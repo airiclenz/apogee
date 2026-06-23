@@ -115,9 +115,10 @@ func (a *Agent) Mode() domain.Mode { return a.cfg.Mode }
 // bench composes forking by deep-copying a Session and the sandbox directory.
 //
 // Domain owns the Session envelope and its version; the engine owns the opaque State
-// payload, so Snapshot serializes the engine's conversation state into it (ADR 0010).
+// payload, so Snapshot serializes the engine's loop state (conversation + turnIndex +
+// inExchange + pending input — internal/agent/state.go) into it (ADR 0010).
 func (a *Agent) Snapshot() (domain.Session, error) {
-	state, err := encodeConversation(&a.conv)
+	state, err := a.encodeState()
 	if err != nil {
 		return domain.Session{}, err
 	}

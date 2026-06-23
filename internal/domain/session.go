@@ -10,12 +10,14 @@ import (
 // ----------------------------------------------------------------------------
 
 // SessionVersion is the schema version Snapshot stamps and Resume/DecodeSession
-// accept. P0.6 ships v1; a snapshot whose Version exceeds this is from a newer build
-// and is rejected with ErrSessionVersion (ADR 0001 — no silent forward migration).
+// accept. v1 is finalised by P1.6; a snapshot whose Version exceeds this is from a newer
+// build and is rejected with ErrSessionVersion (ADR 0001 — no silent forward migration).
 //
-// Domain owns the Session *envelope* and its versioning; the engine (internal/agent)
-// owns the opaque State payload — it serializes engine state (conversation, and from
-// P1.6 the loop counters and deferred actions), so its schema lives with the engine.
+// Domain owns the Session *envelope* and its versioning; the engine (internal/agent) owns
+// the opaque State payload and its schema. In v1 that payload is the loop's full
+// quiescent-boundary state: the conversation (messages with tool-call/result pairing and
+// per-message Extra wire fields, plus the deferred-action queue) and the loop counters
+// (turnIndex, inExchange, pending input) — see internal/agent/state.go.
 const SessionVersion = 1
 
 // Session is the serializable, copyable conversation state — no live handles, no

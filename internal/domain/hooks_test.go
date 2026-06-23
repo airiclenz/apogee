@@ -234,6 +234,66 @@ func TestMessageExtra(t *testing.T) {
 	}
 }
 
+// TestMessageExtraRoundTrip is the P1.6 schema proof: a Message's preserved wire siblings
+// survive a JSON round-trip, are flattened at the top level (the OpenAI chat shape, not
+// nested), and the known fields never leak into the Extra set.
+func TestMessageExtraRoundTrip(t *testing.T) {
+	orig := Message{Role: RoleAssistant, Content: "the answer"}.
+		WithExtra("reasoning_content", json.RawMessage(`"chain of thought"`)).
+		WithExtra("tool_choice", json.RawMessage(`"auto"`))
+
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Extras are flattened as top-level siblings of the known fields, not nested.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal to map: %v", err)
+	}
+	if _, nested := raw["extra"]; nested {
+		t.Errorf("extras nested under an \"extra\" key, want flattened siblings: %s", data)
+	}
+	if string(raw["reasoning_content"]) != `"chain of thought"` {
+		t.Errorf("reasoning_content not flattened at top level: %s", data)
+	}
+	if string(raw["content"]) != `"the answer"` {
+		t.Errorf("known field content missing or renamed: %s", data)
+	}
+
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal to Message: %v", err)
+	}
+	if got.Role != RoleAssistant || got.Content != "the answer" {
+		t.Errorf("known fields not restored: %+v", got)
+	}
+	if v, ok := got.Extra("reasoning_content"); !ok || string(v) != `"chain of thought"` {
+		t.Errorf("reasoning_content did not round-trip: %q ok=%v", v, ok)
+	}
+	if v, ok := got.Extra("tool_choice"); !ok || string(v) != `"auto"` {
+		t.Errorf("tool_choice did not round-trip: %q ok=%v", v, ok)
+	}
+	if _, ok := got.Extra("content"); ok {
+		t.Error("a known field leaked into the Extra set")
+	}
+
+	t.Run("collects an upstream wire message's unknown siblings into Extra", func(t *testing.T) {
+		wire := []byte(`{"role":"assistant","content":"hi","reasoning_content":"because","logprobs":{"x":1}}`)
+		var m Message
+		if err := json.Unmarshal(wire, &m); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if v, ok := m.Extra("reasoning_content"); !ok || string(v) != `"because"` {
+			t.Errorf("reasoning_content not collected: %q ok=%v", v, ok)
+		}
+		if v, ok := m.Extra("logprobs"); !ok || string(v) != `{"x":1}` {
+			t.Errorf("unknown object sibling not collected: %q ok=%v", v, ok)
+		}
+	})
+}
+
 func TestResponse(t *testing.T) {
 	view := loopView{messages: []Message{{Role: RoleUser, Content: "u"}}}
 	calls := []ToolCall{{ID: "c1", Tool: "write_file", Arguments: json.RawMessage(`{"path":"a"}`)}}

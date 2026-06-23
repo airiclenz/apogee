@@ -44,8 +44,9 @@ type Message struct {
 	ToolCallID string     // RoleTool only — links the result to its ToolCall.ID
 
 	// extra carries preserved unknown wire fields (reasoning_content, tool_choice,
-	// thinking, …) read through Extra. It is populated by the session decoder that
-	// round-trips the wire schema (P1.6); a Message built as a literal carries none.
+	// thinking, …) read through Extra. It is populated by Message's own JSON decoder
+	// (UnmarshalJSON collects unknown siblings) and by WithExtra; a Message built as a
+	// plain literal carries none.
 	extra map[string]json.RawMessage
 }
 
@@ -55,6 +56,97 @@ type Message struct {
 func (m Message) Extra(key string) (json.RawMessage, bool) {
 	v, ok := m.extra[key]
 	return v, ok
+}
+
+// WithExtra returns a copy of m carrying an additional preserved wire field under key.
+// The engine attaches the model's reasoning channel (reasoning_content) to a committed
+// assistant message this way, so it survives snapshot/resume; an empty key or value is a
+// no-op. It copies the extra set, so a caller already holding the original Message is
+// unaffected.
+func (m Message) WithExtra(key string, v json.RawMessage) Message {
+	if key == "" || len(v) == 0 {
+		return m
+	}
+	next := make(map[string]json.RawMessage, len(m.extra)+1)
+	for k, val := range m.extra {
+		next[k] = val
+	}
+	next[key] = v
+	m.extra = next
+	return m
+}
+
+// messageJSON is the canonical on-wire shape of a Message's known fields. The unknown
+// sibling fields in extra are flattened alongside these at the top level (not nested), so
+// a serialized message matches the OpenAI chat shape a provider emits and a future field
+// round-trips untouched.
+type messageJSON struct {
+	Role       Role       `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+// messageKnownKeys are the top-level JSON keys messageJSON owns; UnmarshalJSON strips them
+// so only genuinely-unknown siblings land in extra. Kept in sync with messageJSON's tags.
+var messageKnownKeys = []string{"role", "content", "tool_calls", "tool_call_id"}
+
+// MarshalJSON serializes the Message as its known wire fields with any preserved Extra
+// fields flattened alongside them. Known fields win on a key collision, so a stale extra
+// entry can never shadow a real field. A Message with no extras takes the fast path and
+// marshals straight from messageJSON.
+func (m Message) MarshalJSON() ([]byte, error) {
+	known, err := json.Marshal(messageJSON{
+		Role:       m.Role,
+		Content:    m.Content,
+		ToolCalls:  m.ToolCalls,
+		ToolCallID: m.ToolCallID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(m.extra) == 0 {
+		return known, nil
+	}
+	merged := make(map[string]json.RawMessage, len(m.extra)+len(messageKnownKeys))
+	for k, v := range m.extra {
+		merged[k] = v
+	}
+	var knownMap map[string]json.RawMessage
+	if err := json.Unmarshal(known, &knownMap); err != nil {
+		return nil, err
+	}
+	for k, v := range knownMap {
+		merged[k] = v
+	}
+	return json.Marshal(merged)
+}
+
+// UnmarshalJSON restores a Message, decoding the known fields and collecting any unknown
+// sibling fields into the preserved Extra set so they survive a snapshot round-trip.
+func (m *Message) UnmarshalJSON(data []byte) error {
+	var known messageJSON
+	if err := json.Unmarshal(data, &known); err != nil {
+		return err
+	}
+	m.Role = known.Role
+	m.Content = known.Content
+	m.ToolCalls = known.ToolCalls
+	m.ToolCallID = known.ToolCallID
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for _, k := range messageKnownKeys {
+		delete(all, k)
+	}
+	if len(all) > 0 {
+		m.extra = all
+	} else {
+		m.extra = nil
+	}
+	return nil
 }
 
 // ToolDef is one entry of the tool menu the model sees.
@@ -339,7 +431,9 @@ const (
 // boundary.
 //
 // MarshalJSON / UnmarshalJSON keep the type opaque while persisting it; the v1 wire
-// schema (including per-message Extra preservation) is finalised by P1.6.
+// schema persists the message list (with per-message Extra preservation, P1.6) and the
+// pending deferred corrections. The engine wraps this payload in its session-state
+// envelope (internal/agent/state.go), which adds the loop counters.
 type Conversation struct {
 	messages []Message
 	deferred []string // pending ActionDefer injections, FIFO
@@ -451,8 +545,9 @@ func (c *Conversation) TakeDeferred() (injects []string, ok bool) {
 	return out, true
 }
 
-// conversationJSON is the on-disk shape of a Conversation. Per-message Extra
-// preservation is finalised by P1.6; today the exported Message fields round-trip.
+// conversationJSON is the on-disk shape of a Conversation. Per-message Extra fields
+// round-trip through Message's own MarshalJSON/UnmarshalJSON (the unknown wire siblings
+// are flattened alongside the known fields), so reasoning_content and the like survive.
 type conversationJSON struct {
 	Messages []Message `json:"messages"`
 	Deferred []string  `json:"deferred,omitempty"`

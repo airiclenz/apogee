@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -86,11 +87,9 @@ func resumeAgent(cfg domain.Config, snap domain.Session, up provider.Responder) 
 	if err != nil {
 		return nil, err
 	}
-	conv, err := decodeConversation(snap.State)
-	if err != nil {
+	if err := a.restoreState(snap.State); err != nil {
 		return nil, err
 	}
-	a.conv = conv
 	return a, nil
 }
 
@@ -172,14 +171,14 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
 		// Final no-tool response: commit the assistant message and end the Exchange.
-		a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: resp.Text()})
+		a.conv.Append(assistantMessage(resp, nil))
 		a.cfg.Events.Emit(domain.MessageEvent{EventBase: base(turn), Text: resp.Text()})
 		return a.completeTurn(turn, start, domain.StatusExchangeComplete), nil
 	}
 
 	// The model requested tools: commit the assistant tool-call message, then dispatch
 	// each call through Approval. A cancellation mid-tool rolls the whole Turn back.
-	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: resp.Text(), ToolCalls: calls})
+	a.conv.Append(assistantMessage(resp, calls))
 	if a.dispatchTools(ctx, turn, calls) == dispatchCancelled {
 		return a.cancelTurn(turn, rollback, deferred, start), nil
 	}
@@ -290,6 +289,21 @@ func parseToolCalls(raw []provider.ToolCall) ([]domain.ToolCall, error) {
 		}
 	}
 	return processing.ParseNativeToolCalls(native)
+}
+
+// assistantMessage builds the committed assistant message from the reviewed response. It
+// preserves the model's reasoning channel as reasoning_content in the message's Extra so it
+// survives snapshot/resume — the channel is recorded in history, not re-sent upstream (the
+// provider seam drops Extra). calls is nil for a final no-tool message and the parsed tool
+// calls otherwise.
+func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Message {
+	msg := domain.Message{Role: domain.RoleAssistant, Content: resp.Text(), ToolCalls: calls}
+	if think, ok := resp.Thinking(); ok {
+		if raw, err := json.Marshal(think); err == nil {
+			msg = msg.WithExtra("reasoning_content", raw)
+		}
+	}
+	return msg
 }
 
 // completeTurn closes a Turn at the quiescent boundary and advances the Turn counter. A

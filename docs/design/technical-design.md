@@ -6,15 +6,19 @@ authoritative records; it does not replace them. For *why* a decision was made, 
 the ADR link — this doc records *what* the design is and *what is still undesigned*.
 
 **Date:** 2026-06-23  **Repo state:** **Phase 0 complete; Phase 1's core is built —
-P1.0–P1.5 are done, only P1.6 + P1.7 remain.** The ADR-0010 layout is realised (P1.0); the
-real provider client (P1.1), `processing/` parse (P1.3), the minimal tool set (P1.4), and the
-hook-mutation bodies (P1.5) are in; and **P1.2 — the convergence — landed the full Turn/Step
-state machine** (stream → parse → hooks → tool dispatch through Approval → quiescent boundary;
-`Run`; the `ActionDefer` feed-forward surviving a snapshot). **No `panic("sketch")` remains on
-the public surface.** Verify stays green: `go test -race ./...`, `gofmt`/`vet`/`build`, 6-target
-cross-build, `apogee --help` exit 0. Detail + acceptance:
-[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Next: P1.6 (Session
-schema) then P1.7 (point the bench at the API) — the Phase-1 deliverable.**
+P1.0–P1.6 are done, only P1.7 remains.** The ADR-0010 layout is realised (P1.0); the
+real provider client (P1.1), `processing/` parse (P1.3), the minimal tool set (P1.4), the
+hook-mutation bodies (P1.5), and **P1.2 — the convergence — the full Turn/Step state machine**
+(stream → parse → hooks → tool dispatch through Approval → quiescent boundary; `Run`; the
+`ActionDefer` feed-forward surviving a snapshot) are in; and **P1.6 finalised the concrete
+v1 Session schema** — the engine-state envelope (`internal/agent/state.go`) serializes the
+conversation *and* the loop counters (`turnIndex`, the in-Exchange flag, pending input), and
+per-message `Extra` wire fields (`reasoning_content`, …) round-trip, so Resume *continues* an
+Exchange rather than re-zeroing it. **No `panic("sketch")` remains on the public surface.**
+Verify stays green: `go test -race ./...`, `gofmt`/`vet`/`build`, 6-target cross-build,
+`apogee --help` exit 0. Detail + acceptance:
+[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Next: P1.7 (point the
+bench at the API) — the Phase-1 deliverable.**
 
 **Purpose of this revision:** a `/handoff` to the next session. The job next session is
 to **raise the density** of the thin sections (marked **⏳ DENSIFY** with a concrete
@@ -143,7 +147,7 @@ The shape is in [`apogee.go`](../../apogee.go). Summary:
 | Tools | `Tool`, `ExternalEffectTool`, `ToolCall`/`ToolResult`, `ToolRegistry` (`.Subset` for sub-agents) | 0002, 0005, 0008 |
 | Mechanisms | 5 hook interfaces; `Mechanism` + `MechanismDescriptor` (`Capability`, `SuppressionPolicy`, incompatibilities) + `OrderingConstraints`; `MechanismRegistry` (`Add` / `AddExperimental`); `PostResponseDecision` | 0002, 0003, 0006 |
 | Confinement | `Confiner` (interface **public**), `ConfinementCaps.AutoEligible()`, `ConfinementBox` | 0004 |
-| Sessions | `Agent.Snapshot() → Session`, `Session.Encode`/`DecodeSession` (**no fork API**) | 0001 |
+| Sessions | `Agent.Snapshot() → Session`, `Session.Encode`/`DecodeSession` (**no fork API**); v1 `State` = conversation + loop counters (P1.6) | 0001 |
 | Errors | `ErrAutoUnavailable`, `ErrOrderingCycle`, `ErrSessionVersion`, `ErrInputPending` | 0003, 0004 |
 
 ### 4.1 Design calls the sketch made (decided here; need ratifying into plan/ADRs)
@@ -169,12 +173,12 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 | Component | Status | Decided | Undesigned (→ §8) |
 |---|---|---|---|
 | Public API facade | S→**P** | shape, seams, naming (§4); hook mutation API (§6.2, designed P0.1); **capstone-path bodies real (P0.6); hook-mutation working-value bodies real (P1.5); P1.2: `Run` real + every hook point engine-wired — no `panic("sketch")` left on the public surface** | (none — public surface is body-complete for Phase 1) |
-| Loop / Turn engine | S→**P (P1.2)** | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007); **P1.2: the full Step — stream → parse → post-response hooks → tool dispatch through Approval → post-tool-result → boundary, emitting typed Events; `Run` steps until the Exchange ends; streaming+Approval interleave (§6 #6) and event delivery (§6 #3) settled; ActionDefer feed-forward survives snapshot; cancel mid-stream + mid-tool roll back; tool/hook panics recover — all under `-race`; engine adopts `domain.Conversation`** | cross-Turn loop counters (`turnIndex`) in the snapshot envelope (→ P1.6); inline thinking-strip wiring (needs a `ThinkingConfig` source — Phase 2/3); sub-agent nesting (Phase 3) |
+| Loop / Turn engine | S→**P (P1.2)** | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007); **P1.2: the full Step — stream → parse → post-response hooks → tool dispatch through Approval → post-tool-result → boundary, emitting typed Events; `Run` steps until the Exchange ends; streaming+Approval interleave (§6 #6) and event delivery (§6 #3) settled; ActionDefer feed-forward survives snapshot; cancel mid-stream + mid-tool roll back; tool/hook panics recover — all under `-race`; engine adopts `domain.Conversation`; P1.6: the snapshot envelope now serializes the loop counters (`turnIndex`, in-Exchange flag, pending input) so Resume continues** | inline thinking-strip wiring (needs a `ThinkingConfig` source — Phase 2/3); sub-agent nesting (Phase 3) |
 | Provider / Upstream | S→**P (P1.1)** | openai-compatible; model discovery; TS as oracle; **P1.1: real `internal/provider.Client` — non-streaming `Respond` + streaming `Stream` (`iter.Seq[Delta]`), bounded retries/timeouts, `/v1/models` discovery, `ServerManager`; httptest-hermetic; replaces `Placeholder`. P1.2: the `Responder` seam is now streaming-only (`Stream`) — the loop consumes it; `Respond` stays a concrete `Client` method** | ollama/llama.cpp `/props` discovery + PID-file orphan adoption (deferred) |
 | processing/ (parsers) | ∅→**P (P1.3)** | RISKIEST; TS oracle + ported test vectors *is* the gate (0024b); **P1.3: one format end-to-end — native/JSON tool-call parse (`ParseNativeToolCalls`→`domain.ToolCall`, args validated, empty→`{}`, malformed→`ErrMalformedToolCall` never panic) + inline thinking-channel strip (`StripThinking`/`IsThinking`; gemma `<think>`, gpt-oss harmony); ported thinking-stripper vectors are the gate; package depends only on `domain`. P1.2: the loop adapts `provider.ToolCall`→`NativeToolCall` and parses at the seam (a malformed call degrades to a parse-error path, not a Turn failure)** | markdown-fenced + custom-regex formats; full harmony channel set (→ Phase 3); inline thinking-strip wiring (needs a `ThinkingConfig` source) |
 | Tools (~30) | S→**P (P1.4)** | open extension point; stateless-across-Turns; external-effect boundary; **P1.4: minimal local set — `read_file`/`write_file`/`list_dir`/pure-Go `grep` (`io/fs` walk + `regexp`, no external programs) in `internal/tools/`, each scoped to a sandbox root at construction with traversal-rejecting path-safety (symlink-aware); real `domain.ToolRegistry`; `NewDefaultRegistry(root)` seam; optional `ReadOnlyTool` interface (the Plan-mode/Approval signal). P1.2: dispatch/approval/executor wired — `Config.WorkspaceDir` resolves the default registry; Plan filters the menu to read-only; Ask-Before gates writes; Auto gates only external-effect tools; allow-for-session cached; tool panics → `ErrorEvent` + error result** | richer tools (patch-edit/terminal/web); ripgrep-optional |
 | Context (Budget/Compaction/capping) | ∅ | four-way split; Compaction default generative; capping = surviving half of `compress` | Budget allocation algorithm; Compaction trigger/strategy; token counting |
-| Sessions | S→**P (minimal)** | snapshot/resume at quiescent boundary; copyable value; **P0.6: versioned JSON `Snapshot`/`Resume`/`DecodeSession`, future-version rejected; P1.2: `State` payload is now `domain.Conversation` — full messages (tool calls + tool-call IDs) and the deferred-action queue round-trip** | concrete schema doc; versioning/migration beyond reject; loop counters (`turnIndex`) in the envelope; preserved per-message `Extra` wire fields (→ P1.6) |
+| Sessions | S→**P (P1.6)** | snapshot/resume at quiescent boundary; copyable value; **P0.6: versioned JSON `Snapshot`/`Resume`/`DecodeSession`, future-version rejected; P1.2: `State` payload is `domain.Conversation` — full messages (tool calls + tool-call IDs) and the deferred-action queue round-trip; P1.6: concrete v1 schema finalised — the engine-state envelope (`internal/agent/state.go`) wraps the conversation with the loop counters (`turnIndex`, in-Exchange flag, pending input) so Resume continues at the right Turn, and per-message `Extra` wire fields (`reasoning_content`) round-trip via `Message` (un)marshal** | versioning/migration beyond reject (Phase 3+); the allow-for-session approval cache is deliberately not serialized (re-confirmed on resume) |
 | Mechanisms + registry | S→**P (partial)** | constraint-declared; deterministic total order; descriptor; Bypass by Capability; **P0.6: cycle detection + experimental-hook slots real** | full topo-sort *order* (only cycle-check built); self-regulation (Adaptive Suppression, Turn Budget, Effectiveness tracking); catalogue→hook mapping (deferred session) |
 | Security guardrails | ∅ | Approval, path/url safety, arg-guard, circuit-breaker, audit | designs; arg-guard policy; audit format |
 | Confinement | S (iface) | capability matrix; Auto needs fs+net; per-tool; backends macOS/Linux v1 | backend impls (seatbelt/landlock); deferred design session |
@@ -208,7 +212,7 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    (`ActionRetry`/`ActionIntercept`/`ActionDefer`), pre-tool-exec, post-tool-result, and
    history-rewrite all fire in the loop now; the `ActionDefer` feed-forward drains on the next
    request and survives a snapshot end-to-end (the engine adopted `domain.Conversation` as its
-   storage — P1.6 owns only the Session envelope around it).
+   storage; P1.6 wrapped it in the Session envelope that also serializes the loop counters).
 3. ✅ **Event delivery & backpressure — RESOLVED (P1.2; canonical record [ADR 0007 §Phase-1
    realisation](../adr/0007-step-turn-and-the-quiescent-boundary.md)).** The loop emits
    synchronously and in Turn order through `EventSink.Emit`; it neither buffers nor drops. The
@@ -284,7 +288,7 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 4. ✅ **Loop/Turn engine state machine** — **DONE (P1.2):** the full Step runs stream (P1.1) → parse (P1.3) → post-response hooks → tool dispatch (P1.4) through Approval → post-tool-result → quiescent boundary, emitting typed Events; `Run` steps until the Exchange completes. All five hook points fire (pre-request P1.5 + the four wired here); the `ActionDefer` feed-forward drains on the next request and survives a snapshot end-to-end. Streaming+Approval interleave (§6 #6) and event delivery (§6 #3) settled (stream-then-gate; synchronous in-order emit). The engine adopts `domain.Conversation` (rich messages + deferred queue + JSON round-trip) as its storage; `Config.WorkspaceDir` + `tools.NewDefaultRegistry` wire the default tools. Cancellation (mid-stream + mid-tool → Turn rollback) and recover-at-boundary (tool/hook panic → `ErrorEvent`) intact under `-race`. **+11 test funcs** (`statemachine_test.go` + harness/hookmutation migrated to the streaming seam).
 5. ✅ **Provider/Upstream client** — **DONE (P1.1):** `internal/provider.Client` (non-streaming `Respond` + streaming `Stream`, bounded retries/timeouts), `/v1/models` discovery, `ServerManager`; httptest-hermetic, replaces `Placeholder`. TS oracle ported (`openai-compatible-provider` / `model-discovery` / `server-process-manager`).
 6. ✅ **processing/ — one tool-call format** — **DONE (P1.3):** native/JSON tool-call parse (`ParseNativeToolCalls`→`domain.ToolCall`; empty args→`{}`; malformed→`ErrMalformedToolCall`, never panic) + inline thinking-channel strip (`StripThinking`/`IsThinking`; gemma `<think>`, gpt-oss harmony `<|channel|>…<|end|>`). **Finding:** the bench (apogee-sim) and the deliverable run on native structured `tool_calls` (grammar-forced JSON when a server lacks support), so "the most common native/JSON tool-call shape" is literal; the provider already extracts the wire shape and keeps args verbatim, so processing parses args + strips thinking. Ported apogee-code thinking-stripper vectors are the parity gate; the package depends only on `domain` (loop adapts `provider.ToolCall`→`NativeToolCall` at the seam — ADR 0010). markdown-fenced/custom-regex + full harmony channels are Phase 3; loop wiring is P1.2.
-7. Session concrete schema + versioning (what serializes into `State`; copyability proof).
+7. ✅ **Session concrete schema + versioning** — **DONE (P1.6):** the engine-state envelope (`internal/agent/state.go`) is the v1 `State` schema — it wraps `domain.Conversation` (messages with tool-call/result pairing + the deferred-action queue) with the loop's full quiescent-boundary counters: `turnIndex` (so Resume *continues* the Exchange rather than re-zeroing — the documented P0.6 gap), the in-Exchange flag (a resumed Agent rejects a mid-Exchange `Submit`), and pending input (a `Submit`→`Snapshot`→`Resume` keeps the queued message). Per-message `Extra` wire fields round-trip via `Message`'s own (un)marshal — unknown siblings (`reasoning_content`, …) are flattened at the top level and collected back on decode; the loop records the model's reasoning channel on the committed assistant message. `Session.Version` future-version rejection kept. The allow-for-session approval cache is deliberately **not** serialized (re-confirmed on resume — the safer human-in-the-loop default). **+7 test funcs** (`state_test.go`, `session_test.go`, `Message` round-trip).
 8. Context reducers: Budget allocation, Compaction trigger/strategy, tool-result capping, token counting.
 
 **P2 — subsystems & validation**
@@ -296,27 +300,26 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. ✅ §6.1 (Confiner placement) + §6 #7 (facade↔engine layout) **resolved** ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)); §4.1 #1 (public `Confiner`) ratified there too. **Still open:** §6.4 (mechanisms package-per-hook layout — Phase-4 catalogue-mapping session). *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
-**Phase 0 is complete (P0.1–P0.6); Phase 1's core is built — P1.0, P1.1, P1.2, P1.3, P1.4,
-and P1.5 are done. Only P1.6 (Session schema) and P1.7 (point the bench at the API) remain.**
-The ADR-0010 layout is realised (P1.0), the real provider client is built (P1.1), `processing/`
-parses one tool-call format (P1.3), the minimal tool set + registry are built (P1.4), the
-hook-mutation bodies are real (P1.5), and **P1.2 — the convergence — landed the full Turn/Step
-state machine**: a Step streams the Upstream reply (emitting `TokenEvent`s), parses tool calls,
-runs the post-response/pre-tool-exec/post-tool-result/history-rewrite hooks, dispatches tools
-through Approval (Plan filters read-only / Ask-Before gates writes / Auto gates external-effect),
-and returns at a quiescent boundary; `Run` steps until the Exchange ends. The `Responder` seam is
-now streaming-only; the engine's conversation storage is `domain.Conversation` (rich messages +
-deferred queue + JSON round-trip), and the `ActionDefer` feed-forward survives a snapshot
-end-to-end. §6 #6 (stream-then-gate) and §6 #3 (synchronous in-order emit) are settled. The
-latest state lives in the handoffs.
+**Phase 0 is complete (P0.1–P0.6); Phase 1's core is built — P1.0–P1.6 are done. Only P1.7
+(point the bench at the API) remains.** The ADR-0010 layout is realised (P1.0), the real
+provider client is built (P1.1), `processing/` parses one tool-call format (P1.3), the minimal
+tool set + registry are built (P1.4), the hook-mutation bodies are real (P1.5), **P1.2 — the
+convergence — landed the full Turn/Step state machine** (a Step streams the Upstream reply
+emitting `TokenEvent`s, parses tool calls, runs the post-response/pre-tool-exec/post-tool-result/
+history-rewrite hooks, dispatches tools through Approval, and returns at a quiescent boundary;
+`Run` steps until the Exchange ends), and **P1.6 finalised the concrete v1 Session schema**: the
+engine-state envelope (`internal/agent/state.go`) serializes `turnIndex`, the in-Exchange flag,
+and pending input alongside `domain.Conversation`, and per-message `Extra` wire fields round-trip,
+so Resume *continues* an Exchange instead of restarting it. The `Responder` seam is streaming-only;
+§6 #6 (stream-then-gate) and §6 #3 (synchronous in-order emit) are settled. The latest state lives
+in the handoffs.
 The remaining Phase-1 work is the task-level breakdown in
-[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §4: **P1.6** wraps the
-`domain.Conversation` payload in a versioned Session envelope that also serializes the loop
-counter (`turnIndex`) and populates per-message `Extra` wire fields, and **P1.7** points
-`apogee-sim` at the Go API (`go.mod replace`, construct/Step/score a file-edit task) — the
+[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §4: **P1.7** points
+`apogee-sim` at the Go API (`go.mod replace github.com/airiclenz/apogee => ../apogee`, construct
+an `Agent` against isolated dirs, `Submit`/`Step`/score a file-edit task) — the Phase-1
 deliverable. The only throwaway P0.6 internal still standing is the cycle-check-only Mechanism
 registry (Phase 4 replaces it); the minimal `conversation` is gone (P1.2 adopted
-`domain.Conversation`).
+`domain.Conversation`, P1.6 wrapped it in the Session envelope).
 
 ---
 
