@@ -5,14 +5,16 @@ technical design (the *as-designed system* in one place). It **synthesizes** the
 authoritative records; it does not replace them. For *why* a decision was made, follow
 the ADR link — this doc records *what* the design is and *what is still undesigned*.
 
-**Date:** 2026-06-23  **Repo state:** **Phase 0 is complete.** P0.1–P0.5 (facade,
-skeleton, detail plan + CI, `internal/platform` seam) plus **P0.6 — the capstone harness**
-are done: the four P0.6 gate decisions were confirmed by the owner on 2026-06-23, and the
-construct→`Step`→`Snapshot`→`Resume`→`AddExperimental` path now runs for real (12 tests
-under `-race`, 6-target cross-build, `apogee --help` exit 0). Off-capstone-path methods
-remain `panic` stubs by design. Detail + acceptance:
-[`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md). **Phase 1 (the
-embeddable agent core) is next.**
+**Date:** 2026-06-23  **Repo state:** **Phase 0 complete; Phase 1's core is built —
+P1.0–P1.5 are done, only P1.6 + P1.7 remain.** The ADR-0010 layout is realised (P1.0); the
+real provider client (P1.1), `processing/` parse (P1.3), the minimal tool set (P1.4), and the
+hook-mutation bodies (P1.5) are in; and **P1.2 — the convergence — landed the full Turn/Step
+state machine** (stream → parse → hooks → tool dispatch through Approval → quiescent boundary;
+`Run`; the `ActionDefer` feed-forward surviving a snapshot). **No `panic("sketch")` remains on
+the public surface.** Verify stays green: `go test -race ./...`, `gofmt`/`vet`/`build`, 6-target
+cross-build, `apogee --help` exit 0. Detail + acceptance:
+[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Next: P1.6 (Session
+schema) then P1.7 (point the bench at the API) — the Phase-1 deliverable.**
 
 **Purpose of this revision:** a `/handoff` to the next session. The job next session is
 to **raise the density** of the thin sections (marked **⏳ DENSIFY** with a concrete
@@ -77,7 +79,7 @@ plan. **All four prior "open items" are resolved** (plan §6 #22–24).
 ### 2.2 Code
 | Artifact | State |
 |---|---|
-| `apogee.go` | Public API facade. **Capstone-path methods now have real bodies** (`New`/`Resume`/`Submit`/`Step`/`Snapshot`/`DecodeSession`/`AddExperimental`/`Add` + registry); the **tools (P1.4) and hook-mutation surface (P1.5) are now real**, leaving only `Run` (P1.2) as a `panic` stub. Thin delegators to sibling files. |
+| `apogee.go` | Public API facade. **Every public method now has a real body** — `New`/`Resume`/`Submit`/`Step`/`Run`/`Snapshot`/`DecodeSession`/`AddExperimental`/`Add` + registry, tools (P1.4), hook-mutation surface (P1.5); **`Run` (the last `panic` stub) landed with the full state machine (P1.2)**. No `panic("sketch")` remains on the public surface. Thin delegators to sibling files. |
 | capstone bodies (P0.6) | `loop.go` + `conversation.go` + `registry.go` (package `apogee`) — single non-streaming Turn, JSON snapshot/resume, ordering-cycle detection, experimental pre-request hook + `MechanismFiredEvent`, ctx-cancel→`StatusCancelled`, recover-at-boundary→`ErrorEvent`. **12 tests pass under `-race`** (black-box `apogee_test` + white-box harness). |
 | `internal/agent` (P0.6) | the provider seam (Decision C): `Responder` + root-type-free `Request`/`RawResponse`/`Message`. Imported one-way by the root facade; the real HTTP provider implements `Responder` in Phase 1. |
 | skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). `doc.go`-only **except `internal/platform`** (P0.5) and **`internal/agent`** (P0.6 seam). |
@@ -166,13 +168,13 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 
 | Component | Status | Decided | Undesigned (→ §8) |
 |---|---|---|---|
-| Public API facade | S→**P** | shape, seams, naming (§4); hook mutation API (§6.2, designed P0.1); **capstone-path bodies real (P0.6); hook-mutation working-value bodies real (P1.5) — `Request`/`Response`/`Conversation`/`LoopView` accessors+mutators, pre-request mutations flow into the Upstream request** | off-path bodies: `Run` (P1.2), streaming wiring (P1.2) |
-| Loop / Turn engine | **P (minimal)** | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007); **P0.6: single non-streaming Turn, cancel, panic-recover all real in `loop.go`** | full state machine; streaming/approval/tool interleave; cross-Turn loop counters in snapshot |
-| Provider / Upstream | S→**P (P1.1)** | openai-compatible; model discovery; TS as oracle; **P1.1: real `internal/provider.Client` — non-streaming `Respond` + streaming `Stream` (`iter.Seq[Delta]`), bounded retries/timeouts, `/v1/models` discovery, `ServerManager`; httptest-hermetic; replaces `Placeholder`** | wiring `Stream` into the loop (P1.2); ollama/llama.cpp `/props` discovery + PID-file orphan adoption (deferred) |
-| processing/ (parsers) | ∅→**P (P1.3)** | RISKIEST; TS oracle + ported test vectors *is* the gate (0024b); **P1.3: one format end-to-end — native/JSON tool-call parse (`ParseNativeToolCalls`→`domain.ToolCall`, args validated, empty→`{}`, malformed→`ErrMalformedToolCall` never panic) + inline thinking-channel strip (`StripThinking`/`IsThinking`; gemma `<think>`, gpt-oss harmony); ported thinking-stripper vectors are the gate; package depends only on `domain` — loop adapts `provider.ToolCall`→`NativeToolCall` at the seam (ADR 0010)** | markdown-fenced + custom-regex formats; full harmony channel set (→ Phase 3); loop wiring (→ P1.2) |
-| Tools (~30) | S→**P (P1.4)** | open extension point; stateless-across-Turns; external-effect boundary; **P1.4: minimal local set — `read_file`/`write_file`/`list_dir`/pure-Go `grep` (`io/fs` walk + `regexp`, no external programs) in `internal/tools/`, each scoped to a sandbox root at construction with traversal-rejecting path-safety (symlink-aware); real `domain.ToolRegistry` (`Register` dup→`ErrDuplicateTool`, `Subset` never-a-superset, `Lookup`/`All` for dispatch+menu); `NewDefaultRegistry(root)` seam; optional `ReadOnlyTool` interface (read_file/list_dir/grep read-only, write_file write — the Plan-mode/Approval signal); tool failures surface as `IsError` results, ctx-cancel as a Go error** | richer tools (patch-edit/terminal/web); dispatch/approval/executor wiring (→ P1.2); ripgrep-optional |
+| Public API facade | S→**P** | shape, seams, naming (§4); hook mutation API (§6.2, designed P0.1); **capstone-path bodies real (P0.6); hook-mutation working-value bodies real (P1.5); P1.2: `Run` real + every hook point engine-wired — no `panic("sketch")` left on the public surface** | (none — public surface is body-complete for Phase 1) |
+| Loop / Turn engine | S→**P (P1.2)** | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007); **P1.2: the full Step — stream → parse → post-response hooks → tool dispatch through Approval → post-tool-result → boundary, emitting typed Events; `Run` steps until the Exchange ends; streaming+Approval interleave (§6 #6) and event delivery (§6 #3) settled; ActionDefer feed-forward survives snapshot; cancel mid-stream + mid-tool roll back; tool/hook panics recover — all under `-race`; engine adopts `domain.Conversation`** | cross-Turn loop counters (`turnIndex`) in the snapshot envelope (→ P1.6); inline thinking-strip wiring (needs a `ThinkingConfig` source — Phase 2/3); sub-agent nesting (Phase 3) |
+| Provider / Upstream | S→**P (P1.1)** | openai-compatible; model discovery; TS as oracle; **P1.1: real `internal/provider.Client` — non-streaming `Respond` + streaming `Stream` (`iter.Seq[Delta]`), bounded retries/timeouts, `/v1/models` discovery, `ServerManager`; httptest-hermetic; replaces `Placeholder`. P1.2: the `Responder` seam is now streaming-only (`Stream`) — the loop consumes it; `Respond` stays a concrete `Client` method** | ollama/llama.cpp `/props` discovery + PID-file orphan adoption (deferred) |
+| processing/ (parsers) | ∅→**P (P1.3)** | RISKIEST; TS oracle + ported test vectors *is* the gate (0024b); **P1.3: one format end-to-end — native/JSON tool-call parse (`ParseNativeToolCalls`→`domain.ToolCall`, args validated, empty→`{}`, malformed→`ErrMalformedToolCall` never panic) + inline thinking-channel strip (`StripThinking`/`IsThinking`; gemma `<think>`, gpt-oss harmony); ported thinking-stripper vectors are the gate; package depends only on `domain`. P1.2: the loop adapts `provider.ToolCall`→`NativeToolCall` and parses at the seam (a malformed call degrades to a parse-error path, not a Turn failure)** | markdown-fenced + custom-regex formats; full harmony channel set (→ Phase 3); inline thinking-strip wiring (needs a `ThinkingConfig` source) |
+| Tools (~30) | S→**P (P1.4)** | open extension point; stateless-across-Turns; external-effect boundary; **P1.4: minimal local set — `read_file`/`write_file`/`list_dir`/pure-Go `grep` (`io/fs` walk + `regexp`, no external programs) in `internal/tools/`, each scoped to a sandbox root at construction with traversal-rejecting path-safety (symlink-aware); real `domain.ToolRegistry`; `NewDefaultRegistry(root)` seam; optional `ReadOnlyTool` interface (the Plan-mode/Approval signal). P1.2: dispatch/approval/executor wired — `Config.WorkspaceDir` resolves the default registry; Plan filters the menu to read-only; Ask-Before gates writes; Auto gates only external-effect tools; allow-for-session cached; tool panics → `ErrorEvent` + error result** | richer tools (patch-edit/terminal/web); ripgrep-optional |
 | Context (Budget/Compaction/capping) | ∅ | four-way split; Compaction default generative; capping = surviving half of `compress` | Budget allocation algorithm; Compaction trigger/strategy; token counting |
-| Sessions | S→**P (minimal)** | snapshot/resume at quiescent boundary; copyable value; **P0.6: versioned JSON `Snapshot`/`Resume`/`DecodeSession`, future-version rejected** | concrete schema; versioning/migration beyond reject; what's in `State` (loop counters, deferred actions) |
+| Sessions | S→**P (minimal)** | snapshot/resume at quiescent boundary; copyable value; **P0.6: versioned JSON `Snapshot`/`Resume`/`DecodeSession`, future-version rejected; P1.2: `State` payload is now `domain.Conversation` — full messages (tool calls + tool-call IDs) and the deferred-action queue round-trip** | concrete schema doc; versioning/migration beyond reject; loop counters (`turnIndex`) in the envelope; preserved per-message `Extra` wire fields (→ P1.6) |
 | Mechanisms + registry | S→**P (partial)** | constraint-declared; deterministic total order; descriptor; Bypass by Capability; **P0.6: cycle detection + experimental-hook slots real** | full topo-sort *order* (only cycle-check built); self-regulation (Adaptive Suppression, Turn Budget, Effectiveness tracking); catalogue→hook mapping (deferred session) |
 | Security guardrails | ∅ | Approval, path/url safety, arg-guard, circuit-breaker, audit | designs; arg-guard policy; audit format |
 | Confinement | S (iface) | capability matrix; Auto needs fs+net; per-tool; backends macOS/Linux v1 | backend impls (seatbelt/landlock); deferred design session |
@@ -194,27 +196,39 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    see it without an upward import). **No** public `apogee/platform` subpackage; the single
    root facade stays the only public package. `internal/platform` imports `internal/domain`,
    not root.
-2. ✅ **Hook mutation API — RESOLVED (designed P0.1, bodies P1.5).** `Request`, `Response`,
-   `Conversation` stay **opaque structs with unexported fields**, but hooks now mutate them
-   through a real accessor/mutation surface scoped from apogee-sim's actual Transform/Injector
-   signatures (`docs/design/hook-mutation-api.md`): `AppendToSystem`/`InjectContext`/`SetTools`/
-   `SetMessageContent` on `Request`, `SetText`/`SetToolCallArguments` on `Response`,
-   `DropRange`/`Insert`/`Replace`/`Defer` on `Conversation`, each reading cross-Turn state via
-   `LoopView`. The loop builds one `Request` from conversation state, runs pre-request hooks
-   against it (mutations compose), and drains it onto the provider wire — closing the P0.6 gap
-   where hooks fired but their mutations were dropped. Engine integration of the post-response
-   (`ActionDefer`) and history-rewrite hooks is P1.2; `Conversation`'s deferred-action queue +
-   JSON round-trip already make the feed-forward survive a snapshot (the P1.6 schema adopts it).
-3. **Event delivery & backpressure.** `EventSink.Emit` must not block the loop; define the
-   contract (buffering, drop policy, sub-agent fan-in). Channel adapter for Bubble Tea?
+2. ✅ **Hook mutation API — RESOLVED (designed P0.1, bodies P1.5, engine-integrated P1.2).**
+   `Request`, `Response`, `Conversation` stay **opaque structs with unexported fields**, but
+   hooks now mutate them through a real accessor/mutation surface scoped from apogee-sim's
+   actual Transform/Injector signatures (`docs/design/hook-mutation-api.md`):
+   `AppendToSystem`/`InjectContext`/`SetTools`/`SetMessageContent` on `Request`,
+   `SetText`/`SetToolCallArguments` on `Response`, `DropRange`/`Insert`/`Replace`/`Append`/
+   `Defer` on `Conversation`, each reading cross-Turn state via `LoopView`. The loop builds one
+   `Request` from conversation state, runs pre-request hooks against it (mutations compose), and
+   drains it onto the provider wire. **P1.2 wires the remaining four hook points:** post-response
+   (`ActionRetry`/`ActionIntercept`/`ActionDefer`), pre-tool-exec, post-tool-result, and
+   history-rewrite all fire in the loop now; the `ActionDefer` feed-forward drains on the next
+   request and survives a snapshot end-to-end (the engine adopted `domain.Conversation` as its
+   storage — P1.6 owns only the Session envelope around it).
+3. ✅ **Event delivery & backpressure — RESOLVED (P1.2).** The loop emits synchronously and in
+   Turn order through `EventSink.Emit`; it neither buffers nor drops. The non-blocking contract
+   is the host's to honour (the `EventSink` doc states it) — the bench consumes Events as Go
+   values in order (reproducibility wants exactly that), and a buffered channel adapter with a
+   drop policy for the Phase-2 TUI sits behind the same interface. Sub-agent fan-in (Depth > 0)
+   is Phase 3; every Phase-1 Event is Depth 0.
 4. **`mechanisms/` package-per-hook layout** statically encodes the hook point, in tension
    with ADR 0003's *constraint-declared* (hook = descriptor field, dynamic order). Plan
    already calls it "provisional." Lean toward a flat `internal/mechanisms` with hook-point
    as data. **Resolve when the catalogue→hook mapping session runs.**
 5. **`UserInput`/`FileRefs` resolution** — how file references become budgeted context
    (context-builder seam) is unspecified.
-6. **Streaming + Approval interleave inside a Step** — confirm the control flow (sync
-   `Approver` call mid-stream; what the EventSink sees around it).
+6. ✅ **Streaming + Approval interleave inside a Step — RESOLVED (P1.2).** The stream is
+   consumed to its terminal Delta and the SSE body closed **before** any tool call is
+   dispatched; Approval is then consulted synchronously at a sub-step boundary, so a blocking
+   `Approver` never holds an open Upstream connection. The EventSink sees, per Turn:
+   `TokenEvent`s (live, as content arrives) → [stream ends] → `ToolCallEvent` → `ApprovalEvent`
+   (around the blocking `Approve`) → `ToolResultEvent`, for each call. A cancel mid-stream
+   surfaces as a terminal stream error the loop distinguishes from a real fault via `ctx.Err()`
+   and rolls the Turn back to a serializable boundary.
 7. ✅ **Facade ↔ `internal/agent` placement — RESOLVED ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)).**
    Adopted a **domain-core / engine / thin-facade** layout with one hard rule: **`internal/*`
    never imports the root `apogee` package; dependencies flow down to `internal/domain`.** The
@@ -265,7 +279,7 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 3b. ✅ **Capstone harness** — **DONE (P0.6):** four gate decisions confirmed (Charm v2, MCP verdict, the `Responder` seam, P0.6 scope); construct→Step→Snapshot→Resume→`AddExperimental` runs for real over the `internal/agent.Responder` seam — 12 tests under `-race`, 6-target cross-build, `apogee --help` exit 0 (detail plan §3 "as built"). **Phase 0 is complete.**
 
 **P1 — deepen the core design**
-4. Loop/Turn engine internal state machine (how a Step interleaves stream → parse → hooks → tool dispatch → approval → boundary).
+4. ✅ **Loop/Turn engine state machine** — **DONE (P1.2):** the full Step runs stream (P1.1) → parse (P1.3) → post-response hooks → tool dispatch (P1.4) through Approval → post-tool-result → quiescent boundary, emitting typed Events; `Run` steps until the Exchange completes. All five hook points fire (pre-request P1.5 + the four wired here); the `ActionDefer` feed-forward drains on the next request and survives a snapshot end-to-end. Streaming+Approval interleave (§6 #6) and event delivery (§6 #3) settled (stream-then-gate; synchronous in-order emit). The engine adopts `domain.Conversation` (rich messages + deferred queue + JSON round-trip) as its storage; `Config.WorkspaceDir` + `tools.NewDefaultRegistry` wire the default tools. Cancellation (mid-stream + mid-tool → Turn rollback) and recover-at-boundary (tool/hook panic → `ErrorEvent`) intact under `-race`. **+11 test funcs** (`statemachine_test.go` + harness/hookmutation migrated to the streaming seam).
 5. ✅ **Provider/Upstream client** — **DONE (P1.1):** `internal/provider.Client` (non-streaming `Respond` + streaming `Stream`, bounded retries/timeouts), `/v1/models` discovery, `ServerManager`; httptest-hermetic, replaces `Placeholder`. TS oracle ported (`openai-compatible-provider` / `model-discovery` / `server-process-manager`).
 6. ✅ **processing/ — one tool-call format** — **DONE (P1.3):** native/JSON tool-call parse (`ParseNativeToolCalls`→`domain.ToolCall`; empty args→`{}`; malformed→`ErrMalformedToolCall`, never panic) + inline thinking-channel strip (`StripThinking`/`IsThinking`; gemma `<think>`, gpt-oss harmony `<|channel|>…<|end|>`). **Finding:** the bench (apogee-sim) and the deliverable run on native structured `tool_calls` (grammar-forced JSON when a server lacks support), so "the most common native/JSON tool-call shape" is literal; the provider already extracts the wire shape and keeps args verbatim, so processing parses args + strips thinking. Ported apogee-code thinking-stripper vectors are the parity gate; the package depends only on `domain` (loop adapts `provider.ToolCall`→`NativeToolCall` at the seam — ADR 0010). markdown-fenced/custom-regex + full harmony channels are Phase 3; loop wiring is P1.2.
 7. Session concrete schema + versioning (what serializes into `State`; copyability proof).
@@ -280,24 +294,27 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. ✅ §6.1 (Confiner placement) + §6 #7 (facade↔engine layout) **resolved** ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)); §4.1 #1 (public `Confiner`) ratified there too. **Still open:** §6.4 (mechanisms package-per-hook layout — Phase-4 catalogue-mapping session). *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
-**Phase 0 is complete (P0.1–P0.6); Phase 1 is underway — P1.0, P1.1, P1.3, P1.4, and P1.5 are done.** The
-ADR-0010 layout is realised (P1.0), the real OpenAI-compatible provider client is built
-and wired (P1.1, replacing `Placeholder`), `processing/` parses one tool-call format
-end-to-end (P1.3 — native/JSON + thinking strip), the minimal tool set + real registry
-are built (P1.4 — `read_file`/`write_file`/`list_dir`/pure-Go `grep` behind `domain.ToolRegistry`),
-and the hook-mutation working-value bodies are real with **pre-request mutations now flowing into
-the Upstream request** (P1.5). P1.1/P1.3/P1.4 are tested libraries not yet wired into the loop;
-P1.5 wired the pre-request path and left the post-response/history-rewrite hook integration to
-P1.2. The latest state lives in the handoffs.
+**Phase 0 is complete (P0.1–P0.6); Phase 1's core is built — P1.0, P1.1, P1.2, P1.3, P1.4,
+and P1.5 are done. Only P1.6 (Session schema) and P1.7 (point the bench at the API) remain.**
+The ADR-0010 layout is realised (P1.0), the real provider client is built (P1.1), `processing/`
+parses one tool-call format (P1.3), the minimal tool set + registry are built (P1.4), the
+hook-mutation bodies are real (P1.5), and **P1.2 — the convergence — landed the full Turn/Step
+state machine**: a Step streams the Upstream reply (emitting `TokenEvent`s), parses tool calls,
+runs the post-response/pre-tool-exec/post-tool-result/history-rewrite hooks, dispatches tools
+through Approval (Plan filters read-only / Ask-Before gates writes / Auto gates external-effect),
+and returns at a quiescent boundary; `Run` steps until the Exchange ends. The `Responder` seam is
+now streaming-only; the engine's conversation storage is `domain.Conversation` (rich messages +
+deferred queue + JSON round-trip), and the `ActionDefer` feed-forward survives a snapshot
+end-to-end. §6 #6 (stream-then-gate) and §6 #3 (synchronous in-order emit) are settled. The
+latest state lives in the handoffs.
 The remaining Phase-1 work is the task-level breakdown in
-[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §4: with all of P1's
-independent slices (P1.1/P1.3/P1.4/P1.5) in, the next task is **P1.2** (the convergence — the full
-Turn/Step state machine that consumes provider streaming + processing + tools + hook-mutation;
-the place streaming consumption, the §6 #6 streaming+Approval interleave, and the §6 #3
-event-backpressure calls get settled), with **P1.6** (concrete Session schema — adopts P1.5's
-`Conversation` + deferred-action queue) and **P1.7** (point `apogee-sim` at the Go API) closing
-the phase. The throwaway P0.6 internals still standing — minimal `conversation`,
-cycle-check-only registry — are what P1.6 and Phase 4 replace.
+[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §4: **P1.6** wraps the
+`domain.Conversation` payload in a versioned Session envelope that also serializes the loop
+counter (`turnIndex`) and populates per-message `Extra` wire fields, and **P1.7** points
+`apogee-sim` at the Go API (`go.mod replace`, construct/Step/score a file-edit task) — the
+deliverable. The only throwaway P0.6 internal still standing is the cycle-check-only Mechanism
+registry (Phase 4 replaces it); the minimal `conversation` is gone (P1.2 adopted
+`domain.Conversation`).
 
 ---
 
