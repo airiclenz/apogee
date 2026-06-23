@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -297,6 +298,119 @@ func TestModelStopKeys(t *testing.T) {
 			t.Error("ctrl+c did not quit")
 		}
 	})
+}
+
+// ----------------------------------------------------------------------------
+// The Approval UI (phase-2 detail plan §4 P2.4; ADR 0004 — the C3 face)
+// ----------------------------------------------------------------------------
+
+// newApprovalModel drives a fresh model to awaitingApproval with a buffered reply channel,
+// returning both so a test can assert on the decision the keys send back.
+func newApprovalModel(t *testing.T, req domain.ApprovalRequest) (Model, chan domain.ApprovalDecision) {
+	t.Helper()
+	reply := make(chan domain.ApprovalDecision, 1)
+	m := step(t, newTestModel(t), approvalReqMsg{Request: req, Reply: reply})
+	if m.state != stateAwaitingApproval {
+		t.Fatalf("state = %v, want awaitingApproval", m.state)
+	}
+	return m, reply
+}
+
+// Each decision key yields the matching ApprovalDecision on the reply channel, clears the
+// prompt, and returns to running so the worker's blocked Step resumes.
+func TestModelApprovalDecisionKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		key  tea.KeyPressMsg
+		want domain.ApprovalDecision
+	}{
+		{"a → allow", tea.KeyPressMsg{Code: 'a'}, domain.ApprovalAllow},
+		{"d → deny", tea.KeyPressMsg{Code: 'd'}, domain.ApprovalDeny},
+		{"s → allow-for-session", tea.KeyPressMsg{Code: 's'}, domain.ApprovalAllowForSession},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+
+			m, cmd := stepCmd(t, m, tc.key)
+
+			select {
+			case got := <-reply:
+				if got != tc.want {
+					t.Errorf("decision = %q, want %q", got, tc.want)
+				}
+			default:
+				t.Fatal("no decision sent on the reply channel")
+			}
+			if m.state != stateRunning {
+				t.Errorf("state = %v, want running after the decision", m.state)
+			}
+			if m.pending != nil {
+				t.Error("pending approval not cleared after the decision")
+			}
+			if cmd == nil {
+				t.Error("spinner tick not re-armed on the return to running")
+			}
+		})
+	}
+}
+
+// The pending request renders into the View: the tool, its Reason, and the arguments.
+func TestModelApprovalPromptRender(t *testing.T) {
+	m, _ := newApprovalModel(t, domain.ApprovalRequest{
+		Tool:      "write_file",
+		Reason:    "write",
+		Arguments: json.RawMessage(`{"path":"notes.txt"}`),
+	})
+	got := plain(m.View())
+	for _, want := range []string{"write_file", "write", "notes.txt"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("approval prompt missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// A non-decision key while a prompt is up neither resolves the gate nor leaves the state.
+func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
+	m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+
+	m = step(t, m, tea.KeyPressMsg{Code: 'x'})
+
+	select {
+	case got := <-reply:
+		t.Errorf("a non-decision key sent %q on the reply channel", got)
+	default:
+	}
+	if m.state != stateAwaitingApproval {
+		t.Errorf("state = %v, want still awaitingApproval", m.state)
+	}
+	if m.pending == nil {
+		t.Error("pending approval cleared by a non-decision key")
+	}
+}
+
+// A stop key while pending cancels the worker; the prompt clears when the worker reports back
+// (the cancel path is structural — esc → stopWorker → cancelledMsg → finishWorker).
+func TestModelApprovalCancelClearsPrompt(t *testing.T) {
+	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+
+	m = step(t, m, keyEsc())
+	if !cancelled {
+		t.Error("esc did not cancel the in-flight worker")
+	}
+	if m.state != stateAwaitingApproval {
+		t.Errorf("state = %v, want still awaitingApproval until the worker reports back", m.state)
+	}
+
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+	if m.state != stateIdle {
+		t.Fatalf("state = %v, want idle after cancellation", m.state)
+	}
+	if m.pending != nil {
+		t.Error("pending prompt not cleared after cancellation")
+	}
 }
 
 // ----------------------------------------------------------------------------

@@ -120,8 +120,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case approvalReqMsg:
-		// The worker's Approver hands the gate to the Update loop. P2.2 records it and
-		// switches state; P2.4 renders the prompt and replies on msg.Reply.
+		// The worker's Approver hands the gate to the Update loop; this case records the
+		// request and switches state. View renders the prompt and handleApprovalKey replies
+		// on msg.Reply (the C3 rendezvous; P2.4).
 		m.state = stateAwaitingApproval
 		m.pending = &msg
 		return m, nil
@@ -190,12 +191,45 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// A live approval prompt claims the decision keys. This branch must precede the scroll
+	// fall-through below, which would otherwise swallow a/d/s as viewport scroll keys.
+	if m.state == stateAwaitingApproval {
+		return m.handleApprovalKey(msg)
+	}
+
 	if m.state == stateIdle {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
 	}
-	// While busy, let the keys scroll the transcript rather than edit the (refused) input.
+	// While running, let the keys scroll the transcript rather than edit the (refused) input.
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// approvalKeys maps a decision keypress to the ApprovalDecision it sends. The set mirrors the
+// awaitingApproval hint legend (a allow · d deny · s allow-session).
+var approvalKeys = map[string]domain.ApprovalDecision{
+	"a": domain.ApprovalAllow,
+	"d": domain.ApprovalDeny,
+	"s": domain.ApprovalAllowForSession,
+}
+
+// handleApprovalKey resolves a pending Approval while awaitingApproval. A decision key sends
+// its verdict back over the rendezvous reply channel (buffered cap 1, so the send never
+// blocks — messages.go) and returns the model to running so the worker's blocked Step
+// resumes; the spinner tick is re-armed because the chain died when the prompt went up. Any
+// other key scrolls the transcript so the human can review context before ruling. The
+// decision's transcript record arrives for free as the loop's observational ApprovalEvent
+// (C3; P2.3), so this renders the prompt's resolution, not the record.
+func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if decision, ok := approvalKeys[msg.String()]; ok && m.pending != nil {
+		m.pending.Reply <- decision
+		m.pending = nil
+		m.state = stateRunning
+		return m, m.spinner.Tick
+	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
@@ -296,16 +330,50 @@ func (m Model) View() tea.View {
 	if !m.ready {
 		return tea.NewView("apogee — starting…")
 	}
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.viewport.View(),
-		m.statusLine(),
-		m.input.View(),
-		m.hintLine(),
-	)
-	v := tea.NewView(body)
+
+	var prompt string
+	if m.state == stateAwaitingApproval && m.pending != nil {
+		prompt = m.approvalPrompt(m.pending.Request)
+		// Make room for the prompt by shrinking the viewport on this local copy (View has a
+		// value receiver, so the stored layout is untouched) — otherwise the prompt would
+		// push the status, input, and hint rows past the bottom of the window.
+		h := m.viewport.Height() - lipgloss.Height(prompt)
+		if h < 1 {
+			h = 1
+		}
+		m.viewport.SetHeight(h)
+		m.viewport.GotoBottom()
+	}
+
+	rows := []string{m.viewport.View()}
+	if prompt != "" {
+		rows = append(rows, prompt)
+	}
+	rows = append(rows, m.statusLine(), m.input.View(), m.hintLine())
+
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true
 	return v
+}
+
+// approvalStyle weights the approval prompt's lead line so it stands out from the transcript
+// above it; the reason reuses the faint hint style. Themed framing is a later polish (§6).
+var approvalStyle = lipgloss.NewStyle().Bold(true)
+
+// approvalPrompt renders the pending tool call the human must rule on: the tool name and its
+// Reason on the lead line, then the pretty-printed Arguments. It reuses prettyJSON so the
+// formatting matches the tool-call entries in the transcript (empty/null arguments add no
+// body). Only the top-level (Depth == 0) prompt is rendered this phase.
+func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
+	head := approvalStyle.Render("approve " + req.Tool + "?")
+	if req.Reason != "" {
+		head += "  " + hintStyle.Render("("+req.Reason+")")
+	}
+	args := prettyJSON(req.Arguments)
+	if args == "" {
+		return head
+	}
+	return head + "\n" + args
 }
 
 // statusStyle and hintStyle dim the two chrome rows so the transcript reads as the
