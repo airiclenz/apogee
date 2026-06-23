@@ -5,9 +5,12 @@ technical design (the *as-designed system* in one place). It **synthesizes** the
 authoritative records; it does not replace them. For *why* a decision was made, follow
 the ADR link — this doc records *what* the design is and *what is still undesigned*.
 
-**Date:** 2026-06-23  **Repo state:** P0.1 (`apogee.go` facade) and P0.2 (`go.mod` +
-`cmd/apogee` + empty `internal/` skeleton) are committed; the facade builds and
-`go vet`s in-tree with panic-stub bodies.
+**Date:** 2026-06-23  **Repo state:** P0.1 (`apogee.go` facade), P0.2 (`go.mod` +
+`cmd/apogee` + empty `internal/` skeleton), P0.3+P0.4 (Phase-0 detail plan + CI,
+commit `c7d4f61`), and P0.5 (`internal/platform` seam + deny-all `Confiner` stub) are
+committed; the facade builds and `go vet`s in-tree with panic-stub bodies. The remaining
+Phase-0 worklist (P0.6 capstone harness) is spec'd in
+[`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md).
 
 **Purpose of this revision:** a `/handoff` to the next session. The job next session is
 to **raise the density** of the thin sections (marked **⏳ DENSIFY** with a concrete
@@ -72,7 +75,8 @@ plan. **All four prior "open items" are resolved** (plan §6 #22–24).
 | Artifact | State |
 |---|---|
 | `apogee.go` | **Signature sketch** — public API facade. gofmt-clean, stdlib-only, **bodies are `panic` stubs**. As of **P0.2** it **builds + `go vet`s** in-tree. |
-| skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and empty `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). **No tests, no CI yet.** |
+| skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and empty `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). **No tests yet** (CI landed in P0.4). |
+| CI (P0.4) | `.github/workflows/ci.yml` — `check` (gofmt/vet/build/`test -race`) + `cross` (Win/Mac/Linux × amd64/arm64, CGO off). Verified green locally. |
 
 The sketch covers: `Agent`/`Config`/lifecycle; `Step`/`Run`/`Submit`/`StepResult`;
 sealed `Event` + 8 variants + `EventSink`; `Approver`; `Tool`/`ExternalEffectTool`/
@@ -204,11 +208,12 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 
 **Process / scaffolding (Phase 0):**
 - ✅ **Done (P0.2):** `go.mod` (`go 1.26`, no deps) + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles and `go vet`/`go vet -race` pass in-tree.
-- No CI (cross-compile Win/Mac/Linux, `gofmt`/`go vet`/`-race`), no build.
-- No pinned dependency versions (Cobra, Bubble Tea/Lipgloss/Bubbles, MCP go-sdk, yaml.v3).
-- No **Phase-0 detail plan** (the plan is broad-by-design; Phase 0 needs a task-level plan).
-- No throwaway in-process harness proving construct→Step→snapshot→resume→register-hook (plan Phase 0 deliverable).
-- No tests anywhere (testing strategy named but not concretized; `testing.go.md`: table-driven + golden files).
+- ✅ **Done (P0.4):** CI — `.github/workflows/ci.yml` cross-compiles Win/Mac/Linux × amd64/arm64 and gates `gofmt`/`go vet`/`go build`/`go test -race`.
+- ✅ **Done (P0.3):** dependency versions pinned-by-decision (Cobra, Charm v2 stack, MCP go-sdk v1.6.1, yaml.v3, shlex, ulid) in the detail plan §1 — added per-task, graph still empty.
+- ✅ **Done (P0.3):** the **Phase-0 detail plan** — [`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md) (task-level breakdown, acceptance criteria).
+- ✅ **Done (P0.5):** `internal/platform` seam — `Shell`/`Path` interfaces (real POSIX impl, Windows stub) + a deny-all `denyConfiner` stub (`AutoEligible()==false`) so New's Auto gate is testable before the real backends (Phase 3).
+- No throwaway in-process harness proving construct→Step→snapshot→resume→register-hook yet (the **P0.6 capstone harness** — spec'd in the detail plan, awaiting build).
+- Tests exist only in `internal/platform` (P0.5 table tests); the rest of the tree is untested until the **P0.6 capstone harness** — the first cross-cutting test (`testing.go.md`: table-driven + golden files).
 
 **Design depth (this TDD's §5 ∅/S rows):** loop engine, provider, processing/, context
 reducers, security guardrails, sub-agent orchestrator, MCP, Library, platform, TUI — all
@@ -234,7 +239,8 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 **P0 — unblocks everything else**
 1. ✅ **Hook mutation API** (§6.2) — **DONE (P0.1):** `Request`/`Response`/`Conversation` accessors designed from apogee-sim's Transform/Injector signatures (see `docs/design/hook-mutation-api.md`).
 2. ✅ **Stand up `go.mod` + minimal `internal/` stubs** — **DONE (P0.2):** module + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles, `go vet`/`go vet -race` pass in-tree.
-3. **Write the Phase-0 detail plan** (task-level, acceptance criteria, version pins, CI). **← next P0.** Then the Phase-0 *capstone* harness (construct→Step→Snapshot→Resume→`AddExperimental`) — needs minimal real bodies, not `panic` stubs.
+3. ✅ **Phase-0 detail plan + CI** — **DONE (P0.3+P0.4, `c7d4f61`):** [`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md) (version pins, CI spec, acceptance-tested task list) + `.github/workflows/ci.yml`.
+3a. ✅ **`platform/` seam** — **DONE (P0.5):** `internal/platform` `Shell`/`Path` interfaces (real POSIX, Windows stub) + deny-all `denyConfiner` (`AutoEligible()==false`); cross-matrix builds, table-tested (detail plan §3). **← next: P0.6** the *capstone* harness (construct→Step→Snapshot→Resume→`AddExperimental`) — the first real bodies, not `panic` stubs (spec'd in the detail plan §3). **Gate:** four detail-plan decisions (Charm v2, MCP verdict, the `responder` seam, P0.6 scope) are awaiting owner review before the harness is built.
 
 **P1 — deepen the core design**
 4. Loop/Turn engine internal state machine (how a Step interleaves stream → parse → hooks → tool dispatch → approval → boundary).
@@ -252,12 +258,14 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. Resolve §6.1 (Confiner placement) + §6.4 (mechanisms layout); ratify §4.1 into plan/ADRs; fix `README.md:68`.
 
 ### Suggested next-session entry point
-**P0.1 (hook mutation API) and P0.2 (go.mod + skeleton, compiles + vets) are now done.**
-Start at **P0.3** — the Phase-0 detail plan (task-level acceptance, version pins for
-Cobra/Bubble Tea/MCP-SDK, CI). Then the Phase-0 *capstone* harness that exercises
-construct→Step→Snapshot→Resume→`AddExperimental` (the first place the API runs for real —
-it needs minimal real bodies, so it follows P0.2's compile checkpoint). P1+ can fan out now
-that the keystone compiles.
+**P0.1–P0.5 are done** (hook mutation API; go.mod + skeleton; the Phase-0 detail plan; CI;
+the `platform/` seam + deny-all `Confiner` stub). The forward worklist now lives in
+[`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md) §3. Start at **P0.6** the
+*capstone* harness that exercises construct→Step→Snapshot→Resume→`AddExperimental` (the first
+place the API runs for real — minimal real bodies behind an unexported `responder` seam).
+**Before building P0.6, confirm the four detail-plan decisions flagged for owner review**
+(Charm v2 pin, MCP-SDK maturity verdict, the hermetic-Upstream `responder` seam, P0.6 scope).
+P1+ can fan out in parallel now that the keystone compiles.
 
 ---
 
