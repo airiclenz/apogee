@@ -1,7 +1,10 @@
 # Apogee — Phase-1 Detail Plan (P1)
 
-**Date:** 2026-06-23 · **Status:** 🟢 active — the task-level breakdown of **Phase 1: the
-embeddable agent core.**
+**Date:** 2026-06-23 · **Status:** ✅ **COMPLETE** — all of P1.0–P1.7 landed; the
+embeddable agent core is built and the bench is re-armed on it (P1.7). The one open
+runtime step is the live-local-model eval run (the harness is wired and hermetically
+verified — see §4 P1.7). This document remains the authoritative record of Phase-1
+order & acceptance; Phase 2 (TUI) is the next phase.
 **Parent:** [`implementation-plan-apogee-merge.md`](./implementation-plan-apogee-merge.md) §4
 (Phase 1 is intentionally coarse there). **Design of record:**
 [`../design/technical-design.md`](../design/technical-design.md) §5/§6/§8 P1 (#4–8) +
@@ -49,6 +52,15 @@ resolves the target layout; **P1.0 realises it before any real body lands.**
 Broad plan §4 Phase-1 deliverable, verbatim: *"a local model completes a simple file-edit task;
 the bench drives, steps, snapshots, and scores it in-process via the library API."* Phase 1 is
 **done** when all six hold:
+
+> ✅ **All six hold (2026-06-23).** P1.0–P1.6 landed in the apogee repo (verify gate green);
+> P1.7 landed in apogee-sim as `internal/coreagent` — it drives the real library through the
+> public API against an ephemeral workspace, `Step`s a file-edit task to completion, observes
+> Events as Go values, and scores the workspace, proven under `-race` by a hermetic
+> OpenAI-compatible `httptest` model (the same code path a live model takes). The remaining
+> runtime confirmation — driving an actual local model at `http://192.168.64.1:1111` (MCP
+> control `http://192.168.61.1:7331/mcp`) — is a `RunConfig.Endpoint` swap run from the host;
+> the build container does not route to that server. See §4 P1.7.
 
 1. **Layout** is ADR-0010-shaped (P1.0): `internal/*` never imports root; the throwaway root
    loop is gone; verify green.
@@ -156,8 +168,8 @@ IDs continue the `P1.x` scheme. **P1.0 blocks all.** Then the core subsystems fa
 | **P1.3** | `processing/` — parse **one** tool-call format end-to-end (TS oracle + ported vectors) | P1.0 | none | TDD §8 #6 (partial) |
 | **P1.4** | Minimal tool set + real registry/executor (file read/write, dir-list, pure-Go grep) | P1.0 | none | TDD §5 Tools (partial) |
 | **P1.5** | Hook-mutation API real bodies (`Request`/`Response`/`Conversation`) — wire pre-request mutations into the Upstream request | P1.0 | none | TDD §6.2 |
-| **P1.6** | Concrete Session schema + versioning; restore `turnIndex` | P1.0 | `ulid` (maybe) | TDD §8 #7 |
-| **P1.7** | Point apogee-sim at the Go API (`go.mod replace`, construct/Step/score a file-edit task) | P1.2, P1.4, P1.6 | none (in the bench repo) | plan §4 Phase-1 deliverable |
+| **P1.6** ✅ | Concrete Session schema + versioning; restore `turnIndex` | P1.0 | none (`ulid` not needed — int counters) | TDD §8 #7 |
+| **P1.7** ✅ | Point apogee-sim at the Go API (`go.mod replace`, construct/Step/score a file-edit task) | P1.2, P1.4, P1.6 | none (in the bench repo) | plan §4 Phase-1 deliverable |
 
 ### P1.1 — the real provider
 `internal/provider`: an OpenAI-compatible chat-completions client implementing
@@ -229,6 +241,17 @@ construct an `Agent` against ephemeral `LibraryDir` / `SessionsDir` (isolation �
 loop on the real library for the rest of the build.
 **Acceptance:** a local model completes a simple file-edit task driven entirely through the
 public API; the bench observes Events as Go values and scores the result.
+**✅ Done (apogee-sim `internal/coreagent`):** `Run(ctx, RunConfig)` constructs an
+`apogee.Agent` (Ask-Before, auto-approving writes) against an ephemeral `WorkspaceDir`,
+`Submit`s the task, `Step`s to the quiescent boundary until the Exchange completes, records
+every `apogee.Event`, and reads the workspace back; `ScoreFileEdit` judges the target file.
+The acceptance is proven under `-race` by a hermetic OpenAI-compatible `httptest` model that
+drives the **real** provider client (the scripted model asks for `write_file`; the loop
+dispatches it through Approval; the file lands in the sandbox; the run scores a pass) — the
+same code path a live model takes. The **live-model run** against `http://192.168.64.1:1111`
+(MCP control `http://192.168.61.1:7331/mcp`) is a `RunConfig.Endpoint` swap, run from the host
+(the build container does not route to the server). The bench was not committed (apogee-sim
+carries unrelated WIP); the apogee library it consumes is committed.
 
 ---
 

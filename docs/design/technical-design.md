@@ -5,20 +5,26 @@ technical design (the *as-designed system* in one place). It **synthesizes** the
 authoritative records; it does not replace them. For *why* a decision was made, follow
 the ADR link — this doc records *what* the design is and *what is still undesigned*.
 
-**Date:** 2026-06-23  **Repo state:** **Phase 0 complete; Phase 1's core is built —
-P1.0–P1.6 are done, only P1.7 remains.** The ADR-0010 layout is realised (P1.0); the
-real provider client (P1.1), `processing/` parse (P1.3), the minimal tool set (P1.4), the
-hook-mutation bodies (P1.5), and **P1.2 — the convergence — the full Turn/Step state machine**
-(stream → parse → hooks → tool dispatch through Approval → quiescent boundary; `Run`; the
-`ActionDefer` feed-forward surviving a snapshot) are in; and **P1.6 finalised the concrete
-v1 Session schema** — the engine-state envelope (`internal/agent/state.go`) serializes the
-conversation *and* the loop counters (`turnIndex`, the in-Exchange flag, pending input), and
-per-message `Extra` wire fields (`reasoning_content`, …) round-trip, so Resume *continues* an
-Exchange rather than re-zeroing it. **No `panic("sketch")` remains on the public surface.**
+**Date:** 2026-06-23  **Repo state:** **✅ Phase 1 COMPLETE — P1.0–P1.7 all landed.** The
+embeddable agent core is built and the bench (apogee-sim) is re-armed on it. The ADR-0010
+layout is realised (P1.0); the real provider client (P1.1), `processing/` parse (P1.3), the
+minimal tool set (P1.4), the hook-mutation bodies (P1.5), and **P1.2 — the convergence — the
+full Turn/Step state machine** (stream → parse → hooks → tool dispatch through Approval →
+quiescent boundary; `Run`; the `ActionDefer` feed-forward surviving a snapshot) are in; **P1.6
+finalised the concrete v1 Session schema** — the engine-state envelope
+(`internal/agent/state.go`) serializes the conversation *and* the loop counters (`turnIndex`,
+the in-Exchange flag, pending input), and per-message `Extra` wire fields (`reasoning_content`,
+…) round-trip, so Resume *continues* an Exchange rather than re-zeroing it; and **P1.7 re-armed
+the bench** — apogee-sim's `internal/coreagent` drives the real library through the public API
+against an ephemeral workspace, `Step`s a file-edit task to completion, observes Events as Go
+values, and scores the workspace (proven under `-race` by a hermetic OpenAI-compatible
+`httptest` model — the same code path a live model takes; the live-model run at
+`http://192.168.64.1:1111` is a `RunConfig.Endpoint` swap run from the host). **No
+`panic("sketch")` remains on the public surface.**
 Verify stays green: `go test -race ./...`, `gofmt`/`vet`/`build`, 6-target cross-build,
 `apogee --help` exit 0. Detail + acceptance:
-[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Next: P1.7 (point the
-bench at the API) — the Phase-1 deliverable.**
+[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Next: run the live
+file-edit eval against the local model, then Phase 2 (the TUI consuming the Phase-1 Events).**
 
 **Purpose of this revision:** a `/handoff` to the next session. The job next session is
 to **raise the density** of the thin sections (marked **⏳ DENSIFY** with a concrete
@@ -300,24 +306,25 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. ✅ §6.1 (Confiner placement) + §6 #7 (facade↔engine layout) **resolved** ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)); §4.1 #1 (public `Confiner`) ratified there too. **Still open:** §6.4 (mechanisms package-per-hook layout — Phase-4 catalogue-mapping session). *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
-**Phase 0 is complete (P0.1–P0.6); Phase 1's core is built — P1.0–P1.6 are done. Only P1.7
-(point the bench at the API) remains.** The ADR-0010 layout is realised (P1.0), the real
-provider client is built (P1.1), `processing/` parses one tool-call format (P1.3), the minimal
-tool set + registry are built (P1.4), the hook-mutation bodies are real (P1.5), **P1.2 — the
-convergence — landed the full Turn/Step state machine** (a Step streams the Upstream reply
+**✅ Phase 1 is COMPLETE — P1.0–P1.7 all landed.** The ADR-0010 layout is realised (P1.0),
+the real provider client is built (P1.1), `processing/` parses one tool-call format (P1.3), the
+minimal tool set + registry are built (P1.4), the hook-mutation bodies are real (P1.5), **P1.2 —
+the convergence — landed the full Turn/Step state machine** (a Step streams the Upstream reply
 emitting `TokenEvent`s, parses tool calls, runs the post-response/pre-tool-exec/post-tool-result/
 history-rewrite hooks, dispatches tools through Approval, and returns at a quiescent boundary;
-`Run` steps until the Exchange ends), and **P1.6 finalised the concrete v1 Session schema**: the
-engine-state envelope (`internal/agent/state.go`) serializes `turnIndex`, the in-Exchange flag,
-and pending input alongside `domain.Conversation`, and per-message `Extra` wire fields round-trip,
-so Resume *continues* an Exchange instead of restarting it. The `Responder` seam is streaming-only;
-§6 #6 (stream-then-gate) and §6 #3 (synchronous in-order emit) are settled. The latest state lives
-in the handoffs.
-The remaining Phase-1 work is the task-level breakdown in
-[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §4: **P1.7** points
-`apogee-sim` at the Go API (`go.mod replace github.com/airiclenz/apogee => ../apogee`, construct
-an `Agent` against isolated dirs, `Submit`/`Step`/score a file-edit task) — the Phase-1
-deliverable. The only throwaway P0.6 internal still standing is the cycle-check-only Mechanism
+`Run` steps until the Exchange ends), **P1.6 finalised the concrete v1 Session schema** (the
+engine-state envelope `internal/agent/state.go` serializes `turnIndex`, the in-Exchange flag, and
+pending input alongside `domain.Conversation`, and per-message `Extra` wire fields round-trip, so
+Resume *continues* an Exchange), and **P1.7 re-armed the bench** (apogee-sim's
+`internal/coreagent` drives the real library through the public API and scores a file-edit task,
+proven under `-race` by a hermetic OpenAI-compatible `httptest` model). The `Responder` seam is
+streaming-only; §6 #6 (stream-then-gate) and §6 #3 (synchronous in-order emit) are settled.
+The latest state lives in the handoffs.
+**Two immediate next actions:** (1) the **live-model eval** — point
+`coreagent.RunConfig.Endpoint` at the local server `http://192.168.64.1:1111` (MCP control
+`http://192.168.61.1:7331/mcp`) and run the file-edit task against a real model from the host
+(the build container does not route there); (2) **Phase 2 — the TUI**, a consumer of the
+Phase-1 Events. The only throwaway P0.6 internal still standing is the cycle-check-only Mechanism
 registry (Phase 4 replaces it); the minimal `conversation` is gone (P1.2 adopted
 `domain.Conversation`, P1.6 wrapped it in the Session envelope).
 
