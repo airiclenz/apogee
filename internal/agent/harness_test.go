@@ -1,25 +1,27 @@
-package apogee
+package agent
 
-// White-box capstone harness (P0.6e). It lives in package apogee so it can inject a
-// deterministic fake Responder through the unexported newAgent/resumeAgent seam — the
-// provider seam stays internal (Decision C), so there is no public way to supply a
-// fake, and the full Turn cannot be driven black-box. The public-API validation paths
-// that need no fake live in the black-box apogee_test package (apogee_test.go).
+// White-box capstone harness (P0.6e, re-homed to internal/agent by P1.0). It lives in
+// package agent so it can inject a deterministic fake Responder through the unexported
+// newAgent/resumeAgent seam — the provider seam stays internal (Decision C), so there
+// is no public way to supply a fake, and the full Turn cannot be driven black-box. The
+// public-API validation paths that need no fake live in the black-box apogee_test
+// package (../../apogee_test.go).
 
 import (
 	"context"
 	"testing"
 
-	"github.com/airiclenz/apogee/internal/agent"
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // recordingSink captures every emitted Event for assertion. It is written only by the
 // goroutine driving Step, so it is race-safe under the single-goroutine Agent contract.
 type recordingSink struct {
-	events []Event
+	events []domain.Event
 }
 
-func (s *recordingSink) Emit(e Event) { s.events = append(s.events, e) }
+func (s *recordingSink) Emit(e domain.Event) { s.events = append(s.events, e) }
 
 // echoResponder is the canned-reply fake: it answers every request with a fixed
 // assistant message, the stand-in for the Phase-1 HTTP provider.
@@ -27,8 +29,8 @@ type echoResponder struct {
 	reply string
 }
 
-func (r echoResponder) Respond(context.Context, agent.Request) (agent.RawResponse, error) {
-	return agent.RawResponse{Content: r.reply}, nil
+func (r echoResponder) Respond(context.Context, provider.Request) (provider.RawResponse, error) {
+	return provider.RawResponse{Content: r.reply}, nil
 }
 
 // blockingResponder blocks until ctx is cancelled, then reports the cancellation —
@@ -38,10 +40,10 @@ type blockingResponder struct {
 	started chan struct{}
 }
 
-func (r blockingResponder) Respond(ctx context.Context, _ agent.Request) (agent.RawResponse, error) {
+func (r blockingResponder) Respond(ctx context.Context, _ provider.Request) (provider.RawResponse, error) {
 	close(r.started)
 	<-ctx.Done()
-	return agent.RawResponse{}, ctx.Err()
+	return provider.RawResponse{}, ctx.Err()
 }
 
 // firingHook is a no-op experimental pre-request hook that records that it fired.
@@ -49,7 +51,7 @@ type firingHook struct {
 	fired *bool
 }
 
-func (h firingHook) PreRequest(context.Context, *Request) error {
+func (h firingHook) PreRequest(context.Context, *domain.Request) error {
 	*h.fired = true
 	return nil
 }
@@ -58,29 +60,29 @@ func (h firingHook) PreRequest(context.Context, *Request) error {
 // recover-at-extension-boundary guarantee.
 type panickingHook struct{}
 
-func (panickingHook) PreRequest(context.Context, *Request) error { panic("hook boom") }
+func (panickingHook) PreRequest(context.Context, *domain.Request) error { panic("hook boom") }
 
 // ---------------------------------------------------------------------------
 
-func baseConfig(sink EventSink) Config {
-	return Config{
+func baseConfig(sink domain.EventSink) domain.Config {
+	return domain.Config{
 		Endpoint: "http://localhost:0",
 		Model:    "test-model",
 		Events:   sink,
 	}
 }
 
-func firstMessageEvent(t *testing.T, events []Event) (MessageEvent, bool) {
+func firstMessageEvent(t *testing.T, events []domain.Event) (domain.MessageEvent, bool) {
 	t.Helper()
 	for _, e := range events {
-		if me, ok := e.(MessageEvent); ok {
+		if me, ok := e.(domain.MessageEvent); ok {
 			return me, true
 		}
 	}
-	return MessageEvent{}, false
+	return domain.MessageEvent{}, false
 }
 
-func hasEvent[T Event](events []Event) bool {
+func hasEvent[T domain.Event](events []domain.Event) bool {
 	for _, e := range events {
 		if _, ok := e.(T); ok {
 			return true
@@ -99,8 +101,8 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	fired := false
-	cfg.Mechanisms = NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(HookPreRequest, firingHook{fired: &fired}); err != nil {
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &fired}); err != nil {
 		t.Fatalf("AddExperimental: %v", err)
 	}
 
@@ -109,7 +111,7 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	if err := a.Submit(UserInput{Text: "hi"}); err != nil {
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	res, err := a.Step(context.Background())
@@ -117,8 +119,8 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	if res.Status != StatusExchangeComplete {
-		t.Errorf("Step status = %q, want %q", res.Status, StatusExchangeComplete)
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("Step status = %q, want %q", res.Status, domain.StatusExchangeComplete)
 	}
 	if res.TurnIndex != 0 {
 		t.Errorf("Step TurnIndex = %d, want 0", res.TurnIndex)
@@ -126,7 +128,7 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	if !fired {
 		t.Error("experimental pre-request hook did not fire")
 	}
-	if !hasEvent[MechanismFiredEvent](sink.events) {
+	if !hasEvent[domain.MechanismFiredEvent](sink.events) {
 		t.Error("no MechanismFiredEvent emitted for the experimental hook")
 	}
 	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "hello from model" {
@@ -137,8 +139,8 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	if snap.Version != sessionVersion {
-		t.Errorf("Snapshot Version = %d, want %d", snap.Version, sessionVersion)
+	if snap.Version != domain.SessionVersion {
+		t.Errorf("Snapshot Version = %d, want %d", snap.Version, domain.SessionVersion)
 	}
 
 	// Resume into a fresh Agent (fresh sink) and continue the restored conversation.
@@ -149,7 +151,7 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	if err := b.Submit(UserInput{Text: "again"}); err != nil {
+	if err := b.Submit(domain.UserInput{Text: "again"}); err != nil {
 		t.Fatalf("Submit (resumed): %v", err)
 	}
 	if _, err := b.Step(context.Background()); err != nil {
@@ -172,10 +174,10 @@ func TestHarness_SubmitMidExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	if err := a.Submit(UserInput{Text: "first"}); err != nil {
+	if err := a.Submit(domain.UserInput{Text: "first"}); err != nil {
 		t.Fatalf("first Submit: %v", err)
 	}
-	if err := a.Submit(UserInput{Text: "second"}); err != ErrInputPending {
+	if err := a.Submit(domain.UserInput{Text: "second"}); err != domain.ErrInputPending {
 		t.Errorf("second Submit err = %v, want ErrInputPending", err)
 	}
 }
@@ -190,7 +192,7 @@ func TestHarness_CancellationIsResumable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	if err := a.Submit(UserInput{Text: "slow"}); err != nil {
+	if err := a.Submit(domain.UserInput{Text: "slow"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 
@@ -203,8 +205,8 @@ func TestHarness_CancellationIsResumable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Step returned a loop error on cancel: %v", err)
 	}
-	if res.Status != StatusCancelled {
-		t.Fatalf("Step status = %q, want %q", res.Status, StatusCancelled)
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("Step status = %q, want %q", res.Status, domain.StatusCancelled)
 	}
 
 	snap, err := a.Snapshot()
@@ -218,15 +220,15 @@ func TestHarness_CancellationIsResumable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resumeAgent after cancel: %v", err)
 	}
-	if err := b.Submit(UserInput{Text: "retry"}); err != nil {
+	if err := b.Submit(domain.UserInput{Text: "retry"}); err != nil {
 		t.Fatalf("Submit (resumed): %v", err)
 	}
 	res2, err := b.Step(context.Background())
 	if err != nil {
 		t.Fatalf("Step (resumed): %v", err)
 	}
-	if res2.Status != StatusExchangeComplete {
-		t.Errorf("resumed Step status = %q, want %q", res2.Status, StatusExchangeComplete)
+	if res2.Status != domain.StatusExchangeComplete {
+		t.Errorf("resumed Step status = %q, want %q", res2.Status, domain.StatusExchangeComplete)
 	}
 }
 
@@ -235,8 +237,8 @@ func TestHarness_CancellationIsResumable(t *testing.T) {
 func TestHarness_PanicRecovery(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Mechanisms = NewMechanismRegistry()
-	if err := cfg.Mechanisms.AddExperimental(HookPreRequest, panickingHook{}); err != nil {
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, panickingHook{}); err != nil {
 		t.Fatalf("AddExperimental: %v", err)
 	}
 	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
@@ -244,17 +246,17 @@ func TestHarness_PanicRecovery(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	if err := a.Submit(UserInput{Text: "hi"}); err != nil {
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	res, err := a.Step(context.Background())
 	if err != nil {
 		t.Fatalf("Step returned a loop error on hook panic: %v", err)
 	}
-	if res.Status != StatusExchangeComplete {
-		t.Errorf("Step status = %q, want %q", res.Status, StatusExchangeComplete)
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("Step status = %q, want %q", res.Status, domain.StatusExchangeComplete)
 	}
-	if !hasEvent[ErrorEvent](sink.events) {
+	if !hasEvent[domain.ErrorEvent](sink.events) {
 		t.Error("no ErrorEvent emitted for the panicking hook")
 	}
 	if _, ok := firstMessageEvent(t, sink.events); ok {
@@ -262,14 +264,14 @@ func TestHarness_PanicRecovery(t *testing.T) {
 	}
 
 	// The loop survived: a second Submit/Step recovers again and still returns cleanly.
-	if err := a.Submit(UserInput{Text: "again"}); err != nil {
+	if err := a.Submit(domain.UserInput{Text: "again"}); err != nil {
 		t.Fatalf("Submit after recovery: %v", err)
 	}
 	res2, err := a.Step(context.Background())
 	if err != nil {
 		t.Fatalf("second Step after recovery returned a loop error: %v", err)
 	}
-	if res2.Status != StatusExchangeComplete {
-		t.Errorf("second Step status = %q, want %q", res2.Status, StatusExchangeComplete)
+	if res2.Status != domain.StatusExchangeComplete {
+		t.Errorf("second Step status = %q, want %q", res2.Status, domain.StatusExchangeComplete)
 	}
 }

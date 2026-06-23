@@ -1,9 +1,9 @@
-package apogee
+package domain
 
-// This file holds the MechanismRegistry internals the public methods in apogee.go
-// delegate to: experimental-hook storage, hook-interface assertions, and the
-// startup ordering-cycle check (ADR 0003). P0.6 builds only cycle detection — the
-// deterministic total order beyond it is Phase-4 registry work (plan §6).
+// This file holds the MechanismRegistry's pure logic the methods in mechanism.go
+// delegate to: hook-interface assertions and the startup ordering-cycle check
+// (ADR 0003). P0.6 built only cycle detection — the deterministic total order beyond
+// it is Phase-4 registry work (plan §6).
 
 // implementsAnyHook reports whether m satisfies at least one of the five hook
 // interfaces. A Mechanism that hooks nowhere is a configuration error (ADR 0002 — a

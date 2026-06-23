@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 func TestDenyConfinerCapabilities(t *testing.T) {
@@ -37,7 +37,7 @@ func TestDenyConfinerConfineRunsFnUnchanged(t *testing.T) {
 
 	ran := false
 	sentinel := errors.New("from fn")
-	err := denyConfiner{}.Confine(context.Background(), apogee.ConfinementBox{}, func(context.Context) error {
+	err := denyConfiner{}.Confine(context.Background(), domain.ConfinementBox{}, func(context.Context) error {
 		ran = true
 		return sentinel
 	})

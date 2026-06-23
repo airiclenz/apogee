@@ -3,7 +3,7 @@ package platform
 import (
 	"context"
 
-	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // Shell abstracts how a command line is handed to the operating system's shell —
@@ -44,7 +44,7 @@ type Host interface {
 
 // denyConfiner is the Phase-0 stub Confiner backend (plan §P0.5). It enforces
 // nothing: Capabilities reports neither fs-write nor network-egress
-// confinement, so AutoEligible is false and apogee.New rejects Auto mode against
+// confinement, so AutoEligible is false and New rejects Auto mode against
 // it (ADR 0004). Confine runs fn unchanged. The real backends (seatbelt /
 // landlock / AppContainer) land in Phase 3; this stub exists so New's Auto gate
 // can be exercised by the P0.6 harness before any of them do.
@@ -52,19 +52,21 @@ type denyConfiner struct{}
 
 // Capabilities reports a backend that can enforce nothing — both fs-write and
 // network-egress are false, so this backend never satisfies the Auto gate.
-func (denyConfiner) Capabilities() apogee.ConfinementCaps {
-	return apogee.ConfinementCaps{FSWrite: false, NetworkEgress: false}
+func (denyConfiner) Capabilities() domain.ConfinementCaps {
+	return domain.ConfinementCaps{FSWrite: false, NetworkEgress: false}
 }
 
 // Confine runs fn unchanged: the stub applies no confinement box (Phase 0).
-func (denyConfiner) Confine(ctx context.Context, _ apogee.ConfinementBox, fn func(context.Context) error) error {
+func (denyConfiner) Confine(ctx context.Context, _ domain.ConfinementBox, fn func(context.Context) error) error {
 	return fn(ctx)
 }
 
 // NewDenyConfiner returns the Phase-0 stub Confiner backend (plan §P0.5). It
-// enforces nothing and never satisfies the Auto gate, so it lets apogee.New's
-// Auto-mode rejection (ADR 0004) be tested before the real backends land.
-func NewDenyConfiner() apogee.Confiner { return denyConfiner{} }
+// enforces nothing and never satisfies the Auto gate, so it lets New's Auto-mode
+// rejection (ADR 0004) be tested before the real backends land. It returns
+// domain.Confiner — the same type the root re-exports as apogee.Confiner (ADR 0010),
+// so callers in either package assign it interchangeably.
+func NewDenyConfiner() domain.Confiner { return denyConfiner{} }
 
-// The stub must satisfy the public Confiner contract at compile time.
-var _ apogee.Confiner = (*denyConfiner)(nil)
+// The stub must satisfy the Confiner contract at compile time.
+var _ domain.Confiner = (*denyConfiner)(nil)

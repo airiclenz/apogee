@@ -1,27 +1,27 @@
-package apogee
+package agent
 
 import (
 	"encoding/json"
 	"fmt"
-)
 
-// sessionVersion is the schema version Snapshot stamps and Resume/DecodeSession
-// accept. P0.6 ships v1; a snapshot whose Version exceeds this is from a newer build
-// and is rejected with ErrSessionVersion (ADR 0001 — no silent forward migration).
-const sessionVersion = 1
+	"github.com/airiclenz/apogee/internal/domain"
+)
 
 // message is the loop's internal, serializable conversation message — the throwaway
 // Phase-0 stand-in for the concrete Session schema (TDD §5 Sessions row, Phase 1).
 // It is unexported and minimal on purpose: snapshot/resume must round-trip it, and a
-// plain role+content pair is all the single non-streaming Turn needs.
+// plain role+content pair is all the single non-streaming Turn needs. P1.6 replaces
+// it with the real serialized state (full messages, deferred actions, loop counters).
 type message struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
+	Role    domain.Role `json:"role"`
+	Content string      `json:"content"`
 }
 
 // conversation is the copyable conversation state the loop appends to and that
-// Snapshot serializes. It holds no live handles (ADR 0001), so a JSON round-trip is a
-// faithful copy — the property snapshot/resume and the bench's fork both rely on.
+// Snapshot serializes into the Session's opaque State payload. It holds no live
+// handles (ADR 0001), so a JSON round-trip is a faithful copy — the property
+// snapshot/resume and the bench's fork both rely on. The engine owns this payload
+// schema (it serializes engine state); domain owns only the Session envelope (ADR 0010).
 type conversation struct {
 	Messages []message `json:"messages"`
 }
