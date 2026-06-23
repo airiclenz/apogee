@@ -30,12 +30,16 @@ the remaining Phase-0 work; the TDD §8 backlog points here.
 | P0.3 | this detail plan (pins, CI, acceptance) | ✅ committed `c7d4f61` |
 | P0.4 | CI workflow `.github/workflows/ci.yml` (§2) | ✅ committed `c7d4f61` |
 | P0.5 | `internal/platform` seam (`Shell`/`Path`, POSIX + Windows stub) + deny-all `Confiner` stub | ✅ committed `2b71932` |
-| **P0.6** | **capstone harness** (the first real bodies) | **next — gated on §3 owner-review decisions** |
+| P0.6 | **capstone harness** (the first real bodies) | ✅ built & green — gate Decisions A–D confirmed 2026-06-23 (see §3) |
+| — | **Phase 0 complete** (§4 done-definition: all 5 conditions met) | ✅ |
 
-Everything past P0.2 is **`panic`-stub bodies** — nothing executes a loop yet. The remaining
-Phase-0 deliverables from plan §4 are: CI/build; the `platform/` seam (shell + path + the
-already-public `Confiner`, with stub backends); cancellation as a Phase-0 API primitive
-(ADR 0007); and the **capstone harness** — the first slice that needs *real* bodies.
+The capstone path now executes for real (construct→`Step`→`Snapshot`→`Resume`→
+`AddExperimental`); everything *off* that path remains a `panic`-stub body (the
+throwaway-thin discipline — plan §3 in/out table). All Phase-0 deliverables from plan §4
+are now landed: CI/build (P0.4); the `platform/` seam — shell + path + the already-public
+`Confiner`, stub backends (P0.5); cancellation as a Phase-0 API primitive — ADR 0007,
+proved by the capstone's cancellation test (P0.6); and the **capstone harness** itself
+(P0.6) — the first slice with *real* bodies. Phase 1 (the embeddable agent core) is next.
 
 ---
 
@@ -125,12 +129,18 @@ independent** and can land in either order; **P0.6 depends on P0.5** (the Auto-g
 |---|---|---|---|---|
 | **P0.4** | CI workflow (§2) | — | none | ✅ `c7d4f61` |
 | **P0.5** | `platform/` seam: shell + path interfaces (POSIX impl, Windows stub) + stub `Confiner` backend | — | none | ✅ `2b71932` |
-| **P0.6** | **Capstone harness** — minimal real bodies for construct→`Step`→`Snapshot`→`Resume`→`AddExperimental`, exercised by a hermetic test | P0.5 | none | ⏳ next (gated — see below) |
+| **P0.6** | **Capstone harness** — minimal real bodies for construct→`Step`→`Snapshot`→`Resume`→`AddExperimental`, exercised by a hermetic test | P0.5 | none | ✅ built & green |
 
-**P0.6 is gated on owner review of four decisions** before its bodies are written: the **Charm
-v2 pin** (§1.1), the **MCP-SDK maturity verdict** (§1.2), the **hermetic-Upstream `responder`
-seam** (§3 P0.6 sub-section), and **P0.6 scope** (the in/out-of-scope table). Walking the owner
-through these is the next session's job — see the handoff `docs/handoffs/2026-06-23 - 03 …`.
+**P0.6's four gate decisions were confirmed by the owner on 2026-06-23** (verdicts below);
+the bodies were then written. The handoff that drove the walk-through is
+`docs/handoffs/2026-06-23 - 03 …`.
+
+| Decision | Spec | Verdict (2026-06-23) |
+|---|---|---|
+| **A — Charm v2 pin** | §1.1 | ✅ Confirmed: target the **v2** trio; v1 documented fallback. No deps added (first use Phase 2; re-checked at Phase-2 entry). |
+| **B — MCP-SDK maturity** | §1.2 | ✅ Confirmed: stay on the official `go-sdk` pinned **`v1.6.x`**; **retire `mark3labs`** from the active set (break-glass note only). Propagated to broad plan §5/Phase-3. |
+| **C — hermetic-Upstream seam** | §3 below | ✅ Confirmed: provider injection stays **internal-only** (no public seam). As built, the seam is `internal/agent.Responder` (root-type-free so the root facade imports it one-way, avoiding a cycle); the sketch's lowercase names became exported *within the internal package* since the caller is the root facade — still non-public API. Fake `Responder` lives in the white-box harness test. |
+| **D — P0.6 scope** | §3 in/out table | ✅ Confirmed as specified — single non-streaming Turn; no item pulled in or out. |
 
 Housekeeping carried from the handoff (decided, not yet propagated — **not Phase-0-blocking**,
 tracked here so it isn't lost): ratify the five §4.1 TDD sketch-decisions into the plan/ADRs
@@ -177,7 +187,25 @@ amd64 + arm64); `denyConfiner` satisfies `apogee.Confiner` (compile-time
 `var _ apogee.Confiner = (*denyConfiner)(nil)`); a table test asserts
 `denyConfiner{}.Capabilities().AutoEligible() == false`.
 
-### P0.6 — the capstone harness (the first real bodies)
+### P0.6 — the capstone harness (the first real bodies) · ✅ landed
+
+> **As built:** real bodies live in the **root `apogee` package** (sibling files
+> `loop.go`, `conversation.go`, `registry.go`) with the public methods in `apogee.go`
+> as thin delegators — because the committed dependency direction is *internal→root*
+> (`internal/platform` already imports `apogee` for `Confiner`), so the root facade
+> cannot import `internal/agent` back without a cycle. The provider seam
+> (`internal/agent.Responder` + root-type-free `Request`/`RawResponse`/`Message`) is the
+> one thing in `internal/agent`; the root loop imports it one-way and translates
+> conversation→wire. Off-path public methods stay `panic` stubs. Tests split as the plan
+> calls for: black-box `apogee_test` for the validation/session paths (the Auto-gate test
+> needs `platform.NewDenyConfiner`, and `internal/platform` imports root → must be
+> external); white-box `package apogee` for the fake-`Responder` capstone, cancellation,
+> and panic-recovery. **All §P0.6 acceptance met** (12 tests pass under `-race`; 6-target
+> cross-build; `apogee --help` exit 0). Known throwaway simplifications (Phase 1 replaces
+> the internals): `Resume` restores conversation but not loop counters (`turnIndex`);
+> pre-request hooks fire but their request mutations are not yet wired to the Upstream
+> (the hook-mutation API is TDD §6.2); the public `New` binds a `placeholderResponder`
+> that errors until the Phase-1 HTTP client lands.
 
 Plan §4 Phase-0 deliverable: *"a throwaway in-process harness that constructs an `Agent`,
 `Step`s it, snapshots + resumes, and registers an experimental hook — proving the bench's
@@ -260,14 +288,14 @@ same module and may reach `internal/`, so no public seam is needed.)
 
 ## 4. Phase-0 "done" definition
 
-Phase 0 is complete (plan §4 "Deliverable") when **all** hold:
+Phase 0 is complete (plan §4 "Deliverable") — **all five hold as of 2026-06-23:**
 
-1. Repo builds; `apogee --help` runs. *(done — P0.2)*
-2. Public API + `platform/` seams exist (Confiner public; backends stubbed). *(P0.5)*
-3. The in-process **step/snapshot/hook pattern is exercised by a passing test** — the capstone
-   harness. *(P0.6)*
-4. CI gates `gofmt`/`vet`/`build`/`test -race` and cross-compiles Win/Mac/Linux. *(P0.4)*
-5. Dependency versions are pinned-by-decision (this doc §1); the module graph is still empty.
+1. ✅ Repo builds; `apogee --help` runs. *(P0.2)*
+2. ✅ Public API + `platform/` seams exist (Confiner public; backends stubbed). *(P0.5)*
+3. ✅ The in-process **step/snapshot/hook pattern is exercised by a passing test** — the
+   capstone harness, 12 tests under `-race`. *(P0.6)*
+4. ✅ CI gates `gofmt`/`vet`/`build`/`test -race` and cross-compiles Win/Mac/Linux. *(P0.4)*
+5. ✅ Dependency versions are pinned-by-decision (this doc §1); the module graph is still empty.
 
 On completion, Phase 1 (the embeddable agent core — real provider, loop, minimal tools,
 sessions, `apogee-sim` pointed at the Go API) can begin; the capstone's internal seams

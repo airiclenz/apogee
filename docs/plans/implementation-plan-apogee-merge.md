@@ -338,8 +338,9 @@ Port apogee-code's loop as an embeddable vertical slice (TS as oracle):
   shell-out otherwise; each external dependency detected with graceful degradation.
   **Sub-agent** orchestrator is constructed with the parent's mode/approval/confiner —
   privileges **≤ parent** (ADR 0005); do **not** port apogee-code's gate-less version.
-- **MCP client** on the official Go SDK (`modelcontextprotocol/go-sdk`) — stdio / SSE /
-  streamable-http; re-verify SDK maturity at this point.
+- **MCP client** on the official Go SDK (`modelcontextprotocol/go-sdk`, pinned `v1.6.x`
+  — GA-verified at the P0.6 gate, Decision B) — stdio / SSE / streamable-http; re-confirm
+  the pin at this point (mark3labs is a break-glass fallback only, no longer co-evaluated).
 - **Agent modes** (Plan / Ask-Before / Auto) + **Safety guardrails** (approval, audit,
   circuit-breaker, path/url safety, arg guard). **Implement the `platform/` `Confiner`
   backends for v1 targets — macOS (seatbelt) + Linux (landlock).** Confinement is a
@@ -424,7 +425,7 @@ before keeping it on**:
 | Mechanism re-validation | proxy-era effects may not transfer to in-loop firing | bench A/Bs each one (Phase 4); never carry forward on faith |
 | **Public Go API stability** | the bench *and* third-party embedders depend on it; costly to change later (ADR 0001) | design first (Phase 0); minimal guarded surface; **semver**; typed Events; everything else `internal/` |
 | **Library pollution** | bench drives the *real* loop, so the real Library mechanism could flood production with sim data | ADR 0001: Config-injected state roots; **bench isolation by default**; opt-in bleed only if proven |
-| MCP SDK maturity | Go SDK is new and moves fast | re-verify version/maturity at Phase 3; mark3labs fallback if needed |
+| MCP SDK maturity | Go SDK was new and moving fast | **substantially retired (2026-06-23, P0.6 gate Decision B):** official `modelcontextprotocol/go-sdk` reached `v1.6.1` (post-1.0 GA, 6 stable minors), pinned `v1.6.x`; mark3labs dropped from the active set (break-glass note only). Phase 3 re-confirms at entry |
 | External-tool creep | easy to silently `os/exec` a formatter/linter and quietly require it | §3a: in-process default, detect + degrade, log absence; review tool deps each phase |
 | Dependency bloat | incidental `go get` grows the binary & supply-chain surface | §3a: stdlib-first; every direct dep is a noted, deliberate choice |
 | **Library cross-session harm** | the Library injects learned content across sessions, where per-Session safety nets reset clean; bad/mismatched observations could persist and hurt the model | confidence-tagged `ModelFingerprint` (prefer-not-to-inject under uncertainty); TTL + Bayesian counter-evidence; **longitudinal bench gate** (never below baseline) |

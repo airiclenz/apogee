@@ -5,12 +5,14 @@ technical design (the *as-designed system* in one place). It **synthesizes** the
 authoritative records; it does not replace them. For *why* a decision was made, follow
 the ADR link — this doc records *what* the design is and *what is still undesigned*.
 
-**Date:** 2026-06-23  **Repo state:** P0.1 (`apogee.go` facade), P0.2 (`go.mod` +
-`cmd/apogee` + empty `internal/` skeleton), P0.3+P0.4 (Phase-0 detail plan + CI,
-commit `c7d4f61`), and P0.5 (`internal/platform` seam + deny-all `Confiner` stub) are
-committed; the facade builds and `go vet`s in-tree with panic-stub bodies. The remaining
-Phase-0 worklist (P0.6 capstone harness) is spec'd in
-[`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md).
+**Date:** 2026-06-23  **Repo state:** **Phase 0 is complete.** P0.1–P0.5 (facade,
+skeleton, detail plan + CI, `internal/platform` seam) plus **P0.6 — the capstone harness**
+are done: the four P0.6 gate decisions were confirmed by the owner on 2026-06-23, and the
+construct→`Step`→`Snapshot`→`Resume`→`AddExperimental` path now runs for real (12 tests
+under `-race`, 6-target cross-build, `apogee --help` exit 0). Off-capstone-path methods
+remain `panic` stubs by design. Detail + acceptance:
+[`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md). **Phase 1 (the
+embeddable agent core) is next.**
 
 **Purpose of this revision:** a `/handoff` to the next session. The job next session is
 to **raise the density** of the thin sections (marked **⏳ DENSIFY** with a concrete
@@ -74,8 +76,10 @@ plan. **All four prior "open items" are resolved** (plan §6 #22–24).
 ### 2.2 Code
 | Artifact | State |
 |---|---|
-| `apogee.go` | **Signature sketch** — public API facade. gofmt-clean, stdlib-only, **bodies are `panic` stubs**. As of **P0.2** it **builds + `go vet`s** in-tree. |
-| skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). All still `doc.go`-only **except `internal/platform`** (filled by P0.5). |
+| `apogee.go` | Public API facade. **Capstone-path methods now have real bodies** (`New`/`Resume`/`Submit`/`Step`/`Snapshot`/`DecodeSession`/`AddExperimental`/`Add` + registry); off-path methods (hook-mutation surface, tools, `Run`) remain `panic` stubs. Thin delegators to sibling files. |
+| capstone bodies (P0.6) | `loop.go` + `conversation.go` + `registry.go` (package `apogee`) — single non-streaming Turn, JSON snapshot/resume, ordering-cycle detection, experimental pre-request hook + `MechanismFiredEvent`, ctx-cancel→`StatusCancelled`, recover-at-boundary→`ErrorEvent`. **12 tests pass under `-race`** (black-box `apogee_test` + white-box harness). |
+| `internal/agent` (P0.6) | the provider seam (Decision C): `Responder` + root-type-free `Request`/`RawResponse`/`Message`. Imported one-way by the root facade; the real HTTP provider implements `Responder` in Phase 1. |
+| skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). `doc.go`-only **except `internal/platform`** (P0.5) and **`internal/agent`** (P0.6 seam). |
 | CI (P0.4) | `.github/workflows/ci.yml` — `check` (gofmt/vet/build/`test -race`) + `cross` (Win/Mac/Linux × amd64/arm64, CGO off). Verified green locally. |
 | `internal/platform` (P0.5) | `Shell`/`Path` interfaces + `Host` aggregate (POSIX impl, Windows stub, `Current()` selector), and `denyConfiner` — the deny-all `Confiner` stub (`AutoEligible()==false`) behind `NewDenyConfiner()`. **First tests in the tree** (white-box table tests). |
 
@@ -157,18 +161,18 @@ The shape is in [`apogee.go`](../../apogee.go). Summary:
 ## 5. Component design status
 
 Spine of the TDD: each component, what's decided, what's undesigned. **D**=decided,
-**S**=sketched (signatures only), **∅**=not started.
+**S**=sketched (signatures only), **P**=partial real bodies (the P0.6 capstone path), **∅**=not started.
 
 | Component | Status | Decided | Undesigned (→ §8) |
 |---|---|---|---|
-| Public API facade | S | shape, seams, naming (§4); hook mutation API (§6.2, done P0.1) | bodies |
-| Loop / Turn engine | ∅ | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007) | internal state machine; how Steps interleave streaming/approval/tools |
-| Provider / Upstream | ∅ | openai-compatible; model discovery; TS as oracle | client design, streaming, ret/timeouts, server-process mgr |
+| Public API facade | S→**P** | shape, seams, naming (§4); hook mutation API (§6.2, done P0.1); **capstone-path bodies real (P0.6)** | off-path bodies (hook-mutation surface, tools, `Run`, streaming) |
+| Loop / Turn engine | **P (minimal)** | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007); **P0.6: single non-streaming Turn, cancel, panic-recover all real in `loop.go`** | full state machine; streaming/approval/tool interleave; cross-Turn loop counters in snapshot |
+| Provider / Upstream | **S (seam)** | openai-compatible; model discovery; TS as oracle; **P0.6: `internal/agent.Responder` seam (Decision C) — root-type-free, fake in test, real HTTP in Phase 1** | client design, streaming, ret/timeouts, server-process mgr |
 | processing/ (parsers) | ∅ | RISKIEST; TS oracle + ported test vectors *is* the gate (0024b) | parser architecture; harmony/thinking channels; vector extraction |
 | Tools (~30) | S (iface) | open extension point; stateless-across-Turns; external-effect boundary | per-tool design; approval/path-safety wiring; pure-Go search vs ripgrep |
 | Context (Budget/Compaction/capping) | ∅ | four-way split; Compaction default generative; capping = surviving half of `compress` | Budget allocation algorithm; Compaction trigger/strategy; token counting |
-| Sessions | S | snapshot/resume at quiescent boundary; copyable value | concrete schema; versioning/migration; what's in `State` |
-| Mechanisms + registry | S (iface) | constraint-declared; deterministic total order; descriptor; Bypass by Capability | topo-sort impl; cycle detection; self-regulation (Adaptive Suppression, Turn Budget, Effectiveness tracking); catalogue→hook mapping (deferred session) |
+| Sessions | S→**P (minimal)** | snapshot/resume at quiescent boundary; copyable value; **P0.6: versioned JSON `Snapshot`/`Resume`/`DecodeSession`, future-version rejected** | concrete schema; versioning/migration beyond reject; what's in `State` (loop counters, deferred actions) |
+| Mechanisms + registry | S→**P (partial)** | constraint-declared; deterministic total order; descriptor; Bypass by Capability; **P0.6: cycle detection + experimental-hook slots real** | full topo-sort *order* (only cycle-check built); self-regulation (Adaptive Suppression, Turn Budget, Effectiveness tracking); catalogue→hook mapping (deferred session) |
 | Security guardrails | ∅ | Approval, path/url safety, arg-guard, circuit-breaker, audit | designs; arg-guard policy; audit format |
 | Confinement | S (iface) | capability matrix; Auto needs fs+net; per-tool; backends macOS/Linux v1 | backend impls (seatbelt/landlock); deferred design session |
 | Sub-agents | ∅ | privileges ≤ parent; top-level-only stepping v1; events nest | orchestrator design (mode/approver/confiner/tool-subset threading) |
@@ -202,10 +206,17 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    (context-builder seam) is unspecified.
 6. **Streaming + Approval interleave inside a Step** — confirm the control flow (sync
    `Approver` call mid-stream; what the EventSink sees around it).
-
----
-
-## 7. What's still missing (inventory)
+7. **Facade ↔ `internal/agent` placement (surfaced by P0.6).** The committed dependency
+   direction is *internal→root*: `internal/platform` imports the root `apogee` package for
+   `Confiner`, and the public types live in root. That makes it **impossible for the root
+   facade to import `internal/agent`** (which would need root's types) without a cycle — so
+   P0.6 put the loop bodies in the **root package** and kept only the root-type-free
+   `Responder` seam in `internal/agent`. This conflicts with the §3 layout that files the
+   loop under `internal/agent/{loop,subagent,modes}`. **Phase 1 must decide:** (a) keep the
+   loop in root and let `internal/agent` hold only provider-shaped seams; (b) introduce a
+   shared `internal/core` types package both root and `internal/agent` import; or (c) flip
+   to apogee-sim's *root→internal* aliasing (root re-exports `internal` types) — which would
+   also move `Confiner` and revisit §6.1. Lowest-churn is (a)/(b); (c) is a larger reshape.
 
 **Process / scaffolding (Phase 0):**
 - ✅ **Done (P0.2):** `go.mod` (`go 1.26`, no deps) + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles and `go vet`/`go vet -race` pass in-tree.
@@ -241,7 +252,8 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 1. ✅ **Hook mutation API** (§6.2) — **DONE (P0.1):** `Request`/`Response`/`Conversation` accessors designed from apogee-sim's Transform/Injector signatures (see `docs/design/hook-mutation-api.md`).
 2. ✅ **Stand up `go.mod` + minimal `internal/` stubs** — **DONE (P0.2):** module + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles, `go vet`/`go vet -race` pass in-tree.
 3. ✅ **Phase-0 detail plan + CI** — **DONE (P0.3+P0.4, `c7d4f61`):** [`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md) (version pins, CI spec, acceptance-tested task list) + `.github/workflows/ci.yml`.
-3a. ✅ **`platform/` seam** — **DONE (P0.5):** `internal/platform` `Shell`/`Path` interfaces (real POSIX, Windows stub) + deny-all `denyConfiner` (`AutoEligible()==false`); cross-matrix builds, table-tested (detail plan §3). **← next: P0.6** the *capstone* harness (construct→Step→Snapshot→Resume→`AddExperimental`) — the first real bodies, not `panic` stubs (spec'd in the detail plan §3). **Gate:** four detail-plan decisions (Charm v2, MCP verdict, the `responder` seam, P0.6 scope) are awaiting owner review before the harness is built.
+3a. ✅ **`platform/` seam** — **DONE (P0.5):** `internal/platform` `Shell`/`Path` interfaces (real POSIX, Windows stub) + deny-all `denyConfiner` (`AutoEligible()==false`); cross-matrix builds, table-tested (detail plan §3).
+3b. ✅ **Capstone harness** — **DONE (P0.6):** four gate decisions confirmed (Charm v2, MCP verdict, the `Responder` seam, P0.6 scope); construct→Step→Snapshot→Resume→`AddExperimental` runs for real over the `internal/agent.Responder` seam — 12 tests under `-race`, 6-target cross-build, `apogee --help` exit 0 (detail plan §3 "as built"). **Phase 0 is complete.**
 
 **P1 — deepen the core design**
 4. Loop/Turn engine internal state machine (how a Step interleaves stream → parse → hooks → tool dispatch → approval → boundary).
@@ -259,14 +271,15 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. Resolve §6.1 (Confiner placement) + §6.4 (mechanisms layout); ratify §4.1 into plan/ADRs. *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
-**P0.1–P0.5 are done** (hook mutation API; go.mod + skeleton; the Phase-0 detail plan; CI;
-the `platform/` seam + deny-all `Confiner` stub). The forward worklist now lives in
-[`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md) §3. Start at **P0.6** the
-*capstone* harness that exercises construct→Step→Snapshot→Resume→`AddExperimental` (the first
-place the API runs for real — minimal real bodies behind an unexported `responder` seam).
-**Before building P0.6, confirm the four detail-plan decisions flagged for owner review**
-(Charm v2 pin, MCP-SDK maturity verdict, the hermetic-Upstream `responder` seam, P0.6 scope).
-P1+ can fan out in parallel now that the keystone compiles.
+**Phase 0 is complete (P0.1–P0.6).** The capstone runs the API for real over the
+`internal/agent.Responder` seam; off-path methods stay `panic` stubs. Next is **Phase 1 —
+the embeddable agent core**: the real OpenAI-compatible provider implementing `Responder`,
+the full Turn/Step state machine (streaming, tool dispatch, approval interleave), the
+concrete Session schema (P1 backlog #7), minimal tools, and pointing `apogee-sim` at the Go
+API. The throwaway P0.6 internals (the placeholder responder, the minimal `conversation`
+value, the cycle-check-only registry) are the precursors Phase 1 replaces. The P1/P2
+densification items above (loop engine, provider, processing/, context reducers) can fan out
+in parallel.
 
 ---
 
