@@ -1,8 +1,10 @@
 # Apogee — Phase-2 Detail Plan (P2): the minimal modular TUI shell
 
-**Date:** 2026-06-23 · **Status:** 🚧 **IN PROGRESS** — **P2.0 landed** (HEAD `a210c4f`: the
-Cobra binary, the composition-root wiring, and state-root resolution); next is **P2.1** (the
-concurrency seam). Phase 1 is complete (the embeddable
+**Date:** 2026-06-23 · **Status:** 🚧 **IN PROGRESS** — **P2.1 landed** (HEAD `5e574c5`: the
+concurrency seam — `teaSink` + `uiApprover` + the worker driver, late-bound through the
+`Bridge`, `-race`-proven against a stub program; **ADR 0011** records the model). P2.0 landed
+before it (HEAD `a210c4f`: the Cobra binary, the composition-root wiring, and state-root
+resolution). Next is **P2.2** (the Model/Update/View skeleton). Phase 1 is complete (the embeddable
 agent core + the bench are built; the live-model eval is the one open Phase-1 runtime step,
 which Phase 2 also exercises in passing). **All Phase-2 entry-state pre-checks were
 re-verified against source (2026-06-23) and passed** (see the **Readiness** note in §0). This
@@ -162,7 +164,7 @@ phase the TUI + CLI stack lands, so it adds the deps that were pinned-and-deferr
 | Module | Pin | Added by | Note |
 |---|---|---|---|
 | `github.com/spf13/cobra` | `v1.10.2` | **P2.0** (the command tree) | Replaces the hand-rolled `--help`. Mature, ubiquitous. |
-| `github.com/charmbracelet/bubbletea/v2` | `v2.0.7` | **P2.1** (the program + Msg loop) | **v2** chosen for a greenfield TUI (phase-0 §1.1). Fallback: v1 `v1.3.10`. |
+| `charm.land/bubbletea/v2` | `v2.0.7` | **P2.1** ✅ (the program + Msg loop) | **v2** chosen for a greenfield TUI (phase-0 §1.1). **Path moved**: Bubble Tea renamed its module to `charm.land/bubbletea/v2` exactly at v2.0.7 (the `github.com/charmbracelet/...` path resolves only through v2.0.6); took the new canonical path (ADR 0011). Fallback: v1 `github.com/charmbracelet/bubbletea v1.3.10`. |
 | `github.com/charmbracelet/lipgloss/v2` | `v2.0.4` | **P2.2** (layout/style) | Matches the Bubble Tea v2 line. Fallback: v1 `v1.1.0`. |
 | `github.com/charmbracelet/bubbles/v2` | `v2.1.0` | **P2.2** (textarea/viewport/spinner) | Matches the Bubble Tea v2 line. Fallback: v1 `v1.0.0`. |
 | `gopkg.in/yaml.v3` | `v3.0.1` | **P2.5** (config file) — *only if* a config file lands in v1; flags+env+defaults may suffice | Same pin apogee-sim carries. Keep config thin (§6). |
@@ -309,7 +311,7 @@ end-to-end), and it doubles as the Phase-1 live-model confirmation.
 | ID | Task | Depends | New deps | Resolves |
 |---|---|---|---|---|
 | **P2.0** ✅ | Cobra command tree + binary wiring + state-root resolution + `Config` construction (C5/C7/C8) | — | `cobra` | broad §4; TDD §5 CLI row |
-| **P2.1** | The concurrency seam: `teaSink` bridge + `uiApprover` rendezvous + worker `tea.Cmd` + cancel (C1–C4), as a fake-engine-testable package | P2.0 | `bubbletea/v2` | ADR 0007; TDD §6 #3; **new ADR 0011** |
+| **P2.1** ✅ | The concurrency seam: `teaSink` bridge + `uiApprover` rendezvous + worker `tea.Cmd` + cancel (C1–C4), as a fake-engine-testable package | P2.0 | `bubbletea/v2` | ADR 0007; TDD §6 #3; **ADR 0011** |
 | **P2.2** | Bubble Tea `Model`/`Update`/`View` skeleton: states (idle/running/awaiting-approval/error), input box, transcript viewport, status line | P2.1 | `lipgloss/v2`, `bubbles/v2` | TDD §5 TUI row |
 | **P2.3** | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
 | **P2.4** | The Approval UI: inline prompt, `allow`/`deny`/`allow-for-session` keys, cancel-clears-prompt (C3) | P2.2 | none | CONTEXT: Approval; ADR 0004 |
@@ -355,6 +357,20 @@ ctx, returns `ApprovalDeny`+`ctx.Err()` **without** the UI ever replying (no gor
 deadlock); a cancel mid-run yields the `cancelledMsg`; concurrent Emit + Approve + cancel pass
 the race detector. (Bubble Tea's `teatest` may drive a thin harness, or a stub `programSender`
 interface stands in for `*tea.Program` so the seam tests need no real terminal.)
+**✅ Done (HEAD `5e574c5`).** `internal/tui` now holds the seam: `messages.go` (the five
+worker→Update Msgs + the `programSender` assertion), `bridge.go` (`Bridge` + the atomic
+late-bound `programRef`), `sink.go` (`teaSink`, C2), `approver.go` (`uiApprover`, C3),
+`worker.go` (`startExchange`/`driveExchange`, C1/C4). `cmd/apogee` retires the P2.0 `nopSink`
+and installs `Bridge.Sink()`/`Approver()` into `Config`; the `launcher` seam now carries the
+`Bridge` so `Run` can bind the live program (its body stays a placeholder until P2.2 builds
+the `Model` + `*tea.Program`). Tests are all under `-race`: scripted sink ordering
+(lossless/in-order), the approver returning each decision, the **cancel-no-leak** proof
+(cancelled ctx ⇒ `ApprovalDeny`+`ctx.Err()`, buffered reply absorbs a late UI reply), the
+worker terminal-Msg paths, and concurrent Emit+Approve+cancel+rebind (stress-passed 20×).
+**Two handoff premises corrected** (both in **ADR 0011**): the Bubble Tea module path moved to
+`charm.land/bubbletea/v2` at v2.0.7, and `tea.Msg` is an alias for a method-less
+`ultraviolet.Event` (not `any`), so the `programSender` seam references `tea.Msg`. All verify
+gates green. Next: **P2.2** — the `Model`/`Update`/`View` skeleton + the Charm v2-vs-v1 call.
 
 ### P2.2 — the Model/Update/View skeleton
 The disciplined Bubble Tea split under `internal/tui`: a `Model` with explicit `state ∈
