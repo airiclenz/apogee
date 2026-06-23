@@ -39,7 +39,7 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 ## Status
 
 🚧 **Early / in active construction.** This is a fresh repository; subsystems are
-being built out deliberately. The headless agent core comes first (so the
+being built out deliberately. The embeddable agent core comes first (so the
 eval/simulation bench can drive it throughout the rewrite), with the TUI layered
 on top. See [`docs/plans/`](docs/plans/) for the implementation plan.
 
@@ -56,8 +56,8 @@ on top. See [`docs/plans/`](docs/plans/) for the implementation plan.
   behavioural nudges, and the cross-session Library, each gated so it only fires when
   the model needs it.
 - **Validated, not assumed** — every mechanism is A/B-tested against real local models
-  via an eval/simulation bench (driven through Apogee's headless mode) before it
-  earns a place in the loop.
+  via an eval/simulation bench (which imports Apogee as a Go library and drives
+  the real loop in-process) before it earns a place in the loop.
 
 ## License
 

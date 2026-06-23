@@ -70,8 +70,8 @@ plan. **All four prior "open items" are resolved** (plan §6 #22–24).
 ### 2.2 Code
 | Artifact | State |
 |---|---|
-| `apogee.go` | **Signature sketch only** — public API facade. gofmt-clean, stdlib-only, **bodies are `panic` stubs**. Does **not** build (no `go.mod`, no `internal/`). |
-| everything else | Does not exist yet. No `go.mod`, no `internal/`, no `cmd/`, no tests, no CI. |
+| `apogee.go` | **Signature sketch** — public API facade. gofmt-clean, stdlib-only, **bodies are `panic` stubs**. As of **P0.2** it **builds + `go vet`s** in-tree. |
+| skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and empty `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). **No tests, no CI yet.** |
 
 The sketch covers: `Agent`/`Config`/lifecycle; `Step`/`Run`/`Submit`/`StepResult`;
 sealed `Event` + 8 variants + `EventSink`; `Approver`; `Tool`/`ExternalEffectTool`/
@@ -155,7 +155,7 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 
 | Component | Status | Decided | Undesigned (→ §8) |
 |---|---|---|---|
-| Public API facade | S | shape, seams, naming (§4) | bodies; hook mutation API (§6.2) |
+| Public API facade | S | shape, seams, naming (§4); hook mutation API (§6.2, done P0.1) | bodies |
 | Loop / Turn engine | ∅ | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007) | internal state machine; how Steps interleave streaming/approval/tools |
 | Provider / Upstream | ∅ | openai-compatible; model discovery; TS as oracle | client design, streaming, ret/timeouts, server-process mgr |
 | processing/ (parsers) | ∅ | RISKIEST; TS oracle + ported test vectors *is* the gate (0024b) | parser architecture; harmony/thinking channels; vector extraction |
@@ -202,7 +202,7 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 ## 7. What's still missing (inventory)
 
 **Process / scaffolding (Phase 0):**
-- No `go.mod` (pin Go version — apogee-sim is 1.26), no `internal/`/`cmd/` skeleton, nothing compiles.
+- ✅ **Done (P0.2):** `go.mod` (`go 1.26`, no deps) + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles and `go vet`/`go vet -race` pass in-tree.
 - No CI (cross-compile Win/Mac/Linux, `gofmt`/`go vet`/`-race`), no build.
 - No pinned dependency versions (Cobra, Bubble Tea/Lipgloss/Bubbles, MCP go-sdk, yaml.v3).
 - No **Phase-0 detail plan** (the plan is broad-by-design; Phase 0 needs a task-level plan).
@@ -231,9 +231,9 @@ in the *public* surface.
 The handoff payload. Each item: raise a §5 row from ∅/S toward a real design, or close a §6/§7 gap.
 
 **P0 — unblocks everything else**
-1. **Hook mutation API** (§6.2): design `Request`/`Response`/`Conversation` accessors from apogee-sim's Transform/Injector signatures. Highest-churn part of the keystone.
-2. **Stand up `go.mod` + minimal `internal/` stubs** so `apogee.go` compiles and `go vet` passes — turns the sketch into a real Phase-0 checkpoint.
-3. **Write the Phase-0 detail plan** (task-level, acceptance criteria, version pins, CI).
+1. ✅ **Hook mutation API** (§6.2) — **DONE (P0.1):** `Request`/`Response`/`Conversation` accessors designed from apogee-sim's Transform/Injector signatures (see `docs/design/hook-mutation-api.md`).
+2. ✅ **Stand up `go.mod` + minimal `internal/` stubs** — **DONE (P0.2):** module + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles, `go vet`/`go vet -race` pass in-tree.
+3. **Write the Phase-0 detail plan** (task-level, acceptance criteria, version pins, CI). **← next P0.** Then the Phase-0 *capstone* harness (construct→Step→Snapshot→Resume→`AddExperimental`) — needs minimal real bodies, not `panic` stubs.
 
 **P1 — deepen the core design**
 4. Loop/Turn engine internal state machine (how a Step interleaves stream → parse → hooks → tool dispatch → approval → boundary).
@@ -251,10 +251,12 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. Resolve §6.1 (Confiner placement) + §6.4 (mechanisms layout); ratify §4.1 into plan/ADRs; fix `README.md:68`.
 
 ### Suggested next-session entry point
-Start at **P0.1 (hook mutation API)** — it's the part of the public keystone still missing
-and it gates Mechanism design (Phase 4) and the bench's experimental-hook path. Then
-**P0.2** to make the surface real (compiles + vets), then **P0.3** the Phase-0 plan. P1+ can
-fan out once the keystone compiles.
+**P0.1 (hook mutation API) and P0.2 (go.mod + skeleton, compiles + vets) are now done.**
+Start at **P0.3** — the Phase-0 detail plan (task-level acceptance, version pins for
+Cobra/Bubble Tea/MCP-SDK, CI). Then the Phase-0 *capstone* harness that exercises
+construct→Step→Snapshot→Resume→`AddExperimental` (the first place the API runs for real —
+it needs minimal real bodies, so it follows P0.2's compile checkpoint). P1+ can fan out now
+that the keystone compiles.
 
 ---
 

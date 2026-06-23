@@ -1,0 +1,7 @@
+.DS_Store
+
+# Go build artifacts (the cmd/apogee binary if built at the repo root, test bins)
+/apogee
+/apogee.exe
+*.test
+*.out
