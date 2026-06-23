@@ -15,6 +15,12 @@ import (
 // MechanismFiredEvent.Mechanism is never empty for bench attribution.
 const experimentalMechanismID domain.MechanismID = "experimental"
 
+// defaultCharsPerToken is the Phase-1 trivial chars→tokens estimate the Budget view
+// reports until real token accounting and the Budget allocator land (TDD §8 #8). No
+// Phase-1 hook reads the budget meaningfully; it is here so the value is usable rather
+// than a zero that a future Mechanism might divide by.
+const defaultCharsPerToken = 4.0
+
 var (
 	errMissingEvents   = errors.New("apogee: Config.Events is required")
 	errMissingEndpoint = errors.New("apogee: Config.Endpoint is required")
@@ -109,13 +115,18 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		a.inExchange = true
 	}
 
-	if err := a.runPreRequestHooks(ctx, turn); err != nil {
+	// Build the pre-request working value from conversation state, run the pre-request
+	// hooks against that single shared Request so their mutations compose, then drain
+	// it onto the provider wire shape — closing the P0.6 gap where hooks fired but
+	// their mutations were dropped (TDD §6.2 / P1.5).
+	req := a.buildRequest(turn)
+	if err := a.runPreRequestHooks(ctx, turn, req); err != nil {
 		// A hook panicked: the ErrorEvent is already emitted; degrade to a clean
 		// boundary with the conversation still serializable (no assistant message).
 		return a.completeTurn(turn, start), nil
 	}
 
-	response, err := a.upstream.Respond(ctx, a.buildUpstreamRequest())
+	response, err := a.upstream.Respond(ctx, a.toProviderRequest(req))
 	if err != nil {
 		if ctx.Err() != nil {
 			// Cancelled mid-respond: leave state serializable — never half-streamed
@@ -157,17 +168,18 @@ func (a *Agent) completeTurn(turn int, start time.Time) domain.StepResult {
 	}
 }
 
-// runPreRequestHooks fires the registered experimental pre-request hooks, emitting a
+// runPreRequestHooks fires the registered experimental pre-request hooks against the
+// shared req — their mutations compose in registration order — emitting a
 // MechanismFiredEvent per successful fire (P0.6d). A panic in any hook is caught,
 // reported as an ErrorEvent, and signalled back via errHookPanicked so step can
 // degrade — the recover-at-extension-boundary guarantee (ADR 0007 / ADR 0002).
-func (a *Agent) runPreRequestHooks(ctx context.Context, turn int) error {
+func (a *Agent) runPreRequestHooks(ctx context.Context, turn int, req *domain.Request) error {
 	for _, raw := range a.registry.Experimental(domain.HookPreRequest) {
 		hook, ok := raw.(domain.PreRequestHook)
 		if !ok {
 			continue
 		}
-		if err := a.firePreRequest(ctx, hook, turn); err != nil {
+		if err := a.firePreRequest(ctx, hook, turn, req); err != nil {
 			return err
 		}
 		a.cfg.Events.Emit(domain.MechanismFiredEvent{
@@ -181,10 +193,9 @@ func (a *Agent) runPreRequestHooks(ctx context.Context, turn int) error {
 }
 
 // firePreRequest invokes one pre-request hook under a recover boundary. The hook
-// receives a Request value for shape-parity with the production surface; wiring its
-// mutations back into the Upstream request is the Phase-1 hook-mutation API (TDD §6.2)
-// and is out of scope for P0.6 — here the hook fires and is observed, nothing more.
-func (a *Agent) firePreRequest(ctx context.Context, hook domain.PreRequestHook, turn int) (err error) {
+// shapes the shared req in place (AppendToSystem / InjectContext / SetTools / …); those
+// mutations flow into the Upstream request when step drains req with toProviderRequest.
+func (a *Agent) firePreRequest(ctx context.Context, hook domain.PreRequestHook, turn int, req *domain.Request) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			a.cfg.Events.Emit(domain.ErrorEvent{
@@ -195,16 +206,81 @@ func (a *Agent) firePreRequest(ctx context.Context, hook domain.PreRequestHook, 
 			err = errHookPanicked
 		}
 	}()
-	return hook.PreRequest(ctx, &domain.Request{})
+	return hook.PreRequest(ctx, req)
 }
 
-// buildUpstreamRequest projects the conversation onto the provider seam's wire shape.
-// It is the Phase-0 translation boundary between the loop's conversation state and the
-// domain-free provider.Request — the seam the real HTTP provider plugs into (ADR 0010).
-func (a *Agent) buildUpstreamRequest() provider.Request {
-	messages := make([]provider.Message, 0, len(a.conv.Messages))
+// buildRequest projects the conversation onto the hook-facing domain.Request the
+// pre-request hooks shape. It carries the current tool menu and a trivial Budget so a
+// hook can read them through req.View(); the Phase-0 conversation holds only
+// role+content messages (P1.6 adds tool calls / IDs / preserved Extra fields).
+func (a *Agent) buildRequest(turn int) *domain.Request {
+	messages := make([]domain.Message, 0, len(a.conv.Messages))
 	for _, m := range a.conv.Messages {
+		messages = append(messages, domain.Message{Role: m.Role, Content: m.Content})
+	}
+	budget := domain.Budget{
+		ContextLimit:  a.cfg.Context.MaxContextTokens,
+		CharsPerToken: defaultCharsPerToken,
+	}
+	return domain.NewRequest(a.cfg.Model, messages, a.toolMenu(), budget, turn)
+}
+
+// toolMenu builds the model's tool menu from the injected registry (nil ⇒ no tools).
+// P1.2 constructs the default registry and dispatches calls; here the menu only feeds
+// req.View().Tools() and a tool-filter hook's SetTools.
+func (a *Agent) toolMenu() []domain.ToolDef {
+	if a.cfg.Tools == nil {
+		return nil
+	}
+	tools := a.cfg.Tools.All()
+	menu := make([]domain.ToolDef, 0, len(tools))
+	for _, t := range tools {
+		menu = append(menu, domain.ToolDef{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Schema:      t.Schema(),
+		})
+	}
+	return menu
+}
+
+// toProviderRequest drains the post-hook req onto the provider seam's wire shape — the
+// translation boundary between the loop's domain state and the domain-free
+// provider.Request the real HTTP provider plugs into (ADR 0010). It carries the
+// messages, tool menu, and sampling a pre-request hook shaped; the provider wire has
+// no carrier for SetExtra fields yet (response_format is a Phase-4 grammar concern).
+func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
+	st := req.State()
+	messages := make([]provider.Message, 0, len(st.Messages))
+	for _, m := range st.Messages {
 		messages = append(messages, provider.Message{Role: string(m.Role), Content: m.Content})
 	}
-	return provider.Request{Model: a.cfg.Model, Messages: messages}
+	return provider.Request{
+		Model:    st.Model,
+		Messages: messages,
+		Tools:    toProviderTools(st.Tools),
+		Sampling: toProviderSampling(st.Sampling),
+	}
+}
+
+// toProviderTools maps the domain tool menu onto provider tool specs (nil ⇒ nil).
+func toProviderTools(defs []domain.ToolDef) []provider.ToolSpec {
+	if len(defs) == 0 {
+		return nil
+	}
+	specs := make([]provider.ToolSpec, 0, len(defs))
+	for _, d := range defs {
+		specs = append(specs, provider.ToolSpec{
+			Name:        d.Name,
+			Description: d.Description,
+			Parameters:  d.Schema,
+		})
+	}
+	return specs
+}
+
+// toProviderSampling maps the two sampling knobs a hook may set onto the provider
+// shape; the provider's other knobs (TopP/TopK/RepeatPenalty) stay unset (server default).
+func toProviderSampling(p domain.SamplingParams) provider.Sampling {
+	return provider.Sampling{Temperature: p.Temperature, MaxTokens: p.MaxTokens}
 }
