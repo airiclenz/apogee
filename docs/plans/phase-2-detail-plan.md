@@ -1,0 +1,455 @@
+# Apogee — Phase-2 Detail Plan (P2): the minimal modular TUI shell
+
+**Date:** 2026-06-23 · **Status:** 📋 **PLANNED** — Phase 1 is complete (the embeddable
+agent core + the bench are built; the live-model eval is the one open Phase-1 runtime step,
+which Phase 2 also exercises in passing). This document refines the broad plan's **Phase 2**
+into numbered, acceptance-tested tasks and fixes the **concurrency model** the TUI lands into
+(the hard part — §3). It is authoritative for the *order and acceptance* of Phase-2 work.
+**Parent:** [`implementation-plan-apogee-merge.md`](./implementation-plan-apogee-merge.md) §4
+(Phase 2 is intentionally coarse there). **Design of record:**
+[`../design/technical-design.md`](../design/technical-design.md) §5 (TUI / CLI rows) + §6 #3
+(Event delivery & backpressure, the channel-adapter note) and
+[ADR 0007](../adr/0007-step-turn-and-the-quiescent-boundary.md) (Step / quiescent boundary /
+cancellation — the seam the TUI drives). **Predecessor:**
+[`phase-1-detail-plan.md`](./phase-1-detail-plan.md) (the public API the TUI consumes).
+**Standing Requirements** (plan "⚠️ Standing requirements") apply to every task below — chiefly
+**`/coding-standards` is mandatory for all new Go** (`coding-standards.go.md` +
+`testing.go.md`), and **the module graph stays lean** (§3a: a pin is a decision; the dep is
+added by the task that first needs it).
+
+> **Why a detail plan now.** The broad plan calls Phase 2 "a thin Bubble Tea app over the
+> Phase-1 Events." The *rendering* is thin; the **concurrency seam underneath it is not.** The
+> Agent is single-goroutine and `Step` blocks (network + streaming + a synchronous, possibly
+> human-blocking `Approver`); Bubble Tea owns its own single-threaded `Update` loop. Wiring a
+> blocking, event-pushing, cancellable engine to an event-driven UI without a deadlock or a
+> data race is the real work — and it must be settled **before** any pane is drawn or every
+> view fights the threading model. This doc makes those calls (§3) so each pane is mechanical.
+> The TUI is the **first interactive consumer** of the Phase-1 Events; the bench (P1.7) was the
+> first programmatic one. They share the exact same surface — that is the point (ADR 0001).
+
+---
+
+## 0. Phase-2 entry state (where the repo stands)
+
+| Backlog | Deliverable | State |
+|---|---|---|
+| P0.1–P0.6 | Phase 0 — facade, skeleton, detail plan + CI, `platform` seam, capstone harness | ✅ complete |
+| P1.0–P1.7 | Phase 1 — ADR-0010 layout, real provider, full Turn/Step state machine, processing (one format), minimal tools, hook-mutation bodies, concrete Session schema, bench re-armed | ✅ complete |
+| — | the public API is **body-complete for an embedder**: `New`/`Resume`, `Submit`/`Step`/`Run`, the 7 typed Events through `EventSink`, the synchronous `Approver`, `Snapshot`/`Resume` at the quiescent boundary, `Close` | ✅ proven by the bench (apogee-sim `internal/coreagent`) under `-race` |
+| — | verify green: `gofmt -l .` · `go vet ./...` · `go build ./...` · `go test -race ./...` · 6-target cross-build · `grep -rl '"github.com/airiclenz/apogee"' internal/` empty (ADR-0010) · `apogee --help` exit 0 (hand-rolled stub) | ✅ |
+
+**What Phase 2 inherits to build on (the consumer surface — verified against the source):**
+
+- **Construction** — `apogee.New(Config)` / `apogee.Resume(Config, Session)`. `Config`
+  carries the Upstream (`Endpoint`, `Model`), autonomy (`Mode`, `Bypass`), the host delegates
+  (`Approver`, `Confiner`, **`Events EventSink`** — required), the registries (`Tools`,
+  `Mechanisms`, nil ⇒ defaults), and the **injected state roots** (`LibraryDir`,
+  `SessionsDir`, `ConfigDir`, `WorkspaceDir`). **There is no implicit `~/.apogee`** (ADR 0001):
+  *the binary* must resolve and inject those roots — a Phase-2 responsibility (C7).
+- **Driving** — `Agent.Submit(UserInput{Text, FileRefs})`, then `Agent.Step(ctx) →
+  (StepResult, error)` returning at a quiescent boundary, or `Agent.Run(ctx)` to step to
+  Exchange-end. `StepResult.Status ∈ {StatusTurnComplete, StatusExchangeComplete,
+  StatusCancelled}`. The canonical drive loop is in `coreagent.Run` (P1.7) — the TUI's worker
+  is the interactive twin of it.
+- **Observing** — `EventSink.Emit(Event)` is **push, synchronous, in Turn order, on the Step
+  goroutine; the loop neither buffers nor drops** ([ADR 0007 §Phase-1 realisation] / TDD §6 #3).
+  *"Emit must not block the loop for long — fan out if needed"* is the **host's** contract to
+  honour. The 7 variants (each embeds `EventBase{Depth, Turn}`):
+  `TokenEvent{Text}` · `MessageEvent{Text}` · `ToolCallEvent{Call ToolCall}` ·
+  `ToolResultEvent{Result ToolResult}` · `ApprovalEvent{Request, Decision}` ·
+  `MechanismFiredEvent{Mechanism, Hook, Action}` · `ErrorEvent{Source, Err}`.
+- **Approving** — `Approver.Approve(ctx, ApprovalRequest{Tool, Arguments, Reason}) →
+  (ApprovalDecision, error)` is called **synchronously inside a Step, may block on the human,
+  and a cancelled ctx must unblock it.** Decisions: `ApprovalAllow` / `ApprovalDeny` /
+  `ApprovalAllowForSession` (the loop caches *allow-for-session* per tool name for the rest of
+  the Session — `dispatch.go`).
+- **Cancellation** — promised by `Step`/`Run`: cancel ctx ⇒ abandon the in-flight stream/tool,
+  return at the next boundary with `StatusCancelled`, state serializable (ADR 0007; promoted to
+  a Phase-0 primitive **precisely so the TUI does not retrofit it** — plan §6 #24a).
+- **The binary** — `cmd/apogee/main.go` is still the **Phase-0 stdlib stub** (hand-rolled
+  `--help`). Phase 2 replaces it with the Cobra tree and makes it a real product (P2.0).
+
+**The exact event sequence the renderer must handle (verified in `loop.go`/`dispatch.go`):**
+
+- Within a Turn, `TokenEvent`s stream **live** as content arrives (`loop.go:257`).
+- A **final no-tool** Turn then emits **one `MessageEvent`** with the full text (`loop.go:175`)
+  and ends the Exchange (`StatusExchangeComplete`).
+- A **tool** Turn emits **no `MessageEvent`** — it commits the assistant message and, per call,
+  emits `ToolCallEvent` → (`ApprovalEvent`, around the synchronous `Approve`) → `ToolResultEvent`
+  (`dispatch.go:31/111/190`), then returns `StatusTurnComplete` (the loop continues next Step).
+- ⇒ **Renderer rule (C6):** finalise the streamed-token buffer into a committed assistant
+  message when *either* a `MessageEvent` arrives (exchange end) *or* the first `ToolCallEvent`
+  of the Turn arrives (the streamed text was pre-tool narration). `MessageEvent.Text` is the
+  canonical full text — reconcile it against the accumulated tokens (they should match).
+- `MechanismFiredEvent` / `ErrorEvent` interleave anywhere; `ErrorEvent` is a *recovered* fault
+  (a tool/Mechanism panic or a tool error), **not** a loop stop (ADR 0007). Every Phase-1 event
+  is `Depth == 0`; sub-agent nesting (`Depth > 0`) is Phase 3 — the TUI must **tolerate**
+  `Depth > 0` (indent or ignore) without crashing, but need not render it richly yet.
+
+---
+
+## 1. Phase-2 deliverable & exit definition
+
+Broad plan §4 Phase-2 deliverable, verbatim: *"you can hold a real coding conversation with a
+local model in the terminal, watch tools run, and approve writes."* With the constraint, also
+verbatim: *"No agent logic in the TUI — it only renders events and sends user input"* (and
+supplies the **Approval** delegate + **cancellation**). Phase 2 is **done** when all hold:
+
+1. **Real binary.** `cmd/apogee` is a Cobra command tree; the root command launches the TUI;
+   `apogee --help` still exits 0; the 6-target cross-build stays green. The binary resolves and
+   injects the state roots (`~/.apogee` + workspace `.apogee` — C7); the library keeps no
+   implicit roots.
+2. **Thin renderer, clean split.** A Bubble Tea app with a disciplined model/update/view split
+   under `internal/tui`, holding **no agent logic** — it renders Events, sends `UserInput`,
+   supplies the `Approver`, and owns the cancel control. It consumes the **same** Phase-1
+   surface the bench does.
+3. **Conversation works end-to-end.** Submit text → watch assistant tokens stream → watch a
+   tool call, approve/deny it inline → see the tool result → see the final message → submit
+   again. Proven against a **hermetic httptest model** under `-race` (the same proof shape as
+   P1.7 `coreagent`), then confirmed against a **live local model** from the host.
+4. **Approval is a real human gate.** In Ask-Before mode every write prompts; `allow` / `deny`
+   / `allow-for-session` all work; `allow-for-session` suppresses the next prompt for that tool;
+   a user-stop while a prompt is pending cancels cleanly (`StatusCancelled`).
+5. **Cancellation works.** A stop key (e.g. `esc` / `ctrl+c`) cancels the in-flight Exchange at
+   the next quiescent boundary, the UI returns to idle, and the Session is still resumable.
+6. **The ADR-0010 invariant holds.** `grep -rl '"github.com/airiclenz/apogee"' internal/` stays
+   **empty**: `internal/tui` imports `internal/domain` (the public types, via their canonical
+   path) and accepts the engine through a **narrow local interface** (satisfied by
+   `*agent.Agent`) — it never imports the root module path. `cmd/apogee` (package `main`, not
+   under `internal/`) is the composition root (C5).
+
+The public API stays **v0.x, no stability promise** (ADR 0001 §18); semver begins at the end of
+Phase 3. Phase 2 ships **Plan + Ask-Before** only — **Auto is out of scope** (it needs a
+`Confiner`, which is Phase 3); selecting Auto is refused gracefully at startup (`--mode auto` ⇒
+a clear message + `ErrAutoUnavailable`, not a crash — C8).
+
+---
+
+## 2. Dependency additions (pins already decided — phase-0 detail plan §1)
+
+A pin is a decision; the dependency is added by the *task that first needs it*. Phase 2 is the
+phase the TUI + CLI stack lands, so it adds the deps that were pinned-and-deferred in Phase 0/1:
+
+| Module | Pin | Added by | Note |
+|---|---|---|---|
+| `github.com/spf13/cobra` | `v1.10.2` | **P2.0** (the command tree) | Replaces the hand-rolled `--help`. Mature, ubiquitous. |
+| `github.com/charmbracelet/bubbletea/v2` | `v2.0.7` | **P2.1** (the program + Msg loop) | **v2** chosen for a greenfield TUI (phase-0 §1.1). Fallback: v1 `v1.3.10`. |
+| `github.com/charmbracelet/lipgloss/v2` | `v2.0.4` | **P2.2** (layout/style) | Matches the Bubble Tea v2 line. Fallback: v1 `v1.1.0`. |
+| `github.com/charmbracelet/bubbles/v2` | `v2.1.0` | **P2.2** (textarea/viewport/spinner) | Matches the Bubble Tea v2 line. Fallback: v1 `v1.0.0`. |
+| `gopkg.in/yaml.v3` | `v3.0.1` | **P2.5** (config file) — *only if* a config file lands in v1; flags+env+defaults may suffice | Same pin apogee-sim carries. Keep config thin (§6). |
+
+**Charm v2 risk + fallback (phase-0 §1.1, re-confirmed here):** if a needed Bubbles v2 widget
+or a community component lags the v2 API during P2.2, fall back to the **v1 trio** (`bubbletea
+v1.3.10` + `lipgloss v1.1.0` + `bubbles v1.0.0`) — API-stable and battle-tested. Decide at the
+first real widget need; record the call in the P2.2 commit. `ulid v2.1.1` is **not** pulled in
+(session filenames use a sortable timestamp; revisit only if collision-free IDs are needed).
+Net: Phase 2 adds **cobra + the Charm trio** (and yaml only if a config file is built). `net/http`
+stays stdlib (the provider already owns the Upstream client). Each addition is re-justified when
+its `go get` lands.
+
+---
+
+## 3. The architecture Phase 2 lands into — the concurrency model (the hard part)
+
+This is the section that must be right before panes are drawn. Five forces collide:
+
+- the **Agent is single-goroutine** and *not* safe for concurrent use (`agent.go`: "drive one
+  Agent from one goroutine; observe it only via its EventSink");
+- **`Step` blocks** — network I/O, streaming, and a synchronous `Approver` that may block on a
+  human;
+- **`EventSink.Emit` is called synchronously on the Step goroutine**, in Turn order, and *"must
+  not block the loop for long"*;
+- **Bubble Tea owns a single-threaded `Update` loop** — all model mutation happens there, one
+  `Msg` at a time;
+- **the human's approval + stop live in that `Update` loop**, but the `Approver` that needs them
+  runs on the Step goroutine.
+
+The resolution is one decision with five facets (C1–C5 below). **Recommendation: record it as a
+new ADR (0011 — "the TUI is a thin event-driven renderer over a worker-goroutine engine")** when
+P2.1 lands, the same way Phase 1 recorded its control-flow calls into ADR 0007. The shape:
+
+```
+ ┌────────────────────────── Bubble Tea program goroutine ──────────────────────────┐
+ │  model { transcript, input, status, pendingApproval, cancel CancelFunc, ... }     │
+ │  Update(msg):  keypress → submit ⇒ launch worker Cmd (holds Agent+ctx)            │
+ │                eventMsg{Event} ⇒ fold into transcript / status (RENDER ONLY)      │
+ │                approvalReqMsg{req, reply} ⇒ show prompt; key ⇒ reply<-decision    │
+ │                exchangeDoneMsg / cancelledMsg / errMsg ⇒ back to idle             │
+ │                stopKey ⇒ cancel()                                                 │
+ └───────────▲───────────────────────────────────────────────────────▲──────────────┘
+       p.Send │ (goroutine-safe; async to Update)         reply <- d  │ (buffered chan)
+ ┌───────────┴───────────── worker goroutine (one tea.Cmd at a time) ─┴──────────────┐
+ │  Submit(input); for { Step(ctx) } until !TurnComplete    ← the ONLY caller of the │
+ │    Agent.* methods (preserves the single-goroutine contract)                      │
+ │  Config.Events = teaSink{p}        → Emit(e) = p.Send(eventMsg{e})                │
+ │  Config.Approver = uiApprover{p}   → Approve = p.Send(approvalReqMsg) ; <-reply   │
+ └────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**C1 — One worker, run the Agent inside a `tea.Cmd`; the `Update` goroutine never touches the
+Agent.** Submitting input launches a `tea.Cmd` whose closure captures the `*agent.Agent` and a
+fresh cancellable ctx; the Cmd `Submit`s and then runs the **Step loop** (mirroring
+`coreagent.Run`) to the Exchange boundary, returning a single terminal `Msg`
+(`exchangeDoneMsg` / `cancelledMsg` / `errMsg`). Only **one** such Cmd runs at a time (the model
+refuses input while running), so the Agent is only ever driven from the currently-running Cmd —
+the single-goroutine contract holds by construction. **Drive via `Step`, not `Run`** — the
+per-Turn boundary lets the status line show Turn progress and leaves a clean snapshot point
+between Turns (Run hides that). All intermediate output reaches the UI as Events (C2), not as the
+Cmd's return value.
+
+**C2 — Event→Msg bridge: a `teaSink` whose `Emit` calls `p.Send`.** `Config.Events` is a tiny
+adapter holding the `*tea.Program`; `Emit(e)` wraps the Event in an `eventMsg` and calls
+`p.Send` — Bubble Tea's goroutine-safe, async-to-`Update` enqueue, which is exactly the intended
+mechanism and satisfies *"Emit must not block the loop for long."* **Backpressure/drop policy
+(TDD §6 #3):** for a single local model at human-reading rates, direct `p.Send` is sufficient and
+**lossless** (the correctness default — never silently drop, since the bench-side requires
+in-order delivery and the TUI wants the same). If profiling later shows `TokenEvent` flooding the
+program queue, add **coalescing of adjacent `TokenEvent`s** in the sink (concatenate text within
+a short window) — *coalescing, not dropping* — behind the same interface; do not pre-optimise.
+The sink must **never block forever**: `p.Send` is async, so a deadlock is structurally
+impossible here, but document the invariant.
+
+**C3 — Approval is a cross-goroutine rendezvous.** `Config.Approver` is a `uiApprover` holding
+the `*tea.Program`. `Approve(ctx, req)`:
+
+```
+reply := make(chan domain.ApprovalDecision, 1)        // buffered: the UI never blocks replying
+p.Send(approvalReqMsg{Request: req, Reply: reply})     // hand the prompt to the Update loop
+select {
+case d := <-reply:   return d, nil
+case <-ctx.Done():   return domain.ApprovalDeny, ctx.Err()   // user-stop unblocks the human gate
+}
+```
+
+`Update` stores the pending `approvalReqMsg`, renders the prompt, and on the human's keypress
+(`a`/`d`/`s` → allow/deny/allow-for-session) sends `msg.Reply <- decision` (non-blocking, buffered)
+and clears the prompt. A user-stop while pending cancels the worker ctx ⇒ `Approve` returns
+`ctx.Err()` ⇒ the Step rolls back to a boundary with `StatusCancelled`; `Update` also clears the
+prompt on the resulting `cancelledMsg`. This whole path is exercised under `-race` (C3 is the
+single most race-prone piece; it gets a dedicated concurrency test in P2.1).
+
+**C4 — Cancellation is the model's `CancelFunc`.** When the worker Cmd launches, the model stores
+the ctx's `CancelFunc`; the stop key calls it; the in-flight `Step` honours it at the next
+boundary (ADR 0007). The Cmd returns `cancelledMsg`; the model returns to idle with a resumable
+Session. (This is the Phase-0-promoted primitive — no retrofit.)
+
+**C5 — Package placement & the ADR-0010 invariant.** `internal/tui` holds the Bubble Tea
+model/update/view and imports **`internal/domain`** (the public types — `domain.Event`,
+`domain.UserInput`, `domain.ApprovalRequest`, …) and **accepts the engine through a narrow local
+interface** it defines (e.g. `type engine interface { Submit(domain.UserInput) error;
+Step(context.Context) (domain.StepResult, error); Snapshot() (domain.Session, error); Mode()
+domain.Mode; Close() error }`), satisfied by `*agent.Agent`. It must **not** import the root
+`apogee` module path (that breaks the ADR-0010 invariant *and* would cycle root→cmd→tui→root).
+The narrow interface also makes the model **unit-testable with a fake engine**. **`cmd/apogee`**
+(package `main`) is the composition root: it may dogfood the **public `apogee` package**
+(`apogee.New`, `apogee.Config`) — desirable, it proves the shipped surface builds a real product
+— and wire the resulting `*apogee.Agent` (= `*agent.Agent` by alias) into `internal/tui`. Because
+the root types are aliases of the domain types, `cmd` speaking `apogee.*` and `internal/tui`
+speaking `domain.*` are the *same types* — no friction, no violation.
+
+**C6 — The rendering model** (the event-sequence rule derived in §0): a `transcript` of typed
+*entries* (user msg / assistant msg / tool call+result / error / note), an in-progress assistant
+buffer fed by `TokenEvent`s, finalised on `MessageEvent` **or** the first `ToolCallEvent` of the
+Turn. `MessageEvent.Text` is canonical. `ApprovalEvent` is observational (the decision already
+came back through C3's reply channel) — use it for the transcript record, not as the gate.
+
+**C7 — State-root resolution moves into the binary.** ADR 0001 forbids an implicit `~/.apogee` in
+the *library*; therefore `cmd/apogee` resolves: `ConfigDir`/`LibraryDir`/`SessionsDir` under
+`~/.apogee` (XDG-respecting where sensible), and `WorkspaceDir` = the cwd (or `--workspace`).
+These are injected via `Config`. This is the home of the "Config: `~/.apogee/` + workspace
+`.apogee/`" seam from the broad-plan VS Code→Go map.
+
+**C8 — Mode handling in Phase 2.** Expose `--mode plan|ask-before` (default `ask-before`).
+`--mode auto` is **refused at startup** with a clear message ("Auto mode requires Confinement,
+landing in Phase 3") — `New` already returns `ErrAutoUnavailable` when `Mode==Auto` and
+`Confiner==nil`; the binary turns that into a friendly error, never a panic. `--bypass` is a
+cheap passthrough flag (mostly inert until Phase-4 Mechanisms exist; wire it so it is ready).
+
+---
+
+## 4. Phase-2 task list
+
+IDs use the `P2.x` scheme. **P2.0 (the binary + wiring) blocks all** (nothing renders without a
+program to run it in). **P2.1 is the convergence point** — it builds and *proves under `-race`*
+the C1–C5 concurrency seam as a standalone, fake-engine-testable package, before any pane
+depends on it. Then the panes (P2.2–P2.4) fan out. **P2.6 is last** (it needs the slice working
+end-to-end), and it doubles as the Phase-1 live-model confirmation.
+
+| ID | Task | Depends | New deps | Resolves |
+|---|---|---|---|---|
+| **P2.0** | Cobra command tree + binary wiring + state-root resolution + `Config` construction (C5/C7/C8) | — | `cobra` | broad §4; TDD §5 CLI row |
+| **P2.1** | The concurrency seam: `teaSink` bridge + `uiApprover` rendezvous + worker `tea.Cmd` + cancel (C1–C4), as a fake-engine-testable package | P2.0 | `bubbletea/v2` | ADR 0007; TDD §6 #3; **new ADR 0011** |
+| **P2.2** | Bubble Tea `Model`/`Update`/`View` skeleton: states (idle/running/awaiting-approval/error), input box, transcript viewport, status line | P2.1 | `lipgloss/v2`, `bubbles/v2` | TDD §5 TUI row |
+| **P2.3** | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
+| **P2.4** | The Approval UI: inline prompt, `allow`/`deny`/`allow-for-session` keys, cancel-clears-prompt (C3) | P2.2 | none | CONTEXT: Approval; ADR 0004 |
+| **P2.5** | Config & session glue: flags+env+defaults (optional `.apogee/config.yaml`); basic snapshot-on-exit + `--resume` | P2.0 | `yaml.v3` *(only if a file lands)* | ADR 0001 (roots); §6.1 (sessions) |
+| **P2.6** | End-to-end acceptance: drive the **real** Agent through the TUI against a hermetic httptest model under `-race`; then the **live-model** run from the host | P2.1–P2.4 | none | broad §4 deliverable; Phase-1 live eval |
+
+### P2.0 — the Cobra command tree + binary wiring
+Replace `cmd/apogee/main.go`'s stdlib stub with a Cobra root command that **launches the TUI**.
+Flags (minimal, reviewable): `--endpoint`, `--model`, `--mode` (`plan`|`ask-before`, default
+ask-before — C8), `--workspace` (default cwd), `--bypass`, `--resume <session-file>`,
+`--config <dir>`. Resolve the state roots (C7) and build a `Config`; construct the Agent via the
+**public** `apogee.New` (dogfood — C5); hand it to `internal/tui`. Keep `apogee --help` exit 0
+and the 6-target cross-build green. No subcommands beyond the root are required this phase
+(`headless`/`probe` are later — §6); add the tree shape so they slot in.
+**Acceptance:** `apogee --help` exits 0 and lists the flags (cobra-generated); `apogee
+--endpoint … --model … --workspace <tmp>` constructs an Agent and enters the TUI (smoke-tested by
+launching with a fake/empty endpoint and asserting clean construction + a clean quit); an
+`--mode auto` invocation exits non-zero with the Phase-3 message (not a panic); cross-build green.
+
+### P2.1 — the concurrency seam (the convergence)
+Build C1–C5 as a cohesive, **rendering-free** unit so the threading is proven before the views
+exist: the `teaSink` (`Emit` → `p.Send(eventMsg)`, C2 — with the lossless default + a documented
+coalescing hook), the `uiApprover` (the request/reply rendezvous with ctx-cancel, C3), and the
+worker driver (`Submit` + Step-loop to the boundary, returning the terminal `Msg`, holding the
+`CancelFunc`, C1/C4). Define the narrow `engine` interface (C5) so the driver is testable with a
+fake Agent. **This is the most race-prone code in the phase — it carries the heaviest test.**
+**Acceptance (all under `-race`):** a fake engine + a scripted event sequence drives the sink and
+the terminal Msg in order; the approver rendezvous returns the UI's decision and, on a cancelled
+ctx, returns `ApprovalDeny`+`ctx.Err()` **without** the UI ever replying (no goroutine leak, no
+deadlock); a cancel mid-run yields the `cancelledMsg`; concurrent Emit + Approve + cancel pass
+the race detector. (Bubble Tea's `teatest` may drive a thin harness, or a stub `programSender`
+interface stands in for `*tea.Program` so the seam tests need no real terminal.)
+
+### P2.2 — the Model/Update/View skeleton
+The disciplined Bubble Tea split under `internal/tui`: a `Model` with explicit `state ∈
+{idle, running, awaitingApproval, errored}`, an input box (Bubbles `textarea`), a scrollback
+(Bubbles `viewport`), a status line (model · endpoint · mode · bypass · turn counter · spinner
+when running), and `Init`/`Update`/`View`. `Update` folds the C1–C4 messages
+(`eventMsg`/`approvalReqMsg`/`exchangeDoneMsg`/`cancelledMsg`/`errMsg`) and keypresses; **it holds
+no agent logic** (C5). Layout/styling via Lipgloss; the decision to keep v2 or fall back to v1
+(phase-0 §1.1) is made and recorded here at the first widget need.
+**Acceptance:** `Update` is unit-tested by feeding synthetic `Msg`s and asserting `Model` state
+transitions + `View` substrings (golden snapshots per `testing.go.md`); resizing (`WindowSizeMsg`)
+reflows without panic; submitting while `running` is a no-op (single-worker invariant); the
+package has **no** import of the root module path (the ADR-0010 grep stays empty).
+
+### P2.3 — rendering the event stream
+Fold Events into the transcript per the C6 rule: append `TokenEvent.Text` to the in-progress
+assistant entry (live); finalise that entry on `MessageEvent` (canonical text) **or** the first
+`ToolCallEvent` of the Turn; render `ToolCallEvent` (tool + pretty-printed `Arguments`) and its
+paired `ToolResultEvent`; render `ErrorEvent` as a recoverable notice (not a stop); render
+`MechanismFiredEvent` only in a debug view (off by default — there is no catalogue until Phase 4).
+Tolerate `Depth > 0` (indent or skip) without crashing.
+**Acceptance:** feeding a **recorded** event sequence (the shape `coreagent` produces: tokens →
+tool call → tool result → tokens → message) yields a correct transcript (golden); a tool-Turn
+with **no** `MessageEvent` still finalises the pre-tool narration; an `ErrorEvent` mid-stream
+renders inline and the transcript keeps going; the streamed tokens and the final `MessageEvent`
+reconcile to the same text.
+
+### P2.4 — the Approval UI
+The interactive face of C3: when `awaitingApproval`, render the pending `ApprovalRequest` (tool,
+arguments, `Reason`) and a key legend; `a` → `ApprovalAllow`, `d` → `ApprovalDeny`, `s` →
+`ApprovalAllowForSession`, each sending the decision back over the reply channel and returning to
+`running`. A stop key while pending cancels (clears the prompt on `cancelledMsg`). Only the
+top-level (`Depth == 0`) prompt is handled this phase.
+**Acceptance:** an `approvalReqMsg` puts the model in `awaitingApproval` and renders the request;
+each key produces the right `ApprovalDecision` on the reply channel (table test, `-race`);
+`allow-for-session` is observably distinct (the engine then auto-allows that tool — verified in
+the P2.6 e2e, where the loop's `approved[...]` cache suppresses the second prompt); a cancel
+while pending clears the prompt and returns to idle.
+
+### P2.5 — config & session glue
+Resolve `Config` from flags → env → file → defaults (C7). Keep it **thin**: flags+env+defaults
+are enough for the deliverable; a `.apogee/config.yaml` (workspace) / `~/.apogee/config.yaml`
+(user) loader is added **only if** it earns its place this phase (else deferred, with `yaml.v3`
+left as a pinned-but-unused decision). Wire **basic** sessions on the already-built
+`Snapshot`/`Resume`: `--resume <file>` reconstructs via `apogee.Resume`, and the TUI offers a
+save (snapshot to `SessionsDir`) — at minimum on clean quit. No session **browser** UI (§6).
+**Acceptance:** precedence (flag > env > file > default) is table-tested; a snapshot written by
+the TUI round-trips through `--resume` and **continues** the conversation at the right Turn
+(reusing P1.6's `turnIndex` continuation); a `--resume` of a future-version file surfaces
+`ErrSessionVersion` as a friendly error, not a panic.
+
+### P2.6 — end-to-end acceptance (+ the Phase-1 live confirmation)
+The deliverable proof, mirroring P1.7's hermetic pattern: a **scripted OpenAI-compatible
+`httptest` model** drives the **real** Agent **through the TUI's seam** (the `teaSink`,
+`uiApprover`, worker) — the model streams assistant text, requests `write_file`, the approval
+path approves (scripted key or an auto-approver in the test), the file lands in a `t.TempDir()`
+workspace, and the transcript shows tokens → tool call → tool result → final message. Then the
+**live-model run** from the host: point `--endpoint http://192.168.64.1:1111` at a tool-capable
+local model (load it via the llama-launcher MCP control `http://192.168.61.1:7331/mcp`) and hold
+a real file-edit conversation, watching tools run and approving the write — which **also closes
+the one open Phase-1 runtime step** (the live file-edit eval), now through the product UI.
+**Acceptance:** the hermetic e2e passes under `-race` (no terminal required — drive via `teatest`
+or the `programSender` stub); the live run completes a file-edit task interactively with a real
+model, writes approved through the UI, transcript correct.
+
+---
+
+## 5. Open design calls to resolve *within* Phase 2
+
+Record each as a short note / ADR amendment when it lands (don't pre-decide in the abstract):
+
+- **The concurrency contract → ADR 0011** (settled by **P2.1**): the worker-goroutine engine +
+  `p.Send` event bridge + approval rendezvous + cancel, exactly as C1–C5. Worth an ADR because
+  it is the product binary's load-bearing structure and the template every future interactive
+  consumer copies. (Phase 1 set the precedent: control-flow calls → ADR 0007.)
+- **Charm v2 vs v1** (settled by **P2.2**): keep v2 unless a needed widget lags; record the call.
+- **Config file or not** (settled by **P2.5**): flags+env+defaults may be the whole v1 surface;
+  add `yaml.v3` only if a file earns it. Don't add a dep for ~30 lines of flag plumbing.
+- **TokenEvent backpressure** (touched by **P2.1/P2.3**): start lossless via `p.Send`; add
+  *coalescing* (never dropping) only if profiling shows queue pressure — behind the sink seam.
+- **Session UX depth** (touched by **P2.5**): minimal `--resume` + snapshot-on-quit this phase;
+  a richer session browser/picker is deferred (§6) unless trivial.
+
+---
+
+## 6. Out of scope for Phase 2 (explicit non-goals — keep the shell thin, the engine untouched)
+
+- **Auto mode + Confinement** — Phase 3 (needs the `Confiner` backends). Phase 2 = Plan +
+  Ask-Before; Auto is refused gracefully (C8). **No agent-logic changes in this phase at all** —
+  if the TUI seems to need a new engine behaviour, that is a Phase-1-surface gap to fix in the
+  library, not logic to add in `internal/tui`.
+- **Sub-agents / `Depth > 0` rendering** — Phase 3. The TUI must *tolerate* nested events
+  without crashing; rich nested rendering waits.
+- **MCP / web / network tools** and the rest of the **30-tool suite** — Phase 3. Phase 2 renders
+  whatever tools the Phase-1 registry exposes (the local file set).
+- **Mechanisms catalogue, self-regulation, the `MechanismFiredEvent` debug UI as a real feature**
+  — Phase 4. A hidden debug pane is the most Phase 2 should show.
+- **`apogee headless`** (serialized events to stdout) — an *optional* scripting surface, **not**
+  the bench contract (ADR 0001); defer unless cheap. **`apogee probe`** — Phase 5.
+- **Model discovery picker** — the provider has `/v1/models` (P1.1); a TUI model picker is a
+  nice stretch, not the deliverable. Keep `--model` explicit for v1.
+- **Theming / config-driven keybindings / mouse** — later polish. Pick sane defaults now.
+- **Windows-specific terminal handling** — Phase 5. Bubble Tea is cross-platform; nothing
+  Windows-specific is needed for the deliverable, and the cross-build must stay green.
+
+---
+
+## 7. Acceptance-criteria summary (quick gate)
+
+A reviewer can check Phase 2 with:
+
+```
+gofmt -l .                          # empty
+go vet ./...                        # clean
+go build ./...                      # ok
+go test -race ./...                 # tui model/update + the C1–C5 seam + the hermetic e2e
+grep -rl '"github.com/airiclenz/apogee"' internal/   # empty (ADR-0010 invariant; incl. internal/tui)
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build ./...   # + the other 5 cross targets
+./apogee --help                     # cobra usage, exit 0
+```
+
+…plus the **deliverable**: a real coding conversation with a **live local model** in the
+terminal — assistant text streams, a tool call appears, the human approves the write, the result
+renders, the Exchange completes — driven entirely over the Phase-1 public API, with `internal/tui`
+holding no agent logic (P2.6). The hermetic httptest e2e is the reproducible proof; the live run
+is the final confirmation (and closes the open Phase-1 live-eval step through the product UI).
+
+---
+
+## 8. Suggested skills
+
+- **`/coding-standards`** — **mandatory** for every Go task here (`coding-standards.go.md` +
+  `testing.go.md`); load before writing each body. Note §9 of the TDD: where a standard fights
+  the plan or official Go/Bubble Tea idiom, the plan/idiom wins (e.g. the `Update`/`View` shape).
+- **`manage-llm-server`** / the llama-launcher MCP control endpoint — to load a tool-capable
+  model before the P2.6 live run.
+- **`run` / `verify`** — to drive the TUI against the hermetic httptest model and then the live
+  local model, and confirm the streamed-tokens → tool-call → approval → result → message loop
+  end-to-end on a real model.
+- **`/handoff`** at session end; **`archive-handoffs`** to retire the consumed Phase-1 handoff
+  once P2.0 lands.
+```
