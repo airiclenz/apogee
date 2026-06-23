@@ -1,0 +1,61 @@
+name: CI
+
+# Phase-0 CI (docs/plans/phase-0-detail-plan.md §2). Gates formatting + vetting now,
+# tests as they land (the capstone harness, P0.6). Cross-compiles the v1 platform matrix
+# so the single static binary keeps building everywhere, Windows fast-follow included.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: fmt / vet / build / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test (race)
+        # Passes trivially until P0.6 adds the harness test; -race is on from day one
+        # so the loop goroutine + EventSink observer are checked the moment they exist.
+        run: go test -race ./...
+
+  cross:
+    name: cross-compile
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - name: build all packages
+        run: go build ./...
+      - name: build the binary
+        run: go build ./cmd/apogee
