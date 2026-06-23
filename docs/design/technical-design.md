@@ -168,7 +168,7 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 |---|---|---|---|
 | Public API facade | S→**P** | shape, seams, naming (§4); hook mutation API (§6.2, done P0.1); **capstone-path bodies real (P0.6)** | off-path bodies (hook-mutation surface, tools, `Run`, streaming) |
 | Loop / Turn engine | **P (minimal)** | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007); **P0.6: single non-streaming Turn, cancel, panic-recover all real in `loop.go`** | full state machine; streaming/approval/tool interleave; cross-Turn loop counters in snapshot |
-| Provider / Upstream | **S (seam)** | openai-compatible; model discovery; TS as oracle; **P0.6: `internal/agent.Responder` seam (Decision C) — root-type-free, fake in test, real HTTP in Phase 1** | client design, streaming, ret/timeouts, server-process mgr |
+| Provider / Upstream | S→**P (P1.1)** | openai-compatible; model discovery; TS as oracle; **P1.1: real `internal/provider.Client` — non-streaming `Respond` + streaming `Stream` (`iter.Seq[Delta]`), bounded retries/timeouts, `/v1/models` discovery, `ServerManager`; httptest-hermetic; replaces `Placeholder`** | wiring `Stream` into the loop (P1.2); ollama/llama.cpp `/props` discovery + PID-file orphan adoption (deferred) |
 | processing/ (parsers) | ∅ | RISKIEST; TS oracle + ported test vectors *is* the gate (0024b) | parser architecture; harmony/thinking channels; vector extraction |
 | Tools (~30) | S (iface) | open extension point; stateless-across-Turns; external-effect boundary | per-tool design; approval/path-safety wiring; pure-Go search vs ripgrep |
 | Context (Budget/Compaction/capping) | ∅ | four-way split; Compaction default generative; capping = surviving half of `compress` | Budget allocation algorithm; Compaction trigger/strategy; token counting |
@@ -261,7 +261,7 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 
 **P1 — deepen the core design**
 4. Loop/Turn engine internal state machine (how a Step interleaves stream → parse → hooks → tool dispatch → approval → boundary).
-5. Provider/Upstream client (streaming, model discovery, server-process mgr) — with TS oracle notes.
+5. ✅ **Provider/Upstream client** — **DONE (P1.1):** `internal/provider.Client` (non-streaming `Respond` + streaming `Stream`, bounded retries/timeouts), `/v1/models` discovery, `ServerManager`; httptest-hermetic, replaces `Placeholder`. TS oracle ported (`openai-compatible-provider` / `model-discovery` / `server-process-manager`).
 6. processing/ architecture + **TS-oracle test-vector extraction plan** (golden files).
 7. Session concrete schema + versioning (what serializes into `State`; copyability proof).
 8. Context reducers: Budget allocation, Compaction trigger/strategy, tool-result capping, token counting.
@@ -275,18 +275,19 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. ✅ §6.1 (Confiner placement) + §6 #7 (facade↔engine layout) **resolved** ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)); §4.1 #1 (public `Confiner`) ratified there too. **Still open:** §6.4 (mechanisms package-per-hook layout — Phase-4 catalogue-mapping session). *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
-**Phase 0 is complete (P0.1–P0.6); Phase 1 is planned.** The capstone runs the API for real
-over the `internal/agent.Responder` seam; off-path methods stay `panic` stubs. The §6 #7 +
-§6.1 layout calls are now resolved ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)),
-and Phase 1 has a task-level breakdown:
-[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Start at P1.0** — the
-layout refactor (stand up `internal/domain`, move the engine into `internal/agent`, relocate
-the `Responder` seam into `internal/provider`, make `internal/platform` import `internal/domain`
-not root, turn `apogee.go` into the thin alias facade) — a pure move that keeps verify green and
-unblocks every real body. Then **P1.1** (real provider) and the rest fan out, converging on
-**P1.2** (the full Turn/Step state machine) and **P1.7** (point `apogee-sim` at the Go API). The
-throwaway P0.6 internals (placeholder responder, minimal `conversation`, cycle-check-only
-registry) are the precursors Phase 1 replaces.
+**Phase 0 is complete (P0.1–P0.6); Phase 1 is underway — P1.0 and P1.1 are done.** The
+ADR-0010 layout is realised (P1.0) and the real OpenAI-compatible provider client is built
+and wired (P1.1, replacing `Placeholder`); the latest state lives in the handoffs
+([`06 - P1.1 provider`](../handoffs/2026-06-23%20-%2006%20-%20P1.1%20provider-complete.md)).
+The remaining Phase-1 work is the task-level breakdown in
+[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §4: the independent
+slices **P1.3** (`processing/`, one tool-call format), **P1.4** (minimal tools + registry),
+and **P1.5** (hook-mutation real bodies) fan out next; they converge on **P1.2** (the full
+Turn/Step state machine — the place streaming consumption, the §6 #6 streaming+Approval
+interleave, and the §6 #3 event-backpressure calls get settled), with **P1.6** (concrete
+Session schema) and **P1.7** (point `apogee-sim` at the Go API) closing the phase. The
+throwaway P0.6 internals still standing — minimal `conversation`, cycle-check-only registry —
+are what P1.6 and Phase 4 replace.
 
 ---
 

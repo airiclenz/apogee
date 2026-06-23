@@ -9,6 +9,9 @@ package agent
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -165,6 +168,41 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	}
 	if me, ok := firstMessageEvent(t, sink2.events); !ok || me.Text != "second reply" {
 		t.Errorf("resumed MessageEvent = %+v (ok=%v), want Text=%q", me, ok, "second reply")
+	}
+}
+
+// TestHarness_RealProviderWirePath exercises the P1.1 wire path hermetically: the public
+// New binds the real OpenAI-compatible provider client at cfg.Endpoint (no longer the
+// Placeholder), and a Step drives a full non-streaming round-trip against an httptest
+// Upstream, surfacing the server's reply as a MessageEvent at the quiescent boundary.
+func TestHarness_RealProviderWirePath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"from the wire"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Endpoint = srv.URL // the real client dials this Upstream
+
+	a, err := New(cfg) // public constructor — binds provider.NewClient (P1.1), not a fake
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("Step status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "from the wire" {
+		t.Errorf("MessageEvent = %+v (ok=%v), want Text=%q", me, ok, "from the wire")
 	}
 }
 
