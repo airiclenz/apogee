@@ -1,8 +1,12 @@
 # Apogee — Phase-2 Detail Plan (P2): the minimal modular TUI shell
 
-**Date:** 2026-06-23 · **Status:** 📋 **PLANNED** — Phase 1 is complete (the embeddable
+**Date:** 2026-06-23 · **Status:** 🚧 **IN PROGRESS** — **P2.0 landed** (HEAD `a210c4f`: the
+Cobra binary, the composition-root wiring, and state-root resolution); next is **P2.1** (the
+concurrency seam). Phase 1 is complete (the embeddable
 agent core + the bench are built; the live-model eval is the one open Phase-1 runtime step,
-which Phase 2 also exercises in passing). This document refines the broad plan's **Phase 2**
+which Phase 2 also exercises in passing). **All Phase-2 entry-state pre-checks were
+re-verified against source (2026-06-23) and passed** (see the **Readiness** note in §0). This
+document refines the broad plan's **Phase 2**
 into numbered, acceptance-tested tasks and fixes the **concurrency model** the TUI lands into
 (the hard part — §3). It is authoritative for the *order and acceptance* of Phase-2 work.
 **Parent:** [`implementation-plan-apogee-merge.md`](./implementation-plan-apogee-merge.md) §4
@@ -35,8 +39,22 @@ added by the task that first needs it).
 |---|---|---|
 | P0.1–P0.6 | Phase 0 — facade, skeleton, detail plan + CI, `platform` seam, capstone harness | ✅ complete |
 | P1.0–P1.7 | Phase 1 — ADR-0010 layout, real provider, full Turn/Step state machine, processing (one format), minimal tools, hook-mutation bodies, concrete Session schema, bench re-armed | ✅ complete |
-| — | the public API is **body-complete for an embedder**: `New`/`Resume`, `Submit`/`Step`/`Run`, the 7 typed Events through `EventSink`, the synchronous `Approver`, `Snapshot`/`Resume` at the quiescent boundary, `Close` | ✅ proven by the bench (apogee-sim `internal/coreagent`) under `-race` |
+| — | the public API is **body-complete for an embedder**: `New`/`Resume`, `Submit`/`Step`/`Run`, the 8 typed Events through `EventSink`, the synchronous `Approver`, `Snapshot`/`Resume` at the quiescent boundary, `Close` | ✅ proven by the bench (apogee-sim `internal/coreagent`) under `-race` |
 | — | verify green: `gofmt -l .` · `go vet ./...` · `go build ./...` · `go test -race ./...` · 6-target cross-build · `grep -rl '"github.com/airiclenz/apogee"' internal/` empty (ADR-0010) · `apogee --help` exit 0 (hand-rolled stub) | ✅ |
+
+**Readiness (re-verified against source, 2026-06-23 — all gates pass; work can start immediately at
+P2.0).** Every gate above was re-run from a clean tree, not taken on trust: `gofmt -l .` empty ·
+`go vet ./...` clean · `go build ./...` ok · `go test -race -count=1 ./...` green on every package ·
+the 6-target cross-build green · the ADR-0010 grep empty · `apogee --help` exit 0. The consumer
+surface below was checked field-by-field against `apogee.go` / `internal/domain` / `internal/agent`,
+and the §3 concurrency seam (C1–C5) was confirmed to map onto the real engine: the Step `ctx` is
+threaded into `Approver.Approve` (`dispatch.go:102`), an Approve error under a cancelled ctx becomes
+a clean cancellation (`dispatch.go:104`), and the `allow-for-session` cache lives at `dispatch.go:113`.
+`internal/tui` + `internal/mcp` are bare `doc.go` stubs (the TUI is greenfield as assumed) and
+`go.mod` carries zero deps (the lean-graph invariant holds; cobra/charm enter at P2.0/P2.1).
+**No engine change is required to begin.** One plan defect surfaced in that pass and is fixed in this
+revision: the Event set is **8** variants, not 7 — `StreamResetEvent` was missing from the §0 list,
+the C6 rule, and P2.3; all three now account for it.
 
 **What Phase 2 inherits to build on (the consumer surface — verified against the source):**
 
@@ -54,10 +72,14 @@ added by the task that first needs it).
 - **Observing** — `EventSink.Emit(Event)` is **push, synchronous, in Turn order, on the Step
   goroutine; the loop neither buffers nor drops** ([ADR 0007 §Phase-1 realisation] / TDD §6 #3).
   *"Emit must not block the loop for long — fan out if needed"* is the **host's** contract to
-  honour. The 7 variants (each embeds `EventBase{Depth, Turn}`):
-  `TokenEvent{Text}` · `MessageEvent{Text}` · `ToolCallEvent{Call ToolCall}` ·
+  honour. The 8 variants (each embeds `EventBase{Depth, Turn}`):
+  `TokenEvent{Text}` · `StreamResetEvent{}` · `MessageEvent{Text}` · `ToolCallEvent{Call ToolCall}` ·
   `ToolResultEvent{Result ToolResult}` · `ApprovalEvent{Request, Decision}` ·
   `MechanismFiredEvent{Mechanism, Hook, Action}` · `ErrorEvent{Source, Err}`.
+  **`StreamResetEvent` carries no payload** — it signals an `ActionRetry` re-stream: the tokens
+  streamed for the current Turn are superseded, and a streaming observer (the TUI) must **discard
+  its in-progress token buffer for that Turn** before the re-stream's tokens arrive (events.go
+  contract; emitted at `loop.go:232`).
 - **Approving** — `Approver.Approve(ctx, ApprovalRequest{Tool, Arguments, Reason}) →
   (ApprovalDecision, error)` is called **synchronously inside a Step, may block on the human,
   and a cancelled ctx must unblock it.** Decisions: `ApprovalAllow` / `ApprovalDeny` /
@@ -71,8 +93,13 @@ added by the task that first needs it).
 
 **The exact event sequence the renderer must handle (verified in `loop.go`/`dispatch.go`):**
 
-- Within a Turn, `TokenEvent`s stream **live** as content arrives (`loop.go:257`).
-- A **final no-tool** Turn then emits **one `MessageEvent`** with the full text (`loop.go:175`)
+- Within a Turn, `TokenEvent`s stream **live** as content arrives (`loop.go:262`).
+- An `ActionRetry` post-response decision re-streams the Turn: the loop emits a **`StreamResetEvent`**
+  first (`loop.go:232`), and the observer discards the tokens accumulated for the Turn so far before
+  the re-stream's tokens arrive. (No default Mechanism emits `ActionRetry` in Phase 2 — the
+  catalogue is empty — but the renderer handles it so a Phase-4 repair Mechanism, or a P2.6 scripted
+  retry, needs no retrofit.)
+- A **final no-tool** Turn then emits **one `MessageEvent`** with the full text (`loop.go:177`)
   and ends the Exchange (`StatusExchangeComplete`).
 - A **tool** Turn emits **no `MessageEvent`** — it commits the assistant message and, per call,
   emits `ToolCallEvent` → (`ApprovalEvent`, around the synchronous `Approve`) → `ToolResultEvent`
@@ -80,7 +107,9 @@ added by the task that first needs it).
 - ⇒ **Renderer rule (C6):** finalise the streamed-token buffer into a committed assistant
   message when *either* a `MessageEvent` arrives (exchange end) *or* the first `ToolCallEvent`
   of the Turn arrives (the streamed text was pre-tool narration). `MessageEvent.Text` is the
-  canonical full text — reconcile it against the accumulated tokens (they should match).
+  canonical full text — reconcile it against the accumulated tokens (they should match). On a
+  `StreamResetEvent`, **discard** the in-progress token buffer for the Turn (the re-stream
+  replaces it) — never commit superseded tokens.
 - `MechanismFiredEvent` / `ErrorEvent` interleave anywhere; `ErrorEvent` is a *recovered* fault
   (a tool/Mechanism panic or a tool error), **not** a loop stop (ADR 0007). Every Phase-1 event
   is `Depth == 0`; sub-agent nesting (`Depth > 0`) is Phase 3 — the TUI must **tolerate**
@@ -250,8 +279,10 @@ speaking `domain.*` are the *same types* — no friction, no violation.
 **C6 — The rendering model** (the event-sequence rule derived in §0): a `transcript` of typed
 *entries* (user msg / assistant msg / tool call+result / error / note), an in-progress assistant
 buffer fed by `TokenEvent`s, finalised on `MessageEvent` **or** the first `ToolCallEvent` of the
-Turn. `MessageEvent.Text` is canonical. `ApprovalEvent` is observational (the decision already
-came back through C3's reply channel) — use it for the transcript record, not as the gate.
+Turn, and **discarded on a `StreamResetEvent`** (an `ActionRetry` re-stream — the accumulated tokens
+for the Turn are superseded). The renderer must switch over **all 8** event variants so the set
+stays exhaustive. `MessageEvent.Text` is canonical. `ApprovalEvent` is observational (the decision
+already came back through C3's reply channel) — use it for the transcript record, not as the gate.
 
 **C7 — State-root resolution moves into the binary.** ADR 0001 forbids an implicit `~/.apogee` in
 the *library*; therefore `cmd/apogee` resolves: `ConfigDir`/`LibraryDir`/`SessionsDir` under
@@ -277,7 +308,7 @@ end-to-end), and it doubles as the Phase-1 live-model confirmation.
 
 | ID | Task | Depends | New deps | Resolves |
 |---|---|---|---|---|
-| **P2.0** | Cobra command tree + binary wiring + state-root resolution + `Config` construction (C5/C7/C8) | — | `cobra` | broad §4; TDD §5 CLI row |
+| **P2.0** ✅ | Cobra command tree + binary wiring + state-root resolution + `Config` construction (C5/C7/C8) | — | `cobra` | broad §4; TDD §5 CLI row |
 | **P2.1** | The concurrency seam: `teaSink` bridge + `uiApprover` rendezvous + worker `tea.Cmd` + cancel (C1–C4), as a fake-engine-testable package | P2.0 | `bubbletea/v2` | ADR 0007; TDD §6 #3; **new ADR 0011** |
 | **P2.2** | Bubble Tea `Model`/`Update`/`View` skeleton: states (idle/running/awaiting-approval/error), input box, transcript viewport, status line | P2.1 | `lipgloss/v2`, `bubbles/v2` | TDD §5 TUI row |
 | **P2.3** | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
@@ -297,6 +328,19 @@ and the 6-target cross-build green. No subcommands beyond the root are required 
 --endpoint … --model … --workspace <tmp>` constructs an Agent and enters the TUI (smoke-tested by
 launching with a fake/empty endpoint and asserting clean construction + a clean quit); an
 `--mode auto` invocation exits non-zero with the Phase-3 message (not a panic); cross-build green.
+**✅ Done (HEAD `a210c4f`).** `cmd/apogee` is now the Cobra composition root: `root.go` carries the
+flag set with an injectable `launcher` seam (so construction is provable without a terminal);
+`wire.go` resolves the state roots (C7 — `~/.apogee` home for config/library/sessions + cwd /
+`--workspace` for the tool sandbox, **paths only — no dir creation**), parses the mode (C8),
+dogfoods `apogee.New` / `apogee.Resume` (C5), and maps `ErrAutoUnavailable` to the Phase-3 message;
+a temporary `nopSink` satisfies the required `Config.Events` until P2.1 wires the real bridge.
+`internal/tui` holds **only the seam boundary** — the narrow `Engine` interface (satisfied by
+`*apogee.Agent`, with a compile-time assertion in `wire.go`), `Options`, and a placeholder `Run` —
+so the ADR-0010 grep stays empty. `cobra v1.10.2` pinned. All acceptance gates green (11 new tests
+under `-race`; 6-target cross-build). **`--resume` was wired now** (it rides the stable Session API)
+with round-trip + future-version (`ErrSessionVersion`) tests; **snapshot-on-quit and the optional
+config file remain P2.5.** Next: **P2.1** — the concurrency seam (`teaSink` + `uiApprover` + worker
+`tea.Cmd` + cancel, under `-race`) and **new ADR 0011**.
 
 ### P2.1 — the concurrency seam (the convergence)
 Build C1–C5 as a cohesive, **rendering-free** unit so the threading is proven before the views
@@ -327,16 +371,20 @@ package has **no** import of the root module path (the ADR-0010 grep stays empty
 
 ### P2.3 — rendering the event stream
 Fold Events into the transcript per the C6 rule: append `TokenEvent.Text` to the in-progress
-assistant entry (live); finalise that entry on `MessageEvent` (canonical text) **or** the first
-`ToolCallEvent` of the Turn; render `ToolCallEvent` (tool + pretty-printed `Arguments`) and its
-paired `ToolResultEvent`; render `ErrorEvent` as a recoverable notice (not a stop); render
-`MechanismFiredEvent` only in a debug view (off by default — there is no catalogue until Phase 4).
-Tolerate `Depth > 0` (indent or skip) without crashing.
+assistant entry (live); **discard the in-progress token buffer on a `StreamResetEvent`** (an
+`ActionRetry` re-stream supersedes the Turn's tokens — events.go contract); finalise that entry on
+`MessageEvent` (canonical text) **or** the first `ToolCallEvent` of the Turn; render `ToolCallEvent`
+(tool + pretty-printed `Arguments`) and its paired `ToolResultEvent`; render `ErrorEvent` as a
+recoverable notice (not a stop); render `MechanismFiredEvent` only in a debug view (off by default —
+there is no catalogue until Phase 4). Switch over **all 8** event variants (no default Mechanism
+emits `ActionRetry` in Phase 2, but handle `StreamResetEvent` now so no retrofit is needed when
+Phase-4 repair Mechanisms land). Tolerate `Depth > 0` (indent or skip) without crashing.
 **Acceptance:** feeding a **recorded** event sequence (the shape `coreagent` produces: tokens →
 tool call → tool result → tokens → message) yields a correct transcript (golden); a tool-Turn
-with **no** `MessageEvent` still finalises the pre-tool narration; an `ErrorEvent` mid-stream
-renders inline and the transcript keeps going; the streamed tokens and the final `MessageEvent`
-reconcile to the same text.
+with **no** `MessageEvent` still finalises the pre-tool narration; a sequence containing a
+`StreamResetEvent` (tokens → reset → tokens → message) **discards the superseded tokens** and
+renders only the final accepted text; an `ErrorEvent` mid-stream renders inline and the transcript
+keeps going; the streamed tokens and the final `MessageEvent` reconcile to the same text.
 
 ### P2.4 — the Approval UI
 The interactive face of C3: when `awaitingApproval`, render the pending `ApprovalRequest` (tool,
