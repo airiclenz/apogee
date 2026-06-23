@@ -10,7 +10,9 @@ the concurrency seam — `teaSink` + `uiApprover` + the worker driver, late-boun
 `Bridge`, `-race`-proven against a stub program; **ADR 0011** records the model). P2.0 landed
 before that (HEAD `a210c4f`: the Cobra binary, the composition-root wiring, and state-root
 resolution). **P2.3** (the C6 event fold) and **P2.4** (the Approval UI — the a/d/s decision keys
-over C3's reply channel) have since landed; **next is P2.5** (config & session glue). Phase 1 is complete (the embeddable
+over C3's reply channel) have since landed; **P2.5** (config & session glue — flag>env>file>default precedence,
+`~/.apogee/config.yaml`, snapshot-on-clean-quit) has since landed too; **next is P2.6** (the
+hermetic e2e + the live-model run). Phase 1 is complete (the embeddable
 agent core + the bench are built; the live-model eval is the one open Phase-1 runtime step,
 which Phase 2 also exercises in passing). **All Phase-2 entry-state pre-checks were
 re-verified against source (2026-06-23) and passed** (see the **Readiness** note in §0). This
@@ -321,7 +323,7 @@ end-to-end), and it doubles as the Phase-1 live-model confirmation.
 | **P2.2** ✅ | Bubble Tea `Model`/`Update`/`View` skeleton: states (idle/running/awaiting-approval/error), input box, transcript viewport, status line | P2.1 | `lipgloss/v2`, `bubbles/v2` | TDD §5 TUI row |
 | **P2.3** ✅ | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
 | **P2.4** ✅ | The Approval UI: inline prompt, `allow`/`deny`/`allow-for-session` keys, cancel-clears-prompt (C3) | P2.2 | none | CONTEXT: Approval; ADR 0004 |
-| **P2.5** | Config & session glue: flags+env+defaults (optional `.apogee/config.yaml`); basic snapshot-on-exit + `--resume` | P2.0 | `yaml.v3` *(only if a file lands)* | ADR 0001 (roots); §6.1 (sessions) |
+| **P2.5** ✅ | Config & session glue: flag > env > file > default precedence (`~/.apogee/config.yaml` landed); snapshot-on-quit + `--resume` | P2.0 | `yaml.v3` | ADR 0001 (roots); §6.1 (sessions) |
 | **P2.6** | End-to-end acceptance: drive the **real** Agent through the TUI against a hermetic httptest model under `-race`; then the **live-model** run from the host | P2.1–P2.4 | none | broad §4 deliverable; Phase-1 live eval |
 
 ### P2.0 — the Cobra command tree + binary wiring
@@ -491,6 +493,38 @@ save (snapshot to `SessionsDir`) — at minimum on clean quit. No session **brow
 the TUI round-trips through `--resume` and **continues** the conversation at the right Turn
 (reusing P1.6's `turnIndex` continuation); a `--resume` of a future-version file surfaces
 `ErrSessionVersion` as a friendly error, not a panic.
+**✅ Done (HEAD `4f93505`).** Both pieces landed, all in the composition root + a new
+`internal/session` writer (the ADR-0010 grep stays empty). **(1) Config precedence** (`cmd/apogee/config.go`): a pure
+`resolveSettings(file, env, flag layer) settings` overlays optional layers in increasing
+priority, fed by `flagLayer` (gated on cobra's `Changed` so an unset flag's default never
+shadows a lower layer), `envLayer` (`APOGEE_{ENDPOINT,MODEL,MODE,BYPASS}`; a bad bool is a hard
+error), and `fileConfig.layer()`. `applyConfig` orchestrates in `RunE` before `runRoot` — it also
+overlays `APOGEE_CONFIG`/`APOGEE_WORKSPACE` onto the dirs (the file can't set the home it lives
+in) and reads `<home>/config.yaml`. **The config file earned its place** (owner decision: a
+uniform `~/.apogee` with `config.yaml`/`library`/`sessions`), so `gopkg.in/yaml.v3 v3.0.1` landed
+(no longer a pinned-but-unused decision); `resolveRoots` now shares an `apogeeHome` helper with
+the file path. A malformed file errors rather than silently dropping a typo'd setting; a bad
+`mode` from any source still flows through `parseMode`'s friendly error. **The config file is
+auto-seeded on first run** (owner directive): `cmd/apogee/defaults/config.yaml` is `//go:embed`-ed
+into the binary (every build re-bakes the latest), and `seedDefaultConfig` writes it to
+`<home>/config.yaml` when absent (best-effort, owner-only perms, honouring `--config`/
+`APOGEE_CONFIG`) with a one-time stderr notice — **never overwriting** an existing file. The
+shipped template is fully commented, so it is behaviour-neutral (a guarded test asserts it parses
+to an empty layer); it lives under `cmd/apogee/` because `//go:embed` cannot reach above its source
+dir and config is the composition root's concern (ADR 0001), not the library's. **(2) Snapshot-on-quit**
+via the **saver seam** (handoff 16's recommended shape): `internal/session.Store` (`NewStore`/
+`Save(domain.Session) (path, error)` — sortable UTC-timestamp filenames, lazy `MkdirAll`, owner-
+only perms) owns the on-disk format in the binary; `cmd/apogee` wraps it in a `sessionSaver` and
+installs `tui.Options.Save func(domain.Session) error`, then prints a `--resume` hint once the
+alt-screen tears down. The model snapshots **only on a clean quit** (idle/errored, `!busy()`,
+non-empty transcript) — calling `eng.Snapshot()` while a worker owns the single-goroutine Agent
+would race, so a `ctrl+c` mid-run cancels and quits **without** saving (snapshot-the-last-boundary
+mid-run is deferred — §6.1). Tests (all `-race`): the precedence table + `applyConfig` end-to-end
+(file+env+flag, env-resolved dirs, flag-beats-env-dir, malformed/bad-bypass errors, absent-is-empty);
+the `Store` round-trip + UTC/sortable filename; the saver→`--resume` round-trip through `buildAgent`;
+and the model's save-on-clean-quit / skip-empty / skip-while-busy / nil-saver paths (66 tui subtests).
+All verify gates green; `go mod tidy` recategorised `yaml.v3` as direct. Next: **P2.6** (the
+hermetic e2e + the live-model run).
 
 ### P2.6 — end-to-end acceptance (+ the Phase-1 live confirmation)
 The deliverable proof, mirroring P1.7's hermetic pattern: a **scripted OpenAI-compatible
@@ -520,12 +554,19 @@ Record each as a short note / ADR amendment when it lands (don't pre-decide in t
   `bubbles/v2 v2.1.0`, so no widget lagged and the v1 fallback was not triggered. All three deps
   resolve on the **`charm.land/…`** path (lipgloss + bubbles moved there at these versions, like
   Bubble Tea). Recorded in the P2.2 commit and ADR 0011's build note.
-- **Config file or not** (settled by **P2.5**): flags+env+defaults may be the whole v1 surface;
-  add `yaml.v3` only if a file earns it. Don't add a dep for ~30 lines of flag plumbing.
+- **Config file or not** (settled by **P2.5** — **file landed**): the owner's uniform `~/.apogee`
+  layout names `config.yaml` alongside `library/` and `sessions/`, so a user-level config file
+  earned its place (set endpoint/model/mode once, not every invocation). `yaml.v3` is now a direct
+  dep. A single user-level file at `<home>/config.yaml`; a workspace-local `.apogee/config.yaml`
+  (a second file tier) is deferred unless it earns a precedence layer of its own. The file is
+  **auto-seeded on first run** from a `//go:embed`-ed, behaviour-neutral template
+  (`cmd/apogee/defaults/config.yaml`), never overwriting an existing one.
 - **TokenEvent backpressure** (touched by **P2.1/P2.3**): start lossless via `p.Send`; add
   *coalescing* (never dropping) only if profiling shows queue pressure — behind the sink seam.
-- **Session UX depth** (touched by **P2.5**): minimal `--resume` + snapshot-on-quit this phase;
-  a richer session browser/picker is deferred (§6) unless trivial.
+- **Session UX depth** (settled by **P2.5**): minimal `--resume` + snapshot-on-clean-quit, with a
+  printed resume hint; no browser/picker (§6). Snapshot-mid-run is deferred — a `ctrl+c` while a
+  worker runs cancels and quits without saving (snapshotting from the Update goroutine would race
+  the single-goroutine Agent the worker owns), so only a quiescent-boundary quit persists state.
 
 ---
 
