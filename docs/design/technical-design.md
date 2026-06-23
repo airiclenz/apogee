@@ -5,8 +5,9 @@ technical design (the *as-designed system* in one place). It **synthesizes** the
 authoritative records; it does not replace them. For *why* a decision was made, follow
 the ADR link — this doc records *what* the design is and *what is still undesigned*.
 
-**Date:** 2026-06-23  **Repo HEAD at writing:** `7dbb1e9` (docs + ADRs 0001–0009),
-plus an uncommitted `apogee.go` signature sketch.
+**Date:** 2026-06-23  **Repo state:** P0.1 (`apogee.go` facade) and P0.2 (`go.mod` +
+`cmd/apogee` + empty `internal/` skeleton) are committed; the facade builds and
+`go vet`s in-tree with panic-stub bodies.
 
 **Purpose of this revision:** a `/handoff` to the next session. The job next session is
 to **raise the density** of the thin sections (marked **⏳ DENSIFY** with a concrete
@@ -19,7 +20,7 @@ prioritized worklist.
 | `CONTEXT.md` | Glossary — the domain language (authoritative for terms) | [`../../CONTEXT.md`](../../CONTEXT.md) |
 | ADRs 0001–0009 | Point decisions + rationale (authoritative for *why*) | [`../adr/`](../adr/) |
 | Implementation plan | Phased build sequence (authoritative for *order*) | [`../plans/implementation-plan-apogee-merge.md`](../plans/implementation-plan-apogee-merge.md) |
-| `apogee.go` | Public API **signature sketch** (Phase-0 keystone, unbuilt) | [`../../apogee.go`](../../apogee.go) |
+| `apogee.go` | Public API **signature sketch** (Phase-0 keystone; builds + vets, panic-stub bodies) | [`../../apogee.go`](../../apogee.go) |
 | **This TDD** | Consolidated design + gap register | you are here |
 
 ---
