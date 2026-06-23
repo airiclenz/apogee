@@ -41,6 +41,7 @@ type Model struct {
 	parent context.Context // the program's context; the worker derives from it (C4)
 	eng    Engine
 	opts   Options
+	save   func(domain.Session) error // persists a snapshot on a clean quit; nil ⇒ off
 
 	// Sub-models (Bubbles widgets).
 	input    textarea.Model
@@ -81,6 +82,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 		parent:   parent,
 		eng:      eng,
 		opts:     opts,
+		save:     opts.Save,
 		input:    ta,
 		viewport: vp,
 		spinner:  sp,
@@ -272,11 +274,35 @@ func (m *Model) finishWorker(next uiState) {
 	m.state = next
 }
 
-// quit cancels any in-flight worker (so its goroutine unwinds rather than outliving the
-// program) and tells Bubble Tea to exit.
+// quit ends the program. On a clean quit — idle or errored, where the worker has already
+// returned — it first snapshots the conversation to the host saver; the Agent is
+// single-goroutine, so reading it from the Update goroutine is only safe once no worker
+// owns it (the busy() states). While busy it cancels the in-flight worker instead (so its
+// goroutine unwinds rather than racing a snapshot) and quits without saving — snapshotting
+// the last boundary mid-run is deferred (plan §6.1; handoff 16).
 func (m Model) quit() (tea.Model, tea.Cmd) {
-	m.stopWorker()
+	if m.busy() {
+		m.stopWorker()
+		return m, tea.Quit
+	}
+	m.saveSession()
 	return m, tea.Quit
+}
+
+// saveSession best-effort persists a snapshot of the conversation through the host saver.
+// It is a no-op without a saver or with an empty transcript (nothing worth resuming).
+// Both Snapshot and the save are best-effort: a quit must never fail, so an error is
+// swallowed rather than blocking the exit. The caller guarantees no worker is running, so
+// calling Snapshot here respects the Agent's single-goroutine contract (C1).
+func (m Model) saveSession() {
+	if m.save == nil || len(m.transcript.entries) == 0 {
+		return
+	}
+	sess, err := m.eng.Snapshot()
+	if err != nil {
+		return
+	}
+	_ = m.save(sess)
 }
 
 // busy reports whether a worker is in flight (running or blocked on an Approval) — the

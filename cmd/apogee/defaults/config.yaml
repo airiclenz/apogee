@@ -1,0 +1,30 @@
+# apogee configuration — ~/.apogee/config.yaml
+#
+# This file is created automatically on first run from a template compiled into the
+# apogee binary. Your edits are preserved: apogee never overwrites an existing config.
+#
+# Settings resolve by precedence, highest first:
+#
+#   command-line flag  >  APOGEE_* environment variable  >  this file  >  built-in default
+#
+# Every line below is commented out, so out of the box this file changes nothing — it is
+# a documented starting point. Uncomment a line and edit it to make it your default.
+
+# The local OpenAI-compatible LLM server URL.
+#   flag: --endpoint   env: APOGEE_ENDPOINT
+# endpoint: http://192.168.64.1:1111
+
+# The model name to request from that server.
+#   flag: --model      env: APOGEE_MODEL
+# model: qwen2.5-coder
+
+# Autonomy mode: how tool calls are gated.
+#   plan        — read-only: no writes, no command execution
+#   ask-before  — every tool call needs your approval (the default)
+#   (auto requires Confinement, which lands in Phase 3)
+#   flag: --mode       env: APOGEE_MODE
+# mode: ask-before
+
+# Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
+#   flag: --bypass     env: APOGEE_BYPASS
+# bypass: false

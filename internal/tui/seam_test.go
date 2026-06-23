@@ -93,8 +93,9 @@ type fakeEngine struct {
 	submitted []domain.UserInput
 	stepCalls int
 
-	submitFn func(domain.UserInput) error
-	stepFn   func(ctx context.Context, call int) (domain.StepResult, error)
+	submitFn   func(domain.UserInput) error
+	stepFn     func(ctx context.Context, call int) (domain.StepResult, error)
+	snapshotFn func() (domain.Session, error)
 }
 
 // fakeEngine satisfies the narrow Engine seam the worker drives.
@@ -120,9 +121,14 @@ func (f *fakeEngine) Step(ctx context.Context) (domain.StepResult, error) {
 	return fn(ctx, call)
 }
 
-func (f *fakeEngine) Snapshot() (domain.Session, error) { return domain.Session{}, nil }
-func (f *fakeEngine) Mode() domain.Mode                 { return domain.ModeAskBefore }
-func (f *fakeEngine) Close() error                      { return nil }
+func (f *fakeEngine) Snapshot() (domain.Session, error) {
+	if f.snapshotFn != nil {
+		return f.snapshotFn()
+	}
+	return domain.Session{}, nil
+}
+func (f *fakeEngine) Mode() domain.Mode { return domain.ModeAskBefore }
+func (f *fakeEngine) Close() error      { return nil }
 
 // submits reports how many times Submit was called.
 func (f *fakeEngine) submits() int {

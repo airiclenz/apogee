@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -65,13 +67,54 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	}
 	defer agent.Close()
 
-	return launch(ctx, agent, bridge, tui.Options{
+	// The saver persists a snapshot to SessionsDir when the UI quits cleanly. It owns the
+	// path and on-disk format (internal/session); the TUI sees only the func(Session) error
+	// seam, keeping file I/O out of the renderer (phase-2 detail plan §3 C5). It records the
+	// last path written so a resume hint can be shown once the alternate screen is torn down.
+	saver := &sessionSaver{store: session.NewStore(roots.sessions)}
+
+	err = launch(ctx, agent, bridge, tui.Options{
 		Model:     opts.model,
 		Endpoint:  opts.endpoint,
 		Mode:      mode,
 		Bypass:    opts.bypass,
 		Workspace: roots.workspace,
+		Save:      saver.save,
 	})
+	if path := saver.saved(); path != "" {
+		fmt.Fprintf(os.Stdout, "Session saved · resume with: apogee --resume %s\n", path)
+	}
+	return err
+}
+
+// sessionSaver adapts a session.Store to the TUI's func(Session) error saver seam and
+// records the last path written. save runs on the program goroutine (a clean quit);
+// saved is read after launch returns — the mutex makes that hand-off race-free regardless
+// of how the program loop synchronises its shutdown.
+type sessionSaver struct {
+	store *session.Store
+
+	mu   sync.Mutex
+	path string
+}
+
+// save persists the snapshot and records its path on success.
+func (s *sessionSaver) save(sess apogee.Session) error {
+	path, err := s.store.Save(sess)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.path = path
+	s.mu.Unlock()
+	return nil
+}
+
+// saved reports the last path written, or "" if nothing was saved.
+func (s *sessionSaver) saved() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.path
 }
 
 // parseMode validates the --mode flag against the known autonomy modes. Auto parses
@@ -98,22 +141,30 @@ type stateRoots struct {
 	workspace string
 }
 
+// apogeeHome resolves the absolute apogee home directory: the configDir override when
+// set, else ~/.apogee (the single uniform dotdir on every OS — owner decision, not XDG).
+// It is shared by resolveRoots (the state roots) and configFilePath (where config.yaml
+// lives), so both agree on the home.
+func apogeeHome(configDir string) (string, error) {
+	home := configDir
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("apogee: resolve home directory: %w", err)
+		}
+		home = filepath.Join(userHome, ".apogee")
+	}
+	return filepath.Abs(home)
+}
+
 // resolveRoots computes the state roots the library refuses to assume (ADR 0001): the
 // apogee home (configDir override, else ~/.apogee) holds config/library/sessions, and the
 // workspace (workspace override, else the current directory) scopes the file tools. It
 // computes paths only — directory creation is deferred to the writer that needs them (P2.5).
 func resolveRoots(configDir, workspace string) (stateRoots, error) {
-	home := configDir
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return stateRoots{}, fmt.Errorf("apogee: resolve home directory: %w", err)
-		}
-		home = filepath.Join(userHome, ".apogee")
-	}
-	absHome, err := filepath.Abs(home)
+	absHome, err := apogeeHome(configDir)
 	if err != nil {
-		return stateRoots{}, fmt.Errorf("apogee: resolve config directory: %w", err)
+		return stateRoots{}, err
 	}
 
 	ws := workspace

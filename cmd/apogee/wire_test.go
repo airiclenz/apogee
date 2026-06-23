@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -138,6 +139,41 @@ func TestBuildAgentResumeRoundTrip(t *testing.T) {
 	resumed, err := buildAgent(validCfg(t), path)
 	if err != nil {
 		t.Fatalf("buildAgent resume: %v", err)
+	}
+	if resumed == nil {
+		t.Fatal("buildAgent resume returned a nil Agent")
+	}
+	t.Cleanup(func() { _ = resumed.Close() })
+}
+
+// The TUI-side save round-trips through --resume: a snapshot written by the same saver the
+// binary installs (sessionSaver over a session.Store) reconstructs an Agent via buildAgent
+// — the P2.5 save↔resume acceptance, exercised without a terminal (P2.6 drives it live).
+func TestSessionSaverRoundTripsThroughResume(t *testing.T) {
+	t.Parallel()
+	original, err := apogee.New(validCfg(t))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = original.Close() })
+
+	snap, err := original.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	saver := &sessionSaver{store: session.NewStore(filepath.Join(t.TempDir(), "sessions"))}
+	if err := saver.save(snap); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	path := saver.saved()
+	if path == "" {
+		t.Fatal("saver recorded no path after a successful save")
+	}
+
+	resumed, err := buildAgent(validCfg(t), path)
+	if err != nil {
+		t.Fatalf("buildAgent resume of the saved session: %v", err)
 	}
 	if resumed == nil {
 		t.Fatal("buildAgent resume returned a nil Agent")

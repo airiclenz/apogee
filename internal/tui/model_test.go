@@ -415,6 +415,99 @@ func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Snapshot-on-quit (phase-2 detail plan §4 P2.5; §6.1)
+// ----------------------------------------------------------------------------
+
+// recordingSaver captures the snapshot the model hands the saver seam.
+type recordingSaver struct {
+	called bool
+	sess   domain.Session
+	err    error // injected to simulate a save failure
+}
+
+func (r *recordingSaver) save(s domain.Session) error {
+	r.called = true
+	r.sess = s
+	return r.err
+}
+
+// newSavingModel builds a ready, idle model wired to the given saver.
+func newSavingModel(t *testing.T, eng Engine, save func(domain.Session) error) Model {
+	t.Helper()
+	m := newModel(context.Background(), eng, Options{Save: save})
+	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+}
+
+// A clean quit (idle, with a non-empty conversation) snapshots the Engine and hands the
+// result to the saver, then quits.
+func TestModelSavesOnCleanQuit(t *testing.T) {
+	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"saved":true}`)}
+	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
+	rec := &recordingSaver{}
+	m := newSavingModel(t, eng, rec.save)
+	m.transcript.addUser("hello") // give it content worth saving
+
+	_, cmd := stepCmd(t, m, keyEsc())
+	if !rec.called {
+		t.Fatal("a clean quit did not save the session")
+	}
+	if string(rec.sess.State) != string(marker.State) {
+		t.Errorf("saved snapshot = %q; want the Engine's snapshot %q", rec.sess.State, marker.State)
+	}
+	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+		t.Error("a clean quit did not quit the program")
+	}
+}
+
+// An empty conversation is not worth a snapshot file — quit without saving.
+func TestModelDoesNotSaveEmptyConversation(t *testing.T) {
+	rec := &recordingSaver{}
+	m := newSavingModel(t, &fakeEngine{}, rec.save)
+
+	_, cmd := stepCmd(t, m, keyEsc())
+	if rec.called {
+		t.Error("an empty conversation was saved on quit")
+	}
+	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+		t.Error("quit did not exit")
+	}
+}
+
+// Quitting while a worker is in flight must NOT snapshot — the worker owns the Agent, and
+// the Agent is single-goroutine, so a snapshot here would race its Step. ctrl+c cancels
+// and quits instead (the last boundary is unsaved this phase).
+func TestModelDoesNotSaveWhileBusy(t *testing.T) {
+	snapshotted := false
+	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) {
+		snapshotted = true
+		return domain.Session{}, nil
+	}}
+	rec := &recordingSaver{}
+	m := newSavingModel(t, eng, rec.save)
+	m.transcript.addUser("hi")
+	m.state = stateRunning
+	m.cancel = func() {}
+
+	_, cmd := stepCmd(t, m, keyCtrlC())
+	if snapshotted || rec.called {
+		t.Error("snapshotted while a worker was running (would race the single-goroutine Agent)")
+	}
+	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+		t.Error("ctrl+c while busy did not quit")
+	}
+}
+
+// A nil saver (session saving disabled) must not break the quit path.
+func TestModelQuitWithoutSaver(t *testing.T) {
+	m := newTestModel(t) // testOpts carries no Save
+	m.transcript.addUser("hi")
+	_, cmd := stepCmd(t, m, keyEsc())
+	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+		t.Error("quit with no saver did not exit")
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Layout: the status line and resizing
 // ----------------------------------------------------------------------------
 

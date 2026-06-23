@@ -119,6 +119,7 @@ func TestRootCommandExecuteCleanQuit(t *testing.T) {
 		"--endpoint", "http://127.0.0.1:1111",
 		"--model", "fake",
 		"--workspace", t.TempDir(),
+		"--config", t.TempDir(), // hermetic: no real ~/.apogee/config.yaml in the loop
 	})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {

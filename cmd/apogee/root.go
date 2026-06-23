@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -39,7 +40,11 @@ func newRootCommand(launch launcher) *cobra.Command {
 		Short: "Terminal coding agent for small local LLMs",
 		Long: "apogee is a terminal coding agent for small local LLMs. The root command\n" +
 			"opens an interactive session against a local OpenAI-compatible model:\n" +
-			"hold a coding conversation, watch tools run, and approve writes.",
+			"hold a coding conversation, watch tools run, and approve writes.\n\n" +
+			"Settings resolve by precedence: a flag overrides an APOGEE_* environment\n" +
+			"variable (APOGEE_ENDPOINT, APOGEE_MODEL, APOGEE_MODE, APOGEE_BYPASS), which\n" +
+			"overrides ~/.apogee/config.yaml, which overrides the built-in default. A clean\n" +
+			"quit snapshots the conversation under ~/.apogee/sessions for --resume.",
 		Args: cobra.NoArgs,
 		// On a runtime (RunE) error, print just the error — not the full usage dump,
 		// which is noise for a misconfiguration rather than a syntax mistake. main owns
@@ -47,6 +52,22 @@ func newRootCommand(launch launcher) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			changed := cmd.Flags().Changed
+			// First run: drop a documented starter config so the file is discoverable.
+			// Best-effort — a run still works off flags/env/defaults if the home is
+			// unwritable — and only the first run creates it (an existing config is never
+			// overwritten). The notice prints before the alt-screen, on stderr.
+			if created, path, err := seedDefaultConfig(opts, changed, os.Getenv); err != nil {
+				cmd.PrintErrln("apogee: could not create default config:", err)
+			} else if created {
+				cmd.PrintErrln("apogee: created a starter config at", path)
+			}
+			// Resolve the upstream/autonomy settings by precedence (flag > env > file >
+			// default) before construction; the flag set tells us which flags were
+			// explicitly set so an unset flag's default never shadows a lower layer.
+			if err := applyConfig(&opts, changed, os.Getenv, os.ReadFile); err != nil {
+				return err
+			}
 			return runRoot(cmd.Context(), opts, launch)
 		},
 	}

@@ -34,15 +34,23 @@ type Engine interface {
 // Wiring values the binary resolves and the TUI renders
 // ----------------------------------------------------------------------------
 
-// Options carries the display and wiring values the binary resolves (the composition
-// root, cmd/apogee) and the TUI renders in its status line but cannot read off the
-// Engine — the model, endpoint, autonomy mode, bypass flag, and workspace root.
+// Options carries the wiring the binary resolves (the composition root, cmd/apogee) and
+// hands the TUI: the display values it renders in its status line but cannot read off the
+// Engine (model, endpoint, autonomy mode, bypass flag, workspace root), plus the session
+// saver seam.
 type Options struct {
 	Model     string
 	Endpoint  string
 	Mode      domain.Mode
 	Bypass    bool
 	Workspace string
+
+	// Save persists a snapshot of the conversation; nil disables session saving. The
+	// binary supplies a store-backed saver (it owns the path and on-disk format — phase-2
+	// detail plan §3 C5). The model calls it only at a quiescent boundary (a clean quit),
+	// passing the snapshot it took itself, so the file I/O stays out of the renderer while
+	// the "is it safe to snapshot" decision stays with the model that owns the Engine.
+	Save func(domain.Session) error
 }
 
 // ----------------------------------------------------------------------------
