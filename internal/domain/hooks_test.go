@@ -6,6 +6,7 @@ package domain
 // (docs/design/hook-mutation-api.md) requires, not just the exported shape.
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -292,6 +293,35 @@ func TestMessageExtraRoundTrip(t *testing.T) {
 			t.Errorf("unknown object sibling not collected: %q ok=%v", v, ok)
 		}
 	})
+}
+
+// TestMessageMarshalDeterministic locks in stable, sorted Extra key order on the wire, so a
+// snapshot carrying preserved siblings is byte-reproducible — Go's randomized map iteration
+// order must not leak into the serialized form.
+func TestMessageMarshalDeterministic(t *testing.T) {
+	m := Message{Role: RoleAssistant, Content: "x"}.
+		WithExtra("zeta", json.RawMessage(`1`)).
+		WithExtra("alpha", json.RawMessage(`2`)).
+		WithExtra("mu", json.RawMessage(`3`))
+
+	first, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for i := 0; i < 50; i++ {
+		again, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("Marshal #%d: %v", i, err)
+		}
+		if !bytes.Equal(first, again) {
+			t.Fatalf("non-deterministic Message JSON:\n %s\nvs\n %s", first, again)
+		}
+	}
+	// Known fields keep messageJSON order; the extras follow in sorted key order.
+	const want = `{"role":"assistant","content":"x","alpha":2,"mu":3,"zeta":1}`
+	if string(first) != want {
+		t.Errorf("Message JSON = %s, want %s", first, want)
+	}
 }
 
 func TestResponse(t *testing.T) {

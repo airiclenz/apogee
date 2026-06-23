@@ -112,6 +112,7 @@ type Event = domain.Event
 // The Event variants. The set is additively extensible (a new variant is a minor bump).
 type (
 	TokenEvent          = domain.TokenEvent
+	StreamResetEvent    = domain.StreamResetEvent
 	MessageEvent        = domain.MessageEvent
 	ToolCallEvent       = domain.ToolCallEvent
 	ToolResultEvent     = domain.ToolResultEvent

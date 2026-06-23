@@ -80,6 +80,11 @@ const (
 // UserInput is one user message into an Exchange: free text plus optional file
 // references the context builder resolves. Stays a value (no live handles) so it
 // snapshots cleanly.
+//
+// Phase 1 consumes Text only. FileRefs are carried and snapshotted but not yet resolved
+// into context — turning references into budgeted file content is a context-builder
+// concern (TDD §8 #8) deferred past Phase 1. Until it lands, supplying FileRefs is
+// surfaced as a loop ErrorEvent rather than silently ignored.
 type UserInput struct {
 	Text     string
 	FileRefs []string

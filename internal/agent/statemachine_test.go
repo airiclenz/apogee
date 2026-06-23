@@ -420,9 +420,15 @@ func TestStep_CancelMidTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	if err := b.Submit(domain.UserInput{Text: "retry"}); err != nil {
-		t.Fatalf("Submit (resumed): %v", err)
+
+	// The cancelled Exchange is still open (inExchange survived the cancel/resume), so a
+	// Submit is rejected — interleaving a fresh user message into the open Exchange would
+	// produce a malformed conversation. The host continues by re-Stepping, not re-Submitting.
+	if err := b.Submit(domain.UserInput{Text: "intrude"}); err == nil {
+		t.Error("Submit after a mid-Exchange cancel was accepted; the open Exchange must reject it")
 	}
+
+	// Re-Stepping re-attempts the Turn from the rolled-back boundary and completes it.
 	res2, err := b.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run (resumed): %v", err)
@@ -479,6 +485,31 @@ func TestDispatch_ToolPanicSurvives(t *testing.T) {
 	}
 }
 
+// TestStep_FileRefsAreSurfacedNotSilentlyDropped proves that UserInput.FileRefs the loop does
+// not yet resolve are reported via a loop ErrorEvent (so a host is not misled into thinking
+// they took effect), while the Text is still consumed and the Exchange completes normally.
+func TestStep_FileRefsAreSurfacedNotSilentlyDropped(t *testing.T) {
+	sink := &recordingSink{}
+	capt := &capturingResponder{reply: "done"}
+	a, err := newAgent(baseConfig(sink), capt)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "use these", FileRefs: []string{"a.go", "b.go"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !hasEvent[domain.ErrorEvent](sink.events) {
+		t.Error("FileRefs were dropped without surfacing a loop ErrorEvent")
+	}
+	if !containsContent(capt.got.Messages, "use these") {
+		t.Errorf("the Text was not consumed despite the unresolved FileRefs: %+v", capt.got.Messages)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Post-response hooks: intercept + ActionDefer feed-forward
 // ---------------------------------------------------------------------------
@@ -514,6 +545,53 @@ func TestStep_PostResponseIntercept(t *testing.T) {
 
 	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "intercepted" {
 		t.Errorf("MessageEvent = %+v (ok=%v), want the intercepted text", me, ok)
+	}
+}
+
+// retryOnceHook asks the loop to re-call the Upstream exactly once (ActionRetry), then lets
+// the response stand — the post-response retry path.
+type retryOnceHook struct{ done *bool }
+
+func (h retryOnceHook) PostResponse(_ context.Context, _ *domain.Response) (domain.PostResponseDecision, error) {
+	if *h.done {
+		return domain.PostResponseDecision{Action: domain.ActionIntercept}, nil
+	}
+	*h.done = true
+	return domain.PostResponseDecision{Action: domain.ActionRetry}, nil
+}
+
+// TestStep_RetryEmitsStreamReset proves an ActionRetry re-streams the Turn and emits a
+// StreamResetEvent first, so a streaming observer discards the superseded tokens; the
+// committed final message is the retried response, not the draft.
+func TestStep_RetryEmitsStreamReset(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	done := false
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	if err := cfg.Mechanisms.AddExperimental(domain.HookPostResponse, retryOnceHook{done: &done}); err != nil {
+		t.Fatalf("AddExperimental: %v", err)
+	}
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		contentScript("draft"),
+		contentScript("final"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !hasEvent[domain.StreamResetEvent](sink.events) {
+		t.Error("no StreamResetEvent emitted before the retry re-streamed")
+	}
+	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "final" {
+		t.Errorf("final MessageEvent = %+v (ok=%v), want the retried text %q", me, ok, "final")
 	}
 }
 

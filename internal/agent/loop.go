@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -135,6 +136,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 
 	if a.pendingInput != nil {
 		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: a.pendingInput.Text})
+		a.noteUnresolvedFileRefs(turn, a.pendingInput.FileRefs)
 		a.pendingInput = nil
 		a.inExchange = true
 	}
@@ -225,6 +227,9 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			return resp, turnOK
 		}
 		if retry && attempt < maxPostResponseRetries {
+			// The Turn re-streams: tell observers the tokens emitted this attempt are
+			// superseded, so a streaming UI discards them before the retry streams afresh.
+			a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: base(turn)})
 			continue
 		}
 		return resp, turnOK
@@ -332,10 +337,17 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 // Turn's assistant message and any tool results), re-queues the deferred corrections it
 // drained, and returns StatusCancelled WITHOUT advancing the Turn counter — so the snapshot
 // taken here resumes and re-attempts the Turn from serializable state (ADR 0007).
+//
+// inExchange is deliberately left untouched (NOT cleared): a cancelled Turn does not END the
+// Exchange — the user input / tool results committed so far are still mid-flight — so the flag
+// must keep reflecting an open Exchange. On resume that makes the next Step re-attempt the Turn
+// and, crucially, makes Submit reject a new user message that would otherwise interleave into
+// the open Exchange (two consecutive user messages, or a user message wedged after a tool
+// result — both of which a strict chat template rejects). Clearing it here contradicted the
+// un-advanced turnIndex (which says "re-attempt"), opening that exact hole.
 func (a *Agent) cancelTurn(turn, rollback int, deferred []string, start time.Time) domain.StepResult {
 	a.conv.DropRange(rollback, a.conv.Len())
 	a.restoreDeferred(deferred)
-	a.inExchange = false
 	return domain.StepResult{Status: domain.StatusCancelled, TurnIndex: turn, Elapsed: time.Since(start)}
 }
 
@@ -362,6 +374,25 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 		}
 	}
 	return req, deferred
+}
+
+// noteUnresolvedFileRefs surfaces that a consumed UserInput carried FileRefs the loop does
+// not yet resolve into context. Turning file references into budgeted context is a context-
+// builder concern (TDD §8 #8) deferred past Phase 1; until it lands the refs are ignored —
+// but NOT silently. It emits a loop ErrorEvent (the same Source "loop" notice channel a
+// missing Approver uses) so a host learns its input was only partly consumed and never
+// mistakes FileRefs for working. The refs round-trip through a snapshot on UserInput, so
+// deferring resolution loses no data.
+func (a *Agent) noteUnresolvedFileRefs(turn int, refs []string) {
+	if len(refs) == 0 {
+		return
+	}
+	a.cfg.Events.Emit(domain.ErrorEvent{
+		EventBase: base(turn),
+		Source:    "loop",
+		Err: fmt.Sprintf("UserInput.FileRefs are not yet resolved into context and were ignored "+
+			"(%d ref(s)); reference resolution is deferred to the context builder", len(refs)),
+	})
 }
 
 // budget reports the trivial Phase-1 context budget (no token accounting yet — TDD §8 #8).

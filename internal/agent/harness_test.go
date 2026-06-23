@@ -269,14 +269,16 @@ func TestHarness_CancellationIsResumable(t *testing.T) {
 		t.Fatalf("Snapshot after cancel: %v", err)
 	}
 
-	// The snapshot is valid: resume against a working responder and complete a Turn.
+	// The snapshot is valid: resume against a working responder and complete the Turn.
 	sink2 := &recordingSink{}
 	b, err := resumeAgent(baseConfig(sink2), snap, echoResponder{reply: "recovered"})
 	if err != nil {
 		t.Fatalf("resumeAgent after cancel: %v", err)
 	}
-	if err := b.Submit(domain.UserInput{Text: "retry"}); err != nil {
-		t.Fatalf("Submit (resumed): %v", err)
+	// The Exchange is still open across the cancel (inExchange survived), so a Submit is
+	// rejected — the host continues the cancelled Turn by re-Stepping, not re-Submitting.
+	if err := b.Submit(domain.UserInput{Text: "intrude"}); err == nil {
+		t.Error("Submit after a cancel was accepted; the open Exchange must reject it")
 	}
 	res2, err := b.Step(context.Background())
 	if err != nil {

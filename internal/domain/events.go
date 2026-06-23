@@ -33,10 +33,21 @@ type EventBase struct {
 
 func (b EventBase) eventDepth() int { return b.Depth }
 
-// TokenEvent is one streamed chunk of assistant text.
+// TokenEvent is one streamed chunk of assistant text. The tokens streamed for a Turn may be
+// superseded by a StreamResetEvent (the loop re-streamed the Turn on an ActionRetry):
+// accumulate TokenEvents per Turn and discard the accumulation when a reset arrives.
 type TokenEvent struct {
 	EventBase
 	Text string
+}
+
+// StreamResetEvent signals that the assistant tokens streamed for the current Turn since the
+// last boundary are superseded and must be discarded — the loop is re-streaming the Turn
+// because an ActionRetry post-response decision re-called the Upstream. A streaming observer
+// (the TUI) clears its in-progress token buffer for the Turn on this event; the MessageEvent
+// that ends the Turn carries the final, accepted text.
+type StreamResetEvent struct {
+	EventBase
 }
 
 // MessageEvent is a completed assistant message (the no-tool turn ends an Exchange).

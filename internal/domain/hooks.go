@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -91,10 +93,26 @@ type messageJSON struct {
 // so only genuinely-unknown siblings land in extra. Kept in sync with messageJSON's tags.
 var messageKnownKeys = []string{"role", "content", "tool_calls", "tool_call_id"}
 
+// isKnownMessageKey reports whether key is one messageJSON owns (so a same-named extra entry
+// is skipped on encode — the known field always wins a collision).
+func isKnownMessageKey(key string) bool {
+	for _, k := range messageKnownKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // MarshalJSON serializes the Message as its known wire fields with any preserved Extra
 // fields flattened alongside them. Known fields win on a key collision, so a stale extra
 // entry can never shadow a real field. A Message with no extras takes the fast path and
 // marshals straight from messageJSON.
+//
+// The preserved siblings are spliced on in sorted key order rather than via a map marshal,
+// so the wire bytes are deterministic regardless of Go's map iteration order — snapshots
+// containing reasoning_content (or any other Extra) are byte-reproducible, which a later
+// snapshot diff/hash relies on.
 func (m Message) MarshalJSON() ([]byte, error) {
 	known, err := json.Marshal(messageJSON{
 		Role:       m.Role,
@@ -108,18 +126,36 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	if len(m.extra) == 0 {
 		return known, nil
 	}
-	merged := make(map[string]json.RawMessage, len(m.extra)+len(messageKnownKeys))
+
+	// Collect the genuinely-unknown, non-empty siblings and sort for a stable key order.
+	keys := make([]string, 0, len(m.extra))
 	for k, v := range m.extra {
-		merged[k] = v
+		if !isKnownMessageKey(k) && len(v) > 0 {
+			keys = append(keys, k)
+		}
 	}
-	var knownMap map[string]json.RawMessage
-	if err := json.Unmarshal(known, &knownMap); err != nil {
-		return nil, err
+	if len(keys) == 0 {
+		return known, nil
 	}
-	for k, v := range knownMap {
-		merged[k] = v
+	sort.Strings(keys)
+
+	// Splice the siblings onto the known object. messageJSON always emits at least "role"
+	// (no omitempty), so known is never "{}" and dropping its closing brace then appending
+	// ",key:value" pairs is always well-formed.
+	var buf bytes.Buffer
+	buf.Write(known[:len(known)-1]) // drop the closing '}'
+	for _, k := range keys {
+		kb, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteByte(',')
+		buf.Write(kb)
+		buf.WriteByte(':')
+		buf.Write(m.extra[k])
 	}
-	return json.Marshal(merged)
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
 }
 
 // UnmarshalJSON restores a Message, decoding the known fields and collecting any unknown

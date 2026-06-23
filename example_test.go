@@ -24,6 +24,7 @@ var (
 	_ apogee.EventSink
 	_ apogee.Event
 	_ apogee.TokenEvent
+	_ apogee.StreamResetEvent
 	_ apogee.MessageEvent
 	_ apogee.ToolCallEvent
 	_ apogee.ToolResultEvent
