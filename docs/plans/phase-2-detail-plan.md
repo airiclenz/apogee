@@ -1,6 +1,7 @@
 # Apogee — Phase-2 Detail Plan (P2): the minimal modular TUI shell
 
-**Date:** 2026-06-23 · **Status:** 🚧 **IN PROGRESS** — **P2.2 landed** (the Bubble Tea
+**Date:** 2026-06-23 · **Status:** ✅ **COMPLETE** (P2.0–P2.6 all landed; the deliverable
+holds end-to-end against a hermetic and a live model) — **P2.2 landed** (the Bubble Tea
 `Model`/`Update`/`View` skeleton: the four-state machine, the input box, the transcript
 viewport, and the status line; `Run` now builds the `tea.Program` and binds the `Bridge`;
 the **Charm v2** stack is taken over the v1 fallback; **P2.3** has since filled the C6 event
@@ -11,8 +12,10 @@ the concurrency seam — `teaSink` + `uiApprover` + the worker driver, late-boun
 before that (HEAD `a210c4f`: the Cobra binary, the composition-root wiring, and state-root
 resolution). **P2.3** (the C6 event fold) and **P2.4** (the Approval UI — the a/d/s decision keys
 over C3's reply channel) have since landed; **P2.5** (config & session glue — flag>env>file>default precedence,
-`~/.apogee/config.yaml`, snapshot-on-clean-quit) has since landed too; **next is P2.6** (the
-hermetic e2e + the live-model run). Phase 1 is complete (the embeddable
+`~/.apogee/config.yaml`, snapshot-on-clean-quit) has since landed too; and **P2.6** (the
+hermetic e2e + the live-model run) has now landed, so **Phase 2 is complete** — the broad-plan
+deliverable holds (a real coding conversation with a local model in the terminal: tokens stream,
+a tool call appears, the write is approved, the result renders). Phase 1 is complete (the embeddable
 agent core + the bench are built; the live-model eval is the one open Phase-1 runtime step,
 which Phase 2 also exercises in passing). **All Phase-2 entry-state pre-checks were
 re-verified against source (2026-06-23) and passed** (see the **Readiness** note in §0). This
@@ -324,7 +327,7 @@ end-to-end), and it doubles as the Phase-1 live-model confirmation.
 | **P2.3** ✅ | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
 | **P2.4** ✅ | The Approval UI: inline prompt, `allow`/`deny`/`allow-for-session` keys, cancel-clears-prompt (C3) | P2.2 | none | CONTEXT: Approval; ADR 0004 |
 | **P2.5** ✅ | Config & session glue: flag > env > file > default precedence (`~/.apogee/config.yaml` landed); snapshot-on-quit + `--resume` | P2.0 | `yaml.v3` | ADR 0001 (roots); §6.1 (sessions) |
-| **P2.6** | End-to-end acceptance: drive the **real** Agent through the TUI against a hermetic httptest model under `-race`; then the **live-model** run from the host | P2.1–P2.4 | none | broad §4 deliverable; Phase-1 live eval |
+| **P2.6** ✅ | End-to-end acceptance: drive the **real** Agent through the TUI against a hermetic httptest model under `-race`; then the **live-model** run from the host | P2.1–P2.4 | none | broad §4 deliverable; Phase-1 live eval |
 
 ### P2.0 — the Cobra command tree + binary wiring
 Replace `cmd/apogee/main.go`'s stdlib stub with a Cobra root command that **launches the TUI**.
@@ -539,6 +542,35 @@ the one open Phase-1 runtime step** (the live file-edit eval), now through the p
 **Acceptance:** the hermetic e2e passes under `-race` (no terminal required — drive via `teatest`
 or the `programSender` stub); the live run completes a file-edit task interactively with a real
 model, writes approved through the UI, transcript correct.
+**✅ Done (HEAD `6f763fc`).** Both parts landed in `internal/tui` test code; production `internal/tui`
+still imports only `internal/domain` + the narrow `Engine` (the ADR-0010 grep stays empty — the
+e2e's `internal/agent`/`provider`/`session`/`tools` imports are **test-only** and none is the bare
+root path). **`teatest` was not used** (it is not in the module cache and targets the v1 Bubble Tea
+path; the v2 module moved to `charm.land/…`), so the no-terminal driver is a small white-box
+`uiHarness` — a `programSender` that drains the Msgs the seam Sends into a **real `Model` through the
+real `Update`**, auto-approving a prompt exactly as a human pressing `a` would (the real keypress →
+`handleApprovalKey` → C3 reply rendezvous). The seam Sends from the one worker goroutine and the
+harness reads on the test goroutine, so only one goroutine touches the Model — race-clean, no lock,
+and it launches the worker via `startExchange` directly (not the input-key path, whose `Batch` would
+drag the cosmetic spinner tick into the loop). **(1) Hermetic e2e** (`e2e_test.go`, `-race`): a
+**stateless** scripted OpenAI-compatible `httptest` model that decides each reply from the request's
+own message history (fresh task → narrate + `write_file`; history ends in a tool result → final
+message; a later user turn → a plain closing reply) — driving, in order, a tool Turn, a final Turn,
+and the continuation Turn, the way a real model does. `TestE2EConversationThroughTUI`: narration →
+`write_file` → approve → the write lands in a `t.TempDir()` workspace → the transcript folds tokens →
+call → result → final message (the real event stream through the real fold). `TestE2ESnapshotResume`​`Continues`: snapshot on a clean quit through the **real saver seam** (`session.Store`) → `agent.Resume`
+from the written file → continue, proving the resumed Exchange picks up at the snapshot's `turnIndex`
+(turn 2, after exchange 1's turns 0+1) — a reset would surface as turn 0. **(2) Live-model run**
+(`live_test.go`, **opt-in** — skipped unless `APOGEE_LIVE_ENDPOINT` is set, so `make check` is
+unaffected): the same harness + real Model against a live local model, the open Phase-1 live
+file-edit eval now over the product surface. Run against **`gemma-4-E4B-it-Q8_0`** (the launcher MCP
+at `192.168.61.1:7331` was unreachable from the dev env, so the already-loaded model was used; it is
+tool-capable despite `/v1/models` advertising only `completion`): it streamed, called `write_file`,
+the write was approved through the real gate and wrote `greeting.txt` (14 bytes), and the final
+message rendered — `StatusExchangeComplete`, transcript correct. The **only** unautomated remainder
+is a human pressing `a` in a live alt-screen terminal (no TTY in the dev env); the hermetic e2e
+proves the Model handles that real keypress, and the owner can run the interactive TUI directly. All
+verify gates green; `go mod tidy` no drift (no new deps). **Phase 2 is complete.**
 
 ---
 
