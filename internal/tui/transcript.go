@@ -23,11 +23,13 @@ import (
 // approvals, and recovered faults append their own entries. It renders only — no agent
 // logic lives here (C5).
 type transcript struct {
-	entries   []entry         // committed, in display order
-	pending   strings.Builder // in-progress assistant tokens for the current Turn
-	streaming bool            // whether pending holds an un-committed assistant buffer
-	turn      int             // the latest Turn index seen (drives the status line)
-	debug     bool            // when set, MechanismFiredEvents are recorded (a hidden debug view)
+	entries []entry // committed, in display order
+	pending string  // in-progress assistant tokens for the current Turn (a plain string,
+	// not a strings.Builder: the Model is a value type copied on every
+	// Update, and a Builder forbids the copy — it panics copyCheck)
+	streaming bool // whether pending holds an un-committed assistant buffer
+	turn      int  // the latest Turn index seen (drives the status line)
+	debug     bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
 }
 
 // entryKind tags a transcript entry so the renderer can prefix and style it. The set
@@ -109,7 +111,7 @@ func (t *transcript) apply(e domain.Event) {
 // ToolCall of the Turn), and is never rendered as a committed entry until then.
 func (t *transcript) appendToken(text string) {
 	t.streaming = true
-	t.pending.WriteString(text)
+	t.pending += text
 }
 
 // discardPending drops the in-progress assistant buffer for the current Turn. A
@@ -119,7 +121,7 @@ func (t *transcript) appendToken(text string) {
 // Turn's MessageEvent carries the final, accepted text.
 func (t *transcript) discardPending() {
 	t.streaming = false
-	t.pending.Reset()
+	t.pending = ""
 }
 
 // commitAssistant finalises the streamed buffer into a committed assistant entry on a
@@ -130,11 +132,11 @@ func (t *transcript) discardPending() {
 func (t *transcript) commitAssistant(canonical string, depth int) {
 	text := canonical
 	if text == "" {
-		text = t.pending.String()
+		text = t.pending
 	}
 	t.entries = append(t.entries, entry{kind: entryAssistant, text: text, depth: depth})
 	t.streaming = false
-	t.pending.Reset()
+	t.pending = ""
 }
 
 // finalizeNarration commits the in-progress buffer as the pre-tool narration when the first
@@ -146,9 +148,9 @@ func (t *transcript) finalizeNarration(depth int) {
 	if !t.streaming {
 		return
 	}
-	text := t.pending.String()
+	text := t.pending
 	t.streaming = false
-	t.pending.Reset()
+	t.pending = ""
 	if text == "" {
 		return
 	}
@@ -245,7 +247,7 @@ func (t *transcript) render() string {
 		if len(t.entries) > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(renderEntry(entry{kind: entryAssistant, text: t.pending.String()}))
+		b.WriteString(renderEntry(entry{kind: entryAssistant, text: t.pending}))
 	}
 	return b.String()
 }

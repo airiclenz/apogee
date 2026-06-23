@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -461,4 +462,50 @@ func TestModelToleratesNestedDepth(t *testing.T) {
 	if got := plain(m.View()); !strings.Contains(got, "nested") {
 		t.Errorf("nested-depth event not rendered:\n%s", got)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// Structural guard: the value-copied Model must hold no strings.Builder by value
+// ----------------------------------------------------------------------------
+
+// TestModelNoBuilderByValue asserts that nothing the Model copies on every Update is a
+// strings.Builder held by value. A Builder records a pointer to itself on its first write
+// and panics ("illegal use of non-zero Builder copied by value") when a later write finds
+// it at a different address — which is exactly what happens to a value field of a model
+// Bubble Tea copies on each Update. A behavioural two-token test cannot reliably catch this:
+// the panic is address-dependent, and a tight test loop reuses the same stack slot for the
+// Update receiver, hiding it. This walks the Model's value-reachable type graph instead, so
+// the invariant holds no matter how the renderer is rewired. A Builder behind a pointer,
+// slice, or map is fine — only the header is copied — so the walk descends through value
+// composites (structs, arrays) only.
+func TestModelNoBuilderByValue(t *testing.T) {
+	builderType := reflect.TypeOf(strings.Builder{})
+	seen := map[reflect.Type]bool{}
+
+	var walk func(typ reflect.Type, path string)
+	walk = func(typ reflect.Type, path string) {
+		if seen[typ] {
+			return
+		}
+		seen[typ] = true
+
+		if typ == builderType {
+			t.Errorf("strings.Builder held by value at %s — the Model is copied on every "+
+				"Update and a value Builder panics copyCheck; hold it by pointer or use a string", path)
+			return
+		}
+		switch typ.Kind() {
+		case reflect.Struct:
+			for i := 0; i < typ.NumField(); i++ {
+				f := typ.Field(i)
+				walk(f.Type, path+"."+f.Name)
+			}
+		case reflect.Array:
+			walk(typ.Elem(), path+"[]")
+		}
+		// Pointer/Slice/Map/Chan/Interface/Func are reference headers: copying the Model
+		// copies the reference, not the pointee, so a Builder behind one is never copied.
+	}
+
+	walk(reflect.TypeOf(Model{}), "Model")
 }
