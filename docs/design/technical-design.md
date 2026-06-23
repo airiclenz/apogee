@@ -209,20 +209,22 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    history-rewrite all fire in the loop now; the `ActionDefer` feed-forward drains on the next
    request and survives a snapshot end-to-end (the engine adopted `domain.Conversation` as its
    storage — P1.6 owns only the Session envelope around it).
-3. ✅ **Event delivery & backpressure — RESOLVED (P1.2).** The loop emits synchronously and in
-   Turn order through `EventSink.Emit`; it neither buffers nor drops. The non-blocking contract
-   is the host's to honour (the `EventSink` doc states it) — the bench consumes Events as Go
-   values in order (reproducibility wants exactly that), and a buffered channel adapter with a
-   drop policy for the Phase-2 TUI sits behind the same interface. Sub-agent fan-in (Depth > 0)
-   is Phase 3; every Phase-1 Event is Depth 0.
+3. ✅ **Event delivery & backpressure — RESOLVED (P1.2; canonical record [ADR 0007 §Phase-1
+   realisation](../adr/0007-step-turn-and-the-quiescent-boundary.md)).** The loop emits
+   synchronously and in Turn order through `EventSink.Emit`; it neither buffers nor drops. The
+   non-blocking contract is the host's to honour (the `EventSink` doc states it) — the bench
+   consumes Events as Go values in order (reproducibility wants exactly that), and a buffered
+   channel adapter with a drop policy for the Phase-2 TUI sits behind the same interface.
+   Sub-agent fan-in (Depth > 0) is Phase 3; every Phase-1 Event is Depth 0.
 4. **`mechanisms/` package-per-hook layout** statically encodes the hook point, in tension
    with ADR 0003's *constraint-declared* (hook = descriptor field, dynamic order). Plan
    already calls it "provisional." Lean toward a flat `internal/mechanisms` with hook-point
    as data. **Resolve when the catalogue→hook mapping session runs.**
 5. **`UserInput`/`FileRefs` resolution** — how file references become budgeted context
    (context-builder seam) is unspecified.
-6. ✅ **Streaming + Approval interleave inside a Step — RESOLVED (P1.2).** The stream is
-   consumed to its terminal Delta and the SSE body closed **before** any tool call is
+6. ✅ **Streaming + Approval interleave inside a Step — RESOLVED (P1.2; canonical record
+   [ADR 0007 §Phase-1 realisation](../adr/0007-step-turn-and-the-quiescent-boundary.md)).** The
+   stream is consumed to its terminal Delta and the SSE body closed **before** any tool call is
    dispatched; Approval is then consulted synchronously at a sub-step boundary, so a blocking
    `Approver` never holds an open Upstream connection. The EventSink sees, per Turn:
    `TokenEvent`s (live, as content arrives) → [stream ends] → `ToolCallEvent` → `ApprovalEvent`
