@@ -3,11 +3,13 @@
 **Date:** 2026-06-23 · **Status:** 🚧 **IN PROGRESS** — **P2.2 landed** (the Bubble Tea
 `Model`/`Update`/`View` skeleton: the four-state machine, the input box, the transcript
 viewport, and the status line; `Run` now builds the `tea.Program` and binds the `Bridge`;
-the **Charm v2** stack is taken over the v1 fallback). P2.1 landed before it (HEAD `5e574c5`:
+the **Charm v2** stack is taken over the v1 fallback; **P2.3** has since filled the C6 event
+fold — tool/result/approval/mechanism entries, the StreamReset discard, and pre-tool narration
+finalisation). P2.1 landed before it (HEAD `5e574c5`:
 the concurrency seam — `teaSink` + `uiApprover` + the worker driver, late-bound through the
 `Bridge`, `-race`-proven against a stub program; **ADR 0011** records the model). P2.0 landed
 before that (HEAD `a210c4f`: the Cobra binary, the composition-root wiring, and state-root
-resolution). Next is **P2.3** (rendering the event stream per C6) and **P2.4** (the Approval UI). Phase 1 is complete (the embeddable
+resolution). Next is **P2.4** (the Approval UI); **P2.3** (rendering the event stream per C6) has landed. Phase 1 is complete (the embeddable
 agent core + the bench are built; the live-model eval is the one open Phase-1 runtime step,
 which Phase 2 also exercises in passing). **All Phase-2 entry-state pre-checks were
 re-verified against source (2026-06-23) and passed** (see the **Readiness** note in §0). This
@@ -316,7 +318,7 @@ end-to-end), and it doubles as the Phase-1 live-model confirmation.
 | **P2.0** ✅ | Cobra command tree + binary wiring + state-root resolution + `Config` construction (C5/C7/C8) | — | `cobra` | broad §4; TDD §5 CLI row |
 | **P2.1** ✅ | The concurrency seam: `teaSink` bridge + `uiApprover` rendezvous + worker `tea.Cmd` + cancel (C1–C4), as a fake-engine-testable package | P2.0 | `bubbletea/v2` | ADR 0007; TDD §6 #3; **ADR 0011** |
 | **P2.2** ✅ | Bubble Tea `Model`/`Update`/`View` skeleton: states (idle/running/awaiting-approval/error), input box, transcript viewport, status line | P2.1 | `lipgloss/v2`, `bubbles/v2` | TDD §5 TUI row |
-| **P2.3** | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
+| **P2.3** ✅ | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
 | **P2.4** | The Approval UI: inline prompt, `allow`/`deny`/`allow-for-session` keys, cancel-clears-prompt (C3) | P2.2 | none | CONTEXT: Approval; ADR 0004 |
 | **P2.5** | Config & session glue: flags+env+defaults (optional `.apogee/config.yaml`); basic snapshot-on-exit + `--resume` | P2.0 | `yaml.v3` *(only if a file lands)* | ADR 0001 (roots); §6.1 (sessions) |
 | **P2.6** | End-to-end acceptance: drive the **real** Agent through the TUI against a hermetic httptest model under `-race`; then the **live-model** run from the host | P2.1–P2.4 | none | broad §4 deliverable; Phase-1 live eval |
@@ -425,6 +427,26 @@ with **no** `MessageEvent` still finalises the pre-tool narration; a sequence co
 `StreamResetEvent` (tokens → reset → tokens → message) **discards the superseded tokens** and
 renders only the final accepted text; an `ErrorEvent` mid-stream renders inline and the transcript
 keeps going; the streamed tokens and the final `MessageEvent` reconcile to the same text.
+**✅ Done (HEAD `27ceb63`).** `transcript.apply` now folds the full event stream (the five P2.2 stubs filled): a
+`StreamResetEvent` discards the in-progress buffer (`discardPending`); the **first `ToolCallEvent`
+of a Turn** finalises the pre-tool narration (`finalizeNarration` — the streamed tokens are
+canonical when no `MessageEvent` follows; a second call in the same Turn does not re-finalise, and a
+Turn with no narration commits no empty entry) before appending the call entry (tool name +
+pretty-printed `Arguments` via `prettyJSON`/`json.Indent`, malformed args shown **verbatim** rather
+than dropped); `ToolResultEvent` appends the paired result (an `IsError` result is marked but stays
+a result — it is in-band, not a recovered fault); `ApprovalEvent` is recorded **observationally** as
+a note (the gate itself is the C3 rendezvous); `MechanismFiredEvent` is gated behind a default-off
+`debug` view (no catalogue until Phase 4 — §6; the field is the seam, the product toggle is later);
+`ErrorEvent` renders inline without stopping the stream. `renderEntry` now indents the continuation
+lines of a multi-line body when `Depth > 0`. The switch stays **exhaustive over all 8** variants.
+`transcript_test.go` (new, in-package, ANSI-stripped) covers the **golden** tool-Turn sequence,
+narration-without-`MessageEvent` plus the no-narration / two-calls-one-Turn edges, the StreamReset
+discard (and the idle-reset no-op), canonical-vs-streamed reconciliation (incl. the empty-canonical
+fallback), the inline `ErrorEvent`, the error tool result, the observational approval, the
+debug-gated mechanism, `Depth > 0` indentation, and the argument formatter. **No new deps** (P2.3
+added none); the only non-test change outside `transcript.go` was threading a `depth` arg through
+`addError`'s one model call site. All verify gates green; the ADR-0010 grep stays empty. Next:
+**P2.4** (the Approval UI keys over C3's reply channel).
 
 ### P2.4 — the Approval UI
 The interactive face of C3: when `awaitingApproval`, render the pending `ApprovalRequest` (tool,
