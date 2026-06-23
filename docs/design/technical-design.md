@@ -170,7 +170,7 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 | Loop / Turn engine | **P (minimal)** | Turn = one primary Upstream call; quiescent boundary; recover-at-boundary (0007); **P0.6: single non-streaming Turn, cancel, panic-recover all real in `loop.go`** | full state machine; streaming/approval/tool interleave; cross-Turn loop counters in snapshot |
 | Provider / Upstream | S→**P (P1.1)** | openai-compatible; model discovery; TS as oracle; **P1.1: real `internal/provider.Client` — non-streaming `Respond` + streaming `Stream` (`iter.Seq[Delta]`), bounded retries/timeouts, `/v1/models` discovery, `ServerManager`; httptest-hermetic; replaces `Placeholder`** | wiring `Stream` into the loop (P1.2); ollama/llama.cpp `/props` discovery + PID-file orphan adoption (deferred) |
 | processing/ (parsers) | ∅→**P (P1.3)** | RISKIEST; TS oracle + ported test vectors *is* the gate (0024b); **P1.3: one format end-to-end — native/JSON tool-call parse (`ParseNativeToolCalls`→`domain.ToolCall`, args validated, empty→`{}`, malformed→`ErrMalformedToolCall` never panic) + inline thinking-channel strip (`StripThinking`/`IsThinking`; gemma `<think>`, gpt-oss harmony); ported thinking-stripper vectors are the gate; package depends only on `domain` — loop adapts `provider.ToolCall`→`NativeToolCall` at the seam (ADR 0010)** | markdown-fenced + custom-regex formats; full harmony channel set (→ Phase 3); loop wiring (→ P1.2) |
-| Tools (~30) | S (iface) | open extension point; stateless-across-Turns; external-effect boundary | per-tool design; approval/path-safety wiring; pure-Go search vs ripgrep |
+| Tools (~30) | S→**P (P1.4)** | open extension point; stateless-across-Turns; external-effect boundary; **P1.4: minimal local set — `read_file`/`write_file`/`list_dir`/pure-Go `grep` (`io/fs` walk + `regexp`, no external programs) in `internal/tools/`, each scoped to a sandbox root at construction with traversal-rejecting path-safety (symlink-aware); real `domain.ToolRegistry` (`Register` dup→`ErrDuplicateTool`, `Subset` never-a-superset, `Lookup`/`All` for dispatch+menu); `NewDefaultRegistry(root)` seam; optional `ReadOnlyTool` interface (read_file/list_dir/grep read-only, write_file write — the Plan-mode/Approval signal); tool failures surface as `IsError` results, ctx-cancel as a Go error** | richer tools (patch-edit/terminal/web); dispatch/approval/executor wiring (→ P1.2); ripgrep-optional |
 | Context (Budget/Compaction/capping) | ∅ | four-way split; Compaction default generative; capping = surviving half of `compress` | Budget allocation algorithm; Compaction trigger/strategy; token counting |
 | Sessions | S→**P (minimal)** | snapshot/resume at quiescent boundary; copyable value; **P0.6: versioned JSON `Snapshot`/`Resume`/`DecodeSession`, future-version rejected** | concrete schema; versioning/migration beyond reject; what's in `State` (loop counters, deferred actions) |
 | Mechanisms + registry | S→**P (partial)** | constraint-declared; deterministic total order; descriptor; Bypass by Capability; **P0.6: cycle detection + experimental-hook slots real** | full topo-sort *order* (only cycle-check built); self-regulation (Adaptive Suppression, Turn Budget, Effectiveness tracking); catalogue→hook mapping (deferred session) |
@@ -275,15 +275,16 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 12. ✅ §6.1 (Confiner placement) + §6 #7 (facade↔engine layout) **resolved** ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)); §4.1 #1 (public `Confiner`) ratified there too. **Still open:** §6.4 (mechanisms package-per-hook layout — Phase-4 catalogue-mapping session). *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
-**Phase 0 is complete (P0.1–P0.6); Phase 1 is underway — P1.0, P1.1, and P1.3 are done.** The
+**Phase 0 is complete (P0.1–P0.6); Phase 1 is underway — P1.0, P1.1, P1.3, and P1.4 are done.** The
 ADR-0010 layout is realised (P1.0), the real OpenAI-compatible provider client is built
-and wired (P1.1, replacing `Placeholder`), and `processing/` parses one tool-call format
-end-to-end (P1.3 — native/JSON + thinking strip, as a tested library not yet wired); the
-latest state lives in the handoffs.
+and wired (P1.1, replacing `Placeholder`), `processing/` parses one tool-call format
+end-to-end (P1.3 — native/JSON + thinking strip), and the minimal tool set + real registry
+are built (P1.4 — `read_file`/`write_file`/`list_dir`/pure-Go `grep` behind `domain.ToolRegistry`);
+all three are tested libraries not yet wired into the loop. The latest state lives in the handoffs.
 The remaining Phase-1 work is the task-level breakdown in
 [`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §4: the independent
-slices **P1.4** (minimal tools + registry) and **P1.5** (hook-mutation real bodies) fan
-out next; they converge on **P1.2** (the full
+slice **P1.5** (hook-mutation real bodies) is next; it and the P1.1/P1.3/P1.4 libraries
+converge on **P1.2** (the full
 Turn/Step state machine — the place streaming consumption, the §6 #6 streaming+Approval
 interleave, and the §6 #3 event-backpressure calls get settled), with **P1.6** (concrete
 Session schema) and **P1.7** (point `apogee-sim` at the Go API) closing the phase. The
