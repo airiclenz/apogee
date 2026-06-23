@@ -173,14 +173,20 @@ and edge-concentrated):
 
 ```
 apogee/
-├── apogee.go              # PUBLIC API facade (root package): Agent + Config, Run/Step,
-│                          #   Event types, Session snapshot/resume, hook-point interfaces,
-│                          #   public Tool interface. The bench + embedders depend on this.
-│                          #   (Thin facade over internal/ — mirrors apogee-sim's apogee.go.)
+├── apogee.go              # PUBLIC API facade (root package): a THIN ALIAS FACADE over
+│                          #   internal/ (ADR 0010) — `type Tool = domain.Tool`, re-exported
+│                          #   consts/errors, and forwarding constructors (New/Resume/…) that
+│                          #   delegate to internal/agent. NO engine logic lives here. The
+│                          #   bench + embedders depend on this. (Mirrors apogee-sim's apogee.go.)
 ├── cmd/apogee/            # Cobra entrypoint: root TUI + subcommands (run, library, probe…)
 │                          #   `headless` is an OPTIONAL user/scripting surface, NOT the
 │                          #   bench contract (the Go API is — ADR 0001).
 ├── internal/
+│   ├── domain/            # the ubiquitous language (CONTEXT.md) as Go — every public
+│   │                      #   type/interface/enum/error + their pure logic (registry ordering,
+│   │                      #   ConfinementCaps.AutoEligible, …). Depends ONLY on stdlib.
+│   │                      #   The Confiner trio lives here (ADR 0010 / §6.1). The bottom of
+│   │                      #   the DAG: every internal package imports DOWN to it, never root.
 │   ├── agent/             # orchestrator: loop-controller, conversation-state, modes
 │   │   ├── loop/          #   the agent loop — embeddable, steppable, NO ambient state;
 │   │   │                  #   owns tool dispatch + typed event emission
@@ -212,6 +218,14 @@ apogee/
 ├── docs/{adr,plans,handoffs}/
 └── go.mod                 # github.com/airiclenz/apogee
 ```
+
+**Dependency direction (the invariant — [ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)).**
+`internal/*` **never** imports the root `apogee` package; imports flow *down* to
+`internal/domain`. Public types live in `internal/domain`, the engine in `internal/agent`, and
+the root is a thin alias facade — so the tool and Mechanism *catalogues* can live in their own
+`internal/` packages (seeded by the engine) without the root↔subsystem cycle a fat root would
+force. P0.6's root-package loop was an explicit throwaway; **P1.0 moves it to this layout**
+([phase-1 detail plan](./phase-1-detail-plan.md) §3).
 
 **Key architectural seams:**
 - **The public Go API (the single most important seam — ADR 0001).** `Agent` + `Config`,

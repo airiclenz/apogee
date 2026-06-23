@@ -23,7 +23,7 @@ prioritized worklist.
 | Artifact | Role | Path |
 |---|---|---|
 | `CONTEXT.md` | Glossary — the domain language (authoritative for terms) | [`../../CONTEXT.md`](../../CONTEXT.md) |
-| ADRs 0001–0009 | Point decisions + rationale (authoritative for *why*) | [`../adr/`](../adr/) |
+| ADRs 0001–0010 | Point decisions + rationale (authoritative for *why*) | [`../adr/`](../adr/) |
 | Implementation plan | Phased build sequence (authoritative for *order*) | [`../plans/implementation-plan-apogee-merge.md`](../plans/implementation-plan-apogee-merge.md) |
 | `apogee.go` | Public API **signature sketch** (Phase-0 keystone; builds + vets, panic-stub bodies) | [`../../apogee.go`](../../apogee.go) |
 | **This TDD** | Consolidated design + gap register | you are here |
@@ -69,6 +69,7 @@ external-dependent task validation out of scope.
 | [0007](../adr/0007-step-turn-and-the-quiescent-boundary.md) | Step/Turn + quiescent boundary; cancellation is a Phase-0 primitive; recover-at-extension-boundary. |
 | [0008](../adr/0008-stateless-tools-and-non-forkable-external-effects.md) | Tools stateless across Turns; MCP/network non-forkable → disable-with-stub for v1. |
 | [0009](../adr/0009-the-ab-decision-rule.md) | A/B decision rule: NI gate + superiority selection, A/A-calibrated δ, task-blocked, asymmetric MC. |
+| [0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md) | Package layout: a domain core (`internal/domain`), the engine (`internal/agent`), a thin root alias facade; `internal/*` never imports root. Resolves §6 #7 + §6.1. |
 
 Plus `CONTEXT.md` (the glossary, with a retired-terms map) and the phased implementation
 plan. **All four prior "open items" are resolved** (plan §6 #22–24).
@@ -186,10 +187,13 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 
 ## 6. Notable open design questions (decide before/while densifying)
 
-1. **Confiner package placement.** Sketch puts the interface + `ConfinementCaps`/
-   `ConfinementBox` in the root `apogee` package, backends in `internal/platform`.
-   Alternative: a public `apogee/platform` (or `apogee/confine`) subpackage. **Decide and
-   reflect in plan §3 + ADR 0004.**
+1. ✅ **Confiner package placement — RESOLVED ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)).**
+   The `Confiner` interface + `ConfinementCaps`/`ConfinementBox` move into `internal/domain`;
+   the root re-exports them via type aliases (so the interface stays *public* — the host
+   injects it via `Config` — while its definition sits where both the loop and the backends
+   see it without an upward import). **No** public `apogee/platform` subpackage; the single
+   root facade stays the only public package. `internal/platform` imports `internal/domain`,
+   not root.
 2. **Hook mutation API — the biggest gap.** `Request`, `Response`, `Conversation` are
    exposed to hooks as **opaque structs with unexported fields** (sketch lines ~507–525),
    but hooks must *mutate* them (pre-request shapes `Request`; history-rewrite edits
@@ -206,17 +210,17 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    (context-builder seam) is unspecified.
 6. **Streaming + Approval interleave inside a Step** — confirm the control flow (sync
    `Approver` call mid-stream; what the EventSink sees around it).
-7. **Facade ↔ `internal/agent` placement (surfaced by P0.6).** The committed dependency
-   direction is *internal→root*: `internal/platform` imports the root `apogee` package for
-   `Confiner`, and the public types live in root. That makes it **impossible for the root
-   facade to import `internal/agent`** (which would need root's types) without a cycle — so
-   P0.6 put the loop bodies in the **root package** and kept only the root-type-free
-   `Responder` seam in `internal/agent`. This conflicts with the §3 layout that files the
-   loop under `internal/agent/{loop,subagent,modes}`. **Phase 1 must decide:** (a) keep the
-   loop in root and let `internal/agent` hold only provider-shaped seams; (b) introduce a
-   shared `internal/core` types package both root and `internal/agent` import; or (c) flip
-   to apogee-sim's *root→internal* aliasing (root re-exports `internal` types) — which would
-   also move `Confiner` and revisit §6.1. Lowest-churn is (a)/(b); (c) is a larger reshape.
+7. ✅ **Facade ↔ `internal/agent` placement — RESOLVED ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)).**
+   Adopted a **domain-core / engine / thin-facade** layout with one hard rule: **`internal/*`
+   never imports the root `apogee` package; dependencies flow down to `internal/domain`.** The
+   public types/interfaces/enums/errors live in `internal/domain` (the ubiquitous language as
+   Go); the engine (loop, Turn state machine, conversation, modes, sub-agents) lives in
+   `internal/agent`; the root `apogee` package is a thin facade of type aliases + re-exported
+   consts/errors + forwarding constructors. Chose this over (a) fat-root — which would force
+   the tool + Mechanism catalogues *into* root to avoid the seeding cycle (a god-package) — and
+   over a halfway `internal/core` that collapses into the same shape. **Realised by P1.0**
+   (the first Phase-1 task; a pure move, verify stays green). See
+   [`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §3.
 
 **Process / scaffolding (Phase 0):**
 - ✅ **Done (P0.2):** `go.mod` (`go 1.26`, no deps) + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles and `go vet`/`go vet -race` pass in-tree.
@@ -268,18 +272,21 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 11. Platform shell/path abstraction; TUI model/update/view; CLI surface.
 
 **Housekeeping (cheap, do alongside):**
-12. Resolve §6.1 (Confiner placement) + §6.4 (mechanisms layout); ratify §4.1 into plan/ADRs. *(`README.md:68` fix already done — `ff2c3f6`.)*
+12. ✅ §6.1 (Confiner placement) + §6 #7 (facade↔engine layout) **resolved** ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)); §4.1 #1 (public `Confiner`) ratified there too. **Still open:** §6.4 (mechanisms package-per-hook layout — Phase-4 catalogue-mapping session). *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
-**Phase 0 is complete (P0.1–P0.6).** The capstone runs the API for real over the
-`internal/agent.Responder` seam; off-path methods stay `panic` stubs. Next is **Phase 1 —
-the embeddable agent core**: the real OpenAI-compatible provider implementing `Responder`,
-the full Turn/Step state machine (streaming, tool dispatch, approval interleave), the
-concrete Session schema (P1 backlog #7), minimal tools, and pointing `apogee-sim` at the Go
-API. The throwaway P0.6 internals (the placeholder responder, the minimal `conversation`
-value, the cycle-check-only registry) are the precursors Phase 1 replaces. The P1/P2
-densification items above (loop engine, provider, processing/, context reducers) can fan out
-in parallel.
+**Phase 0 is complete (P0.1–P0.6); Phase 1 is planned.** The capstone runs the API for real
+over the `internal/agent.Responder` seam; off-path methods stay `panic` stubs. The §6 #7 +
+§6.1 layout calls are now resolved ([ADR 0010](../adr/0010-package-layout-domain-core-and-thin-root-facade.md)),
+and Phase 1 has a task-level breakdown:
+[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Start at P1.0** — the
+layout refactor (stand up `internal/domain`, move the engine into `internal/agent`, relocate
+the `Responder` seam into `internal/provider`, make `internal/platform` import `internal/domain`
+not root, turn `apogee.go` into the thin alias facade) — a pure move that keeps verify green and
+unblocks every real body. Then **P1.1** (real provider) and the rest fan out, converging on
+**P1.2** (the full Turn/Step state machine) and **P1.7** (point `apogee-sim` at the Go API). The
+throwaway P0.6 internals (placeholder responder, minimal `conversation`, cycle-check-only
+registry) are the precursors Phase 1 replaces.
 
 ---
 
