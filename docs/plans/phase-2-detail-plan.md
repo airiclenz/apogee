@@ -9,7 +9,8 @@ finalisation). P2.1 landed before it (HEAD `5e574c5`:
 the concurrency seam — `teaSink` + `uiApprover` + the worker driver, late-bound through the
 `Bridge`, `-race`-proven against a stub program; **ADR 0011** records the model). P2.0 landed
 before that (HEAD `a210c4f`: the Cobra binary, the composition-root wiring, and state-root
-resolution). Next is **P2.4** (the Approval UI); **P2.3** (rendering the event stream per C6) has landed. Phase 1 is complete (the embeddable
+resolution). **P2.3** (the C6 event fold) and **P2.4** (the Approval UI — the a/d/s decision keys
+over C3's reply channel) have since landed; **next is P2.5** (config & session glue). Phase 1 is complete (the embeddable
 agent core + the bench are built; the live-model eval is the one open Phase-1 runtime step,
 which Phase 2 also exercises in passing). **All Phase-2 entry-state pre-checks were
 re-verified against source (2026-06-23) and passed** (see the **Readiness** note in §0). This
@@ -319,7 +320,7 @@ end-to-end), and it doubles as the Phase-1 live-model confirmation.
 | **P2.1** ✅ | The concurrency seam: `teaSink` bridge + `uiApprover` rendezvous + worker `tea.Cmd` + cancel (C1–C4), as a fake-engine-testable package | P2.0 | `bubbletea/v2` | ADR 0007; TDD §6 #3; **ADR 0011** |
 | **P2.2** ✅ | Bubble Tea `Model`/`Update`/`View` skeleton: states (idle/running/awaiting-approval/error), input box, transcript viewport, status line | P2.1 | `lipgloss/v2`, `bubbles/v2` | TDD §5 TUI row |
 | **P2.3** ✅ | Event rendering: token-stream assembly, tool-call/result entries, message finalisation, error/mechanism display (C6) | P2.2 | none | §0 event-sequence rule |
-| **P2.4** | The Approval UI: inline prompt, `allow`/`deny`/`allow-for-session` keys, cancel-clears-prompt (C3) | P2.2 | none | CONTEXT: Approval; ADR 0004 |
+| **P2.4** ✅ | The Approval UI: inline prompt, `allow`/`deny`/`allow-for-session` keys, cancel-clears-prompt (C3) | P2.2 | none | CONTEXT: Approval; ADR 0004 |
 | **P2.5** | Config & session glue: flags+env+defaults (optional `.apogee/config.yaml`); basic snapshot-on-exit + `--resume` | P2.0 | `yaml.v3` *(only if a file lands)* | ADR 0001 (roots); §6.1 (sessions) |
 | **P2.6** | End-to-end acceptance: drive the **real** Agent through the TUI against a hermetic httptest model under `-race`; then the **live-model** run from the host | P2.1–P2.4 | none | broad §4 deliverable; Phase-1 live eval |
 
@@ -459,6 +460,25 @@ each key produces the right `ApprovalDecision` on the reply channel (table test,
 `allow-for-session` is observably distinct (the engine then auto-allows that tool — verified in
 the P2.6 e2e, where the loop's `approved[...]` cache suppresses the second prompt); a cancel
 while pending clears the prompt and returns to idle.
+**✅ Done (HEAD `02ae4d3`).** The wiring P2.2 left in place made this small — all in `model.go`,
+the ADR-0010 grep stays empty, no new deps. `handleKey` gained an `awaitingApproval` branch placed
+**before** the scroll fall-through (which otherwise swallowed `a`/`d`/`s` as viewport scroll keys —
+the bug handoff 15 flagged); `handleApprovalKey` + the `approvalKeys` map send the verdict
+(`a`→`ApprovalAllow`, `d`→`ApprovalDeny`, `s`→`ApprovalAllowForSession`) **non-blocking** on the
+cap-1 reply chan, clear `m.pending`, and return to `running` — **re-arming the spinner tick**, which
+had died when the prompt went up. A non-decision key still scrolls the transcript so the human can
+review context before ruling. `View` + `approvalPrompt` stack a prompt block (bold `approve
+<tool>?`, faint `(<reason>)`, then `prettyJSON(Arguments)` — **reusing the P2.3 helper**, no second
+formatter) between the viewport and the status line, **shrinking the viewport on View's local value
+copy** by the prompt height so it never pushes the status/input/hint past the bottom of the window;
+only `Depth == 0`. **The cancel path needed no new code** (`esc` while pending is already `busy()` →
+`stopWorker` → `cancelledMsg` → `finishWorker` clears the prompt) — only a test. `model_test.go`
+(now **61** tui subtests, +7, all `-race`): a table test for each decision key (verdict on the
+reply chan, return to `running`, `pending` cleared, spinner re-armed), the prompt render
+(tool/reason/args present), a non-decision-key no-op, and the cancel-while-pending → idle path.
+`allow-for-session` being **observably distinct** (the loop's `approved[...]` cache suppresses the
+second prompt) is left to the **P2.6** e2e, per the plan. All verify gates green. Next: **P2.5**
+(config & session glue) and **P2.6** (the hermetic e2e + the live-model run).
 
 ### P2.5 — config & session glue
 Resolve `Config` from flags → env → file → defaults (C7). Keep it **thin**: flags+env+defaults
