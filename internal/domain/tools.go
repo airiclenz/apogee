@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
 
 // ----------------------------------------------------------------------------
@@ -37,6 +38,24 @@ type ExternalEffectTool interface {
 	ExternalEffect() ExternalEffectKind
 }
 
+// ReadOnlyTool is an optional interface a Tool implements to declare that it performs
+// no writes. It is the signal Plan mode filters on (only read-only tools run) and that
+// Ask-Before uses to skip Approval for a harmless read. A Tool that does not implement
+// it — or implements it returning false — is treated as write-capable, the safe
+// default that gates. IsReadOnly is the helper the loop should call rather than the
+// type assertion directly.
+type ReadOnlyTool interface {
+	Tool
+	ReadOnly() bool
+}
+
+// IsReadOnly reports whether t has declared itself read-only via ReadOnlyTool. A tool
+// that makes no such declaration is treated as write-capable.
+func IsReadOnly(t Tool) bool {
+	ro, ok := t.(ReadOnlyTool)
+	return ok && ro.ReadOnly()
+}
+
 // ExternalEffectKind classifies a non-forkable external effect.
 type ExternalEffectKind string
 
@@ -61,20 +80,69 @@ type ToolResult struct {
 
 // ToolRegistry is the injectable set of available tools (ADR 0001 — injectable, no
 // globals). A sub-agent receives a subset of the parent's registry, never a
-// superset (ADR 0005).
+// superset (ADR 0005). Registration order is preserved so the tool menu the model
+// sees is deterministic across runs (load-bearing for the bench's reproducibility).
 type ToolRegistry struct {
-	// unexported map[string]Tool
+	byName map[string]Tool // keyed on Tool.Name for O(1) dispatch lookup
+	order  []string        // registration order, for a deterministic All()
 }
 
 // NewToolRegistry returns an empty registry.
-func NewToolRegistry() *ToolRegistry { panic("sketch: not implemented") }
+func NewToolRegistry() *ToolRegistry {
+	return &ToolRegistry{byName: make(map[string]Tool)}
+}
 
-// Register adds a tool, returning an error on a duplicate name.
-func (r *ToolRegistry) Register(t Tool) error { panic("sketch: not implemented") }
+// Register adds a tool, returning ErrDuplicateTool on a name already present and
+// ErrInvalidTool on an empty name (the model keys calls on the name, so it must be a
+// stable, non-empty identifier).
+func (r *ToolRegistry) Register(t Tool) error {
+	name := t.Name()
+	if name == "" {
+		return fmt.Errorf("%w: tool name must not be empty", ErrInvalidTool)
+	}
+	if _, exists := r.byName[name]; exists {
+		return fmt.Errorf("%w: %q", ErrDuplicateTool, name)
+	}
+	r.byName[name] = t
+	r.order = append(r.order, name)
+	return nil
+}
 
-// Subset returns a new registry containing only the named tools — the primitive a
-// caller uses to narrow a sub-agent's tools (ADR 0005).
-func (r *ToolRegistry) Subset(names ...string) *ToolRegistry { panic("sketch: not implemented") }
+// Lookup returns the tool registered under name, and whether it was found — the seam
+// the loop's dispatch resolves a parsed ToolCall against.
+func (r *ToolRegistry) Lookup(name string) (Tool, bool) {
+	t, ok := r.byName[name]
+	return t, ok
+}
+
+// All returns the registered tools in registration order — the read seam the loop
+// builds the model's tool menu from without reaching into unexported storage.
+func (r *ToolRegistry) All() []Tool {
+	tools := make([]Tool, 0, len(r.order))
+	for _, name := range r.order {
+		tools = append(tools, r.byName[name])
+	}
+	return tools
+}
+
+// Subset returns a new registry containing only the named tools, in the order named
+// — the primitive a caller uses to narrow a sub-agent's tools (ADR 0005). Names not
+// present in this registry are skipped, so the result can never be a superset of the
+// parent; a repeated name is registered once.
+func (r *ToolRegistry) Subset(names ...string) *ToolRegistry {
+	sub := NewToolRegistry()
+	for _, name := range names {
+		t, ok := r.byName[name]
+		if !ok {
+			continue
+		}
+		if _, already := sub.byName[name]; already {
+			continue
+		}
+		_ = sub.Register(t) // cannot fail: name is non-empty (it keyed r.byName) and unique here
+	}
+	return sub
+}
 
 // ExternalEffects is the single injectable boundary for non-forkable external
 // effects (ADR 0008). Production uses a live implementation; the bench injects a

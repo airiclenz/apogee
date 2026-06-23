@@ -35,6 +35,7 @@ var (
 	_ apogee.ApprovalDecision
 	_ apogee.Tool
 	_ apogee.ExternalEffectTool
+	_ apogee.ReadOnlyTool
 	_ apogee.ExternalEffectKind
 	_ apogee.ToolCall
 	_ apogee.ToolResult
@@ -76,6 +77,7 @@ var (
 var (
 	_ = apogee.New
 	_ = apogee.Resume
+	_ = apogee.IsReadOnly
 	_ = apogee.NewToolRegistry
 	_ = apogee.NewMechanismRegistry
 	_ = apogee.DecodeSession
@@ -128,4 +130,6 @@ var (
 	_ = apogee.ErrOrderingCycle
 	_ = apogee.ErrSessionVersion
 	_ = apogee.ErrInputPending
+	_ = apogee.ErrDuplicateTool
+	_ = apogee.ErrInvalidTool
 )

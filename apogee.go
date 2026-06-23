@@ -150,6 +150,14 @@ type Tool = domain.Tool
 // state Apogee does not own (network, MCP).
 type ExternalEffectTool = domain.ExternalEffectTool
 
+// ReadOnlyTool is an optional interface a Tool implements to declare it performs no
+// writes — the signal Plan mode and Ask-Before Approval gate on.
+type ReadOnlyTool = domain.ReadOnlyTool
+
+// IsReadOnly reports whether a Tool has declared itself read-only; an undeclared tool
+// is treated as write-capable.
+func IsReadOnly(t Tool) bool { return domain.IsReadOnly(t) }
+
 // ExternalEffectKind classifies a non-forkable external effect.
 type ExternalEffectKind = domain.ExternalEffectKind
 
@@ -339,4 +347,11 @@ var (
 
 	// ErrInputPending is returned by Submit when an Exchange is already in progress.
 	ErrInputPending = domain.ErrInputPending
+
+	// ErrDuplicateTool is returned by ToolRegistry.Register on a duplicate tool name.
+	ErrDuplicateTool = domain.ErrDuplicateTool
+
+	// ErrInvalidTool is returned by ToolRegistry.Register for an unaddressable tool
+	// (currently an empty Name).
+	ErrInvalidTool = domain.ErrInvalidTool
 )

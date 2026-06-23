@@ -22,4 +22,13 @@ var (
 
 	// ErrInputPending is returned by Submit when an Exchange is already in progress.
 	ErrInputPending = errors.New("apogee: cannot submit input mid-exchange")
+
+	// ErrDuplicateTool is returned by ToolRegistry.Register when a tool with the same
+	// Name is already registered — the name is the model's stable handle, so a
+	// collision is a configuration error, not a silent overwrite.
+	ErrDuplicateTool = errors.New("apogee: a tool with this name is already registered")
+
+	// ErrInvalidTool is returned by ToolRegistry.Register for a tool that cannot be
+	// addressed — currently an empty Name.
+	ErrInvalidTool = errors.New("apogee: invalid tool")
 )
