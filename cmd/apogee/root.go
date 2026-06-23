@@ -43,7 +43,9 @@ func newRootCommand(launch launcher) *cobra.Command {
 			"hold a coding conversation, watch tools run, and approve writes.\n\n" +
 			"Settings resolve by precedence: a flag overrides an APOGEE_* environment\n" +
 			"variable (APOGEE_ENDPOINT, APOGEE_MODEL, APOGEE_MODE, APOGEE_BYPASS), which\n" +
-			"overrides ~/.apogee/config.yaml, which overrides the built-in default. A clean\n" +
+			"overrides ~/.apogee/config.yaml, which overrides the built-in default. With no\n" +
+			"model set anywhere, apogee asks the server for its active model, so a single-\n" +
+			"model server (e.g. llama.cpp's llama-server) needs only --endpoint. A clean\n" +
 			"quit snapshots the conversation under ~/.apogee/sessions for --resume.",
 		Args: cobra.NoArgs,
 		// On a runtime (RunE) error, print just the error — not the full usage dump,
@@ -68,13 +70,21 @@ func newRootCommand(launch launcher) *cobra.Command {
 			if err := applyConfig(&opts, changed, os.Getenv, os.ReadFile); err != nil {
 				return err
 			}
+			// With no model configured by any layer, ask the server for its active model
+			// (the lowest-priority layer) so a single-model server runs with no --model set.
+			// The notice prints before the alt-screen, on stderr.
+			if model, err := resolveModel(cmd.Context(), &opts, discoverUpstreamModel); err != nil {
+				return err
+			} else if model != "" {
+				cmd.PrintErrln("apogee: discovered model", model, "at", opts.endpoint)
+			}
 			return runRoot(cmd.Context(), opts, launch)
 		},
 	}
 
 	flags := cmd.Flags()
 	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
-	flags.StringVar(&opts.model, "model", "", "model name to request")
+	flags.StringVar(&opts.model, "model", "", "model name to request (default: ask the server for its active model)")
 	flags.StringVar(&opts.mode, "mode", string(modeAskBefore),
 		"autonomy: plan | ask-before (auto requires Confinement, lands in Phase 3)")
 	flags.StringVar(&opts.workspace, "workspace", "",

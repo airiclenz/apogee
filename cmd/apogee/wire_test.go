@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +13,42 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
+
+// discoverUpstreamModel probes a real OpenAI-compatible /v1/models endpoint and returns its
+// active model — the production discoverer the root wires into resolveModel. The httptest
+// server exercises the full provider path (HTTP + decode), not just the injected fake.
+func TestDiscoverUpstreamModel(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("discovery hit %q; want /v1/models", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"loaded-model","context_length":32768}]}`))
+	}))
+	defer srv.Close()
+
+	model, err := discoverUpstreamModel(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("discoverUpstreamModel: %v", err)
+	}
+	if model != "loaded-model" {
+		t.Errorf("model = %q; want the server's advertised model", model)
+	}
+}
+
+// An unreachable server is a discovery error the caller surfaces, not a silent empty model.
+func TestDiscoverUpstreamModelUnreachable(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	if _, err := discoverUpstreamModel(context.Background(), srv.URL); err == nil {
+		t.Fatal("discovery against a failing server: want an error, got nil")
+	}
+}
 
 func TestParseMode(t *testing.T) {
 	t.Parallel()

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -25,6 +26,20 @@ const (
 	modeAskBefore = apogee.ModeAskBefore
 	modeAuto      = apogee.ModeAuto
 )
+
+// discoverUpstreamModel probes the OpenAI-compatible server at endpoint for its active
+// model id — the first advertised model when none is configured (provider.Discover). It is
+// the production modelDiscoverer the root wires into resolveModel so a single-model server
+// runs with no --model set; tests inject a fake. ctx bounds the probe (Discover also
+// self-imposes a short timeout), and a model-less client is fine — Discover treats the
+// configured model only as a hint.
+func discoverUpstreamModel(ctx context.Context, endpoint string) (string, error) {
+	info, err := provider.NewClient(endpoint, "").Discover(ctx)
+	if err != nil {
+		return "", err
+	}
+	return info.ActiveModel, nil
+}
 
 // ----------------------------------------------------------------------------
 // Root command body

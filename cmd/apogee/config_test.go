@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -199,6 +200,84 @@ func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 	err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile)
 	if err == nil {
 		t.Fatal("invalid APOGEE_BYPASS: want an error, got nil")
+	}
+}
+
+// With no model configured but an endpoint known, resolveModel asks the server and adopts
+// the discovered id — the zero-config single-model case (llama.cpp's llama-server).
+func TestResolveModelDiscoversWhenUnset(t *testing.T) {
+	t.Parallel()
+	discover := func(_ context.Context, endpoint string) (string, error) {
+		if endpoint != "http://server" {
+			t.Errorf("discover called with endpoint %q; want the resolved endpoint", endpoint)
+		}
+		return "discovered-model", nil
+	}
+	opts := options{endpoint: "http://server"}
+	got, err := resolveModel(context.Background(), &opts, discover)
+	if err != nil {
+		t.Fatalf("resolveModel: %v", err)
+	}
+	if got != "discovered-model" || opts.model != "discovered-model" {
+		t.Errorf("resolveModel = %q, opts.model = %q; want both %q", got, opts.model, "discovered-model")
+	}
+}
+
+// A model resolved by a higher layer (flag/env/file) wins: discovery must not run and must
+// not overwrite it.
+func TestResolveModelSkipsWhenAlreadySet(t *testing.T) {
+	t.Parallel()
+	discover := func(context.Context, string) (string, error) {
+		t.Fatal("discover must not be called when a model is already configured")
+		return "", nil
+	}
+	opts := options{endpoint: "http://server", model: "m-configured"}
+	got, err := resolveModel(context.Background(), &opts, discover)
+	if err != nil {
+		t.Fatalf("resolveModel: %v", err)
+	}
+	if got != "" {
+		t.Errorf("resolveModel = %q; want \"\" (no discovery ran)", got)
+	}
+	if opts.model != "m-configured" {
+		t.Errorf("opts.model = %q; want the configured value preserved", opts.model)
+	}
+}
+
+// With no endpoint there is nothing to ask, so discovery is a silent no-op — construction
+// then surfaces the missing-endpoint error, which is the real problem.
+func TestResolveModelNoEndpointIsNoOp(t *testing.T) {
+	t.Parallel()
+	discover := func(context.Context, string) (string, error) {
+		t.Fatal("discover must not be called with no endpoint")
+		return "", nil
+	}
+	opts := options{}
+	got, err := resolveModel(context.Background(), &opts, discover)
+	if err != nil {
+		t.Fatalf("resolveModel: %v", err)
+	}
+	if got != "" || opts.model != "" {
+		t.Errorf("resolveModel = %q, opts.model = %q; want both empty", got, opts.model)
+	}
+}
+
+// A discovery failure is surfaced (not swallowed) so the user learns the server is
+// unreachable or advertises no model, and the underlying error is wrapped for errors.Is.
+func TestResolveModelDiscoveryErrorPropagates(t *testing.T) {
+	t.Parallel()
+	boom := errors.New("connection refused")
+	discover := func(context.Context, string) (string, error) { return "", boom }
+	opts := options{endpoint: "http://server"}
+	_, err := resolveModel(context.Background(), &opts, discover)
+	if err == nil {
+		t.Fatal("discovery failure: want an error, got nil")
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("error %v does not wrap the underlying discovery error", err)
+	}
+	if opts.model != "" {
+		t.Errorf("opts.model = %q; want it left empty on failure", opts.model)
 	}
 }
 

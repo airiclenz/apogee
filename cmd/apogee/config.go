@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -241,4 +242,35 @@ func configFilePath(configDir string) string {
 		return ""
 	}
 	return filepath.Join(home, "config.yaml")
+}
+
+// ----------------------------------------------------------------------------
+// Model discovery (the lowest-priority resolution layer: flag > env > file > discover)
+// ----------------------------------------------------------------------------
+
+// modelDiscoverer asks the Upstream at endpoint for its active model id. It is injected so
+// auto-discovery is testable without a live server; the production discoverer (wire.go)
+// probes /v1/models through the provider client.
+type modelDiscoverer func(ctx context.Context, endpoint string) (string, error)
+
+// resolveModel fills opts.model by asking the server when no model was configured by any
+// layer (flag, env, and file all empty) but an endpoint is known — so a single-model
+// server (e.g. llama.cpp's llama-server, which serves whatever model was loaded) runs with
+// no model set at all. It returns the discovered id ("" when discovery did not run) so the
+// caller can surface a one-line notice. A discovery failure is returned rather than
+// swallowed: the user learns the server is unreachable or advertises no model, instead of
+// silently sending a model-less request. With no endpoint there is nothing to ask, so it is
+// a no-op — construction then surfaces the missing-endpoint error, the real problem.
+func resolveModel(ctx context.Context, opts *options, discover modelDiscoverer) (string, error) {
+	if opts.model != "" || opts.endpoint == "" {
+		return "", nil
+	}
+	model, err := discover(ctx, opts.endpoint)
+	if err != nil {
+		return "", fmt.Errorf(
+			"apogee: no model configured and discovery from %s failed: %w; "+
+				"set one with --model, APOGEE_MODEL, or model: in config.yaml", opts.endpoint, err)
+	}
+	opts.model = model
+	return model, nil
 }

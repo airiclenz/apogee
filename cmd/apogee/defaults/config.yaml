@@ -14,7 +14,9 @@
 #   flag: --endpoint   env: APOGEE_ENDPOINT
 # endpoint: http://192.168.64.1:1111
 
-# The model name to request from that server.
+# The model name to request from that server. Leave it unset and apogee asks the server
+# for its active model — a single-model server (e.g. llama.cpp's llama-server) needs only
+# the endpoint above.
 #   flag: --model      env: APOGEE_MODEL
 # model: qwen2.5-coder
 
