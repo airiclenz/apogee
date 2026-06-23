@@ -22,13 +22,15 @@ import (
 // from one goroutine (Step/Run), and observe it from another only via its EventSink.
 type Agent struct {
 	cfg      domain.Config
-	upstream provider.Responder        // provider seam (Decision C): fake in P0.6, real HTTP in Phase 1
+	upstream provider.Responder        // provider seam (Decision C): fake in tests, real HTTP via New
 	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
+	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry)
 
-	conv         conversation      // serializable conversation state (ADR 0001)
-	pendingInput *domain.UserInput // queued by Submit, consumed by the next Step
-	inExchange   bool              // true between Submit and the Step that completes the Exchange
-	turnIndex    int               // 0-based index of the next Turn
+	conv         domain.Conversation // serializable conversation state (ADR 0001)
+	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step
+	inExchange   bool                // true between Submit and the Step that completes the Exchange
+	turnIndex    int                 // 0-based index of the next Turn
+	approved     map[string]bool     // tools the human allowed for the rest of this Session
 }
 
 // New constructs an Agent from cfg. It validates the configuration — including the
@@ -87,9 +89,17 @@ func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) { return a.
 
 // Run steps the loop until the Exchange completes (a final no-tool response),
 // cancellation, or a loop-level error — a convenience wrapper over Step for hosts
-// that do not need Turn-level control. The bench drives Step directly.
+// that do not need Turn-level control. It returns the StepResult of the Step that ended
+// the loop (StatusExchangeComplete or StatusCancelled). Each intermediate Turn still
+// returns at its own quiescent boundary, so a cancel delivered through ctx is honoured at
+// the next boundary exactly as it is under Step. The bench drives Step directly.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
-	panic("sketch: not implemented")
+	for {
+		res, err := a.step(ctx)
+		if err != nil || res.Status != domain.StatusTurnComplete {
+			return res, err
+		}
+	}
 }
 
 // Mode reports the Agent's current Agent mode.
@@ -107,7 +117,7 @@ func (a *Agent) Mode() domain.Mode { return a.cfg.Mode }
 // Domain owns the Session envelope and its version; the engine owns the opaque State
 // payload, so Snapshot serializes the engine's conversation state into it (ADR 0010).
 func (a *Agent) Snapshot() (domain.Session, error) {
-	state, err := encodeConversation(a.conv)
+	state, err := encodeConversation(&a.conv)
 	if err != nil {
 		return domain.Session{}, err
 	}

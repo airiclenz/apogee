@@ -10,6 +10,7 @@ package agent
 import (
 	"context"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,27 +27,40 @@ type recordingSink struct {
 
 func (s *recordingSink) Emit(e domain.Event) { s.events = append(s.events, e) }
 
+// streamReply is a fake stream that yields one content chunk then a terminal Done — the
+// streaming stand-in for a canned assistant reply.
+func streamReply(content string) iter.Seq[provider.Delta] {
+	return func(yield func(provider.Delta) bool) {
+		if content != "" && !yield(provider.Delta{Kind: provider.DeltaContent, Content: content}) {
+			return
+		}
+		yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: "stop"})
+	}
+}
+
 // echoResponder is the canned-reply fake: it answers every request with a fixed
-// assistant message, the stand-in for the Phase-1 HTTP provider.
+// assistant message, the stand-in for the real HTTP provider on the streaming seam.
 type echoResponder struct {
 	reply string
 }
 
-func (r echoResponder) Respond(context.Context, provider.Request) (provider.RawResponse, error) {
-	return provider.RawResponse{Content: r.reply}, nil
+func (r echoResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
+	return streamReply(r.reply)
 }
 
-// blockingResponder blocks until ctx is cancelled, then reports the cancellation —
-// the fake that drives the cancel-mid-respond path. started is closed once Respond is
-// in flight so the test can cancel deterministically (no sleep, no flake).
+// blockingResponder blocks until ctx is cancelled, then surfaces the cancellation as a
+// terminal stream error — the fake that drives the cancel-mid-stream path. started is
+// closed once the stream is in flight so the test can cancel deterministically (no sleep).
 type blockingResponder struct {
 	started chan struct{}
 }
 
-func (r blockingResponder) Respond(ctx context.Context, _ provider.Request) (provider.RawResponse, error) {
-	close(r.started)
-	<-ctx.Done()
-	return provider.RawResponse{}, ctx.Err()
+func (r blockingResponder) Stream(ctx context.Context, _ provider.Request) iter.Seq[provider.Delta] {
+	return func(yield func(provider.Delta) bool) {
+		close(r.started)
+		<-ctx.Done()
+		yield(provider.Delta{Kind: provider.DeltaError, Err: ctx.Err().Error()})
+	}
 }
 
 // firingHook is a no-op experimental pre-request hook that records that it fired.
@@ -163,7 +177,7 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 
 	// user "hi", assistant "hello from model" (restored) + user "again", assistant
 	// "second reply" (this Turn) = 4 messages — proving Resume restored the history.
-	if got := len(b.conv.Messages); got != 4 {
+	if got := b.conv.Len(); got != 4 {
 		t.Errorf("resumed conversation has %d messages, want 4", got)
 	}
 	if me, ok := firstMessageEvent(t, sink2.events); !ok || me.Text != "second reply" {
@@ -177,8 +191,11 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 // Upstream, surfacing the server's reply as a MessageEvent at the quiescent boundary.
 func TestHarness_RealProviderWirePath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"from the wire"},"finish_reason":"stop"}]}`)
+		// The loop streams (the §6 #6 path): answer with SSE, not a whole JSON body.
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"from the wire\"},\"finish_reason\":null}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
 

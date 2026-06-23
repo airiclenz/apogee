@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"iter"
 	"strings"
 	"testing"
 
@@ -22,9 +23,9 @@ type capturingResponder struct {
 	reply string
 }
 
-func (r *capturingResponder) Respond(_ context.Context, req provider.Request) (provider.RawResponse, error) {
+func (r *capturingResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
 	r.got = req
-	return provider.RawResponse{Content: r.reply}, nil
+	return streamReply(r.reply)
 }
 
 const guidanceMarker = "[apogee:guidance]"

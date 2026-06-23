@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // experimentalMechanismID is the synthetic MechanismID a descriptor-less experimental
@@ -21,20 +23,25 @@ const experimentalMechanismID domain.MechanismID = "experimental"
 // than a zero that a future Mechanism might divide by.
 const defaultCharsPerToken = 4.0
 
+// maxPostResponseRetries caps how many times an ActionRetry post-response decision may
+// re-call the Upstream within one Turn, so a response-repair hook that always retries
+// cannot spin the loop forever. After the cap the loop proceeds with the last response.
+const maxPostResponseRetries = 3
+
 var (
 	errMissingEvents   = errors.New("apogee: Config.Events is required")
 	errMissingEndpoint = errors.New("apogee: Config.Endpoint is required")
 	errMissingModel    = errors.New("apogee: Config.Model is required")
 	// errHookPanicked is an internal signal — never returned to the host — that a
 	// panic was recovered at an extension boundary and reported as an ErrorEvent, so
-	// Step can degrade to a clean quiescent boundary instead of unwinding.
+	// the loop can degrade to a clean quiescent boundary instead of unwinding.
 	errHookPanicked = errors.New("apogee: extension boundary recovered a panic")
 )
 
 // newAgent validates cfg and constructs a ready-to-Step Agent bound to up. The public
-// New delegates here with the Phase-0 placeholder responder; white-box tests inject a
-// deterministic fake. Validation order is deliberate: required fields, then the
-// ordering-cycle gate (ADR 0003), then the Auto/Confinement gate (ADR 0004).
+// New delegates here with the real provider client; white-box tests inject a deterministic
+// fake. Validation order is deliberate: required fields, then the ordering-cycle gate
+// (ADR 0003), then the Auto/Confinement gate (ADR 0004).
 func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
@@ -52,7 +59,20 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, domain.ErrAutoUnavailable
 	}
 
-	return &Agent{cfg: cfg, upstream: up, registry: registry}, nil
+	return &Agent{cfg: cfg, upstream: up, registry: registry, tools: resolveTools(cfg)}, nil
+}
+
+// resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;
+// otherwise, when Config.WorkspaceDir is set, the built-in file tools scoped to it; else
+// no tools (the host gave neither, so the Agent runs tool-less).
+func resolveTools(cfg domain.Config) *domain.ToolRegistry {
+	if cfg.Tools != nil {
+		return cfg.Tools
+	}
+	if cfg.WorkspaceDir != "" {
+		return tools.NewDefaultRegistry(cfg.WorkspaceDir)
+	}
+	return nil
 }
 
 // resumeAgent rebuilds an Agent from snap, rejecting a snapshot newer than this build
@@ -74,10 +94,10 @@ func resumeAgent(cfg domain.Config, snap domain.Session, up provider.Responder) 
 	return a, nil
 }
 
-// validateConfig enforces the minimum construction surface (Config: Endpoint, Model,
-// and Events are the minimum). Events is load-bearing now — the loop emits through it;
-// Endpoint/Model are validated here for an honest contract even though the Phase-0 fake
-// responder ignores them (the real provider dials them in Phase 1).
+// validateConfig enforces the minimum construction surface (Config: Endpoint, Model, and
+// Events are the minimum). Events is load-bearing — the loop emits through it; Endpoint and
+// Model are validated here for an honest contract even when a test injects a fake responder
+// that ignores them (the real provider dials them).
 func validateConfig(cfg domain.Config) error {
 	if cfg.Events == nil {
 		return errMissingEvents
@@ -100,141 +120,254 @@ func autoEligible(c domain.Confiner) bool {
 	return c.Capabilities().AutoEligible()
 }
 
-// step advances the loop one Turn and returns at a quiescent boundary (ADR 0007). The
-// Phase-0 Turn is the throwaway-thin slice: consume queued input, run pre-request
-// hooks, ask the Upstream once (non-streaming, no tools), emit the assistant message.
-// It honours ctx cancellation and recovers a panic at the extension boundary — the two
-// boundary guarantees the capstone exists to prove — without ever unwinding the host.
+// step advances the loop one Turn and returns at a quiescent boundary (ADR 0007). The full
+// Turn is: consume queued input → history-rewrite hooks → build request (drain deferred
+// corrections + pre-request hooks) → stream the Upstream reply (emitting TokenEvents) →
+// parse tool calls → post-response hooks → if the model asked for tools, dispatch each
+// through Approval and continue the Exchange (StatusTurnComplete); otherwise commit the
+// final message and end it (StatusExchangeComplete).
+//
+// Every return is at a serializable boundary. A ctx cancellation rolls this Turn's work
+// back and returns StatusCancelled with resumable state; a recovered extension panic or
+// Upstream fault degrades the Turn to a clean boundary without unwinding the host.
 func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	start := time.Now()
 	turn := a.turnIndex
 
 	if a.pendingInput != nil {
-		a.conv.append(message{Role: domain.RoleUser, Content: a.pendingInput.Text})
+		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: a.pendingInput.Text})
 		a.pendingInput = nil
 		a.inExchange = true
 	}
 
-	// Build the pre-request working value from conversation state, run the pre-request
-	// hooks against that single shared Request so their mutations compose, then drain
-	// it onto the provider wire shape — closing the P0.6 gap where hooks fired but
-	// their mutations were dropped (TDD §6.2 / P1.5).
-	req := a.buildRequest(turn)
+	// History-rewrite hooks edit conversation state before it is projected (truncation,
+	// generative compaction). A recovered panic degrades the Turn with no Upstream call.
+	if err := a.runHistoryRewriteHooks(ctx, turn); err != nil {
+		return a.abandonTurn(turn, start), nil
+	}
+
+	// rollback marks the boundary a cancellation restores to: this Turn's assistant
+	// message and tool results are dropped and the drained deferred corrections re-queued,
+	// so resume re-attempts the Turn from serializable state. The user message above is
+	// kept — the input is not lost to a cancel.
+	rollback := a.conv.Len()
+
+	req, deferred := a.buildRequest(turn)
 	if err := a.runPreRequestHooks(ctx, turn, req); err != nil {
-		// A hook panicked: the ErrorEvent is already emitted; degrade to a clean
-		// boundary with the conversation still serializable (no assistant message).
-		return a.completeTurn(turn, start), nil
+		// The request was never sent: re-queue the drained corrections so they ride the
+		// next request, and degrade the Turn with no assistant message.
+		a.restoreDeferred(deferred)
+		return a.abandonTurn(turn, start), nil
 	}
 
-	response, err := a.upstream.Respond(ctx, a.toProviderRequest(req))
-	if err != nil {
+	resp, outcome := a.respondAndReview(ctx, turn, req)
+	switch outcome {
+	case turnCancelled:
+		return a.cancelTurn(turn, rollback, deferred, start), nil
+	case turnFailed:
+		a.restoreDeferred(deferred)
+		return a.abandonTurn(turn, start), nil
+	}
+
+	calls := resp.ToolCalls()
+	if len(calls) == 0 {
+		// Final no-tool response: commit the assistant message and end the Exchange.
+		a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: resp.Text()})
+		a.cfg.Events.Emit(domain.MessageEvent{EventBase: base(turn), Text: resp.Text()})
+		return a.completeTurn(turn, start, domain.StatusExchangeComplete), nil
+	}
+
+	// The model requested tools: commit the assistant tool-call message, then dispatch
+	// each call through Approval. A cancellation mid-tool rolls the whole Turn back.
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: resp.Text(), ToolCalls: calls})
+	if a.dispatchTools(ctx, turn, calls) == dispatchCancelled {
+		return a.cancelTurn(turn, rollback, deferred, start), nil
+	}
+	return a.completeTurn(turn, start, domain.StatusTurnComplete), nil
+}
+
+// turnOutcome classifies how the stream → parse → post-response phase ended.
+type turnOutcome int
+
+const (
+	turnOK        turnOutcome = iota // a usable response (a nil-safe *Response is returned)
+	turnCancelled                    // ctx was cancelled mid-stream
+	turnFailed                       // an Upstream fault (already surfaced as an ErrorEvent)
+)
+
+// respondAndReview streams one Upstream reply, parses its tool calls, builds the post-
+// response working value, and runs the post-response hooks — re-calling the Upstream in
+// place for an ActionRetry decision (bounded by maxPostResponseRetries). It returns the
+// reviewed *Response on turnOK, or nil with turnCancelled / turnFailed.
+func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Request) (*domain.Response, turnOutcome) {
+	for attempt := 0; ; attempt++ {
+		reply := a.streamResponse(ctx, turn, req)
 		if ctx.Err() != nil {
-			// Cancelled mid-respond: leave state serializable — never half-streamed
-			// (ADR 0007) — so the Snapshot taken here resumes and continues. The Turn
-			// is abandoned, not completed: return to a clean quiescent boundary without
-			// advancing the Turn counter, so resume re-attempts rather than skips it.
-			a.inExchange = false
-			return domain.StepResult{
-				Status:    domain.StatusCancelled,
-				TurnIndex: turn,
-				Elapsed:   time.Since(start),
-			}, nil
+			return nil, turnCancelled // a cancel masquerades as a stream error; ctx wins
 		}
-		// A non-cancellation Upstream fault is localised to an ErrorEvent; the loop
-		// still reaches a clean boundary rather than failing the whole Step.
-		a.cfg.Events.Emit(domain.ErrorEvent{
-			EventBase: domain.EventBase{Turn: turn},
-			Source:    "loop",
-			Err:       err.Error(),
-		})
-		return a.completeTurn(turn, start), nil
-	}
+		if reply.failed {
+			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: "loop", Err: reply.errMsg})
+			return nil, turnFailed
+		}
 
-	a.conv.append(message{Role: domain.RoleAssistant, Content: response.Content})
-	a.cfg.Events.Emit(domain.MessageEvent{EventBase: domain.EventBase{Turn: turn}, Text: response.Content})
-	return a.completeTurn(turn, start), nil
-}
+		calls, err := parseToolCalls(reply.toolCalls)
+		if err != nil {
+			// A malformed tool call degrades to a parse-error path, not a panic: surface
+			// it and treat the Turn as a final no-tool response.
+			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: "processing", Err: err.Error()})
+			calls = nil
+		}
 
-// completeTurn closes the Exchange at the quiescent boundary and advances the Turn
-// counter. The Phase-0 slice is single-Turn and non-streaming, so every Step that is
-// not cancelled ends the Exchange (StatusExchangeComplete — awaiting the next Submit).
-func (a *Agent) completeTurn(turn int, start time.Time) domain.StepResult {
-	a.inExchange = false
-	a.turnIndex++
-	return domain.StepResult{
-		Status:    domain.StatusExchangeComplete,
-		TurnIndex: turn,
-		Elapsed:   time.Since(start),
-	}
-}
-
-// runPreRequestHooks fires the registered experimental pre-request hooks against the
-// shared req — their mutations compose in registration order — emitting a
-// MechanismFiredEvent per successful fire (P0.6d). A panic in any hook is caught,
-// reported as an ErrorEvent, and signalled back via errHookPanicked so step can
-// degrade — the recover-at-extension-boundary guarantee (ADR 0007 / ADR 0002).
-func (a *Agent) runPreRequestHooks(ctx context.Context, turn int, req *domain.Request) error {
-	for _, raw := range a.registry.Experimental(domain.HookPreRequest) {
-		hook, ok := raw.(domain.PreRequestHook)
-		if !ok {
+		resp := domain.NewResponse(reply.content, reply.thinking, calls, reply.finish, req.View())
+		retry, hookErr := a.runPostResponseHooks(ctx, turn, resp)
+		if hookErr != nil {
+			// A post-response hook panicked (recovered into an ErrorEvent): the model did
+			// reply, so proceed with the response as reviewed so far rather than abandon.
+			return resp, turnOK
+		}
+		if retry && attempt < maxPostResponseRetries {
 			continue
 		}
-		if err := a.firePreRequest(ctx, hook, turn, req); err != nil {
-			return err
+		return resp, turnOK
+	}
+}
+
+// reply is the assembled result of consuming one streamed completion.
+type reply struct {
+	content   string
+	thinking  string
+	toolCalls []provider.ToolCall
+	finish    domain.FinishReason
+	failed    bool   // a terminal DeltaError / DeltaContextOverflow arrived
+	errMsg    string // the terminal fault message when failed
+}
+
+// streamResponse consumes the provider's Delta stream, emitting a TokenEvent per content
+// chunk as it arrives (the live half of §6 #6) and accumulating text, reasoning, and the
+// fully-joined tool calls. The SSE body is drained to its terminal Delta and closed before
+// this returns — so Approval, consulted afterward in dispatchTools, never blocks an open
+// Upstream connection. A cancellation surfaces as a terminal DeltaError; the caller
+// distinguishes it from a real fault by checking ctx.Err().
+func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) reply {
+	var out reply
+	var content, thinking strings.Builder
+	for delta := range a.upstream.Stream(ctx, a.toProviderRequest(req)) {
+		switch delta.Kind {
+		case provider.DeltaContent:
+			content.WriteString(delta.Content)
+			a.cfg.Events.Emit(domain.TokenEvent{EventBase: base(turn), Text: delta.Content})
+		case provider.DeltaThinking:
+			thinking.WriteString(delta.Thinking)
+		case provider.DeltaToolCall:
+			if delta.ToolCall != nil {
+				out.toolCalls = append(out.toolCalls, *delta.ToolCall)
+			}
+		case provider.DeltaDone:
+			out.finish = domain.FinishReason(delta.FinishReason)
+		case provider.DeltaError, provider.DeltaContextOverflow:
+			out.failed = true
+			out.errMsg = delta.Err
 		}
-		a.cfg.Events.Emit(domain.MechanismFiredEvent{
-			EventBase: domain.EventBase{Turn: turn},
-			Mechanism: experimentalMechanismID,
-			Hook:      domain.HookPreRequest,
-			Action:    "fired",
-		})
 	}
-	return nil
+	out.content = content.String()
+	out.thinking = thinking.String()
+	return out
 }
 
-// firePreRequest invokes one pre-request hook under a recover boundary. The hook
-// shapes the shared req in place (AppendToSystem / InjectContext / SetTools / …); those
-// mutations flow into the Upstream request when step drains req with toProviderRequest.
-func (a *Agent) firePreRequest(ctx context.Context, hook domain.PreRequestHook, turn int, req *domain.Request) (err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: domain.EventBase{Turn: turn},
-				Source:    string(experimentalMechanismID),
-				Err:       fmt.Sprintf("panic: %v", recovered),
-			})
-			err = errHookPanicked
+// parseToolCalls adapts the provider's wire tool calls onto processing's native shape and
+// parses them into domain.ToolCalls (wire types stay provider-local — ADR 0010). An empty
+// batch is a no-op; a malformed call returns an ErrMalformedToolCall-wrapped error.
+func parseToolCalls(raw []provider.ToolCall) ([]domain.ToolCall, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	native := make([]processing.NativeToolCall, len(raw))
+	for i, tc := range raw {
+		native[i] = processing.NativeToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: tc.Function.Arguments,
 		}
-	}()
-	return hook.PreRequest(ctx, req)
+	}
+	return processing.ParseNativeToolCalls(native)
 }
 
-// buildRequest projects the conversation onto the hook-facing domain.Request the
-// pre-request hooks shape. It carries the current tool menu and a trivial Budget so a
-// hook can read them through req.View(); the Phase-0 conversation holds only
-// role+content messages (P1.6 adds tool calls / IDs / preserved Extra fields).
-func (a *Agent) buildRequest(turn int) *domain.Request {
-	messages := make([]domain.Message, 0, len(a.conv.Messages))
-	for _, m := range a.conv.Messages {
-		messages = append(messages, domain.Message{Role: m.Role, Content: m.Content})
+// completeTurn closes a Turn at the quiescent boundary and advances the Turn counter. A
+// final no-tool response ends the Exchange (StatusExchangeComplete — awaiting the next
+// Submit); a tool-call Turn leaves the Exchange open (StatusTurnComplete — the next Step
+// calls the Upstream again with the tool results in context).
+func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus) domain.StepResult {
+	if status == domain.StatusExchangeComplete {
+		a.inExchange = false
 	}
-	budget := domain.Budget{
-		ContextLimit:  a.cfg.Context.MaxContextTokens,
-		CharsPerToken: defaultCharsPerToken,
-	}
-	return domain.NewRequest(a.cfg.Model, messages, a.toolMenu(), budget, turn)
+	a.turnIndex++
+	return domain.StepResult{Status: status, TurnIndex: turn, Elapsed: time.Since(start)}
 }
 
-// toolMenu builds the model's tool menu from the injected registry (nil ⇒ no tools).
-// P1.2 constructs the default registry and dispatches calls; here the menu only feeds
-// req.View().Tools() and a tool-filter hook's SetTools.
+// abandonTurn ends a Turn that produced no usable assistant message — a recovered
+// pre-request / history-rewrite panic, or an Upstream fault — at a clean boundary. The
+// Exchange ends (there is nothing to continue from) and the counter advances so resume
+// does not re-run the failed Turn.
+func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
+	a.inExchange = false
+	a.turnIndex++
+	return domain.StepResult{Status: domain.StatusExchangeComplete, TurnIndex: turn, Elapsed: time.Since(start)}
+}
+
+// cancelTurn rolls the conversation back to the boundary the Turn began at (dropping this
+// Turn's assistant message and any tool results), re-queues the deferred corrections it
+// drained, and returns StatusCancelled WITHOUT advancing the Turn counter — so the snapshot
+// taken here resumes and re-attempts the Turn from serializable state (ADR 0007).
+func (a *Agent) cancelTurn(turn, rollback int, deferred []string, start time.Time) domain.StepResult {
+	a.conv.DropRange(rollback, a.conv.Len())
+	a.restoreDeferred(deferred)
+	a.inExchange = false
+	return domain.StepResult{Status: domain.StatusCancelled, TurnIndex: turn, Elapsed: time.Since(start)}
+}
+
+// restoreDeferred re-queues deferred corrections drained by buildRequest when the Turn did
+// not commit (cancelled or abandoned), so a best-effort correction is consumed only when a
+// request is actually sent and processed to a committed boundary — never silently lost.
+func (a *Agent) restoreDeferred(deferred []string) {
+	for _, inject := range deferred {
+		a.conv.Defer(inject)
+	}
+}
+
+// buildRequest projects the conversation onto the hook-facing domain.Request the pre-
+// request hooks shape, draining any deferred corrections (the ActionDefer feed-forward)
+// and injecting each role-safely. It returns the drained corrections so a cancellation can
+// re-queue them. The request carries the tool menu (Plan-filtered) and a trivial Budget so
+// a hook can read them through req.View().
+func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
+	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn)
+	deferred, ok := a.conv.TakeDeferred()
+	if ok {
+		for _, inject := range deferred {
+			req.InjectContext(inject)
+		}
+	}
+	return req, deferred
+}
+
+// budget reports the trivial Phase-1 context budget (no token accounting yet — TDD §8 #8).
+func (a *Agent) budget() domain.Budget {
+	return domain.Budget{ContextLimit: a.cfg.Context.MaxContextTokens, CharsPerToken: defaultCharsPerToken}
+}
+
+// toolMenu builds the model's tool menu from the resolved registry (nil ⇒ no tools). In
+// Plan mode it offers only read-only tools — the model is never shown a write it cannot
+// run (ADR: Plan is read-only).
 func (a *Agent) toolMenu() []domain.ToolDef {
-	if a.cfg.Tools == nil {
+	if a.tools == nil {
 		return nil
 	}
-	tools := a.cfg.Tools.All()
-	menu := make([]domain.ToolDef, 0, len(tools))
-	for _, t := range tools {
+	all := a.tools.All()
+	menu := make([]domain.ToolDef, 0, len(all))
+	for _, t := range all {
+		if a.cfg.Mode == domain.ModePlan && !domain.IsReadOnly(t) {
+			continue
+		}
 		menu = append(menu, domain.ToolDef{
 			Name:        t.Name(),
 			Description: t.Description(),
@@ -244,16 +377,29 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	return menu
 }
 
+// loopView builds the read-only window the tool-stage hooks read — the conversation so far
+// (including this Turn's committed assistant + tool messages), the tool menu, the budget,
+// and the Turn index. It is rebuilt per call from current state so a hook counting prior
+// failures across Turns sees up-to-date history.
+func (a *Agent) loopView(turn int) domain.LoopView {
+	return domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn).View()
+}
+
 // toProviderRequest drains the post-hook req onto the provider seam's wire shape — the
-// translation boundary between the loop's domain state and the domain-free
-// provider.Request the real HTTP provider plugs into (ADR 0010). It carries the
-// messages, tool menu, and sampling a pre-request hook shaped; the provider wire has
-// no carrier for SetExtra fields yet (response_format is a Phase-4 grammar concern).
+// translation boundary between the loop's domain state and the domain-free provider.Request
+// (ADR 0010). It carries messages (with tool calls + tool-call IDs, load-bearing for a
+// multi-Turn tool exchange), the tool menu, and the sampling a pre-request hook shaped; the
+// provider wire has no carrier for SetExtra fields yet (response_format is a Phase-4 concern).
 func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	st := req.State()
 	messages := make([]provider.Message, 0, len(st.Messages))
 	for _, m := range st.Messages {
-		messages = append(messages, provider.Message{Role: string(m.Role), Content: m.Content})
+		messages = append(messages, provider.Message{
+			Role:       string(m.Role),
+			Content:    m.Content,
+			ToolCalls:  toProviderToolCalls(m.ToolCalls),
+			ToolCallID: m.ToolCallID,
+		})
 	}
 	return provider.Request{
 		Model:    st.Model,
@@ -261,6 +407,23 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 		Tools:    toProviderTools(st.Tools),
 		Sampling: toProviderSampling(st.Sampling),
 	}
+}
+
+// toProviderToolCalls maps domain tool calls onto the provider's "function" wire shape so
+// an assistant message's tool calls survive the round-trip back to the Upstream (nil ⇒ nil).
+func toProviderToolCalls(calls []domain.ToolCall) []provider.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]provider.ToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, provider.ToolCall{
+			ID:       c.ID,
+			Type:     "function",
+			Function: provider.FunctionCall{Name: c.Tool, Arguments: string(c.Arguments)},
+		})
+	}
+	return out
 }
 
 // toProviderTools maps the domain tool menu onto provider tool specs (nil ⇒ nil).
@@ -279,8 +442,11 @@ func toProviderTools(defs []domain.ToolDef) []provider.ToolSpec {
 	return specs
 }
 
-// toProviderSampling maps the two sampling knobs a hook may set onto the provider
-// shape; the provider's other knobs (TopP/TopK/RepeatPenalty) stay unset (server default).
+// toProviderSampling maps the two sampling knobs a hook may set onto the provider shape;
+// the provider's other knobs (TopP/TopK/RepeatPenalty) stay unset (server default).
 func toProviderSampling(p domain.SamplingParams) provider.Sampling {
 	return provider.Sampling{Temperature: p.Temperature, MaxTokens: p.MaxTokens}
 }
+
+// base is the EventBase every top-level Event carries (Depth 0; the given Turn index).
+func base(turn int) domain.EventBase { return domain.EventBase{Turn: turn} }

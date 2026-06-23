@@ -7,32 +7,19 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// message is the loop's internal, serializable conversation message — the throwaway
-// Phase-0 stand-in for the concrete Session schema (TDD §5 Sessions row, Phase 1).
-// It is unexported and minimal on purpose: snapshot/resume must round-trip it, and a
-// plain role+content pair is all the single non-streaming Turn needs. P1.6 replaces
-// it with the real serialized state (full messages, deferred actions, loop counters).
-type message struct {
-	Role    domain.Role `json:"role"`
-	Content string      `json:"content"`
-}
+// The engine's conversation storage is domain.Conversation (P1.2 adopts it, replacing
+// the throwaway P0.6 message/conversation pair). It already carries everything the full
+// Turn/Step machine needs — role-tagged messages with tool calls + tool-call IDs (the
+// multi-Turn tool loop), the FIFO deferred-action queue (the ActionDefer feed-forward),
+// and a JSON round-trip — so the loop appends to it and Snapshot serializes it directly.
+// P1.6 owns the Session envelope around this payload (loop counters such as turnIndex,
+// the documented v1 schema, preserved per-message Extra wire fields); the conversation
+// value itself is already library-complete here.
 
-// conversation is the copyable conversation state the loop appends to and that
-// Snapshot serializes into the Session's opaque State payload. It holds no live
-// handles (ADR 0001), so a JSON round-trip is a faithful copy — the property
-// snapshot/resume and the bench's fork both rely on. The engine owns this payload
-// schema (it serializes engine state); domain owns only the Session envelope (ADR 0010).
-type conversation struct {
-	Messages []message `json:"messages"`
-}
-
-// append adds m to the conversation history.
-func (c *conversation) append(m message) {
-	c.Messages = append(c.Messages, m)
-}
-
-// encodeConversation serializes the conversation into a Session.State payload.
-func encodeConversation(c conversation) (json.RawMessage, error) {
+// encodeConversation serializes the conversation into a Session.State payload. It marshals
+// through the pointer so domain.Conversation's MarshalJSON (a pointer method) runs — a
+// value would marshal its unexported fields to an empty object.
+func encodeConversation(c *domain.Conversation) (json.RawMessage, error) {
 	state, err := json.Marshal(c)
 	if err != nil {
 		return nil, fmt.Errorf("apogee: encode conversation: %w", err)
@@ -42,13 +29,13 @@ func encodeConversation(c conversation) (json.RawMessage, error) {
 
 // decodeConversation rebuilds a conversation from a Session.State payload. An empty
 // payload yields an empty conversation (a freshly-snapshotted, never-stepped Agent).
-func decodeConversation(state json.RawMessage) (conversation, error) {
-	var c conversation
+func decodeConversation(state json.RawMessage) (domain.Conversation, error) {
+	var c domain.Conversation
 	if len(state) == 0 {
 		return c, nil
 	}
 	if err := json.Unmarshal(state, &c); err != nil {
-		return conversation{}, fmt.Errorf("apogee: decode conversation: %w", err)
+		return domain.Conversation{}, fmt.Errorf("apogee: decode conversation: %w", err)
 	}
 	return c, nil
 }

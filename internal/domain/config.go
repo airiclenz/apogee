@@ -35,6 +35,12 @@ type Config struct {
 	SessionsDir string
 	ConfigDir   string
 
+	// WorkspaceDir is the sandbox root the built-in file tools are scoped to when
+	// Config.Tools is nil. Empty ⇒ no default tools are wired (the host must inject
+	// Config.Tools to give the Agent any tools). The bench points it at an ephemeral
+	// workspace so a file-edit task never escapes its sandbox (ADR 0001 isolation).
+	WorkspaceDir string
+
 	// ExternalEffects is the single injectable boundary for non-forkable effects
 	// (network, MCP). nil ⇒ live. The bench injects a deterministic stub for v1;
 	// record/replay slots in behind the same interface later (ADR 0008).

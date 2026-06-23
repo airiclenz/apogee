@@ -423,6 +423,12 @@ func (c *Conversation) DropRange(start, end int) {
 // i is clamped to [0, Len].
 func (c *Conversation) Insert(i int, m Message) { c.messages = insertMessage(c.messages, i, m) }
 
+// Append adds m to the end of the history — the engine's per-Turn commit of a user,
+// assistant, or tool-result message, and the natural primitive a history-rewrite hook
+// uses to grow the conversation (a summary, a gap note). It is Insert at Len with a
+// name that reads at the call site.
+func (c *Conversation) Append(m Message) { c.messages = append(c.messages, m) }
+
 // Replace swaps the entire message list — generative Compaction writes its
 // summarised history back through here. The slice is copied.
 func (c *Conversation) Replace(msgs []Message) { c.messages = append([]Message(nil), msgs...) }

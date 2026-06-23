@@ -1,6 +1,9 @@
 package provider
 
-import "context"
+import (
+	"context"
+	"iter"
+)
 
 // Responder is the provider seam (Phase-0 detail plan, Decision C; ADR 0010 homes it
 // beside the HTTP client): the loop depends on this, not on net/http. Tests inject a
@@ -8,10 +11,13 @@ import "context"
 // interface, so the loop never changes when the wire client lands. Living under
 // internal/ it carries no public-API promise.
 //
-// Respond is the non-streaming primary: it performs one Upstream round-trip and returns
-// the assembled reply. Streaming is a separate capability on the concrete Client
-// (Stream), wired into the loop when the full Turn/Step state machine lands (P1.2); the
-// seam stays minimal so a fake need only answer one method.
+// Stream is the loop's primary: it performs one Upstream round-trip and yields Deltas as
+// they arrive (token text, reasoning, accumulated tool calls, a terminal Done/Error), so
+// the loop emits TokenEvents live and reaches the §6 #6 streaming-then-Approval boundary.
+// Faults surface as a terminal Delta rather than a Go error, so the consumer drives a
+// single range loop (matching the TS AsyncIterable). The seam is deliberately streaming-
+// only — the loop never needs the whole-response Respond, which stays a concrete Client
+// method (model discovery, simple calls) outside the interface so a fake answers one method.
 type Responder interface {
-	Respond(ctx context.Context, req Request) (RawResponse, error)
+	Stream(ctx context.Context, req Request) iter.Seq[Delta]
 }

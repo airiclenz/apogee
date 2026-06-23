@@ -342,6 +342,19 @@ func TestConversationEditing(t *testing.T) {
 		}
 	})
 
+	t.Run("Append grows the conversation at the end", func(t *testing.T) {
+		c := base()
+		c.Append(Message{Role: RoleAssistant, Content: "a1"})
+		if c.Len() != 7 || c.At(6).Content != "a1" {
+			t.Errorf("Append failed: Len=%d tail=%q", c.Len(), c.At(c.Len()-1).Content)
+		}
+		empty := NewConversation(nil)
+		empty.Append(Message{Role: RoleUser, Content: "first"})
+		if empty.Len() != 1 || empty.At(0).Content != "first" {
+			t.Errorf("Append onto an empty conversation failed: Len=%d", empty.Len())
+		}
+	})
+
 	t.Run("SetMessageContent edits in place", func(t *testing.T) {
 		c := base()
 		c.SetMessageContent(2, "u0-edited")
