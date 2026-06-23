@@ -1,0 +1,293 @@
+# Apogee
+
+Apogee is a terminal **coding agent** for small local LLMs (~4B–35B) that owns the
+full agentic loop — provider, tools, context, and sessions — and runs a layer of
+gated, self-regulating **Mechanisms** inside that loop to keep small models on track.
+The hard constraint, inherited unchanged from the predecessor projects: **Apogee's
+Mechanisms must never make the underlying model perform worse than the same agent with
+those Mechanisms off.** That floor is **Bypass mode** (Mechanisms off, structure on) —
+**not** a naked model, because Budget and Compaction are structural and load-bearing (a
+truly naked model just overflows its context window). The constraint is **proved at bench
+time** as a ground-truth, distributional non-inferiority gate against Bypass (see
+[ADR 0009](docs/adr/0009-the-ab-decision-rule.md)); in production it is only
+*approximated* by self-regulation (Adaptive Suppression + the Turn Budget), a weaker,
+proxy-based safety net — not the guarantee.
+
+This glossary is a fresh start, not a migration of `apogee-sim`'s `CONTEXT.md`. The
+predecessor project was *middleware* between a coding tool and a model; Apogee **is**
+the coding tool now. Terms that described the old middleware structure are retired (see
+[Retired terms](#retired-terms)); the language below describes the agent.
+
+## Language
+
+### Identity and shape
+
+**Apogee** (the coding agent):
+The terminal-based agent that owns the agentic coding loop end-to-end for a small local
+LLM: it builds each request, calls the Upstream, parses the response, dispatches tools,
+and applies Mechanisms — all in one cross-platform Go binary. It is no longer a layer
+between a coding tool and a model; it is the coding tool.
+_Avoid_: "the proxy", "Apogee Core", "the extension", "middleware" (all describe the
+retired predecessor structure).
+
+**Embeddable agent** (the public API):
+The public Go package other applications import to construct and run an Apogee agent
+in-process. Apogee ships as **both** a ready-to-use terminal tool (the `cmd/apogee` TUI +
+CLI — the headline product) **and** this reusable library: the TUI, the optional `apogee
+headless` CLI, and the bench are all consumers of one public package over the same
+engine. The repo is the whole tool, not just the library. The public surface is guarded
+and versioned; everything else lives in `internal/`. See
+[ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md).
+_Avoid_: "**Apogee Core**" (retired — it named the proxy-era transform engine, a
+different thing; do not resurrect the name for the new library), "the SDK".
+
+**Sub-agent**:
+A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with
+its own Session and a reduced context Budget. It is itself an instance of the **Embeddable
+agent**, spawned in-process; its events nest into the parent's event stream. Its
+privileges are always **≤ the parent's** (mode, guardrails, Confinement, tool set) — see
+[ADR 0005](docs/adr/0005-sub-agent-privileges-are-bounded-by-the-parent.md). Bare "agent"
+means the **top-level** agent unless qualified as "sub-agent".
+_Avoid_: "child agent" (says nothing about the privilege bound), "worker".
+
+**The loop** (the agent loop):
+Apogee's core control flow: build request → call Upstream → parse response → dispatch
+tools → repeat, emitting typed events at each step. The loop owns tool execution and
+conversation state — which is precisely what lets formerly lab-only Mechanisms (e.g.
+`correct_tool_result`) become first-class. Lives under `internal/agent/loop/`.
+_Avoid_: "the pipeline" (that was the proxy-era Transform chain — a narrower thing).
+
+**Upstream**:
+The local LLM server that runs the model — Ollama, llama.cpp, LM Studio, vLLM, or any
+endpoint honouring the OpenAI HTTP surface. Apogee reaches the Upstream directly through
+its `provider/` package; there is no intervening proxy.
+_Avoid_: "the model server", "the backend" (a `backend` detector package may exist, but
+it detects Upstreams — it is not the Upstream).
+
+### Turns and stepping
+
+**Turn**:
+One iteration of the loop — a single *primary* Upstream call and the work that follows it
+(parse → dispatch tools → apply Mechanisms). Compaction's summarisation call is *internal*
+to a Turn, not a Turn of its own. The unit of self-regulation and of bench measurement.
+
+**Exchange**:
+One user input through to the final no-tool response — usually several Turns. The
+user-facing unit of a conversation.
+
+**Step**:
+The bench/embedder primitive that advances the loop **one Turn** and returns at a
+**quiescent boundary** — no in-flight stream or tool call, conversation state fully
+serializable. Approval and streaming happen *inside* a Step; **snapshot, resume, and the
+bench's fork are valid only at the quiescent boundary**. Cancellation is delivered through
+Step and takes effect cleanly at that boundary. Sub-agent stepping is **top-level-only for
+v1** (designed swappable for nested stepping later). See
+[ADR 0007](docs/adr/0007-step-turn-and-the-quiescent-boundary.md).
+_Avoid_: "tick", "cycle" (Turn is the loop iteration; Step is the externally-driven advance
+of one Turn).
+
+### Safety and autonomy
+
+**Agent mode**:
+The autonomy level governing whether tool calls need human approval. Three:
+- **Plan** — read-only; no writes or command execution.
+- **Ask-Before** — every tool call requires an Approval (the human is the gate).
+- **Auto** — runs tool calls without per-call approval; **requires Confinement**.
+_Avoid_: "permission level", "trust mode".
+
+**Bypass mode**:
+A `Config` flag **orthogonal to Agent mode** that turns Apogee's Mechanisms off while
+leaving the agent's structure intact. It disables the `proactive-nudge` and
+`response-repair` Mechanisms and makes the **Library inert** (no inject, no observe, no
+write), but **keeps the exempt off-ramps** (e.g. `empty_response_recovery`) so the floor is
+*functional* — a baseline that quit at the first stumble would pass the hard constraint
+trivially. Budget, Compaction, and the rest of the loop still run: Bypass is the honest
+"Mechanisms-off" floor, **not** a naked model. It is also the bench's **aggregate control
+arm** — the same code path users can run — against which the hard-constraint non-inferiority
+gate is proved. See [ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md).
+_Avoid_: "naked model" (Bypass keeps the structural reducers on), "disabled mode", "raw mode".
+
+**Approval**:
+The human-in-the-loop gate on a single tool call — the primary safety guarantee in
+Ask-Before mode. Delivered through a delegate the host (TUI, embedder) supplies.
+
+**Confinement**:
+OS-level restriction of tool execution, required for **Auto mode**. It is a **capability
+matrix, not a binary**: each backend reports which restrictions it can enforce (`fs-write`,
+`network-egress`, …). **Auto requires both fs-write *and* network confinement** — so Linux
+Auto needs landlock ABI v4 (kernel ≥6.7); an older kernel ⇒ Auto refused, with no escape
+hatch. The invariant is **per-tool**: a tool runs unsupervised only if it can be confined —
+so **MCP tools, which Apogee cannot confine, gate through Approval even in Auto.** If
+Confinement cannot be established, Auto degrades to Ask-Before; Apogee never runs a tool
+call both unsupervised *and* unconfined. Lives behind a `platform/` `Confiner` interface
+(seatbelt / landlock / AppContainer); default box = workspace-write-only + network
+default-deny + per-project allowlist. See
+[ADR 0004](docs/adr/0004-auto-mode-requires-os-level-confinement.md).
+_Avoid_: "sandbox" (that is the bench's term — see below), "jail".
+
+**Safety guardrails**:
+Apogee's production safety set: Agent modes, Approval, path-safety, tool-argument-guard,
+circuit-breaker, and audit log. The human-in-the-loop model — distinct from Confinement
+(OS-level) and from the bench's Sandbox.
+_Avoid_: "the sandbox" (Apogee production is **not** sandboxed; "Sandbox" is a bench term
+for the bench's `RealSandbox` that confines *unsupervised* sim runs — do not use it for
+Apogee's production execution).
+
+### Mechanism and hook points
+
+**Mechanism**:
+A unit of gated, self-regulating behaviour that fires at a defined **Hook point** in
+the loop to help a small LLM. The catalogue of Mechanisms is the current best guess at
+what helps, decided by evidence (the external bench), not a fixed contract. Every
+Mechanism is *gated* (by conversation state, resource pressure, prompt shape, or model
+output) and subject to self-regulation unless declared exempt.
+_Avoid_: "intervention" (that is the bench's per-Turn experiment — a different surface,
+see [Intervention](#intervention)), "transform"/"analyzer"/"injector" as a *kind* (these
+were the retired proxy-era taxonomy — see below), "rule".
+
+**Hook point**:
+*Where* in the loop a Mechanism fires — the primary classification of a Mechanism.
+Four positions plus a cross-cutting capability:
+- **pre-request** — shape the outgoing request before it is sent (subsumes the old
+  Transforms *and* Pre-pipeline Injectors).
+- **post-response** — inspect the model response and choose an action (see below)
+  before the loop acts on it.
+- **pre-tool-exec** — act between the decision to run a tool and its execution.
+- **post-tool-result** — act on a tool result before the model next sees it (home of
+  `correct_tool_result`). New to the loop; the proxy could not host it.
+- **history-rewrite** — a capability that edits conversation state (home of
+  `truncate_history`); may attach at more than one point.
+_Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase".
+
+**Post-response decision**:
+The action a post-response Mechanism chooses: **retry** (re-call the Upstream now),
+**intercept** (alter the response before the loop acts on it), or **defer** (schedule a
+correction into the *next* request). Streaming failures can only defer.
+_Avoid_: "interceptor" (intercept is one decision, not the Mechanism).
+
+**Deferred Response Action vs Request-prep Hint**:
+Two sources of a pre-request injection, kept distinct because they are debugged
+differently. A **Deferred Response Action** is a *defer* decision made by a
+post-response Mechanism on the *previous* turn, consumed from session state this turn
+(look in **session state**). A **Request-prep Hint** is derived fresh from conversation
+history at the start of *this* request (look in **conversation history**). Both fire at
+the pre-request hook and are tracked uniformly as Mechanisms.
+
+**Mechanism descriptor**:
+Per-Mechanism metadata orthogonal to its hook point: `Capability` (off-ramp /
+proactive-nudge / response-repair), `SuppressionPolicy` (exempt or strikes-3), and the
+set of Mechanisms it is declared incompatible with (constrains stacking). The single
+source of truth for which Mechanisms are exempt and which can co-fire.
+
+### Self-regulation
+
+The runtime machinery that keeps a Mechanism from hurting the model — the operational
+half of the hard constraint. All of it is per-Session; a new Session starts clean.
+
+**Effectiveness tracking**:
+Per-Mechanism, per-Session bookkeeping that records each time a Mechanism fires and judges
+whether the next Turn was better for it. The data behind Adaptive Suppression and the Turn
+Budget.
+
+**Adaptive Suppression**:
+The **per-Mechanism** withdrawal rule: a Mechanism judged not-helpful several consecutive
+times in a Session is suppressed for the rest of it, with a configurable clear-path that
+re-opens it on a productive Turn.
+
+**Turn Budget**:
+The **global** withdrawal rule: after several consecutive non-productive Turns (no new file
+read, no file written), all non-exempt Mechanisms are suppressed for the rest of the
+Session, cleared when productive activity resumes.
+
+**Off-ramp** (Exempt Mechanism):
+A Mechanism never subject to Adaptive Suppression or the Turn Budget, because suppressing
+it would leave the model with **no way out of a failed Turn** (e.g. `empty_response_recovery`
+— without it an empty response just ends the conversation). Exempt status is declared in
+the Mechanism descriptor.
+_Avoid_: "always-on Mechanism" (a structurally-always-on Transform is not the same as an
+off-ramp — the former is just untracked, the latter is a deliberate recovery guarantee).
+
+**Library**:
+Apogee's **cross-session, per-model learning store**: it observes completed Turns and
+records per-model observations with Bayesian confidence, then a pre-request Mechanism
+injects qualifying observations to make Apogee better at a given model over time.
+File-backed under `~/.apogee/library/`. It keys observations on a **confidence-tagged
+`ModelFingerprint`**, resolved best-available — **weights-hash (high)** → **behavioral probe
+(medium)** → **metadata label (low)** — where **confidence gates injection** ("prefer not to
+inject under uncertainty"). The old "Library vs Failure library" ambiguity is **resolved by
+the repo split**: the runtime Library lives in Apogee; the development-time **Failure
+library** is now a [bench](#validation-and-the-bench) artifact.
+_Avoid_: "the failure library" (that is the bench's term), "cache" (the Library is learned
+evidence, not a cache), "keyed on the model name" (that was the predecessor's gap — keying
+is now the fingerprint).
+
+### Context and history
+
+These four are distinct operations — "compress", "compact", and "truncate" must **not**
+be used interchangeably.
+
+**Budget**:
+The allocation of the model's context window across the parts of a request — system
+prompt, conversation history, file context, and response reserve. The single authority
+on how much room each part gets; other reducers consume it. Lives in `context/`.
+_Avoid_: "context limit" (that is the raw window; the Budget is the *allocation* within it).
+
+**Tool-result capping**:
+Per-tool-result truncation of any single result that exceeds its fraction of the Budget,
+with head/tail preservation, protecting the most recent Turn. A **pre-request Mechanism**;
+implemented **once** (the surviving half of the predecessor's `compress`).
+_Avoid_: "compression", "compaction" (capping is per-result and non-generative).
+
+**Compaction**:
+The **default** conversation-level reducer: *generatively* summarising older Turns into a
+summary via the model, when the conversation exceeds a threshold. Meaning-preserving but
+costs an extra model call.
+_Avoid_: "compression", "truncation" (Compaction is generative and summarises).
+
+**History truncation**:
+The **cheap alternative** to Compaction: *mechanically* dropping the middle of the
+conversation, keeping the last N exchanges. Config-gated, **off by default**; a
+history-rewrite Mechanism, validated against Compaction via the bench.
+_Avoid_: "compaction" (truncation is mechanical and lossy, not generative).
+
+### Validation and the bench
+
+**The bench** (apogee-sim):
+The external Go module that validates Apogee by **importing it as a library** and driving
+the agent loop in-process — owning the sandbox, stepping turns, forking counterfactuals,
+and scoring outcomes against real local LLMs. It is a development-time instrument; its
+code is never linked into the shipped `apogee` binary. apogee-sim keeps its own glossary
+(Sim, Baseline, Intervention, Trace archive, Frontier driver, …); those are *bench*
+terms, not Apogee terms. See [ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md).
+_Avoid_: "the harness" inside Apogee's own docs (there is no harness in Apogee), "the
+external service" (it's a sibling Go module, not a running service).
+
+**Experimental hook**:
+A temporary hook the bench registers in-process at a [Hook point](#mechanism-and-hook-points)
+to test a behaviour that is **not (yet) a Mechanism**. It never ships in the binary; if it
+earns its place on the evidence, it is promoted to a gated Mechanism in Apogee. The
+in-process heir to the bench's portable-tier Interventions (`system_addendum`,
+`inject_message`, `tool_filter`).
+_Avoid_: "intervention" (that is the bench's term for its own experiment surface), calling
+it a Mechanism (it is a candidate, not a catalogued one).
+
+### Retired terms
+
+These were canonical in `apogee-sim/CONTEXT.md` and are **deliberately dropped** because
+they name a structure that no longer exists. Recorded here so a reader who knows the old
+vocabulary can map forward:
+
+- **Apogee Core** → there is no standalone transform engine + public facade; the loop
+  is the source of behaviour.
+- **Integration** / **Apogee Proxy** / **OpenCode Plugin** → retired; Apogee is a single
+  integrated tool, not a Core exposed through peer integrations.
+- **Coding tool** (the external client sense) → Apogee *is* the coding tool now; there is
+  no external client to name.
+- **OpenAI HTTP surface** / **Chat-completion shape** (as a public contract) → Apogee no
+  longer promises a wire contract to external clients. (The provider still *speaks* the
+  OpenAI chat schema to the Upstream, but that is an internal client concern, not a
+  contract Apogee exposes.)
+- **Transform** / **Response Analyzer** / **Pre-pipeline Injector** (as the three
+  *kinds* of Mechanism) → retired as the taxonomy; Mechanisms are now classified by
+  [Hook point](#mechanism-and-hook-points). The distinctions that still matter survive
+  as attributes (post-response decisions; Deferred-Action vs Request-prep-Hint).
