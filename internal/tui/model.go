@@ -138,7 +138,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.lastErr = msg.Err
-		m.transcript.addError("loop", msg.Err.Error())
+		m.transcript.addError("loop", msg.Err.Error(), 0)
 		m.finishWorker(stateErrored)
 		m.refreshViewport()
 		return m, nil
