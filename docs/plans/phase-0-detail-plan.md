@@ -27,7 +27,10 @@ the remaining Phase-0 work; the TDD §8 backlog points here.
 | P0.1 | `apogee.go` public API facade + hook mutation surface | ✅ committed `e401daa` |
 | P0.2 | `go.mod` (no deps) + `cmd/apogee` `--help` stub + empty `internal/` skeleton | ✅ committed `79c77a0` |
 | — | `apogee --help` runs; tree `gofmt`/`go vet`/`go build`/`go vet -race` clean | ✅ verified |
-| **P0.3** | **this detail plan** (pins, CI, acceptance) | **this doc** |
+| P0.3 | this detail plan (pins, CI, acceptance) | ✅ committed `c7d4f61` |
+| P0.4 | CI workflow `.github/workflows/ci.yml` (§2) | ✅ committed `c7d4f61` |
+| P0.5 | `internal/platform` seam (`Shell`/`Path`, POSIX + Windows stub) + deny-all `Confiner` stub | ✅ committed `2b71932` |
+| **P0.6** | **capstone harness** (the first real bodies) | **next — gated on §3 owner-review decisions** |
 
 Everything past P0.2 is **`panic`-stub bodies** — nothing executes a loop yet. The remaining
 Phase-0 deliverables from plan §4 are: CI/build; the `platform/` seam (shell + path + the
@@ -118,18 +121,24 @@ IDs continue the backlog's `P0.x` scheme. Dependencies are noted; **P0.4 and P0.
 independent** and can land in either order; **P0.6 depends on P0.5** (the Auto-gate check in
 `New` needs a `Confiner` backend to test against).
 
-| ID | Task | Depends | New deps |
-|---|---|---|---|
-| **P0.4** | CI workflow (§2) | — | none |
-| **P0.5** | `platform/` seam: shell + path interfaces (POSIX impl, Windows stub) + stub `Confiner` backend | — | none |
-| **P0.6** | **Capstone harness** — minimal real bodies for construct→`Step`→`Snapshot`→`Resume`→`AddExperimental`, exercised by a hermetic test | P0.5 | none |
+| ID | Task | Depends | New deps | Status |
+|---|---|---|---|---|
+| **P0.4** | CI workflow (§2) | — | none | ✅ `c7d4f61` |
+| **P0.5** | `platform/` seam: shell + path interfaces (POSIX impl, Windows stub) + stub `Confiner` backend | — | none | ✅ `2b71932` |
+| **P0.6** | **Capstone harness** — minimal real bodies for construct→`Step`→`Snapshot`→`Resume`→`AddExperimental`, exercised by a hermetic test | P0.5 | none | ⏳ next (gated — see below) |
+
+**P0.6 is gated on owner review of four decisions** before its bodies are written: the **Charm
+v2 pin** (§1.1), the **MCP-SDK maturity verdict** (§1.2), the **hermetic-Upstream `responder`
+seam** (§3 P0.6 sub-section), and **P0.6 scope** (the in/out-of-scope table). Walking the owner
+through these is the next session's job — see the handoff `docs/handoffs/2026-06-23 - 03 …`.
 
 Housekeeping carried from the handoff (decided, not yet propagated — **not Phase-0-blocking**,
 tracked here so it isn't lost): ratify the five §4.1 TDD sketch-decisions into the plan/ADRs
-(esp. **public `Confiner`** → plan §3 + ADR 0004); fix `README.md:68` (bench "headless"
-wording contradicts ADR 0001). Best done as their own focused doc change — see §6.
+(esp. **public `Confiner`** → plan §3 + ADR 0004). *(The `README.md` "headless"/bench wording
+flagged here previously is already ADR-0001-consistent as of `ff2c3f6` — that item is closed.)*
+Best done as their own focused doc change — see §6.
 
-### P0.4 — CI
+### P0.4 — CI · ✅ landed `c7d4f61`
 
 Per §2. Single file `.github/workflows/ci.yml`. No code change to the tree.
 
@@ -137,7 +146,15 @@ Per §2. Single file `.github/workflows/ci.yml`. No code change to the tree.
 `gofmt -l . ; go vet ./... ; go build ./... ; go test -race ./...` all clean, and
 `GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build ./...` (and the other five targets) succeed.
 
-### P0.5 — `platform/` seam
+### P0.5 — `platform/` seam · ✅ landed `2b71932`
+
+> **As built:** `internal/platform` ships `Shell`/`Path` interfaces + a `Host` aggregate
+> (one trivially-correct, platform-divergent method each — `sh -c` vs `cmd /c`, `""` vs
+> `.exe` — with `// TODO(phase-3)` for the real surface), a real POSIX impl + Windows stub
+> selected by `Current()`, and `denyConfiner` (deny-all, `AutoEligible()==false`) exposed via
+> `NewDenyConfiner()` returning `apogee.Confiner`. White-box table tests cover caps/eligibility,
+> `Confine`-runs-`fn`, and `Current()`. All §P0.5 acceptance met (cross-matrix incl. both
+> Windows targets; compile-time `var _ apogee.Confiner`; `AutoEligible()==false` table test).
 
 Define `internal/platform` (today only a `doc.go`). The **public** `Confiner` interface and
 its caps/box types already live in `apogee.go` (lines ~762–789) — this task adds the
@@ -288,9 +305,10 @@ Deferred deliberately so the keystone stays a *seam*, not a half-built engine:
   Confinement design session (ADR 0004). P0.5 ships only the deny-all stub.
 - **`mechanisms/` package-per-hook layout** — stays flat and provisional (TDD §6.4); resolved
   by the Phase-4 catalogue-mapping session.
-- **Doc-propagation housekeeping** (ratify §4.1 public `Confiner` into plan §3 + ADR 0004; fix
-  `README.md:68`) — decided, low-risk, but a separate focused change so it doesn't entangle
-  scaffold commits. Track, don't fold.
+- **Doc-propagation housekeeping** (ratify §4.1 public `Confiner` into plan §3 + ADR 0004) —
+  decided, low-risk, but a separate focused change so it doesn't entangle scaffold commits.
+  Track, don't fold. *(The `README.md:68` "headless"/bench fix once tracked here is already
+  done — the README is ADR-0001-consistent as of `ff2c3f6`.)*
 
 ---
 

@@ -75,8 +75,9 @@ plan. **All four prior "open items" are resolved** (plan §6 #22–24).
 | Artifact | State |
 |---|---|
 | `apogee.go` | **Signature sketch** — public API facade. gofmt-clean, stdlib-only, **bodies are `panic` stubs**. As of **P0.2** it **builds + `go vet`s** in-tree. |
-| skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and empty `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). **No tests yet** (CI landed in P0.4). |
+| skeleton (P0.2) | `go.mod` (`go 1.26`, no deps), `cmd/apogee` (stdlib `--help` stub), and `internal/{agent,provider,processing,tools,context,session,mcp,security,mechanisms,platform,tui}` (a `doc.go` per package). All still `doc.go`-only **except `internal/platform`** (filled by P0.5). |
 | CI (P0.4) | `.github/workflows/ci.yml` — `check` (gofmt/vet/build/`test -race`) + `cross` (Win/Mac/Linux × amd64/arm64, CGO off). Verified green locally. |
+| `internal/platform` (P0.5) | `Shell`/`Path` interfaces + `Host` aggregate (POSIX impl, Windows stub, `Current()` selector), and `denyConfiner` — the deny-all `Confiner` stub (`AutoEligible()==false`) behind `NewDenyConfiner()`. **First tests in the tree** (white-box table tests). |
 
 The sketch covers: `Agent`/`Config`/lifecycle; `Step`/`Run`/`Submit`/`StepResult`;
 sealed `Event` + 8 variants + `EventSink`; `Approver`; `Tool`/`ExternalEffectTool`/
@@ -225,9 +226,9 @@ in the *public* surface.
 - **Confinement design** — seatbelt/landlock/AppContainer across the capability matrix (ADR 0004).
 
 **Doc hygiene:**
-- `README.md:68` says the bench is "driven through Apogee's headless mode" — **contradicts
-  ADR 0001** (bench drives the real loop via Go import; headless is an optional user
-  surface). Fix.
+- ✅ **Done (`ff2c3f6`):** the old `README.md:68` "bench is driven through Apogee's headless
+  mode" wording — which contradicted ADR 0001 — is gone; the README now describes the bench
+  as importing Apogee as a Go library and driving the real loop in-process. No fix outstanding.
 - Ratify the five §4.1 sketch-decisions into the plan/ADRs (esp. public `Confiner`).
 
 ---
@@ -255,7 +256,7 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 11. Platform shell/path abstraction; TUI model/update/view; CLI surface.
 
 **Housekeeping (cheap, do alongside):**
-12. Resolve §6.1 (Confiner placement) + §6.4 (mechanisms layout); ratify §4.1 into plan/ADRs; fix `README.md:68`.
+12. Resolve §6.1 (Confiner placement) + §6.4 (mechanisms layout); ratify §4.1 into plan/ADRs. *(`README.md:68` fix already done — `ff2c3f6`.)*
 
 ### Suggested next-session entry point
 **P0.1–P0.5 are done** (hook mutation API; go.mod + skeleton; the Phase-0 detail plan; CI;

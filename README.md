@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="graphics/apogee-logo-light.svg" alt="Apogee" width="400">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="graphics/apogee-logo-light.svg">
+    <source media="(prefers-color-scheme: light)" srcset="graphics/apogee-logo-dark.svg">
+    <img src="graphics/apogee-logo-light.svg" alt="Apogee" width="350">
+  </picture>
 </p>
 
 A terminal-based coding agent built for **small, locally-run LLMs** (~4B–35B).
