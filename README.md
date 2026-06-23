@@ -63,6 +63,35 @@ on top. See [`docs/plans/`](docs/plans/) for the implementation plan.
   via an eval/simulation bench (which imports Apogee as a Go library and drives
   the real loop in-process) before it earns a place in the loop.
 
+## Building from source
+
+**Prerequisites:** Go 1.26+ (the toolchain version pinned in `go.mod`).
+
+```bash
+git clone https://github.com/airiclenz/apogee.git
+cd apogee
+make build      # compiles ./apogee
+./apogee --help
+```
+
+A `Makefile` wraps the common Go invocations:
+
+| Command | Does |
+|---|---|
+| `make build` | Compile the binary to `./apogee` |
+| `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
+| `make test` | Run the test suite with the race detector |
+| `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
+| `make check` | The full acceptance gate — gofmt, vet, build, race tests, cross-build |
+| `make help` | List every target |
+
+Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
+Makefile just gives the common commands one-word names.
+
+> **Note:** the binary builds and serves `--help` today, but the interactive TUI is
+> still being wired up (Phase 2) — a live coding session isn't available yet. Track
+> progress in [`docs/plans/`](docs/plans/).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
