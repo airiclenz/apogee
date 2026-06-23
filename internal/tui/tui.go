@@ -2,8 +2,8 @@ package tui
 
 import (
 	"context"
-	"fmt"
-	"os"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -51,26 +51,16 @@ type Options struct {
 
 // Run launches the interactive terminal UI over eng. It is the single entry point the
 // binary calls: cmd/apogee hands it the constructed Agent, the Bridge whose Sink/Approver
-// were installed in the Agent's Config, and the resolved Options. Run creates the Bubble
-// Tea program and binds it to br (br.Bind) before any worker can run, so the late-bound
-// event and approval delegates reach the live program (phase-2 detail plan §3 C2/C3).
-//
-// P2.1 lands the concurrency seam underneath this entry point — the teaSink event bridge,
-// the uiApprover rendezvous, and the worker driver (phase-2 detail plan §3 C1–C5), all
-// proven under -race against a stub program. The Bubble Tea model/update/view that drives
-// them lands in P2.2–P2.4; until then Run binds nothing and is a clean no-op that reports
-// the build state and quits, so the wired binary constructs and exits cleanly without
-// pretending to be interactive.
+// were installed in the Agent's Config, and the resolved Options. Run builds the Model and
+// the Bubble Tea program, then binds the program to br (br.Bind) *before* program.Run()
+// starts the loop — so the late-bound event and approval delegates reach the live program
+// the moment the first worker emits (phase-2 detail plan §3 C2/C3; ADR 0011). The program
+// context is ctx, so a program-wide shutdown also cancels an in-flight Exchange (C4).
 func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
-	_ = ctx
-	_ = eng
-	_ = br // P2.2 creates the tea.Program and calls br.Bind(program) before running it.
-	fmt.Fprintf(
-		os.Stdout,
-		"apogee: configured for %s @ %s (mode %s) — the interactive TUI lands in P2.2.\n",
-		opts.Model,
-		opts.Endpoint,
-		opts.Mode,
-	)
-	return nil
+	program := tea.NewProgram(newModel(ctx, eng, opts), tea.WithContext(ctx))
+	// Bind before Run: the program exists now, and the first Send cannot occur until a
+	// worker is launched, which only happens after the user submits into the running loop.
+	br.Bind(program)
+	_, err := program.Run()
+	return err
 }

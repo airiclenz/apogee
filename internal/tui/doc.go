@@ -7,9 +7,13 @@
 // ADR-0010 invariant "internal/* never imports root" holds (phase-2 detail plan §3 C5).
 //
 // Phase 2 build order: P2.0 landed the seam boundary (the [Engine] interface, [Options],
-// and the [Run] entry point). P2.1 lands the concurrency seam — the worker-goroutine
+// and the [Run] entry point). P2.1 landed the concurrency seam — the worker-goroutine
 // engine driver ([startExchange]/[driveExchange]), the Event→Msg bridge ([teaSink]), and
 // the approval rendezvous ([uiApprover]), all late-bound to the running program through
 // the [Bridge] (phase-2 detail plan §3 C1–C5; ADR 0011) and proven under -race against a
-// stub program. The Bubble Tea model/update/view that drives them land in P2.2–P2.4.
+// stub program. P2.2 lands the Bubble Tea skeleton that drives them: the [Model] with its
+// four-state machine, the input box, the transcript viewport, and the status line, with
+// [Run] now building the [tea.Program] and binding the [Bridge] to it. The Charm v2 stack
+// (bubbletea/bubbles/lipgloss, all on the charm.land path) is taken over the v1 fallback.
+// The rich event fold (P2.3) and the Approval UI keys (P2.4) build on this skeleton.
 package tui
