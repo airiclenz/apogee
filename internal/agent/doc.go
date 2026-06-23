@@ -6,5 +6,7 @@
 // Plan / Ask-Before / Auto modes live here too.
 //
 // See ADR 0001 (embeddable, steppable loop) and ADR 0007 (Step/Turn and the
-// quiescent boundary). Phase-0 scaffold: no implementation yet.
+// quiescent boundary). Phase-0 (P0.6) seeds only the Responder provider seam
+// (responder.go) — root-type-free so the root facade imports it one-way; the real
+// loop, sub-agents, and modes port here in Phase 1.
 package agent

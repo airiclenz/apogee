@@ -1,0 +1,275 @@
+package apogee
+
+// White-box capstone harness (P0.6e). It lives in package apogee so it can inject a
+// deterministic fake Responder through the unexported newAgent/resumeAgent seam — the
+// provider seam stays internal (Decision C), so there is no public way to supply a
+// fake, and the full Turn cannot be driven black-box. The public-API validation paths
+// that need no fake live in the black-box apogee_test package (apogee_test.go).
+
+import (
+	"context"
+	"testing"
+
+	"github.com/airiclenz/apogee/internal/agent"
+)
+
+// recordingSink captures every emitted Event for assertion. It is written only by the
+// goroutine driving Step, so it is race-safe under the single-goroutine Agent contract.
+type recordingSink struct {
+	events []Event
+}
+
+func (s *recordingSink) Emit(e Event) { s.events = append(s.events, e) }
+
+// echoResponder is the canned-reply fake: it answers every request with a fixed
+// assistant message, the stand-in for the Phase-1 HTTP provider.
+type echoResponder struct {
+	reply string
+}
+
+func (r echoResponder) Respond(context.Context, agent.Request) (agent.RawResponse, error) {
+	return agent.RawResponse{Content: r.reply}, nil
+}
+
+// blockingResponder blocks until ctx is cancelled, then reports the cancellation —
+// the fake that drives the cancel-mid-respond path. started is closed once Respond is
+// in flight so the test can cancel deterministically (no sleep, no flake).
+type blockingResponder struct {
+	started chan struct{}
+}
+
+func (r blockingResponder) Respond(ctx context.Context, _ agent.Request) (agent.RawResponse, error) {
+	close(r.started)
+	<-ctx.Done()
+	return agent.RawResponse{}, ctx.Err()
+}
+
+// firingHook is a no-op experimental pre-request hook that records that it fired.
+type firingHook struct {
+	fired *bool
+}
+
+func (h firingHook) PreRequest(context.Context, *Request) error {
+	*h.fired = true
+	return nil
+}
+
+// panickingHook is an experimental hook that panics — the input for the
+// recover-at-extension-boundary guarantee.
+type panickingHook struct{}
+
+func (panickingHook) PreRequest(context.Context, *Request) error { panic("hook boom") }
+
+// ---------------------------------------------------------------------------
+
+func baseConfig(sink EventSink) Config {
+	return Config{
+		Endpoint: "http://localhost:0",
+		Model:    "test-model",
+		Events:   sink,
+	}
+}
+
+func firstMessageEvent(t *testing.T, events []Event) (MessageEvent, bool) {
+	t.Helper()
+	for _, e := range events {
+		if me, ok := e.(MessageEvent); ok {
+			return me, true
+		}
+	}
+	return MessageEvent{}, false
+}
+
+func hasEvent[T Event](events []Event) bool {
+	for _, e := range events {
+		if _, ok := e.(T); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+
+// TestHarness_FullCapstonePath drives the end-to-end seam the plan names: construct →
+// Submit → Step (observe the experimental hook fire + the assistant message at the
+// quiescent boundary) → Snapshot → Resume → Submit → Step, proving the resumed Agent
+// continues the restored conversation.
+func TestHarness_FullCapstonePath(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	fired := false
+	cfg.Mechanisms = NewMechanismRegistry()
+	if err := cfg.Mechanisms.AddExperimental(HookPreRequest, firingHook{fired: &fired}); err != nil {
+		t.Fatalf("AddExperimental: %v", err)
+	}
+
+	a, err := newAgent(cfg, echoResponder{reply: "hello from model"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if res.Status != StatusExchangeComplete {
+		t.Errorf("Step status = %q, want %q", res.Status, StatusExchangeComplete)
+	}
+	if res.TurnIndex != 0 {
+		t.Errorf("Step TurnIndex = %d, want 0", res.TurnIndex)
+	}
+	if !fired {
+		t.Error("experimental pre-request hook did not fire")
+	}
+	if !hasEvent[MechanismFiredEvent](sink.events) {
+		t.Error("no MechanismFiredEvent emitted for the experimental hook")
+	}
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "hello from model" {
+		t.Errorf("MessageEvent = %+v (ok=%v), want Text=%q", me, ok, "hello from model")
+	}
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap.Version != sessionVersion {
+		t.Errorf("Snapshot Version = %d, want %d", snap.Version, sessionVersion)
+	}
+
+	// Resume into a fresh Agent (fresh sink) and continue the restored conversation.
+	sink2 := &recordingSink{}
+	cfg2 := baseConfig(sink2)
+	cfg2.Mechanisms = cfg.Mechanisms
+	b, err := resumeAgent(cfg2, snap, echoResponder{reply: "second reply"})
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	if err := b.Submit(UserInput{Text: "again"}); err != nil {
+		t.Fatalf("Submit (resumed): %v", err)
+	}
+	if _, err := b.Step(context.Background()); err != nil {
+		t.Fatalf("Step (resumed): %v", err)
+	}
+
+	// user "hi", assistant "hello from model" (restored) + user "again", assistant
+	// "second reply" (this Turn) = 4 messages — proving Resume restored the history.
+	if got := len(b.conv.Messages); got != 4 {
+		t.Errorf("resumed conversation has %d messages, want 4", got)
+	}
+	if me, ok := firstMessageEvent(t, sink2.events); !ok || me.Text != "second reply" {
+		t.Errorf("resumed MessageEvent = %+v (ok=%v), want Text=%q", me, ok, "second reply")
+	}
+}
+
+// TestHarness_SubmitMidExchange rejects a second Submit before the first is consumed.
+func TestHarness_SubmitMidExchange(t *testing.T) {
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(UserInput{Text: "first"}); err != nil {
+		t.Fatalf("first Submit: %v", err)
+	}
+	if err := a.Submit(UserInput{Text: "second"}); err != ErrInputPending {
+		t.Errorf("second Submit err = %v, want ErrInputPending", err)
+	}
+}
+
+// TestHarness_CancellationIsResumable cancels mid-respond and proves the Step returns
+// StatusCancelled with serializable state that resumes and continues (ADR 0007).
+func TestHarness_CancellationIsResumable(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	responder := blockingResponder{started: make(chan struct{})}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(UserInput{Text: "slow"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+	res, err := a.Step(ctx)
+	if err != nil {
+		t.Fatalf("Step returned a loop error on cancel: %v", err)
+	}
+	if res.Status != StatusCancelled {
+		t.Fatalf("Step status = %q, want %q", res.Status, StatusCancelled)
+	}
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot after cancel: %v", err)
+	}
+
+	// The snapshot is valid: resume against a working responder and complete a Turn.
+	sink2 := &recordingSink{}
+	b, err := resumeAgent(baseConfig(sink2), snap, echoResponder{reply: "recovered"})
+	if err != nil {
+		t.Fatalf("resumeAgent after cancel: %v", err)
+	}
+	if err := b.Submit(UserInput{Text: "retry"}); err != nil {
+		t.Fatalf("Submit (resumed): %v", err)
+	}
+	res2, err := b.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step (resumed): %v", err)
+	}
+	if res2.Status != StatusExchangeComplete {
+		t.Errorf("resumed Step status = %q, want %q", res2.Status, StatusExchangeComplete)
+	}
+}
+
+// TestHarness_PanicRecovery proves a panicking hook becomes an ErrorEvent at a clean
+// boundary and the loop survives a second Step (the host is never unwound).
+func TestHarness_PanicRecovery(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Mechanisms = NewMechanismRegistry()
+	if err := cfg.Mechanisms.AddExperimental(HookPreRequest, panickingHook{}); err != nil {
+		t.Fatalf("AddExperimental: %v", err)
+	}
+	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step returned a loop error on hook panic: %v", err)
+	}
+	if res.Status != StatusExchangeComplete {
+		t.Errorf("Step status = %q, want %q", res.Status, StatusExchangeComplete)
+	}
+	if !hasEvent[ErrorEvent](sink.events) {
+		t.Error("no ErrorEvent emitted for the panicking hook")
+	}
+	if _, ok := firstMessageEvent(t, sink.events); ok {
+		t.Error("a MessageEvent was emitted despite the pre-request hook panicking")
+	}
+
+	// The loop survived: a second Submit/Step recovers again and still returns cleanly.
+	if err := a.Submit(UserInput{Text: "again"}); err != nil {
+		t.Fatalf("Submit after recovery: %v", err)
+	}
+	res2, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("second Step after recovery returned a loop error: %v", err)
+	}
+	if res2.Status != StatusExchangeComplete {
+		t.Errorf("second Step status = %q, want %q", res2.Status, StatusExchangeComplete)
+	}
+}

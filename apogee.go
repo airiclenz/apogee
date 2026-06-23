@@ -31,7 +31,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/agent"
 )
 
 // ----------------------------------------------------------------------------
@@ -47,25 +50,36 @@ import (
 // An Agent is not safe for concurrent use by multiple goroutines; drive one Agent
 // from one goroutine (Step/Run), and observe it from another only via its EventSink.
 type Agent struct {
-	// unexported: cfg, loop, conversation, registries, … (internal/agent)
+	cfg      Config
+	upstream agent.Responder    // provider seam (Decision C): fake in P0.6, real HTTP in Phase 1
+	registry *MechanismRegistry // catalogued + experimental hooks driving the loop
+
+	conv         conversation // serializable conversation state (ADR 0001)
+	pendingInput *UserInput   // queued by Submit, consumed by the next Step
+	inExchange   bool         // true between Submit and the Step that completes the Exchange
+	turnIndex    int          // 0-based index of the next Turn
 }
 
 // New constructs an Agent from cfg. It validates the configuration — including the
 // Auto-mode/Confinement gate (ADR 0004) and the Mechanism ordering graph (ADR 0003,
 // a constraint cycle is a startup error) — and returns an error rather than
 // silently degrading a misconfigured surface.
-func New(cfg Config) (*Agent, error) { panic("sketch: not implemented") }
+func New(cfg Config) (*Agent, error) { return newAgent(cfg, placeholderResponder{}) }
 
 // Resume reconstructs an Agent from a prior Session snapshot. Config supplies the
 // live delegates (Approver, Confiner, EventSink) and state roots again — only the
 // serializable conversation state comes from snap. External connections (MCP,
 // network) reconnect fresh; no server-side state is restored (ADR 0008).
-func Resume(cfg Config, snap Session) (*Agent, error) { panic("sketch: not implemented") }
+func Resume(cfg Config, snap Session) (*Agent, error) {
+	return resumeAgent(cfg, snap, placeholderResponder{})
+}
 
 // Close releases the Agent's resources. Because tools are stateless across Turns
 // (ADR 0008), there is no live tool state to flush — Close tears down the provider
-// client, any MCP connections, and the log sink.
-func (a *Agent) Close() error { panic("sketch: not implemented") }
+// client, any MCP connections, and the log sink. The Phase-0 slice holds no such live
+// resources (the responder is in-process and hermetic), so Close is a no-op today; it
+// exists now so embedders write the correct lifecycle before Phase 1 adds real teardown.
+func (a *Agent) Close() error { return nil }
 
 // Config is the full construction surface. It carries the Upstream target, the
 // autonomy posture, the host-supplied delegates, the extension registries, and the
@@ -134,7 +148,13 @@ const (
 
 // Submit enqueues user input to begin (or continue) an Exchange. It does not run
 // the loop; the next Step/Run consumes it. Submitting mid-Exchange is an error.
-func (a *Agent) Submit(in UserInput) error { panic("sketch: not implemented") }
+func (a *Agent) Submit(in UserInput) error {
+	if a.pendingInput != nil || a.inExchange {
+		return ErrInputPending
+	}
+	a.pendingInput = &in
+	return nil
+}
 
 // Step advances the loop exactly one Turn and returns at a quiescent boundary — no
 // in-flight stream, no in-flight tool call, conversation state fully serializable
@@ -150,7 +170,7 @@ func (a *Agent) Submit(in UserInput) error { panic("sketch: not implemented") }
 // converted to an ErrorEvent, and the loop degrades to the quiescent boundary
 // rather than unwinding into the host (ADR 0007 / ADR 0002). Step returns a non-nil
 // error only for loop-level faults the Agent itself cannot localise.
-func (a *Agent) Step(ctx context.Context) (StepResult, error) { panic("sketch: not implemented") }
+func (a *Agent) Step(ctx context.Context) (StepResult, error) { return a.step(ctx) }
 
 // Run steps the loop until the Exchange completes (a final no-tool response),
 // cancellation, or a loop-level error — a convenience wrapper over Step for hosts
@@ -158,7 +178,7 @@ func (a *Agent) Step(ctx context.Context) (StepResult, error) { panic("sketch: n
 func (a *Agent) Run(ctx context.Context) (StepResult, error) { panic("sketch: not implemented") }
 
 // Mode reports the Agent's current Agent mode.
-func (a *Agent) Mode() Mode { panic("sketch: not implemented") }
+func (a *Agent) Mode() Mode { return a.cfg.Mode }
 
 // UserInput is one user message into an Exchange: free text plus optional file
 // references the context builder resolves. Stays a value (no live handles) so it
@@ -514,21 +534,41 @@ type OrderingConstraints struct {
 // slots (ADR 0002/0003). The built-in catalogue is curated; Add is how internal
 // Mechanisms join, AddExperimental is how the bench registers a candidate hook.
 type MechanismRegistry struct {
-	// unexported
+	mechanisms   []Mechanism         // catalogued Mechanisms registered via Add
+	experimental map[HookPoint][]any // bench experimental hooks registered via AddExperimental
 }
 
-// NewMechanismRegistry returns a registry seeded with the built-in catalogue.
-func NewMechanismRegistry() *MechanismRegistry { panic("sketch: not implemented") }
+// NewMechanismRegistry returns a registry seeded with the built-in catalogue. The
+// Phase-0 catalogue is empty — the curated Mechanisms land with the catalogue→hook
+// mapping session (Phase 4); P0.6 needs only the experimental-hook slots.
+func NewMechanismRegistry() *MechanismRegistry {
+	return &MechanismRegistry{experimental: make(map[HookPoint][]any)}
+}
 
 // Add registers a catalogued Mechanism. It returns an error if the Mechanism
-// implements no hook interface or introduces a constraint cycle.
-func (r *MechanismRegistry) Add(m Mechanism) error { panic("sketch: not implemented") }
+// implements no hook interface. (The constraint-cycle check is performed by New over
+// the whole graph — a startup gate, ADR 0003 — so a registry under construction can
+// hold constraints that only close a cycle once every Mechanism is present.)
+func (r *MechanismRegistry) Add(m Mechanism) error {
+	if !implementsAnyHook(m) {
+		return fmt.Errorf("apogee: mechanism %q: %w", m.Descriptor().ID, errNoHookInterface)
+	}
+	r.mechanisms = append(r.mechanisms, m)
+	return nil
+}
 
 // AddExperimental registers a bench experimental hook at a hook point — a behaviour
 // that is not (yet) a Mechanism (CONTEXT: Experimental hook). It runs but does not
 // join self-regulation. hook must implement the interface for at.
 func (r *MechanismRegistry) AddExperimental(at HookPoint, hook any) error {
-	panic("sketch: not implemented")
+	if !hookImplements(at, hook) {
+		return fmt.Errorf("apogee: hook does not implement the interface for hook point %q", at)
+	}
+	if r.experimental == nil {
+		r.experimental = make(map[HookPoint][]any)
+	}
+	r.experimental[at] = append(r.experimental[at], hook)
+	return nil
 }
 
 // ----------------------------------------------------------------------------
@@ -796,7 +836,13 @@ type ConfinementBox struct {
 // boundary as a copyable, serializable value (ADR 0001/0007). It is valid only at a
 // boundary (between Steps). Apogee exposes snapshot/resume; it exposes no fork — the
 // bench composes forking by deep-copying a Session and the sandbox directory.
-func (a *Agent) Snapshot() (Session, error) { panic("sketch: not implemented") }
+func (a *Agent) Snapshot() (Session, error) {
+	state, err := encodeConversation(a.conv)
+	if err != nil {
+		return Session{}, err
+	}
+	return Session{Version: sessionVersion, State: state}, nil
+}
 
 // Session is the serializable, copyable conversation state — no live handles, no
 // process globals (ADR 0001). Deep-copying it yields an independent branch (the
@@ -811,7 +857,16 @@ func (s Session) Encode() ([]byte, error) { return json.Marshal(s) }
 
 // DecodeSession deserializes a session, returning ErrSessionVersion if the schema
 // version is newer than this build understands.
-func DecodeSession(data []byte) (Session, error) { panic("sketch: not implemented") }
+func DecodeSession(data []byte) (Session, error) {
+	var s Session
+	if err := json.Unmarshal(data, &s); err != nil {
+		return Session{}, fmt.Errorf("apogee: decode session: %w", err)
+	}
+	if s.Version > sessionVersion {
+		return Session{}, ErrSessionVersion
+	}
+	return s, nil
+}
 
 // ----------------------------------------------------------------------------
 // Sentinel errors
