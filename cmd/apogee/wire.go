@@ -41,12 +41,18 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		return err
 	}
 
+	// The Bridge late-binds the event sink and approval gate to the Bubble Tea program
+	// the launcher starts. Its Sink/Approver are installed in Config before construction
+	// (apogee.New requires Events; Ask-Before needs the Approver), then bound once the
+	// program exists (phase-2 detail plan §3 C2/C3).
+	bridge := tui.NewBridge()
 	cfg := apogee.Config{
 		Endpoint:     opts.endpoint,
 		Model:        opts.model,
 		Mode:         mode,
 		Bypass:       opts.bypass,
-		Events:       nopSink{}, // P2.1 replaces this with the real internal/tui event bridge
+		Events:       bridge.Sink(),
+		Approver:     bridge.Approver(),
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
 		SessionsDir:  roots.sessions,
@@ -59,7 +65,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	}
 	defer agent.Close()
 
-	return launch(ctx, agent, tui.Options{
+	return launch(ctx, agent, bridge, tui.Options{
 		Model:     opts.model,
 		Endpoint:  opts.endpoint,
 		Mode:      mode,
@@ -167,12 +173,3 @@ func friendlyConstructErr(err error) error {
 	}
 	return err
 }
-
-// nopSink is a temporary EventSink placeholder so the binary can construct an Agent
-// before the interactive event bridge exists (Config.Events is required). P2.1 replaces
-// it with the real internal/tui event bridge wired into the Bubble Tea program (C2).
-type nopSink struct{}
-
-// Emit drops the event — the placeholder Agent is never stepped before P2.1 wires a
-// real sink, so no event is lost in practice.
-func (nopSink) Emit(apogee.Event) {}

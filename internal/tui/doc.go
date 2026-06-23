@@ -6,9 +6,10 @@
 // public types through internal/domain; it never imports the root module path, so the
 // ADR-0010 invariant "internal/* never imports root" holds (phase-2 detail plan §3 C5).
 //
-// Phase 2 build order: P2.0 lands the seam boundary defined here (the [Engine]
-// interface, [Options], and the [Run] entry point). The concurrency seam — the
-// worker-goroutine engine driver, the Event→Msg bridge, and the approval rendezvous
-// (phase-2 detail plan §3 C1–C5) — plus the Bubble Tea model/update/view land in
-// P2.1–P2.4.
+// Phase 2 build order: P2.0 landed the seam boundary (the [Engine] interface, [Options],
+// and the [Run] entry point). P2.1 lands the concurrency seam — the worker-goroutine
+// engine driver ([startExchange]/[driveExchange]), the Event→Msg bridge ([teaSink]), and
+// the approval rendezvous ([uiApprover]), all late-bound to the running program through
+// the [Bridge] (phase-2 detail plan §3 C1–C5; ADR 0011) and proven under -race against a
+// stub program. The Bubble Tea model/update/view that drives them land in P2.2–P2.4.
 package tui

@@ -50,19 +50,24 @@ type Options struct {
 // ----------------------------------------------------------------------------
 
 // Run launches the interactive terminal UI over eng. It is the single entry point the
-// binary calls (cmd/apogee hands it the constructed Agent and the resolved Options).
+// binary calls: cmd/apogee hands it the constructed Agent, the Bridge whose Sink/Approver
+// were installed in the Agent's Config, and the resolved Options. Run creates the Bubble
+// Tea program and binds it to br (br.Bind) before any worker can run, so the late-bound
+// event and approval delegates reach the live program (phase-2 detail plan §3 C2/C3).
 //
-// P2.0 ships the binary wiring and this entry point; the Bubble Tea program itself —
-// the model/update/view, the worker-goroutine engine driver, and the event/approval
-// bridge (phase-2 detail plan §3 C1–C5) — lands in P2.1–P2.4. Until then Run is a clean
-// no-op that reports the build state and quits, so the wired binary constructs and exits
-// cleanly without pretending to be interactive.
-func Run(ctx context.Context, eng Engine, opts Options) error {
+// P2.1 lands the concurrency seam underneath this entry point — the teaSink event bridge,
+// the uiApprover rendezvous, and the worker driver (phase-2 detail plan §3 C1–C5), all
+// proven under -race against a stub program. The Bubble Tea model/update/view that drives
+// them lands in P2.2–P2.4; until then Run binds nothing and is a clean no-op that reports
+// the build state and quits, so the wired binary constructs and exits cleanly without
+// pretending to be interactive.
+func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	_ = ctx
 	_ = eng
+	_ = br // P2.2 creates the tea.Program and calls br.Bind(program) before running it.
 	fmt.Fprintf(
 		os.Stdout,
-		"apogee: configured for %s @ %s (mode %s) — the interactive TUI lands in P2.1.\n",
+		"apogee: configured for %s @ %s (mode %s) — the interactive TUI lands in P2.2.\n",
 		opts.Model,
 		opts.Endpoint,
 		opts.Mode,

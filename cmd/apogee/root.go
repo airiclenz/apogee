@@ -21,10 +21,12 @@ type options struct {
 	configDir string
 }
 
-// launcher starts the interactive UI over the constructed engine. It is injected so
-// tests can assert clean construction and a clean quit without a real terminal; main
-// passes tui.Run. The seam also keeps cmd from depending on Bubble Tea directly.
-type launcher func(ctx context.Context, eng tui.Engine, opts tui.Options) error
+// launcher starts the interactive UI over the constructed engine. It carries the Bridge
+// whose Sink/Approver were installed in the Agent's Config, so the launcher can bind it to
+// the running program (resolving the construction chicken-and-egg — phase-2 detail plan §3
+// C2/C3). It is injected so tests can assert clean construction and a clean quit without a
+// real terminal; main passes tui.Run.
+type launcher func(ctx context.Context, eng tui.Engine, br *tui.Bridge, opts tui.Options) error
 
 // newRootCommand builds the apogee root command. The root launches the TUI; it carries
 // the minimal, reviewable flag set (phase-2 detail plan P2.0). Subcommands (headless,

@@ -16,12 +16,14 @@ import (
 type recordingLauncher struct {
 	called bool
 	engine tui.Engine
+	bridge *tui.Bridge
 	opts   tui.Options
 }
 
-func (r *recordingLauncher) launch(_ context.Context, eng tui.Engine, opts tui.Options) error {
+func (r *recordingLauncher) launch(_ context.Context, eng tui.Engine, br *tui.Bridge, opts tui.Options) error {
 	r.called = true
 	r.engine = eng
+	r.bridge = br
 	r.opts = opts
 	return nil
 }
@@ -44,6 +46,9 @@ func TestRunRootConstructsAndLaunches(t *testing.T) {
 	}
 	if rec.engine == nil {
 		t.Fatal("launcher received a nil engine")
+	}
+	if rec.bridge == nil {
+		t.Fatal("launcher received a nil bridge (the sink/approver were not late-bound)")
 	}
 	if rec.opts.Model != "fake" {
 		t.Errorf("opts.Model = %q; want %q", rec.opts.Model, "fake")
