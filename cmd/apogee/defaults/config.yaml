@@ -14,6 +14,10 @@
 #   flag: --endpoint   env: APOGEE_ENDPOINT
 # endpoint: http://192.168.64.1:1111
 
+# A short, friendly name for the upstream host, shown in the status footer. Leave it unset
+# and apogee shows the endpoint's host instead. Config-file only (no flag or env).
+# host-alias: my-box
+
 # The model name to request from that server. Leave it unset and apogee asks the server
 # for its active model — a single-model server (e.g. llama.cpp's llama-server) needs only
 # the endpoint above.
@@ -27,9 +31,7 @@
 #   flag: --mode       env: APOGEE_MODE
 # mode: ask-before
 
-# A short, friendly name for the upstream host, shown in the status footer. Leave it unset
-# and apogee shows the endpoint's host instead. Config-file only (no flag or env).
-# host-alias: my-box
+
 
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
