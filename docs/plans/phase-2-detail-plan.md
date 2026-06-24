@@ -567,7 +567,9 @@ file-edit eval now over the product surface. Run against **`gemma-4-E4B-it-Q8_0`
 model — a deliberate no-swap; the launcher MCP is reachable at `192.168.64.1:7331` and the model is
 tool-capable despite `/v1/models` advertising only `completion`): it streamed, called `write_file`,
 the write was approved through the real gate and wrote `greeting.txt` (14 bytes), and the final
-message rendered — `StatusExchangeComplete`, transcript correct. The **only** unautomated remainder
+message rendered — `StatusExchangeComplete`, transcript correct. **Re-confirmed against
+`gpt-oss-20b-MXFP4`** (swapped in via the launcher MCP) — identical end-to-end result, ~0.9s/Turn —
+so the deliverable holds across two model families/scales. The **only** unautomated remainder
 is a human pressing `a` in a live alt-screen terminal (no TTY in the dev env); the hermetic e2e
 proves the Model handles that real keypress, and the owner can run the interactive TUI directly. All
 verify gates green; `go mod tidy` no drift (no new deps). **Phase 2 is complete.**

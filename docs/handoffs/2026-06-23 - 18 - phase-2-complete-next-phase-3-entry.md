@@ -43,9 +43,10 @@ human approves the write, the result renders** — proven hermetically *and* aga
   ```
   APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -run TestE2ELiveModel -v ./internal/tui/
   ```
-  **Result of the run done this session** (against `gemma-4-E4B-it-Q8_0`): it streamed, called
-  `write_file`, the write was approved through the real gate and wrote `greeting.txt` (14 bytes), the
-  final message rendered, `StatusExchangeComplete` — transcript correct.
+  **Runs done this session:** against the loaded `gemma-4-E4B-it-Q8_0` **and** against
+  `gpt-oss-20b-MXFP4` (swapped in via the launcher) — both PASS: streamed, called `write_file`, the
+  write approved through the real gate, wrote `greeting.txt` (14 bytes), final message rendered,
+  `StatusExchangeComplete`, transcript correct (gpt-oss ~0.9s/Turn). gpt-oss-20b is left loaded.
 
 ### Two environment notes from the live run (for whoever runs it next)
 
