@@ -69,7 +69,8 @@ this table on trust at build time** — P3.0's first job is to reconfirm it.
   optional interfaces are the seams it was built around.*
 - **Confinement — the interface and the gate exist; the backends and the `Confine` call do not.**
   `domain.Confiner` = `Capabilities() ConfinementCaps` + `Confine(ctx, ConfinementBox, fn func(ctx) error) error`;
-  `ConfinementCaps{FSWrite, NetworkEgress}` with `AutoEligible()` = *both true*;
+  `ConfinementCaps{FSWrite, NetworkEgress}` with `AutoEligible()` = *both true* (P3.4 narrows this to
+  **`FSWrite`-only** per ADR 0012 — network is open in Auto by default);
   `ConfinementBox{WorkspaceRoot, WritablePaths, NetworkAllow}`. `internal/platform` ships only the
   **`denyConfiner`** stub (`AutoEligible()==false`, runs `fn` unchanged). `agent.New` already
   **refuses Auto** when `!autoEligible(cfg.Confiner)` → `domain.ErrAutoUnavailable`. **Critically:
@@ -78,8 +79,9 @@ this table on trust at build time** — P3.0's first job is to reconfirm it.
   backends and threads `Confine` into dispatch — that is what makes Auto real.*
 - **Approval/mode wiring — already per-tool-aware (3 modes today).** `needsApproval` (dispatch.go)
   is: **Plan** ⇒ read-only tools only; **Ask-Before** ⇒ gate every non-read-only tool; **Auto** ⇒
-  gate **only `ExternalEffectTool`s** (the per-tool invariant in embryo — external/MCP gate through
-  Approval even in Auto). `approved[tool]` caches allow-for-session. *Phase 3 inserts the
+  gate **only `ExternalEffectTool`s** (the per-tool invariant in embryo). `approved[tool]` caches
+  allow-for-session. *(ADR 0012 refines the Auto half: `network`-kind external tools auto-run, only
+  `mcp`-kind keeps gating under `confine=true`.)* *Phase 3 inserts the
   **Allow-Edits** rung (Plan→Ask-Before→Allow-Edits→Auto), reworks this into the blast-radius
   disposition (D5), makes the "run confined" half real for the subprocess surface, and proves the
   gating end-to-end.*
@@ -126,15 +128,17 @@ with Auto mode confined on Mac/Linux. **Cut `v1.0.0` of the public Go API here**
    Ask-Before → **Allow-Edits** → Auto (CONTEXT: Agent mode). The `platform/` `Confiner` backends
    exist — macOS seatbelt and Linux landlock — reporting an honest capability matrix and confining
    the **unbounded subprocess/network surface** (the single, all-OS subprocess granularity).
-   The **blast-radius invariant holds** (ADR 0004 refined by ADR 0012): a subprocess/shell tool runs
-   unsupervised in Auto *only* under confinement; Apogee's own workspace-scoped in-process writes run
-   path-safety-bounded (no per-thread landlock — **no thread-discard, no macOS asymmetry**); a
-   third-party in-process tool and any tool Apogee cannot confine (arbitrary-URL network, **MCP**)
-   **gate through Approval even in Auto**. **Allow-Edits needs no confinement and is identical on
-   every OS** (path-safety bounds the auto-approved edits; the human backstops the unbounded surface).
-   On Linux 5.13–6.6 (no landlock ABI v4) Auto degrades to **Allow-Edits/Ask-Before** with a clear
-   message — **no `--auto-allow-network` escape hatch** (ADR 0004). `ErrAutoUnavailable` becomes
-   reachable-but-conditional, not a permanent refusal.
+   The **blast-radius invariant holds** (ADR 0012, superseding ADR 0004): under `confine-to-workspace=true`
+   (default) a subprocess/shell tool runs unsupervised in Auto *only* under confinement (escape OS-blocked),
+   Apogee's own workspace-scoped in-process writes run path-safety-bounded (out-of-workspace ⇒ Approval; no
+   per-thread landlock — **no thread-discard, no macOS asymmetry**), the **network is open** so native
+   `web-fetch`/`http-request` **auto-run** (url-filtered), and **MCP gates through Approval** (unfenceable
+   server); if fs-confinement is unavailable, subprocess tools gate. Under `confine-to-workspace=false`
+   ("I am the sandbox", global-config-only, VM-only) nothing fences except the dangerous-action floor.
+   **Allow-Edits needs no confinement and is identical on every OS.** **`AutoEligible()` requires
+   fs-confinement only**, so Linux Auto now needs kernel **≥5.13** (not ≥6.7); a host with no
+   fs-confinement at all gates the subprocess surface rather than refusing Auto. `ErrAutoUnavailable`
+   becomes reachable-but-conditional, not a permanent refusal.
 4. **Sub-agents work, privileges bounded.** A sub-agent is constructed with the parent's mode,
    approval delegate, confiner, and guardrails threaded in, and a **tool subset ≤ the parent's**
    (ADR 0005 — never the gate-less apogee-code port); its events **nest into the parent stream**
@@ -143,7 +147,8 @@ with Auto mode confined on Mac/Linux. **Cut `v1.0.0` of the public Go API here**
 5. **MCP client works on the official Go SDK.** `internal/mcp` connects over stdio / SSE /
    streamable-http (`modelcontextprotocol/go-sdk`, pin re-confirmed at P3.0), surfaces server tools
    into the registry as `ExternalEffectTool`s, and **resume reconnects fresh** with no
-   server-side-state promise (ADR 0008). MCP tool calls gate through Approval even in Auto (#3).
+   server-side-state promise (ADR 0008). MCP tool calls gate through Approval in Auto under
+   `confine-to-workspace=true` (#3; free under `confine=false`).
 6. **Security guardrails are in place.** `internal/security` provides path/url safety, arg-guard,
    circuit-breaker, and an audit record — the human-in-the-loop guardrails (NOT a sandbox; the
    sandbox is the `Confiner`). Path-safety from the Phase-1 tools is consolidated here.
@@ -214,7 +219,8 @@ Everything else is bounded by something cheaper:
 - **The unbounded surface — shell/subprocess (`terminal`, `python-exec`, optional `git`) and arbitrary
   network** — is what Auto runs *without a human*, so it is what must be OS-confined. And this is the
   **clean subprocess case that confines identically on both OSes**: macOS execs the child under
-  `sandbox-exec -p <profile>` (workspace-write-only + network default-deny + `NetworkAllow`); Linux
+  `sandbox-exec -p <profile>` (workspace-write-only + **network open by default**, a deny-list only
+  when the user opts back into network-deny via `NetworkAllow`); Linux
   applies landlock to the child *after fork, before `execve`* (the domain inherits across exec), parent
   unrestricted. `fn` builds + runs the `*exec.Cmd`; the backend owns the wrapping. **No per-thread
   in-process landlock anywhere ⇒ no thread-discard, no goroutine-escape hole, no macOS asymmetry.**
@@ -235,20 +241,21 @@ amendment ADR 0012 records and ADR 0004 points to.** Per-call disposition in Aut
   like external-effect). "Workspace-scoped writer" must be a signal **only Apogee's own tools can
   carry** — an unexported marker (e.g. `workspaceScopedWriter`) the built-ins implement and a
   third-party tool structurally cannot fake from outside `internal/`.
-- **Genuinely-unconfinable external reach** (arbitrary-URL `web-fetch`/`http-request`, **MCP**) →
-  **Approval-gate even in Auto** (ADR 0004's per-tool teeth, intact — the blast radius is an arbitrary
-  remote host Apogee cannot bound). A per-project `NetworkAllow` may later let *specific* hosts run
-  free in Auto; absent that, they gate.
+- **External reach** (superseded by ADR 0012 — network is now open in Auto): native arbitrary-URL
+  `web-fetch`/`http-request` **auto-run** url-filtered in Auto (a subprocess could `curl` the same host
+  anyway, and the native tool is *safer* for passing url-safety). **MCP** still **Approval-gates** under
+  `confine-to-workspace=true` (it runs in a server Apogee cannot fence — the per-tool teeth, intact),
+  and runs free under `confine-to-workspace=false`.
 
-**Capability honesty (unchanged in spirit):** `Capabilities()` reports `{FSWrite, NetworkEgress}` *as
-enforceable on this host now* — for the **subprocess surface** (landlock ABI probed at startup;
-`sandbox-exec` presence probed). `AutoEligible()` (both true) is the whole-box gate `agent.New`
-reads; on Linux <6.7 `NetworkEgress=false` ⇒ `AutoEligible()=false` ⇒ Auto refused, degrading to
-**Allow-Edits/Ask-Before** (no escape hatch). **Acceptance the ADR pins:** in Auto, a *subprocess*
-tool's write outside `WorkspaceRoot` is OS-blocked on both Linux and macOS; its non-allowlisted
-network reach is denied; an Apogee in-process write outside the workspace is rejected by path-safety
-(error result) in every mode; a third-party in-process write and an arbitrary-URL fetch each raise
-Approval in Auto.
+**Capability honesty (ADR 0012):** `Capabilities()` reports `{FSWrite, NetworkEgress}` *as enforceable
+on this host now* — for the **subprocess surface** (landlock ABI probed at startup; `sandbox-exec`
+presence probed). Since the network is open by default, **`AutoEligible()` requires `FSWrite` only**
+(Linux kernel ≥5.13; `NetworkEgress` is an optional tightening for users who opt back into network-deny).
+If fs-confinement is unavailable, Auto is *not* refused — subprocess tools gate through Approval
+("confine if you can, gate if you can't"). **Acceptance the ADR pins:** under `confine-to-workspace=true`
+in Auto, a *subprocess* tool's write outside `WorkspaceRoot` is OS-blocked on both Linux and macOS; an
+Apogee in-process write outside the workspace raises Approval; a third-party in-process write and an MCP
+call raise Approval; native `web-fetch` auto-runs (url-filtered).
 
 ### D2 — The sub-agent orchestrator (→ ADR 0013, landed by **P3.13**)
 
@@ -286,12 +293,14 @@ ADR 0005 fixed the *policy* (privileges ≤ parent); D2 fixes the *shape*. **Rec
   an Auto sub-agent still routes MCP/external tools through Approval; nested events arrive at
   `Depth==1` and render indented.
 
-### D3 — MCP is non-confinable ⇒ Approval-gated even in Auto (→ ADR 0014 *or* a P3.15 note)
+### D3 — MCP is non-confinable ⇒ Approval-gated in Auto under `confine=true` (→ ADR 0014 *or* a P3.15 note)
 
-MCP tools execute in an **external server Apogee cannot confine** (ADR 0004 ¶ "per-tool form has
-teeth"; ADR 0008 "non-forkable external effects"). The integration call: MCP tools surface into the
-registry as **`ExternalEffectTool`** (effect kind `mcp`), which means the **existing** `needsApproval`
-logic *already* gates them through Approval in Auto — D3 is mostly *surfacing them correctly* so the
+MCP tools execute in an **external server Apogee cannot confine** (ADR 0012 per-tool teeth; ADR 0008
+"non-forkable external effects"). The integration call: MCP tools surface into the registry as
+**`ExternalEffectTool`** of effect kind **`mcp`**, which means the `needsApproval` logic gates them
+through Approval in Auto **under `confine-to-workspace=true`** (free under `confine=false`) — D3 is
+mostly *surfacing them with the right effect kind* (distinct from `network`-kind tools, which auto-run)
+so the
 invariant holds for free, plus: **resume reconnects fresh** (no server-side-state promise), and the
 bench swaps deterministic stubs behind the single injectable external-effect boundary (ADR 0008).
 Transports: stdio / SSE / streamable-http on the official SDK; the **client lifecycle** (connect on
@@ -319,10 +328,16 @@ backend-caps)`:
   `workspaceScopedWriter` marker, D1); shell/exec, `ExternalEffectTool` (network/MCP), third-party
   in-process tools, and any out-of-workspace write still gate. **No `Confine` call** — path-safety is
   the bound. Identical on every OS.
-- **Auto** → **subprocess/shell tool, caps sufficient** ⇒ run under `Confine` (no Approval);
-  **Apogee's own workspace-scoped write** ⇒ run directly, path-safety-bounded (no Approval, no
-  `Confine`); **third-party in-process tool OR `ExternalEffectTool` (arbitrary-URL network, MCP) OR
-  backend cannot establish the box** ⇒ **Approval** (the per-tool teeth, intact).
+- **Auto** (per ADR 0012 — see §5 Resolved; tuned by `confine-to-workspace`):
+  - `confine-to-workspace=true` (default): **subprocess/shell tool, caps sufficient** ⇒ run under
+    `Confine` (no Approval), or **gate** if fs-confinement is unavailable; **Apogee's own
+    workspace-scoped write** ⇒ run directly path-safety-bounded if in-workspace (no Approval, no
+    `Confine`), **Approval** if out-of-workspace; **native network tools** (`web-fetch`/`http-request`)
+    ⇒ **auto-run** url-filtered (network is open — they no longer gate); **MCP** ⇒ **Approval**
+    (unfenceable; "allow for session" caches at server grain); **third-party in-process tool** ⇒
+    **Approval** (can't vouch for its scoping).
+  - `confine-to-workspace=false` (VM-only): everything auto-runs unfenced **except** the
+    dangerous-action floor (Tier-1 refuse / Tier-2 force-approval).
 
 "Workspace-scoped writer" is the unexported marker only Apogee's own tools carry (D1). P3.4 builds
 this; every later tool task asserts its own row (e.g. P3.8's `terminal` confines in Auto; P3.11's
@@ -414,16 +429,18 @@ pass ADR 0004 asked for, now simpler because the ladder removed the in-process-c
 ### P3.2 — Linux landlock backend
 Implement the landlock `Confiner` (`//go:build linux`): probe the landlock ABI at startup
 (`landlock_create_ruleset` with `LANDLOCK_CREATE_RULESET_VERSION`); report `FSWrite=true` when ABI
-≥1 (kernel ≥5.13) and `NetworkEgress=true` **only** when ABI ≥4 (kernel ≥6.7); build a ruleset from
-the `ConfinementBox` (workspace-write-only + the `WritablePaths` + network default-deny + the
-`NetworkAllow` TCP-connect allowlist). Realise the **single subprocess granularity** from ADR 0012:
+≥1 (kernel ≥5.13) and `NetworkEgress=true` **only** when ABI ≥4 (kernel ≥6.7 — an *optional*
+tightening now, since Auto's network is open by default per ADR 0012); build a ruleset from
+the `ConfinementBox` (workspace-write-only + the `WritablePaths` + **network open by default**, adding a
+landlock TCP-connect restriction only when the box opts into network-deny via `NetworkAllow`). Realise the **single subprocess granularity** from ADR 0012:
 the child thread applies the landlock domain *after fork, before `execve`* (the domain inherits across
 exec), so the spawned process is confined while the parent stays unrestricted. **No in-process
 per-thread landlock, no thread-discard** — Apogee's own in-process writes are path-safety-bounded (D1).
 **Acceptance (Linux runners):** the shared escape-probe denies an out-of-box write and a
 non-allowlisted connect *for a confined subprocess*; the confined subprocess inherits the domain across
 exec; `Capabilities()` is honest across a ≥6.7 and a 5.13–6.6 kernel (the latter reports
-`NetworkEgress=false` ⇒ `AutoEligible()=false`); the parent process stays unrestricted after a confined
+`NetworkEgress=false` but **`AutoEligible()=true`** — fs-confinement alone satisfies Auto now per ADR
+0012; network-egress is an optional tightening); the parent process stays unrestricted after a confined
 child runs. Cross-build stays green (the file is `linux`-tagged; other OSes keep `denyConfiner`).
 
 ### P3.3 — macOS seatbelt backend
@@ -434,33 +451,42 @@ when present (else deny-all). Subprocess tools exec under `sandbox-exec -p <prof
 single granularity as Linux**, so there is **no macOS in-process asymmetry** (Apogee's own in-process
 writes are path-safety-bounded in every mode, D1). **Acceptance (macOS, opt-in like P2.6's live test
 — no macOS in the dev env):** the escape-probe denies an out-of-box write and a non-allowlisted
-connect for a subprocess tool; `sandbox-exec`-absent ⇒ deny-all caps ⇒ Auto refused (degrades to
-Allow-Edits/Ask-Before); the generated profile is unit-tested as a pure string from a box (hermetic,
+connect for a subprocess tool; `sandbox-exec`-absent ⇒ no fs-confinement ⇒ **subprocess tools gate
+through Approval** (Auto is *not* refused — "confine if you can, gate if you can't", ADR 0012); the
+generated profile is unit-tested as a pure string from a box (hermetic,
 runs everywhere). Cross-build green (`darwin`-tagged).
 
 ### P3.4 — The mode ladder + wire `Confine` into dispatch; Auto becomes real
 Add **`ModeAllowEdits`** to `domain` and the `--mode` flag (the ladder Plan → Ask-Before →
 Allow-Edits → Auto), and rework `needsApproval` into the D5 disposition keyed on
-`(mode, effect-kind, workspaceScopedWriter, backend-caps)`. Thread the `Confiner` into the tool
-executor: in **Auto**, a **subprocess/shell** tool with sufficient caps runs inside
-`Confiner.Confine(ctx, box, …)`; an **Apogee workspace-scoped write** runs directly (path-safety-
-bounded, no `Confine`, no Approval); a **third-party in-process tool or `ExternalEffectTool`** raises
-Approval. In **Allow-Edits**, Apogee's workspace-scoped writes auto-approve and everything unbounded
-gates — **no `Confine` call at all** (all-OS). `cmd/apogee` now selects the **real** backend for the
-host OS (landlock/seatbelt) instead of `denyConfiner`, so `--mode auto` **works** when eligible and
-degrades to **Allow-Edits/Ask-Before** (clear message) when not. The box is built from the injected
-`WorkspaceDir` + per-project allowlist (config). **Plumb `ExternalEffects` here too:** `executeTool`
+`(mode, effect-kind, workspaceScopedWriter, backend-caps, confine-to-workspace)`. Read the global
+**`confine-to-workspace`** flag (ADR 0012; default `true`, global-config-only — a project config cannot
+set it `false`). Thread the `Confiner` into the tool executor: in **Auto** with `confine=true`, a
+**subprocess/shell** tool with sufficient caps runs inside `Confiner.Confine(ctx, box, …)` (or **gates**
+if fs-confinement is unavailable); an **Apogee workspace-scoped write** runs directly path-safety-bounded
+if in-workspace (no `Confine`, no Approval) or **raises Approval** if out-of-workspace; **native network
+tools** auto-run (network open); **MCP** raises Approval; a **third-party in-process tool** raises
+Approval. In **Auto** with `confine=false` everything auto-runs unfenced **except** the dangerous-action
+floor (P3.6). In **Allow-Edits**, Apogee's workspace-scoped writes auto-approve and everything unbounded
+gates — **no `Confine` call at all** (all-OS). Update `ConfinementCaps.AutoEligible()` to require
+**`FSWrite` only** (network no longer gated). `cmd/apogee` now selects the **real** backend for the host
+OS (landlock/seatbelt) instead of `denyConfiner`, so `--mode auto` **works** when fs-confinement exists
+(Linux kernel ≥5.13) and, when it does not, **gates the subprocess surface** rather than refusing Auto.
+The box is built from the injected `WorkspaceDir` + per-project allowlist (config). **Plumb `ExternalEffects` here too:** `executeTool`
 currently calls `tool.Execute` directly and never consults `cfg.ExternalEffects` (the seam is declared
 on `Config` and documented in `tools.go` but unwired). Route an `ExternalEffectTool` through
 `cfg.ExternalEffects.Do(ctx, call)` when `cfg.ExternalEffects != nil` (else live `Execute`), so the
 single injectable boundary ADR 0008 promises is real before P3.11 ships the first network tool.
-**Acceptance (all `-race`):** a table test covers every ladder row — in Auto a subprocess tool runs
-**without** Approval and **under** `Confine`, an Apogee write runs **without** Approval and **without**
-`Confine` (path-safety-bounded), a third-party in-process tool and an `ExternalEffectTool` each
-**raise Approval**; in Allow-Edits an Apogee write auto-approves while a `terminal` call gates and **no
-`Confine` is invoked**; an out-of-box write from a confined subprocess is denied by the backend
-(hermetic on Linux); `--mode auto` on an ineligible host degrades with the message, on an eligible
-host enters Auto. `ErrAutoUnavailable` is now conditional, not constant.
+**Acceptance (all `-race`):** a table test covers every ladder row — in Auto/`confine=true` a subprocess
+tool runs **without** Approval and **under** `Confine`, an in-workspace Apogee write runs **without**
+Approval and **without** `Confine` (path-safety-bounded) while an out-of-workspace one **raises
+Approval**, a native `web-fetch` **auto-runs** (no Approval), an MCP tool and a third-party in-process
+tool each **raise Approval**; in Auto/`confine=false` all of those auto-run **except** a dangerous-action
+(P3.6); in Allow-Edits an Apogee write auto-approves while a `terminal` call gates and **no `Confine` is
+invoked**; an out-of-box write from a confined subprocess is denied by the backend (hermetic on Linux);
+`--mode auto` on a host with no fs-confinement **gates the subprocess surface** (not refuse), on an
+eligible host (kernel ≥5.13) enters Auto. `AutoEligible()` is `FSWrite`-only; `ErrAutoUnavailable` is now
+conditional, not constant.
 
 ### P3.5 — `processing/` parity finish
 Add the remaining tool-call parsers (markdown-fenced, custom-regex) and the **full harmony /
@@ -475,14 +501,30 @@ re-run shows no parsing regression. Record the parity result in the commit.
 ### P3.6 — Security guardrails (`internal/security`)
 Build the human-in-the-loop guardrail layer (D6), distinct from the `Confiner` sandbox: **consolidate**
 the Phase-1 per-tool path-safety into one reusable, symlink-aware guard; add **url-safety** (scheme/
-host allow-deny for `web-fetch`/`http-request`), **arg-guard** (reject dangerous arguments — e.g. a
-`terminal` `rm -rf /`, a path-escaping patch — before execution), a **circuit-breaker** (halt a
-runaway repeated-tool / tool-loop), and an **audit** record (append-only tool-call log). Wire them
-through the tool executor so all tools — and sub-agents (D2) — inherit them. **Acceptance:** table
-tests for each guard (path traversal rejected; a denied url blocked; an arg-guard trip refuses the
-call with a clear `ToolResult` error; the breaker trips after N identical failing calls and surfaces
-an `ErrorEvent`, not a crash); the audit log records call/decision/result; guardrails run in **all**
-modes (not just Auto). Path-safety parity with the Phase-1 tools (no regression on the 4 built-ins).
+host allow-deny for `web-fetch`/`http-request`), the **dangerous-action guard** (below), a
+**circuit-breaker** (halt a runaway repeated-tool / tool-loop), and an **audit** record (append-only
+tool-call log). Wire them through the tool executor so all tools — and sub-agents (D2) — inherit them.
+
+The **dangerous-action guard** (ADR 0012; the renamed "denylist") is a **footgun-guard, NOT a security
+boundary** — it catches a small model's obvious catastrophic *mistakes*, in **every** mode, before
+execution, independent of the Confiner, and is **tighten-only** (runs ahead of the mode disposition; can
+only make a call stricter). Membership: *almost-never-legitimate* **and** *catastrophic/compromising*
+(precision-over-recall — never block `rm -rf ./build`). **Two tiers:** **Tier-1 hard-refuse** (`rm -rf`
+of a root/home/system path, fork bombs, writes to `~/.ssh`/credential/persistence files — clear
+`ToolResult` error, **no** per-call override) and **Tier-2 force-approval** (`curl | bash`-class — a
+legit installer idiom, so a speed-bump that forces the Approver even in Auto; `nil` Approver ⇒ refuse).
+Matching is deliberately simple (narrow, whitespace-normalized literal/regex — **no** obfuscation-chasing;
+that is the adversary game this explicitly is not). Default-on; the **global** config may add *or* remove
+entries (it is the user's machine — this is a footgun-guard, not a boundary), a **project** config may
+only *add*. It **never** makes `confine-to-workspace=false` "safe" (only the VM does).
+
+**Acceptance:** table tests for each guard (path traversal rejected; a denied url blocked; a Tier-1
+action refused with a clear `ToolResult` error in **Plan/Ask-Before/Allow-Edits/Auto alike**, before
+execution and independent of the Confiner; a Tier-2 action forces Approval even in Auto and refuses on
+`nil` Approver; a near-miss like `rm -rf ./build` is **not** blocked — precision; the breaker trips after
+N identical failing calls and surfaces an `ErrorEvent`, not a crash); the audit log records
+call/decision/result; guardrails run in **all** modes (not just Auto). Path-safety parity with the
+Phase-1 tools (no regression on the 4 built-ins).
 
 ### P3.7 — File-editing tool family
 The pure-Go, stateless editing tools (ADR 0008): **find-replace** single + multi (literal + anchored,
@@ -528,8 +570,11 @@ a clear "no diagnostics available" (not an error); the tool is `ReadOnly()` (run
 **`web-fetch`** (stdlib `net/http` GET with url-safety), **`http-request`** (general request, url-
 safety + arg-guard), **`web-search`** (against a **config'd, default-off** search endpoint — no
 hard-wired provider; absent config ⇒ unavailable, not a crash) — all marked **`ExternalEffectTool`**
-(effect kind `network`), so they **gate through Approval even in Auto** (D5) and are **bench-stubbable**
-behind the single external-effect boundary (ADR 0008). Plus **`ask-user`**: a tool that asks the human
+(effect kind **`network`**). Per **ADR 0012** the Auto disposition keys on the **effect *kind***, not the
+bare interface: **`network` tools auto-run in Auto** (url-filtered — the network is open; they no longer
+gate), while only **`mcp`** kind gates under `confine-to-workspace=true`. The `ExternalEffectTool` marker
+*still* routes **both** kinds through the single **bench-stubbable** external-effect boundary (ADR 0008) —
+the stub purpose and the gating purpose have diverged and must be keyed separately. Plus **`ask-user`**: a tool that asks the human
 a question mid-task, routed through a **new `Asker` host delegate** on `Config` (a deliberate v1
 surface addition, D7) — **distinct from `Approver`** (free-text Q&A, not a safety-gate enum). Pin its
 **freeze-aware shape**: `Ask(ctx, AskRequest) (AskAnswer, error)` with `AskRequest{Question string}` /
@@ -539,10 +584,11 @@ in Plan), mode-independent (always routes to the `Asker`, never through the Appr
 **not** an `ExternalEffectTool`), and **blocks the worker goroutine via the C-seam** (ADR 0011) like
 `Approver`; `nil` Asker ⇒ the tool is not registered (graceful). The TUI implements it as an input
 prompt (analogous to the approval-prompt flow); the bench as a canned/scripted responder.
-**Acceptance:** web tools Approval-gate in Auto (never run unconfined-unsupervised); the bench stub
-returns a fixed result with no network; `ask-user` round-trips a question→answer through the delegate
-(TUI prompt; bench script) **and is callable in Plan without Approval**; url-safety blocks a denied
-host; resume makes no network promise (ADR 0008).
+**Acceptance:** web (`network`-kind) tools **auto-run in Auto** (no Approval) but are **url-safety
+filtered** (a denied host is blocked) and still **bench-stubbable** (the stub returns a fixed result with
+no network); an `mcp`-kind tool still Approval-gates in Auto under `confine=true` (asserted in P3.15);
+`ask-user` round-trips a question→answer through the delegate (TUI prompt; bench script) **and is callable
+in Plan without Approval**; resume makes no network promise (ADR 0008).
 
 ### P3.13 — Sub-agent orchestrator + ADR 0013
 Build `internal/agent/subagent` per D2: construct a nested `Agent` threading the parent's `Mode` /
@@ -570,7 +616,7 @@ unchanged.
 ### P3.15 — MCP client
 Build `internal/mcp` on the official Go SDK (pin from P3.0): connect over stdio / SSE / streamable-http
 from config; **surface each server tool into the `ToolRegistry` as an `ExternalEffectTool`** (effect
-kind `mcp`) so D3/D5 gate it through Approval even in Auto **for free**; **resume reconnects fresh**
+kind `mcp`) so D3/D5 gate it through Approval in Auto under `confine=true` **for free**; **resume reconnects fresh**
 (ADR 0008 — no server-side-state promise); clean shutdown on `Close`. Record the client shape (ADR
 0014 or a design note — D3). **Acceptance:** a hermetic stdio MCP server (a test fixture) exposes a
 tool that appears in the menu, is callable, and **raises Approval in Auto** (asserted); a resumed
@@ -613,33 +659,36 @@ Record each as it lands (don't pre-decide in the abstract):
 - **`v1.0.0` API freeze + ADR 0001 §18 amendment** (settled by **P3.16**) — what the frozen surface
   is, and the semver-begins record.
 
-### ⚠️ Reopened 2026-06-24 (grill-with-docs) — resolve at the *start* of the next session, before P3.1
+### ✅ Resolved 2026-06-24 (grill-with-docs) — settled into ADR 0012 + CONTEXT.md
 
-Two calls surfaced in grilling that **reopen / extend** the confinement design and must be settled
-before ADR 0012/0004 are written (they change what P3.1–P3.6 build):
+Both reopened calls were settled in a grilling session and written into
+**[ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)**
+(which **supersedes ADR 0004**) and the CONTEXT.md Agent-mode / Confinement / Dangerous-action-guard
+entries. **ADR 0012 is the source of truth; where §3 D1/D5 below predate it on the network / kernel /
+web-tool / MCP specifics, ADR 0012 wins** (the surviving D1/D5 frame — blast-radius, the
+`workspaceScopedWriter` marker, the single subprocess granularity — is unchanged). Summary:
 
-- **OPEN — Auto-mode confinement strictness (reopens ADR 0004).** The owner's position: *Auto should
-  allow **everything** out of the box — security is the user's responsibility (run in a VM/container)*,
-  because a network-default-deny Auto (where `pip`/`go mod`/`npm` fail until allow-listed) is
-  impractical ("the mode is useless"). This conflicts with ADR 0004's premise (*Auto must be
-  OS-confined, safe even outside a VM*). This is **apogee-code's original posture** and the shape of
-  Claude Code's `--dangerously-skip-permissions`. Option space for next session: **(a)** keep
-  confined-autonomous but flip the box to **network-allow-by-default** (writes still OS-confined to the
-  workspace; network open); **(b)** add an explicit **unconfined "YOLO" rung** that refuses to start
-  unless the user acknowledges "I am the sandbox"; **(c)** make confinement strictness **configurable**,
-  unconfined as a deliberate opt-in. Grill lean: **(a)+(b)** — a practical confined-autonomous default
-  *plus* an explicit unconfined opt-in for VM users. **Until settled, the blast-radius rewrite above
-  assumes confined-autonomous (network-default-deny); if (b)/(c) wins, Auto's box defaults and the
-  `--mode` surface change, and ADR 0004 is amended more deeply than "blast-radius refinement."** CONTEXT.md
-  Agent-mode / Confinement entries reflect the *current* (confined) model and will need a pass once this lands.
-- **OPEN — an always-on action denylist ("blacklist") in *all* modes (extends D6/P3.6).** Owner idea:
-  prohibit a set of **known-malicious actions** (`rm -rf /`, fork bombs, `curl … | bash`, writes to
-  `~/.ssh/authorized_keys`, …) in **every mode regardless of confinement** — a known-malicious *floor*.
-  This is the **arg-guard generalised into a mode-independent denylist** (D6 already says guardrails run
-  in all modes). It is the natural complement to a permissive Auto: even "allow everything" keeps the
-  floor. Next session: confirm scope + the seed denylist, then fold into **P3.6** acceptance (a
-  denylisted action is refused with a clear `ToolResult` error in Plan/Ask-Before/Allow-Edits/Auto
-  alike, *before* execution and independent of the Confiner).
+- **Auto strictness → the `confine-to-workspace` flag** (global-config key, default `true`; meaningful
+  only in Auto). **`true`:** subprocess surface OS-fenced to the workspace (escape = OS-blocked, no
+  prompt), Apogee's own out-of-workspace in-process write raises **Approval**, **network open**
+  (subprocess net + native `web-fetch`/`http-request` auto-run, url-filtered), **MCP gates** (server-grain
+  "allow for session"); if fs-confinement is *unavailable*, subprocess tools **gate** ("confine if you
+  can, gate if you can't"). **`false` ("I am the sandbox"):** nothing fenced/gated except the
+  dangerous-action floor — **VM-only**, global-config-only (a project config cannot loosen it), with a
+  per-session startup warning. **`AutoEligible()` drops to fs-confinement only** → Linux Auto now needs
+  kernel **≥5.13** (not ≥6.7); network-egress confinement is an optional tightening. The 4-mode ladder is
+  unchanged (the unconfined opt-in is a *flag on Auto*, not a 5th rung).
+- **Dangerous-action guard** (the renamed "denylist" — a **footgun-guard, NOT a security boundary**;
+  folds into **P3.6**). Both-(a)-never-legit-**and**-(b)-catastrophic membership, precision-over-recall.
+  **Two tiers:** *hard-refuse* (`rm -rf` of root/home/system, fork bombs, `~/.ssh`/credential/persistence
+  writes — clear `ToolResult` error, no per-call override) and *force-approval* (`curl | bash`-class —
+  forces the Approver even in Auto). **Tighten-only**, runs before the mode disposition, independent of
+  the Confiner, all modes. Default-on; global config may add *or* remove, project config may only *add*.
+  It is trivially bypassable and **never** makes `confine=false` "safe."
+- **Deferred to [`TODO.md`](../../TODO.md):** the user-configurable **tool × mode security matrix**
+  (post-v1, additive, **tighten-only**) and the related command-pattern / per-host allowlist precision
+  knobs. v1 ships the *internal* disposition table + the `confine-to-workspace` flag + the existing
+  narrow allowlists.
 
 ---
 

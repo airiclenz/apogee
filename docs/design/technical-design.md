@@ -75,7 +75,8 @@ external-dependent task validation out of scope.
 | [0001](../adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md) | The loop is an embeddable library; the bench imports it as a Go module and drives it in-process. Apogee exposes snapshot/resume + hygiene; the bench *composes* forking. |
 | [0002](../adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md) | Tools are an open public extension point; the Mechanism catalogue is curated. |
 | [0003](../adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md) | Mechanisms are a constraint-declared registry → deterministic total order (topo-sort + stable ID tiebreak). |
-| [0004](../adr/0004-auto-mode-requires-os-level-confinement.md) | Auto requires OS confinement, reported as a capability matrix; needs fs-write **and** network; per-tool invariant (MCP gates through Approval even in Auto). |
+| [0004](../adr/0004-auto-mode-requires-os-level-confinement.md) | **Superseded by 0012.** (Was: Auto requires OS confinement of fs-write **and** network.) The capability matrix + the per-tool invariant (MCP gates) survive in 0012. |
+| [0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md) | Confinement attaches to blast radius; Auto's network is **open by default**, `AutoEligible()` = fs-write only (Linux ≥5.13); global **`confine-to-workspace`** flag (`false` = unconfined VM opt-in); a **dangerous-action guard** floor (footgun-guard, *not* a security boundary). |
 | [0005](../adr/0005-sub-agent-privileges-are-bounded-by-the-parent.md) | Sub-agent privileges ≤ parent (mode, guardrails, confiner, tool subset). |
 | [0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md) | Bypass mode = honest Mechanisms-off floor = the bench's aggregate control arm. |
 | [0007](../adr/0007-step-turn-and-the-quiescent-boundary.md) | Step/Turn + quiescent boundary; cancellation is a Phase-0 primitive; recover-at-extension-boundary. |
@@ -113,7 +114,7 @@ apogee/
 ├── apogee.go            # PUBLIC API facade (this is the keystone; sketch exists)
 ├── cmd/apogee/          # Cobra entrypoint: TUI + subcommands (run, probe, headless…)
 ├── internal/
-│   ├── agent/{loop,subagent,modes}   # the loop; sub-agent (≤parent); Plan/Ask-Before/Auto
+│   ├── agent/{loop,subagent,modes}   # the loop; sub-agent (≤parent); Plan/Ask-Before/Allow-Edits/Auto
 │   ├── provider/        # openai-compatible client, model discovery, server-process mgr
 │   ├── processing/      # PORT-RISK: tool-call parsers, thinking/harmony channels
 │   ├── tools/           # ~30-tool suite + registry/executor
@@ -146,15 +147,15 @@ The shape is in [`apogee.go`](../../apogee.go). Summary:
 | Concern | Surface | ADR |
 |---|---|---|
 | Construct / resume | `New(Config)`, `Resume(Config, Session)`, `Agent.Close()` | 0001 |
-| Autonomy | `Mode` (Plan/Ask-Before/Auto), `Config.Bypass` | 0004, 0006 |
+| Autonomy | `Mode` (Plan/Ask-Before/Allow-Edits/Auto), `Config.Bypass`, global `confine-to-workspace` | 0006, 0012 |
 | Drive the loop | `Submit(UserInput)`, `Step(ctx) → StepResult`, `Run(ctx)`, `StepStatus` | 0007 |
 | Observe | `EventSink.Emit(Event)`; sealed `Event` + variants (token, message, tool-call, tool-result, approval, mechanism-fired, error); `Depth` carries sub-agent nesting | 0001, 0005 |
 | Approve | `Approver.Approve(ctx, ApprovalRequest) → ApprovalDecision` | 0004 |
 | Tools | `Tool`, `ExternalEffectTool`, `ToolCall`/`ToolResult`, `ToolRegistry` (`.Subset` for sub-agents) | 0002, 0005, 0008 |
 | Mechanisms | 5 hook interfaces; `Mechanism` + `MechanismDescriptor` (`Capability`, `SuppressionPolicy`, incompatibilities) + `OrderingConstraints`; `MechanismRegistry` (`Add` / `AddExperimental`); `PostResponseDecision` | 0002, 0003, 0006 |
-| Confinement | `Confiner` (interface **public**), `ConfinementCaps.AutoEligible()`, `ConfinementBox` | 0004 |
+| Confinement | `Confiner` (interface **public**), `ConfinementCaps.AutoEligible()` (fs-write only), `ConfinementBox` | 0012 |
 | Sessions | `Agent.Snapshot() → Session`, `Session.Encode`/`DecodeSession` (**no fork API**); v1 `State` = conversation + loop counters (P1.6) | 0001 |
-| Errors | `ErrAutoUnavailable`, `ErrOrderingCycle`, `ErrSessionVersion`, `ErrInputPending` | 0003, 0004 |
+| Errors | `ErrAutoUnavailable`, `ErrOrderingCycle`, `ErrSessionVersion`, `ErrInputPending` | 0003, 0012 |
 
 ### 4.1 Design calls the sketch made (decided here; need ratifying into plan/ADRs)
 1. **`Confiner` interface is public** (host injects it via `Config`); only backends stay

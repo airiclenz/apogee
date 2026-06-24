@@ -1,8 +1,17 @@
 ---
-Status: accepted
+Status: superseded by ADR 0012
 ---
 
 # Auto mode requires OS-level confinement — a capability matrix, not a binary
+
+> **Superseded by [ADR 0012](0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)
+> (2026-06-24).** ADR 0012 reverses this ADR's **network-default-deny**, **fs-*and*-network-required**,
+> and **no-escape-hatch** decisions: Auto's network is now open by default, `AutoEligible()` requires
+> filesystem confinement only (Linux kernel ≥5.13, not ≥6.7), and a global-config `confine-to-workspace:
+> false` is the explicit unconfined ("I am the sandbox") opt-in. **What survives** — and is restated in
+> 0012 — is this ADR's capability matrix, its blast-radius "never unsupervised *and* unbounded"
+> invariant, and its per-tool teeth (MCP gates through Approval even in Auto). Read 0012 for the current
+> model; the text below is retained as the historical record of the decision it replaced.
 
 ## Context
 

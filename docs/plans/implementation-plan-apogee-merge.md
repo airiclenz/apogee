@@ -258,7 +258,7 @@ force. P0.6's root-package loop was an explicit throwaway; **P1.0 moves it to th
 | Diagnostics (other langs) | structural checks (brackets, truncation) | `tsc`, language linters — *enhancement only* |
 | Git ops | start by shelling to `git` (ubiquitous); evaluate `go-git` if we want to drop even that dep | `git` |
 | `terminal` / `python-exec` tools | n/a — these *are* the external invocation the user asked for (inherent dep) | shell / python |
-| Auto-mode Confinement (ADR 0004) | Linux **landlock** — fs confinement is kernel ≥5.13, but **network confinement needs landlock ABI v4 / kernel ≥6.7**; Auto requires *both* (see §6) | macOS **`sandbox-exec`** (system binary, fs+network); Windows AppContainer (Phase 5) |
+| Auto-mode Confinement (**ADR 0012**, supersedes 0004) | Linux **landlock** — `AutoEligible()` needs **fs confinement only** (kernel ≥5.13; **network open by default**); network-egress (ABI v4 / ≥6.7) is an *optional* tightening | macOS **`sandbox-exec`** (system binary); Windows AppContainer (Phase 5) |
 | Model fingerprint (Library keying) | **pure-Go GGUF tensor hash** (target) for a definitive weights ID when the file is reachable; behavioral `apogee probe` fingerprint otherwise | `llama-gguf-hash --uuid` (interim, if on PATH) |
 
 Rule: a fresh binary on a bare machine must still **read, edit, search, and run the
@@ -363,14 +363,15 @@ Port apogee-code's loop as an embeddable vertical slice (TS as oracle):
   the pin at this point (mark3labs is a break-glass fallback only, no longer co-evaluated).
 - **Agent modes** (Plan / Ask-Before / Auto) + **Safety guardrails** (approval, audit,
   circuit-breaker, path/url safety, arg guard). **Implement the `platform/` `Confiner`
-  backends for v1 targets — macOS (seatbelt) + Linux (landlock).** Confinement is a
-  **capability set, not a binary** (new — grill-me): **Auto requires fs-write *and* network
-  confinement**, so Linux Auto needs **landlock ABI v4 / kernel ≥6.7** (5.13–6.6 ⇒ Auto
-  refused → Ask-Before; **no `--auto-allow-network` escape**). The invariant is
-  **per-tool**: a tool runs unsupervised only if confined, so **MCP tools (which Apogee
-  cannot confine) gate through Approval even in Auto.** Default box = workspace-write-only +
-  network default-deny + per-project allowlist. (Sessions/resume already landed in Phase 1
-  as a core seam.)
+  backends for v1 targets — macOS (seatbelt) + Linux (landlock).** Confinement **attaches to
+  blast radius** (ADR 0012, supersedes 0004): `AutoEligible()` needs **fs confinement only**
+  (Linux kernel ≥5.13; **network open by default**), tuned by the global **`confine-to-workspace`**
+  flag (`false` = unconfined VM opt-in, global-config-only). The invariant is **per-tool**: a tool
+  runs unsupervised only if its blast radius is bounded, so **MCP gates through Approval in Auto
+  under `confine=true`** (native `web-fetch`/`http-request` auto-run, url-filtered). A
+  **dangerous-action guard** floor refuses obvious catastrophic *mistakes* in every mode (a
+  footgun-guard, **not** a security boundary). Default box = workspace-write-only + **network-open**
+  + per-project allowlist. (Sessions/resume already landed in Phase 1 as a core seam.)
 - Finish the riskiest **`processing/`** port (all tool-call formats, thinking/harmony
   channels) and validate parity against the TS oracle + the bench.
 - **Deliverable:** feature-parity with apogee-code's non-UI behavior, with Auto mode
@@ -522,12 +523,15 @@ Resolved in the 2026-06-22 grilling session (see ADRs):
     stability promise, through Phase 3; cut `v1.0.0` at end of Phase 3.** Events/hook-points
     **additively extensible** (new variant = minor bump). Seed types (e.g.
     `OrderingConstraints`) **move into apogee**; the bench imports them — never backward.
-19. **Confinement is a capability matrix, not a binary** (sharpens ADR 0004). Each backend
-    reports `{fs-write, network-egress, …}`. **Auto requires fs-write *and* network
-    confinement** ⇒ Linux Auto needs **landlock ABI v4 / kernel ≥6.7** (5.13–6.6 ⇒ Auto
-    refused; **no escape hatch**). Invariant generalized **per-tool**: unsupervised only if
-    confined ⇒ **MCP gates through Approval even in Auto.** Default box = workspace-write-only
-    + network default-deny + per-project allowlist.
+19. **Confinement is a capability matrix that attaches to blast radius** (ADR 0012, supersedes
+    0004). Each backend reports `{fs-write, network-egress, …}`. **Auto's network is open by
+    default**, so **`AutoEligible()` needs fs-write confinement only** ⇒ Linux Auto needs only
+    **kernel ≥5.13** (network-egress / ABI v4 is an *optional* tightening). Tuned by the global
+    **`confine-to-workspace`** flag (`false` = unconfined VM opt-in, global-config-only). Invariant
+    generalized **per-tool**: unsupervised only if blast-radius-bounded ⇒ **MCP gates through Approval
+    in Auto under `confine=true`** (native network tools auto-run, url-filtered). A **dangerous-action
+    guard** floor (footgun-guard, not a security boundary) refuses obvious catastrophic mistakes in
+    every mode. Default box = workspace-write-only + **network-open** + per-project allowlist.
 20. **Mechanism ordering is a deterministic total order:** topo-sort + **stable tiebreak by
     canonical Mechanism ID** (never rely on map iteration); the **bench detects
     order-sensitivity** among undeclared co-firing pairs and surfaces the missing constraint
@@ -658,8 +662,9 @@ traceability map):
   bench composes" (forking/record-replay) (#16); added the co-dev / versioning consequences
   (#18).
 - **ADR 0003** — added the deterministic total order + bench order-sensitivity detection (#20).
-- **ADR 0004** — rewritten around the capability matrix, kernel ≥6.7 for Auto, per-tool
-  invariant / MCP-in-Auto (#19).
+- **ADR 0004** — capability matrix + per-tool invariant / MCP-in-Auto (#19); **now superseded by
+  ADR 0012** (2026-06-24): network open by default, `AutoEligible()` = fs-only (kernel ≥5.13),
+  `confine-to-workspace` flag, dangerous-action guard floor.
 - **New ADRs:** `0006` Bypass mode (#13); `0007` Step/Turn + quiescent boundary + cancellation
   + recover-at-boundary (#15 + the #24 contract additions); `0008` stateless tools +
   non-forkable external effects + disable-with-stub bench posture (#17, #23); `0009` the A/B

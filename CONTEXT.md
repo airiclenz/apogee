@@ -98,10 +98,13 @@ privilege ladder**. Four:
   without asking; shell/exec, network, MCP, and anything out-of-workspace still gate.
   Needs **no Confinement** — path-safety bounds the auto-approved writes and the human
   backstops the unbounded surface, so it is **identical on every OS**.
-- **Auto** — adds the unbounded **shell/subprocess** surface to the auto-approved set, so
-  it is the one **unsupervised** mode and the only one that **requires Confinement** (of
-  that surface). Genuinely-unconfinable external reaches (arbitrary-URL fetch, MCP) still
-  gate even here.
+- **Auto** — adds the unbounded **shell/subprocess** surface to the auto-approved set, so it
+  is the one **unsupervised** mode. Its blast radius is tuned by the global
+  **`confine-to-workspace`** flag (ADR 0012): **on** (default) OS-**Confines** the subprocess
+  surface to the workspace with the **network open**, and still gates **MCP**; **off** ("I am
+  the sandbox") runs unconfined — safe only inside a VM. Apogee's own network tools
+  (`web-fetch`/`http-request`) auto-run url-filtered in both (they no longer gate in Auto —
+  ADR 0012 reversed ADR 0004 here).
 _Avoid_: "permission level", "trust mode".
 
 **Bypass mode**:
@@ -121,33 +124,57 @@ The human-in-the-loop gate on a single tool call — the primary safety guarante
 Ask-Before mode. Delivered through a delegate the host (TUI, embedder) supplies.
 
 **Confinement**:
-OS-level restriction of the **unbounded tool surface** (shell / subprocess / arbitrary
-network), required for **Auto mode**. It attaches to **blast radius, not to a mode-wide
-binary**: a tool runs unsupervised only if its blast radius is bounded — **either** by OS
-confinement of the unbounded subprocess/network surface (Linux **landlock** applied
-pre-`execve` on the child; macOS **`sandbox-exec`** wrapping the child — the clean
-subprocess case on both OSes), **or** by Apogee's own **path-safety-to-workspace** for its
-own in-process write tools (a third-party in-process tool, whose scoping Apogee cannot
-vouch for, gates instead of running unsupervised). It is still a **capability matrix, not a
-one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`, …),
-and **Auto requires both fs-write *and* network confinement of that surface** — so Linux
-Auto needs landlock ABI v4 (kernel ≥6.7); an older kernel ⇒ Auto refused (degrades to
-Allow-Edits/Ask-Before), with no escape hatch. The per-tool teeth remain: **MCP and
-arbitrary-URL network tools, which Apogee cannot confine, gate through Approval even in
-Auto.** Apogee never runs a tool call both unsupervised *and* unbounded. Lives behind a
-`platform/` `Confiner` interface (seatbelt / landlock / AppContainer); default box =
-workspace-write-only + network default-deny + per-project allowlist. See
-[ADR 0004](docs/adr/0004-auto-mode-requires-os-level-confinement.md) (blast-radius
-refinement: ADR 0012).
+OS-level restriction of the **unbounded subprocess surface** (shell / subprocess), attaching to
+**blast radius, not to a mode-wide binary** (ADR 0012, superseding ADR 0004): a tool runs
+unsupervised only if its blast radius is bounded — **either** by OS confinement of the subprocess
+surface (Linux **landlock** applied pre-`execve` on the child; macOS **`sandbox-exec`** wrapping
+the child — one clean subprocess granularity on both OSes), **or** by Apogee's own
+**path-safety-to-workspace** for its own in-process write tools (a third-party in-process tool,
+whose scoping Apogee cannot vouch for, gates instead of running unsupervised). It is a **capability
+matrix, not a one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`,
+…). In **Auto** the network is **open by default**, so **`AutoEligible()` requires filesystem
+confinement only** — Linux Auto needs landlock ABI ≥1 (kernel ≥5.13), not ABI v4. The unbounded
+surface is tuned by the global **`confine-to-workspace`** flag (below). The per-tool teeth remain:
+**MCP**, which executes in a server Apogee cannot fence, gates through Approval whenever
+`confine-to-workspace` is on; and if fs-confinement is *unavailable* on the host, subprocess tools
+gate too ("confine if you can, gate if you can't") rather than refusing Auto. Apogee never runs a
+tool call both unsupervised *and* unbounded. Lives behind a `platform/` `Confiner` interface
+(seatbelt / landlock / AppContainer); default box = workspace-write-only + **network-open** +
+per-project allowlist. See
+[ADR 0012](docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md).
 _Avoid_: "sandbox" (that is the bench's term — see below), "jail".
 
+**`confine-to-workspace`** (the Auto blast-radius flag):
+A global-config key (`~/.apogee/config.yaml`, default **`true`**) that tunes **Auto**'s blast radius
+(ADR 0012); meaningful only in Auto. **`true`** fences filesystem writes to the workspace —
+a subprocess escape is **OS-blocked**, an Apogee in-process out-of-workspace write raises
+**Approval** — with the network open and MCP gated. **`false`** ("I am the sandbox") runs Auto
+unconfined, safe **only inside a VM** (the user's responsibility); it is **global-only** (a project
+config cannot loosen it — the hostile-repo footgun is closed) and prints a per-session warning. The
+**only blanket *loosen*** in the system — every other knob (the dangerous-action guard, the deferred
+tool×mode matrix) is tighten-only.
+_Avoid_: "YOLO mode" (informal; it is a flag on Auto, not a fifth mode),
+"`--dangerously-skip-permissions`" (names Claude Code's analogue, not this flag).
+
 **Safety guardrails**:
-Apogee's production safety set: Agent modes, Approval, path-safety, tool-argument-guard,
-circuit-breaker, and audit log. The human-in-the-loop model — distinct from Confinement
-(OS-level) and from the bench's Sandbox.
+Apogee's production safety set: Agent modes, Approval, path-safety, tool-argument-guard (incl.
+the **Dangerous-action guard** floor), circuit-breaker, and audit log. The human-in-the-loop
+model — distinct from Confinement (OS-level) and from the bench's Sandbox.
 _Avoid_: "the sandbox" (Apogee production is **not** sandboxed; "Sandbox" is a bench term
 for the bench's `RealSandbox` that confines *unsupervised* sim runs — do not use it for
 Apogee's production execution).
+
+**Dangerous-action guard**:
+A **footgun-guard — *not* a security boundary** — that refuses a small model's obvious
+catastrophic *mistakes* before execution, in **every** mode independent of Confinement (ADR 0012;
+lives in `internal/security`, P3.6). Two tiers: **hard-refuse** (`rm -rf` of a root/home/system
+path, fork bombs, writes to `~/.ssh`/credential/persistence files — no per-call override) and
+**force-approval** (`curl | bash`-class — sometimes a legit installer, so a speed-bump that forces
+the Approver even in Auto). It is **tighten-only** and trivially bypassable by anything determined,
+so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on; the global
+config may add *or* remove entries (it is the user's machine), a project config may only *add*.
+_Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is
+not — it guards against mistakes, not attackers).
 
 ### Mechanism and hook points
 
