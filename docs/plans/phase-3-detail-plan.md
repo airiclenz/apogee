@@ -1069,6 +1069,60 @@ and its output/exit is captured; a timeout/cancel kills the process group cleanl
 an out-of-workspace write from the child is OS-denied (Linux hermetic), a non-allowlisted network
 reach denied; `python-exec` degrades gracefully when no interpreter is present; statelessness holds.
 
+#### ✅ P3.8 result — landed 2026-06-24 (first `Confiner` consumers; both carried findings closed; gate GREEN)
+`terminal` + `python_exec` are the first `domain.SubprocessTool`s — they build and run their own
+`*exec.Cmd`, consume the `ConfinementFromContext` handle, and honour the §2.4 teardown. One static
+artifact still (`shlex` is the only new dep, tiny + transitive-free). **What landed:**
+
+- **Shared subprocess runner** (`internal/tools/exec_common.go`): `runSubprocess(ctx, subprocessSpec)`
+  owns the whole §2.4 contract once for every execution tool — builds the `*exec.Cmd` via
+  `exec.CommandContext` (tool-builds-and-runs-the-cmd, contract §2.2), captures combined stdout+stderr
+  through a `cappedBuffer` (256 KiB ceiling + truncation marker), enforces a per-call timeout (default
+  120 s, max 600 s), and confines the cmd when a `Confinement` handle is on ctx. A clean non-zero exit
+  is a normal **result** (exit code surfaced), not a Go error; only ctx-cancel and the demote signal are
+  Go errors.
+- **`terminal`** (`terminal.go`): runs a command line through `platform.Shell` (`sh -c` / `cmd /c`),
+  `shlex`-validates the line (balanced quotes) before the shell sees it, path-scopes an optional
+  `workdir` to the root. **`python_exec`** (`python_exec.go`): probes `python3`→`python` on PATH (a
+  swappable `lookInterpreter` var), feeds the script on **stdin** (`<interp> -`, no temp file ⇒
+  statelessness, ADR 0008), and degrades to a clear "python not available" result when absent (§3a — no
+  hard dep). Both carry `domain.SubprocessTool` (`Subprocess()==true`), are write-capable (not
+  `ReadOnly`), and do **not** carry the `workspaceScopedWriter` marker — they confirm the subproc row of
+  the disposition (`TestClassifyTool` already classifies a `subprocTool` as `classSubprocess`). Both
+  registered in `DefaultTools` after the P3.7 family.
+- **CARRIED FINDING #1 — process-group lifecycle (CLOSED).** `setProcessGroupTeardown`
+  (`exec_pgroup_unix.go`, `//go:build !windows`) pairs the backend's `Setpgid` with `cmd.Cancel` (SIGKILL
+  to the **negative PID** = the whole group) + a 5 s `cmd.WaitDelay`, so a cancelled/timed-out command
+  reaps its children — no orphaned child, no orphaned `sandbox-exec`. It also runs for an **unconfined**
+  subprocess (lower modes / confine=false), giving every subprocess clean teardown. A Windows stub
+  (`exec_pgroup_other.go`, `//go:build windows`) keeps the cross-build green (leader-kill + WaitDelay;
+  real job-object teardown is Phase 5). **Tested:** `TestTerminal_TimeoutKillsCleanly` (a `sleep 30`
+  with a 1 s timeout returns promptly) and `TestTerminal_CancelKillsChildProcessGroup` (a backgrounded
+  grandchild `sleep` is reaped on ctx-cancel — a leader-only kill would orphan it).
+- **CARRIED FINDING #2 — runtime confinement-unavailable net (CLOSED).** The subprocess tools return
+  `ErrConfinementUnavailable` (wrapped) rather than running unconfined when `Confine` fails at run time.
+  `internal/agent/dispatch.go` now lands it: `executeTool` maps `errors.Is(err,
+  ErrConfinementUnavailable)` to a new `dispatchConfinementUnavailable` outcome; `resolveAndExecute`
+  routes it to `executeWithApprovalFallback`, which **demotes the call to a forced Approval** and, only
+  on allow, re-runs it unconfined (Approval is now the bound — the §4 "subproc, caps insufficient → gate"
+  row applied at run time). This is the previously-missing "confine-if-you-can, gate-if-you-can't"
+  **runtime** landing site (the construction-time caps gate already existed). **Tested:**
+  `TestDisposition_RuntimeConfineUnavailable_DemotesToApproval` (approved → runs once; denied → refused,
+  never runs unconfined; nil-Approver → refused) plus per-tool
+  `Test{Terminal,PythonExec}_ConfinementUnavailablePropagates`.
+- **Confine handoff proven hermetically.** `Test{Terminal,PythonExec}_RunsUnderConfine` inject a fake
+  caps-`{FSWrite:true}` `Confiner` (the dev host has landlock compiled out) and assert the tool hands its
+  cmd to `Confine` exactly once — the real landlock/seatbelt *enforcement* (an out-of-box write is
+  OS-denied) is the owner/CI run on a landlock-enabled kernel + macOS, per the env caveat.
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go vet
+./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` (new terminal/python-exec + dispatch
+demote tests; landlock/seatbelt enforcement batteries self-skip loudly on this kernel as expected;
+`python_exec` live-run subtests skip when no interpreter is on PATH) · ADR-0010 self-import grep empty ·
+6 cross-builds OK (`CGO_ENABLED=0`; teardown build-tagged so the Windows targets pass) · `go mod tidy`
+adds `github.com/google/shlex` as the lone direct dep, no other drift · `./apogee --help` exit 0.
+**Next: P3.9** (`git` tool — system-`git` shell-out, the next subprocess consumer).
+
 ### P3.9 — `git` tool
 Branch / commit / diff-range over the **system** `git` (§3a — detected on PATH, graceful "git not
 available" when absent — never a hard dep; this is a *convenience* dep, not inherent). Path-safe to

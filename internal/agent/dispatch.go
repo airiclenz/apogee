@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -15,6 +16,11 @@ type dispatchOutcome int
 const (
 	dispatchDone dispatchOutcome = iota
 	dispatchCancelled
+	// dispatchConfinementUnavailable reports that a dispoConfine subprocess call could not
+	// be confined at run time (the Confiner returned ErrConfinementUnavailable). The call did
+	// NOT run; resolveAndExecute demotes it to Approval — the runtime "confine if you can,
+	// gate if you can't" net (confinement-execution-contract §2.2; carried finding #2).
+	dispatchConfinementUnavailable
 )
 
 // dispatchTools runs each requested tool call through the pre-tool-exec hooks, the Approval
@@ -99,6 +105,17 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 	result, execOutcome := a.executeTool(ctx, turn, tool, call, dispo)
 	if execOutcome == dispatchCancelled {
 		return result, dispatchCancelled
+	}
+	if execOutcome == dispatchConfinementUnavailable {
+		// "Confine if you can, gate if you can't" at RUNTIME (carried finding #2): the
+		// disposition chose dispoConfine (caps reported sufficient at construction), but the
+		// backend could not establish the box when the subprocess tool tried to confine. The
+		// call did NOT run unconfined — runSubprocess refused. Demote to Approval and, if the
+		// human allows, re-run unconfined (Approval is now the bound, the §4 gate row).
+		result, execOutcome = a.executeWithApprovalFallback(ctx, turn, tool, call, guard)
+		if execOutcome == dispatchCancelled {
+			return result, dispatchCancelled
+		}
 	}
 
 	// Post-execution guardrails: feed the circuit-breaker the outcome (surfacing a
@@ -247,10 +264,45 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		if ctx.Err() != nil {
 			return domain.ToolResult{}, dispatchCancelled
 		}
+		// A subprocess tool that could not confine its command (the backend returned
+		// ErrConfinementUnavailable when asked to wrap the cmd) reports it as a Go error
+		// rather than running unconfined. Surface it as the demote signal so dispatch routes
+		// the call to Approval instead of failing it (carried finding #2). This only arises
+		// on a dispoConfine call (the only path that installs a Confinement handle).
+		if errors.Is(err, domain.ErrConfinementUnavailable) {
+			return domain.ToolResult{}, dispatchConfinementUnavailable
+		}
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: call.Tool, Err: err.Error()})
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 	return res, dispatchDone
+}
+
+// executeWithApprovalFallback is the runtime demote-to-Approval path for a subprocess call
+// the disposition chose to confine but whose Confiner could not establish the box at run time
+// (carried finding #2). It gates the call through the Approver (a forced gate — a runtime
+// safety event, not a pre-allowable convenience) and, if allowed, re-runs the tool UNCONFINED
+// (dispoRun): Approval is now the blast-radius bound, exactly the §4 "subproc, caps
+// insufficient → gate" row applied at run time. A nil Approver or a deny refuses the call.
+func (a *Agent) executeWithApprovalFallback(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, guard security.PreCheck) (domain.ToolResult, dispatchOutcome) {
+	a.cfg.Events.Emit(domain.ErrorEvent{
+		EventBase: base(turn),
+		Source:    call.Tool,
+		Err:       "confinement unavailable at run time: demoting subprocess call to Approval",
+	})
+
+	allowed, outcome := a.approve(ctx, turn, tool, call, true /* gate */, true /* force */)
+	if outcome == dispatchCancelled {
+		return domain.ToolResult{}, dispatchCancelled
+	}
+	if !allowed {
+		result := errorToolResult(call.ID, "subprocess could not be confined and approval was not granted")
+		a.guards.RecordBlocked(call, guard.Audit, guard.Reason, result)
+		return result, dispatchDone
+	}
+	// Re-run with NO confinement handle installed (dispoRun): the call already failed to
+	// confine, and Approval is now the bound the human granted.
+	return a.executeTool(ctx, turn, tool, call, dispoRun)
 }
 
 // runTool routes the call to the injected ExternalEffects boundary for an external-effect

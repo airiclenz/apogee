@@ -399,6 +399,115 @@ func TestDisposition_AutoConfineTrue_SubprocCapsInsufficient(t *testing.T) {
 	}
 }
 
+// confinePropagatingTool is a subprocess tool that, like the real terminal/python-exec, asks
+// the Confiner to wrap a cmd and RETURNS ErrConfinementUnavailable (rather than running
+// unconfined) when the backend cannot establish the box. It is the fake that exercises the
+// runtime demote-to-Approval net (carried finding #2).
+type confinePropagatingTool struct {
+	name string
+	ran  *int
+}
+
+func (t confinePropagatingTool) Name() string            { return t.name }
+func (t confinePropagatingTool) Description() string     { return t.name + " (subprocess)" }
+func (t confinePropagatingTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t confinePropagatingTool) ReadOnly() bool          { return false }
+func (t confinePropagatingTool) Subprocess() bool        { return true }
+
+func (t confinePropagatingTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if conf, ok := domain.ConfinementFromContext(ctx); ok && conf.Confiner != nil {
+		cmd := exec.Command("/bin/true")
+		if err := conf.Confiner.Confine(ctx, conf.Box, cmd); err != nil {
+			// Mirror the real tools: do NOT run unconfined — surface the error so dispatch
+			// can demote to Approval.
+			return domain.ToolResult{}, fmt.Errorf("confine: %w", err)
+		}
+	}
+	if t.ran != nil {
+		*t.ran++
+	}
+	return domain.ToolResult{CallID: call.ID, Content: "ran"}, nil
+}
+
+// TestDisposition_RuntimeConfineUnavailable_DemotesToApproval proves the RUNTIME
+// "confine if you can, gate if you can't" net (carried finding #2): the disposition chose
+// dispoConfine (caps reported FSWrite at construction), but the Confiner failed to establish
+// the box when the tool tried to confine. The call must NOT run unconfined — it demotes to
+// Approval; an allowing human lets it re-run, a denying one refuses it.
+func TestDisposition_RuntimeConfineUnavailable_DemotesToApproval(t *testing.T) {
+	t.Parallel()
+
+	t.Run("approved → runs once", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		ran := 0
+		sub := confinePropagatingTool{name: "terminal", ran: &ran}
+		// Caps report FSWrite (so the disposition picks dispoConfine), but Confine fails at
+		// run time (unavailable) — the runtime net, not the construction-time caps gate.
+		conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true}
+		cfg := autoConfig(sink, conf, true, sub)
+		approver := &fakeApprover{decision: domain.ApprovalAllow}
+		cfg.Approver = approver
+
+		driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"echo hi"}`)
+
+		if approver.calls != 1 {
+			t.Errorf("Approver consulted %d times; a runtime confine failure must demote to Approval", approver.calls)
+		}
+		if ran != 1 {
+			t.Errorf("tool ran %d times; an approved demoted call must re-run once (unconfined)", ran)
+		}
+		res, _ := lastToolResult(sink.events)
+		if res.IsError {
+			t.Errorf("approved demoted call result = %q, want a clean run", res.Content)
+		}
+	})
+
+	t.Run("denied → refused, never runs unconfined", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		ran := 0
+		sub := confinePropagatingTool{name: "terminal", ran: &ran}
+		conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true}
+		cfg := autoConfig(sink, conf, true, sub)
+		approver := &fakeApprover{decision: domain.ApprovalDeny}
+		cfg.Approver = approver
+
+		driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"echo hi"}`)
+
+		if approver.calls != 1 {
+			t.Errorf("Approver consulted %d times; a runtime confine failure must demote to Approval", approver.calls)
+		}
+		if ran != 0 {
+			t.Errorf("tool ran %d times; a DENIED demoted call must never run unconfined", ran)
+		}
+		res, _ := lastToolResult(sink.events)
+		if !res.IsError {
+			t.Error("a denied demoted call must produce an error result")
+		}
+	})
+
+	t.Run("nil Approver → refused, never runs unconfined", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		ran := 0
+		sub := confinePropagatingTool{name: "terminal", ran: &ran}
+		conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true}
+		cfg := autoConfig(sink, conf, true, sub)
+		cfg.Approver = nil
+
+		driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"echo hi"}`)
+
+		if ran != 0 {
+			t.Errorf("tool ran %d times; with no Approver a demoted call must be refused, not run unconfined", ran)
+		}
+		res, _ := lastToolResult(sink.events)
+		if !res.IsError {
+			t.Error("a demoted call with no Approver must produce an error result")
+		}
+	})
+}
+
 // ----------------------------------------------------------------------------
 // Auto · confine=false — everything auto-runs except the dangerous-action floor
 // ----------------------------------------------------------------------------
