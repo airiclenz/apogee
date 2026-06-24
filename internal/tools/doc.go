@@ -17,6 +17,12 @@
 // Phase 3 (P3.7) adds the file-editing family: single/multi find-replace, a patch-aware
 // edit_existing_file, a pure-Go view_diff, and a read-and-locate open_file. The write
 // tools among them carry the unexported workspaceScopedWriter marker so the dispatch
-// disposition path-bounds rather than confines them (ADR 0012 D1). The subprocess
-// (terminal, python-exec, git), network, and MCP tools land in later phases.
+// disposition path-bounds rather than confines them (ADR 0012 D1).
+//
+// Phase 3 (P3.8) adds the execution tools (terminal, python-exec) and (P3.9) the git
+// tools (git_branch, git_commit, git_diff_range) — SubprocessTools that shell out to a
+// detected program (the system shell/interpreter, the system git) and degrade gracefully
+// when it is absent (§3a). The disposition confines the write-capable ones in Auto (or
+// gates them when fs-confinement is unavailable); git_diff_range is read-only and runs
+// freely. The network and MCP tools land in later phases.
 package tools

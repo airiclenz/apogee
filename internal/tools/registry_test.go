@@ -16,14 +16,15 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
 		"view_diff", "open_file",
 		"terminal", "python_exec",
+		"git_branch", "git_commit", "git_diff_range",
 	} {
 		if _, ok := registry.Lookup(name); !ok {
 			t.Errorf("default registry is missing %q", name)
 		}
 	}
 
-	if got := len(registry.All()); got != 11 {
-		t.Errorf("default registry holds %d tools, want 11", got)
+	if got := len(registry.All()); got != 14 {
+		t.Errorf("default registry holds %d tools, want 14", got)
 	}
 }
 
@@ -37,6 +38,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
 		"view_diff", "open_file",
 		"terminal", "python_exec",
+		"git_branch", "git_commit", "git_diff_range",
 	}
 	for i, tool := range registry.All() {
 		if tool.Name() != want[i] {
@@ -63,6 +65,11 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		// them, so they must not declare read-only.
 		"terminal":    false,
 		"python_exec": false,
+		// Git tools (P3.9): branch/commit mutate the repo (write-capable); diff-range is a
+		// harmless read (read-only, runs in Plan).
+		"git_branch":     false,
+		"git_commit":     false,
+		"git_diff_range": true,
 	}
 
 	for _, tool := range DefaultTools(t.TempDir()) {

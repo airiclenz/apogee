@@ -1131,6 +1131,60 @@ can't be established. **Acceptance:** branch/commit/diff-range produce correct o
 `t.TempDir()` repo; absence of `git` degrades to a clear unavailable result (not a crash); writes
 (commit) gate/confine per mode; no network git op runs unconfined in Auto.
 
+#### ✅ P3.9 result — landed 2026-06-24 (three git tools ported from the oracle; gate GREEN; rides the P3.8 SubprocessTool/Confiner pattern for free)
+`git_branch` + `git_commit` + `git_diff_range` are the next `domain.SubprocessTool`s — they build a
+`["git", …]` argv and run it through the shared `runSubprocess` (P3.8), so the §2.4 teardown, the
+output cap, the timeout, and the `ConfinementFromContext` handoff are inherited verbatim. No dispatch
+change: the disposition classifies them by their existing markers (`classSubprocess` for the writers,
+`classReadOnly` for diff-range), so they confine/gate/run by the P3.4 table with zero new wiring. The
+binary stays one static artifact — **no new dependency** (the system `git` is a detected, graceful
+convenience dep, §3a). **What landed:**
+
+- **`internal/tools/git.go`** — three tools mirroring the apogee-code oracle (`git-branch-tool.ts` /
+  `git-commit-tool.ts` / `git-diff-range-tool.ts`):
+  - **`git_branch`** (write-capable): `create` (`checkout -b`, optional `start_point`), `switch`
+    (`checkout`), `list` (`branch -a --format`), `delete` (safe `-d`, which refuses an unmerged branch).
+    Deletion of the protected mainline branches (`main`/`master`/`develop`/`development`, case-insensitive)
+    is refused before the subprocess.
+  - **`git_commit`** (write-capable): stages the named files (each **path-safe** to the workspace via the
+    shared `resolveInRoot`) then commits; `amend` is **refused on a published commit** (a decoration ref
+    `origin/…` from `git log -1 --format=%D`), so the tool never rewrites history a remote has seen;
+    `allow_empty` supported; reports the new commit's one-line summary.
+  - **`git_diff_range`** (`ReadOnly()` — runs in Plan): three-dot `base...head` diff with `stat` /
+    `name_only` / path-scoped `paths`; refs are validated against a conservative character class
+    (`^[A-Za-z0-9._\-/~^@{}]+$`) so a `head` like `x; rm -rf /` is rejected before git sees it.
+- **Allowlisted environment.** Each git subprocess runs with `safeGitEnv()` — the `safeEnvKeys` allowlist
+  ported from the oracle's `SAFE_ENV_KEYS` — so a surprising inherited variable cannot redirect git
+  (config/auth/pager). This rides a **small additive field on `subprocessSpec`** (`env []string`, nil =
+  inherit) in `exec_common.go`; the shell/interpreter tools keep nil (inherit), unchanged.
+- **Disposition for free + the runtime net.** `git_branch`/`git_commit` confine in Auto under
+  `confine-to-workspace=true` and return (wrapped) `ErrConfinementUnavailable` rather than running
+  unconfined when `Confine` fails — `dispatch.go` already demotes that to forced Approval (P3.8's runtime
+  net). `git_diff_range` is read-only, so the disposition runs it freely (read-only wins over the
+  subprocess class) — a local diff is harmless inspection. None of the three exposes a network git op
+  (no `push`/`fetch`/`clone`), so "no network git op runs unconfined in Auto" holds structurally.
+- **Dangerous-floor decision (no addition).** The destructive footgun ops (`push --force`, `reset --hard`,
+  `clean -fdx`) are **structurally unreachable** through these fixed-subcommand tools — there is no raw
+  passthrough — so no git-specific rule was added to the dangerous-action floor (precision-over-recall,
+  ADR 0012). The `terminal` tool can still run arbitrary `git`; that surface is the terminal's, already
+  covered by the existing floor + the subprocess confinement.
+
+**Tests** (`git_test.go`): markers (branch/commit write-capable + SubprocessTool, diff-range ReadOnly +
+SubprocessTool, none a workspaceScopedWriter); graceful absence for all three (injected `lookGit`→absent
+⇒ "git not available", not a crash); arg validation (invalid action, name-required, protected-delete
+block, message-required, ref-class rejection, path-escape on commit-staging and diff-paths); live runs
+against a `t.TempDir()` repo (create/switch/list/delete round-trip, stage+commit summary, three-dot diff
+names the changed file) — these `t.Skip` when no `git` is on PATH (the graceful contract); confine
+handoff proven hermetically (a fake caps-`{FSWrite:true}` Confiner is called exactly once) and the
+unavailable-Confiner case propagates `ErrConfinementUnavailable` (the tool must not run unconfined).
+`registry_test.go` updated to 14 built-ins (menu order + read-only nature).
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go vet
+./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` (the live git subtests run where git
+exists, skip where it doesn't; landlock/seatbelt enforcement batteries self-skip on this kernel as
+expected) · ADR-0010 self-import grep empty · 6 cross-builds OK (`CGO_ENABLED=0`) · `go mod tidy` no
+drift (no new dep) · `./apogee --help` exit 0. **Next: P3.10** (`diagnostics` tool).
+
 ### P3.10 — `diagnostics` tool
 In-process for Go — `go/parser` for syntax + the `go vet` that ships with the toolchain — and
 **optional** shell-out linters (`tsc`, etc.) for other languages, **detected + graceful-degrading**

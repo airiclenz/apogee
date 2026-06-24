@@ -40,6 +40,11 @@ type subprocessSpec struct {
 	timeout time.Duration
 	// stdin, when non-empty, is fed to the process on its standard input.
 	stdin string
+	// env, when non-nil, is the exact environment the process runs with (each entry
+	// "KEY=value"); nil means it inherits the caller's environment. A tool that wants a
+	// scrubbed, allowlisted environment (e.g. git) sets it; the shell/interpreter tools
+	// leave it nil to inherit.
+	env []string
 }
 
 // subprocessResult is the captured outcome of one subprocess execution.
@@ -95,6 +100,9 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 
 	cmd := exec.CommandContext(runCtx, spec.argv[0], spec.argv[1:]...)
 	cmd.Dir = spec.dir
+	if spec.env != nil {
+		cmd.Env = spec.env
+	}
 	if spec.stdin != "" {
 		cmd.Stdin = strings.NewReader(spec.stdin)
 	}

@@ -40,7 +40,8 @@ func TestPythonExec_Markers(t *testing.T) {
 }
 
 func TestPythonExec_GracefulWhenAbsent(t *testing.T) {
-	t.Parallel()
+	// Not parallel: withFakeInterpreter swaps the package-level lookInterpreter var, which
+	// the parallel run-tests read — a non-parallel test completes before they resume.
 	withFakeInterpreter(t, false, "")
 	py := NewPythonExec(t.TempDir())
 	res, err := py.Execute(context.Background(), pythonCall("c1", "print(1)"))
@@ -131,7 +132,7 @@ func TestPythonExec_RunsUnderConfine(t *testing.T) {
 }
 
 func TestPythonExec_ConfinementUnavailablePropagates(t *testing.T) {
-	t.Parallel()
+	// Not parallel: withFakeInterpreter swaps the package-level lookInterpreter var.
 	withFakeInterpreter(t, true, "/usr/bin/python3")
 	py := NewPythonExec(t.TempDir())
 	conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true}
