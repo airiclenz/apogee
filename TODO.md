@@ -66,3 +66,38 @@ P3.11 (file-only, default-off) because web_search is unusable without it.
 **The tighten-only law (must hold when built):** like the dangerous-rule merge and the SSRF
 floor, a config url-safety layer may only **tighten** (add `DenyHosts`, narrow `AllowHosts`) —
 it can never remove the SSRF floor or widen the scheme set past the safe default.
+
+---
+
+## Deferred security-review Lows (P3 `/security-review`, 2026-06-24)
+
+Recorded so the deferral is deliberate, not a silent drop. Each is an INTENDED-design
+acceptance or a future-task re-verification, NOT a live hole.
+
+- **[L1] `MergeDangerousRules` tighten-only path is dead code (floor fixed by absence).** The
+  project-config dangerous-rule merge (`security/rules.go`, `projectAdd` tighten-only) is never
+  called — `guards` is always `NewDefaultGuards()` — so the "project cannot loosen the floor"
+  property is currently true **by absence**, and the merge's tighten-only invariant lives only in
+  `rules_test.go`. **Deferred** because there is nothing to fix today: when the project/global
+  config merge is wired (the parked "configurable tool × mode matrix" / dangerous-rule config
+  surfacing above), re-verify the project/global split end-to-end at that point. No change now.
+
+- **[L3] Confined subprocess can read any host file + open network ⇒ exfiltration is in-design.**
+  `platform/landlock_linux.go` handles only WRITE accesses (read/exec unrestricted) and the
+  network is open by default. A confined Auto subprocess can `cat ~/.ssh/id_rsa` and POST it out.
+  **Deferred — INTENDED per ADR 0012**: the box bounds *writes* (stops clobbering the host), the
+  network is open by default, and `confine=false` is the only blanket loosen. Recorded as a
+  conscious v1.0.0 acceptance. If read-confinement or default-deny egress is ever wanted it is an
+  ADDITIVE box tightening (landlock read-handling + a per-host network filter), not a v1 change.
+
+- **[L4 enhancement] Optional env-allowlist scrub for stdio MCP launches.** A configured stdio
+  MCP server inherits Apogee's full process environment (all secrets) — see the trust note in
+  `internal/mcp/transport.go`. This is **intended** (a trusted, host-configured launch), so v1
+  documents the trust rather than scrubbing (a blanket scrub would break MCP servers needing
+  inherited PATH/HOME/runtime vars). **Deferred — optional**: a future per-server `EnvAllowlist`
+  (mirroring `safeGitEnv`) for a host that wants to run a less-trusted stdio MCP server. Additive,
+  post-v1.
+
+(L2 — the dangerous-action guard normalising only whitespace+case, trivially evadable — needs no
+entry: it is ADR-0012 by-design, and `internal/security/doc.go` already states the guard is "NOT
+a security boundary." No doc/UI describes it as one, which is exactly what L2 asks for.)

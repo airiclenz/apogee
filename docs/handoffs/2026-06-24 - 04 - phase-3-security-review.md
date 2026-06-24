@@ -230,3 +230,71 @@ command is fully trusted with the process environment.
 - **DNS-rebinding dial-time block against a real rebinding resolver** (the unit tests inject a
   deterministic resolver; confirm `SafeDialControl` fires on a genuinely rebinding name on a networked
   runner).
+
+---
+
+## Fix-pass disposition (remediation, 2026-06-24)
+
+Outcome of the fix pass. Each finding was re-confirmed against the cited code before any change;
+every fix carries a regression test that fails before / passes after. All guard floors stayed
+**tighten-only** (no fix introduced a new way to loosen a floor); no change contradicts ADR 0012.
+
+### High
+
+- **[H1] Symlink-swap TOCTOU — FIXED.** Confirmed real (and a hermetic test proved a plain
+  `os.WriteFile` through a symlinked workspace component leaks outside the fence). The write family
+  (`write_file`, `single|multi_find_and_replace`, `edit_existing_file`) now performs every read and
+  write through an `os.Root` pinned at the workspace root (Go 1.26 stdlib): the path that is
+  validated *is* the path that is operated on (no re-resolution gap), and an escaping-symlink
+  component — including one swapped in concurrently — is **refused** ("path escapes from parent"),
+  not followed. New `internal/security/safeio.go` (`SafeWriteFile`/`SafeReadFile`); tools call them
+  via `internal/tools/path_safety.go`. `os.Root` is stdlib, so all 6 cross-builds stay green (no
+  build tags needed). Tests: `internal/security/safeio_test.go` (swapped-intermediate, final-symlink,
+  read-side, traversal, positive controls). The fence stays tighten-only — the helpers refuse
+  strictly more than the old string-path I/O.
+
+### Medium
+
+- **[M1] Audit trail not threaded to an observer — FIXED.** Added `domain.AuditEvent` and emit it
+  from dispatch wherever an audit record is appended (`recordExecuted`/`recordBlocked` in
+  `internal/agent/dispatch.go`), so the trail is now observable on the `EventSink`, not only in the
+  volatile ring. The sub-agent half is closed for free: a child Agent shares the parent's `EventSink`
+  and emits at `Depth>0`, so a delegated call's audit record reaches the same observer instead of
+  vanishing with the discarded child (it no longer needs folding back into the parent ring — it is
+  streamed live with its nesting depth). Tests: `internal/agent/audit_event_test.go` (executed,
+  refused, and sub-agent-at-depth cases).
+
+- **[M2] `web_search` API-key in model-facing error — FIXED (assessed MORE severe than the review).**
+  The review judged this "latent, not a live leak." On the transport-error path it **was a live
+  leak**: `client.Do`'s `*url.Error` stringifies the full request URL (host + query + the config'd
+  API key), and the old code returned `err.Error()` verbatim to the model (proven by a repro test:
+  the key appeared in the result). Fixed: every model-facing error now renders only the bare endpoint
+  **host**, and any transport error is URL-scrubbed (`scrubURLError`/`endpointHost` in
+  `internal/tools/web_search.go`). Tests: `internal/tools/web_search_redaction_test.go`
+  (transport-error + floor-block, asserting the key never appears, the host does).
+
+- **[M3] `http_request` forwards `Host`/hop-by-hop headers — FIXED.** A caller-supplied `Host` (and
+  the hop-by-hop / framing family `Content-Length`/`Transfer-Encoding`/`Connection`/`Proxy-*`/…) is
+  now rejected as a result error before the request goes out, with a header count + per-value size
+  cap (`applyRequestHeaders`/`deniedRequestHeaders` in `internal/tools/http_request.go`). Tighten-only
+  (it only removes a model's reach). Tests in `internal/tools/network_test.go`
+  (`TestHTTPRequest_RejectsDeniedHeaders`/`_HeaderCountCapped`/`_HeaderValueCapped`). *(This fix, the
+  SSRF-floor v4/NAT64 hardening, and the git option-injection guard were already present as
+  in-progress uncommitted working-tree work when the fix pass began; verified real, complete, and
+  green, and folded into this remediation commit.)*
+
+### Low
+
+- **[L1] `MergeDangerousRules` dead code — DEFERRED (TODO.md).** Floor is fixed-by-absence today;
+  re-verify when the config merge is wired. Nothing to change now.
+- **[L2] Dangerous-action guard trivially evadable — NO ACTION (already satisfied / by-design).**
+  ADR 0012 "not the adversary game"; `internal/security/doc.go` already states the guard is "NOT a
+  security boundary" and no doc/UI describes it as one — exactly what L2 asks. Not a false positive,
+  just already-met.
+- **[L3] Confined subprocess read-anywhere + open egress — DEFERRED (TODO.md), INTENDED per ADR 0012.**
+  Conscious v1.0.0 acceptance; read-confinement / default-deny egress would be an additive box
+  tightening.
+- **[L4] stdio MCP inherits full parent env — FIXED (documented trust) + enhancement DEFERRED
+  (TODO.md).** Made the full-environment trust explicit in `internal/mcp/transport.go` (a blanket
+  scrub would break MCP servers needing inherited PATH/HOME/runtime); an optional per-server
+  env-allowlist scrub is parked for a less-trusted stdio server.

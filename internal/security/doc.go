@@ -9,7 +9,11 @@
 //
 //   - Path-safety (ResolveInRoot / EvalRealPath, ErrPathEscape): the consolidated,
 //     symlink-aware, traversal-rejecting workspace boundary the file tools call —
-//     one guard instead of a copy per tool.
+//     one guard instead of a copy per tool. The actual read/write the write tools then
+//     perform goes through the TOCTOU-safe SafeReadFile / SafeWriteFile (safeio.go),
+//     which operate via an os.Root pinned at the workspace root so the validated path IS
+//     the path written — an escaping-symlink component (incl. one swapped in concurrently
+//     by a confined subprocess) is refused, not followed (closes the H1 symlink-swap race).
 //   - URL-safety (URLGuard): scheme/host allow-deny for the network tools
 //     (web-fetch / http-request, P3.11), deny-first precedence.
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun

@@ -95,3 +95,24 @@ type ErrorEvent struct {
 	Source string // tool name / mechanism ID / "loop"
 	Err    string
 }
+
+// AuditEvent surfaces one append-only audit record — a tool call, the guardrail
+// decision it cleared/was blocked by, and whether its result errored — to the
+// EventSink as it is recorded, so the audit trail is OBSERVABLE (and snapshot- or
+// log-shippable) rather than living only in a volatile in-process ring no observer
+// reads (security-review M1). Because a sub-agent emits through the parent's EventSink
+// at Depth > 0, a delegated call's audit record reaches the same observer at its nesting
+// depth instead of vanishing with the discarded child Agent.
+//
+// The payload mirrors security.AuditRecord but is expressed in domain-only types: the
+// agent layer (which imports both domain and security) constructs it, so domain keeps
+// its no-upward-dependency property (ADR 0010). Decision is the audit decision as a
+// string (e.g. "allowed", "dangerous-refused", "circuit-tripped").
+type AuditEvent struct {
+	EventBase
+	Tool     string
+	CallID   string
+	Decision string
+	Reason   string // the guardrail reason, if any
+	IsError  bool   // whether the recorded result was a tool-level error
+}

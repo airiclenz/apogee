@@ -182,8 +182,11 @@ loopback / private / IMDS / link-local **plus** RFC-6598 CGNAT `100.64/10`, the 
 TEST-NET / benchmark ranges, and NAT64-embedded private/loopback `64:ff9b::/96` **by resolved IP**,
 re-checked at dial time so DNS-rebinding is closed; tighten-only, never dissolvable by config),
 tool-argument-guard (incl. the **Dangerous-action guard** floor, the `http_request` header filter,
-and a leading-`-` guard on git ref args), circuit-breaker, and audit log. The human-in-the-loop
-model — distinct from Confinement (OS-level) and from the bench's Sandbox.
+a leading-`-` guard on git ref args, and **`web_search` API-key redaction** — only the bare endpoint
+host, never the key-bearing request URL, reaches a model-facing error), circuit-breaker, and a
+**bounded audit log surfaced on the `EventSink`** (`domain.AuditEvent`, so the trail is observable —
+a sub-agent's records reach the parent observer at `Depth>0`, not lost with the discarded child).
+The human-in-the-loop model — distinct from Confinement (OS-level) and from the bench's Sandbox.
 _Avoid_: "the sandbox" (Apogee production is **not** sandboxed; "Sandbox" is a bench term
 for the bench's `RealSandbox` that confines *unsupervised* sim runs — do not use it for
 Apogee's production execution).

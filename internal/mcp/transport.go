@@ -88,6 +88,16 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 // buildStdioTransport launches the configured local command and speaks over its stdin/stdout
 // (CommandTransport). The command is the host's choice (a trusted launch — no URL floor); an
 // empty command is refused so a misconfigured server fails loudly rather than launching nothing.
+//
+// TRUST NOTE (security-review L4): a configured stdio MCP server is launched with Apogee's FULL
+// process environment (cmd.Environ()) plus the per-server cfg.Env, so it sees every secret the
+// Apogee process holds (API keys, tokens). This is DELIBERATE and is a conscious trust decision,
+// not a leak: the stdio command is chosen by the host in global config (the same trust level as
+// the toolchain Apogee invokes), and many MCP servers need inherited PATH/HOME/runtime vars to
+// function. It is broader than the git tool's allowlisted env (safeGitEnv) on purpose. An
+// optional env-allowlist scrub for stdio MCP launches is parked in TODO.md (L4) for a host that
+// wants to run a less-trusted stdio server; v1 treats a configured stdio MCP command as fully
+// trusted with the process environment.
 func buildStdioTransport(cfg ServerConfig) (mcpsdk.Transport, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
 		return nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)

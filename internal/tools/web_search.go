@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -82,13 +83,21 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return errorResult(call.ID, "could not build search url: "+err.Error()), nil
 	}
+	// endpointHost is the bare host of the configured endpoint — the ONLY part of the
+	// endpoint safe to surface to the model. The constructed reqURL carries the query and
+	// may carry a config'd API key in its parameters (the endpoint "preserves any
+	// parameters it already carries"); it must never reach a model-facing or logged string
+	// (security-review M2). Every error below renders endpointHost or a URL-scrubbed error,
+	// never reqURL.
+	endpointHost := endpointHost(t.endpoint)
+
 	if err := t.guard.CheckContext(ctx, reqURL); err != nil {
-		return errorResult(call.ID, "search endpoint blocked by url-safety: "+err.Error()), nil
+		return errorResult(call.ID, "search endpoint blocked by url-safety (host "+endpointHost+")"), nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return errorResult(call.ID, "could not build request: "+err.Error()), nil
+		return errorResult(call.ID, "could not build search request for host "+endpointHost), nil
 	}
 
 	client := newHTTPClient(t.guard, defaultNetworkTimeout)
@@ -98,14 +107,55 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 			return domain.ToolResult{}, ctx.Err()
 		}
 		if networkURLError(err) {
-			return errorResult(call.ID, "search endpoint blocked by url-safety: "+err.Error()), nil
+			return errorResult(call.ID, "search endpoint blocked by url-safety (host "+endpointHost+")"), nil
 		}
-		return errorResult(call.ID, "search request failed: "+err.Error()), nil
+		// A transport error's text (*url.Error) embeds the FULL request URL — which here
+		// carries the query and any API key — so scrub the URL out before surfacing it.
+		return errorResult(call.ID, "search request to host "+endpointHost+" failed: "+scrubURLError(err, reqURL)), nil
 	}
 	defer resp.Body.Close()
 
 	body, truncated := readCappedBody(resp.Body)
 	return okResult(call.ID, renderSearchResult(resp, body, truncated)), nil
+}
+
+// endpointHost returns the bare host (no scheme, no path, no query) of the configured
+// search endpoint — the only part safe to surface to the model, since the endpoint's
+// query may carry an API key (security-review M2). An unparseable endpoint yields a
+// neutral placeholder rather than echoing the raw (possibly key-bearing) string.
+func endpointHost(endpoint string) string {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || u.Host == "" {
+		return "the configured search endpoint"
+	}
+	return u.Hostname()
+}
+
+// scrubURLError renders a transport error WITHOUT the request URL it embeds. Go's
+// *url.Error stringifies as `<op> "<url>": <cause>`, and that url here carries the query
+// and any API-key parameter; scrubURLError strips the URL substring so only the operation
+// and the underlying cause survive (security-review M2). reqURL is the exact string to
+// remove. A non-url.Error is returned unchanged (it carries no URL).
+func scrubURLError(err error, reqURL string) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		// Reconstruct from the parts that do NOT include the URL: the op and the cause.
+		cause := "request failed"
+		if ue.Err != nil {
+			cause = ue.Err.Error()
+		}
+		return strings.TrimSpace(ue.Op) + ": " + redactSubstring(cause, reqURL)
+	}
+	return redactSubstring(err.Error(), reqURL)
+}
+
+// redactSubstring removes any occurrence of secret from s (defence-in-depth in case the
+// URL leaks into a nested error's text), returning the cleaned string.
+func redactSubstring(s, secret string) string {
+	if secret == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, secret, "[redacted-url]")
 }
 
 // buildSearchURL appends the query as the `q` parameter to the configured endpoint,
