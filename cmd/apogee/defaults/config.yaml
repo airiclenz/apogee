@@ -27,6 +27,10 @@
 #   flag: --mode       env: APOGEE_MODE
 # mode: ask-before
 
+# A short, friendly name for the upstream host, shown in the status footer. Leave it unset
+# and apogee shows the endpoint's host instead. Config-file only (no flag or env).
+# host-alias: my-box
+
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false

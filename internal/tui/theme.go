@@ -1,0 +1,97 @@
+package tui
+
+import (
+	"time"
+
+	"charm.land/bubbles/v2/spinner"
+	lipgloss "charm.land/lipgloss/v2"
+)
+
+// ----------------------------------------------------------------------------
+// The theme (P2.7 — TUI presentation pass)
+// ----------------------------------------------------------------------------
+//
+// theme is the single place the look-and-feel lives: the palette, the marker glyphs, the
+// spinner frames, and the reusable lipgloss styles every renderer draws with. It is built
+// once in newModel and stored as a Model value field. A lipgloss.Style holds no
+// self-referential no-copy type (it is value-copy by design — its whole API returns new
+// Styles), so a theme of Styles is safe inside the value-copied Model (ADR 0011;
+// TestModelNoBuilderByValue guards the strings.Builder case structurally).
+
+// The palette. Colours are hex so lipgloss maps them to the terminal's profile; the two
+// "dark gray" roles (the user block's background and the chrome's borders) share one tone,
+// matching the layout sketch (layout.md).
+var (
+	colWhite    = lipgloss.Color("#ffffff") // user-prompt text
+	colDarkGray = lipgloss.Color("#4a4a4a") // user-block background + input/footer borders
+	colBlack    = lipgloss.Color("#000000") // input-box interior
+	colFaint    = lipgloss.Color("#8a8a8a") // status/footer/tool-detail dim
+	colDiffAdd  = lipgloss.Color("#3fb950") // diff "+" lines (reserved — no producer yet)
+	colDiffDel  = lipgloss.Color("#f85149") // diff "-" lines (reserved — no producer yet)
+	colError    = lipgloss.Color("#f85149") // recovered-fault notices
+)
+
+// The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
+// tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯.
+const (
+	glyphAssistant  = "✦"
+	glyphBranch     = "┝"
+	glyphBranchLast = "┕"
+	glyphUser       = "❯"
+)
+
+// brailleFrames are the status-line spinner frames (a single braille cell that appears to
+// rotate), shown while a worker drives the Exchange.
+var brailleFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+
+// newBrailleSpinner builds the status-line spinner from brailleFrames.
+func newBrailleSpinner() spinner.Model {
+	return spinner.New(spinner.WithSpinner(spinner.Spinner{
+		Frames: brailleFrames,
+		FPS:    time.Second / 10, //nolint:mnd // 10 fps, matching the bundled spinners
+	}))
+}
+
+// theme bundles the reusable styles. They are intentionally spare — a few colour and weight
+// cues — so the transcript stays legible under any terminal profile.
+type theme struct {
+	userBlock   lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
+	assistant   lipgloss.Style // the ✦ assistant marker + text (terminal default fg)
+	toolHeader  lipgloss.Style // the ✦ [Label] target header
+	toolDetail  lipgloss.Style // the ┝/┕ branch detail lines (dim)
+	diffAdded   lipgloss.Style // a "+" diff detail line (reserved)
+	diffRemoved lipgloss.Style // a "-" diff detail line (reserved)
+	errorText   lipgloss.Style // a recovered-fault notice
+	noteText    lipgloss.Style // a neutral note (cancelled, approval record)
+	inputBorder lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
+	statusFaint lipgloss.Style // the status line
+	footerRule  lipgloss.Style // the footer's border runes and corners (dark gray)
+	footerText  lipgloss.Style // the footer's content (faint on black)
+}
+
+// newTheme builds the styles from the palette. The input border drops its bottom edge: the
+// footer's top rule is the shared divider, so the input box and footer read as one connected
+// unit (layout.md), and a single lipgloss.Border rune cannot vary per column the way the
+// footer's decorative ━/─ rules do — those are composed by hand in render.go.
+func newTheme() theme {
+	return theme{
+		userBlock:   lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
+		assistant:   lipgloss.NewStyle(),
+		toolHeader:  lipgloss.NewStyle(),
+		toolDetail:  lipgloss.NewStyle().Foreground(colFaint),
+		diffAdded:   lipgloss.NewStyle().Foreground(colDiffAdd),
+		diffRemoved: lipgloss.NewStyle().Foreground(colDiffDel),
+		errorText:   lipgloss.NewStyle().Foreground(colError).Bold(true),
+		noteText:    lipgloss.NewStyle().Foreground(colFaint),
+		inputBorder: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderBottom(false).
+			BorderForeground(colDarkGray).
+			BorderBackground(colBlack).
+			Background(colBlack).
+			Padding(0, 1),
+		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
+		footerRule:  lipgloss.NewStyle().Foreground(colDarkGray),
+		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
+	}
+}

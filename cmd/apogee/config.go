@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"path/filepath"
 	"strconv"
 
@@ -26,10 +27,11 @@ import (
 // settings is the resolved configuration after precedence is applied: the values the
 // composition root feeds into the apogee.Config and the TUI Options.
 type settings struct {
-	endpoint string
-	model    string
-	mode     string
-	bypass   bool
+	endpoint  string
+	model     string
+	mode      string
+	hostAlias string
+	bypass    bool
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -37,10 +39,11 @@ type settings struct {
 // pointer (including a pointer to the zero value) is an explicit setting that wins over
 // everything below it.
 type layer struct {
-	endpoint *string
-	model    *string
-	mode     *string
-	bypass   *bool
+	endpoint  *string
+	model     *string
+	mode      *string
+	hostAlias *string
+	bypass    *bool
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -59,6 +62,9 @@ func resolveSettings(file, env, flag layer) settings {
 		if l.mode != nil {
 			s.mode = *l.mode
 		}
+		if l.hostAlias != nil {
+			s.hostAlias = *l.hostAlias
+		}
 		if l.bypass != nil {
 			s.bypass = *l.bypass
 		}
@@ -75,10 +81,11 @@ func resolveSettings(file, env, flag layer) settings {
 // Bypass is a pointer so an explicit `bypass: false` is distinguishable from an absent
 // key (the former wins over a lower layer; the latter falls through).
 type fileConfig struct {
-	Endpoint string `yaml:"endpoint"`
-	Model    string `yaml:"model"`
-	Mode     string `yaml:"mode"`
-	Bypass   *bool  `yaml:"bypass"`
+	Endpoint  string `yaml:"endpoint"`
+	Model     string `yaml:"model"`
+	Mode      string `yaml:"mode"`
+	HostAlias string `yaml:"host-alias"`
+	Bypass    *bool  `yaml:"bypass"`
 }
 
 // layer projects a parsed file config onto a precedence layer: a present (non-empty)
@@ -93,6 +100,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.Mode != "" {
 		l.mode = &fc.Mode
+	}
+	if fc.HostAlias != "" {
+		l.hostAlias = &fc.HostAlias
 	}
 	if fc.Bypass != nil {
 		l.bypass = fc.Bypass
@@ -217,7 +227,26 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.model = s.model
 	opts.mode = s.mode
 	opts.bypass = s.bypass
+	opts.hostAlias = s.hostAlias
+	if opts.hostAlias == "" {
+		opts.hostAlias = hostFromEndpoint(opts.endpoint)
+	}
 	return nil
+}
+
+// hostFromEndpoint extracts the bare host (without scheme or port) from an endpoint URL —
+// the footer's fallback when no host-alias is configured. A URL that does not parse, or
+// carries no host, falls back to the raw endpoint so the footer still shows something
+// identifiable. An empty endpoint stays empty.
+func hostFromEndpoint(endpoint string) string {
+	if endpoint == "" {
+		return ""
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Hostname() == "" {
+		return endpoint
+	}
+	return u.Hostname()
 }
 
 // resolveConfigDir returns the apogee home honouring --config > APOGEE_CONFIG, falling
@@ -248,13 +277,20 @@ func configFilePath(configDir string) string {
 // Model discovery (the lowest-priority resolution layer: flag > env > file > discover)
 // ----------------------------------------------------------------------------
 
-// modelDiscoverer asks the Upstream at endpoint for its active model id. It is injected so
-// auto-discovery is testable without a live server; the production discoverer (wire.go)
-// probes /v1/models through the provider client.
-type modelDiscoverer func(ctx context.Context, endpoint string) (string, error)
+// discoveredUpstream is what a discovery probe resolves: the server's active model id and its
+// context-window size in tokens (0 when the server does not advertise one).
+type discoveredUpstream struct {
+	model         string
+	contextWindow int
+}
 
-// resolveModel fills opts.model by asking the server when no model was configured by any
-// layer (flag, env, and file all empty) but an endpoint is known — so a single-model
+// modelDiscoverer asks the Upstream at endpoint for its active model and context window. It
+// is injected so auto-discovery is testable without a live server; the production discoverer
+// (wire.go) probes /v1/models through the provider client.
+type modelDiscoverer func(ctx context.Context, endpoint string) (discoveredUpstream, error)
+
+// resolveModel fills opts.model (and opts.contextWindow) by asking the server when no model
+// was configured by any layer (flag, env, and file all empty) but an endpoint is known — so a single-model
 // server (e.g. llama.cpp's llama-server, which serves whatever model was loaded) runs with
 // no model set at all. It returns the discovered id ("" when discovery did not run) so the
 // caller can surface a one-line notice. A discovery failure is returned rather than
@@ -265,12 +301,13 @@ func resolveModel(ctx context.Context, opts *options, discover modelDiscoverer) 
 	if opts.model != "" || opts.endpoint == "" {
 		return "", nil
 	}
-	model, err := discover(ctx, opts.endpoint)
+	got, err := discover(ctx, opts.endpoint)
 	if err != nil {
 		return "", fmt.Errorf(
 			"apogee: no model configured and discovery from %s failed: %w; "+
 				"set one with --model, APOGEE_MODEL, or model: in config.yaml", opts.endpoint, err)
 	}
-	opts.model = model
-	return model, nil
+	opts.model = got.model
+	opts.contextWindow = got.contextWindow
+	return got.model, nil
 }

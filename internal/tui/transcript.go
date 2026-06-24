@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	lipgloss "charm.land/lipgloss/v2"
-
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -45,13 +43,18 @@ const (
 	entryNote
 )
 
-// entry is one committed line-block in the transcript. text is the body; depth is the
-// sub-agent nesting level (Phase 3 — Phase 2 tolerates depth > 0 without rendering it
-// richly, per the plan's Depth > 0 rule).
+// entry is one committed line-block in the transcript. text is the body (for the text
+// kinds); depth is the sub-agent nesting level (Phase 3). A tool call carries its
+// presentation view and a callID so the paired result can be folded into the same block:
+// callID matches the result by ToolCall.ID, and done marks the call once its result has
+// arrived (so a re-used tool pairs each result with the right call).
 type entry struct {
-	kind  entryKind
-	text  string
-	depth int
+	kind   entryKind
+	text   string
+	depth  int
+	callID string
+	tool   toolView
+	done   bool
 }
 
 // addUser appends a user message — the text the human submitted to open or continue the
@@ -157,17 +160,34 @@ func (t *transcript) finalizeNarration(depth int) {
 	t.entries = append(t.entries, entry{kind: entryAssistant, text: text, depth: depth})
 }
 
-// addToolCall appends a tool-call entry: the tool name followed by its pretty-printed
-// arguments. The model's requested call is shown verbatim (a malformed argument is rendered
+// addToolCall appends a tool-call entry: the presentation view (friendly label + target)
+// built from the model's requested call, plus the call ID the paired result folds into. The
+// view shows the call verbatim where it cannot summarise it (a malformed argument is rendered
 // as-is rather than hidden — the human approving a write must see exactly what was asked).
 func (t *transcript) addToolCall(call domain.ToolCall, depth int) {
-	t.entries = append(t.entries, entry{kind: entryToolCall, text: formatToolCall(call), depth: depth})
+	t.entries = append(t.entries, entry{
+		kind:   entryToolCall,
+		depth:  depth,
+		callID: call.ID,
+		tool:   presentToolCall(call),
+	})
 }
 
-// addToolResult appends the paired tool-result entry. A result the tool flagged as an error
-// (IsError) is a normal in-band outcome the model will see and react to — not a recovered
-// fault (that is ErrorEvent) — so it is marked but still rendered as a result.
+// addToolResult folds a tool result into its call's block. It scans from the tail for the
+// most recent un-paired tool-call entry with a matching CallID and enriches that call's view
+// with the result's one-line summary, marking it done. A result the tool flagged as an error
+// (IsError) is a normal in-band outcome the model reacts to — not a recovered fault (that is
+// ErrorEvent) — so it is summarised, not raised. A result that matches no open call (the
+// defensive orphan case) is appended as a standalone result block so its outcome is not lost.
 func (t *transcript) addToolResult(result domain.ToolResult, depth int) {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		e := &t.entries[i]
+		if e.kind == entryToolCall && !e.done && e.callID == result.CallID {
+			e.tool.enrichWithResult(result)
+			e.done = true
+			return
+		}
+	}
 	text := result.Content
 	if result.IsError {
 		text = "error: " + text
@@ -203,16 +223,6 @@ func (t *transcript) addError(source, msg string, depth int) {
 // Formatting helpers
 // ----------------------------------------------------------------------------
 
-// formatToolCall renders a tool call as "<tool> <arguments>", with the arguments
-// pretty-printed. A call with no arguments shows just the tool name.
-func formatToolCall(call domain.ToolCall) string {
-	args := prettyJSON(call.Arguments)
-	if args == "" {
-		return call.Tool
-	}
-	return call.Tool + " " + args
-}
-
 // prettyJSON re-renders raw JSON arguments as indented, human-readable text. Empty or null
 // arguments render as nothing; arguments that do not parse are returned trimmed-but-verbatim
 // so a malformed tool argument is still shown rather than silently dropped.
@@ -226,67 +236,4 @@ func prettyJSON(raw json.RawMessage) string {
 		return trimmed
 	}
 	return buf.String()
-}
-
-// ----------------------------------------------------------------------------
-// Rendering
-// ----------------------------------------------------------------------------
-
-// render joins the committed entries and the in-progress assistant buffer into the body
-// the viewport displays. The viewport soft-wraps to its width, so render leaves wrapping
-// to it and only labels each entry.
-func (t *transcript) render() string {
-	var b strings.Builder
-	for i, e := range t.entries {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(renderEntry(e))
-	}
-	if t.streaming {
-		if len(t.entries) > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(renderEntry(entry{kind: entryAssistant, text: t.pending}))
-	}
-	return b.String()
-}
-
-// entryLabels maps each entry kind to its transcript prefix. They are short and plain so
-// the rendered text stays readable and the substring assertions in the tests stay stable.
-var entryLabels = map[entryKind]string{
-	entryUser:       "you",
-	entryAssistant:  "apogee",
-	entryToolCall:   "tool",
-	entryToolResult: "result",
-	entryError:      "error",
-	entryNote:       "·",
-}
-
-// renderEntry formats one entry as "<label>  <body>" with the label styled. depth > 0
-// (a sub-agent's event, Phase 3) indents the block — including the continuation lines of a
-// multi-line body — so a nested stream does not corrupt the top-level layout, without yet
-// rendering the nesting richly.
-func renderEntry(e entry) string {
-	label := labelStyle(e.kind).Render(entryLabels[e.kind])
-	indent := strings.Repeat("  ", e.depth)
-	body := e.text
-	if indent != "" {
-		body = strings.ReplaceAll(body, "\n", "\n"+indent)
-	}
-	return indent + label + "  " + body
-}
-
-// labelStyle is the lipgloss style for an entry's label. It is intentionally minimal
-// (a weight cue only) — themed colours are a later polish, and keeping it spare keeps the
-// rendered transcript legible under any terminal profile.
-func labelStyle(k entryKind) lipgloss.Style {
-	switch k {
-	case entryUser:
-		return lipgloss.NewStyle().Bold(true)
-	case entryError:
-		return lipgloss.NewStyle().Bold(true)
-	default:
-		return lipgloss.NewStyle().Faint(true)
-	}
 }

@@ -207,11 +207,11 @@ func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 // the discovered id — the zero-config single-model case (llama.cpp's llama-server).
 func TestResolveModelDiscoversWhenUnset(t *testing.T) {
 	t.Parallel()
-	discover := func(_ context.Context, endpoint string) (string, error) {
+	discover := func(_ context.Context, endpoint string) (discoveredUpstream, error) {
 		if endpoint != "http://server" {
 			t.Errorf("discover called with endpoint %q; want the resolved endpoint", endpoint)
 		}
-		return "discovered-model", nil
+		return discoveredUpstream{model: "discovered-model", contextWindow: 32768}, nil
 	}
 	opts := options{endpoint: "http://server"}
 	got, err := resolveModel(context.Background(), &opts, discover)
@@ -221,15 +221,18 @@ func TestResolveModelDiscoversWhenUnset(t *testing.T) {
 	if got != "discovered-model" || opts.model != "discovered-model" {
 		t.Errorf("resolveModel = %q, opts.model = %q; want both %q", got, opts.model, "discovered-model")
 	}
+	if opts.contextWindow != 32768 {
+		t.Errorf("opts.contextWindow = %d; want the discovered window 32768", opts.contextWindow)
+	}
 }
 
 // A model resolved by a higher layer (flag/env/file) wins: discovery must not run and must
 // not overwrite it.
 func TestResolveModelSkipsWhenAlreadySet(t *testing.T) {
 	t.Parallel()
-	discover := func(context.Context, string) (string, error) {
+	discover := func(context.Context, string) (discoveredUpstream, error) {
 		t.Fatal("discover must not be called when a model is already configured")
-		return "", nil
+		return discoveredUpstream{}, nil
 	}
 	opts := options{endpoint: "http://server", model: "m-configured"}
 	got, err := resolveModel(context.Background(), &opts, discover)
@@ -248,9 +251,9 @@ func TestResolveModelSkipsWhenAlreadySet(t *testing.T) {
 // then surfaces the missing-endpoint error, which is the real problem.
 func TestResolveModelNoEndpointIsNoOp(t *testing.T) {
 	t.Parallel()
-	discover := func(context.Context, string) (string, error) {
+	discover := func(context.Context, string) (discoveredUpstream, error) {
 		t.Fatal("discover must not be called with no endpoint")
-		return "", nil
+		return discoveredUpstream{}, nil
 	}
 	opts := options{}
 	got, err := resolveModel(context.Background(), &opts, discover)
@@ -267,7 +270,7 @@ func TestResolveModelNoEndpointIsNoOp(t *testing.T) {
 func TestResolveModelDiscoveryErrorPropagates(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("connection refused")
-	discover := func(context.Context, string) (string, error) { return "", boom }
+	discover := func(context.Context, string) (discoveredUpstream, error) { return discoveredUpstream{}, boom }
 	opts := options{endpoint: "http://server"}
 	_, err := resolveModel(context.Background(), &opts, discover)
 	if err == nil {

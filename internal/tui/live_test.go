@@ -99,7 +99,7 @@ func TestE2ELiveModel(t *testing.T) {
 	}
 	t.Logf("workspace files: %v", names)
 
-	if !strings.Contains(plainTranscript(m), "write_file") {
-		t.Errorf("transcript does not show the write_file tool call")
+	if !strings.Contains(plainTranscript(m), "Write File") {
+		t.Errorf("transcript does not show the Write File tool call")
 	}
 }

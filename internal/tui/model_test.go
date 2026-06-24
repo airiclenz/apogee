@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -23,11 +24,13 @@ import (
 // submit returns is never executed (these tests drive the state machine directly with the
 // five seam Msgs), so the fakeEngine's drive methods are never called.
 
-// testOpts are the display values the status line renders.
+// testOpts are the display values the status line and footer render.
 var testOpts = Options{
-	Model:    "test-model",
-	Endpoint: "http://localhost:1234",
-	Mode:     domain.ModeAskBefore,
+	Model:         "test-model",
+	Endpoint:      "http://localhost:1234",
+	Mode:          domain.ModeAskBefore,
+	HostAlias:     "test-host",
+	ContextWindow: 32768,
 }
 
 // newTestModel builds a ready, idle model sized to a standard window.
@@ -511,13 +514,18 @@ func TestModelQuitWithoutSaver(t *testing.T) {
 // Layout: the status line and resizing
 // ----------------------------------------------------------------------------
 
+// The status line carries the turn; the footer carries the host alias, model, static context
+// window, and mode. The full endpoint URL is no longer shown — the footer uses the host alias.
 func TestModelStatusLine(t *testing.T) {
 	m := newTestModel(t)
 	got := plain(m.View())
-	for _, want := range []string{"test-model", "http://localhost:1234", "ask-before", "turn"} {
+	for _, want := range []string{"test-host", "test-model", "32k", "ask-before", "turn"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("status line missing %q:\n%s", want, got)
+			t.Errorf("status/footer missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "http://localhost:1234") {
+		t.Errorf("footer shows the full endpoint URL; want the host alias instead:\n%s", got)
 	}
 }
 
@@ -601,4 +609,65 @@ func TestModelNoBuilderByValue(t *testing.T) {
 	}
 
 	walk(reflect.TypeOf(Model{}), "Model")
+}
+
+// ----------------------------------------------------------------------------
+// Sticky-to-top and auto-grow input (P2.7 — TUI presentation pass)
+// ----------------------------------------------------------------------------
+
+// firstVisibleLine returns the viewport's top visible line, styling stripped.
+func firstVisibleLine(vp viewport.Model) string {
+	return strings.SplitN(ansiPattern.ReplaceAllString(vp.View(), ""), "\n", 2)[0]
+}
+
+// The last user prompt is pinned to the top of the viewport while the reply streams beneath
+// it, and a human scroll suspends the pin so reading history is not yanked back.
+func TestStickyPinsLastUserPrompt(t *testing.T) {
+	m := newTestModel(t) // 80x24
+
+	// A transcript taller than the viewport, with a clear last prompt followed by enough
+	// content below it to fill the screen (so the pin is not clamped to the bottom).
+	m.transcript.addUser("first question")
+	m.transcript.commitAssistant(strings.Repeat("filler above. ", 80), 0)
+	m.transcript.addUser("STICKY-PROMPT")
+	for i := 0; i < 30; i++ {
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+
+	if m.viewport.YOffset() == 0 {
+		t.Fatal("viewport did not scroll; the sticky prompt cannot be pinned to the top")
+	}
+	if top := firstVisibleLine(m.viewport); !strings.Contains(top, "STICKY-PROMPT") {
+		t.Errorf("top visible line = %q; want the last user prompt pinned to the top", top)
+	}
+
+	// A human scroll suspends the pin: a later refresh must not re-pin and move the offset.
+	m.userScrolled = true
+	off := m.viewport.YOffset()
+	m.transcript.commitAssistant("more streamed content", 0)
+	m.refreshViewport()
+	if m.viewport.YOffset() != off {
+		t.Errorf("a scrolled viewport was re-pinned: offset %d → %d", off, m.viewport.YOffset())
+	}
+}
+
+// The input box grows with its content and the viewport shrinks by the same number of rows,
+// keeping the layout balanced as a multi-line message is typed.
+func TestInputAutoGrowReflowsViewport(t *testing.T) {
+	m := newTestModel(t)
+	if r := m.input.Height(); r != 1 {
+		t.Fatalf("empty input height = %d, want 1 row", r)
+	}
+	vpBefore := m.viewport.Height()
+
+	m.input.SetValue("line1\nline2\nline3\nline4")
+	m.layout()
+
+	if r := m.input.Height(); r != 4 {
+		t.Errorf("input height after a four-line message = %d, want 4", r)
+	}
+	if got, want := m.viewport.Height(), vpBefore-3; got != want {
+		t.Errorf("viewport height = %d; want %d (shrunk by the three rows the input grew)", got, want)
+	}
 }

@@ -28,12 +28,15 @@ func TestDiscoverUpstreamModel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	model, err := discoverUpstreamModel(context.Background(), srv.URL)
+	got, err := discoverUpstreamModel(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("discoverUpstreamModel: %v", err)
 	}
-	if model != "loaded-model" {
-		t.Errorf("model = %q; want the server's advertised model", model)
+	if got.model != "loaded-model" {
+		t.Errorf("model = %q; want the server's advertised model", got.model)
+	}
+	if got.contextWindow != 32768 {
+		t.Errorf("contextWindow = %d; want the server's advertised window 32768", got.contextWindow)
 	}
 }
 

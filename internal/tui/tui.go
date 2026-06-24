@@ -45,6 +45,15 @@ type Options struct {
 	Bypass    bool
 	Workspace string
 
+	// ContextWindow is the active model's context-window size in tokens (0 when unknown), as
+	// reported by upstream discovery. The footer renders it statically (e.g. "32k"); the live
+	// status-line gauge that compares usage against it lights up when Phase 4 routes usage.
+	ContextWindow int
+
+	// HostAlias is a short, friendly name for the upstream host shown in the footer (a
+	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
+	HostAlias string
+
 	// Save persists a snapshot of the conversation; nil disables session saving. The
 	// binary supplies a store-backed saver (it owns the path and on-disk format — phase-2
 	// detail plan §3 C5). The model calls it only at a quiescent boundary (a clean quit),

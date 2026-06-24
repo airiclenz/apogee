@@ -12,11 +12,19 @@ import (
 // ----------------------------------------------------------------------------
 
 // The transcript is proven by folding recorded event sequences — the shapes coreagent
-// produces — and asserting the rendered scrollback. plainRender strips the label styling so
-// the assertions test the text, not the ANSI (ansiPattern lives in model_test.go).
-func plainRender(tr *transcript) string {
-	return ansiPattern.ReplaceAllString(tr.render(), "")
+// produces — and asserting the rendered scrollback. renderPlain renders at a fixed width,
+// strips the ANSI styling, and trims each line's trailing padding so the assertions test the
+// text, not the styling (ansiPattern lives in model_test.go). plainRender is the width-80
+// default the substring assertions use.
+func renderPlain(tr *transcript, width int) string {
+	lines := tr.renderLines(newTheme(), width)
+	for i, ln := range lines {
+		lines[i] = strings.TrimRight(ansiPattern.ReplaceAllString(ln, ""), " ")
+	}
+	return strings.Join(lines, "\n")
 }
+
+func plainRender(tr *transcript) string { return renderPlain(tr, 80) }
 
 // feed folds a sequence of events into a fresh transcript and returns it.
 func feed(events ...domain.Event) *transcript {
@@ -41,24 +49,50 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "read it."})
 	tr.apply(domain.ToolCallEvent{
 		EventBase: domain.EventBase{Turn: 0},
-		Call:      domain.ToolCall{Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
+		Call:      domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
 	})
 	tr.apply(domain.ToolResultEvent{
 		EventBase: domain.EventBase{Turn: 0},
-		Result:    domain.ToolResult{Content: "package main"},
+		Result:    domain.ToolResult{CallID: "c1", Content: "[File: main.go, 1 lines total, showing lines 1-1]\npackage main"},
 	})
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 1}, Text: "It is "})
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 1}, Text: "a Go file."})
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Turn: 1}, Text: "It is a Go file."})
 
-	want := `you  read main.go
-apogee  Let me read it.
-tool  read_file {
-  "path": "main.go"
-}
-result  package main
-apogee  It is a Go file.`
-	if got := plainRender(tr); got != want {
+	// (a) structured: the call and its result fold into one block, keyed by CallID, and the
+	// result is summarised to a one-line detail (the read range) rather than the file body.
+	var tool *entry
+	for i := range tr.entries {
+		if tr.entries[i].kind == entryToolCall {
+			tool = &tr.entries[i]
+		}
+	}
+	if tool == nil {
+		t.Fatal("no tool-call entry recorded")
+	}
+	if !tool.done {
+		t.Error("tool call not marked done after its result folded in")
+	}
+	if tool.tool.Label != "Read File" || tool.tool.Target != "main.go" || !tool.tool.bracket {
+		t.Errorf("tool view = %+v; want a bracketed Read File / main.go header", tool.tool)
+	}
+	if len(tool.tool.Details) != 1 || tool.tool.Details[0].Text != "1 - 1" {
+		t.Errorf("tool details = %+v; want a single \"1 - 1\" summary", tool.tool.Details)
+	}
+
+	// (b) render snapshot: the grouped block in the new look — ✦-prefixed, one blank line
+	// between blocks, the tool detail hanging off a ┕ branch.
+	want := strings.Join([]string{
+		"❯ read main.go",
+		"",
+		"✦ Let me read it.",
+		"",
+		"✦ [Read File] main.go",
+		"  ┕ 1 - 1",
+		"",
+		"✦ It is a Go file.",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("transcript mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 	if tr.turn != 1 {
@@ -82,10 +116,10 @@ func TestTranscriptToolCallFinalisesNarration(t *testing.T) {
 		t.Error("still streaming after the first ToolCall finalised the narration")
 	}
 	got := plainRender(tr)
-	if !strings.Contains(got, "apogee  Checking the file.") {
+	if !strings.Contains(got, "✦ Checking the file.") {
 		t.Errorf("pre-tool narration not committed:\n%s", got)
 	}
-	if !strings.Contains(got, "tool  read_file") {
+	if !strings.Contains(got, "✦ [Read File]") {
 		t.Errorf("tool call not rendered:\n%s", got)
 	}
 	if n := len(tr.entries); n != 2 { // assistant narration + tool call
@@ -205,7 +239,7 @@ func TestTranscriptErrorEventInline(t *testing.T) {
 		domain.MessageEvent{EventBase: domain.EventBase{Turn: 1}, Text: "Recovered."},
 	)
 	got := plainRender(tr)
-	for _, want := range []string{"I'll read it.", "error  read_file: boom", "Recovered."} {
+	for _, want := range []string{"I'll read it.", "read_file: boom", "Recovered."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
@@ -218,8 +252,8 @@ func TestTranscriptErrorEventInline(t *testing.T) {
 
 func TestTranscriptToolResultError(t *testing.T) {
 	tr := feed(domain.ToolResultEvent{Result: domain.ToolResult{Content: "no such file", IsError: true}})
-	if got := plainRender(tr); !strings.Contains(got, "result  error: no such file") {
-		t.Errorf("error tool result not marked as a result:\n%s", got)
+	if got := plainRender(tr); !strings.Contains(got, "error: no such file") {
+		t.Errorf("error tool result not surfaced:\n%s", got)
 	}
 }
 
@@ -272,50 +306,62 @@ func TestTranscriptDepthIndents(t *testing.T) {
 		Result:    domain.ToolResult{Content: "line1\nline2"},
 	})
 	got := plainRender(tr)
-	if !strings.HasPrefix(got, "  result  line1") {
+	if !strings.HasPrefix(got, "  ✦ [result]") {
 		t.Errorf("depth-1 entry not indented:\n%q", got)
 	}
-	if !strings.Contains(got, "\n  line2") {
+	if !strings.Contains(got, "    ┕ line2") {
 		t.Errorf("continuation line of a depth-1 entry not indented:\n%q", got)
 	}
 }
 
 // ----------------------------------------------------------------------------
-// Argument formatting
+// Tool call + result group by CallID
 // ----------------------------------------------------------------------------
 
-func TestFormatToolCall(t *testing.T) {
-	tests := []struct {
-		name string
-		call domain.ToolCall
-		want string
-	}{
-		{
-			name: "pretty-printed object",
-			call: domain.ToolCall{Tool: "write_file", Arguments: []byte(`{"path":"x"}`)},
-			want: "write_file {\n  \"path\": \"x\"\n}",
-		},
-		{
-			name: "no arguments shows just the tool",
-			call: domain.ToolCall{Tool: "list_dir"},
-			want: "list_dir",
-		},
-		{
-			name: "null arguments shows just the tool",
-			call: domain.ToolCall{Tool: "list_dir", Arguments: []byte("null")},
-			want: "list_dir",
-		},
-		{
-			name: "malformed arguments render verbatim, not dropped",
-			call: domain.ToolCall{Tool: "weird", Arguments: []byte("{not json")},
-			want: "weird {not json",
-		},
+// A result folds into its call's block by CallID — even when results arrive out of order and
+// the same tool is called twice in a Turn — so each call shows its own summary and no orphan
+// result entry is appended.
+func TestToolResultGroupsByCallID(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "a", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "b", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
+
+	// The second call's result arrives first; it must fold into call b, not call a.
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "b", Content: "[File: b.go, 10 lines total, showing lines 1-10]\n…"}})
+
+	if n := len(tr.entries); n != 2 {
+		t.Fatalf("entries = %d, want 2 (the result folded in, no orphan entry)", n)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := formatToolCall(tc.call); got != tc.want {
-				t.Errorf("formatToolCall = %q, want %q", got, tc.want)
-			}
-		})
+	a, b := callEntry(tr, "a"), callEntry(tr, "b")
+	if a == nil || b == nil {
+		t.Fatal("a tool-call entry went missing")
 	}
+	if a.done {
+		t.Error("call a folded a result it never received")
+	}
+	if !b.done {
+		t.Fatal("call b's result did not fold into it")
+	}
+	if len(b.tool.Details) != 1 || b.tool.Details[0].Text != "1 - 10" {
+		t.Errorf("call b details = %+v; want a single \"1 - 10\" summary", b.tool.Details)
+	}
+
+	// Call a's result arrives later and folds into a — still two entries, no orphan.
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "a", Content: "[File: a.go, 5 lines total, showing lines 1-5]\n…"}})
+	if !callEntry(tr, "a").done {
+		t.Error("call a's later result did not fold into it")
+	}
+	if n := len(tr.entries); n != 2 {
+		t.Errorf("entries = %d after both results; want 2", n)
+	}
+}
+
+// callEntry returns the tool-call entry with the given CallID, or nil.
+func callEntry(tr *transcript, id string) *entry {
+	for i := range tr.entries {
+		if tr.entries[i].kind == entryToolCall && tr.entries[i].callID == id {
+			return &tr.entries[i]
+		}
+	}
+	return nil
 }

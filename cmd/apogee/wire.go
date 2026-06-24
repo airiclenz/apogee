@@ -33,12 +33,12 @@ const (
 // runs with no --model set; tests inject a fake. ctx bounds the probe (Discover also
 // self-imposes a short timeout), and a model-less client is fine — Discover treats the
 // configured model only as a hint.
-func discoverUpstreamModel(ctx context.Context, endpoint string) (string, error) {
+func discoverUpstreamModel(ctx context.Context, endpoint string) (discoveredUpstream, error) {
 	info, err := provider.NewClient(endpoint, "").Discover(ctx)
 	if err != nil {
-		return "", err
+		return discoveredUpstream{}, err
 	}
-	return info.ActiveModel, nil
+	return discoveredUpstream{model: info.ActiveModel, contextWindow: info.ContextWindow}, nil
 }
 
 // ----------------------------------------------------------------------------
@@ -89,12 +89,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	saver := &sessionSaver{store: session.NewStore(roots.sessions)}
 
 	err = launch(ctx, agent, bridge, tui.Options{
-		Model:     opts.model,
-		Endpoint:  opts.endpoint,
-		Mode:      mode,
-		Bypass:    opts.bypass,
-		Workspace: roots.workspace,
-		Save:      saver.save,
+		Model:         opts.model,
+		Endpoint:      opts.endpoint,
+		Mode:          mode,
+		Bypass:        opts.bypass,
+		Workspace:     roots.workspace,
+		ContextWindow: opts.contextWindow,
+		HostAlias:     opts.hostAlias,
+		Save:          saver.save,
 	})
 	if path := saver.saved(); path != "" {
 		fmt.Fprintf(os.Stdout, "Session saved · resume with: apogee --resume %s\n", path)

@@ -17,6 +17,19 @@
 // (bubbletea/bubbles/lipgloss, all on the charm.land path) is taken over the v1 fallback.
 // The rich event fold (P2.3) and the Approval UI keys (P2.4) build on this skeleton.
 //
+// P2.7 (the pre-Phase-3 TUI presentation pass) reshapes the look to layout.md and splits the
+// rendering into reusable seams the Phase-3 tool fan-out and sub-agent work extend rather than
+// rework: [theme] holds the palette, glyphs, and styles; toolpresent.go turns a tool call+result
+// into a compact [toolView] through an OPEN, name-keyed registry (each later tool adds one entry);
+// render.go is the line-oriented renderer (the full-width user block, ✦ assistant/tool headers,
+// ┝/┕ tool-detail branches, depth indenting, and the [wrappedOffset] that mirrors the viewport's
+// soft-wrap so the last user prompt sticks to the top while a reply streams). The transcript now
+// groups a tool call with its result by ToolCall ID, the input box is a rounded, auto-growing
+// black field, and the chrome is a braille status line plus a footer bar (host-alias ✦ model ✦
+// context-window, mode). The live token gauge is reserved until Phase 4 routes usage; the
+// red/green diff detail and the sub-agent (Depth > 0) block are reserved renderers awaiting their
+// Phase-3 producers.
+//
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole
 // Model — every field it holds, recursively — is copied on every Update. A type that records

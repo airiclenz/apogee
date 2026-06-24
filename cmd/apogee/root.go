@@ -20,6 +20,12 @@ type options struct {
 	bypass    bool
 	resume    string
 	configDir string
+
+	// Resolved display values handed to the TUI (not bound to flags). hostAlias is the
+	// footer's friendly host name (config key, else the endpoint host); contextWindow is the
+	// active model's window in tokens, captured during model discovery (0 when unknown).
+	hostAlias     string
+	contextWindow int
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

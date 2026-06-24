@@ -56,8 +56,10 @@ type Model struct {
 
 	// Content & layout.
 	transcript    transcript
+	th            theme // the palette and reusable styles, built once at construction
 	width, height int
 	ready         bool // a WindowSizeMsg has sized the layout at least once
+	userScrolled  bool // the human scrolled the transcript; suspend sticky-to-top until submit
 }
 
 // newModel builds the initial idle Model. parent is the program context the worker derives
@@ -66,17 +68,20 @@ type Model struct {
 // Cmd: the focus *state* must be set on the stored widget, while Init returns the cursor's
 // blink Cmd.
 func newModel(parent context.Context, eng Engine, opts Options) Model {
+	th := newTheme()
+
 	ta := textarea.New()
-	ta.Placeholder = "Send a message…"
-	ta.Prompt = "› "
+	ta.Placeholder = "Send a message…  ⏎ send · ⇧⏎ newline · esc quit"
+	ta.Prompt = "" // the rounded border is the frame; no inline prompt gutter (layout.md)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit; the model, not the widget, bounds a turn
+	blackenInput(&ta)
 	ta.Focus()
 
 	vp := viewport.New()
 	vp.SoftWrap = true // wrap long transcript lines to the viewport width
 
-	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
+	sp := newBrailleSpinner()
 
 	return Model{
 		parent:   parent,
@@ -86,8 +91,24 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 		input:    ta,
 		viewport: vp,
 		spinner:  sp,
+		th:       th,
 		state:    stateIdle,
 	}
+}
+
+// blackenInput gives the textarea the black interior the layout calls for: the base, text,
+// cursor line, and placeholder all sit on a black background so the box reads as one solid
+// field inside its dark-gray border, on any terminal theme.
+func blackenInput(ta *textarea.Model) {
+	s := ta.Styles()
+	for _, st := range []*textarea.StyleState{&s.Focused, &s.Blurred} {
+		st.Base = st.Base.Background(colBlack)
+		st.Text = st.Text.Background(colBlack)
+		st.CursorLine = st.CursorLine.Background(colBlack)
+		st.Placeholder = st.Placeholder.Background(colBlack)
+		st.EndOfBuffer = st.EndOfBuffer.Background(colBlack)
+	}
+	ta.SetStyles(s)
 }
 
 // Init starts the cursor blink. The window is sized by the first WindowSizeMsg the program
@@ -202,11 +223,24 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.state == stateIdle {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd
 	}
-	// While running, let the keys scroll the transcript rather than edit the (refused) input.
+	// While running, let the keys scroll the transcript rather than edit the (refused) input;
+	// a scroll that actually moves the viewport suspends sticky-to-top until the next submit.
+	return m.scrollViewport(msg)
+}
+
+// scrollViewport routes a key to the viewport and records a human scroll: if the offset
+// moved, sticky-to-top is suspended (refreshViewport stops re-pinning the last user prompt)
+// so reading history is not yanked back as new content streams in.
+func (m Model) scrollViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
+	before := m.viewport.YOffset()
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
+	if m.viewport.YOffset() != before {
+		m.userScrolled = true
+	}
 	return m, cmd
 }
 
@@ -232,9 +266,7 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.state = stateRunning
 		return m, m.spinner.Tick
 	}
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
+	return m.scrollViewport(msg)
 }
 
 // submit launches a worker for the text in the input box. It records the user message,
@@ -247,8 +279,9 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.input.Reset()
+	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
 	m.transcript.addUser(text)
-	m.refreshViewport()
+	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 
 	cmd, cancel := startExchange(m.parent, m.eng, domain.UserInput{Text: text})
 	m.cancel = cancel
@@ -315,43 +348,81 @@ func (m Model) busy() bool {
 // Layout
 // ----------------------------------------------------------------------------
 
-// inputHeight is the textarea's fixed height in rows; statusHeight and hintHeight are one
-// row each. The viewport takes whatever remains.
+// The fixed chrome heights below the transcript. The status line is one row; one blank gap
+// row separates the transcript from the chrome (layout.md); the footer is three rows (its
+// top divider, its content line, its bottom rule). The input box and the viewport take what
+// remains — the box grows with its content, the viewport gets the rest.
 const (
-	inputHeight  = 3
 	statusHeight = 1
-	hintHeight   = 1
+	gapHeight    = 1
+	footerHeight = 3 // divider + content + bottom rule
+
+	minInputRows = 1
+	maxInputRows = 10 // past this the textarea scrolls internally rather than growing further
+	borderFrame  = 2  // the input border's left + right columns
+	inputPadding = 2  // the input border's left + right padding columns
 )
 
-// layout sizes the viewport and input to the current window. The viewport gets the height
-// left after the status, input, and hint rows; a floor of one row keeps it valid on a tiny
-// window. It refreshes the viewport content so a resize reflows without losing the bottom.
+// layout sizes the viewport and input box to the current window. The input box auto-grows
+// with its content (clamped), and the viewport gets the height left after the status row, the
+// gap row, the input box (its content rows plus a top border — the divider below it belongs to
+// the footer), and the footer. A floor of one row keeps the viewport valid on a tiny window.
 func (m *Model) layout() {
-	vpHeight := m.height - inputHeight - statusHeight - hintHeight
+	m.viewport.SetWidth(m.width)
+	m.input.SetWidth(m.inputInnerWidth())
+	m.input.SetHeight(m.inputRows())
+
+	inputBoxHeight := m.input.Height() + 1 // content rows + top border (no bottom — it is the footer's divider)
+	vpHeight := m.height - statusHeight - gapHeight - inputBoxHeight - footerHeight
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
-	m.viewport.SetWidth(m.width)
 	m.viewport.SetHeight(vpHeight)
-	m.input.SetWidth(m.width)
-	m.input.SetHeight(inputHeight)
 	m.refreshViewport()
 }
 
-// refreshViewport re-renders the transcript into the viewport and pins it to the bottom so
-// the newest content stays visible as it streams in.
+// inputInnerWidth is the textarea's text width: the window less the border and padding
+// columns, floored at one so a very narrow window does not produce a zero-width box.
+func (m *Model) inputInnerWidth() int {
+	return max(1, m.width-borderFrame-inputPadding)
+}
+
+// inputRows is the textarea's height: the number of rows its current content wraps to,
+// clamped to [minInputRows, maxInputRows]. The box grows as the human types a multi-line
+// message and stops growing at the cap, where the textarea scrolls internally.
+func (m *Model) inputRows() int {
+	rows := inputContentRows(m.input.Value(), m.inputInnerWidth())
+	return clampInt(rows, minInputRows, maxInputRows)
+}
+
+// refreshViewport re-renders the transcript into the viewport and, unless the human has
+// scrolled, pins the last user prompt to the top of the visible area (sticky-to-top, as in
+// apogee-code) so the prompt stays put while the reply streams beneath it. With no user
+// prompt yet, it falls back to the bottom. A human scroll (userScrolled) suspends the pin so
+// reading history is not yanked back; submit re-arms it.
 func (m *Model) refreshViewport() {
-	m.viewport.SetContent(m.transcript.render())
-	m.viewport.GotoBottom()
+	rendered := m.transcript.renderView(m.th, m.viewport.Width())
+	m.viewport.SetContentLines(rendered.lines)
+	if m.userScrolled {
+		return
+	}
+	if rendered.lastUserStart < 0 {
+		m.viewport.GotoBottom()
+		return
+	}
+	m.viewport.SetYOffset(wrappedOffset(rendered.lines[:rendered.lastUserStart], m.viewport.Width()))
 }
 
 // ----------------------------------------------------------------------------
 // View
 // ----------------------------------------------------------------------------
 
-// View renders the transcript, the status line, the input box, and a key hint, stacked top
-// to bottom and filling the alternate screen. Before the first WindowSizeMsg there is no
-// geometry to lay out, so it shows a minimal placeholder.
+// View stacks the transcript, a single blank line, the status line, the bordered input box,
+// and the footer bar, filling the alternate screen (layout.md). Before the first
+// WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
+// approval prompt, when one is pending, sits between the transcript and the blank line; the
+// viewport is shrunk on this local copy to make room (View has a value receiver, so the
+// stored layout is untouched).
 func (m Model) View() tea.View {
 	if !m.ready {
 		return tea.NewView("apogee — starting…")
@@ -360,91 +431,168 @@ func (m Model) View() tea.View {
 	var prompt string
 	if m.state == stateAwaitingApproval && m.pending != nil {
 		prompt = m.approvalPrompt(m.pending.Request)
-		// Make room for the prompt by shrinking the viewport on this local copy (View has a
-		// value receiver, so the stored layout is untouched) — otherwise the prompt would
-		// push the status, input, and hint rows past the bottom of the window.
 		h := m.viewport.Height() - lipgloss.Height(prompt)
 		if h < 1 {
 			h = 1
 		}
 		m.viewport.SetHeight(h)
-		m.viewport.GotoBottom()
 	}
 
 	rows := []string{m.viewport.View()}
 	if prompt != "" {
 		rows = append(rows, prompt)
 	}
-	rows = append(rows, m.statusLine(), m.input.View(), m.hintLine())
+	// The single blank line between chat content and the bottom chrome (layout.md).
+	rows = append(rows, "", m.statusLine(), m.inputView(), m.footerView())
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true
 	return v
 }
 
+// inputView renders the textarea inside the rounded, dark-gray, black-bg border (no bottom
+// edge — the footer's top rule is the shared divider). lipgloss.Width sets the box's total
+// width including the border and padding, so the box always spans the window and the footer
+// below it aligns.
+func (m Model) inputView() string {
+	return m.th.inputBorder.Width(m.width).Render(m.input.View())
+}
+
+// footerView renders the footer bar: a decorative top divider (the shared border with the
+// input box above), the content line, and a decorative bottom rule. The content shows the
+// host alias, model, and static context window on the left and the autonomy mode on the
+// right — string(Mode), so a later rung (ModeAllowEdits, P3.4) appears for free. A window too
+// narrow for a bordered bar renders nothing rather than overflowing.
+func (m Model) footerView() string {
+	w := m.width
+	if w < 3 {
+		return ""
+	}
+	rule := func(left, right string) string {
+		return m.th.footerRule.Render(left + ruleMix(w-2) + right)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		rule("├", "┤"),
+		m.footerContent(w),
+		rule("╰", "╯"),
+	)
+}
+
+// footerContent composes the footer's content line: host ✦ model ✦ ctx on the left, mode on
+// the right, between two dark-gray │ borders on a black field. The host falls back to the
+// endpoint when no alias is configured, and the context window is omitted when unknown (0).
+func (m Model) footerContent(w int) string {
+	host := m.opts.HostAlias
+	if host == "" {
+		host = m.opts.Endpoint
+	}
+	left := strings.Join(nonEmpty(host, m.opts.Model, formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
+	body := fitLeftRight(left, string(m.opts.Mode), w-2)
+	bar := m.th.footerRule.Render("│")
+	return bar + m.th.footerText.Render(body) + bar
+}
+
+// statusLine renders the activity indicator and turn on the left and the live context gauge
+// (or a key hint) on the right, justified across the window. It reads only display values off
+// Options and the model's own state — never off the Engine mid-step.
+func (m Model) statusLine() string {
+	turn := m.th.statusFaint.Render(fmt.Sprintf("turn %d", m.transcript.turn))
+	left := turn
+	switch m.state {
+	case stateRunning:
+		left = m.spinner.View() + " " + turn
+	case stateAwaitingApproval:
+		left = m.th.statusFaint.Render("approval needed · ") + turn
+	case stateErrored:
+		left = m.th.errorText.Render("error") + m.th.statusFaint.Render(" · ") + turn
+	}
+	return justify(left, m.th.statusFaint.Render(m.statusRight()), m.width)
+}
+
+// statusRight is the status line's right slot: the live context gauge when token usage is
+// known, else a state-appropriate key hint. The gauge is empty until Phase 4 routes usage, so
+// for now the hint shows; once usage is wired, the gauge takes the slot with no rework.
+func (m Model) statusRight() string {
+	if g := m.contextGauge(); g != "" {
+		return g
+	}
+	switch m.state {
+	case stateRunning:
+		return "esc stop"
+	case stateErrored:
+		return "enter dismiss · esc quit"
+	default:
+		return ""
+	}
+}
+
+// contextGauge renders the live token-usage gauge for the status line. Token counting is a
+// Phase-4 deliverable (phase-3 detail plan §6), so Used is 0 today and the gauge renders
+// nothing; the static window is shown in the footer instead. When Phase 4 routes usage, the
+// gauge lights up here automatically — no UI rework.
+func (m Model) contextGauge() string {
+	return contextUsage{Used: 0, Limit: m.opts.ContextWindow}.view()
+}
+
+// contextUsage is the live context-window gauge's data: tokens Used out of the window Limit.
+// It is self-hiding — view renders nothing until usage is known.
+type contextUsage struct {
+	Used  int
+	Limit int
+}
+
+// view renders the gauge as "<used> <pct>% <bar>", or "" when usage is unknown.
+func (c contextUsage) view() string {
+	if c.Used <= 0 || c.Limit <= 0 {
+		return ""
+	}
+	const barWidth = 6
+	filled := clampInt(c.Used*barWidth/c.Limit, 0, barWidth)
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	return fmt.Sprintf("%s %d%% %s", formatTokens(c.Used), c.Used*100/c.Limit, bar)
+}
+
+// formatTokens renders a token count compactly: bare below 1000, else "<n>k" (32768 → 32k).
+// Zero renders as "" so an unknown window is simply omitted.
+func formatTokens(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%dk", n/1000)
+}
+
+// nonEmpty returns the non-empty arguments in order — the footer's left segment skips an
+// absent host, model, or context window rather than rendering a dangling separator.
+func nonEmpty(parts ...string) []string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // approvalStyle weights the approval prompt's lead line so it stands out from the transcript
-// above it; the reason reuses the faint hint style. Themed framing is a later polish (§6).
+// above it.
 var approvalStyle = lipgloss.NewStyle().Bold(true)
 
-// approvalPrompt renders the pending tool call the human must rule on: the tool name and its
-// Reason on the lead line, then the pretty-printed Arguments. It reuses prettyJSON so the
-// formatting matches the tool-call entries in the transcript (empty/null arguments add no
-// body). Only the top-level (Depth == 0) prompt is rendered this phase.
+// approvalPrompt renders the pending tool call the human must rule on: the RAW tool name (not
+// the friendly transcript label — the approval flow is a security surface, so the human sees
+// exactly the tool that will run) and its Reason on the lead line, the decision legend on the
+// next, then the pretty-printed Arguments. Empty/null arguments add no body. Only the
+// top-level (Depth == 0) prompt is rendered this phase.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	head := approvalStyle.Render("approve " + req.Tool + "?")
 	if req.Reason != "" {
-		head += "  " + hintStyle.Render("("+req.Reason+")")
+		head += "  " + m.th.statusFaint.Render("("+req.Reason+")")
 	}
-	args := prettyJSON(req.Arguments)
-	if args == "" {
-		return head
+	body := head + "\n" + m.th.statusFaint.Render("a allow · d deny · s allow-session · esc cancel")
+	if args := prettyJSON(req.Arguments); args != "" {
+		body += "\n" + m.th.toolDetail.Render(args)
 	}
-	return head + "\n" + args
-}
-
-// statusStyle and hintStyle dim the two chrome rows so the transcript reads as the
-// foreground. Colour theming is a later polish (plan §6).
-var (
-	statusStyle = lipgloss.NewStyle().Faint(true)
-	hintStyle   = lipgloss.NewStyle().Faint(true)
-)
-
-// statusLine renders the model · endpoint · mode [· bypass] · turn, prefixed by a
-// state indicator (a spinner while running, a word otherwise). It reads only display
-// values off Options and the model's own state — never off the Engine mid-step.
-func (m Model) statusLine() string {
-	parts := []string{m.opts.Model, m.opts.Endpoint, string(m.opts.Mode)}
-	if m.opts.Bypass {
-		parts = append(parts, "bypass")
-	}
-	parts = append(parts, fmt.Sprintf("turn %d", m.transcript.turn))
-	line := strings.Join(parts, " · ")
-
-	switch m.state {
-	case stateRunning:
-		line = m.spinner.View() + " " + line
-	case stateAwaitingApproval:
-		line = "approval needed · " + line
-	case stateErrored:
-		line = "error · " + line
-	default:
-		line = "ready · " + line
-	}
-	return statusStyle.Width(m.width).Render(line)
-}
-
-// hintLine renders the live key legend for the current state.
-func (m Model) hintLine() string {
-	var hint string
-	switch m.state {
-	case stateRunning:
-		hint = "esc stop"
-	case stateAwaitingApproval:
-		hint = "a allow · d deny · s allow-session · esc cancel"
-	case stateErrored:
-		hint = "enter dismiss · esc quit"
-	default:
-		hint = "enter send · esc quit"
-	}
-	return hintStyle.Width(m.width).Render(hint)
+	return body
 }
