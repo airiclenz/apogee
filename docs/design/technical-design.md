@@ -195,7 +195,7 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
 | MCP client | ∅ | official go-sdk; stdio/SSE/streamable-http; gates Approval in Auto | client design; re-verify SDK maturity at Phase 3 |
 | Library | ∅ | cross-session per-model; confidence-tagged `ModelFingerprint`; inert under Bypass; longitudinal bench gate | store design; Bayesian confidence; fingerprint resolution; GGUF hash |
 | Platform (shell/path) | ∅ | POSIX v1, Windows Phase 5; one interface | shell abstraction; path handling; Windows backend |
-| TUI | ∅ | Bubble Tea; thin renderer over Events; supplies Approval delegate | model/update/view; panes |
+| TUI | ∅→**P (P2.x / P3.14)** | Bubble Tea; thin renderer over Events; supplies Approval delegate; **P3.14: sub-agent (`Depth > 0`) events now *render* (no longer just *tolerate*) — each nested block is framed by a `│ ` rail gutter per level and opened by a `⤷ sub-agent` label, derived purely from each event's `Depth` in the renderer (no Model state; ADR 0011 holds); the flat `Depth==0` transcript is byte-for-byte unchanged** | panes; live token gauge (Phase 4) |
 | CLI / `headless` / `probe` | ∅ | Cobra; headless optional (NOT bench contract); probe doubles as fingerprint | command surface |
 
 ---

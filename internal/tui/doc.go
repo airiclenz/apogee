@@ -27,8 +27,14 @@
 // groups a tool call with its result by ToolCall ID, the input box is a rounded, auto-growing
 // black field, and the chrome is a braille status line plus a footer bar (host-alias ✦ model ✦
 // context-window, mode). The live token gauge is reserved until Phase 4 routes usage; the
-// red/green diff detail and the sub-agent (Depth > 0) block are reserved renderers awaiting their
-// Phase-3 producers.
+// red/green diff detail is a reserved renderer awaiting its Phase-3 producer.
+//
+// P3.14 turns the Depth-tolerating renderer into a Depth-rendering one: a sub-agent (Depth > 0)
+// run is framed as a vertical-ruled sub-section — each line carries one "│ " rail gutter per
+// nesting level ([railLines]), and a [renderSubAgentLabel] ⤷ sub-agent header opens each descent
+// to a deeper level. The framing lives entirely in render.go (the value-copied Model holds no new
+// state — the run boundary is derived from each entry's depth inside [transcript.renderView]), so
+// the flat Depth==0 transcript renders byte-for-byte as before (ADR 0011 still holds — render only).
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole

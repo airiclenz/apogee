@@ -636,14 +636,21 @@ func TestModelViewBeforeReady(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Depth > 0 tolerance (Phase 3 sub-agents must not crash the Phase-2 renderer)
+// Depth > 0 rendering (Phase 3 sub-agents render as a framed block, no crash) — P3.14
 // ----------------------------------------------------------------------------
 
-func TestModelToleratesNestedDepth(t *testing.T) {
+func TestModelRendersNestedDepth(t *testing.T) {
 	m := newTestModel(t)
 	m = step(t, m, eventMsg{Event: domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "nested"}})
-	if got := plain(m.View()); !strings.Contains(got, "nested") {
+	got := plain(m.View())
+	if !strings.Contains(got, "nested") {
 		t.Errorf("nested-depth event not rendered:\n%s", got)
+	}
+	if !strings.Contains(got, "⤷ sub-agent") {
+		t.Errorf("nested-depth block not opened by a sub-agent label:\n%s", got)
+	}
+	if !strings.Contains(got, "│ │ ✦ nested") {
+		t.Errorf("depth-2 block not framed by two rail gutters:\n%s", got)
 	}
 }
 

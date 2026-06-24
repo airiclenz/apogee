@@ -32,13 +32,21 @@ var (
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
-// tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯.
+// tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯. A
+// sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level) and opened
+// by a ⤷ sub-agent label (P3.14).
 const (
 	glyphAssistant  = "✦"
 	glyphBranch     = "┝"
 	glyphBranchLast = "┕"
 	glyphUser       = "❯"
+	glyphSubRail    = "│"
+	glyphSubLabel   = "⤷"
 )
+
+// subAgentLabel is the one-line header that opens each contiguous run of sub-agent
+// (Depth > 0) blocks, announcing the nested section (P3.14).
+const subAgentLabel = "sub-agent"
 
 // brailleFrames are the status-line spinner frames (a single braille cell that appears to
 // rotate), shown while a worker drives the Exchange.
@@ -59,6 +67,7 @@ type theme struct {
 	assistant   lipgloss.Style // the ✦ assistant marker + text (terminal default fg)
 	toolHeader  lipgloss.Style // the ✦ [Label] target header
 	toolDetail  lipgloss.Style // the ┝/┕ branch detail lines (dim)
+	subRail     lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
 	diffAdded   lipgloss.Style // a "+" diff detail line (reserved)
 	diffRemoved lipgloss.Style // a "-" diff detail line (reserved)
 	errorText   lipgloss.Style // a recovered-fault notice
@@ -79,6 +88,7 @@ func newTheme() theme {
 		assistant:   lipgloss.NewStyle(),
 		toolHeader:  lipgloss.NewStyle(),
 		toolDetail:  lipgloss.NewStyle().Foreground(colFaint),
+		subRail:     lipgloss.NewStyle().Foreground(colFaint),
 		diffAdded:   lipgloss.NewStyle().Foreground(colDiffAdd),
 		diffRemoved: lipgloss.NewStyle().Foreground(colDiffDel),
 		errorText:   lipgloss.NewStyle().Foreground(colError).Bold(true),

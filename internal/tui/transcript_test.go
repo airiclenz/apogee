@@ -295,22 +295,69 @@ func TestTranscriptMechanismGatedByDebug(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Tolerating sub-agent depth (Phase 3)
+// Rendering sub-agent depth (Phase 3, P3.14 — "tolerate" → "render")
 // ----------------------------------------------------------------------------
 
-// A Depth > 0 event indents its block — including continuation lines of a multi-line body —
-// without crashing or corrupting the top-level layout.
-func TestTranscriptDepthIndents(t *testing.T) {
+// A Depth > 0 event renders as a framed sub-agent block: a ⤷ sub-agent label opens the run,
+// and every line — header and the continuation lines of a multi-line body — is prefixed by
+// the │ rail gutter, without crashing or corrupting the top-level layout.
+func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 	tr := feed(domain.ToolResultEvent{
 		EventBase: domain.EventBase{Depth: 1},
 		Result:    domain.ToolResult{Content: "line1\nline2"},
 	})
 	got := plainRender(tr)
-	if !strings.HasPrefix(got, "  ✦ [result]") {
-		t.Errorf("depth-1 entry not indented:\n%q", got)
+	if !strings.HasPrefix(got, "│ ⤷ sub-agent") {
+		t.Errorf("depth-1 run not opened by a ⤷ sub-agent label:\n%q", got)
 	}
-	if !strings.Contains(got, "    ┕ line2") {
-		t.Errorf("continuation line of a depth-1 entry not indented:\n%q", got)
+	if !strings.Contains(got, "│ ✦ [result]") {
+		t.Errorf("depth-1 entry not framed by the rail:\n%q", got)
+	}
+	if !strings.Contains(got, "│   ┕ line2") {
+		t.Errorf("continuation line of a depth-1 entry not framed by the rail:\n%q", got)
+	}
+}
+
+// A nested event sequence (Depth 0 → 1 → 0) renders the sub-agent block framed and labelled
+// while the parent stream stays intact and unframed (the P3.14 acceptance golden).
+func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 0}, Text: "delegating"})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child work"})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 0}, Text: "back to parent"})
+
+	want := strings.Join([]string{
+		"✦ delegating",
+		"",
+		"│ ⤷ sub-agent",
+		"",
+		"│ ✦ child work",
+		"",
+		"✦ back to parent",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("nested-depth transcript mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// The ⤷ sub-agent label opens once per descent and at each level: a 0→1→2 climb labels both
+// the first and the second nesting level, framed by one and two rail gutters respectively.
+func TestTranscriptDepthLabelsEachLevel(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child"})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "grandchild"})
+
+	want := strings.Join([]string{
+		"│ ⤷ sub-agent",
+		"",
+		"│ ✦ child",
+		"",
+		"│ │ ⤷ sub-agent",
+		"",
+		"│ │ ✦ grandchild",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("multi-level transcript mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/viewport"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -46,5 +47,35 @@ func TestWrappedOffsetFloors(t *testing.T) {
 	}
 	if got := wrappedOffset([]string{""}, 0); got != 1 {
 		t.Errorf("zero width = %d rows; want 1 (width floored to one, no divide-by-zero)", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Sub-agent framing reflow safety (P3.14)
+// ----------------------------------------------------------------------------
+
+// railedWidth floors a deeply-nested block's usable width at one column so the wrapper never
+// divides by zero, even when the rail gutters consume more than the whole terminal width.
+func TestRailedWidthFloors(t *testing.T) {
+	if got := railedWidth(80, 0); got != 80 {
+		t.Errorf("railedWidth(80, 0) = %d; want 80 (depth 0 takes no gutter)", got)
+	}
+	if got := railedWidth(3, 5); got != 1 {
+		t.Errorf("railedWidth(3, 5) = %d; want 1 (floored, not negative)", got)
+	}
+}
+
+// A Depth > 0 block renders at a tiny and a zero width without panicking (the acceptance's
+// "reflow at small sizes doesn't panic"); the framed text is still produced.
+func TestSubAgentReflowAtSmallWidths(t *testing.T) {
+	for _, width := range []int{0, 1, 2, 3, 6} {
+		tr := feed(domain.MessageEvent{
+			EventBase: domain.EventBase{Depth: 2},
+			Text:      "a deeply nested sub-agent message that must wrap hard",
+		})
+		lines := tr.renderLines(newTheme(), width) // must not panic at any width
+		if len(lines) == 0 {
+			t.Errorf("width %d produced no lines", width)
+		}
 	}
 }

@@ -1399,6 +1399,38 @@ sequence (`Depth 0 → 1 → 0`) renders with the sub-agent block indented/label
 intact (golden); reflow at small sizes doesn't panic; the existing flat (`Depth==0`) goldens are
 unchanged.
 
+#### ✅ P3.14 result — landed 2026-06-24 (gate GREEN)
+
+Turned the Depth-*tolerating* renderer into a Depth-*rendering* one — purely in `internal/tui`
+render code, no Model state added (ADR 0011 holds: render only, no agent logic). The Phase-2 plumbing
+was already complete (every `entry` carries `depth`, threaded from `e.Depth` through `transcript.apply`,
+and `indentLines` indented 2 cols/level); P3.14 replaces "indent" with a **framed sub-section**:
+
+- **Vertical-rail gutter** (`render.go` — `railLines` replaces `indentLines`; `railedWidth`): each
+  physical line of a `Depth > 0` block is prefixed by one styled `│ ` gutter per nesting level
+  (dim, `theme.subRail`), so a sub-agent block reads as a quoted/ruled sub-section rather than a bare
+  indent. `railedWidth` narrows the wrap column by one gutter per level and floors at 1, so deep
+  nesting at a tiny terminal width never divides by zero. **Depth 0 returns the lines/width untouched**
+  — the flat top-level transcript renders byte-for-byte as before (the C6 tool-Turn golden is unchanged).
+- **`⤷ sub-agent` label** (`render.go` — `renderSubAgentLabel`; emitted in `transcript.renderView`):
+  a one-line header opens each *descent to a deeper level* (a `0→1`, and again a `1→2`, transition),
+  framed inside the same rail as the block it announces. The run boundary is derived from each entry's
+  `depth` inside the existing entry loop (a local `prevDepth`), so **no per-event state lands on the
+  value-copied Model** — `TestModelNoBuilderByValue` stays structurally green.
+- **Glyphs** (`theme.go`): `glyphSubRail = "│"`, `glyphSubLabel = "⤷"`, `subAgentLabel = "sub-agent"`,
+  and the dim `subRail` style. No new ADR (the §5 line lists no ADR for P3.14 — ADR 0011 still governs).
+- **Visual** (width-60 sample): the parent stream stays flat/unframed; the sub-agent run is
+  `│ ⤷ sub-agent` then `│ ✦ …` / `│   ┕ …` lines; a `0→1→2` climb nests as `│ │ …`.
+
+**Tests** (`transcript_test.go`, `render_test.go`, `model_test.go`): the old indent-only tolerance
+asserts were updated to the framed/labelled treatment (the "tolerate→render" change *is* the spec, not
+a weakening) — `TestTranscriptDepthRendersFramedBlock`, the `Depth 0→1→0` acceptance golden
+(`TestTranscriptDepthNestedSequenceGolden`), the per-level-label golden
+(`TestTranscriptDepthLabelsEachLevel`), small-width reflow safety (`TestSubAgentReflowAtSmallWidths`,
+`TestRailedWidthFloors`), and the Model-level framed render (`TestModelRendersNestedDepth`) — all green
+under `-race`. The flat goldens and `TestWrappedOffsetMatchesViewport` are unchanged. Full §7 gate green
+(gofmt/vet/darwin-vet/build/`-race`/self-import-grep/6 cross-builds/mod-tidy/`--help`).
+
 ### P3.15 — MCP client
 Build `internal/mcp` on the official Go SDK (pin from P3.0): connect over stdio / SSE / streamable-http
 from config; **surface each server tool into the `ToolRegistry` as an `ExternalEffectTool`** (effect

@@ -53,8 +53,18 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		lines = append(lines, block...)
 	}
 
+	prevDepth := 0
 	for _, e := range t.entries {
+		// Open a ⤷ sub-agent label whenever a run descends to a deeper level than the
+		// previous block — a 0→1 (or 1→2) transition announces the nested section once,
+		// per level, until the stream climbs back out (P3.14).
+		if e.depth > prevDepth {
+			for d := prevDepth + 1; d <= e.depth; d++ {
+				appendBlock(false, renderSubAgentLabel(th, d, width))
+			}
+		}
 		appendBlock(e.kind == entryUser, renderEntryLines(th, e, width))
+		prevDepth = e.depth
 	}
 	if t.streaming {
 		appendBlock(false, renderEntryLines(th, entry{kind: entryAssistant, text: t.pending}, width))
@@ -67,25 +77,37 @@ func (t *transcript) renderLines(th theme, width int) []string {
 	return t.renderView(th, width).lines
 }
 
-// renderEntryLines renders one committed entry into its physical lines, indented for its
+// renderEntryLines renders one committed entry into its physical lines, framed for its
 // sub-agent depth. The user prompt is a full-width block; everything else hangs off a marker.
+// A Depth > 0 entry is wrapped to the narrower column left of its rail gutter, then each line
+// is prefixed by the rail (P3.14) so the nested block reads as a framed sub-section.
 func renderEntryLines(th theme, e entry, width int) []string {
+	inner := railedWidth(width, e.depth)
 	switch e.kind {
 	case entryUser:
-		return indentLines(renderUserBlock(th, e.text, width), e.depth)
+		return railLines(th, renderUserBlock(th, e.text, inner), e.depth)
 	case entryAssistant:
-		return indentLines(hangingWrap(th.assistant, glyphAssistant+" ", e.text, width), e.depth)
+		return railLines(th, hangingWrap(th.assistant, glyphAssistant+" ", e.text, inner), e.depth)
 	case entryToolCall:
-		return renderToolBlock(th, e.tool, e.depth, width)
+		return railLines(th, renderToolBlock(th, e.tool, inner), e.depth)
 	case entryToolResult:
-		return renderOrphanResult(th, e.text, e.depth, width)
+		return railLines(th, renderOrphanResult(th, e.text, inner), e.depth)
 	case entryError:
-		return indentLines(hangingWrap(th.errorText, glyphAssistant+" ", e.text, width), e.depth)
+		return railLines(th, hangingWrap(th.errorText, glyphAssistant+" ", e.text, inner), e.depth)
 	case entryNote:
-		return indentLines(hangingWrap(th.noteText, "· ", e.text, width), e.depth)
+		return railLines(th, hangingWrap(th.noteText, "· ", e.text, inner), e.depth)
 	default:
 		return nil
 	}
+}
+
+// renderSubAgentLabel renders the one-line ⤷ sub-agent header that opens a contiguous run of
+// sub-agent (Depth > 0) blocks (P3.14). It is itself framed at the run's depth, so the label
+// sits inside the same rail as the block it announces.
+func renderSubAgentLabel(th theme, depth, width int) []string {
+	inner := railedWidth(width, depth)
+	body := hangingWrap(th.subRail, glyphSubLabel+" ", subAgentLabel, inner)
+	return railLines(th, body, depth)
 }
 
 // renderUserBlock renders the user prompt as a full-width white-on-dark-gray block: the ❯
@@ -101,28 +123,30 @@ func renderUserBlock(th theme, text string, width int) []string {
 }
 
 // renderToolBlock renders a tool call: the ✦ [Label] target header, then each summary detail
-// hanging off a ┝/┕ branch (the last line gets ┕). The whole block is indented for depth.
-func renderToolBlock(th theme, tv toolView, depth, width int) []string {
+// hanging off a ┝/┕ branch (the last line gets ┕). The caller frames the block for depth
+// (renderEntryLines applies the rail) — width is already the railed inner column.
+func renderToolBlock(th theme, tv toolView, width int) []string {
 	head := bracketLabel(tv)
 	if tv.Target != "" {
 		head += " " + tv.Target
 	}
 	out := hangingWrap(th.toolHeader, glyphAssistant+" ", head, width)
 	out = append(out, renderDetails(th, tv.Details, width)...)
-	return indentLines(out, depth)
+	return out
 }
 
 // renderOrphanResult renders a tool result that matched no pending call (a defensive
 // fallback — normally a result folds into its call by CallID). It reads as a result block:
-// a ✦ [result] header with the raw content hanging off branches.
-func renderOrphanResult(th theme, text string, depth, width int) []string {
+// a ✦ [result] header with the raw content hanging off branches. The caller frames it for
+// depth — width is already the railed inner column.
+func renderOrphanResult(th theme, text string, width int) []string {
 	out := hangingWrap(th.toolHeader, glyphAssistant+" ", "[result]", width)
 	details := make([]detailLine, 0)
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
 	}
 	out = append(out, renderDetails(th, details, width)...)
-	return indentLines(out, depth)
+	return out
 }
 
 // renderDetails renders tool-detail lines as ┝/┕ tree branches (the last line gets ┕),
@@ -208,16 +232,33 @@ func wrapText(text string, limit int) []string {
 	return strings.Split(ansi.Wrap(text, limit, ""), "\n")
 }
 
-// indentLines prepends two columns per depth level to each line (a sub-agent's nested block,
-// Phase 3). Depth 0 is the common case and returns the lines untouched.
-func indentLines(lines []string, depth int) []string {
+// railWidth is the column cost of one sub-agent rail gutter ("│ " — the rail glyph plus one
+// space), the amount each nesting level steals from the usable text width (P3.14).
+const railWidth = 2
+
+// railedWidth is the usable text width inside a Depth-level block: the full width less one
+// rail gutter per level. Depth 0 is the common case and returns width unchanged; deeper
+// levels are floored at one column so wrapping never divides by zero.
+func railedWidth(width, depth int) int {
+	if depth <= 0 {
+		return width
+	}
+	return max(1, width-depth*railWidth)
+}
+
+// railLines frames a Depth-level block: it prepends one styled "│ " rail gutter per nesting
+// level to each physical line, so a sub-agent's nested block reads as a vertical-ruled
+// sub-section (P3.14). Depth 0 is the common case and returns the lines untouched, so the
+// flat top-level transcript renders exactly as before. The rail is styled (dim) and sits
+// left of any per-line background (e.g. the user block's), matching the marker hanging indent.
+func railLines(th theme, lines []string, depth int) []string {
 	if depth <= 0 {
 		return lines
 	}
-	indent := strings.Repeat("  ", depth)
+	gutter := th.subRail.Render(strings.Repeat(glyphSubRail+" ", depth))
 	out := make([]string, len(lines))
 	for i, ln := range lines {
-		out[i] = indent + ln
+		out[i] = gutter + ln
 	}
 	return out
 }
