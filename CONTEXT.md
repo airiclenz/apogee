@@ -89,10 +89,19 @@ of one Turn).
 ### Safety and autonomy
 
 **Agent mode**:
-The autonomy level governing whether tool calls need human approval. Three:
-- **Plan** — read-only; no writes or command execution.
-- **Ask-Before** — every tool call requires an Approval (the human is the gate).
-- **Auto** — runs tool calls without per-call approval; **requires Confinement**.
+The autonomy level governing which tool calls need human approval — a **monotonic
+privilege ladder**. Four:
+- **Plan** — read-only; no writes or command execution (explore and propose, touch nothing).
+- **Ask-Before** — workspace reads run free; every write, command, and external reach
+  requires an Approval (the human is the gate).
+- **Allow-Edits** — Apogee's own **workspace-scoped edits** (path-safety-bounded) run
+  without asking; shell/exec, network, MCP, and anything out-of-workspace still gate.
+  Needs **no Confinement** — path-safety bounds the auto-approved writes and the human
+  backstops the unbounded surface, so it is **identical on every OS**.
+- **Auto** — adds the unbounded **shell/subprocess** surface to the auto-approved set, so
+  it is the one **unsupervised** mode and the only one that **requires Confinement** (of
+  that surface). Genuinely-unconfinable external reaches (arbitrary-URL fetch, MCP) still
+  gate even here.
 _Avoid_: "permission level", "trust mode".
 
 **Bypass mode**:
@@ -112,17 +121,24 @@ The human-in-the-loop gate on a single tool call — the primary safety guarante
 Ask-Before mode. Delivered through a delegate the host (TUI, embedder) supplies.
 
 **Confinement**:
-OS-level restriction of tool execution, required for **Auto mode**. It is a **capability
-matrix, not a binary**: each backend reports which restrictions it can enforce (`fs-write`,
-`network-egress`, …). **Auto requires both fs-write *and* network confinement** — so Linux
-Auto needs landlock ABI v4 (kernel ≥6.7); an older kernel ⇒ Auto refused, with no escape
-hatch. The invariant is **per-tool**: a tool runs unsupervised only if it can be confined —
-so **MCP tools, which Apogee cannot confine, gate through Approval even in Auto.** If
-Confinement cannot be established, Auto degrades to Ask-Before; Apogee never runs a tool
-call both unsupervised *and* unconfined. Lives behind a `platform/` `Confiner` interface
-(seatbelt / landlock / AppContainer); default box = workspace-write-only + network
-default-deny + per-project allowlist. See
-[ADR 0004](docs/adr/0004-auto-mode-requires-os-level-confinement.md).
+OS-level restriction of the **unbounded tool surface** (shell / subprocess / arbitrary
+network), required for **Auto mode**. It attaches to **blast radius, not to a mode-wide
+binary**: a tool runs unsupervised only if its blast radius is bounded — **either** by OS
+confinement of the unbounded subprocess/network surface (Linux **landlock** applied
+pre-`execve` on the child; macOS **`sandbox-exec`** wrapping the child — the clean
+subprocess case on both OSes), **or** by Apogee's own **path-safety-to-workspace** for its
+own in-process write tools (a third-party in-process tool, whose scoping Apogee cannot
+vouch for, gates instead of running unsupervised). It is still a **capability matrix, not a
+one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`, …),
+and **Auto requires both fs-write *and* network confinement of that surface** — so Linux
+Auto needs landlock ABI v4 (kernel ≥6.7); an older kernel ⇒ Auto refused (degrades to
+Allow-Edits/Ask-Before), with no escape hatch. The per-tool teeth remain: **MCP and
+arbitrary-URL network tools, which Apogee cannot confine, gate through Approval even in
+Auto.** Apogee never runs a tool call both unsupervised *and* unbounded. Lives behind a
+`platform/` `Confiner` interface (seatbelt / landlock / AppContainer); default box =
+workspace-write-only + network default-deny + per-project allowlist. See
+[ADR 0004](docs/adr/0004-auto-mode-requires-os-level-confinement.md) (blast-radius
+refinement: ADR 0012).
 _Avoid_: "sandbox" (that is the bench's term — see below), "jail".
 
 **Safety guardrails**:
