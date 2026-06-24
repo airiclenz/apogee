@@ -603,6 +603,64 @@ through Approval** (Auto is *not* refused — "confine if you can, gate if you c
 generated profile is unit-tested as a pure string from a box (hermetic,
 runs everywhere). Cross-build green (`darwin`-tagged).
 
+#### ✅ P3.3 result — landed 2026-06-24 (seatbelt backend reuses `confinetest`; gate GREEN; profile + caps tests hermetic on Linux; macOS live-probe deferred to owner/CI)
+
+The macOS seatbelt backend is implemented mechanically against the contract §2.3 + §5 + §6 and ADR
+0012, mirroring the P3.2 landlock pattern (a concrete prepare-in-place `Confine(ctx,box,*exec.Cmd)`
++ honest `Capabilities()` driven by the shared `confinetest` harness; the `domain.Confiner` interface
+change stays P3.4). **No new dep** — seatbelt shells out to the system `sandbox-exec`. **What landed:**
+
+- **`internal/platform/seatbelt.go`** (`//go:build !windows`, host-agnostic): `seatbeltConfiner` with
+  the shared `newSeatbeltConfiner(present)` constructor; `Capabilities()` honest — `{true,true}` when
+  `sandbox-exec` is present (one profile enforces both fs-write + network), `{false,false}` when absent;
+  `Confine` generates the profile and rewrites the cmd to `sandbox-exec -p <profile> <orig…>` + sets
+  `SysProcAttr.Setpgid` (process-group teardown, §2.4), returning `ErrConfinementUnavailable` when
+  `sandbox-exec` is absent (the "confine if you can, gate if you can't" net, §2.2); `seatbeltProfile(box)`
+  is the **pure** profile generator — `(allow default)` then `(deny file-write*)` then
+  `(allow file-write* (subpath …))` for `WorkspaceRoot ∪ WritablePaths`, empty roots skipped.
+- **`internal/platform/seatbelt_darwin.go`** (`//go:build darwin`): only `NewSeatbeltConfiner()` and the
+  real `os.Stat("/usr/bin/sandbox-exec")` presence probe — the lone darwin-tagged surface, so the
+  profile/caps/rewrite logic compiles and unit-tests on Linux. **Build-tag decision:** `seatbelt.go` is
+  `!windows`, not `darwin`-only, because `SysProcAttr.Setpgid` is POSIX-only (absent on Windows, where
+  only `denyConfiner` exists — Phase 5); on Linux the type is compiled but never *selected* (P3.4 picks
+  it on darwin only).
+- **`internal/platform/seatbelt_test.go`** (`//go:build !windows`, runs on Linux): hermetic profile-string
+  battery (in-workspace write allowed, out-of-workspace denied, `WritablePaths` honoured, empty-root
+  skip, network-open default, network-deny tightening, quote/backslash escaping), caps-honesty table
+  (absent⇒`{false,false}`⇒not Auto-eligible; present⇒`{true,true}`) via the injectable `present` seam (no
+  real macOS needed), and the `Confine` cmd-rewrite (profiler path, `-p`, profile==pure-fn, argv,
+  `Setpgid`, empty-argv reject, `ErrConfinementUnavailable` when absent).
+- **`internal/platform/seatbelt_darwin_test.go`** (`//go:build darwin`): wires `confinetest.Probe`/
+  `ProbeNetwork` against the real `sandbox-exec` child — the §6.2 escape battery — runnable only on a
+  macOS runner. **`internal/platform/seatbelt_notdarwin_test.go`** (`//go:build !darwin && !windows`):
+  same test names that **`t.Skip` LOUDLY** with a clear reason (macOS-only, deferred to owner/CI), so the
+  deferral is visible in `go test` output on this Linux host.
+
+**Network-open reconciliation (older P3.3 task text vs ADR 0012):** the task section above says "deny
+network except `NetworkAllow`"; **ADR 0012 wins** — the network is **open by default** in Auto. The
+generated profile therefore emits **no** network clause for the default box (network open) and adds a
+single coarse `(deny network*)` clause **only** when the box opts into network-deny via a non-empty
+`NetworkAllow` — exactly matching landlock's deny-all-TCP tightening (per-host allow is a later additive
+change once a finer filter is wired, mirroring landlock's deferred per-port rule).
+
+**macOS live escape-probe — deferred to owner/CI (not fakeable, not deleted).** The dev host is
+`linux/arm64`; there is no macOS / `sandbox-exec` here, so the live battery (a real confined child whose
+out-of-box write must be OS-denied and whose non-allowlisted connect must be denied while an open-network
+connect succeeds, §6.2 #1–#5/#7/#8) is **owner-run / CI-only on a darwin runner**. It is wired in
+`seatbelt_darwin_test.go` and **self-skips loudly with a clear reason on non-darwin**
+(`seatbelt_notdarwin_test.go`), the same kernel-feature-gated idiom P3.2's landlock battery uses on this
+landlock-disabled host. The hermetic profile-string + caps/presence acceptance **does** run and passes
+here.
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` clean (also `GOOS=darwin go vet`
+and `GOOS=windows go vet` clean — the darwin file type-checks) · `go build ./...` ok · `go test -race
+./...` all `ok` (seatbelt live-probe SKIPs loudly on this host; hermetic profile/caps tests PASS) ·
+ADR-0010 grep empty · 6 cross-builds OK (`seatbelt.go` `!windows`-tagged, `NewSeatbeltConfiner`
+`darwin`-tagged; windows keeps `denyConfiner`) · `go mod tidy` clean (no new dep) · `apogee --help` exit
+0. **Next: P3.4** — adopt the `*exec.Cmd` `Confiner` signature, select the real backend per-OS
+(`platform.NewConfiner()` ⇒ landlock on Linux, **seatbelt on macOS**, `denyConfiner` elsewhere), wire
+`Confine` into dispatch, `AutoEligible()`→`FSWrite`-only, `__confined-exec` dispatcher in `main`.
+
 ### P3.4 — The mode ladder + wire `Confine` into dispatch; Auto becomes real
 Add **`ModeAllowEdits`** to `domain` and the `--mode` flag (the ladder Plan → Ask-Before →
 Allow-Edits → Auto), and rework `needsApproval` into the D5 disposition keyed on
