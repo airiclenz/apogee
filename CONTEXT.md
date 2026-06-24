@@ -174,12 +174,16 @@ _Avoid_: "YOLO mode" (informal; it is a flag on Auto, not a fifth mode),
 "`--dangerously-skip-permissions`" (names Claude Code's analogue, not this flag).
 
 **Safety guardrails**:
-Apogee's production safety set: Agent modes, Approval, path-safety, **url-safety** (the network
-tools' `URLGuard` — scheme/host allow-deny plus a **default-on SSRF floor** that denies loopback /
-private / IMDS / link-local addresses **by resolved IP**, re-checked at dial time so DNS-rebinding
-is closed; tighten-only, never dissolvable by config), tool-argument-guard (incl. the
-**Dangerous-action guard** floor), circuit-breaker, and audit log. The human-in-the-loop model —
-distinct from Confinement (OS-level) and from the bench's Sandbox.
+Apogee's production safety set: Agent modes, Approval, path-safety (TOCTOU-safe at use time via a
+Go 1.26 `os.Root` pinned at the workspace root — `security.SafeWriteFile`/`SafeReadFile`, so an
+escaping symlink component swapped after the check is refused at write/read time), **url-safety**
+(the network tools' `URLGuard` — scheme/host allow-deny plus a **default-on SSRF floor** that denies
+loopback / private / IMDS / link-local **plus** RFC-6598 CGNAT `100.64/10`, the whole `0.0.0.0/8`,
+TEST-NET / benchmark ranges, and NAT64-embedded private/loopback `64:ff9b::/96` **by resolved IP**,
+re-checked at dial time so DNS-rebinding is closed; tighten-only, never dissolvable by config),
+tool-argument-guard (incl. the **Dangerous-action guard** floor, the `http_request` header filter,
+and a leading-`-` guard on git ref args), circuit-breaker, and audit log. The human-in-the-loop
+model — distinct from Confinement (OS-level) and from the bench's Sandbox.
 _Avoid_: "the sandbox" (Apogee production is **not** sandboxed; "Sandbox" is a bench term
 for the bench's `RealSandbox` that confines *unsupervised* sim runs — do not use it for
 Apogee's production execution).

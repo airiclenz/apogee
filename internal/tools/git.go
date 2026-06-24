@@ -185,6 +185,15 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	return okResult(call.ID, gitResultText(res, branchSuccessMessage(args))), nil
 }
 
+// looksLikeOption reports whether a model-supplied ref/branch argument begins with "-", which
+// git would interpret as an option flag rather than a ref/branch name (e.g. a name "-D" or a
+// start-point "--upload-pack=…"). Such arguments are rejected up front: the git tools pass argv
+// arrays (no shell), so this is the remaining argument-injection class to close. A legitimate
+// ref/branch never starts with "-".
+func looksLikeOption(arg string) bool {
+	return strings.HasPrefix(strings.TrimSpace(arg), "-")
+}
+
 // buildBranchArgs validates the branch arguments and returns the git argv (without
 // the program), or a non-empty error message describing why the call is rejected.
 func buildBranchArgs(args gitBranchArgs) (gitArgs []string, errMsg string) {
@@ -194,6 +203,14 @@ func buildBranchArgs(args gitBranchArgs) (gitArgs []string, errMsg string) {
 	}
 	if action != "list" && strings.TrimSpace(args.Name) == "" {
 		return nil, "name is required for create, switch, and delete"
+	}
+	// Reject a name / start-point that git would read as an option flag (leading "-"), so a
+	// model-supplied argument cannot smuggle an option past the subcommand (SEC-06).
+	if action != "list" && looksLikeOption(args.Name) {
+		return nil, "branch name may not begin with '-'"
+	}
+	if action == "create" && args.StartPoint != "" && looksLikeOption(args.StartPoint) {
+		return nil, "start_point may not begin with '-'"
 	}
 
 	switch action {
@@ -458,10 +475,13 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 	if strings.TrimSpace(args.Head) == "" {
 		return errorResult(call.ID, "head ref is required"), nil
 	}
-	if !validRef.MatchString(args.Base) {
+	// validRef's character class permits "-" (it is a legal git ref char), so a ref could
+	// otherwise begin with "-" and be read as an option even after the diff-range "..." join.
+	// Reject a leading-"-" ref explicitly (SEC-06) before the class check.
+	if !validRef.MatchString(args.Base) || looksLikeOption(args.Base) {
 		return errorResult(call.ID, "invalid base ref: "+args.Base), nil
 	}
-	if !validRef.MatchString(args.Head) {
+	if !validRef.MatchString(args.Head) || looksLikeOption(args.Head) {
 		return errorResult(call.ID, "invalid head ref: "+args.Head), nil
 	}
 

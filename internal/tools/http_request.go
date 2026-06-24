@@ -41,6 +41,35 @@ var allowedHTTPMethods = map[string]bool{
 	http.MethodOptions: true,
 }
 
+// maxRequestHeaders caps how many caller-supplied headers http_request forwards, so a model
+// cannot smuggle an unbounded header block into the request.
+const maxRequestHeaders = 32
+
+// maxRequestHeaderValueBytes caps a single forwarded header value's length, bounding the
+// model-controlled input that reaches the wire.
+const maxRequestHeaderValueBytes = 4096
+
+// deniedRequestHeaders are headers a caller may NOT set on an http_request: the hop-by-hop /
+// transfer-framing controls (which the transport owns and which can desync a proxy or smuggle a
+// request — `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, the `Proxy-*` family)
+// and a forged `Host` (the SSRF-floor host check is keyed off the URL host, so a `Host` override
+// would route to a virtual-host-routed internal service the floor never saw). Keys are compared
+// case-insensitively via http.CanonicalHeaderKey. This is a tighten-only filter — it removes a
+// model's reach, never adds one (parity with the SSRF floor and the dangerous-rule semantics).
+var deniedRequestHeaders = map[string]bool{
+	"Host":                true,
+	"Content-Length":      true,
+	"Transfer-Encoding":   true,
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Upgrade":             true,
+	"Te":                  true, // TE (hop-by-hop)
+	"Trailer":             true,
+	"Proxy-Connection":    true,
+	"Proxy-Authorization": true,
+	"Proxy-Authenticate":  true,
+}
+
 // HTTPRequest performs a general http(s) request (method, headers, body) and returns the
 // response status, a stable header subset, and the (capped) body. It is an ExternalEffectTool
 // of kind network, filtered by the same URLGuard (scheme/host + SSRF floor, pre-flight and at
@@ -99,8 +128,8 @@ func (t *HTTPRequest) Execute(ctx context.Context, call domain.ToolCall) (domain
 	if err != nil {
 		return errorResult(call.ID, "could not build request: "+err.Error()), nil
 	}
-	for k, v := range args.Headers {
-		req.Header.Set(k, v)
+	if errMsg := applyRequestHeaders(req, args.Headers); errMsg != "" {
+		return errorResult(call.ID, errMsg), nil
 	}
 
 	client := newHTTPClient(t.guard, clampTimeout(args.TimeoutSeconds))
@@ -118,6 +147,31 @@ func (t *HTTPRequest) Execute(ctx context.Context, call domain.ToolCall) (domain
 
 	body, truncated := readCappedBody(resp.Body)
 	return okResult(call.ID, renderRequestResult(resp, body, truncated)), nil
+}
+
+// applyRequestHeaders sets the caller-supplied headers on req after filtering: a header on the
+// hop-by-hop / framing deny-list (incl. a forged Host) is rejected, the total count is capped at
+// maxRequestHeaders, and each value is capped at maxRequestHeaderValueBytes. It returns a
+// non-empty error message for a rejected/over-limit header (surfaced to the model as a result
+// error) and "" on success. The filter is tighten-only — it only ever removes a model's reach.
+func applyRequestHeaders(req *http.Request, headers map[string]string) (errMsg string) {
+	if len(headers) > maxRequestHeaders {
+		return fmt.Sprintf("too many request headers: %d (max %d)", len(headers), maxRequestHeaders)
+	}
+	for k, v := range headers {
+		canonical := http.CanonicalHeaderKey(strings.TrimSpace(k))
+		if canonical == "" {
+			return "empty header name is not allowed"
+		}
+		if deniedRequestHeaders[canonical] {
+			return fmt.Sprintf("header %q may not be set by http_request (it is transport-controlled or unsafe to override)", canonical)
+		}
+		if len(v) > maxRequestHeaderValueBytes {
+			return fmt.Sprintf("header %q value too large: %d bytes (max %d)", canonical, len(v), maxRequestHeaderValueBytes)
+		}
+		req.Header.Set(canonical, v)
+	}
+	return ""
 }
 
 // renderRequestResult formats the response for the model: status, a stable (sorted) header

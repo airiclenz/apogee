@@ -189,6 +189,38 @@ func TestGitBranch_ProtectedDeleteBlocked(t *testing.T) {
 	}
 }
 
+// TestGitBranch_RejectsOptionLikeArgs proves the SEC-06 leading-"-" guard: a model-supplied
+// branch name or start-point that git would read as an option flag is refused before the
+// subprocess runs (the git tools use argv arrays, so this is the remaining injection class).
+func TestGitBranch_RejectsOptionLikeArgs(t *testing.T) {
+	// Not parallel: withFakeGit swaps the package-level lookGit var. The guard rejects before
+	// the subprocess, but a present git keeps the test honest that the guard — not a missing
+	// git — is what blocks.
+	withFakeGit(t, true, "/usr/bin/git")
+
+	cases := []struct {
+		name    string
+		args    string
+		wantMsg string
+	}{
+		{"create name -D", `{"action":"create","name":"-D"}`, "branch name may not begin with '-'"},
+		{"switch option name", `{"action":"switch","name":"--orphan"}`, "branch name may not begin with '-'"},
+		{"delete option name", `{"action":"delete","name":"-rf"}`, "branch name may not begin with '-'"},
+		{"create option start_point", `{"action":"create","name":"feature","start_point":"--upload-pack=evil"}`, "start_point may not begin with '-'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := NewGitBranch(t.TempDir()).Execute(context.Background(), branchCall("c1", tc.args))
+			if err != nil {
+				t.Fatalf("Execute err = %v", err)
+			}
+			if !res.IsError || !strings.Contains(res.Content, tc.wantMsg) {
+				t.Errorf("args %s: result = %q, want %q", tc.args, res.Content, tc.wantMsg)
+			}
+		})
+	}
+}
+
 func TestGitCommit_MessageRequired(t *testing.T) {
 	t.Parallel()
 	res, err := NewGitCommit(t.TempDir()).Execute(context.Background(), commitCall("c1", `{"message":"   "}`))
@@ -219,6 +251,16 @@ func TestGitDiffRange_RefValidation(t *testing.T) {
 	}
 	if !res.IsError || !strings.Contains(res.Content, "invalid head ref") {
 		t.Errorf("malformed head: result = %q, want an invalid-ref error", res.Content)
+	}
+
+	// SEC-06: a leading-"-" ref passes the validRef character class (which permits "-") but
+	// git would read it as an option even after the "..." join — it must be rejected.
+	res, err = dr.Execute(context.Background(), diffCall("c3", `{"base":"--output=/tmp/evil","head":"main"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "invalid base ref") {
+		t.Errorf("leading-dash base: result = %q, want an invalid-ref error", res.Content)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -80,14 +79,12 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		return errorResult(call.ID, fmt.Sprintf("content exceeds maximum size (%d bytes)", maxFileContentBytes)), nil
 	}
 
-	path, err := resolveInRoot(args.Path, t.root)
+	// TOCTOU-safe read+write through an os.Root pinned at t.root: an escaping-symlink
+	// component (including one swapped in between the read and the write) is refused
+	// rather than followed (security review H1).
+	original, err := safeReadFile(args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
-	}
-
-	original, err := os.ReadFile(path)
-	if err != nil {
-		return errorResult(call.ID, "file not found: "+args.Path), nil
+		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
 
 	if isPatchContent(args.Content) {
@@ -99,7 +96,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		if !ok {
 			return errorResult(call.ID, "patch hunk did not match file content"), nil
 		}
-		if err := os.WriteFile(path, []byte(patched), 0o644); err != nil {
+		if err := safeWriteFile(args.Path, t.root, []byte(patched), 0o644); err != nil {
 			return errorResult(call.ID, err.Error()), nil
 		}
 		suffix := ""
@@ -109,7 +106,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		return okResult(call.ID, fmt.Sprintf("applied patch to %s (%d hunk%s)", args.Path, len(hunks), suffix)), nil
 	}
 
-	if err := os.WriteFile(path, []byte(args.Content), 0o644); err != nil {
+	if err := safeWriteFile(args.Path, t.root, []byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okResult(call.ID, "updated "+args.Path), nil

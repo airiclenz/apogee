@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -99,14 +98,12 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 		return errorResult(call.ID, fmt.Sprintf("replacement text exceeds maximum size (%d bytes)", maxFileContentBytes)), nil
 	}
 
-	path, err := resolveInRoot(args.Path, t.root)
+	// TOCTOU-safe read+write: both operations resolve through an os.Root pinned at
+	// t.root, so an escaping-symlink component (including one swapped in between the read
+	// and the write by a confined subprocess) is refused rather than followed (H1).
+	content, err := safeReadFile(args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
-	}
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return errorResult(call.ID, "file not found: "+args.Path), nil
+		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
 
 	count := countOccurrences(string(content), args.OldText)
@@ -118,7 +115,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	}
 
 	updated := strings.Replace(string(content), args.OldText, args.NewText, 1)
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+	if err := safeWriteFile(args.Path, t.root, []byte(updated), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 
@@ -225,14 +222,10 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 		}
 	}
 
-	path, err := resolveInRoot(args.Path, t.root)
+	// TOCTOU-safe read+write through an os.Root pinned at t.root (H1).
+	raw, err := safeReadFile(args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return errorResult(call.ID, "file not found: "+args.Path), nil
+		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
 
 	content := string(raw)
@@ -252,7 +245,7 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 		}
 	}
 
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := safeWriteFile(args.Path, t.root, []byte(content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 

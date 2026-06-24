@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -170,6 +171,93 @@ func TestHTTPRequest_PostsBody(t *testing.T) {
 	}
 	if !strings.Contains(res.Content, "HTTP 201") {
 		t.Errorf("status missing: %q", res.Content)
+	}
+}
+
+// TestHTTPRequest_RejectsDeniedHeaders proves the SEC-04 header filter: a hop-by-hop / framing
+// header or a forged Host is refused as a result error and the request never goes out.
+func TestHTTPRequest_RejectsDeniedHeaders(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		header string
+	}{
+		{"forged host", "Host"},
+		{"connection", "Connection"},
+		{"transfer-encoding", "Transfer-Encoding"},
+		{"content-length", "Content-Length"},
+		{"proxy-authorization", "Proxy-Authorization"},
+		// Case-insensitivity: a lower-cased spelling is canonicalised and still denied.
+		{"lower-cased host", "host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reached := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached = true
+			}))
+			defer srv.Close()
+
+			res, err := NewHTTPRequest(loopbackGuard()).Execute(context.Background(), domain.ToolCall{
+				ID: "c1", Tool: "http_request", Arguments: jsonArgs(t, map[string]any{
+					"url": srv.URL, "method": "post",
+					"headers": map[string]string{tc.header: "x"},
+				}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			if !res.IsError {
+				t.Errorf("header %q must be rejected as a result error; got %q", tc.header, res.Content)
+			}
+			if reached {
+				t.Errorf("header %q was rejected but the request still reached the server", tc.header)
+			}
+		})
+	}
+}
+
+// TestHTTPRequest_HeaderCountCapped proves the SEC-04 count cap: more than maxRequestHeaders
+// model-supplied headers is refused before the request goes out.
+func TestHTTPRequest_HeaderCountCapped(t *testing.T) {
+	t.Parallel()
+
+	headers := make(map[string]string, maxRequestHeaders+1)
+	for i := 0; i <= maxRequestHeaders; i++ {
+		headers["X-H-"+strconv.Itoa(i)] = "v"
+	}
+	res, err := NewHTTPRequest(loopbackGuard()).Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "http_request", Arguments: jsonArgs(t, map[string]any{
+			"url": "https://example.com", "headers": headers,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "too many request headers") {
+		t.Errorf("an over-cap header block must be rejected; got %q", res.Content)
+	}
+}
+
+// TestHTTPRequest_HeaderValueCapped proves the SEC-04 per-value size cap.
+func TestHTTPRequest_HeaderValueCapped(t *testing.T) {
+	t.Parallel()
+
+	res, err := NewHTTPRequest(loopbackGuard()).Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "http_request", Arguments: jsonArgs(t, map[string]any{
+			"url": "https://example.com",
+			"headers": map[string]string{
+				"X-Big": strings.Repeat("a", maxRequestHeaderValueBytes+1),
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "value too large") {
+		t.Errorf("an over-cap header value must be rejected; got %q", res.Content)
 	}
 }
 

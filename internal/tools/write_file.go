@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -83,15 +81,12 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxFileContentBytes)), nil
 	}
 
-	path, err := resolveInRoot(args.Path, t.root)
-	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return errorResult(call.ID, "could not create parent directory: "+err.Error()), nil
-	}
-	if err := os.WriteFile(path, []byte(args.Content), 0o644); err != nil {
+	// TOCTOU-safe write: the workspace fence is enforced AT WRITE TIME through an
+	// os.Root pinned at t.root, so a path component swapped to an outside-pointing
+	// symlink — including a concurrent swap by a confined subprocess — is refused
+	// rather than followed (security review H1). Parent directories are created within
+	// the same fence.
+	if err := safeWriteFile(args.Path, t.root, []byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 
