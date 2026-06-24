@@ -338,6 +338,11 @@ var (
 	// satisfy the Auto gate (missing or insufficient capabilities).
 	ErrAutoUnavailable = domain.ErrAutoUnavailable
 
+	// ErrConfinementUnavailable is the runtime safety net a Confiner backend returns
+	// when it cannot establish a confinement box for a subprocess, so dispatch gates
+	// the call through Approval instead of running it unconfined (ADR 0012).
+	ErrConfinementUnavailable = domain.ErrConfinementUnavailable
+
 	// ErrOrderingCycle is returned by New / registry Add when Mechanism ordering
 	// constraints form a cycle.
 	ErrOrderingCycle = domain.ErrOrderingCycle

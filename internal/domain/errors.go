@@ -12,6 +12,13 @@ var (
 	// kernel < 6.7). Auto degrades to Ask-Before; it never runs unconfined (ADR 0004).
 	ErrAutoUnavailable = errors.New("apogee: auto mode requires fs-write and network confinement")
 
+	// ErrConfinementUnavailable is the runtime "confine if you can, gate if you can't"
+	// safety net (ADR 0012; confinement-execution-contract §2.2): a Confiner backend
+	// that finds it cannot establish the requested box for a subprocess returns it, and
+	// the dispatch disposition falls back to Approval rather than running the call
+	// unconfined. Distinct from ErrAutoUnavailable, which gates Auto at construction.
+	ErrConfinementUnavailable = errors.New("apogee: confinement unavailable on this host")
+
 	// ErrOrderingCycle is returned by New / registry Add when Mechanism ordering
 	// constraints form a cycle — it must fail loudly at startup (ADR 0003).
 	ErrOrderingCycle = errors.New("apogee: mechanism ordering constraints contain a cycle")

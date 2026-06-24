@@ -534,6 +534,62 @@ exec; `Capabilities()` is honest across a ≥6.7 and a 5.13–6.6 kernel (the la
 0012; network-egress is an optional tightening); the parent process stays unrestricted after a confined
 child runs. Cross-build stays green (the file is `linux`-tagged; other OSes keep `denyConfiner`).
 
+#### ✅ P3.2 result — landed 2026-06-24 (landlock backend + shared escape-probe harness; gate GREEN; enforcement battery self-skips on this landlock-disabled host)
+
+The Linux landlock backend is implemented mechanically against the contract §2.3 + §5 + §6.
+**Decision: raw `golang.org/x/sys/unix` syscalls, NOT the `go-landlock` helper** — the raw surface
+(`unix.Syscall(unix.SYS_LANDLOCK_*, …)` over `LandlockRulesetAttr`/`LandlockPathBeneathAttr`) proved
+ergonomic enough at this scale (one create + N add-rule + restrict_self), keeping the single static
+artifact dep-lean (§3a); the helper was not needed. **What landed:**
+
+- **`internal/platform/landlock_linux.go`** (`//go:build linux`, CGO-free):
+  `NewLandlockConfiner()` probes the ABI once via `landlock_create_ruleset(NULL,0,VERSION)`
+  (`probeLandlockABI`, l.~96); `Capabilities()` (l.~120) is honest — `FSWrite` at ABI≥1, `NetworkEgress`
+  at ABI≥4, `{false,false}` on a kernel without landlock. `Confine(ctx, box, *exec.Cmd)` (l.~138 — the
+  **prepare-in-place** signature the contract gives P3.4; exposed here as a concrete method, the
+  `domain.Confiner` interface keeps its closure form until P3.4) rewrites `cmd` into the re-exec wrapper
+  `[self, "__confined-exec", <base64-JSON box>, "--", <orig argv…>]` and sets `Setpgid` for
+  process-group teardown (§2.4). `ApplyLandlockAndExec(box, argv)` (l.~183) is the in-child half:
+  `applyLandlock` builds the ruleset (write-class FS accesses handled, re-granted beneath
+  `WorkspaceRoot ∪ WritablePaths`; `NO_NEW_PRIVS` then `landlock_restrict_self`), then `syscall.Exec`s
+  the real argv — landlock inherits across `execve`, parent never restricted. `encodeBox`/
+  `DecodeConfinedBox` + `ConfinedExecSentinel()` are the inline-argv seam for the P3.4 `main` dispatcher.
+- **`internal/platform/confinetest/`** — the shared escape-probe harness (`Probe`/`ProbeNetwork`, l. in
+  `confinetest.go`) driving the §6.2 8-row battery (#1/#2 in-box & writable-path writes succeed; #3/#4
+  out-of-box & `~/.ssh` writes OS-denied; #5 parent stays unrestricted; #6 domain inherits across a
+  nested `sh -c` exec; #7 network-deny connect denied; #8 network-open connect allowed). Parameterised
+  over a local `Confiner` interface (the `*exec.Cmd` shape) so P3.3 seatbelt reuses it unchanged; imports
+  only `internal/domain` (ADR-0010-clean).
+- **`internal/platform/landlock_linux_test.go`** — `TestMain` dispatches the `__confined-exec` sentinel
+  (the standard `TestHelperProcess` idiom) so the test binary is its own confined child;
+  `TestLandlockCapabilitiesHonest` table-tests caps across ABI −1/1/3/4/6 (the **5.13–6.6 kernel reports
+  `NetworkEgress=false` with fs-confinement still available** → Auto-eligible per ADR 0012);
+  `TestLandlockConfineRewritesCmd` asserts the re-exec argv shape + `Setpgid`; round-trip + sentinel tests.
+- **`internal/domain/errors.go` + `apogee.go`** — added the **`ErrConfinementUnavailable`** sentinel (the
+  "confine-if-you-can, gate-if-you-can't" safety net, §2.2) and re-exported it at the root. This is a
+  pure additive `var` — it does **not** touch the `Confiner` interface signature (that change is P3.4) —
+  needed now so the backend can honestly signal an unestablishable box.
+- **`go.mod`/`go.sum`** — `golang.org/x/sys v0.45.0` promoted **indirect → direct** (now used by
+  production code); `go mod tidy` clean (also dropped a few stale transitive `/go.mod`-only sum lines).
+
+**Capability-honesty finding (this dev host):** the kernel is built **`# CONFIG_SECURITY_LANDLOCK is not
+set`** (the boot cmdline lists `landlock` in `lsm=…` but the LSM is compiled out), so
+`landlock_create_ruleset` returns `ENOSYS` and `Capabilities()` honestly reports `{false,false}`. The
+enforcement battery (`Probe`/`ProbeNetwork`) therefore **self-skips** with a clear reason (standard
+kernel-feature-gated idiom) — the OS-denial assertions (#3/#4/#6/#7) are unrunnable *here* but compile
+and run for real on a landlock-enabled runner. The pure-logic acceptance (honest caps across ABIs, the
+re-exec argv rewrite, box round-trip, parent-unrestricted) **does** run and passes here. *(The §0 entry
+note's "fully testable hermetically here" did not hold for this specific sandbox kernel; the contract's
+capability-honesty rule is exactly what absorbs that — the backend degrades to "gate", never to a false
+"confined".)*
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` clean · `go build ./...` ok ·
+`go test -race ./...` all `ok` (no FAIL/panic/DATA RACE; landlock enforcement subtests SKIP on this host)
+· ADR-0010 grep empty · 6 cross-builds OK (linux file `//go:build linux`-tagged; darwin/windows keep
+`denyConfiner`) · `go mod tidy` clean (x/sys direct) · `apogee --help` exit 0. **Next: P3.3** (macOS
+seatbelt, reuses `confinetest`) and **P3.4** (mode ladder + `Confine` into dispatch — adopts the
+`*exec.Cmd` interface signature, wires the `__confined-exec` dispatcher in `main`).
+
 ### P3.3 — macOS seatbelt backend
 Implement the seatbelt `Confiner` (`//go:build darwin`): generate a `sandbox-exec` profile from the
 `ConfinementBox` (deny default; allow file-write under `WorkspaceRoot`/`WritablePaths`; deny network
