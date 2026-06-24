@@ -8,9 +8,12 @@ import "errors"
 
 var (
 	// ErrAutoUnavailable is returned by New when Mode==Auto but the Confiner cannot
-	// satisfy the Auto gate (missing, or insufficient capabilities — e.g. Linux
-	// kernel < 6.7). Auto degrades to Ask-Before; it never runs unconfined (ADR 0004).
-	ErrAutoUnavailable = errors.New("apogee: auto mode requires fs-write and network confinement")
+	// satisfy the Auto gate — missing, or no filesystem-write confinement on this host.
+	// Under ADR 0012 the gate is FSWrite-only (the network is open by default), so this
+	// is now CONDITIONAL: a host with fs-confinement (Linux kernel ≥5.13) enters Auto;
+	// only a host without it is refused. The unfenceable subprocess surface then falls
+	// back to Approval rather than refusing Auto outright (confinement-execution-contract §5).
+	ErrAutoUnavailable = errors.New("apogee: auto mode requires filesystem-write confinement, unavailable on this host")
 
 	// ErrConfinementUnavailable is the runtime "confine if you can, gate if you can't"
 	// safety net (ADR 0012; confinement-execution-contract §2.2): a Confiner backend

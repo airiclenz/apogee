@@ -44,7 +44,7 @@ var (
 // newAgent validates cfg and constructs a ready-to-Step Agent bound to up. The public
 // New delegates here with the real provider client; white-box tests inject a deterministic
 // fake. Validation order is deliberate: required fields, then the ordering-cycle gate
-// (ADR 0003), then the Auto/Confinement gate (ADR 0004).
+// (ADR 0003), then the Auto/Confinement gate (ADR 0012 — FSWrite-only AutoEligible).
 func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
@@ -58,7 +58,12 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, err
 	}
 
-	if cfg.Mode == domain.ModeAuto && !autoEligible(cfg.Confiner) {
+	if cfg.Mode == domain.ModeAuto && cfg.Confiner == nil {
+		// Auto needs a Confiner to enforce the subprocess surface. A PRESENT-but-incapable
+		// Confiner (no fs-confinement on this host) is allowed: Auto is entered and the
+		// subprocess surface gates through Approval rather than refusing Auto ("confine if
+		// you can, gate if you can't" — ADR 0012). Only a NIL Confiner — no facility injected
+		// at all — refuses, so ErrAutoUnavailable is now conditional, not constant.
 		return nil, domain.ErrAutoUnavailable
 	}
 
@@ -116,15 +121,6 @@ func validateConfig(cfg domain.Config) error {
 		return errMissingModel
 	}
 	return nil
-}
-
-// autoEligible reports whether c can satisfy the Auto gate. A nil Confiner can confine
-// nothing, so Auto is refused (ADR 0004 — Auto never runs unconfined).
-func autoEligible(c domain.Confiner) bool {
-	if c == nil {
-		return false
-	}
-	return c.Capabilities().AutoEligible()
 }
 
 // step advances the loop one Turn and returns at a quiescent boundary (ADR 0007). The full

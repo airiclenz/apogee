@@ -47,6 +47,22 @@ func (t *WriteFile) Schema() json.RawMessage { return writeFileSchema }
 // that the loop must gate it through Approval in Ask-Before (domain.ReadOnlyTool).
 func (t *WriteFile) ReadOnly() bool { return false }
 
+// workspaceWriteTarget resolves the absolute path this call would write so dispatch can
+// classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker,
+// confinement-execution-contract §3). It performs no write — pure path resolution using
+// the same root the Execute path resolves against, WITHOUT the containment check, so an
+// out-of-workspace target resolves rather than erroring (that is the classification
+// dispatch needs). A call with no decodable path yields ok=false (treated as in-bounds).
+// This method being unexported is what makes write_file an Apogee-own writer no
+// third-party tool can fake (contract §3.2).
+func (t *WriteFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+	var args writeFileArgs
+	if err := decodeArgs(call.Arguments, &args); err != nil {
+		return "", false
+	}
+	return resolveTargetUnbounded(args.Path, t.root)
+}
+
 // Execute writes content to the file named in call.Arguments, honouring ctx
 // cancellation. Bad arguments, oversized content, or a path that escapes the root are
 // reported as IsError results; the write itself is atomic to the model's view (it
@@ -82,4 +98,7 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	return okResult(call.ID, fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path)), nil
 }
 
-var _ domain.Tool = (*WriteFile)(nil)
+var (
+	_ domain.Tool           = (*WriteFile)(nil)
+	_ workspaceScopedWriter = (*WriteFile)(nil)
+)

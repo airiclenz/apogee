@@ -17,6 +17,12 @@ import (
 )
 
 func main() {
+	// Intercept the __confined-exec sentinel before Cobra: on Linux this binary re-invokes
+	// itself in the landlock helper mode to confine a subprocess (confinement-execution-
+	// contract §2.3 / §2.6). The normal CLI never surfaces the sentinel; off Linux this is a
+	// no-op.
+	maybeDispatchConfinedExec()
+
 	cmd := newRootCommand(tui.Run)
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, err)

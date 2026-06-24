@@ -50,15 +50,18 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 }
 
 // resolveAndExecute resolves a tool call against the registry, applies the always-on
-// security guardrails (D6) and the Plan-mode and Approval gates, and executes it —
-// returning the result (or an error result) and whether ctx was cancelled mid-flight.
+// security guardrails (D6) and the per-call blast-radius disposition (D5), and executes
+// it — returning the result (or an error result) and whether ctx was cancelled mid-flight.
 //
 // The guardrails (security.Guards) run FIRST, in every mode and independent of the
 // Confiner, and are tighten-only (ADR 0012): a Tier-1 dangerous action or a tripped
 // circuit-breaker refuses the call outright; a Tier-2 dangerous action forces the
 // Approver even in Auto. They run ahead of the mode disposition — they never loosen it.
-// (The full mode × blast-radius disposition is P3.4's rework of needsApproval; P3.6 wires
-// only the always-on guardrail layer beneath it.)
+//
+// The disposition (D5; disposition.go) then decides the call's fate by blast radius:
+// run directly, run OS-confined (subprocess surface in Auto), gate through Approval, or
+// refuse (Plan-mode write). A Tier-2 force-approval upgrades any non-refuse disposition
+// to a gate (the guardrail can only tighten).
 func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
@@ -73,15 +76,17 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 		return result, dispatchDone
 	}
 
-	if a.cfg.Mode == domain.ModePlan && !domain.IsReadOnly(tool) {
+	dispo := a.dispose(tool, call)
+	if dispo == dispoRefuse {
 		// The Plan menu hides write tools; refuse one defensively if the model calls it.
 		return errorToolResult(call.ID, "plan mode: write tools are not permitted"), dispatchDone
 	}
 
-	// A Tier-2 dangerous action forces the Approver even where the mode disposition
-	// would not (e.g. Auto): the guardrail can only tighten.
+	// A Tier-2 dangerous action forces the Approver even where the disposition would not
+	// (e.g. an Auto confine/run): the guardrail can only tighten.
 	forceApproval := guard.Outcome == security.GuardForceApproval
-	allowed, outcome := a.approve(ctx, turn, tool, call, forceApproval)
+	needGate := dispo == dispoGate || forceApproval
+	allowed, outcome := a.approve(ctx, turn, tool, call, needGate, forceApproval)
 	if outcome == dispatchCancelled {
 		return domain.ToolResult{}, dispatchCancelled
 	}
@@ -91,7 +96,7 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 		return result, dispatchDone
 	}
 
-	result, execOutcome := a.executeTool(ctx, turn, tool, call)
+	result, execOutcome := a.executeTool(ctx, turn, tool, call, dispo)
 	if execOutcome == dispatchCancelled {
 		return result, dispatchCancelled
 	}
@@ -128,20 +133,22 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 	return a.tools.Lookup(name)
 }
 
-// approve consults the Approver when the Agent's mode and the tool require it, returning
-// whether the call may run. It honours allow-for-session (remembered for the rest of the
-// Session) and reports dispatchCancelled if ctx is cancelled while the human deliberates.
+// approve consults the Approver when the disposition (or a forced guardrail) requires a
+// gate, returning whether the call may run. It honours allow-for-session (remembered for
+// the rest of the Session) and reports dispatchCancelled if ctx is cancelled while the
+// human deliberates.
 //
-// force overrides the mode disposition: a Tier-2 dangerous action forces the Approver
-// even in Auto (the guardrail can only tighten). A forced call ignores the allow-for-
-// session cache — a force-approval gate is a per-call speed-bump, not a thing the user
-// can pre-allow for the Session. A nil Approver while a gate is required (or forced) ⇒
-// refuse rather than run unapproved.
-func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, force bool) (bool, dispatchOutcome) {
-	if !force {
-		if !a.needsApproval(tool) || a.approved[tool.Name()] {
-			return true, dispatchDone
-		}
+// gate is the disposition's verdict that this call must clear the Approver (dispoGate, or
+// a Tier-2 force-approval). force distinguishes the Tier-2 case: a forced gate ignores the
+// allow-for-session cache — a force-approval is a per-call speed-bump, not a thing the user
+// can pre-allow for the Session. A nil Approver while a gate is required ⇒ refuse rather
+// than run unapproved.
+func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, gate, force bool) (bool, dispatchOutcome) {
+	if !gate {
+		return true, dispatchDone
+	}
+	if !force && a.approved[tool.Name()] {
+		return true, dispatchDone
 	}
 	if a.cfg.Approver == nil {
 		// A gate is required but the host supplied no Approver: refuse rather than run an
@@ -183,42 +190,35 @@ func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call do
 	}
 }
 
-// needsApproval reports whether a tool call must clear the Approver before running, per the
-// Agent's mode: Plan runs only read-only tools (no gate); Ask-Before gates every write (a
-// read-only tool is harmless and skips it); Auto trusts OS confinement and gates only tools
-// that reach unconfinable external state (ADR 0004). An empty mode is treated as Ask-Before
-// — the safe default that gates writes.
-func (a *Agent) needsApproval(tool domain.Tool) bool {
-	switch a.cfg.Mode {
-	case domain.ModePlan:
-		return false
-	case domain.ModeAuto:
-		return isExternalEffect(tool)
-	default:
-		return !domain.IsReadOnly(tool)
-	}
-}
-
-// approvalReason is the human-facing why for the Approval prompt.
+// approvalReason is the human-facing why for the Approval prompt, derived from the tool's
+// blast-radius class so the human sees what kind of reach they are authorising.
 func (a *Agent) approvalReason(tool domain.Tool) string {
-	if isExternalEffect(tool) {
-		return "unconfinable external-effect tool"
+	switch classifyTool(tool) {
+	case classNetwork:
+		return "network reach"
+	case classMCP:
+		return "unconfinable MCP tool"
+	case classSubprocess:
+		return "subprocess execution (confinement unavailable on this host)"
+	case classWorkspaceWrite:
+		return "out-of-workspace write"
+	default:
+		return "write"
 	}
-	return "write"
-}
-
-// isExternalEffect reports whether tool reaches state Apogee cannot confine (network, MCP)
-// — the tools that gate through Approval even in Auto (ADR 0004).
-func isExternalEffect(tool domain.Tool) bool {
-	_, ok := tool.(domain.ExternalEffectTool)
-	return ok
 }
 
 // executeTool runs one tool under a recover boundary (ADR 0007): a panic becomes an
 // ErrorEvent and an error tool-result so the loop survives; a ctx cancellation propagates as
 // dispatchCancelled; any other Execute error is surfaced to the model as an error result
 // rather than failing the Turn (a tool returns a Go error only for cancellation).
-func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall) (result domain.ToolResult, outcome dispatchOutcome) {
+//
+// dispo carries the blast-radius disposition: a dispoConfine subprocess call runs with the
+// Confinement handle (Confiner + box) installed in its context, so the subprocess tool
+// confines the *exec.Cmd it builds (confinement-execution-contract §2.2). An
+// ExternalEffectTool routes through the injected ExternalEffects boundary (ADR 0008) when
+// the host supplied one, so the bench can stub network/MCP deterministically; else it runs
+// live.
+func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, dispo disposition) (result domain.ToolResult, outcome dispatchOutcome) {
 	outcome = dispatchDone
 	defer func() {
 		if r := recover(); r != nil {
@@ -232,7 +232,17 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		}
 	}()
 
-	res, err := tool.Execute(ctx, call)
+	if dispo == dispoConfine {
+		// Install the Confinement handle so the subprocess tool confines the command it
+		// launches. The disposition only chose dispoConfine after confirming caps (§4), so
+		// the Confiner is non-nil and fs-confinement-capable here.
+		ctx = domain.WithConfinement(ctx, domain.Confinement{
+			Confiner: a.cfg.Confiner,
+			Box:      a.confinementBox(),
+		})
+	}
+
+	res, err := a.runTool(ctx, tool, call)
 	if err != nil {
 		if ctx.Err() != nil {
 			return domain.ToolResult{}, dispatchCancelled
@@ -241,6 +251,31 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 	return res, dispatchDone
+}
+
+// runTool routes the call to the injected ExternalEffects boundary for an external-effect
+// tool when one is configured (ADR 0008 — the single non-forkable-effect seam, both network
+// and MCP kinds), otherwise to the tool's live Execute. The gating decision keyed on the
+// effect KIND (the disposition); routing here is the SEPARATE concern of where the effect
+// actually runs, so the two stay distinct (confinement-execution-contract §8 / task P3.4).
+func (a *Agent) runTool(ctx context.Context, tool domain.Tool, call domain.ToolCall) (domain.ToolResult, error) {
+	if _, isExternal := tool.(domain.ExternalEffectTool); isExternal && a.cfg.ExternalEffects != nil {
+		return a.cfg.ExternalEffects.Do(ctx, call)
+	}
+	return tool.Execute(ctx, call)
+}
+
+// confinementBox builds the ConfinementBox a confined subprocess runs inside: the injected
+// workspace as the writable root, plus the per-project writable/network allowlists the host
+// folded into Config. Box construction (toolchain cache/temp dirs, etc.) is the host's
+// concern (confinement-execution-contract §7); the loop confines to whatever box it builds
+// from the injected roots.
+func (a *Agent) confinementBox() domain.ConfinementBox {
+	return domain.ConfinementBox{
+		WorkspaceRoot: a.cfg.WorkspaceDir,
+		WritablePaths: a.cfg.ConfineWritablePaths,
+		NetworkAllow:  a.cfg.ConfineNetworkAllow,
+	}
 }
 
 // appendToolResult commits a tool result to the conversation as a tool message (linked to

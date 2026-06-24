@@ -32,6 +32,12 @@ type settings struct {
 	mode      string
 	hostAlias string
 	bypass    bool
+
+	// confineToWorkspace is GLOBAL-CONFIG-ONLY (ADR 0012): it is resolved from the config
+	// file alone, never from a flag or env, so a hostile repo invoking apogee cannot loosen
+	// Auto's blast radius. Default true. (There is no project-level config file today; the
+	// file-only resolution is what keeps it un-loosenable by the invocation environment.)
+	confineToWorkspace bool
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -44,14 +50,25 @@ type layer struct {
 	mode      *string
 	hostAlias *string
 	bypass    *bool
+
+	// confineToWorkspace is set only by the FILE layer (global-config-only, ADR 0012). The
+	// env and flag layers leave it nil so the invocation environment cannot loosen it.
+	confineToWorkspace *bool
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
 // the file, then the environment, then the flags — so a flag beats an environment
 // variable beats the file beats the default. Only ask-before (the default mode) is a
 // non-zero base; endpoint/model default empty and bypass defaults false.
+//
+// confine-to-workspace is the exception: it defaults true and is resolved from the FILE
+// layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
+// repo's invocation environment must not be able to loosen Auto's blast radius.
 func resolveSettings(file, env, flag layer) settings {
-	s := settings{mode: string(modeAskBefore)}
+	s := settings{mode: string(modeAskBefore), confineToWorkspace: true}
+	if file.confineToWorkspace != nil {
+		s.confineToWorkspace = *file.confineToWorkspace
+	}
 	for _, l := range []layer{file, env, flag} {
 		if l.endpoint != nil {
 			s.endpoint = *l.endpoint
@@ -86,6 +103,11 @@ type fileConfig struct {
 	Mode      string `yaml:"mode"`
 	HostAlias string `yaml:"host-alias"`
 	Bypass    *bool  `yaml:"bypass"`
+	// ConfineToWorkspace is global-config-only (ADR 0012): a pointer so an explicit
+	// `confine-to-workspace: false` is distinguishable from an absent key (which keeps the
+	// secure default true). It has no flag or env — editing the global config IS the
+	// deliberate acknowledgement required to run Auto unconfined.
+	ConfineToWorkspace *bool `yaml:"confine-to-workspace"`
 }
 
 // layer projects a parsed file config onto a precedence layer: a present (non-empty)
@@ -106,6 +128,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.Bypass != nil {
 		l.bypass = fc.Bypass
+	}
+	if fc.ConfineToWorkspace != nil {
+		l.confineToWorkspace = fc.ConfineToWorkspace
 	}
 	return l
 }
@@ -228,6 +253,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.hostAlias = s.hostAlias
+	opts.confineToWorkspace = s.confineToWorkspace
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

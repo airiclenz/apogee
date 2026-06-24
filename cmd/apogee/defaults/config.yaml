@@ -24,12 +24,25 @@
 #   flag: --model      env: APOGEE_MODEL
 # model: qwen2.5-coder
 
-# Autonomy mode: how tool calls are gated.
+# Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).
 #   plan        — read-only: no writes, no command execution
-#   ask-before  — every tool call needs your approval (the default)
-#   (auto requires Confinement, which lands in Phase 3)
+#   ask-before  — every write, command, and external reach needs your approval (the default)
+#   allow-edits — Apogee's own workspace edits run without asking; shell/exec, network, MCP,
+#                 and any out-of-workspace write still gate (needs no confinement)
+#   auto        — also runs the unbounded shell/subprocess surface unsupervised, fenced by
+#                 confine-to-workspace below; needs OS filesystem confinement on the host
 #   flag: --mode       env: APOGEE_MODE
 # mode: ask-before
+
+# Auto's blast radius (only meaningful in --mode auto). GLOBAL-CONFIG-ONLY: there is no flag
+# or env, and a project config cannot loosen it — editing THIS file is the deliberate
+# acknowledgement. Default: true.
+#   true   — filesystem writes are fenced to the workspace under OS confinement; the network
+#            is open; MCP still asks. (The safe default.)
+#   false  — "I am the sandbox": nothing is fenced and nothing asks, EXCEPT the dangerous-
+#            action guard floor. Safe ONLY inside a VM/container — your responsibility. Prints
+#            a warning every session.
+# confine-to-workspace: true
 
 
 

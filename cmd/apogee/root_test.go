@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -61,21 +60,30 @@ func TestRunRootConstructsAndLaunches(t *testing.T) {
 	}
 }
 
-func TestRunRootAutoRefused(t *testing.T) {
+// TestRunRootAutoConstructs proves --mode auto now CONSTRUCTS and reaches the launcher,
+// because runRoot injects the host's real Confiner (platform.NewConfiner(), always
+// non-nil): under ADR 0012 Auto is no longer refused for a present-but-incapable Confiner
+// — it is entered and the subprocess surface gates ("confine if you can, gate if you
+// can't"). This is the reversal of the old Phase-2 refuse-Auto behaviour. confineToWorkspace
+// defaults true here so no unconfined-warning prints.
+func TestRunRootAutoConstructs(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
 	opts := options{
-		endpoint: "http://127.0.0.1:1111",
-		model:    "fake",
-		mode:     "auto",
+		endpoint:           "http://127.0.0.1:1111",
+		model:              "fake",
+		mode:               "auto",
+		confineToWorkspace: true,
 	}
 
-	err := runRoot(context.Background(), opts, rec.launch)
-	if !errors.Is(err, errAutoPhase3) {
-		t.Fatalf("runRoot --mode auto: err = %v; want errAutoPhase3", err)
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot --mode auto: err = %v; want nil (Auto constructs and reaches the launcher)", err)
 	}
-	if rec.called {
-		t.Error("launcher should not run when construction is refused")
+	if !rec.called {
+		t.Error("launcher should run once --mode auto constructs successfully")
+	}
+	if rec.opts.Mode != apogee.ModeAuto {
+		t.Errorf("launcher Mode = %q; want %q", rec.opts.Mode, apogee.ModeAuto)
 	}
 }
 

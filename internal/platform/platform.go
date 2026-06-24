@@ -2,6 +2,8 @@ package platform
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -42,12 +44,14 @@ type Host interface {
 	Path
 }
 
-// denyConfiner is the Phase-0 stub Confiner backend (plan §P0.5). It enforces
-// nothing: Capabilities reports neither fs-write nor network-egress
-// confinement, so AutoEligible is false and New rejects Auto mode against
-// it (ADR 0004). Confine runs fn unchanged. The real backends (seatbelt /
-// landlock / AppContainer) land in Phase 3; this stub exists so New's Auto gate
-// can be exercised by the P0.6 harness before any of them do.
+// denyConfiner is the no-confinement backend. It enforces nothing: Capabilities
+// reports neither fs-write nor network-egress confinement, so AutoEligible is false.
+// It is the host backend on OSes without a real Confiner (Windows until Phase 5), and
+// the seam the P0.6 harness used to exercise New's Auto gate before the real backends
+// landed. Because it reports {false, false}, the dispatch disposition gates the
+// subprocess surface rather than handing it a cmd to confine; if a cmd is passed
+// anyway (a caller that skipped the caps check), Confine honestly reports
+// ErrConfinementUnavailable — "confine if you can, gate if you can't" (ADR 0012).
 type denyConfiner struct{}
 
 // Capabilities reports a backend that can enforce nothing — both fs-write and
@@ -56,16 +60,18 @@ func (denyConfiner) Capabilities() domain.ConfinementCaps {
 	return domain.ConfinementCaps{FSWrite: false, NetworkEgress: false}
 }
 
-// Confine runs fn unchanged: the stub applies no confinement box (Phase 0).
-func (denyConfiner) Confine(ctx context.Context, _ domain.ConfinementBox, fn func(context.Context) error) error {
-	return fn(ctx)
+// Confine cannot prepare a confined command — this backend enforces nothing — so it
+// returns ErrConfinementUnavailable rather than running cmd unconfined. The dispatch
+// disposition checks Capabilities() first and never reaches here in normal flow
+// (confinement-execution-contract §2.2/§2.3).
+func (denyConfiner) Confine(_ context.Context, _ domain.ConfinementBox, _ *exec.Cmd) error {
+	return fmt.Errorf("%w: no confinement backend on this host", domain.ErrConfinementUnavailable)
 }
 
-// NewDenyConfiner returns the Phase-0 stub Confiner backend (plan §P0.5). It
-// enforces nothing and never satisfies the Auto gate, so it lets New's Auto-mode
-// rejection (ADR 0004) be tested before the real backends land. It returns
-// domain.Confiner — the same type the root re-exports as apogee.Confiner (ADR 0010),
-// so callers in either package assign it interchangeably.
+// NewDenyConfiner returns the no-confinement backend. It enforces nothing and never
+// satisfies the Auto gate. It returns domain.Confiner — the same type the root
+// re-exports as apogee.Confiner (ADR 0010), so callers in either package assign it
+// interchangeably.
 func NewDenyConfiner() domain.Confiner { return denyConfiner{} }
 
 // The stub must satisfy the Confiner contract at compile time.

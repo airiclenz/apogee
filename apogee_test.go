@@ -46,13 +46,18 @@ func validConfig() apogee.Config {
 // ---------------------------------------------------------------------------
 
 func TestNew_AutoModeGate(t *testing.T) {
+	// Under ADR 0012 the Auto construction gate is CONDITIONAL: a NIL Confiner — no
+	// confinement facility injected at all — is refused (ErrAutoUnavailable); a PRESENT
+	// but incapable Confiner (deny-all: no fs-confinement on this host) is NOT refused —
+	// Auto is entered and the subprocess surface gates through Approval ("confine if you
+	// can, gate if you can't"). This reverses ADR 0004's refuse-deny-all behaviour.
 	tests := []struct {
 		name     string
 		confiner apogee.Confiner
 		wantErr  bool
 	}{
 		{name: "auto with no confiner is refused", confiner: nil, wantErr: true},
-		{name: "auto with deny-all confiner is refused", confiner: platform.NewDenyConfiner(), wantErr: true},
+		{name: "auto with deny-all confiner enters Auto (subprocess gates)", confiner: platform.NewDenyConfiner(), wantErr: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,8 +67,14 @@ func TestNew_AutoModeGate(t *testing.T) {
 
 			_, err := apogee.New(cfg)
 
-			if tt.wantErr && !errors.Is(err, apogee.ErrAutoUnavailable) {
-				t.Errorf("New err = %v, want ErrAutoUnavailable", err)
+			if tt.wantErr {
+				if !errors.Is(err, apogee.ErrAutoUnavailable) {
+					t.Errorf("New err = %v, want ErrAutoUnavailable", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("New err = %v, want nil (deny-all confiner enters Auto, subprocess gates)", err)
 			}
 		})
 	}

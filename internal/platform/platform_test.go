@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"runtime"
 	"testing"
 
@@ -32,20 +33,17 @@ func TestDenyConfinerCapabilities(t *testing.T) {
 	}
 }
 
-func TestDenyConfinerConfineRunsFnUnchanged(t *testing.T) {
+func TestDenyConfinerConfineReportsUnavailable(t *testing.T) {
 	t.Parallel()
 
-	ran := false
-	sentinel := errors.New("from fn")
-	err := denyConfiner{}.Confine(context.Background(), domain.ConfinementBox{}, func(context.Context) error {
-		ran = true
-		return sentinel
-	})
-	if !ran {
-		t.Fatal("Confine did not run fn")
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("Confine returned %v, want fn's error %v", err, sentinel)
+	// denyConfiner enforces nothing, so it cannot prepare a confined command: Confine
+	// must report ErrConfinementUnavailable rather than silently leave cmd unconfined
+	// ("confine if you can, gate if you can't", ADR 0012). The dispatch disposition
+	// checks Capabilities() first and never reaches here in normal flow.
+	cmd := exec.Command("/bin/echo", "hi")
+	err := denyConfiner{}.Confine(context.Background(), domain.ConfinementBox{}, cmd)
+	if !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Errorf("Confine returned %v, want wrapping ErrConfinementUnavailable", err)
 	}
 }
 

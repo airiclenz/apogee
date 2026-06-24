@@ -56,6 +56,30 @@ func IsReadOnly(t Tool) bool {
 	return ok && ro.ReadOnly()
 }
 
+// SubprocessTool is an optional interface a Tool implements to declare that it launches
+// an OS subprocess (a shell, an interpreter, a child program) whose blast radius is the
+// whole filesystem unless OS-confined — the unbounded surface ADR 0012 fences with the
+// Confiner. The dispatch disposition keys on this marker to RUN such a tool inside
+// Confiner.Confine in Auto with confine-to-workspace on (rather than gating it), and to
+// gate it when fs-confinement is unavailable ("confine if you can, gate if you can't").
+// terminal / python-exec (P3.8) carry it; the in-process write tools do not (they are
+// path-safety-bounded, not OS-confined). IsSubprocessTool is the helper the loop calls.
+type SubprocessTool interface {
+	Tool
+	// Subprocess reports that this tool launches an OS subprocess. It exists so a tool
+	// can implement the marker yet still report false (a degraded build), the safe
+	// default being treated as a non-subprocess tool.
+	Subprocess() bool
+}
+
+// IsSubprocessTool reports whether t has declared itself a subprocess tool via
+// SubprocessTool — the signal the disposition confines it (Auto) rather than gating it.
+// A tool that makes no such declaration is not a subprocess tool.
+func IsSubprocessTool(t Tool) bool {
+	st, ok := t.(SubprocessTool)
+	return ok && st.Subprocess()
+}
+
 // ExternalEffectKind classifies a non-forkable external effect.
 type ExternalEffectKind string
 

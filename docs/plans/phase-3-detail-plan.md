@@ -385,7 +385,7 @@ everything, and it cuts `v1.0.0`).
 | **P3.1** ✅ | **Confinement execution-model design + ADR 0012** (D1): the blast-radius invariant + the Allow-Edits ladder rung, the single subprocess granularity, the per-call decision, capability-honesty; amend/cross-ref ADR 0004. **Done 2026-06-24** — policy in ADR 0012; impl contract in [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) (see result note below) | P3.0 | — | ADR 0004; **ADR 0012** |
 | **P3.2** | **Linux landlock `Confiner` backend**: fs-write + network-egress, ABI-v4/kernel-≥6.7 probe, honest caps; build-tagged `linux` | P3.1 | `golang.org/x/sys` | ADR 0004; ADR 0012 |
 | **P3.3** | **macOS seatbelt `Confiner` backend**: `sandbox-exec` profile from the box, fs+net in one, presence-probed; build-tagged `darwin` | P3.1 | — | ADR 0004; ADR 0012 |
-| **P3.4** | **Mode ladder + wire `Confine` into dispatch; Auto becomes real** (D5): add **`ModeAllowEdits`** (Plan→Ask-Before→Allow-Edits→Auto); rework `needsApproval` into the blast-radius disposition; `ErrAutoUnavailable` now conditional. **Also plumb the `ExternalEffects.Do` boundary** (ADR 0008) — currently declared on `Config` but never called; dispatch must route `ExternalEffectTool`s through it when set, so the bench-stub story (P3.11/P3.15/P3.16) is real before the first external tool ships | P3.2, P3.3 | — | ADR 0004; ADR 0008; ADR 0012; dispatch.go |
+| **P3.4** ✅ | **Mode ladder + wire `Confine` into dispatch; Auto becomes real** (D5): add **`ModeAllowEdits`** (Plan→Ask-Before→Allow-Edits→Auto); rework `needsApproval` into the blast-radius disposition; `ErrAutoUnavailable` now conditional. **Also plumb the `ExternalEffects.Do` boundary** (ADR 0008) — currently declared on `Config` but never called; dispatch must route `ExternalEffectTool`s through it when set, so the bench-stub story (P3.11/P3.15/P3.16) is real before the first external tool ships. **Done 2026-06-24** — see result note below | P3.2, P3.3 | — | ADR 0004; ADR 0008; ADR 0012; dispatch.go |
 | **P3.5** | **`processing/` parity finish** (D4): markdown-fenced + custom-regex parsers + full harmony channel set + `processor-factory`, TS-vector-gated | P3.0 | — | TDD §5 processing; broad §4 |
 | **P3.6** | **Security guardrails** `internal/security` (D6): consolidate path-safety + url-safety + arg-guard + circuit-breaker + audit | P3.0 | — | broad §4; TDD §5 security |
 | **P3.7** | **File-editing tool family**: find-replace (single + multi), `diff`, `patch`/apply-edit, `open-file` — pure-Go, stateless; carry the `workspaceScopedWriter` marker | P3.6, P3.4 | — | ADR 0002/0008; D1/D5; broad §4 tools |
@@ -692,6 +692,88 @@ invoked**; an out-of-box write from a confined subprocess is denied by the backe
 `--mode auto` on a host with no fs-confinement **gates the subprocess surface** (not refuse), on an
 eligible host (kernel ≥5.13) enters Auto. `AutoEligible()` is `FSWrite`-only; `ErrAutoUnavailable` is now
 conditional, not constant.
+
+#### ✅ P3.4 result — landed 2026-06-24 (mode ladder + Confine into dispatch; Auto is real; gate GREEN; disposition table hermetic; landlock enforcement self-skips on this kernel)
+
+P3.4 wires the contract (§2.2 signature, §4 disposition, §5 `AutoEligible`, §2.6 host selection, §3 marker)
+into running code. The disposition/wiring tests are **fake-Confiner** driven (caps injected), so the full
+ladder is hermetic regardless of the host kernel (this dev host has landlock compiled out — the live
+landlock/seatbelt escape batteries self-skip loudly, the disposition table runs and passes under `-race`).
+**No new dep** (`go.mod`/`go.sum` unchanged). **What landed:**
+
+- **Confiner signature flipped to prepare-in-place** (`internal/domain/confinement.go`):
+  `Confine(ctx, box, *exec.Cmd) error` replaces the deleted closure form (`fn func(ctx) error`). `domain`
+  gains an `os/exec` import (stdlib — ADR 0010's invariant is the root module path, not stdlib breadth).
+  The real backends (`*landlockConfiner`/`*seatbeltConfiner`) already had this concrete method, so flipping
+  the interface makes them satisfy it; `denyConfiner` (`internal/platform/platform.go`) now mirrors it,
+  returning `ErrConfinementUnavailable` rather than running a cmd unconfined; `platform_test.go`'s former
+  closure-form test became an `ErrConfinementUnavailable` assertion.
+- **`AutoEligible()` → `FSWrite`-only**; **the construction gate is now conditional on a NIL Confiner**, not
+  on caps (`internal/agent/loop.go`). A present-but-incapable Confiner (no fs-confinement) now ENTERS Auto
+  and the subprocess surface gates ("confine if you can, gate if you can't" — ADR 0012 §4/§5), reversing
+  ADR 0004's refuse-deny-all. `ErrAutoUnavailable` fires only for a nil Confiner. `apogee_test.go`'s
+  "deny-all → refused" row became "deny-all → enters Auto (subprocess gates)".
+- **`ModeAllowEdits`** added to the ladder (`internal/domain/config.go`) and re-exported (`apogee.go`); the
+  `--mode` flag accepts `plan | ask-before | allow-edits | auto` (`cmd/apogee/wire.go`,`root.go`).
+- **`workspaceScopedWriter` marker built** (`internal/tools/workspace_scoped.go`) exactly per contract §3.2:
+  an **unexported** interface in `internal/tools` with the `workspaceWriteTarget(call)` seam, plus the
+  exported `IsWorkspaceScopedWriter` / `WorkspaceWriteTarget` detectors. `write_file` carries it (the two
+  unexported methods + a compile-time assertion); it survives `Subset` for free (a method set on the value).
+- **`SubprocessTool` marker** added to `domain` (`tools.go`): the exported "I launch an OS subprocess, confine
+  me" signal P3.8's `terminal`/`python-exec` implement — the "subproc" tool-class the disposition confines.
+- **`needsApproval` reworked into the D5 blast-radius disposition** (`internal/agent/disposition.go`):
+  `classifyTool` → {RO, WS-write, network, mcp, subproc, 3p-write}; `dispose(mode, tool, call)` →
+  {run, confine, gate, refuse} keyed on `(mode, class, confine-to-workspace, caps)`. The dangerous-action
+  guard still runs FIRST (P3.6, tighten-only), and a Tier-2 force-approval upgrades any non-refuse
+  disposition to a gate. `dispatch.go`'s `resolveAndExecute`/`approve`/`executeTool` consume the disposition;
+  the legacy `needsApproval`/`isExternalEffect` helpers are gone.
+- **Confiner threaded to the subprocess tool via the context** (`domain.WithConfinement` /
+  `ConfinementFromContext`, a `Confinement{Confiner, Box}` handle). A `dispoConfine` call runs with the handle
+  installed; the subprocess tool builds its own `*exec.Cmd` and calls `Confine` on it (the contract's
+  tool-owns-IO model, §2.2), keeping `domain.Tool.Execute(ctx, call)` unchanged (the open extension point,
+  ADR 0002). The box is built from the injected `WorkspaceDir ∪ Config.ConfineWritablePaths` with
+  `Config.ConfineNetworkAllow` as the box's `NetworkAllow` (new Config fields; box-construction of toolchain
+  cache dirs is the host's concern, §7).
+- **`ExternalEffects.Do` plumbed** (`dispatch.go` `runTool`): an `ExternalEffectTool` (network OR mcp kind)
+  routes through `cfg.ExternalEffects.Do(ctx, call)` when set, else live `Execute` — kept SEPARATE from the
+  gating, which keys on the effect KIND, not the bare interface.
+- **Per-OS backend selector behind build tags** (`internal/platform/confiner_{linux,darwin,other}.go`):
+  `platform.NewConfiner()` returns landlock on Linux, seatbelt on darwin, `denyConfiner` elsewhere. The
+  selector is split per file because `NewLandlockConfiner` is linux-only and `NewSeatbeltConfiner` darwin-only.
+  `cmd/apogee` injects it (no longer `denyConfiner`), so `--mode auto` works where fs-confinement exists.
+- **`__confined-exec` sentinel dispatched before Cobra** (`cmd/apogee/main.go` →
+  `maybeDispatchConfinedExec`, build-tagged `confined_exec_{linux,other}.go`): on Linux it decodes the box
+  (`platform.DecodeConfinedBox`) and calls `platform.ApplyLandlockAndExec` (failing closed on error); off
+  Linux it is a no-op (macOS confines via `sandbox-exec`, which is itself the wrapper).
+- **`confine-to-workspace` is global-config-only** (`cmd/apogee/config.go`): a new `fileConfig` key resolved
+  from the FILE layer alone (never env or flag — a hostile repo's invocation environment cannot loosen it),
+  default `true`; a per-session startup warning prints when Auto runs unconfined (`wire.go`). The embedded
+  `defaults/config.yaml` documents the ladder + the flag.
+
+**Disposition realised (the D5 table, all `-race`, `internal/agent/dispatch_test.go`):** Auto/confine=true —
+subproc runs **under Confine** no Approval; in-workspace Apogee write runs no Approval **no Confine**;
+out-of-workspace Apogee write **gates**; native network **auto-runs**; mcp + 3p-write **gate**; subproc with
+insufficient caps **gates**. Auto/confine=false — all auto-run **except** the Tier-1 floor. Allow-Edits —
+in-workspace Apogee write auto-approves, `terminal` gates, **no Confine** invoked. Plan refuses writes;
+Ask-Before gates writes/subproc, reads free. `ExternalEffects.Do` routes external tools, bypasses the rest.
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` clean · `GOOS=darwin go vet` clean ·
+`go build ./...` ok · `go test -race ./...` ok (landlock/seatbelt enforcement batteries self-skip loudly —
+this kernel has `CONFIG_SECURITY_LANDLOCK` off; everything else passes) · ADR-0010 grep empty · 6/6
+cross-builds ok · `go mod tidy` adds no dep (go.mod/go.sum unchanged) · `./apogee --help` exit 0 with the
+ladder surfaced.
+
+**v1 gap flagged (P3.7's job):** the "WS-write, target out of workspace → gate" row resolves correctly in the
+disposition, but `write_file.Execute` still hard-rejects an out-of-root path via `resolveInRoot`, so an
+*approved* out-of-workspace write would still error at Execute. The `workspaceWriteTarget` seam is what makes
+the richer behaviour a later additive change (contract §4 v1-gap note); until P3.7, Apogee writes stay
+strictly workspace-bounded and the gate→error is the honest fallback.
+
+**Handoff to successors:** P3.7 (file-edit family) carries the `workspaceScopedWriter` marker (the seam is
+built) and closes the out-of-workspace write gap. P3.8 (`terminal`/`python-exec`) implements `SubprocessTool`
+and consumes the `ConfinementFromContext` handle (+ the §2.4 process-group teardown). P3.11 (`web-fetch`) ships
+an `ExternalEffectTool{network}` that auto-runs in Auto. P3.15 (MCP) ships `ExternalEffectTool{mcp}` that
+gates. P3.13 (sub-agents) inherits the marker for free through `Subset`.
 
 ### P3.5 — `processing/` parity finish
 Add the remaining tool-call parsers (markdown-fenced, custom-regex) and the **full harmony /

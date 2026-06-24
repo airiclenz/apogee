@@ -63,7 +63,8 @@ func TestParseMode(t *testing.T) {
 	}{
 		{name: "plan", in: "plan", want: apogee.ModePlan},
 		{name: "ask-before", in: "ask-before", want: apogee.ModeAskBefore},
-		{name: "auto parses (refused later)", in: "auto", want: apogee.ModeAuto},
+		{name: "allow-edits", in: "allow-edits", want: apogee.ModeAllowEdits},
+		{name: "auto parses (availability checked later)", in: "auto", want: apogee.ModeAuto},
 		{name: "unknown", in: "bogus", wantErr: true},
 		{name: "empty", in: "", wantErr: true},
 	}
@@ -251,8 +252,8 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 func TestFriendlyConstructErr(t *testing.T) {
 	t.Parallel()
 
-	if got := friendlyConstructErr(apogee.ErrAutoUnavailable); !errors.Is(got, errAutoPhase3) {
-		t.Errorf("friendlyConstructErr(ErrAutoUnavailable) = %v; want errAutoPhase3", got)
+	if got := friendlyConstructErr(apogee.ErrAutoUnavailable); !errors.Is(got, errAutoUnavailable) {
+		t.Errorf("friendlyConstructErr(ErrAutoUnavailable) = %v; want errAutoUnavailable", got)
 	}
 
 	other := errors.New("some other failure")

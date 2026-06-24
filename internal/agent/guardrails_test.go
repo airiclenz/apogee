@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -11,16 +12,17 @@ import (
 )
 
 // eligibleConfiner is a fake Confiner reporting Auto-eligible capabilities so a test can
-// construct an Auto-mode Agent. It never actually confines (P3.4 wires Confine into
-// dispatch); P3.6 only needs Auto reachable to prove the guardrails run there too.
+// construct an Auto-mode Agent. Its Confine is a no-op preparation (it leaves cmd as-is)
+// — the guardrail tests here drive read-only tools, so no subprocess is ever confined;
+// the full confine-into-dispatch behaviour is exercised in dispatch_test.go.
 type eligibleConfiner struct{}
 
 func (eligibleConfiner) Capabilities() domain.ConfinementCaps {
 	return domain.ConfinementCaps{FSWrite: true, NetworkEgress: true}
 }
 
-func (eligibleConfiner) Confine(ctx context.Context, _ domain.ConfinementBox, fn func(context.Context) error) error {
-	return fn(ctx)
+func (eligibleConfiner) Confine(_ context.Context, _ domain.ConfinementBox, _ *exec.Cmd) error {
+	return nil
 }
 
 // driveToolCall runs a single Turn that issues one tool call (then a final reply) and

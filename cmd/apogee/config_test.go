@@ -23,31 +23,42 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}{
 		{
 			name: "all empty → defaults",
-			want: settings{mode: "ask-before"},
+			want: settings{mode: "ask-before", confineToWorkspace: true},
 		},
 		{
 			name: "file fills every field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan"), bypass: boolptr(true)},
-			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true},
+			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true},
 		},
 		{
 			name: "env beats file, file fills the rest",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file")},
 			env:  layer{endpoint: strptr("http://env")},
-			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before"},
+			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true},
 		},
 		{
 			name: "flag beats env beats file, per field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan")},
 			env:  layer{endpoint: strptr("http://env"), model: strptr("m-env")},
 			flag: layer{endpoint: strptr("http://flag")},
-			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan"},
+			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true},
 		},
 		{
 			name: "explicit false in a higher layer overrides true below it",
 			file: layer{bypass: boolptr(true)},
 			flag: layer{bypass: boolptr(false)},
-			want: settings{mode: "ask-before", bypass: false},
+			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true},
+		},
+		{
+			name: "confine-to-workspace is file-only and defaults true",
+			file: layer{confineToWorkspace: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: false},
+		},
+		{
+			name: "confine-to-workspace is NOT loosenable by env or flag (global-config-only)",
+			env:  layer{confineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
+			flag: layer{confineToWorkspace: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true},
 		},
 	}
 	for _, tt := range tests {

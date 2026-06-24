@@ -17,8 +17,25 @@ type Config struct {
 	Model    string
 
 	// Autonomy.
-	Mode   Mode // Plan / Ask-Before / Auto
+	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006: Mechanisms off, structure on (the hard-constraint floor)
+
+	// ConfineToWorkspace tunes Auto's blast radius (ADR 0012); meaningful only in Auto.
+	// true (the default) fences subprocess writes to the workspace under OS confinement
+	// (network open, MCP gated); false ("I am the sandbox") runs Auto unconfined, safe
+	// only inside a VM. It is loaded from the GLOBAL config only (a project config cannot
+	// loosen it — the hostile-repo footgun is closed). The host sets it; the loop reads it
+	// in the dispatch disposition.
+	ConfineToWorkspace bool
+
+	// ConfineWritablePaths and ConfineNetworkAllow extend the confinement box beyond the
+	// workspace root (confinement-execution-contract §7): the toolchain cache/temp dirs a
+	// confined `go build`/`pip` needs to write, and the per-project network tightening
+	// list. The host probes/configures these and folds them into Config; the loop confines
+	// a subprocess to WorkspaceDir ∪ ConfineWritablePaths with ConfineNetworkAllow as the
+	// box's NetworkAllow. Empty NetworkAllow leaves the network open (the ADR 0012 default).
+	ConfineWritablePaths []string
+	ConfineNetworkAllow  []string
 
 	// Host-supplied delegates. The host (TUI / bench / embedder) owns these.
 	Approver Approver  // the human-in-the-loop gate; required unless Mode==Plan
@@ -66,10 +83,20 @@ type Mode string
 const (
 	// ModePlan is read-only: no writes, no command execution.
 	ModePlan Mode = "plan"
-	// ModeAskBefore requires an Approval for every tool call.
+	// ModeAskBefore requires an Approval for every write, command, and external reach
+	// (a harmless read runs free).
 	ModeAskBefore Mode = "ask-before"
-	// ModeAuto runs tool calls without per-call approval. Requires Confinement
-	// (ADR 0004); a tool that cannot be confined still gates through Approval.
+	// ModeAllowEdits auto-approves Apogee's own workspace-scoped writes (path-safety-
+	// bounded); shell/exec, network, MCP, third-party in-process tools, and any
+	// out-of-workspace write still gate. It needs NO Confinement — path-safety bounds
+	// the auto-approved writes and the human backstops the unbounded surface — so it is
+	// identical on every OS (ADR 0012).
+	ModeAllowEdits Mode = "allow-edits"
+	// ModeAuto runs unbounded tool calls without per-call approval, tuned by
+	// Config.ConfineToWorkspace (ADR 0012). With confinement on (the default), the
+	// subprocess surface runs OS-confined to the workspace; an unfenceable tool (MCP) or
+	// an out-of-workspace Apogee write still gates through Approval; if fs-confinement is
+	// unavailable, the subprocess surface gates ("confine if you can, gate if you can't").
 	ModeAuto Mode = "auto"
 )
 

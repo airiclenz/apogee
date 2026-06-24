@@ -26,6 +26,11 @@ type options struct {
 	// active model's window in tokens, captured during model discovery (0 when unknown).
 	hostAlias     string
 	contextWindow int
+
+	// confineToWorkspace tunes Auto's blast radius (ADR 0012); default true. It is NOT a
+	// flag — it is loaded from the GLOBAL config file only (a project config cannot loosen
+	// it), so applyConfig sets it from the resolved settings.
+	confineToWorkspace bool
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge
@@ -92,7 +97,8 @@ func newRootCommand(launch launcher) *cobra.Command {
 	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
 	flags.StringVar(&opts.model, "model", "", "model name to request (default: ask the server for its active model)")
 	flags.StringVar(&opts.mode, "mode", string(modeAskBefore),
-		"autonomy: plan | ask-before (auto requires Confinement, lands in Phase 3)")
+		"autonomy ladder: plan | ask-before | allow-edits | auto "+
+			"(auto needs filesystem confinement; tuned by confine-to-workspace in config.yaml)")
 	flags.StringVar(&opts.workspace, "workspace", "",
 		"workspace root the file tools are scoped to (default: current directory)")
 	flags.BoolVar(&opts.bypass, "bypass", false,

@@ -73,9 +73,10 @@ type ContextConfig = domain.ContextConfig
 type Mode = domain.Mode
 
 const (
-	ModePlan      = domain.ModePlan
-	ModeAskBefore = domain.ModeAskBefore
-	ModeAuto      = domain.ModeAuto
+	ModePlan       = domain.ModePlan
+	ModeAskBefore  = domain.ModeAskBefore
+	ModeAllowEdits = domain.ModeAllowEdits
+	ModeAuto       = domain.ModeAuto
 )
 
 // ----------------------------------------------------------------------------
