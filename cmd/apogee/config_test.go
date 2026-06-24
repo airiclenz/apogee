@@ -60,6 +60,11 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			flag: layer{confineToWorkspace: boolptr(false)},
 			want: settings{mode: "ask-before", confineToWorkspace: true},
 		},
+		{
+			name: "web-search endpoint is file-only (default empty)",
+			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
+			want: settings{mode: "ask-before", confineToWorkspace: true, webSearchEndpoint: "https://search.example.com"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -31,6 +31,10 @@ type options struct {
 	// flag — it is loaded from the GLOBAL config file only (a project config cannot loosen
 	// it), so applyConfig sets it from the resolved settings.
 	confineToWorkspace bool
+
+	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
+	// loaded from the config file only (default-off). applyConfig sets it from settings.
+	webSearchEndpoint string
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

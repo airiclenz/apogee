@@ -418,6 +418,88 @@ func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The ask-user UI (P3.11 — the free-text C3-style face)
+// ----------------------------------------------------------------------------
+
+// newAskModel drives a fresh model to awaitingAsk with a buffered reply channel.
+func newAskModel(t *testing.T, req domain.AskRequest) (Model, chan domain.AskAnswer) {
+	t.Helper()
+	reply := make(chan domain.AskAnswer, 1)
+	m := step(t, newTestModel(t), askReqMsg{Request: req, Reply: reply})
+	if m.state != stateAwaitingAsk {
+		t.Fatalf("state = %v, want awaitingAsk", m.state)
+	}
+	return m, reply
+}
+
+// typeInput feeds each rune of s into the model as a keypress (the input box is live while
+// awaitingAsk, so this is how the human types the answer).
+func typeInput(t *testing.T, m Model, s string) Model {
+	t.Helper()
+	for _, r := range s {
+		m = step(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	return m
+}
+
+// An ask question switches to awaitingAsk; typing then enter sends the answer on the reply
+// channel, clears the pending question, and returns to running so the worker resumes.
+func TestModelAskRoundTrip(t *testing.T) {
+	m, reply := newAskModel(t, domain.AskRequest{Question: "what colour?"})
+
+	m = typeInput(t, m, "teal")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	select {
+	case got := <-reply:
+		if got.Text != "teal" {
+			t.Errorf("answer = %q, want %q", got.Text, "teal")
+		}
+	default:
+		t.Fatal("no answer sent on the reply channel")
+	}
+	if m.state != stateRunning {
+		t.Errorf("state = %v, want running after the answer", m.state)
+	}
+	if m.pendingAsk != nil {
+		t.Error("pending question not cleared after the answer")
+	}
+	if cmd == nil {
+		t.Error("spinner tick not re-armed on the return to running")
+	}
+}
+
+// The pending question renders into the View.
+func TestModelAskPromptRender(t *testing.T) {
+	m, _ := newAskModel(t, domain.AskRequest{Question: "pick a port number"})
+	got := plain(m.View())
+	if !strings.Contains(got, "pick a port number") {
+		t.Errorf("ask prompt missing the question:\n%s", got)
+	}
+}
+
+// A stop key while a question is pending cancels the worker; the question clears when the
+// worker reports back (the same structural cancel path as the Approval gate).
+func TestModelAskCancelClearsPrompt(t *testing.T) {
+	m, _ := newAskModel(t, domain.AskRequest{Question: "q?"})
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+
+	m = step(t, m, keyEsc())
+	if !cancelled {
+		t.Error("esc did not cancel the in-flight worker")
+	}
+
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+	if m.state != stateIdle {
+		t.Fatalf("state = %v, want idle after cancellation", m.state)
+	}
+	if m.pendingAsk != nil {
+		t.Error("pending question not cleared after cancellation")
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Snapshot-on-quit (phase-2 detail plan §4 P2.5; §6.1)
 // ----------------------------------------------------------------------------
 

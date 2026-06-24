@@ -29,5 +29,16 @@
 // Phase 3 (P3.10) adds the diagnostics tool — a read-only SubprocessTool that checks Go
 // in-process (go/parser for syntax, always available) plus an optional go vet, and
 // degrades gracefully to a clear "no diagnostics available" for languages with no
-// provider (§3a). The network and MCP tools land in later phases.
+// provider (§3a).
+//
+// Phase 3 (P3.11) adds the network and host tools: web_fetch (GET), http_request (general
+// request), and web_search (a config'd, default-off search endpoint) — in-process net/http
+// ExternalEffectTools of kind network (the disposition auto-runs them in Auto, url-filtered,
+// and routes them through ExternalEffects for the bench), each filtering every URL through a
+// security.URLGuard whose default-on, resolved-IP SSRF floor blocks loopback / private /
+// metadata addresses (pre-flight AND at dial time, closing DNS-rebinding). ask_user routes a
+// free-text question to the host's Asker delegate (the public analogue of Approver); it is
+// ReadOnly (runs in Plan, mode-independent) and is registered only when an Asker is supplied
+// (NewDefaultRegistryWithHost threads the URLGuard, search endpoint, and Asker from Config).
+// The MCP tools land in P3.15.
 package tools

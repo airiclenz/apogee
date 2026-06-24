@@ -44,6 +44,13 @@
 #            a warning every session.
 # confine-to-workspace: true
 
+# Search endpoint for the web_search tool. Default-OFF: with no endpoint set, web_search is
+# offered to the model but reports that web search is unavailable (it never fails the turn).
+# There is no hard-wired provider — point this at your own search backend, which receives the
+# query as the `q` URL parameter. Config-file only (no flag or env). The SSRF floor (loopback,
+# private, and metadata addresses are always blocked, by resolved IP) applies regardless.
+# web-search-endpoint: https://search.example.com/search
+
 
 
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).

@@ -27,6 +27,7 @@ const (
 	stateIdle             uiState = iota // awaiting input; the worker is not running
 	stateRunning                         // a worker drives an Exchange; input is refused
 	stateAwaitingApproval                // a tool call is blocked on the human's decision
+	stateAwaitingAsk                     // an ask_user question is blocked on the human's typed answer
 	stateErrored                         // the worker returned a loop-level error
 )
 
@@ -49,10 +50,11 @@ type Model struct {
 	spinner  spinner.Model
 
 	// Lifecycle.
-	state   uiState
-	cancel  context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
-	pending *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
-	lastErr error              // the error behind stateErrored, shown in the status line
+	state      uiState
+	cancel     context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
+	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
+	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
+	lastErr    error              // the error behind stateErrored, shown in the status line
 
 	// Content & layout.
 	transcript    transcript
@@ -150,6 +152,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pending = &msg
 		return m, nil
 
+	case askReqMsg:
+		// The worker's Asker hands a free-text question to the Update loop; record it, switch
+		// state, and re-focus the (emptied) input so the human types the answer. View renders
+		// the question; submitAnswer replies on msg.Reply when the human submits (P3.11).
+		m.state = stateAwaitingAsk
+		m.pendingAsk = &msg
+		m.input.Reset()
+		m.layout()
+		return m, m.input.Focus()
+
 	case exchangeDoneMsg:
 		m.finishWorker(stateIdle)
 		return m, nil
@@ -204,6 +216,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case stateIdle:
 			return m.submit()
+		case stateAwaitingAsk:
+			// Submit the typed answer back to the blocked ask_user tool (P3.11).
+			return m.submitAnswer()
 		case stateErrored:
 			// Dismiss the error and return to idle so the next message can be sent.
 			m.lastErr = nil
@@ -220,7 +235,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleApprovalKey(msg)
 	}
 
-	if m.state == stateIdle {
+	// While awaiting an ask_user answer the input box is live so the human types the reply —
+	// the same editing path as idle (enter, handled above, submits it).
+	if m.state == stateIdle || m.state == stateAwaitingAsk {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
@@ -289,6 +306,25 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, m.spinner.Tick)
 }
 
+// submitAnswer sends the typed answer back to the blocked ask_user tool over the rendezvous
+// reply channel (buffered cap 1, so the send never blocks — messages.go) and returns to
+// running so the worker's blocked Step resumes; the spinner tick is re-armed because the
+// chain died when the question went up. The input box is emptied (it was borrowed for the
+// answer). An empty answer is allowed — the human may legitimately reply with nothing — so
+// the answer round-trips whatever was typed. Only reachable from stateAwaitingAsk.
+func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
+	if m.pendingAsk == nil {
+		return m, nil
+	}
+	answer := strings.TrimSpace(m.input.Value())
+	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
+	m.pendingAsk = nil
+	m.input.Reset()
+	m.state = stateRunning
+	m.layout()
+	return m, m.spinner.Tick
+}
+
 // stopWorker cancels the in-flight worker. The worker honours the cancel at the next
 // quiescent boundary and returns a cancelledMsg, which clears the state; until then the
 // model stays running. A cancelled approval gate unblocks the same way (C3/C4).
@@ -299,11 +335,12 @@ func (m *Model) stopWorker() {
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
-// arrives: it clears the CancelFunc and any pending Approval. The new state is idle for a
-// completed or cancelled Exchange, errored for a loop fault.
+// arrives: it clears the CancelFunc and any pending Approval or ask_user question. The new
+// state is idle for a completed or cancelled Exchange, errored for a loop fault.
 func (m *Model) finishWorker(next uiState) {
 	m.cancel = nil
 	m.pending = nil
+	m.pendingAsk = nil
 	m.state = next
 }
 
@@ -338,10 +375,13 @@ func (m Model) saveSession() {
 	_ = m.save(sess)
 }
 
-// busy reports whether a worker is in flight (running or blocked on an Approval) — the
-// states in which input is refused and the stop key cancels instead of quitting.
+// busy reports whether a worker is in flight (running, blocked on an Approval, or blocked on
+// an ask_user question) — the states in which a free submit is refused and the stop key
+// cancels instead of quitting.
 func (m Model) busy() bool {
-	return m.state == stateRunning || m.state == stateAwaitingApproval
+	return m.state == stateRunning ||
+		m.state == stateAwaitingApproval ||
+		m.state == stateAwaitingAsk
 }
 
 // ----------------------------------------------------------------------------
@@ -431,6 +471,11 @@ func (m Model) View() tea.View {
 	var prompt string
 	if m.state == stateAwaitingApproval && m.pending != nil {
 		prompt = m.approvalPrompt(m.pending.Request)
+	}
+	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
+		prompt = m.askPrompt(m.pendingAsk.Request)
+	}
+	if prompt != "" {
 		h := m.viewport.Height() - lipgloss.Height(prompt)
 		if h < 1 {
 			h = 1
@@ -503,6 +548,8 @@ func (m Model) statusLine() string {
 		left = m.spinner.View() + " " + turn
 	case stateAwaitingApproval:
 		left = m.th.statusFaint.Render("approval needed · ") + turn
+	case stateAwaitingAsk:
+		left = m.th.statusFaint.Render("answer needed · ") + turn
 	case stateErrored:
 		left = m.th.errorText.Render("error") + m.th.statusFaint.Render(" · ") + turn
 	}
@@ -594,5 +641,16 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	if args := prettyJSON(req.Arguments); args != "" {
 		body += "\n" + m.th.toolDetail.Render(args)
 	}
+	return body
+}
+
+// askPrompt renders the pending ask_user question above the input box: the question on a
+// bold lead line and a one-line hint that the input below is the answer field (P3.11). The
+// human types into the (borrowed) input box and presses enter to submit, or esc to cancel —
+// the same chrome as a normal message, with the question framing it.
+func (m Model) askPrompt(req domain.AskRequest) string {
+	head := approvalStyle.Render("the assistant is asking:")
+	body := head + "\n" + m.th.toolDetail.Render(req.Question)
+	body += "\n" + m.th.statusFaint.Render("type your answer below · ⏎ send · esc cancel")
 	return body
 }

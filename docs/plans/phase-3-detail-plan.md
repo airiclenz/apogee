@@ -1263,6 +1263,69 @@ no network); an `mcp`-kind tool still Approval-gates in Auto under `confine=true
 `ask-user` round-trips a question→answer through the delegate (TUI prompt; bench script) **and is callable
 in Plan without Approval**; resume makes no network promise (ADR 0008).
 
+#### ✅ P3.11 result — landed 2026-06-24 (network + host tools; SSRF floor closed by resolved IP + dial-time; gate GREEN; no new dependency)
+
+The four P3.11 tools ship behind the public `Tool` interface, wired through `Config` via the new
+`tools.NewDefaultRegistryWithHost`/`HostTools` seam (the loop's `resolveTools` threads the
+`URLGuard`, the configured web-search endpoint, and the `Asker`). **No new dependency** (stdlib
+`net/http`; `go mod tidy` clean; ADR-0010 grep stays empty). **What landed:**
+
+- **Three network tools** (`internal/tools/{web_fetch,http_request,web_search}.go`, shared helpers
+  in `network.go`): in-process `net/http` `ExternalEffectTool`s of kind **`network`** — they
+  carry **no** `workspaceScopedWriter` marker and are **not** `SubprocessTool`s (no spawn, no
+  Confiner lifecycle). The existing D5 disposition already **auto-runs `classNetwork` in Auto**
+  (url-filtered) and routes external-effect tools through `ExternalEffects.Do` for the bench, so
+  the gating/stub acceptance holds **with no dispatch change** — the tools just classify into the
+  existing class (asserted: `web_fetch` is `EffectNetwork`, not workspace-writer/subprocess).
+  `web_fetch` = GET; `http_request` = method/headers/body with a **method arg-guard** (CONNECT/TRACE
+  refused); `web_search` posts a query (`q` param) to the **config'd, default-off** endpoint and
+  reports a graceful "not configured" when absent (never a crash). Each caps the response body
+  (2 MiB), bounds the timeout, and **does not auto-follow redirects** (a redirect to a private host
+  is returned raw, not silently chased).
+- **The carried SSRF finding — CLOSED.** `URLGuard` now carries a **default-on, tighten-only SSRF
+  floor** (`internal/security/ssrf.go`): loopback (127/8, ::1), cloud **IMDS `169.254.169.254`** +
+  link-local (169.254/16, fe80::/10), RFC-1918 (10/8, 172.16/12, 192.168/16) + ULA (fc00::/7),
+  unspecified, and IPv4-mapped forms denied **by the RESOLVED IP** (so `localhost`, a
+  private-resolving DNS name, and decimal/hex IP encodings are all caught). The floor is **never
+  dissolvable by config** — config may only ADD denials; `DisableIPFloor()` is a code-only opt-out
+  (mirrors the dangerous-rule tighten-only semantics). **DNS-rebinding/TOCTOU:** the pre-flight
+  `CheckContext` resolve is the cheap first line; the real bound is **`SafeDialControl`**, a
+  `net.Dialer.Control` hook installed on every network tool's transport that **re-validates the
+  ACTUAL connected IP at dial time**, so a rebinding name that passes the pre-flight check still
+  cannot connect to a private address. Tests (hermetic, injected resolver — no real DNS/network):
+  a public IP passes; loopback-by-name, IMDS, a private-resolving hostname, and an IP-literal in
+  **each** blocked range are all denied; an allow-listed-but-private host still hits the floor
+  (tighten-only); the dial-time control blocks loopback/IMDS/private connects.
+- **`ask_user` + the `Asker` host delegate** (`internal/tools/ask_user.go`; `domain/ask.go`;
+  facade re-exports `Asker`/`AskRequest`/`AskAnswer`): a new **struct-typed** `Config.Asker`
+  (`Ask(ctx, AskRequest) (AskAnswer, error)` — freeze-safe per D7, so a post-v1 `Choices` field is
+  additive), the public analogue of `Approver` but free-text, **NOT** a safety gate. `ask_user` is
+  **`ReadOnly()`** (runs in Plan, mode-independent — never routed through the disposition gate) and
+  is **NOT** an `ExternalEffectTool`. A **nil Asker ⇒ the tool is not registered** (graceful), so
+  the model is never offered a question it cannot have answered; the round-trip is covered by a
+  scripted-asker tool test and the TUI seam test. **TUI wiring:** `uiAsker` (the free-text sibling
+  of `uiApprover`) on the same late-bound `Bridge` programRef; a new `stateAwaitingAsk` +
+  `askReqMsg` + an input-prompt rendezvous (the human types the answer into the input box, enter
+  submits, esc cancels) — proven under `-race` (answer round-trips; a cancelled ctx returns
+  promptly with no goroutine leak; an unbound program still unblocks on cancel — **fail-safe**).
+- **`WebSearchEndpoint`** surfaced from `config.yaml` as a **file-only, default-off** key
+  (`web-search-endpoint`; mirrors the global-only `confine-to-workspace` plumbing — no flag/env per
+  the plan), documented (commented-out) in the embedded template. The **url-safety host allow/deny**
+  config key is **deferred** (TODO.md) exactly as P3.6 deferred surfacing custom dangerous-rules —
+  the SSRF floor (the security-relevant part) is on regardless.
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go
+vet ./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` (no FAIL/panic/DATA RACE) ·
+ADR-0010 grep empty · 6 cross-builds OK (`CGO_ENABLED=0`) · `go mod tidy` no drift (stdlib only) ·
+`apogee --help` exit 0. No landlock/seatbelt enforcement is exercised here (the network tools are
+in-process — no Confiner), so there are no self-skips for this task.
+
+**Downstream notes.** **P3.13:** a sub-agent inherits the network/host tools via `registry.Subset`
+verbatim (the `URLGuard`/`Asker` ride the tool values — no extra threading); the `Asker`, like the
+`Approver`, threads from the parent `Config` into the nested Agent. **P3.16:** `Asker` is a new
+public v1 symbol to review at the freeze (D7 already named it). **Residual:** a user-tunable
+url-safety host allow/deny config layer is parked (TODO.md, tighten-only when built).
+
 ### P3.13 — Sub-agent orchestrator + ADR 0013
 Build `internal/agent/subagent` per D2: construct a nested `Agent` threading the parent's `Mode` /
 `Approver` / `Confiner` / guardrails (or stricter) and a `registry.Subset(names…)` **≤ the parent's**

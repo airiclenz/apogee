@@ -31,15 +31,16 @@ type programSender interface {
 // root builds a Bridge, installs its Sink and Approver into Config, constructs the Agent,
 // then Run binds the live program once it exists (phase-2 detail plan §3 C2/C3).
 //
-// The Sink and Approver share one late-bound programRef, so a single Bind wires both.
+// The Sink, Approver, and Asker share one late-bound programRef, so a single Bind wires all.
 type Bridge struct {
 	prog     *programRef
 	sink     *teaSink
 	approver *uiApprover
+	asker    *uiAsker
 }
 
-// NewBridge builds an unbound Bridge whose Sink and Approver are usable immediately as
-// Config delegates. They only need the program once the Agent is stepped, which cannot
+// NewBridge builds an unbound Bridge whose Sink, Approver, and Asker are usable immediately
+// as Config delegates. They only need the program once the Agent is stepped, which cannot
 // happen before Run binds it — so construction is safe even though no program exists yet.
 func NewBridge() *Bridge {
 	prog := &programRef{}
@@ -47,6 +48,7 @@ func NewBridge() *Bridge {
 		prog:     prog,
 		sink:     &teaSink{prog: prog},
 		approver: &uiApprover{prog: prog},
+		asker:    &uiAsker{prog: prog},
 	}
 }
 
@@ -55,6 +57,10 @@ func (b *Bridge) Sink() domain.EventSink { return b.sink }
 
 // Approver returns the Approver the composition root installs in Config.Approver (C3).
 func (b *Bridge) Approver() domain.Approver { return b.approver }
+
+// Asker returns the Asker the composition root installs in Config.Asker — the free-text
+// ask-user gate (P3.11), late-bound through the same programRef as the Approver.
+func (b *Bridge) Asker() domain.Asker { return b.asker }
 
 // Bind connects the live program. Run calls it once, before the program processes any
 // input that could launch a worker, so every later Emit/Approve reaches a bound program.

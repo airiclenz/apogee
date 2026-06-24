@@ -1,9 +1,19 @@
 package security
 
 import (
+	"context"
 	"errors"
+	"net"
 	"testing"
 )
+
+// publicResolver maps every host to a fixed public IP so the existing scheme/host tests stay
+// hermetic under the SSRF floor: they exercise the string-level allow/deny logic, not the
+// floor, so they must resolve to something the floor permits. Floor behaviour has its own
+// dedicated tests (ssrf_test.go).
+func publicResolver(context.Context, string) ([]net.IP, error) {
+	return []net.IP{net.ParseIP("93.184.216.34")}, nil // example.com's documentation IP
+}
 
 func TestURLGuard_Check(t *testing.T) {
 	t.Parallel()
@@ -33,7 +43,7 @@ func TestURLGuard_Check(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := tc.guard.Check(tc.url)
+			err := tc.guard.WithResolver(publicResolver).Check(tc.url)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("Check(%q) = nil, want error", tc.url)

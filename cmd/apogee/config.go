@@ -38,6 +38,10 @@ type settings struct {
 	// Auto's blast radius. Default true. (There is no project-level config file today; the
 	// file-only resolution is what keeps it un-loosenable by the invocation environment.)
 	confineToWorkspace bool
+
+	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
+	// file-only and default-off (empty ⇒ web_search reports "not configured").
+	webSearchEndpoint string
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -54,6 +58,10 @@ type layer struct {
 	// confineToWorkspace is set only by the FILE layer (global-config-only, ADR 0012). The
 	// env and flag layers leave it nil so the invocation environment cannot loosen it.
 	confineToWorkspace *bool
+
+	// webSearchEndpoint is set only by the FILE layer (P3.11 — web-search is config'd,
+	// default-off, with no flag/env). Empty/absent ⇒ web_search reports "not configured".
+	webSearchEndpoint *string
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -68,6 +76,9 @@ func resolveSettings(file, env, flag layer) settings {
 	s := settings{mode: string(modeAskBefore), confineToWorkspace: true}
 	if file.confineToWorkspace != nil {
 		s.confineToWorkspace = *file.confineToWorkspace
+	}
+	if file.webSearchEndpoint != nil {
+		s.webSearchEndpoint = *file.webSearchEndpoint
 	}
 	for _, l := range []layer{file, env, flag} {
 		if l.endpoint != nil {
@@ -108,6 +119,10 @@ type fileConfig struct {
 	// secure default true). It has no flag or env — editing the global config IS the
 	// deliberate acknowledgement required to run Auto unconfined.
 	ConfineToWorkspace *bool `yaml:"confine-to-workspace"`
+	// WebSearch is the search endpoint the web_search tool posts a query to (P3.11). Absent
+	// ⇒ web_search is registered but reports "not configured" (default-off, no hard-wired
+	// provider). Empty string is treated as absent.
+	WebSearch string `yaml:"web-search-endpoint"`
 }
 
 // layer projects a parsed file config onto a precedence layer: a present (non-empty)
@@ -131,6 +146,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.ConfineToWorkspace != nil {
 		l.confineToWorkspace = fc.ConfineToWorkspace
+	}
+	if fc.WebSearch != "" {
+		l.webSearchEndpoint = &fc.WebSearch
 	}
 	return l
 }
@@ -254,6 +272,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.bypass = s.bypass
 	opts.hostAlias = s.hostAlias
 	opts.confineToWorkspace = s.confineToWorkspace
+	opts.webSearchEndpoint = s.webSearchEndpoint
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

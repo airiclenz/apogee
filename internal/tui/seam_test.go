@@ -21,6 +21,7 @@ type stubProgram struct {
 	mu         sync.Mutex
 	msgs       []tea.Msg
 	onApproval func(approvalReqMsg) // invoked inside Send for each approvalReqMsg, if set
+	onAsk      func(askReqMsg)      // invoked inside Send for each askReqMsg, if set
 	replies    sync.WaitGroup       // tracks async reply goroutines for a clean drain
 }
 
@@ -35,9 +36,13 @@ func (s *stubProgram) Send(msg tea.Msg) {
 	s.mu.Lock()
 	s.msgs = append(s.msgs, msg)
 	onApproval := s.onApproval
+	onAsk := s.onAsk
 	s.mu.Unlock()
 	if req, ok := msg.(approvalReqMsg); ok && onApproval != nil {
 		onApproval(req)
+	}
+	if req, ok := msg.(askReqMsg); ok && onAsk != nil {
+		onAsk(req)
 	}
 }
 
@@ -56,7 +61,22 @@ func (s *stubProgram) replyWith(decision domain.ApprovalDecision) {
 	}
 }
 
-// wait drains the async reply goroutines started by replyWith.
+// answerWith makes the stub answer every ask_user question asynchronously, from its own
+// goroutine — modelling the Update loop replying after the human types an answer (P3.11).
+// Call wait to drain those goroutines before the test ends.
+func (s *stubProgram) answerWith(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onAsk = func(req askReqMsg) {
+		s.replies.Add(1)
+		go func() {
+			defer s.replies.Done()
+			req.Reply <- domain.AskAnswer{Text: text}
+		}()
+	}
+}
+
+// wait drains the async reply goroutines started by replyWith / answerWith.
 func (s *stubProgram) wait() { s.replies.Wait() }
 
 // messages returns a copy of the captured Msgs in send order.

@@ -77,16 +77,36 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 }
 
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;
-// otherwise, when Config.WorkspaceDir is set, the built-in file tools scoped to it; else
-// no tools (the host gave neither, so the Agent runs tool-less).
+// otherwise, when Config.WorkspaceDir is set, the built-in file tools scoped to it (with the
+// network/host tools configured from Config — the url-safety policy, the web-search endpoint,
+// and the Asker); else no tools (the host gave neither, so the Agent runs tool-less).
 func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 	if cfg.Tools != nil {
 		return cfg.Tools
 	}
 	if cfg.WorkspaceDir != "" {
-		return tools.NewDefaultRegistry(cfg.WorkspaceDir)
+		return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, hostTools(cfg))
 	}
 	return nil
+}
+
+// hostTools builds the host-supplied tool configuration (P3.11) from Config: the url-safety
+// guard the network tools filter through (the zero URLGuard — its default-on SSRF floor always
+// applies in ALL modes, an app-level guard independent of OS confinement), the configured
+// web-search endpoint (empty ⇒ web_search reports "not configured"), and the Asker delegate
+// (nil ⇒ ask_user is not registered).
+//
+// The url-safety policy is deliberately the default floor, NOT seeded from ConfineNetworkAllow:
+// that field is the OS confinement box's network allow-list (CIDRs the confined SUBPROCESS may
+// reach), a different concept from the in-process tools' host allow/deny — conflating them would
+// silently restrict the network tools to the confinement list. A dedicated url-safety config key
+// is a thin later addition; the SSRF floor is the security-relevant default and is on regardless.
+func hostTools(cfg domain.Config) tools.HostTools {
+	return tools.HostTools{
+		URLGuard:          security.URLGuard{},
+		WebSearchEndpoint: cfg.WebSearchEndpoint,
+		Asker:             cfg.Asker,
+	}
 }
 
 // resumeAgent rebuilds an Agent from snap, rejecting a snapshot newer than this build

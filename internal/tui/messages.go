@@ -20,6 +20,7 @@ import (
 var (
 	_ tea.Msg = eventMsg{}
 	_ tea.Msg = approvalReqMsg{}
+	_ tea.Msg = askReqMsg{}
 	_ tea.Msg = exchangeDoneMsg{}
 	_ tea.Msg = cancelledMsg{}
 	_ tea.Msg = errMsg{}
@@ -40,6 +41,16 @@ type eventMsg struct {
 type approvalReqMsg struct {
 	Request domain.ApprovalRequest
 	Reply   chan domain.ApprovalDecision
+}
+
+// askReqMsg hands a pending ask-user question to the Update loop. The uiAsker sends it from
+// the worker goroutine and blocks on Reply; the model renders the question and, on the
+// human's typed-then-submitted answer, sends it back over Reply (P3.11 — the free-text
+// analogue of approvalReqMsg). Reply is buffered (cap 1) by the sender so the Update loop
+// never blocks replying, and so a late answer after a cancel is absorbed rather than leaking.
+type askReqMsg struct {
+	Request domain.AskRequest
+	Reply   chan domain.AskAnswer
 }
 
 // exchangeDoneMsg is the worker's terminal Msg when the Exchange reached its final no-tool

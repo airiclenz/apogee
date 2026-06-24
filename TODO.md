@@ -41,3 +41,28 @@ explicit internal table; this feature would expose a *user-tunable* layer on top
 
 **What v1 ships instead (so the deferral is safe):** the internal disposition table (D5) +
 the `confine-to-workspace` flag (the one blanket loosen) + the existing narrow allowlists.
+
+---
+
+## Dedicated url-safety config key for the network tools
+
+**Status:** parked 2026-06-24 (P3.11). Post-v1, **additive** (a new config key + a new
+optional field on the network tools' `URLGuard` — a minor bump).
+
+**The idea:** surface `URLGuard.AllowHosts` / `DenyHosts` (and the scheme allow-set) from
+`config.yaml`, so a user can restrict `web_fetch`/`http_request`/`web_search` to an allow-list
+of hosts, or add explicit host denials, per machine/project.
+
+**Why it's deferred:** P3.11 ships the **load-bearing** url-safety: the **default-on SSRF
+floor** (loopback / private / IMDS / link-local denied by resolved IP, pre-flight AND at dial
+time — DNS-rebinding closed) is **always on** and **tighten-only** (config could only ever ADD
+denials, never dissolve the floor — `URLGuard.DisableIPFloor` is a code-level opt-out, not a
+config key). The floor is the security-relevant part; a user-tunable host allow/deny layer on
+top is a convenience that can wait. This mirrors the **P3.6** deferral of surfacing the
+dangerous-rule config + the breaker threshold into `config.yaml` (the merge logic is built and
+tested; only the file-key surfacing waits). The `WebSearchEndpoint` key **is** surfaced in
+P3.11 (file-only, default-off) because web_search is unusable without it.
+
+**The tighten-only law (must hold when built):** like the dangerous-rule merge and the SSRF
+floor, a config url-safety layer may only **tighten** (add `DenyHosts`, narrow `AllowHosts`) —
+it can never remove the SSRF floor or widen the scheme set past the safe default.

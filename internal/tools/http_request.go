@@ -1,0 +1,144 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
+)
+
+var httpRequestSchema = json.RawMessage(`{
+  "type": "object",
+  "required": ["url"],
+  "properties": {
+    "url": {"type": "string", "description": "The absolute http(s) URL to request."},
+    "method": {"type": "string", "description": "HTTP method (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS). Default GET."},
+    "headers": {"type": "object", "description": "Optional request headers as a string-to-string map.", "additionalProperties": {"type": "string"}},
+    "body": {"type": "string", "description": "Optional request body (sent as-is for POST/PUT/PATCH)."},
+    "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default 30, max 120)."}
+  }
+}`)
+
+type httpRequestArgs struct {
+	URL            string            `json:"url"`
+	Method         string            `json:"method"`
+	Headers        map[string]string `json:"headers"`
+	Body           string            `json:"body"`
+	TimeoutSeconds int               `json:"timeout_seconds"`
+}
+
+// allowedHTTPMethods is the set of methods http_request accepts — the arg-guard that rejects
+// an unknown/dangerous method before reaching out (CONNECT/TRACE are not coding-agent idioms).
+var allowedHTTPMethods = map[string]bool{
+	http.MethodGet: true, http.MethodPost: true, http.MethodPut: true,
+	http.MethodPatch: true, http.MethodDelete: true, http.MethodHead: true,
+	http.MethodOptions: true,
+}
+
+// HTTPRequest performs a general http(s) request (method, headers, body) and returns the
+// response status, a stable header subset, and the (capped) body. It is an ExternalEffectTool
+// of kind network, filtered by the same URLGuard (scheme/host + SSRF floor, pre-flight and at
+// dial time) as web_fetch. Stateless across Turns (ADR 0008).
+type HTTPRequest struct{ guard security.URLGuard }
+
+// NewHTTPRequest returns an http_request tool that filters every URL through guard.
+func NewHTTPRequest(guard security.URLGuard) *HTTPRequest { return &HTTPRequest{guard: guard} }
+
+// Name returns the stable identifier the model calls.
+func (t *HTTPRequest) Name() string { return "http_request" }
+
+// Description returns the model-facing summary of the tool.
+func (t *HTTPRequest) Description() string {
+	return "Make an http(s) request with a chosen method, headers, and body, and return the response status, headers, and body. Use this for API calls (POST/PUT/etc.). Blocked URLs (loopback, private, or metadata addresses, and disallowed hosts) and unsupported methods are refused."
+}
+
+// Schema returns the JSON schema of the tool's arguments.
+func (t *HTTPRequest) Schema() json.RawMessage { return httpRequestSchema }
+
+// ExternalEffect reports that http_request reaches the network (kind network).
+func (t *HTTPRequest) ExternalEffect() domain.ExternalEffectKind { return domain.EffectNetwork }
+
+// Execute performs the request. A blocked URL, an unsupported method, or a transport error
+// are surfaced as results; only ctx cancellation is a Go error (ADR 0007).
+func (t *HTTPRequest) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ToolResult{}, err
+	}
+
+	var args httpRequestArgs
+	if err := decodeArgs(call.Arguments, &args); err != nil {
+		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	}
+	if strings.TrimSpace(args.URL) == "" {
+		return errorResult(call.ID, "url is required"), nil
+	}
+
+	method := strings.ToUpper(strings.TrimSpace(args.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+	if !allowedHTTPMethods[method] {
+		return errorResult(call.ID, fmt.Sprintf("unsupported HTTP method %q", method)), nil
+	}
+
+	if err := t.guard.CheckContext(ctx, args.URL); err != nil {
+		return errorResult(call.ID, "url blocked by url-safety: "+err.Error()), nil
+	}
+
+	var bodyReader io.Reader
+	if args.Body != "" {
+		bodyReader = strings.NewReader(args.Body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, args.URL, bodyReader)
+	if err != nil {
+		return errorResult(call.ID, "could not build request: "+err.Error()), nil
+	}
+	for k, v := range args.Headers {
+		req.Header.Set(k, v)
+	}
+
+	client := newHTTPClient(t.guard, clampTimeout(args.TimeoutSeconds))
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return domain.ToolResult{}, ctx.Err()
+		}
+		if networkURLError(err) {
+			return errorResult(call.ID, "url blocked by url-safety: "+err.Error()), nil
+		}
+		return errorResult(call.ID, "request failed: "+err.Error()), nil
+	}
+	defer resp.Body.Close()
+
+	body, truncated := readCappedBody(resp.Body)
+	return okResult(call.ID, renderRequestResult(resp, body, truncated)), nil
+}
+
+// renderRequestResult formats the response for the model: status, a stable (sorted) header
+// list, and the (capped) body.
+func renderRequestResult(resp *http.Response, body string, truncated bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "HTTP %s\n", resp.Status)
+
+	keys := make([]string, 0, len(resp.Header))
+	for k := range resp.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s: %s\n", k, strings.Join(resp.Header[k], ", "))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(body)
+	if truncated {
+		fmt.Fprintf(&b, "\n\n[response truncated at %d bytes]", maxNetworkResponseBytes)
+	}
+	return b.String()
+}

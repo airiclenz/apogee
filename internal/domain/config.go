@@ -39,6 +39,7 @@ type Config struct {
 
 	// Host-supplied delegates. The host (TUI / bench / embedder) owns these.
 	Approver Approver  // the human-in-the-loop gate; required unless Mode==Plan
+	Asker    Asker     // free-text Q&A delegate for the ask_user tool; nil ⇒ ask_user is not registered (P3.11)
 	Confiner Confiner  // nil ⇒ no confinement ⇒ Auto is refused (ADR 0004)
 	Events   EventSink // where typed Events are pushed; required
 
@@ -62,6 +63,12 @@ type Config struct {
 	// (network, MCP). nil ⇒ live. The bench injects a deterministic stub for v1;
 	// record/replay slots in behind the same interface later (ADR 0008).
 	ExternalEffects ExternalEffects
+
+	// WebSearchEndpoint is the OpenAI-compatible-ish search backend the web_search tool
+	// posts a query to (P3.11). It is DEFAULT-OFF: empty ⇒ web_search is registered but
+	// reports "web search is not configured" (graceful, never a crash) — there is no
+	// hard-wired provider. The host folds a configured endpoint in from config.yaml.
+	WebSearchEndpoint string
 
 	// Budget / Compaction knobs (context/) are structural and load-bearing — they
 	// run even under Bypass. Defaults are sane; overrides are advanced.

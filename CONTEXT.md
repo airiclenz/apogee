@@ -123,6 +123,16 @@ _Avoid_: "naked model" (Bypass keeps the structural reducers on), "disabled mode
 The human-in-the-loop gate on a single tool call — the primary safety guarantee in
 Ask-Before mode. Delivered through a delegate the host (TUI, embedder) supplies.
 
+**Ask-user**:
+A free-text question the model puts to the human mid-task (via the `ask_user` tool), answered
+through a host-supplied **`Asker`** delegate — the public analogue of the **Approver**, but
+**not** a safety gate: it carries no allow/deny semantics, never bypasses the disposition, and
+is `ReadOnly` (it runs even in Plan, mode-independent). A `nil` Asker means the tool is simply
+not registered; a headless host must supply an Asker that **fails safe** (no hang). The TUI
+implements it as an input-prompt rendezvous (the free-text sibling of the Approval prompt); the
+bench as a scripted responder. Added in P3.11.
+_Avoid_: conflating it with Approval — an answer is not a permission.
+
 **Confinement**:
 OS-level restriction of the **unbounded subprocess surface** (shell / subprocess), attaching to
 **blast radius, not to a mode-wide binary** (ADR 0012, superseding ADR 0004): a tool runs
@@ -157,9 +167,12 @@ _Avoid_: "YOLO mode" (informal; it is a flag on Auto, not a fifth mode),
 "`--dangerously-skip-permissions`" (names Claude Code's analogue, not this flag).
 
 **Safety guardrails**:
-Apogee's production safety set: Agent modes, Approval, path-safety, tool-argument-guard (incl.
-the **Dangerous-action guard** floor), circuit-breaker, and audit log. The human-in-the-loop
-model — distinct from Confinement (OS-level) and from the bench's Sandbox.
+Apogee's production safety set: Agent modes, Approval, path-safety, **url-safety** (the network
+tools' `URLGuard` — scheme/host allow-deny plus a **default-on SSRF floor** that denies loopback /
+private / IMDS / link-local addresses **by resolved IP**, re-checked at dial time so DNS-rebinding
+is closed; tighten-only, never dissolvable by config), tool-argument-guard (incl. the
+**Dangerous-action guard** floor), circuit-breaker, and audit log. The human-in-the-loop model —
+distinct from Confinement (OS-level) and from the bench's Sandbox.
 _Avoid_: "the sandbox" (Apogee production is **not** sandboxed; "Sandbox" is a bench term
 for the bench's `RealSandbox` that confines *unsupervised* sim runs — do not use it for
 Apogee's production execution).

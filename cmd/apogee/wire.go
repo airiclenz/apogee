@@ -73,6 +73,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Bypass:       opts.bypass,
 		Events:       bridge.Sink(),
 		Approver:     bridge.Approver(),
+		Asker:        bridge.Asker(),
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
 		SessionsDir:  roots.sessions,
@@ -83,6 +84,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// subprocess surface where it does not (rather than refusing Auto).
 		Confiner:           platform.NewConfiner(),
 		ConfineToWorkspace: opts.confineToWorkspace,
+		WebSearchEndpoint:  opts.webSearchEndpoint,
 	}
 
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false

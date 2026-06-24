@@ -1,8 +1,10 @@
 package security
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -37,6 +39,32 @@ type URLGuard struct {
 	// the floor that keeps loopback / metadata endpoints unreachable by default when a
 	// caller seeds it.
 	DenyHosts []string
+
+	// disableFloor turns the default-on SSRF floor off — only for a test or a deliberately
+	// unfenced embedder. It is unexported and set only via DisableIPFloor, so a config
+	// merge can never dissolve the floor (tighten-only, mirroring the dangerous-rule
+	// semantics): config can ADD denials, never remove the floor (ssrf.go).
+	disableFloor bool
+	// resolver injects host→IP resolution for the SSRF floor so the tests stay hermetic
+	// (no real DNS). nil ⇒ the real net resolver (defaultIPResolver). It is unexported and
+	// set via WithResolver; an IP-literal host needs no resolver.
+	resolver func(ctx context.Context, host string) ([]net.IP, error)
+}
+
+// DisableIPFloor returns a copy of g with the default-on SSRF floor turned off. It is the
+// ONLY way to disable the floor (the floor is on for the zero value and survives any config
+// merge), used by a test or a deliberately-unfenced embedder. A config layer cannot reach
+// this — it is a code-level opt-out, not a configuration key.
+func (g URLGuard) DisableIPFloor() URLGuard {
+	g.disableFloor = true
+	return g
+}
+
+// WithResolver returns a copy of g whose SSRF floor resolves hosts through r — the seam the
+// network-tool tests inject a deterministic resolver through so they reach no real DNS.
+func (g URLGuard) WithResolver(r func(ctx context.Context, host string) ([]net.IP, error)) URLGuard {
+	g.resolver = r
+	return g
 }
 
 // defaultURLSchemes is the scheme allow-set when URLGuard.AllowSchemes is empty.
@@ -44,8 +72,20 @@ var defaultURLSchemes = []string{"http", "https"}
 
 // Check parses raw and reports whether the URL passes the guard, returning an
 // ErrURLBlocked-wrapped error (naming the reason) for a rejected URL and a parse error
-// for a malformed one. It is pure — no network is touched.
+// for a malformed one. It runs the string-level scheme/host checks and the resolved-IP
+// SSRF floor (resolving with context.Background()); CheckContext threads a caller's ctx
+// for cancellable resolution. No network beyond DNS resolution is touched.
 func (g URLGuard) Check(raw string) error {
+	return g.CheckContext(context.Background(), raw)
+}
+
+// CheckContext is Check with a caller-supplied ctx for the SSRF floor's host resolution, so
+// a slow/blocked DNS lookup is cancellable. It runs in order: parse, scheme allow, host
+// deny/allow (string-level), then the resolved-IP SSRF floor (the default-on tighten-only
+// safety net — loopback / IMDS / private / link-local denied by RESOLVED IP, ssrf.go). The
+// floor is the pre-flight half of the defence; SafeDialControl re-checks the connected IP at
+// dial time to close DNS-rebinding (ssrf.go).
+func (g URLGuard) CheckContext(ctx context.Context, raw string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return fmt.Errorf("%w: unparseable url: %v", ErrURLBlocked, err)
@@ -65,6 +105,12 @@ func (g URLGuard) Check(raw string) error {
 	}
 	if len(g.AllowHosts) > 0 && !hostMatches(host, g.AllowHosts) {
 		return fmt.Errorf("%w: host %q is not on the allow-list", ErrURLBlocked, host)
+	}
+
+	if g.floorEnabled() {
+		if err := g.resolveAndCheckFloor(ctx, host); err != nil {
+			return err
+		}
 	}
 	return nil
 }

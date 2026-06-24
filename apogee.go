@@ -142,6 +142,21 @@ const (
 )
 
 // ----------------------------------------------------------------------------
+// Ask-user (internal/domain) — the free-text host question delegate (P3.11)
+// ----------------------------------------------------------------------------
+
+// Asker is the host-supplied free-text Q&A delegate the ask_user tool routes a question to.
+// It is distinct from Approver (free-text, not a safety gate); a nil Asker means ask_user is
+// not registered. A headless host must supply an Asker that fails safe (no hang).
+type Asker = domain.Asker
+
+// AskRequest is the free-text question put to the human (a struct for freeze-safety).
+type AskRequest = domain.AskRequest
+
+// AskAnswer is the human's free-text reply (a struct for freeze-safety).
+type AskAnswer = domain.AskAnswer
+
+// ----------------------------------------------------------------------------
 // Tools (internal/domain)
 // ----------------------------------------------------------------------------
 
