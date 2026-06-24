@@ -731,6 +731,81 @@ N identical failing calls and surfaces an `ErrorEvent`, not a crash); the audit 
 call/decision/result; guardrails run in **all** modes (not just Auto). Path-safety parity with the
 Phase-1 tools (no regression on the 4 built-ins).
 
+#### ✅ P3.6 result — landed 2026-06-24 (guardrail layer built in `internal/security` + wired through the executor; gate GREEN; path-safety consolidated with 4-built-in parity)
+
+`internal/security` is filled (was a Phase-0 `doc.go` stub) — the human-in-the-loop guardrail layer
+(D6 / ADR 0012), distinct from the `Confiner`, running in **every** mode and threaded through the tool
+executor so all tools — and a sub-agent (D2) — inherit it. **No new dep** (`go mod tidy` clean);
+imports only `internal/domain` + stdlib (ADR-0010 grep stays empty). **What landed:**
+
+- **Consolidated path-safety** (`internal/security/pathsafety.go`): `ResolveInRoot` / `EvalRealPath` /
+  `ErrPathEscape` — the symlink-aware, traversal-rejecting guard moved **verbatim** from
+  `internal/tools/path_safety.go` (the logic is byte-for-byte the former code, now exported and in one
+  place). `internal/tools/path_safety.go` is reduced to thin aliases (`resolveInRoot` →
+  `security.ResolveInRoot`, `ErrPathEscape = security.ErrPathEscape`, `evalRealPath` →
+  `security.EvalRealPath`), so the **4 built-ins and their tests are untouched** and behaviour is
+  identical. **Parity verified:** `go test ./internal/tools/...` passes unchanged; the path-safety table
+  tests are duplicated at the guard's new home (`pathsafety_test.go`). New edge: `internal/tools` now
+  imports `internal/security` (a clean `tools → security → domain` chain, no cycle — `security` never
+  imports `tools`).
+- **URL-safety** (`urlsafety.go`): `URLGuard{AllowSchemes, AllowHosts, DenyHosts}` + `Check(raw)` →
+  `ErrURLBlocked`, **deny-first** precedence, scheme defaulting to http/https, exact-or-subdomain host
+  matching (a sibling-prefix host does not match). Provided now for P3.11's `web-fetch`/`http-request`;
+  **not yet wired** (no network tool exists) — the guard + its tests are the deliverable.
+- **Dangerous-action guard** (`dangerous.go` + `rules.go`): `DangerousActionGuard` over a tighten-only
+  ruleset, inspecting a call's tool name + every JSON string leaf, **whitespace-normalized + lower-cased**
+  (the only normalization — **no obfuscation-chasing**, by ADR 0012). Two tiers — **Tier-1 hard-refuse**
+  (no override) and **Tier-2 force-approval** — with the strictest matching tier winning. **Default
+  ruleset** (`DefaultDangerousRules`, precision-over-recall): T1 = `rm -rf`/`rm -fr` of root/home/system
+  (`/`, `~`, `$HOME`, `/etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|opt`), fork bomb,
+  `~/.ssh` writes, credential/persistence-file writes (`.bashrc`/`.zshrc`/`.aws/credentials`/`.netrc`/
+  `.npmrc` *under $HOME*), raw block-device `dd of=/dev/sd…`; T2 = `curl|wget|fetch … | sh`-class,
+  `sudo <cmd>`. **Precision asserted**: `rm -rf ./build`, `rm -rf node_modules`, `curl … | grep`, a
+  project `.npmrc`, `go build` etc. are **not** blocked. **Config-merge** (`MergeDangerousRules`): base
+  ⊕ global-add ⊕ global-remove(by id) ⊕ project-add — **global may add OR remove**, **project may only
+  add** (same-id add tightens in place; a project can never remove). A malformed regex is dropped, never
+  fatal.
+- **Circuit-breaker** (`circuitbreaker.go`): `CircuitBreaker` trips after N (default **3**) consecutive
+  identical failing calls keyed on `(tool, args-hash)`; a success clears the streak; `Tripped` short-
+  circuits before re-running; `Record` reports the **trip edge once** so the executor surfaces a single
+  `ErrorEvent`. Mutex-guarded (safe under `-race`).
+- **Audit** (`audit.go`): `AuditLog` — append-only `AuditRecord{Time, Tool, CallID, Decision, Reason,
+  IsError, Result}`; `Records()` returns a copy (no storage leak); large results truncated.
+- **Executor bundle + wiring** (`guard.go` + `internal/agent/dispatch.go`): `security.Guards{Dangerous,
+  Breaker, Audit}` (zero value inert) with `PreExecute` (breaker-tripped → refuse; then dangerous-action
+  → refuse / force-approval; **runs ahead of the mode disposition**, tighten-only) and `RecordExecution`
+  (breaker + audit post-run). The Agent holds a `guards` field (`security.NewDefaultGuards()` at
+  construction); `resolveAndExecute` runs `PreExecute` **first** (Tier-1/breaker → error `ToolResult` +
+  `ErrorEvent`, before the Plan/Approval gates and independent of the Confiner), forces the Approver on
+  Tier-2 (a `nil` Approver ⇒ refuse), and records every call's outcome. **`needsApproval` is
+  unchanged** — the per-mode blast-radius disposition rework (D5) is left to **P3.4**; P3.6 only adds the
+  always-on guardrail layer beneath it and an extra `force` parameter on the existing `approve` helper.
+
+**Dangerous-action ruleset + precision posture:** membership is *almost-never-legitimate* **and**
+*catastrophic*; the rule patterns anchor on dangerous **targets** (absolute root/home/system paths,
+`$HOME` dotfiles) so destructive-but-normal project operations (`rm -rf ./build`) never match — recall is
+deliberately sacrificed for precision (it is a mistake-net, not an adversary boundary).
+
+**Config-merge approach + deferral:** the merge **rule** (global add/remove, project add-only) is
+implemented and table-tested as `MergeDangerousRules`; **the config.yaml file-surfacing is deferred** —
+no `config.yaml` keys are read for custom rules yet (the executor wires the default ruleset via
+`NewDefaultGuards`). Surfacing the rules + the breaker threshold into `~/.apogee/config.yaml` is a thin
+later addition (the merge function is the hard part and is done + tested). url-safety is likewise built
+but unwired (waits on P3.11's network tools).
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin go vet` clean ·
+`go build ./...` ok · `go test -race ./...` all `ok` (no FAIL/panic/DATA RACE) · ADR-0010 grep empty · 6
+cross-builds OK · `go mod tidy` no drift · `apogee --help` exit 0.
+
+**Downstream notes.** **P3.4:** key the mode disposition (D5) on top of `PreExecute` — the dangerous-
+action guard already hooks "before the disposition" inside `resolveAndExecute` (`PreExecute` runs first,
+tighten-only), so P3.4's `needsApproval`-rework only needs to handle the *clear* path; the `force`
+parameter on `approve` is the seam a Tier-2 forces-Approval-even-in-Auto through, and P3.4 should leave
+that override intact. **P3.11:** call `URLGuard.Check` from `web-fetch`/`http-request` before reaching out
+(`network`-kind tools auto-run in Auto, url-filtered). **P3.13:** the sub-agent inherits guardrails by
+threading the parent's `security.Guards` value into the nested Agent (it is a copyable value with no live
+state); the marker/breaker/audit ride along verbatim.
+
 ### P3.7 — File-editing tool family
 The pure-Go, stateless editing tools (ADR 0008): **find-replace** single + multi (literal + anchored,
 the apogee-code semantics), **`diff`** (a small in-package myers diff — no external), **`patch`/

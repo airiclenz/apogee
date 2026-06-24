@@ -5,6 +5,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
@@ -25,6 +26,7 @@ type Agent struct {
 	upstream provider.Responder        // provider seam (Decision C): fake in tests, real HTTP via New
 	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
 	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry)
+	guards   security.Guards           // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
 
 	conv         domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step

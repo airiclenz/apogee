@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // dispatchOutcome reports whether a Turn's tool dispatch ran to completion or was cut short
@@ -48,28 +49,75 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 	return dispatchDone
 }
 
-// resolveAndExecute resolves a tool call against the registry, applies the Plan-mode and
-// Approval gates, and executes it — returning the result (or an error result) and whether
-// ctx was cancelled mid-flight.
+// resolveAndExecute resolves a tool call against the registry, applies the always-on
+// security guardrails (D6) and the Plan-mode and Approval gates, and executes it —
+// returning the result (or an error result) and whether ctx was cancelled mid-flight.
+//
+// The guardrails (security.Guards) run FIRST, in every mode and independent of the
+// Confiner, and are tighten-only (ADR 0012): a Tier-1 dangerous action or a tripped
+// circuit-breaker refuses the call outright; a Tier-2 dangerous action forces the
+// Approver even in Auto. They run ahead of the mode disposition — they never loosen it.
+// (The full mode × blast-radius disposition is P3.4's rework of needsApproval; P3.6 wires
+// only the always-on guardrail layer beneath it.)
 func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
 		return errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool)), dispatchDone
 	}
+
+	guard := a.guards.PreExecute(call)
+	if guard.Outcome == security.GuardRefuse {
+		result := errorToolResult(call.ID, guardRefusalMessage(guard))
+		a.guards.RecordBlocked(call, guard.Audit, guard.Reason, result)
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: call.Tool, Err: guardRefusalMessage(guard)})
+		return result, dispatchDone
+	}
+
 	if a.cfg.Mode == domain.ModePlan && !domain.IsReadOnly(tool) {
 		// The Plan menu hides write tools; refuse one defensively if the model calls it.
 		return errorToolResult(call.ID, "plan mode: write tools are not permitted"), dispatchDone
 	}
 
-	allowed, outcome := a.approve(ctx, turn, tool, call)
+	// A Tier-2 dangerous action forces the Approver even where the mode disposition
+	// would not (e.g. Auto): the guardrail can only tighten.
+	forceApproval := guard.Outcome == security.GuardForceApproval
+	allowed, outcome := a.approve(ctx, turn, tool, call, forceApproval)
 	if outcome == dispatchCancelled {
 		return domain.ToolResult{}, dispatchCancelled
 	}
 	if !allowed {
-		return errorToolResult(call.ID, "tool call denied by approver"), dispatchDone
+		result := errorToolResult(call.ID, "tool call denied by approver")
+		a.guards.RecordBlocked(call, guard.Audit, guard.Reason, result)
+		return result, dispatchDone
 	}
 
-	return a.executeTool(ctx, turn, tool, call)
+	result, execOutcome := a.executeTool(ctx, turn, tool, call)
+	if execOutcome == dispatchCancelled {
+		return result, dispatchCancelled
+	}
+
+	// Post-execution guardrails: feed the circuit-breaker the outcome (surfacing a
+	// single ErrorEvent on the trip edge so a runaway loop is halted, not crashed) and
+	// append the audit record (call / decision / result).
+	if tripped := a.guards.RecordExecution(call, guard.Audit, guard.Reason, result); tripped {
+		a.cfg.Events.Emit(domain.ErrorEvent{
+			EventBase: base(turn),
+			Source:    call.Tool,
+			Err: fmt.Sprintf("circuit-breaker tripped: tool %q failed %d times with identical arguments; "+
+				"further identical calls will be refused", call.Tool, a.guards.Breaker.Threshold()),
+		})
+	}
+	return result, dispatchDone
+}
+
+// guardRefusalMessage renders the model-facing reason a guardrail refused a call.
+func guardRefusalMessage(guard security.PreCheck) string {
+	switch guard.Audit {
+	case security.AuditCircuitTripped:
+		return "circuit-breaker open: this tool call has failed repeatedly with identical arguments and is refused"
+	default:
+		return "refused by the dangerous-action guard: " + guard.Reason
+	}
 }
 
 // lookupTool resolves a tool name against the resolved registry (nil registry ⇒ not found).
@@ -83,13 +131,21 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // approve consults the Approver when the Agent's mode and the tool require it, returning
 // whether the call may run. It honours allow-for-session (remembered for the rest of the
 // Session) and reports dispatchCancelled if ctx is cancelled while the human deliberates.
-func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall) (bool, dispatchOutcome) {
-	if !a.needsApproval(tool) || a.approved[tool.Name()] {
-		return true, dispatchDone
+//
+// force overrides the mode disposition: a Tier-2 dangerous action forces the Approver
+// even in Auto (the guardrail can only tighten). A forced call ignores the allow-for-
+// session cache — a force-approval gate is a per-call speed-bump, not a thing the user
+// can pre-allow for the Session. A nil Approver while a gate is required (or forced) ⇒
+// refuse rather than run unapproved.
+func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, force bool) (bool, dispatchOutcome) {
+	if !force {
+		if !a.needsApproval(tool) || a.approved[tool.Name()] {
+			return true, dispatchDone
+		}
 	}
 	if a.cfg.Approver == nil {
 		// A gate is required but the host supplied no Approver: refuse rather than run an
-		// unapproved write / unconfinable tool.
+		// unapproved write / unconfinable / dangerous tool.
 		a.cfg.Events.Emit(domain.ErrorEvent{
 			EventBase: base(turn),
 			Source:    "loop",
@@ -98,7 +154,11 @@ func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call do
 		return false, dispatchDone
 	}
 
-	areq := domain.ApprovalRequest{Tool: call.Tool, Arguments: call.Arguments, Reason: a.approvalReason(tool)}
+	reason := a.approvalReason(tool)
+	if force {
+		reason = "dangerous-action guard forced approval"
+	}
+	areq := domain.ApprovalRequest{Tool: call.Tool, Arguments: call.Arguments, Reason: reason}
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
 		if ctx.Err() != nil {

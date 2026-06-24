@@ -11,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -61,7 +62,13 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, domain.ErrAutoUnavailable
 	}
 
-	return &Agent{cfg: cfg, upstream: up, registry: registry, tools: resolveTools(cfg)}, nil
+	return &Agent{
+		cfg:      cfg,
+		upstream: up,
+		registry: registry,
+		tools:    resolveTools(cfg),
+		guards:   security.NewDefaultGuards(),
+	}, nil
 }
 
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;
