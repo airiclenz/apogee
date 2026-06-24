@@ -109,8 +109,14 @@ func (c *seatbeltConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 	profile := seatbeltProfile(box)
 
 	// Launch the original command under the sandbox profiler; argv after the profile is
-	// the original command, run confined by sandbox-exec.
-	orig := cmd.Args
+	// the original command, run confined by sandbox-exec. Carry the RESOLVED program
+	// path (cmd.Path), not the bare cmd.Args[0], so the profiled child execs the same
+	// binary Go resolved (contract §2.3); fall back to Args[0] only if Path is unset.
+	prog := cmd.Path
+	if prog == "" {
+		prog = cmd.Args[0]
+	}
+	orig := append([]string{prog}, cmd.Args[1:]...)
 	cmd.Path = profiler
 	cmd.Args = append([]string{profiler, "-p", profile}, orig...)
 

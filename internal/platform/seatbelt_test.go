@@ -198,6 +198,30 @@ func TestSeatbeltConfineRewritesCmd(t *testing.T) {
 	}
 }
 
+func TestSeatbeltConfineForwardsResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	// Regression (P3.4 review): the profiled argv must carry the RESOLVED program
+	// path (cmd.Path), not the bare cmd.Args[0], so the confined child execs the
+	// same binary Go resolved (contract §2.3).
+	c := &seatbeltConfiner{present: true, execPath: "/path/to/sandbox-exec"}
+	cmd := exec.Command("echo", "hi") // bare name; Go resolves cmd.Path via LookPath
+	resolved := cmd.Path
+	if resolved == "" || !strings.HasPrefix(resolved, "/") {
+		t.Skipf("echo did not resolve to an absolute path (%q); cannot exercise regression", resolved)
+	}
+	if err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: "/ws"}, cmd); err != nil {
+		t.Fatalf("Confine: %v", err)
+	}
+	// Args layout: [profiler, "-p", profile, <program>, <args...>].
+	if len(cmd.Args) < 5 {
+		t.Fatalf("cmd.Args = %v, too short", cmd.Args)
+	}
+	if got := cmd.Args[3]; got != resolved {
+		t.Errorf("confined program = %q, want resolved path %q (not bare name)", got, resolved)
+	}
+}
+
 func TestSeatbeltConfineDefaultsProfilerPath(t *testing.T) {
 	t.Parallel()
 

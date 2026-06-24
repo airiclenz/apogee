@@ -154,7 +154,14 @@ func (c *landlockConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 
 	// Re-exec the apogee binary in __confined-exec mode; argv after "--" is the
 	// original command, run confined by the in-child half (ApplyLandlockAndExec).
-	orig := cmd.Args
+	// It must carry the RESOLVED program path (cmd.Path), not the bare cmd.Args[0]:
+	// the child re-execs via syscall.Exec, which does NO PATH lookup, so a bare
+	// "sh" would fail with ENOENT (contract §2.3).
+	prog := cmd.Path
+	if prog == "" {
+		prog = cmd.Args[0]
+	}
+	orig := append([]string{prog}, cmd.Args[1:]...)
 	cmd.Path = self
 	cmd.Args = append([]string{self, confinedExecSentinel, encoded, "--"}, orig...)
 

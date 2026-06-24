@@ -145,6 +145,30 @@ func TestLandlockConfineRewritesCmd(t *testing.T) {
 	}
 }
 
+func TestLandlockConfineForwardsResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	// Regression (P3.4 review): the confined argv must carry the RESOLVED program
+	// path (cmd.Path), not the bare cmd.Args[0]. The in-child half re-execs via
+	// syscall.Exec, which does NO PATH lookup, so a bare "echo" would ENOENT.
+	c := &landlockConfiner{abi: 4, reexecPath: "/path/to/apogee"}
+	cmd := exec.Command("echo", "hi") // bare name; Go resolves cmd.Path via LookPath
+	resolved := cmd.Path
+	if resolved == "" || !strings.HasPrefix(resolved, "/") {
+		t.Skipf("echo did not resolve to an absolute path (%q); cannot exercise regression", resolved)
+	}
+	if err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: "/ws"}, cmd); err != nil {
+		t.Fatalf("Confine: %v", err)
+	}
+	// Args layout: [self, sentinel, box, "--", <program>, <args...>].
+	if len(cmd.Args) < 6 {
+		t.Fatalf("cmd.Args = %v, too short", cmd.Args)
+	}
+	if got := cmd.Args[4]; got != resolved {
+		t.Errorf("confined program = %q, want resolved path %q (not bare name)", got, resolved)
+	}
+}
+
 func TestLandlockConfineRejectsEmptyArgv(t *testing.T) {
 	t.Parallel()
 
