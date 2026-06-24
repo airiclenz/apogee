@@ -116,5 +116,9 @@ project config may only *add* (tighten). Lives in `internal/security` (P3.6).
   unconfined Auto "safe."
 - **CONTEXT.md** Agent-mode / Confinement entries and the **Phase-3 plan** (§3 D1/D5, §1 exit #3,
   P3.4/P3.6/P3.8/P3.11) are updated to this model; the plan's §5 reopened block is resolved.
-- The P3.1 design pass now writes the *implementation contract* (the `Confine(fn)` signature, the
-  shared escape-probe harness, the `workspaceScopedWriter` marker) on top of this settled *policy*.
+- The P3.1 design pass wrote the *implementation contract* on top of this settled *policy* —
+  [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md): the
+  `Confine` signature (prepare-in-place over a `*exec.Cmd`; the closure form is deleted), the
+  `workspaceScopedWriter` marker, the per-call disposition table, the capability-honesty rule, and the
+  shared escape-probe harness P3.2/P3.3 build to. **Where that contract and this ADR's prose differ on a
+  mechanism, that contract is authoritative on the *how*; this ADR remains authoritative on the *policy*.**

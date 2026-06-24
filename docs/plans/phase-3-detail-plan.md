@@ -1,8 +1,10 @@
 # Apogee — Phase-3 Detail Plan (P3): full subsystems, Auto confined, cut `v1.0.0`
 
-**Date:** 2026-06-24 · **Status:** 🚧 **IN PROGRESS** — **P3.0 entry re-verify ✅ done** (2026-06-24:
-gate green, 7/7 §0 facts confirmed zero-drift, pins held — see the P3.0 result note in §4); **P3.1
-(ADR 0012) is next, no production code yet** · **Branch:** `main` (commit directly — pre-production owner directive).
+**Date:** 2026-06-24 · **Status:** 🚧 **IN PROGRESS** — **P3.0 entry re-verify ✅ done** + **P3.1
+confinement execution-model design ✅ done** (2026-06-24: ADR 0012 accepted, the implementation contract
+written as [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md);
+see the P3.1 result note in §4); **P3.2 (Linux landlock) / P3.3 (macOS seatbelt) are next — now mechanical
+against the contract** · **Branch:** `main` (commit directly — pre-production owner directive).
 This document refines the broad plan's **Phase 3** ("Full subsystems") into numbered,
 acceptance-tested tasks and **makes the load-bearing design calls Phase 3 lands into** (§3 — the
 confinement execution model, the sub-agent orchestrator shape, the MCP non-confinable gating, and
@@ -379,8 +381,8 @@ everything, and it cuts `v1.0.0`).
 
 | ID | Task | Depends | New deps | Resolves |
 |---|---|---|---|---|
-| **P3.0** | Phase-3 entry: re-verify gates, re-confirm the §0 inheritance, re-confirm pins (MCP go-sdk `v1.6.x`, landlock approach), refresh dep/ADR posture, confirm processing-oracle access | — | — | this §0; §2 |
-| **P3.1** | **Confinement execution-model design + ADR 0012** (D1): the blast-radius invariant + the Allow-Edits ladder rung, the single subprocess granularity, the per-call decision, capability-honesty; amend/cross-ref ADR 0004 | P3.0 | — | ADR 0004; **ADR 0012** |
+| **P3.0** ✅ | Phase-3 entry: re-verify gates, re-confirm the §0 inheritance, re-confirm pins (MCP go-sdk `v1.6.x`, landlock approach), refresh dep/ADR posture, confirm processing-oracle access | — | — | this §0; §2 |
+| **P3.1** ✅ | **Confinement execution-model design + ADR 0012** (D1): the blast-radius invariant + the Allow-Edits ladder rung, the single subprocess granularity, the per-call decision, capability-honesty; amend/cross-ref ADR 0004. **Done 2026-06-24** — policy in ADR 0012; impl contract in [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) (see result note below) | P3.0 | — | ADR 0004; **ADR 0012** |
 | **P3.2** | **Linux landlock `Confiner` backend**: fs-write + network-egress, ABI-v4/kernel-≥6.7 probe, honest caps; build-tagged `linux` | P3.1 | `golang.org/x/sys` | ADR 0004; ADR 0012 |
 | **P3.3** | **macOS seatbelt `Confiner` backend**: `sandbox-exec` profile from the box, fs+net in one, presence-probed; build-tagged `darwin` | P3.1 | — | ADR 0004; ADR 0012 |
 | **P3.4** | **Mode ladder + wire `Confine` into dispatch; Auto becomes real** (D5): add **`ModeAllowEdits`** (Plan→Ask-Before→Allow-Edits→Auto); rework `needsApproval` into the blast-radius disposition; `ErrAutoUnavailable` now conditional. **Also plumb the `ExternalEffects.Do` boundary** (ADR 0008) — currently declared on `Config` but never called; dispatch must route `ExternalEffectTool`s through it when set, so the bench-stub story (P3.11/P3.15/P3.16) is real before the first external tool ships | P3.2, P3.3 | — | ADR 0004; ADR 0008; ADR 0012; dispatch.go |
@@ -476,6 +478,44 @@ denial). **Acceptance:** ADR 0012 committed (status accepted) + ADR 0004 amended
 `workspaceScopedWriter` marker is specified; the shared confinement-probe contract is specified
 (signatures, escape attempts) so P3.2/P3.3 are mechanical. **No production code yet** — the design
 pass ADR 0004 asked for, now simpler because the ladder removed the in-process-confinement problem.
+
+#### ✅ P3.1 result — landed 2026-06-24 (ADR 0012 was already accepted; this pass wrote the implementation contract)
+
+ADR 0012's policy was already accepted + ADR 0004 amended in the prior grill-with-docs session
+(commit `54b363c`). P3.1's remaining deliverable — the *implementation contract* ADR 0012's own
+closing line defers to "the P3.1 design pass" — is now written as
+**[`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md)**
+(precedent: `hook-mutation-api.md`). **No production code changed.** It pins, grounded against source:
+
+- **The `Confine` signature (the load-bearing call).** The Phase-0 stub `Confine(ctx, box, fn func(ctx)
+  error)` **cannot express ADR 0012's subprocess-granularity model** — a backend cannot wrap an opaque
+  closure, and the only way a closure *could* confine a child is the per-thread in-process landlock ADR
+  0012 deleted (impossible on macOS). So the closure form is **deleted**. Replacement (lands in P3.4):
+  `Confine(ctx, box, cmd *exec.Cmd) error` — **prepare-in-place**: the tool builds + runs an idiomatic
+  `*exec.Cmd`; the backend rewrites it to launch confined (macOS `sandbox-exec -p` prefix; Linux a
+  landlock **re-exec wrapper** via a hidden `__confined-exec` self-subcommand, CGO-free raw `x/sys`
+  syscalls) and sets `Setpgid` for process-group teardown. `domain` gains an `os/exec` import (stdlib —
+  ADR-0010-clean); `ErrConfinementUnavailable` is the "confine-if-you-can, gate-if-you-can't" safety net.
+- **The `workspaceScopedWriter` marker.** An **unexported** interface in `internal/tools` (the only home
+  where Apogee's own write tools can satisfy it *and* a third-party module structurally cannot fake it),
+  with a `workspaceWriteTarget(call)` seam so dispatch classifies in- vs out-of-workspace *before*
+  `Execute`. Detected via `tools.IsWorkspaceScopedWriter` (a **pre-existing** `agent`→`tools` edge —
+  `loop.go` already imports it). Rides the tool value through `registry.Subset`, so sub-agents inherit it
+  for free. Today only `write_file` carries it (the other 3 built-ins are read-only); P3.7 adds the
+  find-replace/patch family.
+- **The per-call disposition table (D5)** — the full `(mode × tool-class × confine-to-workspace × caps)`
+  grid dispatch computes (P3.4 builds it), dangerous-action guard running first/tighten-only. Flags one
+  honest **v1 realisation gap** for P3.7: the "out-of-workspace Apogee write → Approval" row needs the
+  write tool to actually perform an *approved* escape (today `resolveInRoot` hard-rejects it); the marker
+  seam makes that a later additive change.
+- **Capability honesty** (startup probe; `AutoEligible()` → **`FSWrite`-only**, Linux Auto ≥5.13) and the
+  **shared escape-probe harness** `internal/platform/confinetest` (`Probe`/`ProbeNetwork`, an 8-row
+  battery: in-box write succeeds, out-of-box/`~/.ssh` writes OS-denied, parent stays unrestricted, domain
+  inherits across exec, network open-by-default with deny as a tightening) — so P3.2/P3.3 differ only in
+  which `Confiner` they pass. Per-backend acceptance checklists are now mechanical.
+
+ADR 0012's closing bullet was updated to point at the contract doc (policy in the ADR, *how* in the
+contract). **Next: P3.2** (Linux landlock backend) and P3.3 (macOS seatbelt) — now mechanical against §2.3 + §6.
 
 ### P3.2 — Linux landlock backend
 Implement the landlock `Confiner` (`//go:build linux`): probe the landlock ABI at startup
