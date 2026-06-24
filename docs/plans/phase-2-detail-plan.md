@@ -563,8 +563,8 @@ from the written file → continue, proving the resumed Exchange picks up at the
 (turn 2, after exchange 1's turns 0+1) — a reset would surface as turn 0. **(2) Live-model run**
 (`live_test.go`, **opt-in** — skipped unless `APOGEE_LIVE_ENDPOINT` is set, so `make check` is
 unaffected): the same harness + real Model against a live local model, the open Phase-1 live
-file-edit eval now over the product surface. Run against **`gemma-4-E4B-it-Q8_0`** (the launcher MCP
-at `192.168.61.1:7331` was unreachable from the dev env, so the already-loaded model was used; it is
+file-edit eval now over the product surface. Run against **`gemma-4-E4B-it-Q8_0`** (the already-loaded
+model — a deliberate no-swap; the launcher MCP is reachable at `192.168.64.1:7331` and the model is
 tool-capable despite `/v1/models` advertising only `completion`): it streamed, called `write_file`,
 the write was approved through the real gate and wrote `greeting.txt` (14 bytes), and the final
 message rendered — `StatusExchangeComplete`, transcript correct. The **only** unautomated remainder

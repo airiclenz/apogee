@@ -49,10 +49,14 @@ human approves the write, the result renders** — proven hermetically *and* aga
 
 ### Two environment notes from the live run (for whoever runs it next)
 
-- The **llama-launcher MCP** at `http://192.168.61.1:7331/mcp` was **unreachable** from the dev
-  environment (connection timed out), so the model could not be swapped via `manage-llm-server`; the
-  already-loaded `gemma-4-E4B-it-Q8_0` was used. It **is tool-capable** (emits real `tool_calls`)
-  even though `/v1/models` advertises only `["completion"]` — don't trust that capability list.
+- The **llama-launcher MCP** is at **`http://192.168.64.1:7331/mcp`** (same host as the inference
+  endpoint `:1111`, not `192.168.61.1` — that earlier address was wrong, hence the timeout). It is
+  reachable from the dev env and exposes the **full** toolset (`list_profiles`, `load_profile`,
+  `server_status`, …), so models **can** be swapped via `manage-llm-server` / the MCP adapter.
+  Tool-capable profiles available: **gpt-oss-20b** (MXFP4 / Q6-K), **Qwen3.6-27B**, and the Gemma-4
+  family (e4b / 12B / 26B). The live run this session used the already-loaded `gemma-4-E4B-it-Q8_0`
+  (a deliberate no-swap); it **is tool-capable** (emits real `tool_calls`) even though `/v1/models`
+  advertises only `["completion"]` — don't trust that capability list.
 - There is **no TTY** in the dev env, so the literal interactive alt-screen TUI (a human pressing
   `a`) is the **only** unautomated remainder. The hermetic e2e proves the Model handles that real
   keypress; the owner can run `apogee --endpoint http://192.168.64.1:1111` directly to see it live.
@@ -116,8 +120,9 @@ APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -run TestE2ELiveMode
   Phase 3 builds on it.
 - **`/coding-standards`** (`go`) — mandatory for every Phase-3 Go body (the package idiom keeps
   section dividers + symbol-first doc comments; the plan/idiom wins over the base "no dividers" rule).
-- **`manage-llm-server`** / the llama-launcher MCP — to load a tool-capable model for the live TUI
-  run (note the launcher MCP was unreachable from the dev env this session — it may need the host).
+- **`manage-llm-server`** / the llama-launcher MCP at **`http://192.168.64.1:7331/mcp`** — to load a
+  tool-capable model for the live TUI run (reachable from the dev env, full toolset; profiles include
+  gpt-oss-20b, Qwen3.6-27B, Gemma-4 e4b/12B/26B).
 - **`/handoff`** at session end; **`archive-handoffs`** — handoff 17 is consumed (archived with this
   handoff active); the untracked bugfix-note is left in place for the owner.
 ```
