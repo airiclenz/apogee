@@ -51,6 +51,26 @@
 # private, and metadata addresses are always blocked, by resolved IP) applies regardless.
 # web-search-endpoint: https://search.example.com/search
 
+# External MCP (Model Context Protocol) servers to connect on startup. Default-EMPTY: with no
+# servers listed, the MCP feature is dormant (no connections, no error). Each server's tools are
+# discovered at startup and offered to the model, named "<server-name>__<tool>". Config-file only.
+#
+# An MCP server is an EXTERNAL, untrusted process Apogee cannot confine — so its tools ALWAYS ask
+# for approval in auto mode (confine-to-workspace: true), the same as any unfenceable reach. A
+# server reached over http(s) (sse / streamable-http) passes the same SSRF floor as the network
+# tools (loopback / private / metadata endpoints are refused). A stdio server is a local process
+# you launch — you chose the command — so no URL floor applies; its tools still ask in auto.
+#
+# mcp-servers:
+#   - name: github                       # the prefix on each tool's name; must be unique
+#     transport: stdio                   # stdio | sse | streamable-http
+#     command: github-mcp-server         # stdio: the executable to launch
+#     args: ["--stdio"]                  # stdio: optional arguments
+#     env: ["GITHUB_TOKEN=…"]            # stdio: optional KEY=VALUE environment entries
+#   - name: docs
+#     transport: streamable-http         # sse | streamable-http: a remote http(s) server
+#     endpoint: https://mcp.example.com/ # the server URL (passes the SSRF floor)
+
 
 
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).

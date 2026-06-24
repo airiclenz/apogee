@@ -1441,6 +1441,51 @@ tool that appears in the menu, is callable, and **raises Approval in Auto** (ass
 session re-establishes the connection from scratch; the bench swaps a deterministic stub with no
 process; `Close` tears down the server cleanly (no orphan). Cross-build green (the SDK is pure-Go).
 
+#### ✅ P3.15 result — landed 2026-06-24 (MCP client on go-sdk v1.6.1; client shape → design note; gate GREEN; hermetic stdio fork-and-exec fixture under `-race`)
+
+Built `internal/mcp` on the official Go SDK (`github.com/modelcontextprotocol/go-sdk` **v1.6.1**, now
+a **direct** require — `go mod tidy` clean, idempotent; the 6 CGO_ENABLED=0 cross-builds stay green,
+the SDK is pure-Go). The integration is exactly D3's "surface with the right effect kind": **no
+dispatch change** — the existing disposition already classifies `EffectMCP` as `classMCP` and gates
+it in Auto (proven in `dispatch_test.go`), so the gate held the moment a real MCP tool carried the kind.
+
+- **`internal/mcp` (client.go / transport.go / tool.go / doc.go).** `Connect(ctx, []ServerConfig,
+  URLGuard) → *Client` dials every configured server (stdio / SSE / streamable-http), lists its tools,
+  and surfaces each as a `serverTool` — a `domain.ExternalEffectTool` of kind **`mcp`** named
+  `<server>__<tool>` (collision-safe across servers). `Client.Tools()` hands the discovered set to the
+  registry; `Client.Close()` joins every session's teardown (no orphan). **Connect is all-or-nothing:**
+  a later server's failure rolls back the already-opened sessions and returns the error. **Zero servers
+  ⇒ dormant** (no sessions, nil tools, no-op Close). **Resume reconnects FRESH** (ADR 0008 — the Client
+  holds no serializable state; the composition root calls `Connect` on every launch, resume included).
+- **Trust boundary (doc.go).** Server description / schema / result are **untrusted** — presented to
+  the model, never executed. An SSE / streamable-http endpoint rides the same default-on, resolved-IP
+  **SSRF floor** (`security.URLGuard`, pre-flight + dial-time) as the network tools; a stdio server is
+  a trusted local launch (no URL floor), its tool calls still gate through Approval in Auto. A
+  server-side tool error round-trips as an `IsError` `ToolResult` (ADR 0007 — Go error only on ctx cancel).
+- **Composition wiring (`cmd/apogee`).** `config.yaml`'s `mcp-servers:` block (config-file-**only**,
+  default-empty, no flag/env — like `web-search-endpoint`) → `mcp.ServerConfig` → `mcp.Connect` in
+  `wire.go` → `registryWithMCP` registers the discovered tools atop the default registry → `Config.Tools`;
+  `defer mcpClient.Close()`. A connect failure is **fatal** (a configured-but-unreachable server is a
+  misconfiguration the user should see, not a silent drop); a qualified-name collision with a built-in
+  is dropped with a stderr notice (built-in wins). `layer` gained a slice field, so the absent-config
+  assertion moved from `!=` to `reflect.DeepEqual` (a compile-fix, not a behaviour change).
+- **Client shape → design note, not ADR 0014** (the D3 judgement): the *decision* (MCP =
+  ExternalEffect ⇒ Approval-gated) is already ADR 0004/0008/0012; only the *client shape* is new →
+  [`docs/design/mcp-client.md`](../design/mcp-client.md) (transports, lifecycle, trust boundary,
+  acceptance map). No new public root surface (ADR 0010 / D7): `internal/mcp` exports `Client` /
+  `Connect` / `ServerConfig` / `Transport`, imports only the SDK + `domain` + `security`.
+
+**Tests** (`internal/mcp/mcp_test.go`, all `-race`): a **hermetic stdio** MCP server via the SDK's
+fork-and-exec trick (`TestMain` re-execs the test binary as a fixture server — no network, no external
+binary, runs everywhere) drives the real `Connect → buildTransport(stdio) → CommandTransport →
+ListTools → CallTool → Close` path. `TestConnect_SurfacesServerToolsAndCalls` (tool in the menu,
+server schema, callable end to end); `TestServerTool_IsMCPExternalEffect` (the **real** surfaced tool
+reports `EffectMCP` — the property the Auto gate keys on); error-result + cancelled-ctx round-trips;
+`TestResume_ReconnectsFresh`; `TestClose_TearsDownSessions` (idempotent); dormant-client + bad-name +
+SSRF-floor-block + transport-selection + all-or-nothing-rollback + `renderContent` branches.
+`cmd/apogee` gained `TestApplyConfigMCPServers` (the `mcp-servers` YAML → `opts.mcpServers` mapping).
+Full §7 gate green (gofmt/vet/darwin-vet/build/`-race`/self-import-grep/6 cross-builds/mod-tidy/`--help`).
+
 ### P3.16 — Phase-3 acceptance + cut `v1.0.0`
 The deliverable proof + the freeze. **(1) Feature-parity:** the bench (apogee-sim) drives the full
 tool suite against the TS-oracle behaviour and shows parity on the non-UI surface; the hermetic e2e

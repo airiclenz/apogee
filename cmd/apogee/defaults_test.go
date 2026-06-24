@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -66,7 +67,7 @@ func TestEmbeddedDefaultConfigIsNeutral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded default config does not parse: %v", err)
 	}
-	if l != (layer{}) {
+	if !reflect.DeepEqual(l, layer{}) {
 		t.Errorf("embedded default config sets values (not behaviour-neutral): %+v", l)
 	}
 }

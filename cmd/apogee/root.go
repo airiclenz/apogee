@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -35,6 +36,10 @@ type options struct {
 	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
 	// loaded from the config file only (default-off). applyConfig sets it from settings.
 	webSearchEndpoint string
+
+	// mcpServers is the set of external MCP servers to connect on startup (P3.15), loaded from
+	// the config file only (default-empty ⇒ MCP dormant). applyConfig sets it from settings.
+	mcpServers []mcp.ServerConfig
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

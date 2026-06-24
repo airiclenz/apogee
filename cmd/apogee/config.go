@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/airiclenz/apogee/internal/mcp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,6 +43,11 @@ type settings struct {
 	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
 	// file-only and default-off (empty ⇒ web_search reports "not configured").
 	webSearchEndpoint string
+
+	// mcpServers is the set of external MCP servers to connect on startup (P3.15), file-only
+	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
+	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
+	mcpServers []mcp.ServerConfig
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -62,6 +68,10 @@ type layer struct {
 	// webSearchEndpoint is set only by the FILE layer (P3.11 — web-search is config'd,
 	// default-off, with no flag/env). Empty/absent ⇒ web_search reports "not configured".
 	webSearchEndpoint *string
+
+	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
+	// with no flag/env). A nil slice means the source does not configure servers (fall through).
+	mcpServers []mcp.ServerConfig
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -80,6 +90,7 @@ func resolveSettings(file, env, flag layer) settings {
 	if file.webSearchEndpoint != nil {
 		s.webSearchEndpoint = *file.webSearchEndpoint
 	}
+	s.mcpServers = file.mcpServers // file-only (P3.15); env/flag never set MCP servers
 	for _, l := range []layer{file, env, flag} {
 		if l.endpoint != nil {
 			s.endpoint = *l.endpoint
@@ -123,6 +134,35 @@ type fileConfig struct {
 	// ⇒ web_search is registered but reports "not configured" (default-off, no hard-wired
 	// provider). Empty string is treated as absent.
 	WebSearch string `yaml:"web-search-endpoint"`
+	// MCPServers configures external MCP servers to connect on startup (P3.15). Absent/empty ⇒
+	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
+	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
+	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
+}
+
+// mcpServerConfig is the on-disk schema for one MCP server (P3.15). It mirrors mcp.ServerConfig
+// with yaml tags; toServerConfig maps it across so the on-disk shape and the package's value
+// type stay independently evolvable.
+type mcpServerConfig struct {
+	Name      string   `yaml:"name"`
+	Transport string   `yaml:"transport"`
+	Command   string   `yaml:"command"`
+	Args      []string `yaml:"args"`
+	Env       []string `yaml:"env"`
+	Endpoint  string   `yaml:"endpoint"`
+}
+
+// toServerConfig maps the on-disk MCP server schema onto the mcp.ServerConfig value the client
+// connects with.
+func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
+	return mcp.ServerConfig{
+		Name:      m.Name,
+		Transport: mcp.Transport(m.Transport),
+		Command:   m.Command,
+		Args:      m.Args,
+		Env:       m.Env,
+		Endpoint:  m.Endpoint,
+	}
 }
 
 // layer projects a parsed file config onto a precedence layer: a present (non-empty)
@@ -149,6 +189,13 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.WebSearch != "" {
 		l.webSearchEndpoint = &fc.WebSearch
+	}
+	if len(fc.MCPServers) > 0 {
+		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
+		for i, m := range fc.MCPServers {
+			servers[i] = m.toServerConfig()
+		}
+		l.mcpServers = servers
 	}
 	return l
 }
@@ -273,6 +320,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.hostAlias = s.hostAlias
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.webSearchEndpoint = s.webSearchEndpoint
+	opts.mcpServers = s.mcpServers
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

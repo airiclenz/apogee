@@ -196,6 +196,20 @@ config may add *or* remove entries (it is the user's machine), a project config 
 _Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is
 not — it guards against mistakes, not attackers).
 
+**MCP client** (Model Context Protocol):
+Apogee's client for external **MCP** servers, on the official Go SDK over **stdio / SSE /
+streamable-http** (`internal/mcp`, P3.15). It connects the servers a host lists in `config.yaml`'s
+`mcp-servers:` block (config-file-only, default-empty ⇒ dormant), discovers each server's tools, and
+surfaces them into the registry as `ExternalEffectTool` of kind **`mcp`** named `<server>__<tool>`.
+An MCP server is an **external, untrusted** process Apogee **cannot confine**, so its tools always
+**gate through Approval in Auto** under `confine-to-workspace=true` (the per-tool teeth above) — and
+their description / schema / result are untrusted data shown to the model, never executed. An http(s)
+server (sse / streamable-http) passes the same **url-safety SSRF floor** as the network tools; a
+stdio server is a trusted local launch (no URL floor), its calls still gate. **Resume reconnects
+fresh** — no server-side state is restored (ADR 0008). The *client shape* is
+[docs/design/mcp-client.md](docs/design/mcp-client.md); the *gating* is ADR 0004/0008/0012.
+_Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).
+
 ### Mechanism and hook points
 
 **Mechanism**:

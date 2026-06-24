@@ -6,7 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/mcp"
 )
 
 func strptr(s string) *string { return &s }
@@ -65,11 +68,22 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
 			want: settings{mode: "ask-before", confineToWorkspace: true, webSearchEndpoint: "https://search.example.com"},
 		},
+		{
+			name: "mcp servers are file-only (default empty)",
+			file: layer{mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+		},
+		{
+			name: "mcp servers are NOT settable by env or flag (file-only)",
+			env:  layer{mcpServers: []mcp.ServerConfig{{Name: "fromenv"}}},
+			flag: layer{mcpServers: []mcp.ServerConfig{{Name: "fromflag"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := resolveSettings(tt.file, tt.env, tt.flag); got != tt.want {
+			if got := resolveSettings(tt.file, tt.env, tt.flag); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("resolveSettings = %+v; want %+v", got, tt.want)
 			}
 		})
@@ -132,6 +146,38 @@ func TestApplyConfigDefaults(t *testing.T) {
 	}
 	if opts.mode != string(modeAskBefore) {
 		t.Errorf("mode = %q; want the default %q", opts.mode, modeAskBefore)
+	}
+}
+
+// The mcp-servers config block parses into opts.mcpServers (P3.15): a stdio and an HTTP server,
+// each mapped across to mcp.ServerConfig, so the composition root can connect them.
+func TestApplyConfigMCPServers(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	const configYAML = `mcp-servers:
+  - name: github
+    transport: stdio
+    command: gh-mcp
+    args: ["--stdio"]
+    env: ["TOKEN=x"]
+  - name: docs
+    transport: streamable-http
+    endpoint: https://mcp.example.com/
+`
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+
+	want := []mcp.ServerConfig{
+		{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp", Args: []string{"--stdio"}, Env: []string{"TOKEN=x"}},
+		{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"},
+	}
+	if !reflect.DeepEqual(opts.mcpServers, want) {
+		t.Errorf("mcpServers = %+v; want %+v", opts.mcpServers, want)
 	}
 }
 
@@ -307,7 +353,7 @@ func TestLoadFileConfigAbsentIsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("absent config: unexpected error %v", err)
 	}
-	if l != (layer{}) {
+	if !reflect.DeepEqual(l, layer{}) {
 		t.Errorf("absent config produced a non-empty layer: %+v", l)
 	}
 }

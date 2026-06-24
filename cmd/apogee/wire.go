@@ -9,9 +9,12 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -95,6 +98,20 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			"the dangerous-action guard is a footgun-net, not a security boundary.")
 	}
 
+	// Connect the configured external MCP servers (P3.15) and surface their tools into the
+	// Agent's registry. With no servers configured this is dormant (a no-op Client, nil tools).
+	// On resume the connection is established FRESH here — no server-side state is restored
+	// (ADR 0008). An MCP connect failure is fatal: a configured server that cannot be reached is
+	// a misconfiguration the user should see, not a silently-dropped capability.
+	mcpClient, err := mcp.Connect(ctx, opts.mcpServers, security.URLGuard{})
+	if err != nil {
+		return fmt.Errorf("apogee: connect MCP servers: %w", err)
+	}
+	defer mcpClient.Close()
+	if mcpTools := mcpClient.Tools(); len(mcpTools) > 0 {
+		cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpTools)
+	}
+
 	agent, err := buildAgent(cfg, opts.resume)
 	if err != nil {
 		return friendlyConstructErr(err)
@@ -121,6 +138,28 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		fmt.Fprintf(os.Stdout, "Session saved · resume with: apogee --resume %s\n", path)
 	}
 	return err
+}
+
+// registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
+// workspace (with the same host configuration the Agent would derive from Config — the
+// url-safety floor, the web-search endpoint, the Asker) PLUS the dynamically discovered MCP
+// tools registered on top. MCP tools are DYNAMIC (discovered from a server at runtime), so they
+// are NOT in DefaultTools — they ride the registry as classMCP ExternalEffectTools the dispatch
+// disposition gates in Auto. A duplicate name (an MCP server's qualified tool colliding with a
+// built-in — unlikely given the alias prefix) is dropped with a stderr notice rather than
+// failing startup; the built-in wins.
+func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool) *apogee.ToolRegistry {
+	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{
+		URLGuard:          security.URLGuard{},
+		WebSearchEndpoint: cfg.WebSearchEndpoint,
+		Asker:             cfg.Asker,
+	})
+	for _, t := range mcpTools {
+		if err := registry.Register(t); err != nil {
+			fmt.Fprintf(os.Stderr, "apogee: skipping MCP tool %q: %v\n", t.Name(), err)
+		}
+	}
+	return registry
 }
 
 // sessionSaver adapts a session.Store to the TUI's func(Session) error saver seam and
