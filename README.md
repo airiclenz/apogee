@@ -88,9 +88,12 @@ A `Makefile` wraps the common Go invocations:
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names.
 
-> **Note:** the binary builds and serves `--help` today, but the interactive TUI is
-> still being wired up (Phase 2) — a live coding session isn't available yet. Track
-> progress in [`docs/plans/`](docs/plans/).
+> **Note:** the interactive TUI now runs (Phase 2 complete) — launch it with
+> `apogee --endpoint <openai-compatible-url> --model <name>` to hold a real coding
+> conversation with a local model: assistant text streams, tool calls appear, and writes
+> prompt for approval (Plan + Ask-Before modes, over the local file toolset). Auto mode,
+> the full 30-tool suite, and MCP land in Phase 3. Track progress in
+> [`docs/plans/`](docs/plans/).
 
 ## License
 

@@ -27,9 +27,21 @@ import (
 // It is opt-in: skipped unless APOGEE_LIVE_ENDPOINT is set, so the default suite and `make
 // check` never depend on a running model. Run it against a tool-capable model with, e.g.:
 //
-//	APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -run TestE2ELiveModel -v ./internal/tui/
+//	APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -count=1 -run TestE2ELiveModel -v ./internal/tui/
+//	make live-eval        # the same, with -count=1 and the default endpoint baked in
 //
 // APOGEE_LIVE_MODEL pins the model name; left empty, the model is discovered from the server.
+//
+// The -count=1 is load-bearing — without it, this test caches across model swaps and lies.
+// `go test` caches a passing result keyed on the test binary, the cacheable command-line flags,
+// and the env vars/files the test reads (Go instruments os.Getenv via the testlog). The live
+// server's currently-loaded model is NOT a Go-visible input, so swapping the loaded model (e.g.
+// via the llama-launcher) and re-running with the same APOGEE_LIVE_ENDPOINT is a cache *hit*:
+// Go replays the previous model's PASS and the result no longer reflects reality. Two cures,
+// either suffices — (1) set APOGEE_LIVE_MODEL to the loaded model: it is a tracked env input, so
+// a swap changes the var and the cache busts naturally; or (2) always pass -count=1, the
+// canonical cache disable (there is no clean in-test API to self-disable caching). `make
+// live-eval` bakes in -count=1 so the right thing is the easy thing.
 func TestE2ELiveModel(t *testing.T) {
 	endpoint := os.Getenv("APOGEE_LIVE_ENDPOINT")
 	if endpoint == "" {

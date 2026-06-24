@@ -18,6 +18,10 @@ CROSS_TARGETS := \
 # Run user-supplied args through `make run ARGS="--help"`.
 ARGS ?=
 
+# The default endpoint for `make live-eval` (override: make live-eval LIVE_ENDPOINT=...).
+# Set APOGEE_LIVE_MODEL in the environment to pin the model (and bust the result cache on a swap).
+LIVE_ENDPOINT ?= http://192.168.64.1:1111
+
 .DEFAULT_GOAL := help
 
 ## help: list the available targets
@@ -45,6 +49,11 @@ install:
 .PHONY: test
 test:
 	go test -race -count=1 ./...
+
+## live-eval: run the opt-in live-model eval against a real local model (always -count=1, never cached)
+.PHONY: live-eval
+live-eval:
+	APOGEE_LIVE_ENDPOINT=$(LIVE_ENDPOINT) go test -race -count=1 -run TestE2ELiveModel -v ./internal/tui/
 
 ## fmt: format all Go source in place
 .PHONY: fmt

@@ -322,7 +322,7 @@ streaming-only; §6 #6 (stream-then-gate) and §6 #3 (synchronous in-order emit)
 The latest state lives in the handoffs.
 **Two immediate next actions:** (1) the **live-model eval** — point
 `coreagent.RunConfig.Endpoint` at the local server `http://192.168.64.1:1111` (MCP control
-`http://192.168.61.1:7331/mcp`) and run the file-edit task against a real model from the host
+`http://192.168.64.1:7331/mcp`) and run the file-edit task against a real model from the host
 (the build container does not route there); (2) **Phase 2 — the TUI**, a consumer of the
 Phase-1 Events. The only throwaway P0.6 internal still standing is the cycle-check-only Mechanism
 registry (Phase 4 replaces it); the minimal `conversation` is gone (P1.2 adopted

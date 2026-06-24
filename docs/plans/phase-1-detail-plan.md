@@ -59,7 +59,7 @@ the bench drives, steps, snapshots, and scores it in-process via the library API
 > Events as Go values, and scores the workspace, proven under `-race` by a hermetic
 > OpenAI-compatible `httptest` model (the same code path a live model takes). The remaining
 > runtime confirmation — driving an actual local model at `http://192.168.64.1:1111` (MCP
-> control `http://192.168.61.1:7331/mcp`) — is a `RunConfig.Endpoint` swap run from the host;
+> control `http://192.168.64.1:7331/mcp`) — is a `RunConfig.Endpoint` swap run from the host;
 > the build container does not route to that server. See §4 P1.7.
 
 1. **Layout** is ADR-0010-shaped (P1.0): `internal/*` never imports root; the throwaway root
@@ -249,7 +249,7 @@ The acceptance is proven under `-race` by a hermetic OpenAI-compatible `httptest
 drives the **real** provider client (the scripted model asks for `write_file`; the loop
 dispatches it through Approval; the file lands in the sandbox; the run scores a pass) — the
 same code path a live model takes. The **live-model run** against `http://192.168.64.1:1111`
-(MCP control `http://192.168.61.1:7331/mcp`) is a `RunConfig.Endpoint` swap, run from the host
+(MCP control `http://192.168.64.1:7331/mcp`) is a `RunConfig.Endpoint` swap, run from the host
 (the build container does not route to the server). The bench was not committed (apogee-sim
 carries unrelated WIP); the apogee library it consumes is committed.
 

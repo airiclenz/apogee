@@ -41,7 +41,7 @@ human approves the write, the result renders** — proven hermetically *and* aga
   **live** local model — the open **Phase-1 live file-edit eval**, now over the product surface. Run
   it with:
   ```
-  APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -run TestE2ELiveModel -v ./internal/tui/
+  APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -count=1 -run TestE2ELiveModel -v ./internal/tui/
   ```
   **Runs done this session:** against the loaded `gemma-4-E4B-it-Q8_0` **and** against
   `gpt-oss-20b-MXFP4` (swapped in via the launcher) — both PASS: streamed, called `write_file`, the
@@ -108,7 +108,7 @@ make check     # gofmt -l . empty · go vet · go build · go test -race · ADR-
 go mod tidy    # no drift (P2.6 added no deps)
 
 # the opt-in live confirmation (needs a tool-capable local model up):
-APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -run TestE2ELiveModel -v ./internal/tui/
+APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race -count=1 -run TestE2ELiveModel -v ./internal/tui/
 ```
 
 ## Suggested skills

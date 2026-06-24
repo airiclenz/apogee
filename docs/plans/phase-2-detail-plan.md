@@ -536,7 +536,7 @@ The deliverable proof, mirroring P1.7's hermetic pattern: a **scripted OpenAI-co
 path approves (scripted key or an auto-approver in the test), the file lands in a `t.TempDir()`
 workspace, and the transcript shows tokens → tool call → tool result → final message. Then the
 **live-model run** from the host: point `--endpoint http://192.168.64.1:1111` at a tool-capable
-local model (load it via the llama-launcher MCP control `http://192.168.61.1:7331/mcp`) and hold
+local model (load it via the llama-launcher MCP control `http://192.168.64.1:7331/mcp`) and hold
 a real file-edit conversation, watching tools run and approving the write — which **also closes
 the one open Phase-1 runtime step** (the live file-edit eval), now through the product UI.
 **Acceptance:** the hermetic e2e passes under `-race` (no terminal required — drive via `teatest`
