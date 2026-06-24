@@ -56,8 +56,11 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // git_branch, git_commit, git_diff_range) follow; they are SubprocessTools the
 // disposition confines in Auto (or gates when confinement is unavailable), not
 // workspace-scoped writers (git_diff_range is read-only and runs freely). The
-// diagnostics tool (P3.10) closes the set: a read-only SubprocessTool that checks
-// Go in-process (plus optional go vet) and degrades gracefully for other languages.
+// diagnostics tool (P3.10) closes the file/exec set: a read-only SubprocessTool that checks
+// Go in-process (plus optional go vet) and degrades gracefully for other languages. The
+// network/host tools (P3.11) and the sub_agent recursion point (P3.13) follow; sub_agent
+// carries NO disposition marker — dispatch special-cases it as the recursion point that
+// drives a nested Agent, never a leaf tool (ADR 0013).
 func DefaultTools(root string) []domain.Tool {
 	return DefaultToolsWithHost(root, HostTools{})
 }
@@ -90,6 +93,7 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
+		NewSubAgent(),
 	}
 	if host.Asker != nil {
 		all = append(all, NewAskUser(host.Asker))

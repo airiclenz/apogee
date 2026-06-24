@@ -20,6 +20,7 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 		"git_branch", "git_commit", "git_diff_range",
 		"diagnostics",
 		"web_fetch", "http_request", "web_search",
+		"sub_agent",
 	} {
 		if _, ok := registry.Lookup(name); !ok {
 			t.Errorf("default registry is missing %q", name)
@@ -27,9 +28,9 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	}
 
 	// ask_user is omitted when no Asker is configured (NewDefaultRegistry uses a zero
-	// HostTools), so the default set is 18 (15 base/exec/git/diag + 3 network).
-	if got := len(registry.All()); got != 18 {
-		t.Errorf("default registry holds %d tools, want 18", got)
+	// HostTools), so the default set is 19 (15 base/exec/git/diag + 3 network + sub_agent).
+	if got := len(registry.All()); got != 19 {
+		t.Errorf("default registry holds %d tools, want 19", got)
 	}
 	if _, ok := registry.Lookup("ask_user"); ok {
 		t.Error("ask_user must NOT be registered without an Asker")
@@ -49,6 +50,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 		"git_branch", "git_commit", "git_diff_range",
 		"diagnostics",
 		"web_fetch", "http_request", "web_search",
+		"sub_agent",
 	}
 	for i, tool := range registry.All() {
 		if tool.Name() != want[i] {
@@ -74,8 +76,8 @@ func TestNewDefaultRegistryWithHost_RegistersAskUserOnlyWithAsker(t *testing.T) 
 	if got := all[len(all)-1].Name(); got != "ask_user" {
 		t.Errorf("ask_user should be last in the menu, got last = %q", got)
 	}
-	if got := len(all); got != 19 {
-		t.Errorf("registry with Asker holds %d tools, want 19", got)
+	if got := len(all); got != 20 {
+		t.Errorf("registry with Asker holds %d tools, want 20", got)
 	}
 }
 
@@ -109,6 +111,9 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		"web_fetch":    false,
 		"http_request": false,
 		"web_search":   false,
+		// sub_agent (P3.13): the recursion point carries NO disposition marker — it is not
+		// read-only (its blast radius is owned per-child-call one level down, ADR 0013).
+		"sub_agent": false,
 		// ask_user (P3.11): asking a question writes nothing — read-only, runs in Plan.
 		"ask_user": true,
 	}

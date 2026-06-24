@@ -44,10 +44,17 @@ different thing; do not resurrect the name for the new library), "the SDK".
 **Sub-agent**:
 A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with
 its own Session and a reduced context Budget. It is itself an instance of the **Embeddable
-agent**, spawned in-process; its events nest into the parent's event stream. Its
-privileges are always **≤ the parent's** (mode, guardrails, Confinement, tool set) — see
-[ADR 0005](docs/adr/0005-sub-agent-privileges-are-bounded-by-the-parent.md). Bare "agent"
-means the **top-level** agent unless qualified as "sub-agent".
+agent**, spawned in-process; its events nest into the parent's event stream at **`Depth =
+parent+1`**. Its privileges are always **≤ the parent's** (mode, guardrails, Confinement,
+tool set) — see [ADR 0005](docs/adr/0005-sub-agent-privileges-are-bounded-by-the-parent.md).
+The *shape* is [ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md):
+the model reaches it through a **`sub_agent` tool** that dispatch treats as a **recursion
+point** (not a leaf — never confined/gated as a unit; each *child* call gets the per-call
+disposition one level down), the orchestrator threads mode/approver/confiner/tool-subset
+verbatim-or-stricter, the sub-agent's **live guard state is isolated** (a fresh
+circuit-breaker + audit log — `Guards.ForSubAgent`) over a **shared, read-only
+dangerous-action floor** (unloosenable one level down), and recursion is depth-bounded.
+Bare "agent" means the **top-level** agent unless qualified as "sub-agent".
 _Avoid_: "child agent" (says nothing about the privilege bound), "worker".
 
 **The loop** (the agent loop):

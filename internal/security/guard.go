@@ -12,10 +12,19 @@ import "github.com/airiclenz/apogee/internal/domain"
 // network tools call them directly), so they are not part of this executor bundle — this
 // is the set the dispatcher itself runs around each call.
 //
-// A Guards value threads into a sub-agent verbatim (D2), so the sub-agent inherits the
-// same floor for free. A zero Guards is inert (every field nil): PreExecute returns
-// GuardProceed and RecordResult is a no-op, so an executor can hold a Guards
-// unconditionally without nil-checking each field.
+// LIVE STATE. Breaker and Audit hold MUTABLE pointer-backed state (the breaker's failure
+// streaks, the audit ring). A Guards value-copy therefore ALIASES that live state through
+// the shared pointers — copying the struct does NOT copy the breaker or the log. Dangerous,
+// by contrast, is read-only after construction (Inspect/Rules only), so sharing its pointer
+// is safe and intended. The split matters when handing Guards to a sub-agent: a verbatim
+// copy would make the sub-agent and parent share one breaker and one audit trail. Use
+// ForSubAgent to ISOLATE the live state (fresh breaker + fresh audit) while keeping the
+// dangerous-action floor SHARED read-only — the floor a sub-agent must never be able to
+// re-derive or loosen (ADR 0013).
+//
+// A zero Guards is inert (every field nil): PreExecute returns GuardProceed and
+// RecordExecution is a no-op, so an executor can hold a Guards unconditionally without
+// nil-checking each field.
 type Guards struct {
 	// Dangerous is the dangerous-action guard (footgun floor). nil ⇒ no dangerous-action
 	// inspection.
@@ -35,6 +44,26 @@ func NewDefaultGuards() Guards {
 		Breaker:   NewCircuitBreaker(DefaultCircuitBreakerThreshold),
 		Audit:     NewAuditLog(),
 	}
+}
+
+// ForSubAgent returns a Guards for a delegated sub-agent that ISOLATES the live state but
+// SHARES the dangerous-action floor read-only (ADR 0013). The breaker and the audit log are
+// fresh (a sub-agent's runaway tool-loop trips its own breaker, not the parent's, and its
+// audit trail is its own), so the two loops cannot interfere through the aliased pointers a
+// verbatim copy would share. The Dangerous guard is shared by POINTER: it is read-only after
+// construction (Inspect/Rules expose no mutator), so a sub-agent inherits the exact same
+// floor and has NO seam to re-derive, replace, or loosen it — the floor cannot be lowered one
+// level down. A nil Breaker/Audit on the parent stays nil (isolation of "no guard" is still
+// "no guard"); the breaker keeps the parent's configured threshold.
+func (g Guards) ForSubAgent() Guards {
+	sub := Guards{Dangerous: g.Dangerous} // shared read-only floor
+	if g.Breaker != nil {
+		sub.Breaker = NewCircuitBreaker(g.Breaker.Threshold())
+	}
+	if g.Audit != nil {
+		sub.Audit = NewAuditLog()
+	}
+	return sub
 }
 
 // GuardOutcome is what PreExecute tells the executor to do with a call before the mode

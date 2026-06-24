@@ -394,7 +394,7 @@ everything, and it cuts `v1.0.0`).
 | **P3.10** | **`diagnostics` tool**: in-process `go/parser` + `go vet` for Go; optional shell-out linters for other langs, graceful | P3.6, P3.8 | — | §3a; broad §4 tools |
 | **P3.11** | **Network + host tools**: `web-fetch`, `web-search`, `http-request` (external-effect, Approval-gated in Auto, bench-stubbable) + `ask-user` (new `Asker` host delegate) | P3.6 | — | ADR 0008; D3; D7 |
 | **P3.12** | *(reserved — folded into P3.6; kept for ID stability if guardrails split)* | — | — | — |
-| **P3.13** | **Sub-agent orchestrator + ADR 0013** (D2): privilege threading, `Subset` tool set, top-level-only swappable driver, `Depth+1` event nesting, the `sub_agent` tool | P3.7–P3.11, P3.4 | — | ADR 0005; **ADR 0013** |
+| **P3.13** ✅ | **Sub-agent orchestrator + ADR 0013** (D2): privilege threading, `Subset` tool set, top-level-only swappable driver, `Depth+1` event nesting, the `sub_agent` recursion point; **isolated live guard state, shared read-only dangerous floor** (`Guards.ForSubAgent`). **Done 2026-06-24** — see result note below | P3.7–P3.11, P3.4 | — | ADR 0005; **ADR 0013** |
 | **P3.14** | **TUI `Depth > 0` rendering**: nested-event framing/indentation (Phase-2 "tolerate" → "render") | P3.13 | — | ADR 0011; TDD §5 TUI |
 | **P3.15** | **MCP client** on the official Go SDK (stdio/SSE/streamable-http): surface server tools as `ExternalEffectTool`, Auto-gates-MCP, resume reconnects fresh | P3.4, P3.6 | `…/go-sdk` | ADR 0004/0008; D3 |
 | **P3.16** | **Phase-3 acceptance + cut `v1.0.0`**: feature-parity vs apogee-code non-UI + bench; live Auto-confined run (Mac + Linux); freeze + tag + amend ADR 0001 §18 | all | — | broad §4 deliverable; ADR 0001 §18 |
@@ -1340,6 +1340,56 @@ arrive at `Depth==1`; a sub-agent panic recovers at the parent boundary (ADR 000
 the parent Exchange; **a cancel during a sub-agent rolls back the whole parent Turn — the parent is
 resumable from the pre-`sub_agent` quiescent boundary with byte-identical state, and no snapshot
 contains suspended sub-agent state** (atomic-within-the-parent-Turn, D2).
+
+#### ✅ P3.13 result — landed 2026-06-24 (sub-agent orchestrator + ADR 0013; carried Guards finding RESOLVED → isolate; gate GREEN; hermetic nested-loop tests under `-race`)
+
+P3.13 makes `Depth > 0` real: a sub-agent is a nested `Agent` driven at a dispatch recursion point,
+constructed bounded by the parent and running with **isolated** live guard state over a **shared,
+read-only** dangerous floor. All tests are hermetic — the parent and sub-agent share one
+`scriptedResponder` (the sub-agent reuses the parent's Upstream), so a scripted "parent delegates →
+child Turns → parent finishes" drives the whole nested loop with **no real LLM and no real exec**.
+**No new dep** (`go.mod`/`go.sum` unchanged). **What landed:**
+
+- **The carried `/code-review` finding RESOLVED → ISOLATE** (`internal/security/guard.go`): `Guards`
+  value-copy aliased the live breaker/audit through shared pointers. New **`Guards.ForSubAgent()`**
+  returns a copy with a **fresh `CircuitBreaker`** (same threshold) + **fresh `AuditLog`**, but the
+  **same `*DangerousActionGuard` shared by pointer** — read-only (only `Inspect`/`Rules`, no mutator),
+  so the floor cannot be re-derived or loosened one level down. The misleading "threads verbatim / no
+  live state" `Guards` comment is corrected to describe the aliasing honestly. Tests prove a sub-agent
+  breaker trip does **not** trip the parent, a sub-agent audit append does **not** leak into the
+  parent log, and the dangerous floor is the **same** guard instance (shared, unloosenable). Decision +
+  rationale recorded in **ADR 0013**.
+- **`sub_agent` is the recursion point, not a leaf** (`internal/tools/sub_agent.go`,
+  `internal/agent/subagent.go`): a plain `domain.Tool` carrying **no disposition marker** (not
+  read-only / workspace-writer / external / subprocess — asserted), registered in `DefaultTools` (now
+  19 built-ins). `resolveAndExecute` recognises `SubAgentToolName` **after** the always-on guardrails
+  (the dangerous floor still applies, tighten-only) but **before** the mode disposition, and drives a
+  nested `Agent` — so each **child** call gets the full per-call blast-radius disposition one level
+  down (a child subprocess confines, a child Apogee write is path-safety-bounded, a child MCP/external
+  still gates), never the sub-agent "as a unit." The tool's own `Execute` errors if ever reached.
+- **`newChildAgent` threads "≤ parent" structurally** (`subagent.go`): same Mode / Approver / Confiner /
+  `confine-to-workspace` (verbatim, never loosened), a `registry.Subset` of the parent's tools
+  (`defaultSubAgentTools` — built from the parent registry's own names, so an expansion is impossible),
+  `Guards.ForSubAgent()`, the same Upstream + EventSink, fresh conversation (only the delegated task —
+  no parent history/pending-input/approval-cache, the ADR-0008 boundary). The sub-agent's final
+  assistant message is surfaced back to the parent as the `sub_agent` tool result.
+- **`Depth` threaded** (`internal/agent/agent.go`, `loop.go`): `Agent` gains a `depth` field; the
+  package-level `base(turn)` became the method **`(a *Agent) base(turn)`** stamping `Depth = a.depth`,
+  so every event an Agent emits nests at its level with no per-call threading — top-level events stay
+  `Depth == 0`, sub-agent events are `Depth == 1`. **P3.14 needs only this `Depth` on events.**
+- **Recursion bounded (`maxSubAgentDepth = 2`), defence in depth**: a child constructed **at** the bound
+  is never offered `sub_agent` (`defaultSubAgentTools` withholds it; `toolMenu` also lets `sub_agent`
+  through in Plan, since it is bounded one level down), **and** the recursion point refuses defensively
+  at the bound — so an unbounded sub-agent tower is structurally impossible (both paths tested).
+- **Top-level-only stepping / atomic-within-the-Turn** preserved: the driver runs the nested Agent to
+  its Exchange boundary in one shot; a cancel mid-sub-agent surfaces `dispatchCancelled` so the parent
+  rolls the whole Turn back to its pre-`sub_agent` boundary; a child tool panic recovers at the parent
+  boundary (ADR 0007) without killing the parent Exchange. The snapshot schema's "suspended sub-agent"
+  slot stays reserved-but-empty (forward-compat for nested stepping).
+- **Tests** (`internal/agent/subagent_test.go`, `internal/security/guard_test.go`): delegate-and-report,
+  `Depth == 1` nesting, Plan-parent-cannot-write, subset-omits-tool, max-depth (withheld + refused),
+  breaker isolation, dangerous-floor shared-read-only, child-panic-recovers-at-parent, arg validation —
+  all green under `-race`. Registry count/order tests updated for the new `sub_agent` entry.
 
 ### P3.14 — TUI `Depth > 0` rendering
 Turn the Phase-2 *tolerate* into *render*: frame/indent nested sub-agent events as a visually distinct

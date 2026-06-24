@@ -147,7 +147,7 @@ func (a *Agent) recoverHook(turn int, errp *error) func() {
 	return func() {
 		if r := recover(); r != nil {
 			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: base(turn),
+				EventBase: a.base(turn),
 				Source:    string(experimentalMechanismID),
 				Err:       fmt.Sprintf("panic: %v", r),
 			})
@@ -159,7 +159,7 @@ func (a *Agent) recoverHook(turn int, errp *error) func() {
 // fired emits a MechanismFiredEvent for a successful experimental-hook fire.
 func (a *Agent) fired(turn int, hook domain.HookPoint, action string) {
 	a.cfg.Events.Emit(domain.MechanismFiredEvent{
-		EventBase: base(turn),
+		EventBase: a.base(turn),
 		Mechanism: experimentalMechanismID,
 		Hook:      hook,
 		Action:    action,

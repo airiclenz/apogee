@@ -35,7 +35,7 @@ const (
 // model sees on the next Turn, and dispatch continues to the next call (ADR 0007).
 func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
 	for _, call := range calls {
-		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: base(turn), Call: call})
+		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call})
 
 		if err := a.runPreToolExecHooks(ctx, turn, &call); err != nil {
 			// A pre-tool-exec hook panicked (recovered into an ErrorEvent): skip the call
@@ -78,7 +78,22 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 	if guard.Outcome == security.GuardRefuse {
 		result := errorToolResult(call.ID, guardRefusalMessage(guard))
 		a.guards.RecordBlocked(call, guard.Audit, guard.Reason, result)
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: call.Tool, Err: guardRefusalMessage(guard)})
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: guardRefusalMessage(guard)})
+		return result, dispatchDone
+	}
+
+	// The sub_agent call is the RECURSION POINT (ADR 0013, D2), not a leaf tool: drive a
+	// nested Agent rather than running the disposition table. It is never Confine-wrapped or
+	// gated AS A UNIT and carries no disposition marker — each CHILD tool call inside the
+	// nested loop gets the full per-call disposition one level down, using the parent's
+	// threaded mode / confiner / approver / guardrails. The dangerous-action floor above still
+	// applies to the delegation call itself (tighten-only), so a Tier-1 task is refused here.
+	if isSubAgentCall(call) {
+		result, outcome := a.runSubAgent(ctx, call)
+		if outcome == dispatchCancelled {
+			return result, dispatchCancelled
+		}
+		a.guards.RecordExecution(call, guard.Audit, guard.Reason, result)
 		return result, dispatchDone
 	}
 
@@ -123,7 +138,7 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 	// append the audit record (call / decision / result).
 	if tripped := a.guards.RecordExecution(call, guard.Audit, guard.Reason, result); tripped {
 		a.cfg.Events.Emit(domain.ErrorEvent{
-			EventBase: base(turn),
+			EventBase: a.base(turn),
 			Source:    call.Tool,
 			Err: fmt.Sprintf("circuit-breaker tripped: tool %q failed %d times with identical arguments; "+
 				"further identical calls will be refused", call.Tool, a.guards.Breaker.Threshold()),
@@ -171,7 +186,7 @@ func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call do
 		// A gate is required but the host supplied no Approver: refuse rather than run an
 		// unapproved write / unconfinable / dangerous tool.
 		a.cfg.Events.Emit(domain.ErrorEvent{
-			EventBase: base(turn),
+			EventBase: a.base(turn),
 			Source:    "loop",
 			Err:       "approval required but no Approver configured",
 		})
@@ -188,11 +203,11 @@ func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call do
 		if ctx.Err() != nil {
 			return false, dispatchCancelled
 		}
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: "loop", Err: "approver: " + err.Error()})
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: "approver: " + err.Error()})
 		return false, dispatchDone
 	}
 
-	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: base(turn), Request: areq, Decision: decision})
+	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Request: areq, Decision: decision})
 	switch decision {
 	case domain.ApprovalAllowForSession:
 		if a.approved == nil {
@@ -240,7 +255,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	defer func() {
 		if r := recover(); r != nil {
 			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: base(turn),
+				EventBase: a.base(turn),
 				Source:    call.Tool,
 				Err:       fmt.Sprintf("panic: %v", r),
 			})
@@ -272,7 +287,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		if errors.Is(err, domain.ErrConfinementUnavailable) {
 			return domain.ToolResult{}, dispatchConfinementUnavailable
 		}
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: call.Tool, Err: err.Error()})
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: err.Error()})
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 	return res, dispatchDone
@@ -286,7 +301,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 // insufficient → gate" row applied at run time. A nil Approver or a deny refuses the call.
 func (a *Agent) executeWithApprovalFallback(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, guard security.PreCheck) (domain.ToolResult, dispatchOutcome) {
 	a.cfg.Events.Emit(domain.ErrorEvent{
-		EventBase: base(turn),
+		EventBase: a.base(turn),
 		Source:    call.Tool,
 		Err:       "confinement unavailable at run time: demoting subprocess call to Approval",
 	})
@@ -334,7 +349,7 @@ func (a *Agent) confinementBox() domain.ConfinementBox {
 // its call by ID) and emits the ToolResultEvent observers see.
 func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
 	a.conv.Append(domain.Message{Role: domain.RoleTool, Content: result.Content, ToolCallID: result.CallID})
-	a.cfg.Events.Emit(domain.ToolResultEvent{EventBase: base(turn), Result: result})
+	a.cfg.Events.Emit(domain.ToolResultEvent{EventBase: a.base(turn), Result: result})
 }
 
 // errorToolResult builds a tool-level failure result surfaced to the model (IsError) rather

@@ -197,7 +197,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	if len(calls) == 0 {
 		// Final no-tool response: commit the assistant message and end the Exchange.
 		a.conv.Append(assistantMessage(resp, nil))
-		a.cfg.Events.Emit(domain.MessageEvent{EventBase: base(turn), Text: resp.Text()})
+		a.cfg.Events.Emit(domain.MessageEvent{EventBase: a.base(turn), Text: resp.Text()})
 		return a.completeTurn(turn, start, domain.StatusExchangeComplete), nil
 	}
 
@@ -230,7 +230,7 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			return nil, turnCancelled // a cancel masquerades as a stream error; ctx wins
 		}
 		if reply.failed {
-			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: "loop", Err: reply.errMsg})
+			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: reply.errMsg})
 			return nil, turnFailed
 		}
 
@@ -238,7 +238,7 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 		if err != nil {
 			// A malformed tool call degrades to a parse-error path, not a panic: surface
 			// it and treat the Turn as a final no-tool response.
-			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: base(turn), Source: "processing", Err: err.Error()})
+			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "processing", Err: err.Error()})
 			calls = nil
 		}
 
@@ -252,7 +252,7 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 		if retry && attempt < maxPostResponseRetries {
 			// The Turn re-streams: tell observers the tokens emitted this attempt are
 			// superseded, so a streaming UI discards them before the retry streams afresh.
-			a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: base(turn)})
+			a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
 			continue
 		}
 		return resp, turnOK
@@ -282,7 +282,7 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
-			a.cfg.Events.Emit(domain.TokenEvent{EventBase: base(turn), Text: delta.Content})
+			a.cfg.Events.Emit(domain.TokenEvent{EventBase: a.base(turn), Text: delta.Content})
 		case provider.DeltaThinking:
 			thinking.WriteString(delta.Thinking)
 		case provider.DeltaToolCall:
@@ -411,7 +411,7 @@ func (a *Agent) noteUnresolvedFileRefs(turn int, refs []string) {
 		return
 	}
 	a.cfg.Events.Emit(domain.ErrorEvent{
-		EventBase: base(turn),
+		EventBase: a.base(turn),
 		Source:    "loop",
 		Err: fmt.Sprintf("UserInput.FileRefs are not yet resolved into context and were ignored "+
 			"(%d ref(s)); reference resolution is deferred to the context builder", len(refs)),
@@ -433,7 +433,11 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	all := a.tools.All()
 	menu := make([]domain.ToolDef, 0, len(all))
 	for _, t := range all {
-		if a.cfg.Mode == domain.ModePlan && !domain.IsReadOnly(t) {
+		// Plan mode offers only read-only tools — EXCEPT the sub_agent recursion point, which
+		// is bounded one level down (a Plan sub-agent inherits Plan, so its children are
+		// read-only too). It is not a leaf write, so hiding it would wrongly deny a Plan-mode
+		// parent the ability to delegate read/research work (ADR 0013).
+		if a.cfg.Mode == domain.ModePlan && !domain.IsReadOnly(t) && t.Name() != tools.SubAgentToolName {
 			continue
 		}
 		menu = append(menu, domain.ToolDef{
@@ -516,5 +520,9 @@ func toProviderSampling(p domain.SamplingParams) provider.Sampling {
 	return provider.Sampling{Temperature: p.Temperature, MaxTokens: p.MaxTokens}
 }
 
-// base is the EventBase every top-level Event carries (Depth 0; the given Turn index).
-func base(turn int) domain.EventBase { return domain.EventBase{Turn: turn} }
+// base is the EventBase every Event this Agent emits carries: the given Turn index and the
+// Agent's sub-agent nesting Depth (0 for the top-level Agent, parent+1 for a sub-agent — ADR
+// 0013), so a sub-agent's events nest into the parent's stream at Depth > 0 with no per-call
+// threading. A nested sub-agent re-emits through its OWN Agent (constructed at the deeper
+// depth), so the depth is read from the emitting Agent rather than passed around.
+func (a *Agent) base(turn int) domain.EventBase { return domain.EventBase{Depth: a.depth, Turn: turn} }
