@@ -12,26 +12,17 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// Confiner is the prepare-in-place backend shape the harness drives
-// (confinement-execution-contract §2.2): report capabilities, and rewrite a *exec.Cmd
-// to launch confined to box. It is the P3.4 domain.Confiner signature, named here as a
-// local interface so the harness can drive the backends before domain adopts it.
-type Confiner interface {
-	Capabilities() domain.ConfinementCaps
-	Confine(ctx context.Context, box domain.ConfinementBox, cmd *exec.Cmd) error
-}
-
 // Probe drives c through the filesystem escape battery (confinement-execution-contract
 // §6.2 rows #1–#6) under a box rooted at fresh temp dirs. The caller passes the
-// OS-specific backend; the battery and its assertions are identical across backends, so
-// "confined" means the same thing on landlock and seatbelt.
+// OS-specific backend (any domain.Confiner); the battery and its assertions are identical
+// across backends, so "confined" means the same thing on landlock and seatbelt.
 //
 // When c reports FSWrite==false (e.g. a kernel built without landlock), enforcement
 // cannot be exercised on this host, so Probe skips — the backend is still constructed
 // and Capabilities is still honest; only the OS-denial assertions are unrunnable. This
 // is the standard kernel-feature-gated test idiom; the denials run for real on a
 // confinement-capable runner.
-func Probe(t *testing.T, c Confiner) {
+func Probe(t *testing.T, c domain.Confiner) {
 	t.Helper()
 	if !c.Capabilities().FSWrite {
 		t.Skip("confinetest: backend reports FSWrite==false (confinement unenforceable on this host); skipping enforcement battery")
@@ -100,7 +91,7 @@ func Probe(t *testing.T, c Confiner) {
 // ProbeNetwork runs the network arm (confinement-execution-contract §6.2 rows #7–#8). It
 // is split from Probe so the fs battery runs on every fs-capable host while the net arm
 // runs only where the backend can enforce network egress (NetworkEgress==true).
-func ProbeNetwork(t *testing.T, c Confiner) {
+func ProbeNetwork(t *testing.T, c domain.Confiner) {
 	t.Helper()
 	if !c.Capabilities().NetworkEgress {
 		t.Skip("confinetest: backend reports NetworkEgress==false; skipping network battery")
@@ -139,14 +130,14 @@ func ProbeNetwork(t *testing.T, c Confiner) {
 // runWriteProbe builds `sh -c 'printf x > target'`, confines it to box via c, runs it,
 // and returns the run error (nil on a successful in-box write, non-nil on an OS-denied
 // out-of-box write).
-func runWriteProbe(t *testing.T, c Confiner, box domain.ConfinementBox, target string) error {
+func runWriteProbe(t *testing.T, c domain.Confiner, box domain.ConfinementBox, target string) error {
 	t.Helper()
 	return runConfined(t, c, box, "printf x > "+shellQuote(target))
 }
 
 // runNestedWriteProbe runs the write inside a nested `sh -c`, so the write executes in a
 // program exec'd by the confined shell — exercising domain inheritance across execve.
-func runNestedWriteProbe(t *testing.T, c Confiner, box domain.ConfinementBox, target string) error {
+func runNestedWriteProbe(t *testing.T, c domain.Confiner, box domain.ConfinementBox, target string) error {
 	t.Helper()
 	inner := "printf x > " + shellQuote(target)
 	return runConfined(t, c, box, "sh -c "+shellQuote(inner))
@@ -155,7 +146,7 @@ func runNestedWriteProbe(t *testing.T, c Confiner, box domain.ConfinementBox, ta
 // runConnectProbe re-execs a tiny dialer inside a confined `sh -c` that uses the host's
 // own toolchain-free TCP check. It shells out to the platform's /dev/tcp redirection,
 // which sh implements without any external program, so the probe stays hermetic.
-func runConnectProbe(t *testing.T, c Confiner, box domain.ConfinementBox, addr string) error {
+func runConnectProbe(t *testing.T, c domain.Confiner, box domain.ConfinementBox, addr string) error {
 	t.Helper()
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -167,13 +158,13 @@ func runConnectProbe(t *testing.T, c Confiner, box domain.ConfinementBox, addr s
 }
 
 // runConfined builds `sh -c <line>`, confines and runs it, returning the run error.
-func runConfined(t *testing.T, c Confiner, box domain.ConfinementBox, line string) error {
+func runConfined(t *testing.T, c domain.Confiner, box domain.ConfinementBox, line string) error {
 	t.Helper()
 	return runConfinedShell(t, c, box, "sh", line)
 }
 
 // runConfinedShell builds `<shell> -c <line>`, confines it to box via c, and runs it.
-func runConfinedShell(t *testing.T, c Confiner, box domain.ConfinementBox, shell, line string) error {
+func runConfinedShell(t *testing.T, c domain.Confiner, box domain.ConfinementBox, shell, line string) error {
 	t.Helper()
 	ctx := context.Background()
 	cmd := exec.CommandContext(ctx, shell, "-c", line)

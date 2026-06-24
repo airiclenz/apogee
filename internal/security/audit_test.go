@@ -68,6 +68,53 @@ func TestAuditLog_AppendOnlyOrderPreserved(t *testing.T) {
 	}
 }
 
+func TestAuditLog_CapEvictsOldestAndCountsDropped(t *testing.T) {
+	t.Parallel()
+	const cap = 3
+	log := NewAuditLogWithCap(cap)
+
+	// Append more than the cap; the ring keeps only the most-recent `cap` records and
+	// counts the rest as dropped (overflow is observable, not silent).
+	const total = 7
+	ids := []string{"a", "b", "c", "d", "e", "f", "g"}
+	for _, id := range ids {
+		log.RecordCall(auditCall("grep", id), AuditAllowed, "", domain.ToolResult{CallID: id})
+	}
+
+	if got := log.Len(); got != cap {
+		t.Errorf("Len() = %d, want capped at %d", got, cap)
+	}
+	if got := log.Dropped(); got != total-cap {
+		t.Errorf("Dropped() = %d, want %d (total %d - cap %d)", got, total-cap, total, cap)
+	}
+
+	// The retained window must be the LAST `cap` records, in append order.
+	recs := log.Records()
+	if len(recs) != cap {
+		t.Fatalf("Records() = %d, want %d", len(recs), cap)
+	}
+	wantTail := ids[total-cap:] // {"e", "f", "g"}
+	for i, want := range wantTail {
+		if recs[i].CallID != want {
+			t.Errorf("retained record %d CallID = %q, want %q (ring must keep newest in order)", i, recs[i].CallID, want)
+		}
+	}
+}
+
+func TestAuditLog_UnderCapDropsNothing(t *testing.T) {
+	t.Parallel()
+	log := NewAuditLogWithCap(5)
+	for _, id := range []string{"a", "b", "c"} {
+		log.RecordCall(auditCall("grep", id), AuditAllowed, "", domain.ToolResult{CallID: id})
+	}
+	if got := log.Dropped(); got != 0 {
+		t.Errorf("Dropped() = %d under cap, want 0", got)
+	}
+	if got := log.Len(); got != 3 {
+		t.Errorf("Len() = %d, want 3", got)
+	}
+}
+
 func TestAuditLog_TruncatesLargeResult(t *testing.T) {
 	t.Parallel()
 	log := NewAuditLog()

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -10,6 +11,50 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 )
+
+// incapableConfiner is a present-but-incapable Confiner: it reports {false, false}, so it
+// cannot enforce the subprocess surface. Auto must still CONSTRUCT with it (the gate
+// refuses only a NIL Confiner — ADR 0012's "confine if you can, gate if you can't"); the
+// per-call disposition then gates the unfenceable surface.
+type incapableConfiner struct{}
+
+func (incapableConfiner) Capabilities() domain.ConfinementCaps { return domain.ConfinementCaps{} }
+func (incapableConfiner) Confine(_ context.Context, _ domain.ConfinementBox, _ *exec.Cmd) error {
+	return nil
+}
+
+// TestAutoConstruction_NilConfinerRefused proves the Auto gate refuses construction when
+// no Confiner facility is injected at all: New returns ErrAutoUnavailable (ADR 0012 — Auto
+// needs a facility to enforce, or to gate, the subprocess surface).
+func TestAutoConstruction_NilConfinerRefused(t *testing.T) {
+	t.Parallel()
+	cfg := baseConfig(&recordingSink{})
+	cfg.Mode = domain.ModeAuto
+	cfg.Confiner = nil
+
+	_, err := New(cfg)
+	if !errors.Is(err, domain.ErrAutoUnavailable) {
+		t.Fatalf("New(Auto, nil Confiner) err = %v, want ErrAutoUnavailable", err)
+	}
+}
+
+// TestAutoConstruction_IncapableConfinerConstructs proves a PRESENT-but-incapable Confiner
+// (reports {false,false}) does NOT refuse Auto: construction succeeds and the disposition
+// later gates the subprocess surface ("confine if you can, gate if you can't" — ADR 0012).
+func TestAutoConstruction_IncapableConfinerConstructs(t *testing.T) {
+	t.Parallel()
+	cfg := baseConfig(&recordingSink{})
+	cfg.Mode = domain.ModeAuto
+	cfg.Confiner = incapableConfiner{}
+
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New(Auto, incapable Confiner) err = %v, want construction to succeed", err)
+	}
+	if a == nil {
+		t.Fatal("New returned a nil Agent without an error")
+	}
+}
 
 // eligibleConfiner is a fake Confiner reporting Auto-eligible capabilities so a test can
 // construct an Auto-mode Agent. Its Confine is a no-op preparation (it leaves cmd as-is)

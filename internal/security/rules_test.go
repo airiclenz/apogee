@@ -76,6 +76,55 @@ func TestMergeDangerousRules_ProjectAddTightensInPlace(t *testing.T) {
 	}
 }
 
+func TestMergeDangerousRules_ProjectCannotDissolveFloorByID(t *testing.T) {
+	t.Parallel()
+	// THE floor-preservation invariant: a project add must not be able to replace a
+	// Tier-1 (TierHardRefuse) floor rule by reusing its ID with a looser tier and/or a
+	// pattern that never matches. A same-ID project add at an equal-or-lower tier is
+	// rejected outright, so the original floor rule survives intact.
+	base := []Rule{
+		{ID: "rm-rf-root", Pattern: `rm -rf /`, Tier: TierHardRefuse, Reason: "delete root"},
+	}
+
+	cases := []struct {
+		name    string
+		project Rule
+	}{
+		{
+			// Loosen the tier (HardRefuse -> ForceApproval) AND neuter the pattern.
+			name:    "lower tier",
+			project: Rule{ID: "rm-rf-root", Pattern: `this-will-never-match`, Tier: TierForceApproval, Reason: "neutered"},
+		},
+		{
+			// Same tier, but a pattern that never fires — equal tier is not strictly
+			// stricter, so it must still be rejected (it could only loosen, never tighten).
+			name:    "equal tier, neutered pattern",
+			project: Rule{ID: "rm-rf-root", Pattern: `this-will-never-match`, Tier: TierHardRefuse, Reason: "neutered"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			merged := MergeDangerousRules(base, nil, nil, []Rule{tc.project})
+			got := ruleIDs(merged)
+			r, ok := got["rm-rf-root"]
+			if !ok {
+				t.Fatal("project add dissolved the Tier-1 floor rule entirely")
+			}
+			if r.Tier != TierHardRefuse {
+				t.Errorf("floor rule tier = %v, want TierHardRefuse (project add loosened the floor)", r.Tier)
+			}
+			if r.Pattern != `rm -rf /` || r.Reason != "delete root" {
+				t.Errorf("floor rule was replaced by the project add: %+v", r)
+			}
+			if len(merged) != 1 {
+				t.Errorf("merged has %d rules, want 1 (the rejected project add must not be appended)", len(merged))
+			}
+		})
+	}
+}
+
 func TestMergeDangerousRules_DefaultRulesetMergesCleanly(t *testing.T) {
 	t.Parallel()
 	// The real default ruleset round-trips through a no-op merge unchanged in count.

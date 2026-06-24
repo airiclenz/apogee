@@ -403,6 +403,47 @@ everything, and it cuts `v1.0.0`).
 > renumber if a reviewer later splits audit/circuit-breaker out. Treat the live list as P3.0–P3.11,
 > P3.13–P3.16.
 
+#### ✅ Hardening pass result — landed 2026-06-24 (in-pillar `/code-review` findings closed before P3.5; gate GREEN)
+
+The confinement pillar's consolidated `/code-review` findings (no dedicated task ID — the findings
+*are* the spec). Closed **all 7**:
+
+1. **[High] tighten-only dangerous-rule merge** (`security/rules.go`): `MergeDangerousRules` project-adds
+   are now tighten-only — a same-ID project add replaces an existing rule **only if strictly stricter**
+   (higher `Tier`); an equal-or-lower-tier same-ID add is **dropped**, so a hostile/careless repo can no
+   longer replace-by-ID to dissolve or loosen a Tier-1 floor rule. Global adds keep their trusted
+   replace-in-place semantics. Test: `TestMergeDangerousRules_ProjectCannotDissolveFloorByID` (lower-tier
+   and neutered-equal-tier both rejected).
+2. **[Med] fail-closed net-deny on landlock ABI<4** (`landlock_linux.go`): when a box opts into
+   network-deny (`NetworkAllow` set) but the kernel can't enforce network rules (ABI<4), `applyLandlock`
+   now **fails closed** (returns `ErrConfinementUnavailable`) instead of silently running network-open —
+   so dispatch's "confine-if-you-can, gate-if-you-can't" net routes the call to Approval. Decision is
+   **consistent with ADR 0012** (deny is a tightening the box requested; the network-OPEN default is
+   unaffected) — no ADR change needed. Extracted `networkDenyDecision(box, abi)` as a pure helper; test
+   `TestNetworkDenyDecision` (open/deny × enforceable/unenforceable).
+3. **[Med] bounded audit log** (`security/audit.go`): `AuditLog` is now a **ring buffer** (`DefaultAuditCap
+   = 10000`) with a `Dropped()` count so overflow is observable; `Records()` returns the most-recent
+   window in append order. `NewAuditLogWithCap` added for small-ring tests. Tests:
+   `TestAuditLog_CapEvictsOldestAndCountsDropped`, `TestAuditLog_UnderCapDropsNothing`.
+4. **[Med] dead-code cleanup**: deleted the duplicated `internal/tools/path_safety_test.go` (canonical is
+   `internal/security/pathsafety_test.go`) and removed the orphaned `evalRealPath` alias from
+   `internal/tools/path_safety.go`.
+5. **[Med] `confinetest` uses `domain.Confiner`**: retired the stale local `Confiner` interface in
+   `internal/platform/confinetest`; `Probe`/`ProbeNetwork` now take `domain.Confiner` directly; dropped the
+   "until P3.4" comments.
+6. **[Med] dead `PreCheck.Decision`** (`security/guard.go`): confirmed never read (only written), removed.
+7. **[Med] hermetic tests added**: nil-Confiner Auto → `ErrAutoUnavailable`
+   (`TestAutoConstruction_NilConfinerRefused`); present-but-incapable Confiner Auto → constructs
+   (`TestAutoConstruction_IncapableConfinerConstructs`); `ApplyLandlockAndExec` empty-argv refusal
+   (`TestApplyLandlockAndExecRejectsEmptyArgv`); marker accessors false/empty for a non-marker tool
+   (`TestMarkerAccessors_NonMarkerTool` + positive contrast `TestMarkerAccessors_MarkerTool`).
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go vet
+./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` · ADR-0010 grep empty · 6 cross-builds
+OK (`CGO_ENABLED=0`) · `go mod tidy` no drift · `apogee --help` exit 0. The landlock **enforcement**
+battery (`confinetest.Probe`) self-skips on this kernel (`CONFIG_SECURITY_LANDLOCK` off) as expected — the
+new logic tests use injected ABI / pure helpers and run regardless.
+
 ### P3.0 — Phase-3 entry (re-verify + re-confirm pins)
 Re-run the full verify gate from a clean tree (§7). Re-confirm the **seven §0 inheritance facts**
 against source (a Phase-2 follow-up may have moved a line — especially `needsApproval`/`dispatch.go`

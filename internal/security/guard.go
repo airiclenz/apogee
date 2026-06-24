@@ -56,10 +56,9 @@ const (
 // PreCheck is PreExecute's verdict: the outcome plus the human-facing reason and the
 // audit decision the executor records.
 type PreCheck struct {
-	Outcome  GuardOutcome
-	Reason   string        // why the guard fired ("" when GuardProceed)
-	Audit    AuditDecision // the decision to record for a fired guard
-	Decision Decision      // the dangerous-action decision (TierNone when not dangerous-action)
+	Outcome GuardOutcome
+	Reason  string        // why the guard fired ("" when GuardProceed)
+	Audit   AuditDecision // the decision to record for a fired guard
 }
 
 // PreExecute runs the always-on pre-execution guardrails for call, in order: the
@@ -80,9 +79,9 @@ func (g Guards) PreExecute(call domain.ToolCall) PreCheck {
 		if d := g.Dangerous.Inspect(call); d.Triggered() {
 			switch d.Tier {
 			case TierHardRefuse:
-				return PreCheck{Outcome: GuardRefuse, Reason: d.Reason, Audit: AuditDangerousRefused, Decision: d}
+				return PreCheck{Outcome: GuardRefuse, Reason: d.Reason, Audit: AuditDangerousRefused}
 			case TierForceApproval:
-				return PreCheck{Outcome: GuardForceApproval, Reason: d.Reason, Audit: AuditDangerousForceApproval, Decision: d}
+				return PreCheck{Outcome: GuardForceApproval, Reason: d.Reason, Audit: AuditDangerousForceApproval}
 			}
 		}
 	}

@@ -4,6 +4,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -178,6 +179,68 @@ func TestLandlockConfineRejectsEmptyArgv(t *testing.T) {
 	cmd := &exec.Cmd{} // no Args
 	if err := c.Confine(context.Background(), domain.ConfinementBox{}, cmd); err == nil {
 		t.Fatal("Confine with empty argv returned nil, want error")
+	}
+}
+
+func TestApplyLandlockAndExecRejectsEmptyArgv(t *testing.T) {
+	t.Parallel()
+
+	// The in-child half must refuse an empty argv before touching landlock or exec — there
+	// is nothing to exec, so it returns an error rather than producing a malformed exec.
+	// This guard fires regardless of the host kernel (no landlock call is reached), so the
+	// test is hermetic on this dev host where landlock is off.
+	if err := ApplyLandlockAndExec(domain.ConfinementBox{}, nil); err == nil {
+		t.Fatal("ApplyLandlockAndExec(nil argv) returned nil, want error")
+	}
+	if err := ApplyLandlockAndExec(domain.ConfinementBox{}, []string{}); err == nil {
+		t.Fatal("ApplyLandlockAndExec(empty argv) returned nil, want error")
+	}
+}
+
+func TestNetworkDenyDecision(t *testing.T) {
+	t.Parallel()
+
+	denyBox := domain.ConfinementBox{WorkspaceRoot: "/ws", NetworkAllow: []string{"example.com:443"}}
+	openBox := domain.ConfinementBox{WorkspaceRoot: "/ws"}
+
+	tests := []struct {
+		name          string
+		box           domain.ConfinementBox
+		abi           int
+		wantHandleNet bool
+		wantErr       bool // expect ErrConfinementUnavailable (fail-closed)
+	}{
+		// Network open (empty NetworkAllow): never restricts, never fails, any ABI.
+		{"open_abi1", openBox, 1, false, false},
+		{"open_abi4", openBox, 4, false, false},
+		// Network deny + enforceable (ABI >= 4): restrict TCP connect.
+		{"deny_abi4", denyBox, 4, true, false},
+		{"deny_abi6", denyBox, 6, true, false},
+		// Network deny but NOT enforceable (ABI < 4): FAIL CLOSED rather than running open.
+		{"deny_abi1_failclosed", denyBox, 1, false, true},
+		{"deny_abi3_failclosed", denyBox, 3, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			handleNet, err := networkDenyDecision(tt.box, tt.abi)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("abi %d, deny box: err = nil, want fail-closed (network-deny unenforceable must not run open)", tt.abi)
+				}
+				if !errors.Is(err, domain.ErrConfinementUnavailable) {
+					t.Errorf("abi %d: err = %v, want ErrConfinementUnavailable so dispatch gates the call", tt.abi, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("abi %d: unexpected err: %v", tt.abi, err)
+			}
+			if handleNet != tt.wantHandleNet {
+				t.Errorf("abi %d: handleNet = %v, want %v", tt.abi, handleNet, tt.wantHandleNet)
+			}
+		})
 	}
 }
 

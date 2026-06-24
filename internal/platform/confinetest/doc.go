@@ -10,9 +10,7 @@
 // backend cannot enforce network egress). The harness owns its temp dirs via
 // t.TempDir, so cleanup is automatic.
 //
-// The harness is parameterised over the prepare-in-place Confiner shape
-// (Capabilities + Confine over a *exec.Cmd). The domain.Confiner interface keeps its
-// Phase-0 closure form until P3.4 adopts the *exec.Cmd signature; until then the
-// backends expose that method as a concrete type and this harness names it via a
-// local Confiner interface.
+// The harness is parameterised over domain.Confiner directly (Capabilities + the
+// prepare-in-place Confine over a *exec.Cmd), so a backend's _test.go hands its
+// platform.NewConfiner()-style value straight to Probe/ProbeNetwork.
 package confinetest

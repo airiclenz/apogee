@@ -45,23 +45,48 @@ type AuditRecord struct {
 // cannot make the in-memory log unbounded.
 const maxAuditResultBytes = 4096
 
-// AuditLog is an append-only, in-memory record of tool calls and their disposition. It is
-// safe for concurrent append/read. The log is the guardrail observability spine — it
-// records every call, its decision, and its result, in order. (Persisting it to disk is a
-// later concern; v1 keeps it in-memory, snapshot-shippable.)
+// DefaultAuditCap is the default number of records an AuditLog retains. A long-running
+// session emits one record per tool call, so an uncapped log would grow without bound;
+// the cap keeps memory bounded while retaining the most recent window of the trail. When
+// the cap is exceeded the OLDEST records are dropped (a ring buffer) and a dropped-count
+// is incremented so the overflow is observable rather than silent.
+const DefaultAuditCap = 10000
+
+// AuditLog is a bounded, in-memory record of tool calls and their disposition. It is safe
+// for concurrent append/read. The log is the guardrail observability spine — it records
+// every call, its decision, and its result, in order. It retains at most cap records:
+// once full, each new append evicts the oldest (a ring buffer) and bumps Dropped, so the
+// trail stays the most-recent window and the eviction is observable. (Persisting the full
+// trail to disk is a later concern; v1 keeps a bounded window in-memory, snapshot-shippable.)
 type AuditLog struct {
 	mu      sync.Mutex
-	records []AuditRecord
+	records []AuditRecord    // ring buffer of up to cap entries, oldest-first via head
+	head    int              // index of the oldest record when the ring is full
+	full    bool             // whether the ring has wrapped (len(records)==cap)
+	dropped uint64           // count of records evicted by the cap (observability)
+	cap     int              // maximum retained records
 	now     func() time.Time // injectable clock for deterministic tests
 }
 
-// NewAuditLog returns an empty audit log using the wall clock.
+// NewAuditLog returns an empty audit log using the wall clock, retaining the default cap
+// of records.
 func NewAuditLog() *AuditLog {
-	return &AuditLog{now: time.Now}
+	return NewAuditLogWithCap(DefaultAuditCap)
 }
 
-// Append records one entry. It is the only mutator — the log is append-only (no edit, no
-// delete), which is what makes it a trustworthy trail.
+// NewAuditLogWithCap returns an empty audit log retaining at most cap records (a
+// non-positive cap falls back to DefaultAuditCap). Exposed so tests can exercise the cap
+// + dropped-count on a small ring without emitting DefaultAuditCap records.
+func NewAuditLogWithCap(cap int) *AuditLog {
+	if cap <= 0 {
+		cap = DefaultAuditCap
+	}
+	return &AuditLog{now: time.Now, cap: cap}
+}
+
+// Append records one entry. The log is append-only in spirit (no edit, no per-record
+// delete) but BOUNDED: once cap records are held, appending evicts the oldest and
+// increments Dropped, so memory stays bounded and the eviction is observable.
 func (l *AuditLog) Append(rec AuditRecord) {
 	if rec.Time.IsZero() {
 		rec.Time = l.clock()
@@ -71,7 +96,18 @@ func (l *AuditLog) Append(rec AuditRecord) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.records = append(l.records, rec)
+
+	if !l.full {
+		l.records = append(l.records, rec)
+		if len(l.records) == l.cap {
+			l.full = true // ring is now full; subsequent appends overwrite oldest-first
+		}
+		return
+	}
+	// Ring is full: overwrite the oldest slot, advance head, and count the eviction.
+	l.records[l.head] = rec
+	l.head = (l.head + 1) % l.cap
+	l.dropped++
 }
 
 // RecordCall is the executor-facing convenience that builds and appends a record from a
@@ -87,21 +123,37 @@ func (l *AuditLog) RecordCall(call domain.ToolCall, decision AuditDecision, reas
 	})
 }
 
-// Records returns a copy of the log in append order, so a caller can read the trail
-// without racing the next append or mutating internal storage.
+// Records returns a copy of the retained trail in append (oldest-to-newest) order, so a
+// caller can read it without racing the next append or mutating internal storage. Once the
+// cap has been exceeded this is the most-recent window only; Dropped reports how many older
+// records were evicted.
 func (l *AuditLog) Records() []AuditRecord {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := make([]AuditRecord, len(l.records))
-	copy(out, l.records)
+	if !l.full {
+		copy(out, l.records)
+		return out
+	}
+	// Unroll the ring from the oldest slot (head) so the copy is in append order.
+	n := copy(out, l.records[l.head:])
+	copy(out[n:], l.records[:l.head])
 	return out
 }
 
-// Len reports how many records the log holds.
+// Len reports how many records the log currently retains (at most cap).
 func (l *AuditLog) Len() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.records)
+}
+
+// Dropped reports how many records the cap has evicted (overflowed past the ring). It is
+// the observability signal that the trail is a most-recent window, not the full history.
+func (l *AuditLog) Dropped() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.dropped
 }
 
 // clock returns the current time via the injected clock (wall clock by default).

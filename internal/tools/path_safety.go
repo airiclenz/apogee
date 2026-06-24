@@ -18,10 +18,3 @@ var ErrPathEscape = security.ErrPathEscape
 func resolveInRoot(input, root string) (string, error) {
 	return security.ResolveInRoot(input, root)
 }
-
-// evalRealPath resolves p through symlinks, climbing to the nearest existing ancestor
-// for a not-yet-existing target — the shared guard's helper, used by the path-safety
-// tests' assertions.
-func evalRealPath(p string) string {
-	return security.EvalRealPath(p)
-}

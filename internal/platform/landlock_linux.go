@@ -204,17 +204,10 @@ func applyLandlock(box domain.ConfinementBox) error {
 		return fmt.Errorf("%w: landlock unavailable (abi %d)", domain.ErrConfinementUnavailable, abi)
 	}
 
-	// Restrict TCP connect only when the box opts into network-deny (NetworkAllow set)
-	// AND the kernel can enforce it; otherwise the network stays open (ADR 0012 default).
-	//
-	// Note: this x/sys (v0.45.0) exposes the LANDLOCK_ACCESS_NET_CONNECT_TCP handler bit
-	// and the Access_net field but NOT the per-port allow rule (no LANDLOCK_RULE_NET_PORT
-	// const / LandlockNetPortAttr type), so a network-deny box currently denies ALL TCP
-	// connect rather than allowing the NetworkAllow ports. That satisfies ADR 0012's
-	// model — network is open by default, deny is a coarse tightening — and the §6.2
-	// network battery (deny non-allowlisted; allow when open). Per-port allow becomes an
-	// additive change when x/sys ships the rule type.
-	handleNet := len(box.NetworkAllow) > 0 && abi >= landlockABINetwork
+	handleNet, err := networkDenyDecision(box, abi)
+	if err != nil {
+		return err
+	}
 
 	attr := unix.LandlockRulesetAttr{Access_fs: landlockFSWriteAccess}
 	if handleNet {
@@ -255,6 +248,29 @@ func applyLandlock(box domain.ConfinementBox) error {
 		return fmt.Errorf("apogee: confined-exec: landlock_restrict_self: %w", errno)
 	}
 	return nil
+}
+
+// networkDenyDecision resolves what to do with the box's network policy at the given
+// landlock ABI, as a pure function so the fail-closed rule is testable without a kernel.
+//
+//   - Empty NetworkAllow ⇒ network OPEN (ADR 0012 default): handleNet=false, no error.
+//   - Non-empty NetworkAllow ⇒ the box opts into network-DENY (NetworkAllow is a
+//     TIGHTENING list). When the kernel can enforce it (ABI >= 4) ⇒ handleNet=true.
+//   - Non-empty NetworkAllow but ABI < 4 ⇒ FAIL CLOSED. The box explicitly requested a
+//     network tightening; silently running network-OPEN would violate that intent — the
+//     dangerous opposite of a fence the user believes is in place. It returns
+//     ErrConfinementUnavailable so the dispatch disposition's "confine if you can, gate
+//     if you can't" net routes the call to Approval rather than letting it run unfenced
+//     (ADR 0012 — deny is a tightening the box requested, never a silent no-op).
+func networkDenyDecision(box domain.ConfinementBox, abi int) (handleNet bool, err error) {
+	if len(box.NetworkAllow) == 0 {
+		return false, nil
+	}
+	if abi < landlockABINetwork {
+		return false, fmt.Errorf("%w: box requests network-deny but landlock network rules need ABI >= %d (have %d); refusing to run network-open silently",
+			domain.ErrConfinementUnavailable, landlockABINetwork, abi)
+	}
+	return true, nil
 }
 
 // allowWriteBeneath adds a path-beneath rule granting the handled write accesses under
