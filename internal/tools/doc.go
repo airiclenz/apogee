@@ -11,7 +11,12 @@
 //
 // A tool reports an expected failure (bad arguments, missing file, path escape) as a
 // ToolResult with IsError set, so the model sees and can react to it; the Go error
-// return is reserved for ctx cancellation. NewDefaultRegistry assembles the four into
-// a domain.ToolRegistry — the seam the loop's dispatch (P1.2) wires. Richer tools
-// (patch-edit, terminal, web) and the remaining oracle behaviours are later phases.
+// return is reserved for ctx cancellation. NewDefaultRegistry assembles the built-ins
+// into a domain.ToolRegistry — the seam the loop's dispatch (P1.2) wires.
+//
+// Phase 3 (P3.7) adds the file-editing family: single/multi find-replace, a patch-aware
+// edit_existing_file, a pure-Go view_diff, and a read-and-locate open_file. The write
+// tools among them carry the unexported workspaceScopedWriter marker so the dispatch
+// disposition path-bounds rather than confines them (ADR 0012 D1). The subprocess
+// (terminal, python-exec, git), network, and MCP tools land in later phases.
 package tools

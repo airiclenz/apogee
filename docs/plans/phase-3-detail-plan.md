@@ -998,6 +998,66 @@ Ask-Before, auto-approve in Allow-Edits, and run path-safety-bounded (no `Confin
 Auto** (P3.4 disposition); statelessness holds (no handle survives the call). TS-oracle parity for
 find-replace/patch semantics where vectors exist.
 
+#### ✅ P3.7 result — landed 2026-06-24 (file-editing family in `internal/tools`; gate GREEN; TS-oracle vectors ported and passing; marker rides the P3.4 disposition for free)
+
+The pure-Go, stateless file-editing family is ported from the apogee-code oracle, behind the public
+`domain.Tool` interface, scoped to a sandbox root with the consolidated path-safety guard (P3.6).
+**No new dep** (`go.mod`/`go.sum` unchanged — stdlib `strings`/`regexp`/`encoding/json` only),
+ADR-0010-clean (`internal/tools` imports only `domain` + `security`). **What landed in `internal/tools`:**
+
+- **`find_replace.go` — `single_find_and_replace` + `multi_find_and_replace`** (oracle names, for parity).
+  Single requires `oldText` to appear **exactly once** (0 → "not found", >1 → "found N times"); multi
+  applies its `replacements` **sequentially in array order against an in-memory copy** and writes only if
+  every step matches exactly once — **atomic** (any failure leaves the file byte-identical). Both honour
+  the `maxFileContentBytes` ceiling. `countOccurrences` is the non-overlapping `strings.Count` port (empty
+  needle → 0). Both carry the **`workspaceScopedWriter`** marker.
+- **`file_edit.go` — `edit_existing_file`**: full-file replacement, OR — when `content` opens with
+  `*** Begin Patch` — a **hunk-applied patch** (`@@` blocks of `-`/`+`/` ` lines; Begin/End/File markers
+  skipped). `parsePatchHunks` + `applyPatch` are faithful ports of the oracle's `indexOf`-based applier: a
+  non-matching hunk returns "did not match" and **never writes** (no corruption); an empty patch returns
+  "no hunks". Carries the marker.
+- **`diff.go` — `view_diff`** (`ReadOnly`, no marker): a **pure-Go Myers/LCS** line diff of the file's
+  current content vs a proposed `newContent` (`-`/`+`/context prefixes), **no external `git`** (the older
+  P3.7 task text said "myers diff — no external"; the oracle's `view_diff` shelled out to git, but the plan
+  explicitly mandates pure-Go, so it diffs against supplied content instead). Output is **deterministic**
+  (LCS table fully orders it; asserted by a repeat-call test). Identical content → "No changes detected".
+- **`open_file.go` — `open_file`** (`ReadOnly`, no marker): the editor-affordance read tool. The oracle's
+  VS Code "currently open file" has no TUI analogue, so this is a **path-named read + optional substring
+  locate** (reports the 1-based line numbers where `locate` occurs). Bounded by `maxFileReadBytes`.
+- **`registry.go`**: the five tools append to `DefaultTools` **after** the P1.4 base set (existing order
+  preserved); `registry_test.go` updated to the 9-tool count / order / read-only map.
+
+**Disposition — rides P3.4 for free.** `classifyTool`/`dispose` (`internal/agent/disposition.go`) key on
+the **marker**, not the tool name, so the three writers classify as `classWorkspaceWrite` and inherit the
+exact `write_file` rows: **gate in Ask-Before, auto-approve in Allow-Edits, run path-safety-bounded (no
+`Confine`, no Approval) in Auto/confine=true** when in-workspace, **gate** when the target is
+out-of-workspace; `view_diff`/`open_file` are `classReadOnly` (run in Plan). Proven by new rows in
+`dispatch_test.go` (`TestClassifyTool` + an Auto/confine=true find-replace in/out-of-workspace pair) — the
+marker's `workspaceWriteTarget` seam works for the whole family. **Statelessness holds** (ADR 0008): each
+`Execute` reads, edits in memory, writes, returns — no handle survives the call.
+
+**TS-oracle parity (the gate).** The apogee-code vectors are ported and pass: multi-find-replace's
+sequential-dependent edit, atomic-failure-leaves-file-intact, duplicate-created-by-prior-edit, and
+deletion-via-empty-newText; file-edit's single-hunk / multi-hunk / context-line-preservation /
+non-matching-hunk-does-not-corrupt / empty-patch vectors. Path-escape is rejected with a clear error
+result in every mode (the P3.6 path-safety guard), asserted per tool.
+
+**v1 gap CLARIFIED (the P3.4 "out-of-workspace Apogee write" row).** P3.4 flagged that an *approved*
+out-of-workspace write would still error because `resolveInRoot` hard-rejects any escape at Execute. P3.7
+keeps Apogee's write tools **strictly workspace-bounded**: the disposition correctly *gates* an
+out-of-workspace target (the marker's `workspaceWriteTarget` resolves it without containment for
+classification), but Execute still rejects it via `resolveInRoot` — so an approved out-of-workspace write
+results in an honest error, not a silent escape. Honouring an approved escape (resolving against
+`WorkspaceRoot ∪ box.WritablePaths`) remains the deferred additive change the `workspaceWriteTarget` seam
+enables; doing it now would require threading the box into the in-process write tools, which P3.7's scope
+does not include. The gate→error fallback is the honest v1 behaviour (consistent with the contract §4 note).
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go vet
+./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` (tools +new file-edit subtests; agent
+disposition +new rows; landlock/seatbelt enforcement batteries self-skip loudly on this kernel as expected)
+· ADR-0010 grep empty · 6 cross-builds OK (`CGO_ENABLED=0`) · `go mod tidy` no drift · `./apogee --help`
+exit 0. **Next: P3.8** (`terminal`/`python-exec` — first `SubprocessTool`/`Confiner` consumers).
+
 ### P3.8 — Execution tools (`terminal`, `python-exec`)
 The first real `Confiner` consumers and the first `Shell`-seam wideners. Both **one-shot / stateless**
 (ADR 0008 — fresh process per call, process-group kill, no persistent shell/REPL): `terminal` runs a

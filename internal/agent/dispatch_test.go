@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -152,6 +153,14 @@ func TestClassifyTool(t *testing.T) {
 	}{
 		{"read-only", fakeTool{name: "read_file", readOnly: true}, classReadOnly},
 		{"workspace writer", tools.NewWriteFile(ws), classWorkspaceWrite},
+		// P3.7 file-editing family: the write tools carry the same workspaceScopedWriter
+		// marker as write_file, so they classify as classWorkspaceWrite and ride the
+		// identical per-mode disposition; the read tools classify as classReadOnly.
+		{"single find-replace", tools.NewSingleFindReplace(ws), classWorkspaceWrite},
+		{"multi find-replace", tools.NewMultiFindReplace(ws), classWorkspaceWrite},
+		{"edit existing file", tools.NewEditExistingFile(ws), classWorkspaceWrite},
+		{"view diff", tools.NewViewDiff(ws), classReadOnly},
+		{"open file", tools.NewOpenFile(ws), classReadOnly},
 		{"network", externalTool{name: "web-fetch", kind: domain.EffectNetwork}, classNetwork},
 		{"mcp", externalTool{name: "github", kind: domain.EffectMCP}, classMCP},
 		{"subprocess", &subprocTool{name: "terminal"}, classSubprocess},
@@ -306,6 +315,58 @@ func TestDisposition_AutoConfineTrue_WorkspaceWrites(t *testing.T) {
 
 		if approver.calls != 1 {
 			t.Errorf("Approver consulted %d times; an out-of-workspace Apogee write must gate", approver.calls)
+		}
+		if conf.confineCount() != 0 {
+			t.Errorf("Confine called %d times; an Apogee write is never confined", conf.confineCount())
+		}
+	})
+
+	// The P3.7 file-editing writers ride the identical disposition: a find-replace edit of
+	// an in-workspace file runs without Approval and without Confine, while a target
+	// outside the workspace gates — proving the workspaceWriteTarget seam works for the
+	// whole write family, not just write_file.
+	t.Run("find-replace in-workspace runs, no Approval, no Confine", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		if err := os.WriteFile(filepath.Join(ws, "in.txt"), []byte("old text here"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		sink := &recordingSink{}
+		conf := &fakeConfiner{caps: capsBoth()}
+		cfg := autoConfigWS(sink, conf, true, ws, tools.NewSingleFindReplace(ws))
+		approver := &fakeApprover{decision: domain.ApprovalDeny}
+		cfg.Approver = approver
+
+		driveToolCall(t, cfg, sink, "c1", "single_find_and_replace",
+			`{"path":"in.txt","oldText":"old text","newText":"new text"}`)
+
+		if approver.calls != 0 {
+			t.Errorf("Approver consulted %d times; an in-workspace find-replace must not gate", approver.calls)
+		}
+		if conf.confineCount() != 0 {
+			t.Errorf("Confine called %d times; an Apogee write is path-safety-bounded, never confined", conf.confineCount())
+		}
+		res, _ := lastToolResult(sink.events)
+		if res.IsError {
+			t.Errorf("in-workspace find-replace produced an error result: %q", res.Content)
+		}
+	})
+
+	t.Run("find-replace out-of-workspace target gates", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		outside := filepath.Join(t.TempDir(), "escape.txt")
+		sink := &recordingSink{}
+		conf := &fakeConfiner{caps: capsBoth()}
+		cfg := autoConfigWS(sink, conf, true, ws, tools.NewSingleFindReplace(ws))
+		approver := &fakeApprover{decision: domain.ApprovalDeny}
+		cfg.Approver = approver
+
+		args := fmt.Sprintf(`{"path":%q,"oldText":"a","newText":"b"}`, outside)
+		driveToolCall(t, cfg, sink, "c1", "single_find_and_replace", args)
+
+		if approver.calls != 1 {
+			t.Errorf("Approver consulted %d times; an out-of-workspace find-replace must gate", approver.calls)
 		}
 		if conf.confineCount() != 0 {
 			t.Errorf("Confine called %d times; an Apogee write is never confined", conf.confineCount())
