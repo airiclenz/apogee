@@ -17,14 +17,15 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 		"view_diff", "open_file",
 		"terminal", "python_exec",
 		"git_branch", "git_commit", "git_diff_range",
+		"diagnostics",
 	} {
 		if _, ok := registry.Lookup(name); !ok {
 			t.Errorf("default registry is missing %q", name)
 		}
 	}
 
-	if got := len(registry.All()); got != 14 {
-		t.Errorf("default registry holds %d tools, want 14", got)
+	if got := len(registry.All()); got != 15 {
+		t.Errorf("default registry holds %d tools, want 15", got)
 	}
 }
 
@@ -39,6 +40,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 		"view_diff", "open_file",
 		"terminal", "python_exec",
 		"git_branch", "git_commit", "git_diff_range",
+		"diagnostics",
 	}
 	for i, tool := range registry.All() {
 		if tool.Name() != want[i] {
@@ -70,6 +72,8 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		"git_branch":     false,
 		"git_commit":     false,
 		"git_diff_range": true,
+		// Diagnostics (P3.10): inspects only — read-only, runs in Plan.
+		"diagnostics": true,
 	}
 
 	for _, tool := range DefaultTools(t.TempDir()) {

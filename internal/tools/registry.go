@@ -24,9 +24,11 @@ func NewDefaultRegistry(root string) *domain.ToolRegistry {
 // tools among them (find-replace, edit_existing_file) carry the workspaceScopedWriter
 // marker so the dispatch disposition path-bounds rather than confines them (ADR 0012 D1).
 // The execution tools (P3.8 — terminal, python_exec) and the git tools (P3.9 —
-// git_branch, git_commit, git_diff_range) close the set; they are SubprocessTools
-// the disposition confines in Auto (or gates when confinement is unavailable), not
-// workspace-scoped writers (git_diff_range is read-only and runs freely).
+// git_branch, git_commit, git_diff_range) follow; they are SubprocessTools the
+// disposition confines in Auto (or gates when confinement is unavailable), not
+// workspace-scoped writers (git_diff_range is read-only and runs freely). The
+// diagnostics tool (P3.10) closes the set: a read-only SubprocessTool that checks
+// Go in-process (plus optional go vet) and degrades gracefully for other languages.
 func DefaultTools(root string) []domain.Tool {
 	return []domain.Tool{
 		NewReadFile(root),
@@ -43,5 +45,6 @@ func DefaultTools(root string) []domain.Tool {
 		NewGitBranch(root),
 		NewGitCommit(root),
 		NewGitDiffRange(root),
+		NewDiagnostics(root),
 	}
 }

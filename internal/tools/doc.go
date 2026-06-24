@@ -24,5 +24,10 @@
 // detected program (the system shell/interpreter, the system git) and degrade gracefully
 // when it is absent (§3a). The disposition confines the write-capable ones in Auto (or
 // gates them when fs-confinement is unavailable); git_diff_range is read-only and runs
-// freely. The network and MCP tools land in later phases.
+// freely.
+//
+// Phase 3 (P3.10) adds the diagnostics tool — a read-only SubprocessTool that checks Go
+// in-process (go/parser for syntax, always available) plus an optional go vet, and
+// degrades gracefully to a clear "no diagnostics available" for languages with no
+// provider (§3a). The network and MCP tools land in later phases.
 package tools

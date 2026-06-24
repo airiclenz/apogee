@@ -1192,6 +1192,53 @@ In-process for Go — `go/parser` for syntax + the `go vet` that ships with the 
 a vet finding is reported in-process (no external dep); a non-Go file with no available linter returns
 a clear "no diagnostics available" (not an error); the tool is `ReadOnly()` (runs in Plan).
 
+#### ✅ P3.10 result — landed 2026-06-24 (single read-only `diagnostics` tool; gate GREEN; no new dependency)
+`diagnostics` is the 15th built-in: one read-only tool that diagnoses a source file. The Go path is
+split into the two halves the §3a stdlib-first rule asks for — a **dependency-free in-process syntax
+check** (`go/parser` with `parser.AllErrors`, so a Go syntax error is reported even on a host with **no
+`go` on PATH**) plus an **optional `go vet`** on the file's package that degrades gracefully when the
+toolchain is absent (a "go vet skipped" note appended to the clean result, never an error, never a hard
+dep). Languages with no built-in provider return a clear **"no diagnostics available"** result (not an
+error) — the per-language external-linter slot (`tsc`, …) is left as a later additive extension behind
+the same read-only/graceful contract. **What landed:**
+
+- **`internal/tools/diagnostics.go`** — the `Diagnostics` tool (`NewDiagnostics(root)`):
+  - **`ReadOnly()` + `Subprocess()`** — it only inspects (so the disposition runs it freely in **every**
+    mode, including Plan), but it carries the `domain.SubprocessTool` marker because the vet half shells
+    out, keeping the classification honest (read-only wins over the subprocess class — identical shape to
+    P3.9's `git_diff_range`). It is **not** a `workspaceScopedWriter`.
+  - **Syntax half** (`goSyntaxDiagnostics`): `go/parser` in-process, all syntax errors in one pass; a
+    parse failure short-circuits (a file that does not parse cannot be vetted) and is surfaced as an
+    **error result** the model can fix.
+  - **Vet half** (`runGoVet`): `go vet <pkg-dir>` via the shared **`runSubprocess`** (P3.8) with the
+    allowlisted **`safeGitEnv()`** environment (P3.9) and a 30s ceiling, working dir pinned to `root`.
+    A non-zero exit with output is a finding (error result); a clean exit confirms the file looks clean.
+    The target path is resolved through the shared **`resolveInRoot`** path-safety guard, so a path
+    escape is refused before anything runs. `vet:false` skips the toolchain half (syntax-only).
+  - **ctx discipline** (ADR 0007): the only Go-error return is ctx cancellation (the read-only diagnosis
+    degrades on everything else); a vet build/setup failure (e.g. no `go.mod`) is surfaced as the finding
+    text the model sees, not a crash.
+
+**Tests** (`diagnostics_test.go`): markers (read-only + SubprocessTool, **not** a workspace-scoped
+writer); path-required + path-escape rejection; unsupported language → graceful "no diagnostics
+available" (not an error); a **Go syntax error reported with `go` faked absent** (proving the syntax
+half needs no toolchain); a clean Go file with the toolchain-absent "go vet skipped" note; `vet:false`
+syntax-only; and the live `go vet` cases (a `Printf`-format finding → error result, a clean file → "looks
+clean") which seed a minimal `go.mod` and `t.Skip` when no `go` is on PATH (the graceful contract).
+`registry_test.go` updated to **15 built-ins** (menu order + read-only nature; `diagnostics` runs in Plan).
+
+**Disposition for free (no dispatch change).** Because `diagnostics` declares `ReadOnly()`, the P3.4
+table classifies it `classReadOnly` → `dispoRun` in every mode — no Confine, no Approval, runs in Plan.
+The `SubprocessTool` marker is inert for the disposition (read-only wins) but lets `runSubprocess`
+honour a confinement handle if one were ever installed; none is, so confinement is moot here.
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go vet
+./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` (the live go-vet subtests run where a
+`go` toolchain exists, skip where it doesn't; landlock/seatbelt enforcement batteries self-skip on this
+kernel as expected) · ADR-0010 self-import grep empty · 6 cross-builds OK (`CGO_ENABLED=0`) · `go mod
+tidy` no drift (no new dep — `go/parser`/`go/token` are stdlib) · `./apogee --help` exit 0.
+**Next: P3.11** (network + host tools — `web-fetch`/`http-request`/`web-search` + `ask-user`).
+
 ### P3.11 — Network + host tools
 **`web-fetch`** (stdlib `net/http` GET with url-safety), **`http-request`** (general request, url-
 safety + arg-guard), **`web-search`** (against a **config'd, default-off** search endpoint — no
