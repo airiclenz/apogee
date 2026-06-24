@@ -1,7 +1,8 @@
 # Apogee — Phase-3 Detail Plan (P3): full subsystems, Auto confined, cut `v1.0.0`
 
-**Date:** 2026-06-24 · **Status:** 📋 **PLANNED** (entry state re-verified against source at the
-top of P3.0; no code yet) · **Branch:** `main` (commit directly — pre-production owner directive).
+**Date:** 2026-06-24 · **Status:** 🚧 **IN PROGRESS** — **P3.0 entry re-verify ✅ done** (2026-06-24:
+gate green, 7/7 §0 facts confirmed zero-drift, pins held — see the P3.0 result note in §4); **P3.1
+(ADR 0012) is next, no production code yet** · **Branch:** `main` (commit directly — pre-production owner directive).
 This document refines the broad plan's **Phase 3** ("Full subsystems") into numbered,
 acceptance-tested tasks and **makes the load-bearing design calls Phase 3 lands into** (§3 — the
 confinement execution model, the sub-agent orchestrator shape, the MCP non-confinable gating, and
@@ -409,6 +410,56 @@ its transport API (stdio/SSE/streamable-http still GA), and the landlock approac
 processing vectors (the P3.5 gate). Refresh this plan's §0 table if anything drifted.
 **Acceptance:** verify gate green; pins reconfirmed in a short note; no code change beyond doc
 refresh. This task is the Phase-3 analogue of the Phase-2 "Readiness" re-verification.
+
+#### ✅ P3.0 result — re-verified 2026-06-24 (entry gate GREEN, 7/7 facts confirmed, pins held)
+
+Run on the dev host (`go1.26.4`, `linux/arm64`; module `go 1.26`). **No production code changed —
+this note is the only edit.**
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` clean · `go build ./...` ok ·
+`go test -race ./...` all `ok`, no FAIL / panic / `DATA RACE` · ADR-0010 grep
+(`grep -rl '"github.com/airiclenz/apogee"' internal/`) empty · 6 cross-builds OK
+(linux/darwin/windows × amd64/arm64, `CGO_ENABLED=0`) · `go mod tidy -diff` no drift ·
+`apogee --help` exit 0.
+
+**Seven §0 inheritance facts — all CONFIRMED, zero drift** (verified against source, file:line):
+(1) tools — exactly 4 built-ins via `NewDefaultRegistry(root)`; `Tool`/`ReadOnlyTool`/`ExternalEffectTool`
++ `ToolRegistry.Subset` all present, no current tool implements `ExternalEffect()`.
+(2) confinement — `Confiner`/`ConfinementCaps{FSWrite,NetworkEgress}` (`AutoEligible()` = **both true**
+today) / `ConfinementBox{WorkspaceRoot,WritablePaths,NetworkAllow}` exactly as documented; `denyConfiner`
+(`internal/platform/platform.go`) the only backend; `agent.New` refuses Auto (`loop.go:60`); **dispatch
+still does not call `Confine`** (`dispatch.go` `executeTool` → `tool.Execute` directly — unconfined, sound
+only because Auto is unreachable). (3) approval — `needsApproval` 3-mode logic + `approved[tool]` cache;
+**`ModeAllowEdits` does not exist** (only a forward-ref comment at `tui/model.go:464`); domain has exactly
+`ModePlan`/`ModeAskBefore`/`ModeAuto`. (4) processing — only `ParseNativeToolCalls` + `StripThinking`/
+`IsThinking`; markdown-fenced + custom-regex + full harmony set absent; imports `domain` only. (5) events —
+8 variants, all embed `EventBase.Depth`. (6) mcp — `doc.go` stub only. (7) platform — `Shell.Command(line)`
+/ `Path.ExecExt()` (POSIX real + Windows stub); mechanisms — `doc.go` stub, cycle-detection lives in
+`domain`, no concrete Mechanism. *(Aside: `internal/security` and `internal/context` already exist as
+Phase-0 `doc.go` stubs — filled by P3.6 / Phase 4.)* §0 table needs no content change.
+
+**Pins reconfirmed:**
+- **MCP `go-sdk` → `v1.6.1`** is the latest stable (proxy `@latest` = `v1.6.1`; only a `v1.7.0-pre.1`
+  prerelease exists above it) — **unchanged** from the P0.6 GA-verified pin. All three transports present
+  in the `mcp` package at `v1.6.1`: stdio (`StdioTransport`/`CommandTransport`/`IOTransport`), SSE
+  (`SSEClientTransport`/`SSEServerTransport`/`SSEHandler`), streamable-http (`StreamableClientTransport`/
+  `StreamableServerTransport`/`StreamableHTTPHandler`) — plus `InMemoryTransport` (hermetic bench stub for
+  P3.15). Added **direct** in P3.15.
+- **landlock → `golang.org/x/sys v0.45.0`** is already present (currently **indirect** via Charm) and
+  carries the full Landlock surface: consts `LANDLOCK_*` incl. ABI-v4 net (`LANDLOCK_ACCESS_NET_CONNECT_TCP`,
+  `LANDLOCK_CREATE_RULESET_VERSION`); types `LandlockRulesetAttr` (`Access_fs`/`Access_net`/`Scoped` —
+  current through ABI-v6) + `LandlockPathBeneathAttr`; syscall numbers `SYS_LANDLOCK_CREATE_RULESET`/
+  `_ADD_RULE`/`_RESTRICT_SELF`. **Caveat for P3.2:** x/sys exposes **no high-level func wrappers** (`go doc`
+  finds no `LandlockCreateRuleset`/`AddRule`/`RestrictSelf`), so "raw x/sys" means
+  `unix.Syscall(unix.SYS_LANDLOCK_*, …)` over the typed attrs — workable but low-level; this is the concrete
+  input to P3.2's "raw vs `github.com/landlock-l/go-landlock` helper" call. x/sys promoted to **direct** in
+  P3.2. (`shlex`, P3.8, not yet added — expected.)
+- **TS oracle reachable:** `/workspace/repos/apogee-code` exists locally → the P3.5 ported-vector source is
+  available.
+
+**Next: P3.1** — Confinement execution-model design + **ADR 0012** (no backend code yet). Handoff
+`docs/handoffs/2026-06-23 - 18 - phase-2-complete-next-phase-3-entry.md` is consumed by this landing
+(per §8 — archive when convenient).
 
 ### P3.1 — Confinement execution-model design + ADR 0012 (blast-radius framing + the mode ladder)
 Settle D1 as **ADR 0012** before any backend code: the **blast-radius invariant** (OS-confine the
