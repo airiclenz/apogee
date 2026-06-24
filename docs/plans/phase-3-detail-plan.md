@@ -826,6 +826,61 @@ payload in any format degrades to the parse-error path (never a panic, never a T
 P1.3 contract); the factory picks the right parser for native vs fenced vs regex models; the bench
 re-run shows no parsing regression. Record the parity result in the commit.
 
+#### ✅ P3.5 result — landed 2026-06-24 (processing parity finished; the riskiest port; gate GREEN; all ported TS vectors pass)
+
+The two remaining tool-call text formats, the full harmony channel set, and the processor-factory
+are ported behind a new `ToolCallParser` interface — `domain`-only, stdlib-only, ADR-0010-clean.
+**No architectural call was forced**, so no ADR (D4's posture held — a port, not a redesign). What
+landed in `internal/processing`:
+
+- **`parser.go` — the `ToolCallParser` interface** (`ParseToolCall(raw) (domain.ToolCall, found)` +
+  `StripToolCall(raw) string`), the text counterpart to `ParseNativeToolCalls`. Single-call contract
+  (the oracle parses at most one); no-call degrades to `found=false`, malformed never panics (P1.3
+  contract). Text formats name no call ID — the empty ID is assigned downstream by the loop.
+- **`markdown_fenced.go` — `MarkdownFencedParser`** (faithful port of the TS oracle): strict
+  ```` ```tool ```` fenced-block parse over the last opener, then a marker-based (`BEGIN_ARG`/`END_ARG`)
+  fallback; `parseBlock` line state-machine; `tryParseValue` coercion (valid-JSON kept, else trimmed
+  string). **One deliberate divergence:** the TS fence-close `` ```(?!tool) `` negative lookahead has
+  no RE2 equivalent, so it is an explicit scan with identical behaviour (a closing ``` that does not
+  reopen the fence language) — noted in the doc comment. Defaults (`tool`/`TOOL_NAME`/`BEGIN_ARG`/
+  `END_ARG`) match the oracle. **All 7 TS markdown-fenced vectors pass** (basic, multi-arg, multi-line,
+  no-block, thinking-strip-then-parse, double-opening-fence, no-`TOOL_NAME`-marker).
+- **`custom_regex.go` — `CustomRegexParser`** (port): named-group regex, args = a valid JSON object
+  verbatim else `{raw:…}` (the oracle's graceful non-JSON path), empty group → `{}`. JS-style
+  `(?<name>…)` groups are **rewritten to Go `(?P<name>…)`** so the apogee-code vector patterns work
+  unchanged; `flags` (`s`/`i`/`m`) map to a Go `(?…)` prefix; an **invalid pattern degrades to a
+  never-match parser** (the oracle's warn-and-fallback), never a construction error. **All 4 TS
+  custom-regex vectors pass** (regex match, no-match, thinking-strip, non-JSON `{raw}`).
+- **`harmony.go` — `StripHarmony` / `IsHarmonyThinking`** (the **full channel set**, the Phase-3
+  generalisation beyond P1.3's single analysis-pair `StripThinking`): parses every
+  `<\|channel\|>NAME<\|message\|>…` message by name, routes **analysis→reasoning,
+  commentary→commentary, final→visible**, consumes an optional `<\|start\|>role` prefix, and honours
+  the three harmony terminators `<\|end\|>` / `<\|call\|>` / `<\|return\|>`. A streaming
+  (unterminated) non-final tail is captured as in-flight reasoning and never leaks into `Visible`;
+  plain non-harmony text passes through. A consistency test pins that it agrees with the existing
+  single-pair `StripThinking` on the analysis channel they both handle. (Format reference: the
+  gpt-oss harmony three-channel spec, analysis/commentary/final.)
+- **`factory.go` — `NewToolCallParser(ToolCallingConfig)`** the processor-factory (port of
+  `ProcessorFactory.create`): selects native / markdown-fenced / custom-regex; **native is a text
+  no-op** (`nativeTextParser`) because the structured path (`ParseNativeToolCalls`) owns native calls;
+  an **unknown format errors** so a misconfigured model fails loudly.
+- **`args.go`** — shared `tryParseValue` / `marshalArgs` (deterministic sorted-key JSON object) used
+  by both text parsers.
+
+**Scope note (honest, for the next agent):** the package-level port + factory are complete and
+fully vector-gated, but the **loop adapt-seam still hard-codes the native path** (`parseToolCalls`
+in `loop.go`). Wiring the factory to select fenced/regex per response needs a model-profile /
+`ToolCallingConfig` *source* that **does not yet exist** in `domain`/config (apogee has no
+model-profile layer — apogee-code's `defaults/model-profiles/*.json` were not ported). The factory
+is the seam that consumes that source when it lands; building the source is out of P3.5's scope (and
+out of the §6 plan for v1 — every shipped profile uses native tool calls). No bench regression: the
+bench runs native structured `tool_calls`, the one path P3.5 leaves untouched.
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go
+vet ./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` (processing +26 subtests) ·
+ADR-0010 grep empty · 6 cross-builds OK (`CGO_ENABLED=0`) · `go mod tidy` no drift (no new deps —
+stdlib `regexp`/`encoding/json` only) · `apogee --help` exit 0.
+
 ### P3.6 — Security guardrails (`internal/security`)
 Build the human-in-the-loop guardrail layer (D6), distinct from the `Confiner` sandbox: **consolidate**
 the Phase-1 per-tool path-safety into one reusable, symlink-aware guard; add **url-safety** (scheme/

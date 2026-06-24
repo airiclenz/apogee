@@ -3,11 +3,22 @@
 // assistant's visible content. apogee-code's TypeScript is the behavioural oracle and its
 // ported test vectors are the parity gate (TDD §8 #6).
 //
-// Phase 1 (P1.3) ports one tool-call format end-to-end — the native/JSON shape the
+// Phase 1 (P1.3) ported one tool-call format end-to-end — the native/JSON shape the
 // provider already extracts structurally (FunctionCall.Arguments kept verbatim) and that
-// the bench relies on — plus thinking-channel stripping (gemma `<think>`, gpt-oss harmony
-// `<|channel|>…<|end|>`). The other formats (markdown-fenced, custom-regex) and the full
-// harmony channel set are Phase 3.
+// the bench relies on — plus single-pair thinking-channel stripping (gemma `<think>`,
+// gpt-oss harmony `<|channel|>analysis<|message|>…<|end|>`).
+//
+// Phase 3 (P3.5) completes the parity port. The two text tool-call formats are added behind
+// the ToolCallParser interface: MarkdownFencedParser (a ```tool fenced block with named
+// argument markers, plus a marker-based fallback) and CustomRegexParser (a user-supplied
+// named-group regex). NewToolCallParser is the processor-factory that selects native /
+// markdown-fenced / custom-regex per model config; native is a text no-op because the
+// structured path (ParseNativeToolCalls) owns native calls. StripHarmony adds the full
+// gpt-oss harmony channel set (analysis / commentary / final) over the single analysis-pair
+// StripThinking handles, routing each channel and honouring the <|end|> / <|call|> /
+// <|return|> terminators. Every format is gated by ported apogee-code TS test vectors (the
+// riskiest-port discipline — the TS is the oracle); a malformed payload degrades to the
+// no-call path, never a panic and never a Turn failure (the P1.3 contract).
 //
 // The package depends only on internal/domain (+ stdlib): the loop adapts provider wire
 // tool calls into NativeToolCall at the seam, so wire types stay provider-local (ADR 0010).
