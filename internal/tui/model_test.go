@@ -690,8 +690,9 @@ func TestModelResizeDoesNotPanic(t *testing.T) {
 		if got := m.View().Content; got == "" {
 			t.Errorf("empty view at %dx%d", size.w, size.h)
 		}
-		if w := m.viewport.Width(); w != size.w {
-			t.Errorf("viewport width = %d at window width %d", w, size.w)
+		// The viewport gives up one column to the scroll-bar gutter (floored at 1 on a tiny window).
+		if want := max(1, size.w-scrollbarWidth); m.viewport.Width() != want {
+			t.Errorf("viewport width = %d at window width %d, want %d", m.viewport.Width(), size.w, want)
 		}
 	}
 }
@@ -810,6 +811,37 @@ func TestStickyPinsLastUserPrompt(t *testing.T) {
 	m.refreshViewport()
 	if m.viewport.YOffset() != off {
 		t.Errorf("a scrolled viewport was re-pinned: offset %d → %d", off, m.viewport.YOffset())
+	}
+}
+
+// The mouse wheel scrolls the transcript in every state, including idle. The keyboard scroll
+// path is state-gated (idle feeds the input box), so without the MouseWheelMsg route in Update a
+// finished reply could not be scrolled back — the "scrolling only works intermittently" bug.
+func TestMouseWheelScrollsWhileIdle(t *testing.T) {
+	m := newTestModel(t) // 80x24, stateIdle
+	m.transcript.addUser("question")
+	for i := 0; i < 40; i++ {
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+	m.viewport.GotoBottom() // scroll to the end so there is room to wheel back up
+	m.userScrolled = false  // GotoBottom is not a human scroll; start from a clean flag
+
+	if m.state != stateIdle {
+		t.Fatalf("precondition: state = %v, want stateIdle", m.state)
+	}
+	before := m.viewport.YOffset()
+	if before == 0 {
+		t.Fatal("precondition: viewport not scrolled; cannot observe a wheel-up")
+	}
+
+	m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+
+	if m.viewport.YOffset() >= before {
+		t.Errorf("wheel-up while idle did not scroll: offset %d → %d", before, m.viewport.YOffset())
+	}
+	if !m.userScrolled {
+		t.Error("a wheel scroll did not set userScrolled; sticky-to-top would yank history back")
 	}
 }
 

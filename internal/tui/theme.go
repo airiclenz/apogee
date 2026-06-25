@@ -93,6 +93,8 @@ type theme struct {
 	statusError lipgloss.Style // status-line "error" token: red bold on black
 	footerRule  lipgloss.Style // the footer's border runes and corners (dark gray)
 	footerText  lipgloss.Style // the footer's content (faint on black)
+	scrollThumb lipgloss.Style // the transcript scroll-bar thumb (the position marker)
+	scrollTrack lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 }
 
 // newTheme builds the styles from the palette. The input border drops its bottom edge: the
@@ -125,5 +127,7 @@ func newTheme() theme {
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
 		footerRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
 		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
+		scrollThumb: lipgloss.NewStyle().Foreground(colFaint),
+		scrollTrack: lipgloss.NewStyle().Foreground(colDarkGray),
 	}
 }

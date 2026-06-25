@@ -210,6 +210,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseWheelMsg:
+		// The wheel scrolls the transcript in every state — unlike the keyboard path, which is
+		// state-gated (idle/ask feed the input). Mouse reporting is enabled in View
+		// (MouseModeCellMotion); the viewport's own Update turns the wheel into a scroll.
+		return m.scrollViewport(msg)
+
 	default:
 		// Other Bubble Tea Msgs (e.g. the cursor blink) belong to the widgets; route them
 		// to the focused input so the cursor keeps blinking.
@@ -275,6 +281,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.opts.Mode = next // the footer renders the mode from opts.Mode (footerContent)
 		m.layout()
 		return m, nil
+	}
+
+	// PageUp/PageDown scroll the transcript in every state. They have no meaning in the input
+	// box, so intercept them before the state-gated routing below — the wheel does the same via
+	// MouseWheelMsg (Update); the other scroll keys stay state-gated so typing is unaffected.
+	switch msg.String() {
+	case "pgup", "pgdown":
+		return m.scrollViewport(msg)
 	}
 
 	// A live approval prompt claims the decision keys. This branch must precede the scroll
@@ -445,6 +459,8 @@ const (
 	gapHeight    = 1
 	footerHeight = 3 // divider + content + bottom rule
 
+	scrollbarWidth = 1 // the transcript's right-hand scroll-bar gutter (always reserved)
+
 	minInputRows = 1
 	maxInputRows = 10 // past this the textarea scrolls internally rather than growing further
 	borderFrame  = 2  // the input border's left + right columns
@@ -456,7 +472,7 @@ const (
 // gap row, the input box (its content rows plus a top border — the divider below it belongs to
 // the footer), and the footer. A floor of one row keeps the viewport valid on a tiny window.
 func (m *Model) layout() {
-	m.viewport.SetWidth(m.width)
+	m.viewport.SetWidth(max(1, m.width-scrollbarWidth)) // reserve the scroll-bar gutter column
 	m.input.SetWidth(m.inputInnerWidth())
 	m.input.SetHeight(m.inputRows())
 
@@ -543,7 +559,12 @@ func (m Model) View() tea.View {
 		m.viewport.SetHeight(h)
 	}
 
-	rows := []string{m.applyStickyHeader(m.viewport.View())}
+	// Draw the transcript with its sticky header, then hang the scroll-bar gutter off its right
+	// edge. The bar's height matches the viewport's current height (already shrunk above when a
+	// prompt is shown), so the two columns line up row-for-row.
+	body := m.applyStickyHeader(m.viewport.View())
+	body = lipgloss.JoinHorizontal(lipgloss.Top, body, m.renderScrollbar(m.viewport.Height()))
+	rows := []string{body}
 	if prompt != "" {
 		rows = append(rows, prompt)
 	}
@@ -552,6 +573,7 @@ func (m Model) View() tea.View {
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion // enable wheel scrolling (Update routes MouseWheelMsg)
 	return v
 }
 
@@ -595,6 +617,35 @@ func (m Model) applyStickyHeader(view string) string {
 		}
 	}
 	return strings.Join(viewLines, "\n")
+}
+
+// renderScrollbar draws the one-column gutter reserved at the transcript's right edge (layout).
+// When the content overflows the viewport it shows a thumb sized to the visible fraction and
+// positioned by the scroll percent; when everything fits it is blank, so the bar appears only
+// while there is something to scroll. The returned block is exactly h rows tall so it lines up
+// with the viewport view it is joined to.
+func (m Model) renderScrollbar(h int) string {
+	if h < 1 {
+		return ""
+	}
+	total := m.viewport.TotalLineCount()
+	rows := make([]string, h)
+	if total <= h { // nothing to scroll — keep the gutter blank
+		for i := range rows {
+			rows[i] = " "
+		}
+		return strings.Join(rows, "\n")
+	}
+	thumb := max(1, h*h/total)
+	pos := int(m.viewport.ScrollPercent() * float64(h-thumb)) // 0 (top) … h-thumb (bottom)
+	for i := range rows {
+		if i >= pos && i < pos+thumb {
+			rows[i] = m.th.scrollThumb.Render("█")
+		} else {
+			rows[i] = m.th.scrollTrack.Render("│")
+		}
+	}
+	return strings.Join(rows, "\n")
 }
 
 // inputView renders the textarea inside the rounded, dark-gray, black-bg border (no bottom
