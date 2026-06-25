@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
@@ -58,6 +59,7 @@ type Model struct {
 	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
 	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
 	lastErr    error              // the error behind stateErrored, shown in the status line
+	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
 
 	// Content & layout.
 	transcript    transcript
@@ -81,7 +83,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 	th := newTheme()
 
 	ta := textarea.New()
-	ta.Placeholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · esc quit"
+	ta.Placeholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ⌃c quit"
 	ta.Prompt = "" // the rounded border is the frame; no inline prompt gutter (layout.md)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit; the model, not the widget, bounds a turn
@@ -152,6 +154,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
+	case ctrlCResetMsg:
+		// The Ctrl+C quit window elapsed without a second press: disarm the gesture so the
+		// "press ctrl+c again to quit" hint clears (handleKey's ctrl+c case).
+		m.lastCtrlC = time.Time{}
+		return m, nil
+
 	case eventMsg:
 		m.transcript.apply(msg.Event)
 		m.refreshViewport()
@@ -211,20 +219,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleKey routes a keypress against the current state. The stop keys (esc / ctrl+c)
-// cancel an in-flight worker or quit at idle; enter submits at idle and is a no-op while a
-// worker runs (the single-worker invariant the seam relies on). Other keys feed the input
-// while idle, or scroll the transcript while busy.
+// ctrlCQuitWindow is how long after one Ctrl+C a second press still quits. A lone Ctrl+C no
+// longer ends the program; only a second press inside this window confirms the exit.
+const ctrlCQuitWindow = time.Second
+
+// ctrlCResetMsg disarms the Ctrl+C quit gesture once the window elapses, clearing the
+// "press ctrl+c again to quit" hint when the human does not follow through.
+type ctrlCResetMsg struct{}
+
+// handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
+// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits. Enter submits at idle and
+// is a no-op while a worker runs (the single-worker invariant the seam relies on). Other keys
+// feed the input while idle, or scroll the transcript while busy.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.quit()
+		// A lone Ctrl+C no longer quits — a stray hit must never drop the human out of a
+		// session. The first press arms the gesture (and shows the hint via statusRight); only
+		// a second press inside ctrlCQuitWindow confirms the quit. The tick disarms it if no
+		// second press follows (ctrlCResetMsg).
+		now := time.Now()
+		if !m.lastCtrlC.IsZero() && now.Sub(m.lastCtrlC) <= ctrlCQuitWindow {
+			return m.quit()
+		}
+		m.lastCtrlC = now
+		return m, tea.Tick(ctrlCQuitWindow, func(time.Time) tea.Msg { return ctrlCResetMsg{} })
 	case "esc":
+		// Esc never ends the program; it only cancels an in-flight worker. At idle/errored it
+		// is a no-op (use Ctrl+C twice to exit), so a reflexive Esc never quits.
 		if m.busy() {
 			m.stopWorker()
-			return m, nil
 		}
-		return m.quit()
+		return m, nil
 	case "enter":
 		switch m.state {
 		case stateIdle:
@@ -719,6 +745,10 @@ func (m Model) statusLine() string {
 // known, else a state-appropriate key hint. The gauge is empty until Phase 4 routes usage, so
 // for now the hint shows; once usage is wired, the gauge takes the slot with no rework.
 func (m Model) statusRight() string {
+	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
+	if !m.lastCtrlC.IsZero() {
+		return "press ctrl+c again to quit"
+	}
 	if g := m.contextGauge(); g != "" {
 		return g
 	}
@@ -726,7 +756,7 @@ func (m Model) statusRight() string {
 	case stateRunning:
 		return "esc stop"
 	case stateErrored:
-		return "enter dismiss · esc quit"
+		return "enter dismiss"
 	default:
 		return ""
 	}

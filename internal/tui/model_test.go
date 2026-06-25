@@ -59,6 +59,15 @@ func keyEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
 func keyEsc() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyEscape} }
 func keyCtrlC() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl} }
 
+// ctrlCQuit drives the two-press Ctrl+C quit gesture: the first press arms it (its disarm
+// tick is discarded by step), the second — landing microseconds later, well inside
+// ctrlCQuitWindow — confirms the quit. Returns the model and the confirming press's Cmd.
+func ctrlCQuit(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	m = step(t, m, keyCtrlC())
+	return stepCmd(t, m, keyCtrlC())
+}
+
 // ansiPattern matches CSI escape sequences so assertions test rendered text, not styling.
 var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]")
 
@@ -310,25 +319,58 @@ func TestModelStopKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("esc while idle quits", func(t *testing.T) {
+	t.Run("esc while idle does not quit", func(t *testing.T) {
 		m := newTestModel(t)
 		_, cmd := stepCmd(t, m, keyEsc())
-		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
-			t.Error("esc at idle did not quit")
+		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
+			t.Error("esc at idle quit the program; it must never end the app")
 		}
 	})
 
-	t.Run("ctrl+c quits and cancels any worker", func(t *testing.T) {
+	t.Run("esc while errored does not quit", func(t *testing.T) {
+		m := newTestModel(t)
+		m.state = stateErrored
+		_, cmd := stepCmd(t, m, keyEsc())
+		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
+			t.Error("esc while errored quit the program; it must never end the app")
+		}
+	})
+
+	t.Run("a single ctrl+c arms the gesture but does not quit", func(t *testing.T) {
+		m := newTestModel(t)
+		next, _ := stepCmd(t, m, keyCtrlC())
+		if next.lastCtrlC.IsZero() {
+			t.Error("a single ctrl+c did not arm the quit gesture")
+		}
+		if got := plain(next.View()); !strings.Contains(got, "press ctrl+c again to quit") {
+			t.Errorf("the arm hint is not shown after one ctrl+c:\n%s", got)
+		}
+	})
+
+	t.Run("ctrl+c twice within the window quits and cancels any worker", func(t *testing.T) {
 		m := newTestModel(t)
 		cancelled := false
 		m.cancel = func() { cancelled = true }
 		m.state = stateRunning
-		_, cmd := stepCmd(t, m, keyCtrlC())
+		_, cmd := ctrlCQuit(t, m)
 		if !cancelled {
-			t.Error("ctrl+c did not cancel the in-flight worker before quitting")
+			t.Error("ctrl+c×2 did not cancel the in-flight worker before quitting")
 		}
 		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
-			t.Error("ctrl+c did not quit")
+			t.Error("ctrl+c×2 did not quit")
+		}
+	})
+
+	t.Run("a second ctrl+c after the window only re-arms", func(t *testing.T) {
+		m := newTestModel(t)
+		m = step(t, m, keyCtrlC())
+		m.lastCtrlC = m.lastCtrlC.Add(-2 * ctrlCQuitWindow) // pretend the window lapsed
+		// Re-arming refreshes lastCtrlC to ~now; the quit path leaves it untouched. A refreshed
+		// stamp therefore proves the press took the arm branch, not the quit branch — asserted
+		// on state so the disarm-tick Cmd need not run (it would block for the whole window).
+		next, _ := stepCmd(t, m, keyCtrlC())
+		if !next.lastCtrlC.After(m.lastCtrlC) {
+			t.Error("ctrl+c after the window quit instead of only re-arming")
 		}
 	})
 }
@@ -561,7 +603,7 @@ func TestModelSavesOnCleanQuit(t *testing.T) {
 	m := newSavingModel(t, eng, rec.save)
 	m.transcript.addUser("hello") // give it content worth saving
 
-	_, cmd := stepCmd(t, m, keyEsc())
+	_, cmd := ctrlCQuit(t, m)
 	if !rec.called {
 		t.Fatal("a clean quit did not save the session")
 	}
@@ -578,7 +620,7 @@ func TestModelDoesNotSaveEmptyConversation(t *testing.T) {
 	rec := &recordingSaver{}
 	m := newSavingModel(t, &fakeEngine{}, rec.save)
 
-	_, cmd := stepCmd(t, m, keyEsc())
+	_, cmd := ctrlCQuit(t, m)
 	if rec.called {
 		t.Error("an empty conversation was saved on quit")
 	}
@@ -602,12 +644,12 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	m.state = stateRunning
 	m.cancel = func() {}
 
-	_, cmd := stepCmd(t, m, keyCtrlC())
+	_, cmd := ctrlCQuit(t, m)
 	if snapshotted || rec.called {
 		t.Error("snapshotted while a worker was running (would race the single-goroutine Agent)")
 	}
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
-		t.Error("ctrl+c while busy did not quit")
+		t.Error("ctrl+c×2 while busy did not quit")
 	}
 }
 
@@ -615,7 +657,7 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 func TestModelQuitWithoutSaver(t *testing.T) {
 	m := newTestModel(t) // testOpts carries no Save
 	m.transcript.addUser("hi")
-	_, cmd := stepCmd(t, m, keyEsc())
+	_, cmd := ctrlCQuit(t, m)
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
 		t.Error("quit with no saver did not exit")
 	}

@@ -379,9 +379,10 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	}
 
 	// A clean quit (idle, non-empty transcript) snapshots through the saver seam and exits.
-	_, quitCmd := stepCmd(t, m1, keyEsc())
+	// The quit gesture is Ctrl+C twice within the window; Esc no longer ends the program.
+	_, quitCmd := ctrlCQuit(t, m1)
 	if _, isQuit := cmdMsg(quitCmd).(tea.QuitMsg); !isQuit {
-		t.Fatal("esc at idle did not quit")
+		t.Fatal("ctrl+c×2 at idle did not quit")
 	}
 	if savedPath == "" {
 		t.Fatal("a clean quit wrote no snapshot")
