@@ -5,6 +5,68 @@ Each entry records *enough* design that we don't re-derive it when we pick it up
 
 ---
 
+## apogee-code feature parity — user-facing affordances not yet ported
+
+**Status:** parked 2026-06-25. Post-v1, **additive** (all TUI/UX layers on top of the agent
+core, which is already at parity). These are features the original **apogee-code** VS Code
+extension (`airic-lenz.apogee-code` v0.2.58) ships that the Go TUI does not. Scope here is
+*user-facing* parity only — the by-design Phase-4 items (Mechanisms catalogue, cross-session
+Library, context-budget gauge) are tracked separately and excluded.
+
+**Verification note (the source-of-truth correction):** apogee-code's `Apogee-Code-TDD.md`
+claims it has *no slash commands, only `@file`*. **That doc is stale.** The shipped webview
+(`~/.vscode/extensions/airic-lenz.apogee-code-0.2.58/media/chat.js`, array `Ws`) actually
+implements a full chat mini-language. When porting, treat `media/chat.js` as the behavioral
+oracle, not the TDD. On send the webview posts `{text, skillIds, fileRefs}`; the backend
+resolves skill bodies + file contents into context.
+
+**The missing surface, prioritized:**
+
+- **[P0] Chat input mini-language** — a parse layer between the input box and the agent. apogee's
+  `submit()` (`internal/tui/model.go:355`) sends the raw string straight through; it should route
+  `/`-prefixed lines to command handlers, extract `@` tokens into refs, and resolve `/skill`
+  tokens. Needs an autocomplete overlay (mirror the existing approval-prompt overlay). Commands to
+  port (from `Ws`): `/clear` (drop model context, keep transcript), `/compact` (LLM summary),
+  `/continue` ("Please continue"), `/server` (switch server), `/skill <name>` (attach a skill).
+  - `@<file>` is **half-scaffolded**: `domain.UserInput.FileRefs` exists
+    (`internal/domain/config.go:138`) but is deliberately unresolved — `loop.go:410
+    noteUnresolvedFileRefs` errors that refs "are not yet resolved into context and were ignored."
+    Port needs both a TUI `@`-parser **and** a real resolver (path-bounded by the existing `os.Root`
+    workspace pin). Add a `SkillIDs []string` field next to `FileRefs`.
+  - `/compact` can trigger the **existing** generative Compaction reducer in `internal/context`
+    (today only budget-driven); expose an `Agent.Compact()` entry point.
+  - `/clear` needs a new `Agent.ClearContext()` (only `Snapshot()` exists today, `agent.go:148`).
+
+- **[P0] Skills system** (prerequisite for `/skill`) — apogee has **zero** skills code
+  (`grep -ri skill --include=*.go` → 0). New `internal/skills` package: discover `.md` skills from
+  layered dirs (`~/.apogee/skills/`, workspace `.apogee/skills/`, workspace `skills/`) with YAML
+  frontmatter → `{id, displayName, summary, body}`; add a `useProjectSkills`-equivalent config key
+  (default true) in `cmd/apogee/config.go`; inject attached skill bodies into the turn.
+
+- **[P1] Session management UI** — in-TUI *new session* (reset without relaunch) and a *history
+  browser* overlay. Today only `--resume <path>` exists; reuse `internal/session/Store`.
+
+- **[P1] Server / model switching** — `/server` live endpoint switch (re-probe `/v1/models`,
+  rebind the `provider` seam; today fixed at startup); a switchable **model-profile** abstraction
+  (sampling params, context-budget %, thinking/tool-call format — reuse `internal/processing`);
+  and start/stop control for a local llama.cpp server.
+
+- **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
+  shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
+  `internal/tui/transcript.go`. Add a TUI toggle behind an advanced flag.
+
+- **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
+  terminal side-effects are not undone, as the extension does).
+
+- **[P2] Throughput display** — rolling tokens/sec readout in the status line
+  (`internal/tui/model.go` footer/status render). Distinct from the excluded context-budget gauge.
+
+**Related (already parked below):** per-tool approval overrides (`toolApprovalOverrides`:
+automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
+disposition table but no user-facing override. See *Configurable tool × mode security matrix*.
+
+---
+
 ## Configurable tool × mode security matrix
 
 **Status:** parked 2026-06-24 (Phase-3 grill). Post-v1, **additive** — config is additive,

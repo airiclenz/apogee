@@ -1,0 +1,22 @@
+
+
+- [ ] Auto sizing prompt box is not working
+- [ ] Functionality that exists in apogee-code has not been fully ported to apogee (e.g. /skill @file). Verified + list collected → see **TODO.md → "apogee-code feature parity — user-facing affordances not yet ported"**. Porting still pending.
+
+
+
+## Resolved
+
+- [X] The complete area of the prompt box including the border pluss the info line above needs to have black backgroud
+- [X] the last user prompt is not sticking to the top when scrolling
+- [X] Loaded model name is dispayed with full path - i jst want to display the model name (even the file ending e.g. `,gguf` should be removed)
+- [X] [Esc] must not end the application. [Ctrl]+[C] twice within one second shoukd do that.
+- [X] [Shift]+[Tab] must change mode
+- [X] bottom information shows full model path and ignored
+- [X] formatting the chat text:
+  - markdown: replace **bold text** with bold text
+  - markdown: ## print all headings as bold text in white
+  - markdown: `colorize this with orange`
+  - code - can we format code (e.g. when a tool call reads and displays a file)
+- [X] scrolling in the session chat does not show a vertical scroll bar
+- [X] scrolling in the session chat does only work intermittently
