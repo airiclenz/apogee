@@ -25,12 +25,19 @@ import (
 // columns per level — the tree-branch and depth-indent primitives are built here now so the
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
-// renderedTranscript is the renderer's output: the physical lines and the index, within
-// them, of the last user prompt's first line (-1 when the transcript holds no user prompt).
-// The caller pins that line to the top of the viewport unless the human has scrolled.
+// userBlock is the line range a single user prompt occupies within the rendered lines: its
+// first line index and its physical-line count. The sticky-header overlay treats each as a
+// section header that freezes at the top of the viewport while its replies are on screen.
+type userBlock struct{ start, count int }
+
+// renderedTranscript is the renderer's output: the physical lines, the index of the last user
+// prompt's first line (-1 when the transcript holds no user prompt), and the line range of
+// every user block. The caller pins the last line to the top of the viewport unless the human
+// has scrolled, and overlays the owning user block as a sticky header (model.go).
 type renderedTranscript struct {
 	lines         []string
 	lastUserStart int
+	userBlocks    []userBlock
 }
 
 // renderView renders the committed entries plus any in-progress assistant buffer into the
@@ -41,6 +48,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		width = 1
 	}
 	var lines []string
+	var userBlocks []userBlock
 	lastUserStart := -1
 
 	appendBlock := func(isUser bool, block []string) {
@@ -49,6 +57,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		}
 		if isUser {
 			lastUserStart = len(lines)
+			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block)})
 		}
 		lines = append(lines, block...)
 	}
@@ -69,7 +78,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 	if t.streaming {
 		appendBlock(false, renderEntryLines(th, entry{kind: entryAssistant, text: t.pending}, width))
 	}
-	return renderedTranscript{lines: lines, lastUserStart: lastUserStart}
+	return renderedTranscript{lines: lines, lastUserStart: lastUserStart, userBlocks: userBlocks}
 }
 
 // renderLines is the line slice alone — the viewport content and the substring-test surface.

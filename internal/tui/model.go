@@ -63,6 +63,11 @@ type Model struct {
 	width, height int
 	ready         bool // a WindowSizeMsg has sized the layout at least once
 	userScrolled  bool // the human scrolled the transcript; suspend sticky-to-top until submit
+
+	// Last render output, stashed by refreshViewport for View's sticky-header overlay: the
+	// physical lines the viewport holds and the line range of every user block.
+	lines      []string
+	userBlocks []userBlock
 }
 
 // newModel builds the initial idle Model. parent is the program context the worker derives
@@ -448,15 +453,27 @@ func (m *Model) inputRows() int {
 // reading history is not yanked back; submit re-arms it.
 func (m *Model) refreshViewport() {
 	rendered := m.transcript.renderView(m.th, m.viewport.Width())
-	m.viewport.SetContentLines(rendered.lines)
+	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
+	m.userBlocks = rendered.userBlocks
 	if m.userScrolled {
+		m.viewport.SetContentLines(rendered.lines)
 		return
 	}
 	if rendered.lastUserStart < 0 {
+		m.viewport.SetContentLines(rendered.lines)
 		m.viewport.GotoBottom()
 		return
 	}
-	m.viewport.SetYOffset(wrappedOffset(rendered.lines[:rendered.lastUserStart], m.viewport.Width()))
+	off := wrappedOffset(rendered.lines[:rendered.lastUserStart], m.viewport.Width())
+	lines := rendered.lines
+	// Pad with trailing blank rows so the viewport can scroll the prompt all the way to the top
+	// even when the reply beneath it is shorter than a screen; otherwise SetYOffset is clamped
+	// to maxYOffset (totalRows-height) and the prompt sits mid-screen.
+	if need := off + m.viewport.Height(); len(lines) < need {
+		lines = append(lines, make([]string, need-len(lines))...)
+	}
+	m.viewport.SetContentLines(lines)
+	m.viewport.SetYOffset(off)
 }
 
 // ----------------------------------------------------------------------------
@@ -489,7 +506,7 @@ func (m Model) View() tea.View {
 		m.viewport.SetHeight(h)
 	}
 
-	rows := []string{m.viewport.View()}
+	rows := []string{m.applyStickyHeader(m.viewport.View())}
 	if prompt != "" {
 		rows = append(rows, prompt)
 	}
@@ -499,6 +516,48 @@ func (m Model) View() tea.View {
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true
 	return v
+}
+
+// applyStickyHeader overlays the user prompt that owns the content at the top of the viewport,
+// frozen at row 0, so the prompt the on-screen replies belong to is always visible. As the next
+// section's prompt scrolls up into the header zone it pushes the current header off the top — a
+// position: sticky hand-off — until the next prompt is itself the natural top line. With the base
+// pin in place (not scrolled) this redraws the latest prompt where it already is, a visual no-op.
+func (m Model) applyStickyHeader(view string) string {
+	if len(m.userBlocks) == 0 {
+		return view
+	}
+	o := m.viewport.YOffset()
+	cur := -1
+	for i, b := range m.userBlocks { // the greatest start <= o owns the top of the screen
+		if b.start <= o {
+			cur = i
+		} else {
+			break
+		}
+	}
+	if cur < 0 {
+		return view // the top content sits above the first prompt — nothing to stick
+	}
+	b := m.userBlocks[cur]
+	push := 0
+	if cur+1 < len(m.userBlocks) {
+		nat := m.userBlocks[cur+1].start - o // the next prompt's natural row within the viewport
+		if nat < b.count {
+			push = b.count - nat // the incoming prompt is shoving this header up
+		}
+	}
+	if push >= b.count {
+		return view // this header is fully pushed out; the next one is already the natural top
+	}
+	header := m.lines[b.start+push : b.start+b.count] // the still-visible (bottom) header rows
+	viewLines := strings.Split(view, "\n")
+	for i, hl := range header {
+		if i < len(viewLines) {
+			viewLines[i] = hl
+		}
+	}
+	return strings.Join(viewLines, "\n")
 }
 
 // inputView renders the textarea inside the rounded, dark-gray, black-bg border (no bottom

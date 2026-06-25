@@ -770,6 +770,64 @@ func TestStickyPinsLastUserPrompt(t *testing.T) {
 	}
 }
 
+// firstViewLine returns the top line of the full View (styling stripped). The sticky-header
+// overlay writes to View, not the viewport, so firstVisibleLine (viewport-only) cannot see it.
+func firstViewLine(m Model) string {
+	return strings.SplitN(plain(m.View()), "\n", 2)[0]
+}
+
+// A short reply still pins the latest prompt to the top: the trailing-blank padding keeps
+// SetYOffset from clamping below row 0 when the content is shorter than the viewport.
+func TestStickyPinsShortReply(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser("first question")
+	m.transcript.commitAssistant("a prior short answer", 0)
+	m.transcript.addUser("LATEST-PROMPT")
+	m.transcript.commitAssistant("a short reply", 0)
+	m.refreshViewport()
+
+	if top := firstViewLine(m); !strings.Contains(top, "LATEST-PROMPT") {
+		t.Errorf("top line = %q; want the latest prompt pinned to the top for a short reply", top)
+	}
+}
+
+// While scrolled, the prompt that owns the on-screen replies is frozen at the top as a sticky
+// header, and the next prompt takes over only once it is the natural top line (position: sticky).
+func TestStickyHeaderHandoffOnScroll(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser("PROMPT-ONE")
+	for i := 0; i < 20; i++ {
+		m.transcript.commitAssistant("one reply "+strings.Repeat("x", 10), 0)
+	}
+	m.transcript.addUser("PROMPT-TWO")
+	for i := 0; i < 20; i++ {
+		m.transcript.commitAssistant("two reply "+strings.Repeat("y", 10), 0)
+	}
+	m.refreshViewport()
+	two := m.userBlocks[len(m.userBlocks)-1] // section two's user-block range in the stashed lines
+
+	// Scrolled into the middle of section one's reply: its prompt is above the top, so it is
+	// drawn as the sticky header.
+	m.userScrolled = true
+	m.viewport.SetYOffset(3)
+	if top := firstViewLine(m); !strings.Contains(top, "PROMPT-ONE") {
+		t.Errorf("scrolled into section one: top line = %q; want PROMPT-ONE stuck to the top", top)
+	}
+
+	// Section two's prompt is the natural top line: it owns the top now.
+	m.viewport.SetYOffset(two.start)
+	if top := firstViewLine(m); !strings.Contains(top, "PROMPT-TWO") {
+		t.Errorf("section two at the top: top line = %q; want PROMPT-TWO", top)
+	}
+
+	// One row earlier, the incoming PROMPT-TWO has not yet reached the top: PROMPT-ONE still owns
+	// it (the hand-off boundary).
+	m.viewport.SetYOffset(two.start - 1)
+	if top := firstViewLine(m); strings.Contains(top, "PROMPT-TWO") {
+		t.Errorf("hand-off boundary: top line = %q; PROMPT-TWO should not yet own the top row", top)
+	}
+}
+
 // The input box grows with its content and the viewport shrinks by the same number of rows,
 // keeping the layout balanced as a multi-line message is typed.
 func TestInputAutoGrowReflowsViewport(t *testing.T) {
