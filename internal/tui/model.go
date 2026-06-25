@@ -73,10 +73,14 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 	th := newTheme()
 
 	ta := textarea.New()
-	ta.Placeholder = "Send a message…  ⏎ send · ⇧⏎ newline · esc quit"
+	ta.Placeholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · esc quit"
 	ta.Prompt = "" // the rounded border is the frame; no inline prompt gutter (layout.md)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit; the model, not the widget, bounds a turn
+	// Plain Enter submits (intercepted in handleKey), so the textarea's newline binding is
+	// repurposed: shift+enter works on terminals that support the Kitty keyboard protocol,
+	// and alt+enter / ctrl+j are byte-distinct fallbacks that insert a newline everywhere.
+	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+j")
 	blackenInput(&ta)
 	ta.Focus()
 
@@ -651,6 +655,6 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 func (m Model) askPrompt(req domain.AskRequest) string {
 	head := approvalStyle.Render("the assistant is asking:")
 	body := head + "\n" + m.th.toolDetail.Render(req.Question)
-	body += "\n" + m.th.statusFaint.Render("type your answer below · ⏎ send · esc cancel")
+	body += "\n" + m.th.statusFaint.Render("type your answer below · ⏎ send · ⇧⏎/⌥⏎ newline · esc cancel")
 	return body
 }

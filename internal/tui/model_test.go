@@ -257,6 +257,35 @@ func TestModelBlankSubmitIsIgnored(t *testing.T) {
 	}
 }
 
+// The newline keys insert a line break into the input instead of submitting: shift+enter on
+// Kitty-capable terminals, alt+enter and ctrl+j everywhere. Plain enter still submits.
+func TestModelNewlineKeysInsertLineBreak(t *testing.T) {
+	cases := []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{"shift+enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}},
+		{"alt+enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}},
+		{"ctrl+j", tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.input.SetValue("line one")
+			m.input.MoveToEnd()
+			next := step(t, m, tc.key)
+			// State stays idle and the input keeps growing: the key was a newline, not a submit
+			// (a submit would switch to running and clear the input).
+			if next.state != stateIdle {
+				t.Errorf("state = %v, want idle (%s must not submit)", next.state, tc.name)
+			}
+			if got := next.input.Value(); !strings.Contains(got, "\n") {
+				t.Errorf("%s did not insert a newline: input = %q", tc.name, got)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Cancellation and quit
 // ----------------------------------------------------------------------------
