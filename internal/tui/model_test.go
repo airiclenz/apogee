@@ -848,3 +848,22 @@ func TestInputAutoGrowReflowsViewport(t *testing.T) {
 		t.Errorf("viewport height = %d; want %d (shrunk by the three rows the input grew)", got, want)
 	}
 }
+
+// TestDisplayModel proves the footer strips a discovered model path to just its name and drops a
+// known weight-file extension, while leaving version dots ("qwen2.5") and bare ids untouched. The
+// strip is display-only; opts.Model (sent to the server) is unaffected.
+func TestDisplayModel(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/Users/me/models/qwen2.5-coder-7b-instruct.gguf", "qwen2.5-coder-7b-instruct"},
+		{"/opt/models/Llama-3.1-8B.GGUF", "Llama-3.1-8B"},
+		{"model.safetensors", "model"},
+		{"qwen2.5-coder", "qwen2.5-coder"}, // no weight extension: the version dot survives
+		{"test-model", "test-model"},
+		{"", "."}, // filepath.Base("") is "."; never reached in practice (nonEmpty-guarded)
+	}
+	for _, tc := range cases {
+		if got := displayModel(tc.in); got != tc.want {
+			t.Errorf("displayModel(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

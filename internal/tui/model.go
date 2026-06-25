@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
@@ -609,7 +610,7 @@ func (m Model) footerContent(w int) string {
 	if host == "" {
 		host = m.opts.Endpoint
 	}
-	info := strings.Join(nonEmpty(host, m.opts.Model, formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
+	info := strings.Join(nonEmpty(host, displayModel(m.opts.Model), formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
 	mode := modeLabel(m.opts.Mode)
 	bar := m.th.footerRule.Render("│")
 	field := w - 2 // content columns between the two │ borders (footerView guards w >= 3)
@@ -627,6 +628,29 @@ func (m Model) footerContent(w int) string {
 	// footerText keeps the black background; only the foreground swaps to the mode's colour.
 	right := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(mode) + m.th.footerText.Render(" ")
 	return bar + left + fill + right + bar
+}
+
+// modelWeightExt is the set of weight-file extensions displayModel strips. It is a fixed
+// whitelist rather than a blind filepath.Ext trim because model ids carry version dots
+// ("qwen2.5-coder"), and an unconditional strip would eat the ".5-coder" tail.
+var modelWeightExt = map[string]bool{
+	".gguf":        true,
+	".ggml":        true,
+	".bin":         true,
+	".safetensors": true,
+}
+
+// displayModel renders a model identifier for the footer. A local server often reports its
+// active model as a filesystem path (e.g. /models/qwen2.5-coder-7b.gguf); the footer wants just
+// the name, so this strips the directory and a known weight-file extension. It is display-only:
+// opts.Model stays the canonical id sent to the server on every request (wire.go), so the strip
+// never reaches the wire — mirroring modeLabel.
+func displayModel(s string) string {
+	base := filepath.Base(s)
+	if modelWeightExt[strings.ToLower(filepath.Ext(base))] {
+		base = base[:len(base)-len(filepath.Ext(base))]
+	}
+	return base
 }
 
 // modeLabel renders an autonomy mode as a human-friendly footer label (spaced, not the
