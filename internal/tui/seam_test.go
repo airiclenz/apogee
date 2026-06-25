@@ -112,6 +112,7 @@ type fakeEngine struct {
 	mu        sync.Mutex
 	submitted []domain.UserInput
 	stepCalls int
+	modeSet   []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
 
 	submitFn   func(domain.UserInput) error
 	stepFn     func(ctx context.Context, call int) (domain.StepResult, error)
@@ -149,6 +150,19 @@ func (f *fakeEngine) Snapshot() (domain.Session, error) {
 }
 func (f *fakeEngine) Mode() domain.Mode { return domain.ModeAskBefore }
 func (f *fakeEngine) Close() error      { return nil }
+
+func (f *fakeEngine) SetMode(m domain.Mode) {
+	f.mu.Lock()
+	f.modeSet = append(f.modeSet, m)
+	f.mu.Unlock()
+}
+
+// modesSet reports the modes SetMode was called with, in order.
+func (f *fakeEngine) modesSet() []domain.Mode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.Mode(nil), f.modeSet...)
+}
 
 // submits reports how many times Submit was called.
 func (f *fakeEngine) submits() int {

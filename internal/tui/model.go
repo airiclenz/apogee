@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
@@ -238,6 +239,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		default:
 			return m, nil // no-op while running / awaiting approval
 		}
+	case "shift+tab":
+		// Cycle the autonomy mode one rung up the privilege ladder (wraps Auto → Plan). Live in
+		// every state (idle, running, awaiting approval/answer): SetMode is goroutine-safe, so the
+		// change can race-free overlap a running Step and takes effect on the next tool call.
+		next := domain.NextMode(m.opts.Mode)
+		m.eng.SetMode(next)
+		m.opts.Mode = next // the footer renders the mode from opts.Mode (footerContent)
+		m.layout()
+		return m, nil
 	}
 
 	// A live approval prompt claims the decision keys. This branch must precede the scroll
@@ -588,18 +598,70 @@ func (m Model) footerView() string {
 	)
 }
 
-// footerContent composes the footer's content line: host ✦ model ✦ ctx on the left, mode on
-// the right, between two dark-gray │ borders on a black field. The host falls back to the
-// endpoint when no alias is configured, and the context window is omitted when unknown (0).
+// footerContent composes the footer's content line: host ✦ model ✦ ctx on the left, the mode
+// marker on the right, between two dark-gray │ borders on a black field. The mode marker takes
+// its own per-mode colour (modeColor), so the segments are styled independently and laid out by
+// hand — mirroring statusLine — rather than rendered under one style, which would let the mode's
+// colour reset bleed the black field. The host falls back to the endpoint when no alias is
+// configured, and the context window is omitted when unknown (0).
 func (m Model) footerContent(w int) string {
 	host := m.opts.HostAlias
 	if host == "" {
 		host = m.opts.Endpoint
 	}
-	left := strings.Join(nonEmpty(host, m.opts.Model, formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
-	body := fitLeftRight(left, string(m.opts.Mode), w-2)
+	info := strings.Join(nonEmpty(host, m.opts.Model, formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
+	mode := modeLabel(m.opts.Mode)
 	bar := m.th.footerRule.Render("│")
-	return bar + m.th.footerText.Render(body) + bar
+	field := w - 2 // content columns between the two │ borders (footerView guards w >= 3)
+
+	// One-column margins inside the borders; a black-bg gap justifies the mode marker right.
+	gap := field - 2 - lipgloss.Width(info) - lipgloss.Width(mode)
+	if gap < 1 {
+		// Too narrow for both segments: keep the left info, truncate to the field, pad black.
+		body := ansi.Truncate(" "+info, field, "…")
+		body += strings.Repeat(" ", max(0, field-lipgloss.Width(body)))
+		return bar + m.th.footerText.Render(body) + bar
+	}
+	left := m.th.footerText.Render(" " + info)
+	fill := m.th.footerText.Render(strings.Repeat(" ", gap))
+	// footerText keeps the black background; only the foreground swaps to the mode's colour.
+	right := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(mode) + m.th.footerText.Render(" ")
+	return bar + left + fill + right + bar
+}
+
+// modeLabel renders an autonomy mode as a human-friendly footer label (spaced, not the
+// hyphenated wire form). It is display-only: the --mode flag, config.yaml, and every domain
+// string stay canonical ("ask-before"); only the footer reads "ask before".
+func modeLabel(m domain.Mode) string {
+	switch m {
+	case domain.ModePlan:
+		return "plan"
+	case domain.ModeAskBefore:
+		return "ask before"
+	case domain.ModeAllowEdits:
+		return "allow edits"
+	case domain.ModeAuto:
+		return "auto"
+	default:
+		return string(m)
+	}
+}
+
+// modeColor maps an autonomy mode to its footer-marker colour (the palette in theme.go). An
+// unknown mode falls back to the footer's faint tone, so an off-ladder value is never invisible.
+func modeColor(m domain.Mode) color.Color {
+	switch m {
+	case domain.ModePlan:
+		return colModePlan
+	case domain.ModeAskBefore:
+		return colModeAskBefore
+	case domain.ModeAllowEdits:
+		return colModeAllowEdits
+	case domain.ModeAuto:
+		return colModeAuto
+	default:
+		return colFaint
+	}
 }
 
 // statusLine renders the activity indicator and turn on the left and the live context gauge

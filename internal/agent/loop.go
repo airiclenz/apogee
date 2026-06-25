@@ -73,6 +73,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		registry: registry,
 		tools:    resolveTools(cfg),
 		guards:   security.NewDefaultGuards(),
+		mode:     cfg.Mode, // seed the live, swappable mode from the construction config
 	}, nil
 }
 
@@ -437,7 +438,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 		// is bounded one level down (a Plan sub-agent inherits Plan, so its children are
 		// read-only too). It is not a leaf write, so hiding it would wrongly deny a Plan-mode
 		// parent the ability to delegate read/research work (ADR 0013).
-		if a.cfg.Mode == domain.ModePlan && !domain.IsReadOnly(t) && t.Name() != tools.SubAgentToolName {
+		if a.Mode() == domain.ModePlan && !domain.IsReadOnly(t) && t.Name() != tools.SubAgentToolName {
 			continue
 		}
 		menu = append(menu, domain.ToolDef{

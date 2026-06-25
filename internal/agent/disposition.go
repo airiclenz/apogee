@@ -78,7 +78,7 @@ func classifyTool(tool domain.Tool) toolClass {
 func (a *Agent) dispose(tool domain.Tool, call domain.ToolCall) disposition {
 	class := classifyTool(tool)
 
-	switch a.cfg.Mode {
+	switch a.Mode() {
 	case domain.ModePlan:
 		// Plan filters the menu to read-only tools; anything else is refused defensively.
 		if class == classReadOnly {

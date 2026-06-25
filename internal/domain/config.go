@@ -107,6 +107,22 @@ const (
 	ModeAuto Mode = "auto"
 )
 
+// modeLadder is the autonomy privilege ladder in cycle order (least to most autonomous);
+// the cycle wraps Auto → Plan. It is the single source of truth for Shift+Tab mode cycling.
+var modeLadder = []Mode{ModePlan, ModeAskBefore, ModeAllowEdits, ModeAuto}
+
+// NextMode returns the mode one rung up the privilege ladder, wrapping Auto back to Plan.
+// An unknown or empty mode starts the cycle at Plan (the safest rung), so a caller can never
+// get stuck off-ladder.
+func NextMode(cur Mode) Mode {
+	for i, m := range modeLadder {
+		if m == cur {
+			return modeLadder[(i+1)%len(modeLadder)]
+		}
+	}
+	return ModePlan
+}
+
 // ----------------------------------------------------------------------------
 // Stepping & Turns (ADR 0007)
 // ----------------------------------------------------------------------------

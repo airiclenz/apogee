@@ -630,7 +630,8 @@ func TestModelQuitWithoutSaver(t *testing.T) {
 func TestModelStatusLine(t *testing.T) {
 	m := newTestModel(t)
 	got := plain(m.View())
-	for _, want := range []string{"test-host", "test-model", "32k", "ask-before", "turn"} {
+	// The footer renders the mode as a friendly, spaced label (ask-before → "ask before").
+	for _, want := range []string{"test-host", "test-model", "32k", "ask before", "turn"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("status/footer missing %q:\n%s", want, got)
 		}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -27,6 +28,13 @@ type Agent struct {
 	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
 	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry)
 	guards   security.Guards           // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
+
+	// modeMu guards mode — the ONE field shared across goroutines, the deliberate exception to
+	// the single-goroutine contract above. The UI cycles the autonomy mode (Shift+Tab → SetMode)
+	// while the worker goroutine reads it during dispatch (Mode() in toolMenu / dispose); the
+	// RWMutex makes that overlap race-free. cfg.Mode stays the immutable construction seed.
+	modeMu sync.RWMutex
+	mode   domain.Mode // live autonomy mode; seeded from cfg.Mode at construction, swappable via SetMode
 
 	conv         domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step
@@ -105,8 +113,25 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	}
 }
 
-// Mode reports the Agent's current Agent mode.
-func (a *Agent) Mode() domain.Mode { return a.cfg.Mode }
+// Mode reports the Agent's current autonomy mode. It reads the live mode under the lock, so a
+// concurrent SetMode (Shift+Tab from the UI) is observed safely from the worker goroutine.
+func (a *Agent) Mode() domain.Mode {
+	a.modeMu.RLock()
+	defer a.modeMu.RUnlock()
+	return a.mode
+}
+
+// SetMode changes the autonomy mode for subsequent tool calls. It is safe to call from another
+// goroutine while a Step runs: the tool menu (Plan filter) and the per-call disposition both
+// read the mode through Mode() under the same lock, so the change lands on the next read with no
+// registry rebuild. A switch to Auto is safe even where fs-confinement is unavailable — the
+// subprocess surface gates through Approval ("confine if you can, gate if you can't", ADR 0012),
+// so no eligibility precheck is needed here.
+func (a *Agent) SetMode(m domain.Mode) {
+	a.modeMu.Lock()
+	a.mode = m
+	a.modeMu.Unlock()
+}
 
 // ----------------------------------------------------------------------------
 // Sessions (ADR 0001 — snapshot/resume is the user feature; the bench composes fork)

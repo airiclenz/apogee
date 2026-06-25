@@ -29,6 +29,13 @@ var (
 	colDiffAdd  = lipgloss.Color("#3fb950") // diff "+" lines (reserved — no producer yet)
 	colDiffDel  = lipgloss.Color("#f85149") // diff "-" lines (reserved — no producer yet)
 	colError    = lipgloss.Color("#f85149") // recovered-fault notices
+
+	// The autonomy-mode footer markers, warming up the privilege ladder (least → most
+	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
+	colModePlan       = lipgloss.Color("#2ee6c5") // plan — turquoise green
+	colModeAskBefore  = lipgloss.Color("#3fb950") // ask-before — green
+	colModeAllowEdits = lipgloss.Color("#58a6ff") // allow-edits — blue
+	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a

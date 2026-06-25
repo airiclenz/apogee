@@ -26,6 +26,10 @@ type Engine interface {
 	Snapshot() (domain.Session, error)
 	// Mode reports the Agent's autonomy mode (for the status line).
 	Mode() domain.Mode
+	// SetMode changes the Agent's autonomy mode (Shift+Tab cycling). It is goroutine-safe, so
+	// the UI may call it while the worker drives a Step; the change takes effect on the next
+	// tool call.
+	SetMode(domain.Mode)
 	// Close releases the Agent's resources.
 	Close() error
 }
