@@ -1,10 +1,11 @@
 # Apogee — Phase-3 Detail Plan (P3): full subsystems, Auto confined, cut `v1.0.0`
 
-**Date:** 2026-06-24 · **Status:** 🚧 **IN PROGRESS** — **P3.0 entry re-verify ✅ done** + **P3.1
-confinement execution-model design ✅ done** (2026-06-24: ADR 0012 accepted, the implementation contract
-written as [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md);
-see the P3.1 result note in §4); **P3.2 (Linux landlock) / P3.3 (macOS seatbelt) are next — now mechanical
-against the contract** · **Branch:** `main` (commit directly — pre-production owner directive).
+**Date:** 2026-06-24 (P3.16 close 2026-06-25) · **Status:** ✅ **COMPLETE** — **all sub-phases
+P3.0–P3.16 landed; `v1.0.0` is tagged** (P3.16 acceptance gate GREEN on this host; live OS-enforcement
+proofs are owner-run residuals — see the P3.16 result note in §4 and `CHANGELOG.md` "Known
+post-release verification"). ADR 0012 supersedes ADR 0004; the confinement contract is
+[`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md); ADR
+0001 §18 is amended (semver begins) · **Branch:** `main` (commit directly — pre-production owner directive).
 This document refines the broad plan's **Phase 3** ("Full subsystems") into numbered,
 acceptance-tested tasks and **makes the load-bearing design calls Phase 3 lands into** (§3 — the
 confinement execution model, the sub-agent orchestrator shape, the MCP non-confinable gating, and
@@ -397,7 +398,7 @@ everything, and it cuts `v1.0.0`).
 | **P3.13** ✅ | **Sub-agent orchestrator + ADR 0013** (D2): privilege threading, `Subset` tool set, top-level-only swappable driver, `Depth+1` event nesting, the `sub_agent` recursion point; **isolated live guard state, shared read-only dangerous floor** (`Guards.ForSubAgent`). **Done 2026-06-24** — see result note below | P3.7–P3.11, P3.4 | — | ADR 0005; **ADR 0013** |
 | **P3.14** | **TUI `Depth > 0` rendering**: nested-event framing/indentation (Phase-2 "tolerate" → "render") | P3.13 | — | ADR 0011; TDD §5 TUI |
 | **P3.15** | **MCP client** on the official Go SDK (stdio/SSE/streamable-http): surface server tools as `ExternalEffectTool`, Auto-gates-MCP, resume reconnects fresh | P3.4, P3.6 | `…/go-sdk` | ADR 0004/0008; D3 |
-| **P3.16** | **Phase-3 acceptance + cut `v1.0.0`**: feature-parity vs apogee-code non-UI + bench; live Auto-confined run (Mac + Linux); freeze + tag + amend ADR 0001 §18 | all | — | broad §4 deliverable; ADR 0001 §18 |
+| **P3.16** ✅ | **Phase-3 acceptance + cut `v1.0.0`**: feature-parity vs apogee-code non-UI + bench; live Auto-confined run (Mac + Linux); freeze + tag + amend ADR 0001 §18. **Done 2026-06-25** — hermetic + cross-build gate GREEN; `v1.0.0` tagged; live OS-enforcement proofs owner-run; see result note below | all | — | broad §4 deliverable; ADR 0001 §18 |
 
 > **On P3.12:** guardrails are a single task (**P3.6**); P3.12 is left reserved so the IDs don't
 > renumber if a reviewer later splits audit/circuit-breaker out. Treat the live list as P3.0–P3.11,
@@ -1499,6 +1500,47 @@ every public symbol added this phase against D7, freeze the facade, **tag `v1.0.
 0001 §18 to record that semver now begins (Events/hook-points stay additively extensible). **Acceptance:**
 the full verify gate green; the bench parity run passes; the live Auto-confined run completes on Linux
 (macOS owner-confirmed); `v1.0.0` tagged; ADR 0001 amended. **Phase 3 is complete.**
+
+#### ✅ P3.16 result — landed 2026-06-25 (`v1.0.0` cut; hermetic + cross-build acceptance GREEN; live OS-enforcement proofs are owner-run residuals)
+
+Run on the dev host (`go1.26.4`, `linux/arm64`; module `go 1.26`). **Phase 3 is complete — `v1.0.0`
+is tagged.** No production code changed in this sub-phase; the deliverable is the acceptance run plus
+the release artifacts (CHANGELOG, ADR 0001 §18 amendment, this note).
+
+**Verify gate (§7) — all green:** `gofmt -l .` empty · `go vet ./...` + `GOOS=darwin GOARCH=arm64 go
+vet ./...` clean · `go build ./...` ok · `go test -race ./...` all `ok` (no FAIL / panic / `DATA
+RACE`) · ADR-0010 self-import grep (`grep -rl '"github.com/airiclenz/apogee"' internal/`) empty · 6
+cross-builds OK (linux/darwin/windows × amd64/arm64, `CGO_ENABLED=0`) · `go mod tidy` no drift ·
+`apogee --help` exit 0. The hermetic deliverable proofs run and pass: the e2e harness exercises a
+sub-agent + an MCP tool + a confined-Auto path, and the opt-in `TestE2ELiveModel` self-skips loudly
+when `APOGEE_LIVE_ENDPOINT` is unset (SKIP, not FAIL).
+
+**Self-skips (expected, nothing faked, no test weakened):** the live OS-**enforcement** batteries
+self-skip on this host — `TestLandlockProbe`/`…Network` skip because the dev-host kernel has
+`CONFIG_SECURITY_LANDLOCK` **off** (`FSWrite==false`), and `TestSeatbeltProbe`/`…Network` skip
+because `sandbox-exec` is macOS-only. The hermetic disposition/logic tests around them (caps honesty,
+generated profile strings, `*exec.Cmd` rewriting, empty-argv refusal, fail-closed net-deny) run on
+every host and pass.
+
+**Tag-readiness decision:** the orchestration brief frames live landlock-kernel + macOS enforcement
+as **owner-run / CI** items (not a hard pre-tag gate), so — per the brief's expected path — `v1.0.0`
+is cut on green hermetic + cross-build acceptance, with the live OS-enforcement proofs recorded as
+**documented post-release verification** (see CHANGELOG "Known post-release verification" and the
+brief's "Carried findings → Owner/CI").
+
+**Version mechanism:** no `--version` flag / ldflags var is introduced — the §7 gate names only
+`--help`, and per D7 the v1 surface stays minimal. The release is the **annotated `v1.0.0` git tag +
+`CHANGELOG.md`**; `internal/mcp` already reports `clientVersion = "v1.0.0"`.
+
+**Owner-run residuals (recorded in CHANGELOG "Known post-release verification"):** (1) Linux landlock
+live enforcement on a landlock-enabled kernel; (2) macOS seatbelt live enforcement; (3) the opt-in
+live Auto-confined deliverable run on Linux + macOS; (4) box-root canonicalization via `EvalRealPath`
+(symlinked roots, e.g. macOS `/tmp`→`/private/tmp`).
+
+**Public-surface freeze (D7):** the frozen v1 surface is the root `apogee` package; Phase-3 additions
+reviewed at the freeze are the `Asker` host delegate (struct-typed, additive-safe) and the
+`ModeAllowEdits` constant. ADR 0001 §18 is amended to record that semver now begins; Events/hook
+points stay additively extensible (a new variant is a minor bump).
 
 ---
 

@@ -83,3 +83,15 @@ disables them with deterministic stubs for v1 — see
   bench, optional `headless`) has exercised it. Events and Hook points stay **additively
   extensible** (a new variant is a minor bump). Seed types the bench needs (e.g.
   `OrderingConstraints`) **move into apogee** and the bench imports them — never the reverse.
+
+  > **Amendment 2026-06-25 (P3.16 — `v1.0.0` cut).** Phase 3 is complete and **`v1.0.0` is
+  > tagged**. The "v0.x, no stability promise" clause above is now spent: **semver begins.** The
+  > frozen v1 public surface is the root `apogee` package (`Agent`/`New`/`Resume`, `Config` and
+  > its host delegates `EventSink`/`Approver`/`Asker`/`ExternalEffects`, the four-rung `Mode`
+  > ladder, the `Tool`/`ToolRegistry` extension point and its `ReadOnlyTool`/`ExternalEffectTool`
+  > markers, the `Event` variants, and the hook points); tools are an open extension point behind
+  > the registry (ADR 0002), not root types. Events and hook points remain **additively
+  > extensible** — a new Event variant or hook point is a **minor** bump, not a break. Phase-3
+  > public-surface additions reviewed at the freeze (§3 D7 of the Phase-3 detail plan): the
+  > `Asker` host delegate (struct-typed for additive growth) and the `ModeAllowEdits` constant.
+  > The changelog is tracked from this release in [`CHANGELOG.md`](../../CHANGELOG.md).
