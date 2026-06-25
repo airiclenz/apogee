@@ -293,18 +293,6 @@ func clampInt(n, lo, hi int) int {
 	return n
 }
 
-// justify lays left and right at the two ends of a width-wide line with a run of spaces
-// between them. When they do not both fit, the left side is kept and truncated, so the
-// status line never overflows its row. Widths are ANSI-aware, so styled inputs justify
-// correctly.
-func justify(left, right string, width int) string {
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		return ansi.Truncate(left, max(0, width), "")
-	}
-	return left + strings.Repeat(" ", gap) + right
-}
-
 // fitLeftRight composes the footer's content body: " left … right " padded to exactly width
 // columns, with one-column margins inside the borders. When the two segments do not fit, the
 // left segment is kept and the body truncated, so the footer never overflows its row.

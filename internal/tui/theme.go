@@ -73,7 +73,9 @@ type theme struct {
 	errorText   lipgloss.Style // a recovered-fault notice
 	noteText    lipgloss.Style // a neutral note (cancelled, approval record)
 	inputBorder lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
-	statusFaint lipgloss.Style // the status line
+	statusFaint lipgloss.Style // dim status text, bg-free (approval/ask prompts)
+	statusBar   lipgloss.Style // status-line segments: faint on black
+	statusError lipgloss.Style // status-line "error" token: red bold on black
 	footerRule  lipgloss.Style // the footer's border runes and corners (dark gray)
 	footerText  lipgloss.Style // the footer's content (faint on black)
 }
@@ -101,7 +103,9 @@ func newTheme() theme {
 			Background(colBlack).
 			Padding(0, 1),
 		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
-		footerRule:  lipgloss.NewStyle().Foreground(colDarkGray),
+		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
+		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
+		footerRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
 		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 	}
 }

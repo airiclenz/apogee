@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -88,6 +89,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 	vp.SoftWrap = true // wrap long transcript lines to the viewport width
 
 	sp := newBrailleSpinner()
+	sp.Style = lipgloss.NewStyle().Background(colBlack) // match the status bar's black field
 
 	return Model{
 		parent:   parent,
@@ -545,19 +547,27 @@ func (m Model) footerContent(w int) string {
 // (or a key hint) on the right, justified across the window. It reads only display values off
 // Options and the model's own state — never off the Engine mid-step.
 func (m Model) statusLine() string {
-	turn := m.th.statusFaint.Render(fmt.Sprintf("turn %d", m.transcript.turn))
+	turn := m.th.statusBar.Render(fmt.Sprintf("turn %d", m.transcript.turn))
 	left := turn
 	switch m.state {
 	case stateRunning:
-		left = m.spinner.View() + " " + turn
+		left = m.spinner.View() + m.th.statusBar.Render(" ") + turn
 	case stateAwaitingApproval:
-		left = m.th.statusFaint.Render("approval needed · ") + turn
+		left = m.th.statusBar.Render("approval needed · ") + turn
 	case stateAwaitingAsk:
-		left = m.th.statusFaint.Render("answer needed · ") + turn
+		left = m.th.statusBar.Render("answer needed · ") + turn
 	case stateErrored:
-		left = m.th.errorText.Render("error") + m.th.statusFaint.Render(" · ") + turn
+		left = m.th.statusError.Render("error") + m.th.statusBar.Render(" · ") + turn
 	}
-	return justify(left, m.th.statusFaint.Render(m.statusRight()), m.width)
+	// Fill the whole width with black-bg cells — segments and the justify gap alike — so
+	// the info line reads as one solid black bar joined to the prompt box below it. A plain
+	// justify gap would show the terminal's default background through the seam.
+	right := m.th.statusBar.Render(m.statusRight())
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		return ansi.Truncate(left, max(0, m.width), "")
+	}
+	return left + m.th.statusBar.Render(strings.Repeat(" ", gap)) + right
 }
 
 // statusRight is the status line's right slot: the live context gauge when token usage is
