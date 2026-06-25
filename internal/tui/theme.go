@@ -29,6 +29,7 @@ var (
 	colDiffAdd  = lipgloss.Color("#3fb950") // diff "+" lines (reserved — no producer yet)
 	colDiffDel  = lipgloss.Color("#f85149") // diff "-" lines (reserved — no producer yet)
 	colError    = lipgloss.Color("#f85149") // recovered-fault notices
+	colCode     = lipgloss.Color("#f0883e") // inline `code` + fenced code blocks (orange)
 
 	// The autonomy-mode footer markers, warming up the privilege ladder (least → most
 	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
@@ -49,6 +50,7 @@ const (
 	glyphUser       = "❯"
 	glyphSubRail    = "│"
 	glyphSubLabel   = "⤷"
+	glyphBullet     = "•" // a markdown bullet-list item (- / * / +)
 )
 
 // subAgentLabel is the one-line header that opens each contiguous run of sub-agent
@@ -71,7 +73,6 @@ func newBrailleSpinner() spinner.Model {
 // cues — so the transcript stays legible under any terminal profile.
 type theme struct {
 	userBlock   lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
-	assistant   lipgloss.Style // the ✦ assistant marker + text (terminal default fg)
 	toolHeader  lipgloss.Style // the ✦ [Label] target header
 	toolDetail  lipgloss.Style // the ┝/┕ branch detail lines (dim)
 	subRail     lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
@@ -79,6 +80,13 @@ type theme struct {
 	diffRemoved lipgloss.Style // a "-" diff detail line (reserved)
 	errorText   lipgloss.Style // a recovered-fault notice
 	noteText    lipgloss.Style // a neutral note (cancelled, approval record)
+
+	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
+	// as bold white, `inline code` and ``` fenced blocks ``` in orange.
+	mdBold      lipgloss.Style // **bold** span
+	mdHeading   lipgloss.Style // # … ###### heading line (bold white)
+	mdCode      lipgloss.Style // `inline code` span (orange)
+	mdCodeBlock lipgloss.Style // a ``` fenced ``` code-block line (orange)
 	inputBorder lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
 	statusFaint lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar   lipgloss.Style // status-line segments: faint on black
@@ -94,7 +102,6 @@ type theme struct {
 func newTheme() theme {
 	return theme{
 		userBlock:   lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
-		assistant:   lipgloss.NewStyle(),
 		toolHeader:  lipgloss.NewStyle(),
 		toolDetail:  lipgloss.NewStyle().Foreground(colFaint),
 		subRail:     lipgloss.NewStyle().Foreground(colFaint),
@@ -102,6 +109,10 @@ func newTheme() theme {
 		diffRemoved: lipgloss.NewStyle().Foreground(colDiffDel),
 		errorText:   lipgloss.NewStyle().Foreground(colError).Bold(true),
 		noteText:    lipgloss.NewStyle().Foreground(colFaint),
+		mdBold:      lipgloss.NewStyle().Bold(true),
+		mdHeading:   lipgloss.NewStyle().Bold(true).Foreground(colWhite),
+		mdCode:      lipgloss.NewStyle().Foreground(colCode),
+		mdCodeBlock: lipgloss.NewStyle().Foreground(colCode),
 		inputBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderBottom(false).

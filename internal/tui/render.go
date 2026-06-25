@@ -96,7 +96,9 @@ func renderEntryLines(th theme, e entry, width int) []string {
 	case entryUser:
 		return railLines(th, renderUserBlock(th, e.text, inner), e.depth)
 	case entryAssistant:
-		return railLines(th, hangingWrap(th.assistant, glyphAssistant+" ", e.text, inner), e.depth)
+		marker := glyphAssistant + " "
+		body := renderMarkdownBody(th, e.text, inner-lipgloss.Width(marker))
+		return railLines(th, withMarker(marker, body), e.depth)
 	case entryToolCall:
 		return railLines(th, renderToolBlock(th, e.tool, inner), e.depth)
 	case entryToolResult:
