@@ -94,7 +94,7 @@ func renderEntryLines(th theme, e entry, width int) []string {
 	inner := railedWidth(width, e.depth)
 	switch e.kind {
 	case entryUser:
-		return railLines(th, renderUserBlock(th, e.text, inner), e.depth)
+		return railLines(th, renderUserBlock(th, e.text, e.skills, inner), e.depth)
 	case entryAssistant:
 		marker := glyphAssistant + " "
 		body := renderMarkdownBody(th, e.text, inner-lipgloss.Width(marker))
@@ -123,14 +123,43 @@ func renderSubAgentLabel(th theme, depth, width int) []string {
 
 // renderUserBlock renders the user prompt as a full-width white-on-dark-gray block: the ❯
 // marker on the first line, a hanging two-column indent on wrapped continuation lines, and
-// the dark-gray background padded across the whole width on every line.
-func renderUserBlock(th theme, text string, width int) []string {
-	wrapped := hangingPrefixes(glyphUser+" ", text, width)
-	out := make([]string, len(wrapped))
-	for i, ln := range wrapped {
-		out[i] = th.userBlock.Width(width).Render(ln)
+// the dark-gray background padded across the whole width on every line. Any skills attached to
+// the send render as chips on a trailing row of the same block, so the attachment stays visible
+// after the message is sent (an empty-text send is just the chip row, marker and all).
+func renderUserBlock(th theme, text string, skills []string, width int) []string {
+	var out []string
+	if text != "" {
+		for _, ln := range hangingPrefixes(glyphUser+" ", text, width) {
+			out = append(out, th.userBlock.Width(width).Render(ln))
+		}
+	}
+	if len(skills) > 0 {
+		marker := glyphUser + " " // a text-less send: the chip row leads with the ❯ marker
+		if len(out) > 0 {
+			marker = "  " // a continuation row: align the chips under the prompt text
+		}
+		out = append(out, renderUserChipRow(th, marker, skills, width))
 	}
 	return out
+}
+
+// renderUserChipRow composes one full-width row of attached-skill chips inside the user block:
+// a dark-gray lead marker, the violet chips (each carrying its own background), and a dark-gray
+// pad filling the block to width — three independently styled segments on one line, so the
+// chips keep their colour while the row stays a solid block (the footerContent idiom). Chips
+// that would overrun the width are clipped ANSI-aware so the row never breaks the block layout.
+func renderUserChipRow(th theme, marker string, skills []string, width int) string {
+	chips := make([]string, 0, len(skills))
+	for _, name := range skills {
+		chips = append(chips, th.skillChip.Render(" "+glyphSkill+" "+name+" "))
+	}
+	lead := th.userBlock.Render(marker)
+	body := strings.Join(chips, " ")
+	if avail := width - lipgloss.Width(lead); lipgloss.Width(body) > avail {
+		body = ansi.Truncate(body, max(0, avail), "…")
+	}
+	pad := th.userBlock.Render(strings.Repeat(" ", max(0, width-lipgloss.Width(lead)-lipgloss.Width(body))))
+	return lead + body + pad
 }
 
 // renderToolBlock renders a tool call: the ✦ [Label] target header, then each summary detail

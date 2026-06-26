@@ -1,10 +1,8 @@
 package tui
 
 import (
-	"io/fs"
-	"os"
-	"sort"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -195,57 +193,21 @@ func (m Model) skillSuggestions(partial string) []acItem {
 	return items
 }
 
-// fileSuggestions lists workspace files matching the typed partial as "@path" rows.
+// fileSuggestions lists workspace files matching the typed partial as "@path" rows, served
+// through the Model's file cache so a typing burst reuses one workspace walk (filecache.go). A
+// Model built without a cache (a bare test fixture) falls back to an uncached walk.
 func (m Model) fileSuggestions(partial string) []acItem {
-	paths := workspaceFiles(m.opts.Workspace, partial, maxAutocompleteItems)
+	var paths []string
+	if m.files != nil {
+		paths = m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
+	} else {
+		paths = workspaceFiles(m.opts.Workspace, partial, maxAutocompleteItems)
+	}
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
 		items = append(items, acItem{value: p, label: "@" + p})
 	}
 	return items
-}
-
-// workspaceFiles returns up to limit workspace-relative file paths matching partial (a
-// case-insensitive substring), via a bounded walk rooted at root through os.Root — so the
-// walk cannot escape the workspace or follow a symlink out of it. It skips .git and hidden
-// directories/files, lists files only, and stops once limit matches are collected. An empty
-// or unreadable root yields nothing.
-func workspaceFiles(root, partial string, limit int) []string {
-	if root == "" {
-		return nil
-	}
-	r, err := os.OpenRoot(root)
-	if err != nil {
-		return nil
-	}
-	defer r.Close()
-
-	needle := strings.ToLower(partial)
-	var out []string
-	_ = fs.WalkDir(r.FS(), ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || p == "." {
-			return nil // skip unreadable entries / the root itself, keep walking
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if strings.HasPrefix(name, ".") { // skip .git and other dotted dirs
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if strings.HasPrefix(name, ".") {
-			return nil // skip hidden files
-		}
-		if needle == "" || strings.Contains(strings.ToLower(p), needle) {
-			out = append(out, p)
-			if len(out) >= limit {
-				return fs.SkipAll
-			}
-		}
-		return nil
-	})
-	sort.Strings(out)
-	return out
 }
 
 // autocompleteKey handles a keypress while the overlay is open (idle only). It reports

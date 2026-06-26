@@ -55,12 +55,15 @@ type entry struct {
 	callID string
 	tool   toolView
 	done   bool
+	skills []string // entryUser only: display names of the skills attached to this send
 }
 
 // addUser appends a user message — the text the human submitted to open or continue the
-// Exchange. Called from the submit path, not the event fold.
-func (t *transcript) addUser(text string) {
-	t.entries = append(t.entries, entry{kind: entryUser, text: text})
+// Exchange, plus the display names of any skills attached to it (rendered as chips on the
+// block so the attachment stays visible after the send; nil when none). Called from the submit
+// path, not the event fold.
+func (t *transcript) addUser(text string, skills []string) {
+	t.entries = append(t.entries, entry{kind: entryUser, text: text, skills: skills})
 }
 
 // addNote appends a neutral note (e.g. "cancelled") — a transcript record of a UI-level

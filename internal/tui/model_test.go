@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -139,6 +140,59 @@ func TestModelExchangeLifecycle(t *testing.T) {
 	}
 	if m.cancel != nil {
 		t.Error("CancelFunc not cleared after the exchange completed")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Live token stats: the UsageEvent lights the context gauge and times throughput
+// ----------------------------------------------------------------------------
+
+func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
+	m := newTestModel(t) // ContextWindow 32768
+
+	// The gauge is dark until the first turn reports usage.
+	if g := m.contextGauge(); g != "" {
+		t.Fatalf("context gauge lit before any usage: %q", g)
+	}
+
+	// A token starts the throughput clock; a short gap guarantees a non-zero elapsed before the
+	// terminal usage lands.
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "hi"}})
+	time.Sleep(2 * time.Millisecond)
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}})
+
+	if m.ctxUsed != 1200 {
+		t.Errorf("ctxUsed = %d, want 1200 (the reported total)", m.ctxUsed)
+	}
+	if g := m.contextGauge(); !strings.Contains(g, "1k") {
+		t.Errorf("context gauge not lit by usage: %q", g)
+	}
+	if m.tokPerSec <= 0 {
+		t.Errorf("tokPerSec = %v, want > 0 (completion timed against the token clock)", m.tokPerSec)
+	}
+	if s := m.throughputSuffix(); !strings.Contains(s, "tok/s") {
+		t.Errorf("throughput readout empty after usage: %q", s)
+	}
+
+	// A sub-agent's usage (Depth > 0) nests in the stream but must not move the top-level gauge.
+	prev := m.ctxUsed
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{
+		EventBase:    domain.EventBase{Depth: 1},
+		PromptTokens: 9, CompletionTokens: 9, TotalTokens: 9,
+	}})
+	if m.ctxUsed != prev {
+		t.Errorf("a Depth>0 UsageEvent changed the top-level gauge: %d -> %d", prev, m.ctxUsed)
+	}
+}
+
+// A re-streamed Turn (StreamResetEvent) restarts the throughput clock, so the next usage times
+// only the accepted generation.
+func TestUsageThroughputClockResetsOnReStream(t *testing.T) {
+	m := newTestModel(t)
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "draft"}})
+	m = step(t, m, eventMsg{Event: domain.StreamResetEvent{}})
+	if !m.genStart.IsZero() {
+		t.Errorf("throughput clock not reset by StreamReset: %v", m.genStart)
 	}
 }
 
@@ -601,7 +655,7 @@ func TestModelSavesOnCleanQuit(t *testing.T) {
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
 	rec := &recordingSaver{}
 	m := newSavingModel(t, eng, rec.save)
-	m.transcript.addUser("hello") // give it content worth saving
+	m.transcript.addUser("hello", nil) // give it content worth saving
 
 	_, cmd := ctrlCQuit(t, m)
 	if !rec.called {
@@ -640,7 +694,7 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	}}
 	rec := &recordingSaver{}
 	m := newSavingModel(t, eng, rec.save)
-	m.transcript.addUser("hi")
+	m.transcript.addUser("hi", nil)
 	m.state = stateRunning
 	m.cancel = func() {}
 
@@ -656,7 +710,7 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 // A nil saver (session saving disabled) must not break the quit path.
 func TestModelQuitWithoutSaver(t *testing.T) {
 	m := newTestModel(t) // testOpts carries no Save
-	m.transcript.addUser("hi")
+	m.transcript.addUser("hi", nil)
 	_, cmd := ctrlCQuit(t, m)
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
 		t.Error("quit with no saver did not exit")
@@ -789,9 +843,9 @@ func TestStickyPinsLastUserPrompt(t *testing.T) {
 
 	// A transcript taller than the viewport, with a clear last prompt followed by enough
 	// content below it to fill the screen (so the pin is not clamped to the bottom).
-	m.transcript.addUser("first question")
+	m.transcript.addUser("first question", nil)
 	m.transcript.commitAssistant(strings.Repeat("filler above. ", 80), 0)
-	m.transcript.addUser("STICKY-PROMPT")
+	m.transcript.addUser("STICKY-PROMPT", nil)
 	for i := 0; i < 30; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -819,7 +873,7 @@ func TestStickyPinsLastUserPrompt(t *testing.T) {
 // finished reply could not be scrolled back — the "scrolling only works intermittently" bug.
 func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 	m := newTestModel(t) // 80x24, stateIdle
-	m.transcript.addUser("question")
+	m.transcript.addUser("question", nil)
 	for i := 0; i < 40; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -855,9 +909,9 @@ func firstViewLine(m Model) string {
 // SetYOffset from clamping below row 0 when the content is shorter than the viewport.
 func TestStickyPinsShortReply(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("first question")
+	m.transcript.addUser("first question", nil)
 	m.transcript.commitAssistant("a prior short answer", 0)
-	m.transcript.addUser("LATEST-PROMPT")
+	m.transcript.addUser("LATEST-PROMPT", nil)
 	m.transcript.commitAssistant("a short reply", 0)
 	m.refreshViewport()
 
@@ -870,11 +924,11 @@ func TestStickyPinsShortReply(t *testing.T) {
 // header, and the next prompt takes over only once it is the natural top line (position: sticky).
 func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("PROMPT-ONE")
+	m.transcript.addUser("PROMPT-ONE", nil)
 	for i := 0; i < 20; i++ {
 		m.transcript.commitAssistant("one reply "+strings.Repeat("x", 10), 0)
 	}
-	m.transcript.addUser("PROMPT-TWO")
+	m.transcript.addUser("PROMPT-TWO", nil)
 	for i := 0; i < 20; i++ {
 		m.transcript.commitAssistant("two reply "+strings.Repeat("y", 10), 0)
 	}

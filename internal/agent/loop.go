@@ -296,6 +296,17 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 			}
 		case provider.DeltaDone:
 			out.finish = domain.FinishReason(delta.FinishReason)
+			if u := delta.Usage; u != nil {
+				// Surface the server's token accounting so a streaming observer can light up
+				// the context-usage gauge and time the completion for a tokens/sec readout. A
+				// server that omits usage sends no Usage here, so no event fires (events.go).
+				a.cfg.Events.Emit(domain.UsageEvent{
+					EventBase:        a.base(turn),
+					PromptTokens:     u.PromptTokens,
+					CompletionTokens: u.CompletionTokens,
+					TotalTokens:      u.TotalTokens,
+				})
+			}
 		case provider.DeltaError, provider.DeltaContextOverflow:
 			out.failed = true
 			out.errMsg = delta.Err

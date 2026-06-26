@@ -44,7 +44,7 @@ func feed(events ...domain.Event) *transcript {
 // shape. The whole scrollback is asserted exactly.
 func TestTranscriptToolTurnGolden(t *testing.T) {
 	tr := &transcript{}
-	tr.addUser("read main.go")
+	tr.addUser("read main.go", nil)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "Let me "})
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "read it."})
 	tr.apply(domain.ToolCallEvent{

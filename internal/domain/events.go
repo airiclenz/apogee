@@ -96,6 +96,21 @@ type ErrorEvent struct {
 	Err    string
 }
 
+// UsageEvent reports the token accounting an Upstream reply carried — the prompt
+// (context) tokens, the generated completion tokens, and their total — once a Turn's
+// stream reaches its terminal Done. A server that omits usage emits no UsageEvent, so an
+// observer that never sees one simply has no token counts (the zero state). It is the
+// observability spine for the live context-usage gauge and a tokens/sec readout: an
+// observer reads the latest Depth-0 UsageEvent for the current context fill and times the
+// completion against its own clock for throughput. Like every variant it nests by Depth, so
+// a sub-agent's usage reaches the parent's observer at its nesting level.
+type UsageEvent struct {
+	EventBase
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
 // AuditEvent surfaces one append-only audit record — a tool call, the guardrail
 // decision it cleared/was blocked by, and whether its result errored — to the
 // EventSink as it is recorded, so the audit trail is OBSERVABLE (and snapshot- or

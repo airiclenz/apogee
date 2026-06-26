@@ -3,12 +3,13 @@
 - [ ] Auto sizing prompt box is not working
 - [ ] Functionality that exists in apogee-code has not been fully ported to apogee (`@file`, `/clear`, `/continue`, `/skill` now done; `/server`, session-management UI, inspector still pending). Verified + list collected → see **TODO.md → "apogee-code feature parity — user-facing affordances not yet ported"**. Porting still in progress.
 - [ ] Mouse clicks not working yet (to strat with placing the cursor at a certina position in the prompt)
-- [ ] Context size is not read properly from the server
-- [ ] the list of used skills is not visible after a prompt has been sent.
+- [ ] Context size is not read properly from the server (the *window* probe in `provider/discovery.go`; the live context-fill gauge now reads usage from the server — see Resolved)
 
 
 
 ## Resolved
+
+- [X] the list of used skills is not visible after a prompt has been sent — the sent user block now renders the attached skills as chips (`transcript.entry.skills` → `renderUserChipRow`), so a `/skill` attachment stays visible after send.
 
 - [X] The complete area of the prompt box including the border pluss the info line above needs to have black backgroud
 - [X] the last user prompt is not sticking to the top when scrolling

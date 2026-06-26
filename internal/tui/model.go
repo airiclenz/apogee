@@ -65,11 +65,25 @@ type Model struct {
 	// (commands on "/", workspace files on "@", skills on "/skill"). The zero value is hidden.
 	autocomplete autocompleteState
 
+	// files memoises the workspace listing behind the "@" autocomplete so a typing burst reuses
+	// one filesystem walk (filecache.go). A pointer — shared across the value-copied Model so
+	// the cache survives each Update (ADR 0011); nil-safe (fileSuggestions falls back).
+	files *fileCache
+
 	// pendingSkills are the skill IDs attached via the /skill picker, awaiting the next submit
 	// (which copies them into UserInput.SkillIDs and clears them). A plain []string — a
 	// reference header, safe in the value-copied Model (ADR 0011) — rendered as chips above the
 	// input. Backspace on an empty input pops the last one.
 	pendingSkills []string
+
+	// Live stats folded from the engine's UsageEvent (server token accounting). ctxUsed is
+	// the latest top-level (Depth 0) total-token count, driving the context-usage gauge;
+	// genStart marks when the current Turn began streaming content (set on its first token,
+	// cleared on a re-stream or once usage lands) and tokPerSec is the last completion's
+	// throughput, timed against the Update clock. All value/zero-safe in the copied Model.
+	ctxUsed   int
+	genStart  time.Time
+	tokPerSec float64
 
 	// Content & layout.
 	transcript    transcript
@@ -120,6 +134,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 		spinner:  sp,
 		th:       th,
 		state:    stateIdle,
+		files:    &fileCache{},
 	}
 }
 
@@ -171,6 +186,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case eventMsg:
+		m = m.foldStats(msg.Event)
 		m.transcript.apply(msg.Event)
 		m.refreshViewport()
 		return m, nil
@@ -398,7 +414,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.autocomplete = autocompleteState{}
 	m.pendingSkills = nil
 	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
-	m.transcript.addUser(m.userPromptLine(parsed.text, attached))
+	m.transcript.addUser(parsed.text, m.skillDisplayNames(attached))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 
 	cmd, cancel := startExchange(m.parent, m.eng,
@@ -408,19 +424,13 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, m.spinner.Tick)
 }
 
-// userPromptLine is the transcript line for a submitted message: the typed text, or — when the
-// human sent skills with no text — a short note naming the attached skills, so the transcript
-// acknowledges the (otherwise blank) send rather than showing an empty user block.
-func (m Model) userPromptLine(text string, attached []string) string {
-	if text != "" {
-		return text
+// skillDisplayNames resolves the attached skill IDs to their display names (falling back to the
+// raw ID when the catalog can't resolve it), for the chips rendered on the sent user block. A
+// nil/empty input yields nil, so the block carries no chip row.
+func (m Model) skillDisplayNames(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
 	}
-	return "(" + m.attachedSkillNames(attached) + ")"
-}
-
-// attachedSkillNames joins the display names of the attached skill IDs (falling back to the raw
-// ID when the catalog can't resolve it), for the chip row and the empty-message prompt note.
-func (m Model) attachedSkillNames(ids []string) string {
 	names := make([]string, 0, len(ids))
 	for _, id := range ids {
 		name := id
@@ -431,10 +441,7 @@ func (m Model) attachedSkillNames(ids []string) string {
 		}
 		names = append(names, name)
 	}
-	if len(names) == 0 {
-		return "no skills"
-	}
-	return "skill: " + strings.Join(names, ", ")
+	return names
 }
 
 // runCommand handles a recognised local /command from the idle state. /continue is the one
@@ -453,7 +460,7 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 		attached := m.pendingSkills
 		m.pendingSkills = nil
 		m.userScrolled = false
-		m.transcript.addUser("/continue")
+		m.transcript.addUser("/continue", m.skillDisplayNames(attached))
 		m.layout()
 		cmd, cancel := startExchange(m.parent, m.eng,
 			domain.UserInput{Text: "Please continue", SkillIDs: attached})
@@ -910,6 +917,55 @@ func modeColor(m domain.Mode) color.Color {
 	}
 }
 
+// foldStats updates the live token stats from one engine Event (the eventMsg fold). Only the
+// top-level agent's (Depth 0) accounting drives the status line: a sub-agent's usage nests in
+// the stream, but the gauge tracks the conversation the human is steering. It marks when a
+// Turn's content begins streaming (its first token) so a later UsageEvent can time the
+// completion for a tokens/sec readout, resets that clock when the Turn re-streams, and on usage
+// adopts the new context fill (the gauge's Used) and throughput. It mutates the local copy and
+// returns it, like every Update fold.
+func (m Model) foldStats(e domain.Event) Model {
+	switch e := e.(type) {
+	case domain.TokenEvent:
+		if e.Depth == 0 && m.genStart.IsZero() {
+			m.genStart = time.Now()
+		}
+	case domain.StreamResetEvent:
+		if e.Depth == 0 {
+			m.genStart = time.Time{} // the Turn re-streams (events.go) — time the fresh generation
+		}
+	case domain.UsageEvent:
+		if e.Depth != 0 {
+			break
+		}
+		// Prefer the server's total; fall back to prompt+completion when it omits the sum.
+		total := e.TotalTokens
+		if total == 0 {
+			total = e.PromptTokens + e.CompletionTokens
+		}
+		if total > 0 {
+			m.ctxUsed = total
+		}
+		if !m.genStart.IsZero() && e.CompletionTokens > 0 {
+			if secs := time.Since(m.genStart).Seconds(); secs > 0 {
+				m.tokPerSec = float64(e.CompletionTokens) / secs
+			}
+		}
+		m.genStart = time.Time{}
+	}
+	return m
+}
+
+// throughputSuffix is the status line's "· N tok/s" readout while a Turn generates, timed off
+// the last completion's server-reported token count (foldStats). It renders nothing below one
+// token per second (an unmeasured or sub-1 tok/s turn), keeping the black status field clean.
+func (m Model) throughputSuffix() string {
+	if m.tokPerSec < 1 {
+		return ""
+	}
+	return m.th.statusBar.Render(fmt.Sprintf(" · %.0f tok/s", m.tokPerSec))
+}
+
 // statusLine renders the activity indicator and turn on the left and the live context gauge
 // (or a key hint) on the right, justified across the window. It reads only display values off
 // Options and the model's own state — never off the Engine mid-step.
@@ -918,7 +974,7 @@ func (m Model) statusLine() string {
 	left := turn
 	switch m.state {
 	case stateRunning:
-		left = m.spinner.View() + m.th.statusBar.Render(" ") + turn
+		left = m.spinner.View() + m.th.statusBar.Render(" ") + turn + m.throughputSuffix()
 	case stateAwaitingApproval:
 		left = m.th.statusBar.Render("approval needed · ") + turn
 	case stateAwaitingAsk:
@@ -958,12 +1014,12 @@ func (m Model) statusRight() string {
 	}
 }
 
-// contextGauge renders the live token-usage gauge for the status line. Token counting is a
-// Phase-4 deliverable (phase-3 detail plan §6), so Used is 0 today and the gauge renders
-// nothing; the static window is shown in the footer instead. When Phase 4 routes usage, the
-// gauge lights up here automatically — no UI rework.
+// contextGauge renders the live token-usage gauge for the status line. Used is the latest
+// top-level UsageEvent's total-token count (foldStats); until the first turn reports usage — or
+// on a server that omits it — Used is 0 and the gauge renders nothing, the static window
+// showing in the footer instead.
 func (m Model) contextGauge() string {
-	return contextUsage{Used: 0, Limit: m.opts.ContextWindow}.view()
+	return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view()
 }
 
 // contextUsage is the live context-window gauge's data: tokens Used out of the window Limit.

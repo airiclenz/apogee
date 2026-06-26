@@ -43,8 +43,12 @@ resolves skill bodies + file contents into context.
     way it acts), so an unknown `/skill foo` stays an ordinary message.
   - `/server` (switch server) — needs a swappable provider seam (today `upstream` is immutable
     after construction). See **[P1] Server / model switching**.
-  - Polish deferred: `@`-file-listing cache (overlay walks on demand, capped at 8), mid-string
-    (non-trailing) token completion (overlay completes the word at the cursor/end only).
+  - Polish: `@`-file-listing cache **SHIPPED 2026-06-26** (`internal/tui/filecache.go`: a
+    `*fileCache` on the Model memoises the workspace listing with a short TTL and filters it in
+    memory, so a typing burst reuses one fenced walk instead of re-scanning the disk per
+    keystroke). **Still deferred:** mid-string (non-trailing) token completion (the overlay
+    completes the word at the cursor/end only) — kept deferred on purpose: it trades the
+    "cursor-position-free, robust" design for cursor-tracking edge cases.
 
 - **[P0] Skills system** (prerequisite for `/skill`) — **SHIPPED 2026-06-26**
   (`docs/plans/skills-system-plan.md`). New `internal/skills` package discovers **directory +
@@ -73,8 +77,15 @@ resolves skill bodies + file contents into context.
 - **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
   terminal side-effects are not undone, as the extension does).
 
-- **[P2] Throughput display** — rolling tokens/sec readout in the status line
-  (`internal/tui/model.go` footer/status render). Distinct from the excluded context-budget gauge.
+- **[P2] Throughput display** — **SHIPPED 2026-06-26.** The server's `stream_options.include_usage`
+  accounting (already on every request) now rides a new `domain.UsageEvent` emitted from the loop's
+  stream consumer (`agent/loop.go` on the terminal `DeltaDone`); the TUI folds the latest top-level
+  (Depth 0) usage to (a) light the live context-fill gauge (`contextGauge` now reads `m.ctxUsed`
+  instead of a hard-coded 0) and (b) show a rolling `· N tok/s` readout in the status line, the
+  completion timed against the Update clock from the Turn's first token (`model.go foldStats` /
+  `throughputSuffix`). Distinct from the excluded context-budget gauge. **Note:** the live gauge
+  surfaces token *usage* against the window; the separate ISSUES bug — the context *window* read
+  wrong from the server (`provider/discovery.go`) — is untouched and still open.
 
 **Related (already parked below):** per-tool approval overrides (`toolApprovalOverrides`:
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal

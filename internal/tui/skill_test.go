@@ -247,6 +247,26 @@ func TestSubmitEmptyTextWithSkillsSends(t *testing.T) {
 	}
 }
 
+// A message sent WITH text and an attached skill keeps the skill visible on its user block
+// after the send (ISSUES #5: the attachment used to vanish once the chips cleared from the
+// input).
+func TestSentUserBlockShowsSkillChipsWithText(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, skillOpts())
+	m.pendingSkills = []string{"clean-code"}
+	m.input.SetValue("fix the parser")
+	m, cmd := stepCmd(t, m, keyEnter())
+	drainCmd(t, m, cmd)
+
+	got := plain(m.View())
+	if !strings.Contains(got, "fix the parser") {
+		t.Errorf("sent text missing from the transcript:\n%s", got)
+	}
+	if !strings.Contains(got, "Clean Code") {
+		t.Errorf("attached skill not shown on the sent user block (ISSUES #5):\n%s", got)
+	}
+}
+
 func TestSubmitEmptyAndNoSkillsIgnored(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, skillOpts())

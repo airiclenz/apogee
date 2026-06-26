@@ -120,6 +120,7 @@ type (
 	ApprovalEvent       = domain.ApprovalEvent
 	MechanismFiredEvent = domain.MechanismFiredEvent
 	ErrorEvent          = domain.ErrorEvent
+	UsageEvent          = domain.UsageEvent
 )
 
 // ----------------------------------------------------------------------------
