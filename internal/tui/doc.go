@@ -45,6 +45,15 @@
 // ([Engine.ClearContext]/[Engine.Compact]); @file *resolution* stays in the agent loop (reusing
 // the workspace fence), so the TUI only parses references — it never reads files itself.
 //
+// The /skill flow (post-v1 apogee-code feature-parity) extends the same overlay without
+// thickening the renderer: the "/" menu offers /skill, accepting it chains into a skill picker
+// ("/skill <id>", an acSkill dropdown over the injected [SkillCatalog]), and a pick pops a chip
+// onto Model.pendingSkills — a plain []string rendered as badges above the input. Submit copies
+// the chips into [domain.UserInput.SkillIDs]; like @file, *resolution* (turning an ID into the
+// prepended skill body) stays in the agent loop, through Config.Skills. /skill is deliberately
+// NOT a parser command (it never submits as a message) — attachment is the only way it acts,
+// mirroring the oracle's selectSkill, which keeps an unknown "/skill foo" an ordinary message.
+//
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole
 // Model — every field it holds, recursively — is copied on every Update. A type that records

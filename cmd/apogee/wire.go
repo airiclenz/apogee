@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -64,6 +65,18 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		return err
 	}
 
+	// Discover the user's skills from the layered source dirs: the global library
+	// (~/.apogee/skills), the project's .apogee/skills, and — when use-project-skills is on —
+	// the project's bare skills/. The load error is soft (a missing dir is skipped, a malformed
+	// skill is skipped), so the catalog is always usable; it is dropped intentionally. The same
+	// *skills.Catalog feeds both the loop (Config.Skills resolves attached IDs into the turn)
+	// and the TUI's /skill picker (Options.Skills lists/labels them).
+	skillCatalog, _ := skills.Load(skills.Sources{
+		Home:             roots.config,
+		Workspace:        roots.workspace,
+		UseProjectSkills: opts.useProjectSkills,
+	})
+
 	// The Bridge late-binds the event sink and approval gate to the Bubble Tea program
 	// the launcher starts. Its Sink/Approver are installed in Config before construction
 	// (apogee.New requires Events; Ask-Before needs the Approver), then bound once the
@@ -88,6 +101,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Confiner:           platform.NewConfiner(),
 		ConfineToWorkspace: opts.confineToWorkspace,
 		WebSearchEndpoint:  opts.webSearchEndpoint,
+		Skills:             skillCatalog,
 	}
 
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
@@ -132,6 +146,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Workspace:     roots.workspace,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
+		Skills:        skillCatalog,
 		Save:          saver.save,
 	})
 	if path := saver.saved(); path != "" {

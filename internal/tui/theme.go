@@ -37,6 +37,8 @@ var (
 	colModeAskBefore  = lipgloss.Color("#3fb950") // ask-before — green
 	colModeAllowEdits = lipgloss.Color("#58a6ff") // allow-edits — blue
 	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
+
+	colSkill = lipgloss.Color("#8957e5") // attached-skill chips — violet
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
@@ -51,6 +53,7 @@ const (
 	glyphSubRail    = "│"
 	glyphSubLabel   = "⤷"
 	glyphBullet     = "•" // a markdown bullet-list item (- / * / +)
+	glyphSkill      = "✦" // leads an attached-skill chip (matches the assistant marker)
 )
 
 // subAgentLabel is the one-line header that opens each contiguous run of sub-agent
@@ -76,6 +79,7 @@ type theme struct {
 	toolHeader  lipgloss.Style // the ✦ [Label] target header
 	toolDetail  lipgloss.Style // the ┝/┕ branch detail lines (dim)
 	subRail     lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
+	skillChip   lipgloss.Style // an attached-skill chip above the input (white on violet)
 	diffAdded   lipgloss.Style // a "+" diff detail line (reserved)
 	diffRemoved lipgloss.Style // a "-" diff detail line (reserved)
 	errorText   lipgloss.Style // a recovered-fault notice
@@ -107,6 +111,7 @@ func newTheme() theme {
 		toolHeader:  lipgloss.NewStyle(),
 		toolDetail:  lipgloss.NewStyle().Foreground(colFaint),
 		subRail:     lipgloss.NewStyle().Foreground(colFaint),
+		skillChip:   lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
 		diffAdded:   lipgloss.NewStyle().Foreground(colDiffAdd),
 		diffRemoved: lipgloss.NewStyle().Foreground(colDiffDel),
 		errorText:   lipgloss.NewStyle().Foreground(colError).Bold(true),

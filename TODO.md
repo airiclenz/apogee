@@ -35,17 +35,28 @@ resolves skill bodies + file contents into context.
     (today an empty Phase-0 scaffold — the TODO's "existing reducer" was wrong) and fill in the
     `Agent.Compact()` seam (summarize → `Conversation.Replace`, fire via `runHistoryRewriteHooks`).
     When it becomes a real upstream call it must run on a worker goroutine, not block Update.
-  - `/skill <name>` — needs the Skills system below; the `SkillIDs` field is the seam.
+  - `/skill <name>` — **SHIPPED 2026-06-26** with the Skills system below: the "/" menu offers
+    `/skill`, which chains into a skill picker (`acSkill` dropdown); a pick pops a chip onto
+    `Model.pendingSkills`, and submit copies it into `UserInput.SkillIDs`. The loop
+    (`loop.go resolveSkillRefs`, replacing `noteUnresolvedSkillIDs`) prepends each resolved
+    body to the turn. `/skill` is intentionally NOT a parser command (attachment is the only
+    way it acts), so an unknown `/skill foo` stays an ordinary message.
   - `/server` (switch server) — needs a swappable provider seam (today `upstream` is immutable
     after construction). See **[P1] Server / model switching**.
   - Polish deferred: `@`-file-listing cache (overlay walks on demand, capped at 8), mid-string
     (non-trailing) token completion (overlay completes the word at the cursor/end only).
 
-- **[P0] Skills system** (prerequisite for `/skill`) — apogee has **zero** skills code
-  (`grep -ri skill --include=*.go` → 0). New `internal/skills` package: discover `.md` skills from
-  layered dirs (`~/.apogee/skills/`, workspace `.apogee/skills/`, workspace `skills/`) with YAML
-  frontmatter → `{id, displayName, summary, body}`; add a `useProjectSkills`-equivalent config key
-  (default true) in `cmd/apogee/config.go`; inject attached skill bodies into the turn.
+- **[P0] Skills system** (prerequisite for `/skill`) — **SHIPPED 2026-06-26**
+  (`docs/plans/skills-system-plan.md`). New `internal/skills` package discovers **directory +
+  `SKILL.md`** skills (not flat `.md` — matches the apogee-code oracle and the Anthropic
+  agent-skills convention) from the layered dirs `~/.apogee/skills/`, workspace `.apogee/skills/`,
+  and workspace `skills/` (the last gated by the new file-only `use-project-skills` config key,
+  default true), later source winning on id collision. YAML frontmatter (`id`|`name`,
+  `displayName`, `summary`|`description`) + body, with a no-frontmatter fallback; layered through
+  `os.OpenRoot` so a workspace symlink can't escape; a missing dir is skipped and a malformed skill
+  is skipped with a soft error. `Catalog` satisfies `domain.SkillResolver` (loop) and the TUI's
+  `SkillCatalog` (picker); `wire.go` loads it once and injects both. No builtin/embedded skills and
+  no auto-created `~/.apogee/skills` in v1 (additive future hooks).
 
 - **[P1] Session management UI** — in-TUI *new session* (reset without relaunch) and a *history
   browser* overlay. Today only `--resume <path>` exists; reuse `internal/session/Store`.

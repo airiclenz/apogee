@@ -26,58 +26,69 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}{
 		{
 			name: "all empty → defaults",
-			want: settings{mode: "ask-before", confineToWorkspace: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
 		},
 		{
 			name: "file fills every field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan"), bypass: boolptr(true)},
-			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true},
+			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true},
 		},
 		{
 			name: "env beats file, file fills the rest",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file")},
 			env:  layer{endpoint: strptr("http://env")},
-			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true},
+			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
 		},
 		{
 			name: "flag beats env beats file, per field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan")},
 			env:  layer{endpoint: strptr("http://env"), model: strptr("m-env")},
 			flag: layer{endpoint: strptr("http://flag")},
-			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true},
+			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true},
 		},
 		{
 			name: "explicit false in a higher layer overrides true below it",
 			file: layer{bypass: boolptr(true)},
 			flag: layer{bypass: boolptr(false)},
-			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true},
+			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true},
 		},
 		{
 			name: "confine-to-workspace is file-only and defaults true",
 			file: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: false},
+			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true},
+		},
+		{
+			name: "use-project-skills is file-only and defaults true",
+			file: layer{useProjectSkills: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false},
+		},
+		{
+			name: "use-project-skills is NOT set by env or flag (file-only)",
+			env:  layer{useProjectSkills: boolptr(false)},
+			flag: layer{useProjectSkills: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
 		},
 		{
 			name: "confine-to-workspace is NOT loosenable by env or flag (global-config-only)",
 			env:  layer{confineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
 			flag: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
 		},
 		{
 			name: "web-search endpoint is file-only (default empty)",
 			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
-			want: settings{mode: "ask-before", confineToWorkspace: true, webSearchEndpoint: "https://search.example.com"},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, webSearchEndpoint: "https://search.example.com"},
 		},
 		{
 			name: "mcp servers are file-only (default empty)",
 			file: layer{mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
 		},
 		{
 			name: "mcp servers are NOT settable by env or flag (file-only)",
 			env:  layer{mcpServers: []mcp.ServerConfig{{Name: "fromenv"}}},
 			flag: layer{mcpServers: []mcp.ServerConfig{{Name: "fromflag"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
 		},
 	}
 	for _, tt := range tests {

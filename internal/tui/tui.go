@@ -6,7 +6,19 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/skills"
 )
+
+// SkillCatalog is the read-only view of the discovered skills the TUI needs: the full sorted
+// list for the /skill picker (List) and a by-id lookup for an attached chip's label (Get). It
+// is satisfied by *skills.Catalog; the TUI depends only on this interface so it stays
+// unit-testable with a fake, and — being an interface — it is a reference header safe to hold
+// in the value-copied Model (ADR 0011). A nil catalog means no skills are wired; every reader
+// guards for it.
+type SkillCatalog interface {
+	List() []skills.Skill
+	Get(id string) (skills.Skill, bool)
+}
 
 // ----------------------------------------------------------------------------
 // The engine seam (phase-2 detail plan §3 C5)
@@ -65,6 +77,12 @@ type Options struct {
 	// HostAlias is a short, friendly name for the upstream host shown in the footer (a
 	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
+
+	// Skills is the discovered skill catalog the /skill picker lists and the attached chips
+	// label; nil ⇒ no skills are wired (the picker offers nothing, chips fall back to the raw
+	// ID). The binary loads it from disk (internal/skills) and the agent loop resolves the same
+	// catalog through Config.Skills, so the body the model sees matches what the picker showed.
+	Skills SkillCatalog
 
 	// Save persists a snapshot of the conversation; nil disables session saving. The
 	// binary supplies a store-backed saver (it owns the path and on-disk format — phase-2

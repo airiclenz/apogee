@@ -34,6 +34,8 @@ var (
 	_ apogee.Approver
 	_ apogee.ApprovalRequest
 	_ apogee.ApprovalDecision
+	_ apogee.SkillResolver
+	_ apogee.ResolvedSkill
 	_ apogee.Tool
 	_ apogee.ExternalEffectTool
 	_ apogee.ReadOnlyTool

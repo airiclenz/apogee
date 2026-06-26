@@ -150,6 +150,7 @@ The shape is in [`apogee.go`](../../apogee.go). Summary:
 | Construct / resume | `New(Config)`, `Resume(Config, Session)`, `Agent.Close()` | 0001 |
 | Autonomy | `Mode` (Plan/Ask-Before/Allow-Edits/Auto), `Config.Bypass`, global `confine-to-workspace` | 0006, 0012 |
 | Drive the loop | `Submit(UserInput)`, `Step(ctx) → StepResult`, `Run(ctx)`, `StepStatus` | 0007 |
+| Turn-local context | `UserInput.FileRefs` (`@file`) + `UserInput.SkillIDs` (`/skill`) → resolved and prepended to the user message; `Config.Skills SkillResolver` (`ResolvedSkill`) resolves attached skill IDs (disk catalog stays in `internal/skills`) | 0001, 0010 |
 | Observe | `EventSink.Emit(Event)`; sealed `Event` + variants (token, message, tool-call, tool-result, approval, mechanism-fired, error); `Depth` carries sub-agent nesting | 0001, 0005 |
 | Approve | `Approver.Approve(ctx, ApprovalRequest) → ApprovalDecision` | 0004 |
 | Ask | `Asker.Ask(ctx, AskRequest) → AskAnswer` — free-text Q&A host delegate for `ask_user` (P3.11), distinct from Approver; nil ⇒ `ask_user` not registered; struct-typed for freeze-safety | 0001 |
@@ -233,13 +234,15 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    with ADR 0003's *constraint-declared* (hook = descriptor field, dynamic order). Plan
    already calls it "provisional." Lean toward a flat `internal/mechanisms` with hook-point
    as data. **Resolve when the catalogue→hook mapping session runs.**
-5. ⏳ **`UserInput`/`FileRefs` resolution — PARTIALLY RESOLVED (2026-06-26, chat
-   mini-language core; handoff `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md`).**
-   The TUI parses `@file` tokens into `UserInput.FileRefs`; the loop now resolves each within
-   the workspace fence (`internal/agent/loop.go resolveFileRefs`, reusing
-   `security.SafeReadFile`) and injects the content into the user message — replacing the old
-   `noteUnresolvedFileRefs` "ignored" stub. The **budgeting** half (token-aware trimming via
-   the context-builder seam) remains deferred to that seam.
+5. ⏳ **`UserInput` turn-local context resolution — `@file` + `/skill` RESOLVED, budgeting
+   still deferred (2026-06-26; handoffs `… - 00 - chat-mini-language-core.md` and
+   `… - 01 - skills-system.md`).** The TUI parses `@file` tokens into `UserInput.FileRefs` and
+   attaches `/skill` picks into `UserInput.SkillIDs`; the loop now resolves both at Turn start —
+   `resolveFileRefs` reads each file within the workspace fence (`security.SafeReadFile`), and
+   `resolveSkillRefs` maps each ID through `Config.Skills` (the `internal/skills` catalog) —
+   prepending the blocks to the user message (order: skills → file refs → text), replacing the
+   old `noteUnresolvedFileRefs`/`noteUnresolvedSkillIDs` "ignored" stubs. The **budgeting** half
+   (token-aware trimming via the context-builder seam) remains deferred to that seam.
 6. ✅ **Streaming + Approval interleave inside a Step — RESOLVED (P1.2; canonical record
    [ADR 0007 §Phase-1 realisation](../adr/0007-step-turn-and-the-quiescent-boundary.md)).** The
    stream is consumed to its terminal Delta and the SSE body closed **before** any tool call is

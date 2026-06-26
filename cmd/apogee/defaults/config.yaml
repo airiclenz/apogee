@@ -73,6 +73,13 @@
 
 
 
+# Discover skills from the workspace's bare skills/ folder, in addition to the global library
+# (~/.apogee/skills) and the project's .apogee/skills (both always loaded). A skill is a folder
+# containing a SKILL.md (YAML frontmatter — id/name, displayName, summary/description — plus a
+# Markdown body); attach one in chat with /skill to prepend its instructions to your next
+# message. Config-file only (no flag or env). Default: true.
+# use-project-skills: true
+
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false

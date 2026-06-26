@@ -157,6 +157,20 @@ type AskRequest = domain.AskRequest
 type AskAnswer = domain.AskAnswer
 
 // ----------------------------------------------------------------------------
+// Skills (internal/domain) — the host-supplied resolver for attached /skill IDs
+// ----------------------------------------------------------------------------
+
+// SkillResolver maps a user's attached skill IDs (UserInput.SkillIDs) to their injectable
+// bodies; the host injects it via Config.Skills (the binary loads a disk-backed catalog, but
+// an embedder may supply any implementation). A nil resolver means an attached ID is reported
+// and dropped. The concrete catalog lives in internal/skills, off the public surface.
+type SkillResolver = domain.SkillResolver
+
+// ResolvedSkill is one attached skill reduced to the fields the loop injects (ID, DisplayName,
+// Body) — the return shape a SkillResolver produces.
+type ResolvedSkill = domain.ResolvedSkill
+
+// ----------------------------------------------------------------------------
 // Tools (internal/domain)
 // ----------------------------------------------------------------------------
 

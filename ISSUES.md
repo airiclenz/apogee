@@ -1,7 +1,10 @@
 
 
 - [ ] Auto sizing prompt box is not working
-- [ ] Functionality that exists in apogee-code has not been fully ported to apogee (e.g. /skill @file). Verified + list collected → see **TODO.md → "apogee-code feature parity — user-facing affordances not yet ported"**. Porting still pending.
+- [ ] Functionality that exists in apogee-code has not been fully ported to apogee (`@file`, `/clear`, `/continue`, `/skill` now done; `/server`, session-management UI, inspector still pending). Verified + list collected → see **TODO.md → "apogee-code feature parity — user-facing affordances not yet ported"**. Porting still in progress.
+- [ ] Mouse clicks not working yet (to strat with placing the cursor at a certina position in the prompt)
+- [ ] Context size is not read properly from the server
+- [ ] the list of used skills is not visible after a prompt has been sent.
 
 
 

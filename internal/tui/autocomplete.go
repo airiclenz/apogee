@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -31,6 +32,7 @@ type acKind int
 const (
 	acCommand acKind = iota // a "/command" word
 	acFile                  // an "@file" reference
+	acSkill                 // a "/skill <id>" argument (attaches a skill chip, not spliced as text)
 )
 
 // acItem is one suggestion: value is the text spliced in (the command name or file path,
@@ -57,6 +59,18 @@ type autocompleteState struct {
 // should be suggested. Only ever called in stateIdle.
 func (m Model) computeAutocomplete() autocompleteState {
 	value := m.input.Value()
+
+	// Skill argument: a "/skill <partial>" region (the trailing word after a "/skill" token).
+	// Checked FIRST so it wins over the bare-command branch — which would otherwise see "/skill"
+	// the moment a space is typed. tokenStart marks the "/skill" itself, so accepting strips the
+	// whole "/skill <partial>" run when the chip is popped.
+	if start, partial, ok := skillArgToken(value); ok {
+		items := m.skillSuggestions(partial)
+		if len(items) == 0 {
+			return autocompleteState{}
+		}
+		return autocompleteState{active: true, kind: acSkill, items: items, tokenStart: start}
+	}
 
 	// Command: the whole line is "/<partial>" with no whitespace yet.
 	if strings.HasPrefix(value, "/") && !strings.ContainsAny(value, " \t\n") {
@@ -92,12 +106,90 @@ func trailingFileToken(value string) (int, string, bool) {
 	return start, word[1:], true
 }
 
-// commandSuggestions returns the known commands whose verb has partial as a prefix.
+// commandMenuItem is one entry the "/" dropdown offers: the verb and a one-line summary.
+type commandMenuItem struct {
+	name    string
+	summary string
+}
+
+// commandMenu is the set the "/" dropdown offers, with summaries. It is a SUPERSET of the
+// parser's knownCommands: it also offers /skill, which the parser deliberately does NOT treat
+// as a command (matchCommand leaves it alone). Accepting /skill completes to "/skill " and
+// chains into the skill picker (acceptAutocomplete recomputes the overlay); it is never sent as
+// a literal message — attachment happens via the picker, like the apogee-code oracle's
+// selectSkill. Keeping it out of knownCommands is what keeps an unknown "/skill foo" a message.
+var commandMenu = []commandMenuItem{
+	{name: "clear", summary: "reset the model's memory of this session"},
+	{name: "compact", summary: "summarise the conversation to reclaim context"},
+	{name: "continue", summary: "ask the model to keep going"},
+	{name: "skill", summary: "attach a skill to your next message"},
+}
+
+// commandSuggestions returns the menu commands whose verb has partial as a prefix, labeling
+// each "/verb  summary" (the value stays the bare verb, so accept splices "/verb ").
 func commandSuggestions(partial string) []acItem {
 	var items []acItem
-	for _, c := range knownCommands {
-		if strings.HasPrefix(c, partial) {
-			items = append(items, acItem{value: c, label: "/" + c})
+	for _, c := range commandMenu {
+		if strings.HasPrefix(c.name, partial) {
+			label := "/" + c.name
+			if c.summary != "" {
+				label += "  " + c.summary
+			}
+			items = append(items, acItem{value: c.name, label: label})
+		}
+	}
+	return items
+}
+
+// skillArgToken reports the "/skill <partial>" region at the end of value: the byte offset of
+// the "/skill" token (the strip point when a chip is popped), the partial id/name being typed,
+// and whether value ends in such a region. The partial is the trailing whitespace-delimited
+// word, and the word immediately before it must be exactly "/skill". It accepts "/skill ",
+// "/skill cl", and mid-line "fix /skill cl"; it rejects a bare "/skill" (no arg yet) and a
+// completed "/skill foo " (the word before the trailing position is "foo", not "/skill").
+func skillArgToken(value string) (int, string, bool) {
+	lastSpace := strings.LastIndexAny(value, " \t\n")
+	if lastSpace < 0 {
+		return 0, "", false // no whitespace ⇒ a bare "/skill" or a single word, no arg region
+	}
+	partial := value[lastSpace+1:]
+	before := value[:lastSpace]
+	prevSpace := strings.LastIndexAny(before, " \t\n")
+	if before[prevSpace+1:] != "/skill" {
+		return 0, "", false
+	}
+	return prevSpace + 1, partial, true
+}
+
+// skillSuggestions lists skills matching partial (a case-insensitive substring of id or
+// displayName), excluding those already attached, as rows showing "displayName  summary". The
+// value is the skill ID (what gets attached). A nil catalog yields nothing (the picker is dark).
+func (m Model) skillSuggestions(partial string) []acItem {
+	if m.opts.Skills == nil {
+		return nil
+	}
+	attached := make(map[string]bool, len(m.pendingSkills))
+	for _, id := range m.pendingSkills {
+		attached[id] = true
+	}
+	needle := strings.ToLower(partial)
+	var items []acItem
+	for _, sk := range m.opts.Skills.List() {
+		if attached[sk.ID] {
+			continue
+		}
+		if needle != "" &&
+			!strings.Contains(strings.ToLower(sk.ID), needle) &&
+			!strings.Contains(strings.ToLower(sk.DisplayName), needle) {
+			continue
+		}
+		label := sk.DisplayName
+		if sk.Summary != "" {
+			label += "  " + sk.Summary
+		}
+		items = append(items, acItem{value: sk.ID, label: label})
+		if len(items) >= maxAutocompleteItems {
+			break
 		}
 	}
 	return items
@@ -200,20 +292,37 @@ func (m Model) autocompleteExactMatch() bool {
 	if !ac.active || len(ac.items) == 0 || ac.tokenStart > len(m.input.Value()) {
 		return false
 	}
+	// A skill is attached via accept (it pops a chip), never submitted literally — so Enter
+	// always completes it, regardless of how exactly the typed text matches.
+	if ac.kind == acSkill {
+		return false
+	}
+	selected := ac.items[ac.selected].value
+	// /skill is not a real command: accepting it chains into the skill picker, so Enter must
+	// complete (open the picker), never submit "/skill" as a message.
+	if ac.kind == acCommand && selected == "skill" {
+		return false
+	}
 	sigil := "/"
 	if ac.kind == acFile {
 		sigil = "@"
 	}
-	return m.input.Value()[ac.tokenStart:] == sigil+ac.items[ac.selected].value
+	return m.input.Value()[ac.tokenStart:] == sigil+selected
 }
 
-// acceptAutocomplete splices the highlighted suggestion into the input, replacing the token
-// from tokenStart to the end with the sigil + value + a trailing space, then closes the
-// overlay. It does not submit. The cursor lands at the end of the spliced text.
+// acceptAutocomplete applies the highlighted suggestion. A skill is attached (a chip is popped
+// and its "/skill <partial>" text stripped — attachSkill); a command/file is spliced in as
+// sigil + value + a trailing space. After a splice it RECOMPUTES the overlay rather than
+// blindly closing it: that closes the overlay for a completed command/file (the trailing space
+// ends the token) but reopens it as the skill picker after "/skill " — the chain the oracle's
+// selectSkill mirrors. It never submits; the cursor lands at the end of the spliced text.
 func (m Model) acceptAutocomplete() Model {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 {
 		return m
+	}
+	if ac.kind == acSkill {
+		return m.attachSkill(ac.items[ac.selected].value)
 	}
 	value := m.input.Value()
 	start := ac.tokenStart
@@ -226,9 +335,39 @@ func (m Model) acceptAutocomplete() Model {
 	}
 	m.input.SetValue(value[:start] + sigil + ac.items[ac.selected].value + " ")
 	m.input.MoveToEnd()
-	m.autocomplete = autocompleteState{}
+	m.autocomplete = m.computeAutocomplete() // chains "/skill " → picker; else closes (trailing space)
 	m.layout()
 	return m
+}
+
+// attachSkill pops the skill onto the pending chip row (deduped) and strips the "/skill
+// <partial>" text that triggered it (from tokenStart to the end), then recomputes the overlay
+// (which closes, the stripped text no longer being a skill region). The chip is what carries
+// the attachment to submit; the input is freed for the message itself.
+func (m Model) attachSkill(id string) Model {
+	if !containsString(m.pendingSkills, id) {
+		m.pendingSkills = append(m.pendingSkills, id)
+	}
+	value := m.input.Value()
+	start := m.autocomplete.tokenStart
+	if start > len(value) {
+		start = len(value)
+	}
+	m.input.SetValue(value[:start])
+	m.input.MoveToEnd()
+	m.autocomplete = m.computeAutocomplete()
+	m.layout()
+	return m
+}
+
+// containsString reports whether s is in xs.
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // renderAutocomplete draws the suggestion popup shown above the input box. The selected row
@@ -250,6 +389,29 @@ func (m Model) renderAutocomplete() string {
 		rows[i] = style.Render(truncateLabel(marker+it.label, m.width))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// renderSkillChips draws the attached-skill badges shown just above the input box, one chip per
+// pending skill (its display name, resolved through the catalog; the raw ID if unresolved). It
+// returns "" when nothing is attached, so View can treat it like the autocomplete slot. A row
+// of chips that would overrun the width is clipped to one line, not wrapped — it is a status
+// strip, not content.
+func (m Model) renderSkillChips() string {
+	if len(m.pendingSkills) == 0 {
+		return ""
+	}
+	chips := make([]string, 0, len(m.pendingSkills))
+	for _, id := range m.pendingSkills {
+		label := id
+		if m.opts.Skills != nil {
+			if sk, ok := m.opts.Skills.Get(id); ok {
+				label = sk.DisplayName
+			}
+		}
+		chips = append(chips, m.th.skillChip.Render(" "+glyphSkill+" "+label+" "))
+	}
+	// ANSI-aware clip: the chips carry styling, so a rune-count truncation could cut mid-escape.
+	return ansi.Truncate(strings.Join(chips, " "), max(0, m.width), "…")
 }
 
 // truncateLabel clips s to at most width display runes, ending in an ellipsis when it had to

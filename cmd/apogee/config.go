@@ -44,6 +44,12 @@ type settings struct {
 	// file-only and default-off (empty ⇒ web_search reports "not configured").
 	webSearchEndpoint string
 
+	// useProjectSkills gates whether the workspace's bare skills/ folder is discovered (in
+	// addition to the global library and the project's .apogee/skills, which are always loaded).
+	// File-only, default TRUE — a project's skills/ is trusted by default, like the @file
+	// references the same workspace already feeds the model.
+	useProjectSkills bool
+
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), file-only
 	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
@@ -69,6 +75,11 @@ type layer struct {
 	// default-off, with no flag/env). Empty/absent ⇒ web_search reports "not configured".
 	webSearchEndpoint *string
 
+	// useProjectSkills is set only by the FILE layer (skills are config'd, default-on, with no
+	// flag/env). A pointer so an explicit `use-project-skills: false` is distinguishable from
+	// an absent key (which keeps the default true).
+	useProjectSkills *bool
+
 	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
 	// with no flag/env). A nil slice means the source does not configure servers (fall through).
 	mcpServers []mcp.ServerConfig
@@ -83,12 +94,15 @@ type layer struct {
 // layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
 // repo's invocation environment must not be able to loosen Auto's blast radius.
 func resolveSettings(file, env, flag layer) settings {
-	s := settings{mode: string(modeAskBefore), confineToWorkspace: true}
+	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true}
 	if file.confineToWorkspace != nil {
 		s.confineToWorkspace = *file.confineToWorkspace
 	}
 	if file.webSearchEndpoint != nil {
 		s.webSearchEndpoint = *file.webSearchEndpoint
+	}
+	if file.useProjectSkills != nil {
+		s.useProjectSkills = *file.useProjectSkills
 	}
 	s.mcpServers = file.mcpServers // file-only (P3.15); env/flag never set MCP servers
 	for _, l := range []layer{file, env, flag} {
@@ -134,6 +148,9 @@ type fileConfig struct {
 	// ⇒ web_search is registered but reports "not configured" (default-off, no hard-wired
 	// provider). Empty string is treated as absent.
 	WebSearch string `yaml:"web-search-endpoint"`
+	// UseProjectSkills gates discovery of the workspace's bare skills/ folder. A pointer so an
+	// explicit `use-project-skills: false` is distinguishable from an absent key (default true).
+	UseProjectSkills *bool `yaml:"use-project-skills"`
 	// MCPServers configures external MCP servers to connect on startup (P3.15). Absent/empty ⇒
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
@@ -189,6 +206,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.WebSearch != "" {
 		l.webSearchEndpoint = &fc.WebSearch
+	}
+	if fc.UseProjectSkills != nil {
+		l.useProjectSkills = fc.UseProjectSkills
 	}
 	if len(fc.MCPServers) > 0 {
 		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
@@ -320,6 +340,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.hostAlias = s.hostAlias
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.webSearchEndpoint = s.webSearchEndpoint
+	opts.useProjectSkills = s.useProjectSkills
 	opts.mcpServers = s.mcpServers
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)

@@ -10,7 +10,38 @@ point is a **minor** bump, not a breaking change.
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
 feature-parity track. See
-`docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md`.
+`docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
+`docs/handoffs/2026-06-26 - 01 - skills-system.md`.
+
+### Skills system + `/skill` (apogee-code feature-parity)
+
+- **`internal/skills` package** discovers user-authored skills — a folder
+  containing a `SKILL.md` (YAML frontmatter `id`|`name`, `displayName`,
+  `summary`|`description`, plus a Markdown body; a no-frontmatter fallback sniffs
+  the first lines) — from three layered dirs: `~/.apogee/skills`, the workspace's
+  `.apogee/skills`, and (when `use-project-skills` is on) the workspace's bare
+  `skills/`. Later source wins on an ID collision. Each dir is walked through
+  `os.OpenRoot` so a symlink can't escape it; a missing dir is skipped and a
+  malformed skill is skipped with a soft error (one bad file never blanks the
+  catalog). No builtin/embedded skills and no auto-created `~/.apogee/skills` ship
+  in v1 (additive future hooks).
+- **`/skill` in the TUI** — the `/` menu offers `/skill`, which chains into a skill
+  picker; a pick pops a chip above the input, and submit attaches the chosen IDs.
+  An empty message with skills attached is a valid send. `/skill` is deliberately
+  **not** a parser command (attachment is the only way it acts), so an unknown
+  `/skill foo` is still sent as an ordinary message. `/clear` and `/compact` drop
+  staged chips; `/continue` carries them.
+- **Attached skills now resolve** (replaces the `SkillIDs` "reserved/ignored"
+  stub): the loop maps each `UserInput.SkillIDs` entry through `Config.Skills` and
+  prepends its body to the user message for that one Turn (order: skills → `@file`
+  blocks → user text). An unknown ID, or any ID with no resolver wired, is reported
+  via an `ErrorEvent` and dropped — never silently ignored.
+
+### Configuration
+
+- **`use-project-skills`** (config-file only, default **true**) gates discovery of
+  the workspace's bare `skills/` folder (the global library and the project's
+  `.apogee/skills` are always loaded). Documented in the seeded `config.yaml`.
 
 ### Chat input mini-language (core)
 
@@ -33,8 +64,12 @@ feature-parity track. See
   boundary (the host's transcript is unaffected); refused mid-Exchange.
 - `Agent.Compact(context.Context) error` — on-demand generative Compaction seam;
   returns the new `ErrCompactionNotImplemented` sentinel until the reducer lands.
-- `UserInput.SkillIDs []string` — reserved for the deferred `/skill` command
-  (carried and snapshotted; not yet resolved).
+- `UserInput.SkillIDs []string` — the skills attached in chat; the loop resolves
+  each through `Config.Skills` and prepends its body to the Turn (was reserved).
+- `Config.Skills SkillResolver` — host-supplied resolver for attached skill IDs
+  (nil ⇒ attached IDs are reported and dropped). `SkillResolver` and its return
+  type `ResolvedSkill` are re-exported on the root facade; the disk-backed catalog
+  stays internal (`internal/skills`).
 
 ## [1.0.0] — 2026-06-25
 

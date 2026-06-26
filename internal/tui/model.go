@@ -62,8 +62,14 @@ type Model struct {
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
 
 	// autocomplete is the chat mini-language suggestion overlay shown while typing at idle
-	// (commands on "/", workspace files on "@"). The zero value is inactive (hidden).
+	// (commands on "/", workspace files on "@", skills on "/skill"). The zero value is hidden.
 	autocomplete autocompleteState
+
+	// pendingSkills are the skill IDs attached via the /skill picker, awaiting the next submit
+	// (which copies them into UserInput.SkillIDs and clears them). A plain []string — a
+	// reference header, safe in the value-copied Model (ADR 0011) — rendered as chips above the
+	// input. Backspace on an empty input pops the last one.
+	pendingSkills []string
 
 	// Content & layout.
 	transcript    transcript
@@ -313,6 +319,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// While awaiting an ask_user answer the input box is live so the human types the reply —
 	// the same editing path as idle (enter, handled above, submits it).
 	if m.state == stateIdle || m.state == stateAwaitingAsk {
+		// Backspace on an empty input pops the last attached skill chip (idle only) — so a chip
+		// is removed the same way a typed character is, once the message field is empty.
+		if m.state == stateIdle && len(m.pendingSkills) > 0 && m.input.Value() == "" && msg.String() == "backspace" {
+			m.pendingSkills = m.pendingSkills[:len(m.pendingSkills)-1]
+			m.layout()
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle {
@@ -375,19 +388,53 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	if parsed.kind == kindCommand {
 		return m.runCommand(parsed.command)
 	}
-	if parsed.text == "" {
+	// Nothing to send only when there is neither text NOR an attached skill: an empty message
+	// with skills attached is a valid send (the skill bodies are the payload).
+	if parsed.text == "" && len(m.pendingSkills) == 0 {
 		return m, nil
 	}
+	attached := m.pendingSkills
 	m.input.Reset()
 	m.autocomplete = autocompleteState{}
+	m.pendingSkills = nil
 	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
-	m.transcript.addUser(parsed.text)
+	m.transcript.addUser(m.userPromptLine(parsed.text, attached))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 
-	cmd, cancel := startExchange(m.parent, m.eng, domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs})
+	cmd, cancel := startExchange(m.parent, m.eng,
+		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached})
 	m.cancel = cancel
 	m.state = stateRunning
 	return m, tea.Batch(cmd, m.spinner.Tick)
+}
+
+// userPromptLine is the transcript line for a submitted message: the typed text, or — when the
+// human sent skills with no text — a short note naming the attached skills, so the transcript
+// acknowledges the (otherwise blank) send rather than showing an empty user block.
+func (m Model) userPromptLine(text string, attached []string) string {
+	if text != "" {
+		return text
+	}
+	return "(" + m.attachedSkillNames(attached) + ")"
+}
+
+// attachedSkillNames joins the display names of the attached skill IDs (falling back to the raw
+// ID when the catalog can't resolve it), for the chip row and the empty-message prompt note.
+func (m Model) attachedSkillNames(ids []string) string {
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		name := id
+		if m.opts.Skills != nil {
+			if sk, ok := m.opts.Skills.Get(id); ok {
+				name = sk.DisplayName
+			}
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "no skills"
+	}
+	return "skill: " + strings.Join(names, ", ")
 }
 
 // runCommand handles a recognised local /command from the idle state. /continue is the one
@@ -401,15 +448,23 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 
 	switch command {
 	case "continue":
+		// /continue carries any attached skills into the canned turn (the user lined them up
+		// before asking the model to keep going).
+		attached := m.pendingSkills
+		m.pendingSkills = nil
 		m.userScrolled = false
 		m.transcript.addUser("/continue")
 		m.layout()
-		cmd, cancel := startExchange(m.parent, m.eng, domain.UserInput{Text: "Please continue"})
+		cmd, cancel := startExchange(m.parent, m.eng,
+			domain.UserInput{Text: "Please continue", SkillIDs: attached})
 		m.cancel = cancel
 		m.state = stateRunning
 		return m, tea.Batch(cmd, m.spinner.Tick)
 
 	case "clear":
+		// Clearing the model's memory also drops the staged chips — they belonged to the turn
+		// being abandoned.
+		m.pendingSkills = nil
 		if err := m.eng.ClearContext(); err != nil {
 			m.transcript.addNote("could not clear context: " + err.Error())
 		} else {
@@ -421,7 +476,8 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 	case "compact":
 		// A stub until the generative reducer lands; surface whatever Compact reports. When it
 		// becomes a real upstream call it must move onto a worker goroutine (like startExchange)
-		// so it does not block the Update loop.
+		// so it does not block the Update loop. Staged chips are dropped (the turn is reset).
+		m.pendingSkills = nil
 		if err := m.eng.Compact(m.parent); err != nil {
 			m.transcript.addNote("compact: " + err.Error())
 		} else {
@@ -616,16 +672,21 @@ func (m Model) View() tea.View {
 	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
 		prompt = m.askPrompt(m.pendingAsk.Request)
 	}
-	// The autocomplete overlay (idle only) sits just above the input box. It and the
-	// approval/ask prompt never co-occur (different states), but each steals rows from the
-	// transcript viewport, so shrink the viewport by their combined height before rendering.
+	// The autocomplete overlay and the attached-skill chips (idle only) sit just above the input
+	// box. They, and the approval/ask prompt, each steal rows from the transcript viewport, so
+	// shrink it by their combined height before rendering. The chips can co-occur with the
+	// dropdown (attaching one skill while picking another); the prompt cannot (different states).
 	dropdown := m.renderAutocomplete()
+	chips := m.renderSkillChips()
 	shrink := 0
 	if prompt != "" {
 		shrink += lipgloss.Height(prompt)
 	}
 	if dropdown != "" {
 		shrink += lipgloss.Height(dropdown)
+	}
+	if chips != "" {
+		shrink += lipgloss.Height(chips)
 	}
 	if shrink > 0 {
 		h := m.viewport.Height() - shrink
@@ -649,6 +710,9 @@ func (m Model) View() tea.View {
 	rows = append(rows, "", m.statusLine())
 	if dropdown != "" {
 		rows = append(rows, dropdown)
+	}
+	if chips != "" {
+		rows = append(rows, chips)
 	}
 	rows = append(rows, m.inputView(), m.footerView())
 

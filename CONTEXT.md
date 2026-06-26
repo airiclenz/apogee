@@ -324,6 +324,17 @@ as that request's *file context* — and reports-and-skips a missing or escaping
 the token is the TUI's job; resolution is the agent's.
 _Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
 
+**Skill**:
+A reusable block of instructions the user *attaches* to a message with `/skill` — a folder
+holding a `SKILL.md` (YAML frontmatter — id, display name, summary — plus a Markdown body).
+Skills are discovered from layered dirs (the global `~/.apogee/skills`, the project's
+`.apogee/skills`, and — when `use-project-skills` is on — the project's `skills/`), the later
+source winning a name clash. Like an `@file`, a skill is **turn-local**: the loop resolves the
+attached IDs through `Config.Skills` and prepends each body to *that one* user message, so a
+skill never persists as a system-prompt edit. The TUI picks and attaches; the agent resolves.
+_Avoid_: "plugin", "tool" (a skill is prompt text, not executable; it adds no capability — it
+steers the model). Distinct from a **Mechanism** (a catalogued, self-regulating loop behaviour).
+
 **Tool-result capping**:
 Per-tool-result truncation of any single result that exceeds its fraction of the Budget,
 with head/tail preservation, protecting the most recent Turn. A **pre-request Mechanism**;

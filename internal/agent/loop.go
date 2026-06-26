@@ -159,9 +159,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	turn := a.turnIndex
 
 	if a.pendingInput != nil {
+		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
+		// per-turn instructions, so prepending them scopes them to this one message (the right
+		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).
+		skillBlocks := a.resolveSkillRefs(turn, a.pendingInput.SkillIDs)
 		refs := a.resolveFileRefs(turn, a.pendingInput.FileRefs)
-		a.noteUnresolvedSkillIDs(turn, a.pendingInput.SkillIDs)
-		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: refs + a.pendingInput.Text})
+		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + a.pendingInput.Text})
 		a.pendingInput = nil
 		a.inExchange = true
 	}
@@ -450,20 +453,46 @@ func (a *Agent) readFileRef(ref string) (string, error) {
 	return string(data), nil
 }
 
-// noteUnresolvedSkillIDs preserves the "never silently ignored" principle for the reserved
-// SkillIDs field: the /skill command and its skills package are a separate feature-parity
-// item, so any SkillIDs reaching the loop today are reported and dropped rather than
-// consumed. The parser does not populate them yet; this is a defensive backstop.
-func (a *Agent) noteUnresolvedSkillIDs(turn int, ids []string) {
+// resolveSkillRefs resolves each attached skill ID through Config.Skills and returns the
+// labeled instruction blocks to prepend to the user message — mirroring resolveFileRefs. The
+// blocks are emitted in the order the IDs were attached. An unknown ID (or any ID at all when
+// no resolver is wired) is surfaced as a loop ErrorEvent and dropped, so an attached skill is
+// never silently ignored — the same "report-and-proceed" contract the @file path keeps. The
+// IDs round-trip through a snapshot on UserInput, so a resumed session re-resolves them.
+func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 	if len(ids) == 0 {
-		return
+		return ""
 	}
-	a.cfg.Events.Emit(domain.ErrorEvent{
-		EventBase: a.base(turn),
-		Source:    "loop",
-		Err: fmt.Sprintf("UserInput.SkillIDs are reserved for the /skill command and not yet "+
-			"resolved (%d id(s)); they were ignored", len(ids)),
-	})
+	if a.cfg.Skills == nil {
+		a.cfg.Events.Emit(domain.ErrorEvent{
+			EventBase: a.base(turn),
+			Source:    "loop",
+			Err: fmt.Sprintf("%d attached skill(s) could not be resolved (no skills are configured) "+
+				"and were ignored", len(ids)),
+		})
+		return ""
+	}
+
+	resolved := a.cfg.Skills.ResolveSkills(ids)
+	byID := make(map[string]domain.ResolvedSkill, len(resolved))
+	for _, s := range resolved {
+		byID[s.ID] = s
+	}
+
+	var b strings.Builder
+	for _, id := range ids {
+		s, ok := byID[id]
+		if !ok {
+			a.cfg.Events.Emit(domain.ErrorEvent{
+				EventBase: a.base(turn),
+				Source:    "loop",
+				Err:       fmt.Sprintf("attached skill %q is not known and was ignored", id),
+			})
+			continue
+		}
+		fmt.Fprintf(&b, "<skill: %s>\n%s\n</skill>\n\n", s.DisplayName, s.Body)
+	}
+	return b.String()
 }
 
 // budget reports the trivial Phase-1 context budget (no token accounting yet — TDD §8 #8).

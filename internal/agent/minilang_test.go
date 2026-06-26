@@ -145,20 +145,98 @@ func TestResolveFileRefsEscapeRefused(t *testing.T) {
 	}
 }
 
-func TestUnresolvedSkillIDsNoted(t *testing.T) {
+// fakeSkillResolver is a deterministic domain.SkillResolver for the loop tests: it returns the
+// skills it knows (by ID), in the requested order, skipping unknowns — the catalog's contract.
+type fakeSkillResolver struct {
+	skills map[string]domain.ResolvedSkill
+}
+
+func (f fakeSkillResolver) ResolveSkills(ids []string) []domain.ResolvedSkill {
+	var out []domain.ResolvedSkill
+	for _, id := range ids {
+		if s, ok := f.skills[id]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func TestResolveSkillRefsInjectsBodyBeforeText(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"review": {ID: "review", DisplayName: "Code Review", Body: "REVIEW INSTRUCTIONS"},
+	}}
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "please look", SkillIDs: []string{"review"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := a.conv.At(0).Content
+	if !strings.Contains(got, "REVIEW INSTRUCTIONS") {
+		t.Errorf("skill body not injected into the user message:\n%s", got)
+	}
+	if !strings.Contains(got, "Code Review") {
+		t.Errorf("skill display name not in the labeled block:\n%s", got)
+	}
+	// The skill block must precede the user's text (per-turn instructions lead the message).
+	if strings.Index(got, "REVIEW INSTRUCTIONS") > strings.Index(got, "please look") {
+		t.Errorf("skill body should be prepended before the user text:\n%s", got)
+	}
+}
+
+func TestResolveSkillRefsUnknownIDNoted(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), echoResponder{reply: "ok"})
+	cfg := baseConfig(sink)
+	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"known": {ID: "known", DisplayName: "Known", Body: "KNOWN BODY"},
+	}}
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "hi", SkillIDs: []string{"known", "ghost"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if !errorEventContaining(sink.events, "ghost") {
+		t.Error("an unknown attached skill ID did not surface an ErrorEvent")
+	}
+	if got := a.conv.At(0).Content; !strings.Contains(got, "KNOWN BODY") {
+		t.Errorf("the known skill was dropped alongside the unknown one:\n%s", got)
+	}
+}
+
+func TestResolveSkillRefsNilResolverGracefulDrop(t *testing.T) {
+	sink := &recordingSink{}
+	a, err := newAgent(baseConfig(sink), echoResponder{reply: "ok"}) // no Config.Skills
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
 	if err := a.Submit(domain.UserInput{Text: "hi", SkillIDs: []string{"foo"}}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if _, err := a.Step(context.Background()); err != nil {
+	res, err := a.Step(context.Background())
+	if err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if !errorEventContaining(sink.events, "SkillIDs") {
-		t.Error("reserved SkillIDs were consumed silently; the loop should note them")
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("turn did not complete despite an unresolved skill: status = %v", res.Status)
+	}
+	if !errorEventContaining(sink.events, "skill") {
+		t.Error("attached skills with no resolver were consumed silently; the loop should note them")
+	}
+	if got := a.conv.At(0).Content; got != "hi" {
+		t.Errorf("user message = %q, want just the text (an unresolved skill injects nothing)", got)
 	}
 }
 

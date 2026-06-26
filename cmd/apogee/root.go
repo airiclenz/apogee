@@ -37,6 +37,10 @@ type options struct {
 	// loaded from the config file only (default-off). applyConfig sets it from settings.
 	webSearchEndpoint string
 
+	// useProjectSkills gates discovery of the workspace's bare skills/ folder (default true),
+	// loaded from the config file only. applyConfig sets it from the resolved settings.
+	useProjectSkills bool
+
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), loaded from
 	// the config file only (default-empty ⇒ MCP dormant). applyConfig sets it from settings.
 	mcpServers []mcp.ServerConfig

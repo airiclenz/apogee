@@ -47,6 +47,13 @@ type Config struct {
 	Tools      *ToolRegistry      // open extension point (ADR 0002)
 	Mechanisms *MechanismRegistry // curated catalogue + bench experimental hooks (ADR 0002/0003)
 
+	// Skills resolves the user's attached skill IDs (UserInput.SkillIDs) to their injectable
+	// bodies; nil ⇒ no skills are wired and any attached ID is reported and dropped. It is an
+	// interface defined here (not the concrete internal/skills catalog) so the loop fulfils the
+	// SkillIDs seam without domain importing skills — the dependency flows toward domain (ADR
+	// 0010). The host (cmd/apogee) loads the catalog and injects it.
+	Skills SkillResolver
+
 	// Injected state roots — no implicit ~/.apogee (ADR 0001). The bench points
 	// these at ephemeral dirs so sim runs never touch the production Library.
 	LibraryDir  string
@@ -133,12 +140,33 @@ func NextMode(cur Mode) Mode {
 //
 // FileRefs (@file tokens parsed from the chat input) are resolved at Step time — the loop
 // reads each within the workspace fence and prepends its content to the user message.
-// SkillIDs is reserved for the deferred /skill command (the skills package is a separate
-// feature-parity item); it is carried and snapshotted but not yet consumed.
+// SkillIDs are the skills the user attached in chat (the /skill command); the loop resolves
+// each through Config.Skills and prepends its body to the user message for that one turn. The
+// refs round-trip through a snapshot, so a resumed session re-resolves them.
 type UserInput struct {
 	Text     string
 	FileRefs []string
 	SkillIDs []string `json:",omitempty"`
+}
+
+// SkillResolver maps attached skill IDs to their injectable form. It is implemented by the
+// skills catalog (internal/skills) and injected via Config.Skills; the interface lives in
+// domain so the loop can fulfil the UserInput.SkillIDs seam without importing the skills
+// package (ADR 0010 — the dependency flows toward domain).
+type SkillResolver interface {
+	// ResolveSkills returns the resolved skills for ids, in the given order, skipping any
+	// unknown ID. The caller compares the result against what it requested to report a miss,
+	// so a typo in an attached ID is never silently swallowed.
+	ResolveSkills(ids []string) []ResolvedSkill
+}
+
+// ResolvedSkill is one attached skill reduced to the fields the loop injects: the ID and
+// DisplayName label the prepended block, and Body is the skill's instruction text scoped to
+// the turn it was attached to.
+type ResolvedSkill struct {
+	ID          string
+	DisplayName string
+	Body        string
 }
 
 // StepResult reports the outcome of one Step at the quiescent boundary.
