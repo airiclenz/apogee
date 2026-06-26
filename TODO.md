@@ -22,20 +22,24 @@ resolves skill bodies + file contents into context.
 
 **The missing surface, prioritized:**
 
-- **[P0] Chat input mini-language** — a parse layer between the input box and the agent. apogee's
-  `submit()` (`internal/tui/model.go:355`) sends the raw string straight through; it should route
-  `/`-prefixed lines to command handlers, extract `@` tokens into refs, and resolve `/skill`
-  tokens. Needs an autocomplete overlay (mirror the existing approval-prompt overlay). Commands to
-  port (from `Ws`): `/clear` (drop model context, keep transcript), `/compact` (LLM summary),
-  `/continue` ("Please continue"), `/server` (switch server), `/skill <name>` (attach a skill).
-  - `@<file>` is **half-scaffolded**: `domain.UserInput.FileRefs` exists
-    (`internal/domain/config.go:138`) but is deliberately unresolved — `loop.go:410
-    noteUnresolvedFileRefs` errors that refs "are not yet resolved into context and were ignored."
-    Port needs both a TUI `@`-parser **and** a real resolver (path-bounded by the existing `os.Root`
-    workspace pin). Add a `SkillIDs []string` field next to `FileRefs`.
-  - `/compact` can trigger the **existing** generative Compaction reducer in `internal/context`
-    (today only budget-driven); expose an `Agent.Compact()` entry point.
-  - `/clear` needs a new `Agent.ClearContext()` (only `Snapshot()` exists today, `agent.go:148`).
+- **[P0] Chat input mini-language** — a parse layer between the input box and the agent.
+  **CORE SHIPPED 2026-06-26** (handoff `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md`):
+  the pure parser/router (`internal/tui/command.go`), the autocomplete overlay for `/`-commands
+  **and** `@`-files (`internal/tui/autocomplete.go`, bounded `os.Root` workspace walk), `/clear`
+  (→ `Agent.ClearContext()`), `/continue` (→ "Please continue"), a **stubbed** `/compact`
+  (→ `Agent.Compact()` returning `ErrCompactionNotImplemented`), and the real agent-side
+  `@file` resolver (`loop.go resolveFileRefs`, reusing `security.SafeReadFile`; replaced
+  `noteUnresolvedFileRefs`). `domain.UserInput.SkillIDs` is pre-wired (reserved, unresolved).
+  **Remaining:**
+  - `/compact` real reducer — build the generative Compaction summarizer in `internal/context`
+    (today an empty Phase-0 scaffold — the TODO's "existing reducer" was wrong) and fill in the
+    `Agent.Compact()` seam (summarize → `Conversation.Replace`, fire via `runHistoryRewriteHooks`).
+    When it becomes a real upstream call it must run on a worker goroutine, not block Update.
+  - `/skill <name>` — needs the Skills system below; the `SkillIDs` field is the seam.
+  - `/server` (switch server) — needs a swappable provider seam (today `upstream` is immutable
+    after construction). See **[P1] Server / model switching**.
+  - Polish deferred: `@`-file-listing cache (overlay walks on demand, capped at 8), mid-string
+    (non-trailing) token completion (overlay completes the word at the cursor/end only).
 
 - **[P0] Skills system** (prerequisite for `/skill`) — apogee has **zero** skills code
   (`grep -ri skill --include=*.go` → 0). New `internal/skills` package: discover `.md` skills from

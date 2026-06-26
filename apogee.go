@@ -376,4 +376,9 @@ var (
 	// ErrInvalidTool is returned by ToolRegistry.Register for an unaddressable tool
 	// (currently an empty Name).
 	ErrInvalidTool = domain.ErrInvalidTool
+
+	// ErrCompactionNotImplemented is returned by Agent.Compact while the generative
+	// Compaction reducer is still a scaffold (the /compact command surface is wired ahead
+	// of it).
+	ErrCompactionNotImplemented = domain.ErrCompactionNotImplemented
 )

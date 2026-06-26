@@ -6,6 +6,36 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [Unreleased]
+
+Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
+feature-parity track. See
+`docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md`.
+
+### Chat input mini-language (core)
+
+- **Parse/route layer** between the TUI input box and the agent: `/`-prefixed
+  lines route to local command handlers, `@file` tokens are extracted as
+  references, and an autocomplete overlay (commands + workspace files, the latter
+  via a bounded `os.Root` walk) mirrors the approval-prompt overlay.
+- **Commands**: `/clear` (drop the model's context, keep the visible transcript),
+  `/continue` ("Please continue"), and a **stubbed** `/compact` (the generative
+  reducer is a follow-up; the command surface and `Agent.Compact()` seam exist now).
+- **`@file` references now resolve** (behaviour change): the loop reads each
+  `UserInput.FileRefs` entry within the workspace fence (`security.SafeReadFile`,
+  `os.Root`-pinned) and injects its content into the user message — replacing the
+  prior "refs ignored" `ErrorEvent`. A missing, oversized, or escaping ref is
+  reported and skipped; the Turn still proceeds.
+
+### Public API (additive — minor)
+
+- `Agent.ClearContext() error` — drop the conversation history at a quiescent
+  boundary (the host's transcript is unaffected); refused mid-Exchange.
+- `Agent.Compact(context.Context) error` — on-demand generative Compaction seam;
+  returns the new `ErrCompactionNotImplemented` sentinel until the reducer lands.
+- `UserInput.SkillIDs []string` — reserved for the deferred `/skill` command
+  (carried and snapshotted; not yet resolved).
+
 ## [1.0.0] — 2026-06-25
 
 The first stable release. `v1.0.0` cuts the public Go API after Phase 3 brought

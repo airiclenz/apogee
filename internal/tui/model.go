@@ -61,6 +61,10 @@ type Model struct {
 	lastErr    error              // the error behind stateErrored, shown in the status line
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
 
+	// autocomplete is the chat mini-language suggestion overlay shown while typing at idle
+	// (commands on "/", workspace files on "@"). The zero value is inactive (hidden).
+	autocomplete autocompleteState
+
 	// Content & layout.
 	transcript    transcript
 	th            theme // the palette and reusable styles, built once at construction
@@ -238,6 +242,15 @@ type ctrlCResetMsg struct{}
 // is a no-op while a worker runs (the single-worker invariant the seam relies on). Other keys
 // feed the input while idle, or scroll the transcript while busy.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// While the autocomplete overlay is open (idle only), it claims the navigation, accept,
+	// and dismiss keys — including enter and tab — before the normal routing below. Any other
+	// key returns handled=false and falls through to edit the input (which re-derives it).
+	if m.state == stateIdle && m.autocomplete.active {
+		if handled, nm, cmd := m.autocompleteKey(msg); handled {
+			return nm, cmd
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		// A lone Ctrl+C no longer quits — a stray hit must never drop the human out of a
@@ -302,6 +315,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.state == stateIdle || m.state == stateAwaitingAsk {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		if m.state == stateIdle {
+			m.autocomplete = m.computeAutocomplete() // re-derive the overlay from the edited input
+		}
 		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd
 	}
@@ -348,24 +364,73 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.scrollViewport(msg)
 }
 
-// submit launches a worker for the text in the input box. It records the user message,
-// switches to running, stores the worker's CancelFunc (C4), and batches the worker Cmd
-// with the spinner tick. A blank message is ignored. Only reachable from stateIdle, so the
-// single-worker invariant holds.
+// submit parses the input through the chat mini-language and routes it: a recognised
+// /command goes to runCommand; anything else is a message sent to the agent (with its @file
+// references extracted for the loop to resolve). It records the user message, switches to
+// running, stores the worker's CancelFunc (C4), and batches the worker Cmd with the spinner
+// tick. A blank message is ignored. Only reachable from stateIdle, so the single-worker
+// invariant holds.
 func (m Model) submit() (tea.Model, tea.Cmd) {
-	text := strings.TrimSpace(m.input.Value())
-	if text == "" {
+	parsed := parseInput(m.input.Value())
+	if parsed.kind == kindCommand {
+		return m.runCommand(parsed.command)
+	}
+	if parsed.text == "" {
 		return m, nil
 	}
 	m.input.Reset()
+	m.autocomplete = autocompleteState{}
 	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
-	m.transcript.addUser(text)
+	m.transcript.addUser(parsed.text)
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 
-	cmd, cancel := startExchange(m.parent, m.eng, domain.UserInput{Text: text})
+	cmd, cancel := startExchange(m.parent, m.eng, domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs})
 	m.cancel = cancel
 	m.state = stateRunning
 	return m, tea.Batch(cmd, m.spinner.Tick)
+}
+
+// runCommand handles a recognised local /command from the idle state. /continue is the one
+// command that opens an agent turn (a canned "Please continue"); /clear and /compact act on
+// the engine's context and stay idle, recording a transcript note. The input box and the
+// autocomplete overlay are cleared either way. Reached only from submit (stateIdle), so the
+// engine is quiescent — no worker owns it — and ClearContext/Compact are safe to call here.
+func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
+	m.input.Reset()
+	m.autocomplete = autocompleteState{}
+
+	switch command {
+	case "continue":
+		m.userScrolled = false
+		m.transcript.addUser("/continue")
+		m.layout()
+		cmd, cancel := startExchange(m.parent, m.eng, domain.UserInput{Text: "Please continue"})
+		m.cancel = cancel
+		m.state = stateRunning
+		return m, tea.Batch(cmd, m.spinner.Tick)
+
+	case "clear":
+		if err := m.eng.ClearContext(); err != nil {
+			m.transcript.addNote("could not clear context: " + err.Error())
+		} else {
+			m.transcript.addNote("context cleared — the model's memory of this session is reset")
+		}
+		m.layout()
+		return m, nil
+
+	case "compact":
+		// A stub until the generative reducer lands; surface whatever Compact reports. When it
+		// becomes a real upstream call it must move onto a worker goroutine (like startExchange)
+		// so it does not block the Update loop.
+		if err := m.eng.Compact(m.parent); err != nil {
+			m.transcript.addNote("compact: " + err.Error())
+		} else {
+			m.transcript.addNote("context compacted")
+		}
+		m.layout()
+		return m, nil
+	}
+	return m, nil
 }
 
 // submitAnswer sends the typed answer back to the blocked ask_user tool over the rendezvous
@@ -551,8 +616,19 @@ func (m Model) View() tea.View {
 	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
 		prompt = m.askPrompt(m.pendingAsk.Request)
 	}
+	// The autocomplete overlay (idle only) sits just above the input box. It and the
+	// approval/ask prompt never co-occur (different states), but each steals rows from the
+	// transcript viewport, so shrink the viewport by their combined height before rendering.
+	dropdown := m.renderAutocomplete()
+	shrink := 0
 	if prompt != "" {
-		h := m.viewport.Height() - lipgloss.Height(prompt)
+		shrink += lipgloss.Height(prompt)
+	}
+	if dropdown != "" {
+		shrink += lipgloss.Height(dropdown)
+	}
+	if shrink > 0 {
+		h := m.viewport.Height() - shrink
 		if h < 1 {
 			h = 1
 		}
@@ -560,16 +636,21 @@ func (m Model) View() tea.View {
 	}
 
 	// Draw the transcript with its sticky header, then hang the scroll-bar gutter off its right
-	// edge. The bar's height matches the viewport's current height (already shrunk above when a
-	// prompt is shown), so the two columns line up row-for-row.
+	// edge. The bar's height matches the viewport's current height (already shrunk above when an
+	// overlay is shown), so the two columns line up row-for-row.
 	body := m.applyStickyHeader(m.viewport.View())
 	body = lipgloss.JoinHorizontal(lipgloss.Top, body, m.renderScrollbar(m.viewport.Height()))
 	rows := []string{body}
 	if prompt != "" {
 		rows = append(rows, prompt)
 	}
-	// The single blank line between chat content and the bottom chrome (layout.md).
-	rows = append(rows, "", m.statusLine(), m.inputView(), m.footerView())
+	// The single blank line between chat content and the bottom chrome (layout.md), then the
+	// status line, the autocomplete overlay (when open), the input box, and the footer.
+	rows = append(rows, "", m.statusLine())
+	if dropdown != "" {
+		rows = append(rows, dropdown)
+	}
+	rows = append(rows, m.inputView(), m.footerView())
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true

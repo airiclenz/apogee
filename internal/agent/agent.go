@@ -152,3 +152,32 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 	}
 	return domain.Session{Version: domain.SessionVersion, State: state}, nil
 }
+
+// ----------------------------------------------------------------------------
+// Context controls (/clear, /compact — the chat mini-language seams)
+// ----------------------------------------------------------------------------
+
+// ClearContext drops the model-facing conversation history while preserving the rest of
+// the loop state — the Turn counter keeps advancing, allow-for-session approvals and the
+// autonomy mode survive, and the visible TUI transcript (a separate structure the host
+// owns) is untouched. It is the engine half of the /clear command: the model forgets
+// prior turns; the human keeps their scrollback. Valid only at a quiescent boundary;
+// calling it mid-Exchange is refused (ErrInputPending) so a half-streamed Turn is never
+// orphaned. The Agent stays snapshot-safe after it returns.
+func (a *Agent) ClearContext() error {
+	if a.inExchange {
+		return domain.ErrInputPending
+	}
+	a.conv = *domain.NewConversation(nil)
+	return nil
+}
+
+// Compact triggers generative Compaction on demand (the /compact command): summarize the
+// conversation and write the summary back via Conversation.Replace, fired through the
+// existing runHistoryRewriteHooks path. The reducer that does this lives in internal/context,
+// which is still a Phase-0 scaffold, so Compact returns ErrCompactionNotImplemented today.
+// The seam exists now so the follow-up slice fills in the body without touching callers.
+func (a *Agent) Compact(ctx context.Context) error {
+	_ = ctx
+	return domain.ErrCompactionNotImplemented
+}

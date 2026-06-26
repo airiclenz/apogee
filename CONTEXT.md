@@ -316,6 +316,14 @@ prompt, conversation history, file context, and response reserve. The single aut
 on how much room each part gets; other reducers consume it. Lives in `context/`.
 _Avoid_: "context limit" (that is the raw window; the Budget is the *allocation* within it).
 
+**File reference (`@file`)**:
+A workspace file the user names with an `@path` token in their message. The loop resolves
+each reference at the start of the Turn — reading it within the workspace fence
+(`security.SafeReadFile`, `os.Root`-pinned) and injecting its content into the user message
+as that request's *file context* — and reports-and-skips a missing or escaping ref. Parsing
+the token is the TUI's job; resolution is the agent's.
+_Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
+
 **Tool-result capping**:
 Per-tool-result truncation of any single result that exceeds its fraction of the Budget,
 with head/tail preservation, protecting the most recent Turn. A **pre-request Mechanism**;

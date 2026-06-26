@@ -233,8 +233,13 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    with ADR 0003's *constraint-declared* (hook = descriptor field, dynamic order). Plan
    already calls it "provisional." Lean toward a flat `internal/mechanisms` with hook-point
    as data. **Resolve when the catalogue→hook mapping session runs.**
-5. **`UserInput`/`FileRefs` resolution** — how file references become budgeted context
-   (context-builder seam) is unspecified.
+5. ⏳ **`UserInput`/`FileRefs` resolution — PARTIALLY RESOLVED (2026-06-26, chat
+   mini-language core; handoff `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md`).**
+   The TUI parses `@file` tokens into `UserInput.FileRefs`; the loop now resolves each within
+   the workspace fence (`internal/agent/loop.go resolveFileRefs`, reusing
+   `security.SafeReadFile`) and injects the content into the user message — replacing the old
+   `noteUnresolvedFileRefs` "ignored" stub. The **budgeting** half (token-aware trimming via
+   the context-builder seam) remains deferred to that seam.
 6. ✅ **Streaming + Approval interleave inside a Step — RESOLVED (P1.2; canonical record
    [ADR 0007 §Phase-1 realisation](../adr/0007-step-turn-and-the-quiescent-boundary.md)).** The
    stream is consumed to its terminal Delta and the SSE body closed **before** any tool call is

@@ -41,4 +41,10 @@ var (
 	// ErrInvalidTool is returned by ToolRegistry.Register for a tool that cannot be
 	// addressed — currently an empty Name.
 	ErrInvalidTool = errors.New("apogee: invalid tool")
+
+	// ErrCompactionNotImplemented is returned by Agent.Compact while the generative
+	// Compaction reducer (internal/context) is still a Phase-0 scaffold. The /compact
+	// command surface is wired through to this seam now; the follow-up slice that builds
+	// the summarizer replaces the sentinel with a real RewriteHistory pass.
+	ErrCompactionNotImplemented = errors.New("apogee: generative compaction is not yet implemented")
 )

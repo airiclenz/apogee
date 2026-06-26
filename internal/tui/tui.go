@@ -15,8 +15,10 @@ import (
 // Engine is the narrow, local view of the agent the TUI drives. It is satisfied by
 // *agent.Agent (= *apogee.Agent), but the TUI depends only on this interface so it
 // never imports the root module path (the ADR-0010 invariant) and stays unit-testable
-// with a fake engine. The worker goroutine is the only caller of these methods, which
-// preserves the Agent's single-goroutine contract (phase-2 detail plan §3 C1).
+// with a fake engine. The worker goroutine is the only caller of the Exchange-driving
+// methods (Submit/Step); ClearContext/Compact are driven from the Update goroutine but
+// only at idle, when no worker runs — so the single-driver contract holds (phase-2 detail
+// plan §3 C1).
 type Engine interface {
 	// Submit enqueues user input to begin or continue an Exchange.
 	Submit(domain.UserInput) error
@@ -24,6 +26,12 @@ type Engine interface {
 	Step(context.Context) (domain.StepResult, error)
 	// Snapshot captures the serializable conversation state at a boundary.
 	Snapshot() (domain.Session, error)
+	// ClearContext drops the model's conversation history (the /clear command); the
+	// host's visible transcript is unaffected. Called only at idle (no worker running).
+	ClearContext() error
+	// Compact triggers generative Compaction on demand (the /compact command); a stub
+	// today returning domain.ErrCompactionNotImplemented. Called only at idle.
+	Compact(context.Context) error
 	// Mode reports the Agent's autonomy mode (for the status line).
 	Mode() domain.Mode
 	// SetMode changes the Agent's autonomy mode (Shift+Tab cycling). It is goroutine-safe, so

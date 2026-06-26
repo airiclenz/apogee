@@ -159,8 +159,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	turn := a.turnIndex
 
 	if a.pendingInput != nil {
-		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: a.pendingInput.Text})
-		a.noteUnresolvedFileRefs(turn, a.pendingInput.FileRefs)
+		refs := a.resolveFileRefs(turn, a.pendingInput.FileRefs)
+		a.noteUnresolvedSkillIDs(turn, a.pendingInput.SkillIDs)
+		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: refs + a.pendingInput.Text})
 		a.pendingInput = nil
 		a.inExchange = true
 	}
@@ -400,22 +401,68 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	return req, deferred
 }
 
-// noteUnresolvedFileRefs surfaces that a consumed UserInput carried FileRefs the loop does
-// not yet resolve into context. Turning file references into budgeted context is a context-
-// builder concern (TDD §8 #8) deferred past Phase 1; until it lands the refs are ignored —
-// but NOT silently. It emits a loop ErrorEvent (the same Source "loop" notice channel a
-// missing Approver uses) so a host learns its input was only partly consumed and never
-// mistakes FileRefs for working. The refs round-trip through a snapshot on UserInput, so
-// deferring resolution loses no data.
-func (a *Agent) noteUnresolvedFileRefs(turn int, refs []string) {
+// maxRefFileBytes caps a single @file reference, mirroring the read_file tool's ceiling
+// (tools.maxFileReadBytes). It is a sanity bound, not a context budget — token-aware
+// trimming is the deferred context-builder's job (TDD §8 #8).
+const maxRefFileBytes = 10 * 1024 * 1024
+
+// resolveFileRefs reads each @file reference within the workspace fence and returns the
+// content blocks to prepend to the user message. It reuses security.SafeReadFile — the
+// os.Root-pinned, TOCTOU-safe read the read_file tool uses — so a ref can never escape the
+// workspace (a symlink swapped mid-read is refused, not followed). A missing, escaping,
+// oversized, directory, or otherwise unreadable ref is surfaced as a loop ErrorEvent and
+// skipped: the Turn proceeds with whatever resolved, and a partly-consumed input is never
+// mistaken for working. The refs round-trip through a snapshot on UserInput, so a resumed
+// session re-resolves them.
+func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 	if len(refs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, ref := range refs {
+		content, err := a.readFileRef(ref)
+		if err != nil {
+			a.cfg.Events.Emit(domain.ErrorEvent{
+				EventBase: a.base(turn),
+				Source:    "loop",
+				Err:       fmt.Sprintf("@%s could not be resolved and was ignored: %v", ref, err),
+			})
+			continue
+		}
+		fmt.Fprintf(&b, "Referenced file `%s`:\n```\n%s\n```\n\n", ref, content)
+	}
+	return b.String()
+}
+
+// readFileRef resolves one workspace-relative reference to its bounded content. An empty
+// WorkspaceDir means no file tools are wired, so references cannot be honoured.
+func (a *Agent) readFileRef(ref string) (string, error) {
+	if a.cfg.WorkspaceDir == "" {
+		return "", errors.New("no workspace is configured for file references")
+	}
+	data, err := security.SafeReadFile(a.cfg.WorkspaceDir, ref)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > maxRefFileBytes {
+		return "", fmt.Errorf("file too large: %d bytes (max %d)", len(data), maxRefFileBytes)
+	}
+	return string(data), nil
+}
+
+// noteUnresolvedSkillIDs preserves the "never silently ignored" principle for the reserved
+// SkillIDs field: the /skill command and its skills package are a separate feature-parity
+// item, so any SkillIDs reaching the loop today are reported and dropped rather than
+// consumed. The parser does not populate them yet; this is a defensive backstop.
+func (a *Agent) noteUnresolvedSkillIDs(turn int, ids []string) {
+	if len(ids) == 0 {
 		return
 	}
 	a.cfg.Events.Emit(domain.ErrorEvent{
 		EventBase: a.base(turn),
 		Source:    "loop",
-		Err: fmt.Sprintf("UserInput.FileRefs are not yet resolved into context and were ignored "+
-			"(%d ref(s)); reference resolution is deferred to the context builder", len(refs)),
+		Err: fmt.Sprintf("UserInput.SkillIDs are reserved for the /skill command and not yet "+
+			"resolved (%d id(s)); they were ignored", len(ids)),
 	})
 }
 

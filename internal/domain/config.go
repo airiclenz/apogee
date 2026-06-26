@@ -128,16 +128,17 @@ func NextMode(cur Mode) Mode {
 // ----------------------------------------------------------------------------
 
 // UserInput is one user message into an Exchange: free text plus optional file
-// references the context builder resolves. Stays a value (no live handles) so it
-// snapshots cleanly.
+// references the loop resolves into context, plus reserved skill references. Stays a value
+// (no live handles) so it snapshots cleanly.
 //
-// Phase 1 consumes Text only. FileRefs are carried and snapshotted but not yet resolved
-// into context — turning references into budgeted file content is a context-builder
-// concern (TDD §8 #8) deferred past Phase 1. Until it lands, supplying FileRefs is
-// surfaced as a loop ErrorEvent rather than silently ignored.
+// FileRefs (@file tokens parsed from the chat input) are resolved at Step time — the loop
+// reads each within the workspace fence and prepends its content to the user message.
+// SkillIDs is reserved for the deferred /skill command (the skills package is a separate
+// feature-parity item); it is carried and snapshotted but not yet consumed.
 type UserInput struct {
 	Text     string
 	FileRefs []string
+	SkillIDs []string `json:",omitempty"`
 }
 
 // StepResult reports the outcome of one Step at the quiescent boundary.

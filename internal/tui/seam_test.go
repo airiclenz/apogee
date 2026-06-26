@@ -109,14 +109,18 @@ func (s *stubProgram) events() []domain.Event {
 // test scripts the drive sequence — queued results, errors, event emission, or a
 // ctx-honouring block. It records Submit/Step calls for assertions.
 type fakeEngine struct {
-	mu        sync.Mutex
-	submitted []domain.UserInput
-	stepCalls int
-	modeSet   []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
+	mu           sync.Mutex
+	submitted    []domain.UserInput
+	stepCalls    int
+	modeSet      []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
+	clearCalls   int           // records ClearContext calls (the /clear command)
+	compactCalls int           // records Compact calls (the /compact command)
 
 	submitFn   func(domain.UserInput) error
 	stepFn     func(ctx context.Context, call int) (domain.StepResult, error)
 	snapshotFn func() (domain.Session, error)
+	clearFn    func() error
+	compactFn  func(context.Context) error
 }
 
 // fakeEngine satisfies the narrow Engine seam the worker drives.
@@ -148,6 +152,28 @@ func (f *fakeEngine) Snapshot() (domain.Session, error) {
 	}
 	return domain.Session{}, nil
 }
+func (f *fakeEngine) ClearContext() error {
+	f.mu.Lock()
+	f.clearCalls++
+	fn := f.clearFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn()
+	}
+	return nil
+}
+
+func (f *fakeEngine) Compact(ctx context.Context) error {
+	f.mu.Lock()
+	f.compactCalls++
+	fn := f.compactFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx)
+	}
+	return domain.ErrCompactionNotImplemented
+}
+
 func (f *fakeEngine) Mode() domain.Mode { return domain.ModeAskBefore }
 func (f *fakeEngine) Close() error      { return nil }
 

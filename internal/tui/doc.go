@@ -36,6 +36,15 @@
 // state — the run boundary is derived from each entry's depth inside [transcript.renderView]), so
 // the flat Depth==0 transcript renders byte-for-byte as before (ADR 0011 still holds — render only).
 //
+// The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
+// between the input box and the engine without thickening the renderer (ADR 0011 still holds):
+// command.go is a pure [parseInput] that classifies a line as a local /command or an agent
+// message and extracts @file references; autocomplete.go is the suggestion overlay (commands on
+// "/", a bounded os.Root workspace-file listing on "@") rendered above the input like the
+// approval-prompt slot. /clear and /compact drive the engine's context seams
+// ([Engine.ClearContext]/[Engine.Compact]); @file *resolution* stays in the agent loop (reusing
+// the workspace fence), so the TUI only parses references — it never reads files itself.
+//
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole
 // Model — every field it holds, recursively — is copied on every Update. A type that records
