@@ -13,6 +13,20 @@ feature-parity track. See
 `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
 `docs/handoffs/2026-06-26 - 01 - skills-system.md`.
 
+### Fixes
+
+- **Context window now reads the runtime size from llama.cpp `/props`.** Discovery
+  (`internal/provider.Discover`) probes `GET /props` after `/v1/models` and prefers
+  its `default_generation_settings.n_ctx` — the `-c`/`--ctx-size` the server was
+  actually launched with — over the model's advertised *training* window
+  (`context_length`, else `meta.n_ctx_train`), which is often far larger than the
+  loaded window. This fixes the live context-fill gauge measuring usage against the
+  wrong denominator (it barely moved on a server loaded well under its training
+  context). Best-effort: a non-llama.cpp server (no `/props`) keeps the `/v1/models`
+  value, and a probe failure never fails discovery. Ports the oracle's previously
+  deferred `llamacpp-props` strategy; the `ollama-show`/`ollama-tags` strategies
+  remain unported (additive, not needed yet).
+
 ### Skills system + `/skill` (apogee-code feature-parity)
 
 - **`internal/skills` package** discovers user-authored skills — a folder

@@ -15,6 +15,7 @@ import (
 const (
 	defaultChatPath  = "/v1/chat/completions"
 	modelsPath       = "/v1/models"
+	propsPath        = "/props"
 	maxErrorLength   = 500
 	maxToolCallBytes = 1 << 20 // 1 MiB — cap on accumulated streamed tool-call arguments
 

@@ -20,11 +20,17 @@ import (
 func TestDiscoverUpstreamModel(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			t.Errorf("discovery hit %q; want /v1/models", r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"loaded-model","context_length":32768}]}`))
+		case "/props":
+			// Best-effort runtime-window probe; a non-llama.cpp server has no /props.
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("discovery hit unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"loaded-model","context_length":32768}]}`))
 	}))
 	defer srv.Close()
 

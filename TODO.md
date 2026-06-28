@@ -83,9 +83,12 @@ resolves skill bodies + file contents into context.
   (Depth 0) usage to (a) light the live context-fill gauge (`contextGauge` now reads `m.ctxUsed`
   instead of a hard-coded 0) and (b) show a rolling `· N tok/s` readout in the status line, the
   completion timed against the Update clock from the Turn's first token (`model.go foldStats` /
-  `throughputSuffix`). Distinct from the excluded context-budget gauge. **Note:** the live gauge
-  surfaces token *usage* against the window; the separate ISSUES bug — the context *window* read
-  wrong from the server (`provider/discovery.go`) — is untouched and still open.
+  `throughputSuffix`). Distinct from the excluded context-budget gauge. **Update 2026-06-28:** the
+  companion ISSUES bug — the context *window* read wrong from the server (`provider/discovery.go`) —
+  is now **FIXED**: `Discover` probes llama.cpp `GET /props` and prefers its runtime
+  `default_generation_settings.n_ctx` over the model's training window (`n_ctx_train`), so the gauge
+  measures against the correct denominator. The deferred `llamacpp-props` discovery strategy is now
+  live; the `ollama-show`/`ollama-tags` strategies remain unported (additive, not needed yet).
 
 **Related (already parked below):** per-tool approval overrides (`toolApprovalOverrides`:
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
