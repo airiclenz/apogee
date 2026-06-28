@@ -85,6 +85,13 @@ type Model struct {
 	genStart  time.Time
 	tokPerSec float64
 
+	// sel is the prompt's mouse drag-selection (mouse.go); the zero value is "no selection". It
+	// is cleared by any keypress, a submit/reset, or a resize, so its visual coords never go stale.
+	sel promptSel
+	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy and
+	// cleared by flashClearMsg after flashDuration.
+	flash string
+
 	// Content & layout.
 	transcript    transcript
 	th            theme // the palette and reusable styles, built once at construction
@@ -173,6 +180,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
+		m.sel = promptSel{} // the box moved/reflowed: its stored visual coords are stale
 		m.layout()
 		return m, nil
 
@@ -206,6 +214,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateAwaitingAsk
 		m.pendingAsk = &msg
 		m.input.Reset()
+		m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
 		m.layout()
 		return m, m.input.Focus()
 
@@ -249,6 +258,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (MouseModeCellMotion); the viewport's own Update turns the wheel into a scroll.
 		return m.scrollViewport(msg)
 
+	case tea.MouseClickMsg:
+		// A left-click positions the caret in the prompt and starts a selection (mouse.go).
+		return m.handleMouseClick(msg)
+
+	case tea.MouseMotionMsg:
+		// A drag (button held) extends the prompt selection (mouse.go).
+		return m.handleMouseMotion(msg)
+
+	case tea.MouseReleaseMsg:
+		// Releasing after a drag copies the prompt selection to the clipboard (mouse.go).
+		return m.handleMouseRelease(msg)
+
+	case flashClearMsg:
+		// The transient mouse-copy note has lingered long enough; clear it (mouse.go).
+		m.flash = ""
+		return m, nil
+
 	default:
 		// Other Bubble Tea Msgs (e.g. the cursor blink) belong to the widgets; route them
 		// to the focused input so the cursor keeps blinking.
@@ -271,6 +297,11 @@ type ctrlCResetMsg struct{}
 // is a no-op while a worker runs (the single-worker invariant the seam relies on). Other keys
 // feed the input while idle, or scroll the transcript while busy.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Any keypress drops a mouse drag-selection: typing past it, navigating, or submitting all
+	// move on from what was selected, and clearing here (before the value can change) keeps the
+	// selection's cached visual coordinates from ever going stale (mouse.go).
+	m.sel = promptSel{}
+
 	// While the autocomplete overlay is open (idle only), it claims the navigation, accept,
 	// and dismiss keys — including enter and tab — before the normal routing below. Any other
 	// key returns handled=false and falls through to edit the input (which re-derives it).
@@ -812,7 +843,7 @@ func (m Model) renderScrollbar(h int) string {
 // width including the border and padding, so the box always spans the window and the footer
 // below it aligns.
 func (m Model) inputView() string {
-	return m.th.inputBorder.Width(m.width).Render(m.input.View())
+	return m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.input.View()))
 }
 
 // footerView renders the footer bar: a decorative top divider (the shared border with the
@@ -1009,6 +1040,10 @@ func (m Model) statusRight() string {
 	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
 	if !m.lastCtrlC.IsZero() {
 		return m.th.statusBar.Render("press ctrl+c again to quit")
+	}
+	// A fresh mouse-copy confirmation briefly takes the slot (flashClearMsg clears it).
+	if m.flash != "" {
+		return m.th.statusBar.Render(m.flash)
 	}
 	if g := m.contextGauge(); g != "" {
 		return g

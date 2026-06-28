@@ -41,6 +41,8 @@ var (
 	colSkill = lipgloss.Color("#8957e5") // attached-skill chips — violet
 
 	colGauge = lipgloss.Color("#7c7cf0") // context-fill gauge bar — periwinkle (llama-launcher look)
+
+	colSelection = lipgloss.Color("#3a5fcd") // mouse drag-selection highlight background — blue
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
@@ -82,6 +84,7 @@ type theme struct {
 	toolDetail  lipgloss.Style // the ┝/┕ branch detail lines (dim)
 	subRail     lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
 	skillChip   lipgloss.Style // an attached-skill chip above the input (white on violet)
+	selection   lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
 	diffAdded   lipgloss.Style // a "+" diff detail line (reserved)
 	diffRemoved lipgloss.Style // a "-" diff detail line (reserved)
 	errorText   lipgloss.Style // a recovered-fault notice
@@ -120,6 +123,7 @@ func newTheme() theme {
 		toolDetail:  lipgloss.NewStyle().Foreground(colFaint),
 		subRail:     lipgloss.NewStyle().Foreground(colFaint),
 		skillChip:   lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
+		selection:   lipgloss.NewStyle().Foreground(colWhite).Background(colSelection),
 		diffAdded:   lipgloss.NewStyle().Foreground(colDiffAdd),
 		diffRemoved: lipgloss.NewStyle().Foreground(colDiffDel),
 		errorText:   lipgloss.NewStyle().Foreground(colError).Bold(true),
