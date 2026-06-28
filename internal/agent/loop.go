@@ -159,6 +159,11 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	turn := a.turnIndex
 
 	if a.pendingInput != nil {
+		// exchangeStart marks the boundary this Exchange opens at (before its first user
+		// message), so AbortExchange can roll a cancelled Exchange all the way back to a clean,
+		// submittable boundary. It is set once per Exchange: pendingInput is non-nil only on the
+		// opening Turn (Submit is refused mid-Exchange), so a continuation Turn never resets it.
+		a.exchangeStart = a.conv.Len()
 		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
 		// per-turn instructions, so prepending them scopes them to this one message (the right
 		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).

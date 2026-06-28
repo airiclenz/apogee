@@ -114,6 +114,7 @@ type fakeEngine struct {
 	stepCalls    int
 	modeSet      []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
 	clearCalls   int           // records ClearContext calls (the /clear command)
+	abortCalls   int           // records AbortExchange calls (discarding a cancelled Exchange)
 	compactCalls int           // records Compact calls (the /compact command)
 
 	submitFn   func(domain.UserInput) error
@@ -163,6 +164,12 @@ func (f *fakeEngine) ClearContext() error {
 	return nil
 }
 
+func (f *fakeEngine) AbortExchange() {
+	f.mu.Lock()
+	f.abortCalls++
+	f.mu.Unlock()
+}
+
 func (f *fakeEngine) Compact(ctx context.Context) error {
 	f.mu.Lock()
 	f.compactCalls++
@@ -195,6 +202,13 @@ func (f *fakeEngine) submits() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.submitted)
+}
+
+// aborts reports how many times AbortExchange was called (a cancel discarded the Exchange).
+func (f *fakeEngine) aborts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.abortCalls
 }
 
 // steps reports how many times Step was called.

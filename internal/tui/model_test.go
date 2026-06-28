@@ -287,6 +287,24 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		}
 	})
 
+	t.Run("cancelledMsg discards the Exchange so the next input is accepted", func(t *testing.T) {
+		// The post-Esc wedge regression: a cancel must tell the engine to abort the open
+		// Exchange, otherwise the engine stays inExchange and the next /clear or message is
+		// rejected with ErrInputPending.
+		eng := &fakeEngine{}
+		m := newModel(context.Background(), eng, testOpts)
+		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		m.cancel = func() {} // stand in for a live worker
+		m.state = stateRunning
+		m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+		if m.state != stateIdle {
+			t.Fatalf("state = %v, want idle", m.state)
+		}
+		if got := eng.aborts(); got != 1 {
+			t.Fatalf("AbortExchange called %d times, want 1 (the cancel must discard the open Exchange)", got)
+		}
+	})
+
 	t.Run("errMsg → errored", func(t *testing.T) {
 		m := newTestModel(t)
 		m.state = stateRunning

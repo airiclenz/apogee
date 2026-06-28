@@ -36,12 +36,13 @@ type Agent struct {
 	modeMu sync.RWMutex
 	mode   domain.Mode // live autonomy mode; seeded from cfg.Mode at construction, swappable via SetMode
 
-	conv         domain.Conversation // serializable conversation state (ADR 0001)
-	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step
-	inExchange   bool                // true between Submit and the Step that completes the Exchange
-	turnIndex    int                 // 0-based index of the next Turn
-	approved     map[string]bool     // tools the human allowed for the rest of this Session
-	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
+	conv          domain.Conversation // serializable conversation state (ADR 0001)
+	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
+	inExchange    bool                // true between Submit and the Step that completes the Exchange
+	exchangeStart int                 // conv length before this Exchange's first user message — the boundary AbortExchange rolls back to
+	turnIndex     int                 // 0-based index of the next Turn
+	approved      map[string]bool     // tools the human allowed for the rest of this Session
+	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
 }
 
 // New constructs an Agent from cfg. It validates the configuration — including the
@@ -111,6 +112,27 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 			return res, err
 		}
 	}
+}
+
+// AbortExchange discards an interrupted Exchange and returns the Agent to a clean quiescent
+// boundary that accepts the next Submit. It rolls the conversation back to the boundary the
+// Exchange began at — dropping the un-answered user message and any tool Turns committed so
+// far — and clears inExchange. It is a no-op when no Exchange is open.
+//
+// It is the interactive host's counterpart to the Step-driven resume path. After a cancel,
+// Step leaves the Exchange OPEN on purpose so a Step-driven host (the bench) re-Steps to
+// re-attempt the Turn (see cancelTurn). A host with no resume affordance — the TUI, where Esc
+// means "stop, scrap it" — calls this instead, so the next /clear or message is accepted
+// rather than rejected with ErrInputPending. Like Snapshot, it is valid only at a quiescent
+// boundary: no worker may be driving the Agent when it is called (the host calls it only after
+// the worker has returned its cancellation), preserving the single-goroutine contract.
+func (a *Agent) AbortExchange() {
+	if !a.inExchange {
+		return
+	}
+	a.conv.DropRange(a.exchangeStart, a.conv.Len())
+	a.inExchange = false
+	a.pendingInput = nil
 }
 
 // Mode reports the Agent's current autonomy mode. It reads the live mode under the lock, so a

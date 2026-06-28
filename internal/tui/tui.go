@@ -41,6 +41,11 @@ type Engine interface {
 	// ClearContext drops the model's conversation history (the /clear command); the
 	// host's visible transcript is unaffected. Called only at idle (no worker running).
 	ClearContext() error
+	// AbortExchange discards an Exchange the user cancelled, returning the engine to a clean
+	// boundary the next Submit/ClearContext accepts. Called once the worker has returned its
+	// cancelledMsg (no worker owns the engine), so the post-Esc /clear or message is not
+	// rejected with ErrInputPending.
+	AbortExchange()
 	// Compact triggers generative Compaction on demand (the /compact command); a stub
 	// today returning domain.ErrCompactionNotImplemented. Called only at idle.
 	Compact(context.Context) error

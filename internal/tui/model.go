@@ -214,6 +214,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case cancelledMsg:
+		// The worker cancelled at a quiescent boundary and has returned, so the engine is the
+		// Update loop's to touch again (C1). Discard the interrupted Exchange so the engine
+		// leaves its open-Exchange state: without this the Agent stays inExchange after a cancel
+		// and the next /clear or message is rejected with ErrInputPending — the post-Esc wedge.
+		// The visible transcript is untouched (the "cancelled" note and any streamed partial
+		// stay in scrollback); only the model's memory drops the scrapped Exchange.
+		m.eng.AbortExchange()
 		m.transcript.addNote("cancelled")
 		m.finishWorker(stateIdle)
 		m.refreshViewport()

@@ -438,6 +438,101 @@ func TestStep_CancelMidTool(t *testing.T) {
 	}
 }
 
+// TestAbortExchange_AfterCancelUnwedges proves the interactive recovery path: after a cancel
+// leaves the Exchange open (so Submit/ClearContext are refused), AbortExchange rolls the
+// conversation back to the pre-Exchange boundary and clears the open-Exchange flag, so the
+// next ClearContext and Submit are accepted again — the fix for the post-Esc TUI wedge where
+// a cancelled session could neither clear nor send.
+func TestAbortExchange_AfterCancelUnwedges(t *testing.T) {
+	sink := &recordingSink{}
+	started := make(chan struct{})
+	cfg := configWithTools(sink, blockingTool{name: "block", started: started})
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "block", "{}"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "run the slow tool"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	res, err := a.Step(ctx)
+	if err != nil {
+		t.Fatalf("Step returned a loop error on cancel: %v", err)
+	}
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("Step status = %q, want %q", res.Status, domain.StatusCancelled)
+	}
+
+	// The Exchange is still open: a Submit and a ClearContext are both refused (the wedge).
+	if err := a.Submit(domain.UserInput{Text: "new message"}); err == nil {
+		t.Fatal("Submit before AbortExchange was accepted; the open Exchange must reject it")
+	}
+	if err := a.ClearContext(); err == nil {
+		t.Fatal("ClearContext before AbortExchange was accepted; the open Exchange must reject it")
+	}
+
+	// Discard the cancelled Exchange. The un-answered user message is rolled back to the
+	// pre-Exchange boundary, leaving a clean, empty conversation.
+	a.AbortExchange()
+	if got := a.conv.Len(); got != 0 {
+		t.Fatalf("after AbortExchange the conversation has %d messages, want 0", got)
+	}
+
+	// ClearContext is accepted again (no longer ErrInputPending).
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext after AbortExchange: %v", err)
+	}
+
+	// A fresh message runs to completion against a working responder — a clean user→assistant
+	// Exchange with no interleaved/orphaned message from the scrapped one.
+	a.upstream = &scriptedResponder{scripts: [][]provider.Delta{contentScript("hello")}}
+	if err := a.Submit(domain.UserInput{Text: "start over"}); err != nil {
+		t.Fatalf("Submit after AbortExchange: %v", err)
+	}
+	done, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run after AbortExchange: %v", err)
+	}
+	if done.Status != domain.StatusExchangeComplete {
+		t.Errorf("status = %q, want %q", done.Status, domain.StatusExchangeComplete)
+	}
+	if got := a.conv.Len(); got != 2 {
+		t.Errorf("conversation has %d messages, want 2 (user + assistant)", got)
+	}
+}
+
+// TestAbortExchange_NoExchangeIsNoop proves AbortExchange leaves a quiescent Agent with no
+// open Exchange untouched — it never drops committed history out from under the next Submit.
+func TestAbortExchange_NoExchangeIsNoop(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "noop", readOnly: true, result: "ok"})
+	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{contentScript("hi")}})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "hello"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	before := a.conv.Len()
+
+	a.AbortExchange() // no Exchange open — must be a no-op
+	if got := a.conv.Len(); got != before {
+		t.Errorf("AbortExchange dropped %d messages with no open Exchange (had %d, now %d)", before-got, before, got)
+	}
+}
+
 // panickingTool panics in Execute — the input for the recover-at-extension-boundary guarantee.
 type panickingTool struct{ name string }
 

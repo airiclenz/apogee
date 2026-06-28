@@ -23,6 +23,9 @@ import (
 //     the right Turn rather than re-zeroing it (the P0.6 gap P1.6 closes).
 //   - inExchange   : whether a multi-Turn Exchange is mid-flight, so a resumed Agent rejects
 //     a Submit that would corrupt an open Exchange and the next Step continues it.
+//   - exchangeStart: the conversation boundary the open Exchange began at, so a resumed host
+//     that discards a cancelled Exchange (AbortExchange) rolls back to the right boundary
+//     rather than wiping unrelated history.
 //   - pendingInput : input Submitted but not yet consumed by a Step, so a Submit→Snapshot→
 //     Resume sequence does not silently drop the queued message.
 //
@@ -33,10 +36,11 @@ import (
 // authorizations — the safer default for a human-in-the-loop gate. This is v1; a later schema
 // that needs the cache adds it under a new SessionVersion.
 type agentState struct {
-	Conversation *domain.Conversation `json:"conversation"`
-	TurnIndex    int                  `json:"turnIndex"`
-	InExchange   bool                 `json:"inExchange,omitempty"`
-	PendingInput *domain.UserInput    `json:"pendingInput,omitempty"`
+	Conversation  *domain.Conversation `json:"conversation"`
+	TurnIndex     int                  `json:"turnIndex"`
+	InExchange    bool                 `json:"inExchange,omitempty"`
+	ExchangeStart int                  `json:"exchangeStart,omitempty"`
+	PendingInput  *domain.UserInput    `json:"pendingInput,omitempty"`
 }
 
 // encodeState serializes the Agent's quiescent-boundary state into a Session.State payload.
@@ -44,10 +48,11 @@ type agentState struct {
 // pointer method) runs — a value field would emit its unexported fields as an empty object.
 func (a *Agent) encodeState() (json.RawMessage, error) {
 	state, err := json.Marshal(agentState{
-		Conversation: &a.conv,
-		TurnIndex:    a.turnIndex,
-		InExchange:   a.inExchange,
-		PendingInput: a.pendingInput,
+		Conversation:  &a.conv,
+		TurnIndex:     a.turnIndex,
+		InExchange:    a.inExchange,
+		ExchangeStart: a.exchangeStart,
+		PendingInput:  a.pendingInput,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("apogee: encode session state: %w", err)
@@ -70,6 +75,7 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 	}
 	a.turnIndex = st.TurnIndex
 	a.inExchange = st.InExchange
+	a.exchangeStart = st.ExchangeStart
 	a.pendingInput = st.PendingInput
 	return nil
 }
