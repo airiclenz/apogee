@@ -984,8 +984,10 @@ func (m Model) statusLine() string {
 	}
 	// Fill the whole width with black-bg cells — segments and the justify gap alike — so
 	// the info line reads as one solid black bar joined to the prompt box below it. A plain
-	// justify gap would show the terminal's default background through the seam.
-	right := m.th.statusBar.Render(m.statusRight())
+	// justify gap would show the terminal's default background through the seam. statusRight
+	// returns a fully pre-styled string (the gauge carries its own per-cell backgrounds), so
+	// it is concatenated raw rather than re-wrapped, which would clobber those backgrounds.
+	right := m.statusRight()
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return ansi.Truncate(left, max(0, m.width), "")
@@ -999,16 +1001,16 @@ func (m Model) statusLine() string {
 func (m Model) statusRight() string {
 	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
 	if !m.lastCtrlC.IsZero() {
-		return "press ctrl+c again to quit"
+		return m.th.statusBar.Render("press ctrl+c again to quit")
 	}
 	if g := m.contextGauge(); g != "" {
 		return g
 	}
 	switch m.state {
 	case stateRunning:
-		return "esc stop"
+		return m.th.statusBar.Render("esc stop")
 	case stateErrored:
-		return "enter dismiss"
+		return m.th.statusBar.Render("enter dismiss")
 	default:
 		return ""
 	}
@@ -1019,7 +1021,7 @@ func (m Model) statusRight() string {
 // on a server that omits it — Used is 0 and the gauge renders nothing, the static window
 // showing in the footer instead.
 func (m Model) contextGauge() string {
-	return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view()
+	return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view(m.th)
 }
 
 // contextUsage is the live context-window gauge's data: tokens Used out of the window Limit.
@@ -1029,15 +1031,59 @@ type contextUsage struct {
 	Limit int
 }
 
-// view renders the gauge as "<used> <pct>% <bar>", or "" when usage is unknown.
-func (c contextUsage) view() string {
+// gaugeWidth is the bar strip's width in terminal cells. Eighth-block glyphs give eight fill
+// levels per cell, so the bar resolves Used/Limit to 1/(gaugeWidth*8) of the window.
+const gaugeWidth = 10
+
+// gaugeEighths are the partial-cell glyphs for 1–7 eighths of a filled cell — the sub-cell
+// granularity that makes the fill edge advance smoothly (llama-launcher's bar look).
+var gaugeEighths = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+
+// view renders the gauge as "<used> <pct>% <bar>", or "" when usage is unknown. The numeric
+// prefix is faint-on-black status text; the bar is a solid two-tone strip (renderGaugeBar)
+// carrying its own per-cell backgrounds, so the whole string is pre-styled and must be
+// concatenated raw by the caller (never re-wrapped in a background style).
+func (c contextUsage) view(th theme) string {
 	if c.Used <= 0 || c.Limit <= 0 {
 		return ""
 	}
-	const barWidth = 6
-	filled := clampInt(c.Used*barWidth/c.Limit, 0, barWidth)
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	return fmt.Sprintf("%s %d%% %s", formatTokens(c.Used), c.Used*100/c.Limit, bar)
+	prefix := th.statusBar.Render(fmt.Sprintf("%s %d%% ", formatTokens(c.Used), c.Used*100/c.Limit))
+	return prefix + renderGaugeBar(th, c.Used, c.Limit)
+}
+
+// renderGaugeBar paints used/limit as one continuous two-color strip in the llama-launcher
+// style: the filled portion as full blocks in the gauge colour, an eighth-block partial cell
+// for sub-cell granularity, then the empty remainder as a solid dark-gray track painted
+// behind it — so the fill meets the track directly, with no terminal-default gap. Any nonzero
+// fraction shows at least a one-eighth sliver; an over-limit Used clamps to a full bar.
+// (Ported from llama-launcher internal/launcher/memformat.go writeBar.)
+func renderGaugeBar(th theme, used, limit int) string {
+	eighths := (used*gaugeWidth*8 + limit/2) / limit // round to the nearest eighth
+	if max := gaugeWidth * 8; eighths > max {
+		eighths = max
+	}
+	if used > 0 && eighths == 0 {
+		eighths = 1
+	}
+	full := eighths / 8
+	rem := eighths % 8
+	empty := gaugeWidth - full
+	if rem > 0 {
+		empty--
+	}
+
+	var b strings.Builder
+	if full > 0 {
+		b.WriteString(th.gaugeFill.Render(strings.Repeat("█", full)))
+	}
+	if rem > 0 {
+		// The eighth glyph's ink is the fill colour, its paper the track colour.
+		b.WriteString(th.gaugeFill.Background(colDarkGray).Render(string(gaugeEighths[rem-1])))
+	}
+	if empty > 0 {
+		b.WriteString(th.gaugeTrack.Render(strings.Repeat(" ", empty)))
+	}
+	return b.String()
 }
 
 // formatTokens renders a token count compactly: bare below 1000, else "<n>k" (32768 → 32k).

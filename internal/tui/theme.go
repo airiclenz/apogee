@@ -39,6 +39,8 @@ var (
 	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
 
 	colSkill = lipgloss.Color("#8957e5") // attached-skill chips — violet
+
+	colGauge = lipgloss.Color("#7c7cf0") // context-fill gauge bar — periwinkle (llama-launcher look)
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
@@ -99,6 +101,12 @@ type theme struct {
 	footerText  lipgloss.Style // the footer's content (faint on black)
 	scrollThumb lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
+
+	// Context-fill gauge (statusLine). The bar is a solid two-tone strip in the
+	// llama-launcher style: gaugeFill paints the filled portion (full blocks + an eighth-block
+	// partial cell), gaugeTrack the dark-gray groove behind the empty remainder.
+	gaugeFill  lipgloss.Style // the gauge's filled portion (periwinkle)
+	gaugeTrack lipgloss.Style // the gauge's empty track (dark-gray background)
 }
 
 // newTheme builds the styles from the palette. The input border drops its bottom edge: the
@@ -134,5 +142,7 @@ func newTheme() theme {
 		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		scrollThumb: lipgloss.NewStyle().Foreground(colFaint),
 		scrollTrack: lipgloss.NewStyle().Foreground(colDarkGray),
+		gaugeFill:   lipgloss.NewStyle().Foreground(colGauge),
+		gaugeTrack:  lipgloss.NewStyle().Background(colDarkGray),
 	}
 }

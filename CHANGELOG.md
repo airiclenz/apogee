@@ -27,6 +27,16 @@ feature-parity track. See
   deferred `llamacpp-props` strategy; the `ollama-show`/`ollama-tags` strategies
   remain unported (additive, not needed yet).
 
+### TUI
+
+- **Context-fill gauge restyled** to match `llama-launcher`: a solid two-tone strip —
+  full blocks for the filled cells, an eighth-block partial cell (`▏▎▍▌▋▊▉`) for
+  sub-cell granularity, and a solid dark-gray track behind the remainder — replacing
+  the old `█░` dotted bar. Periwinkle fill, a min-sliver floor so any nonzero usage
+  shows at least `▏`, and a clamp at the window limit. Bar width is now 10 cells (was
+  6). The status line composes the gauge raw rather than re-wrapping it in a
+  background style, so the bar keeps its own per-cell backgrounds.
+
 ### Skills system + `/skill` (apogee-code feature-parity)
 
 - **`internal/skills` package** discovers user-authored skills — a folder

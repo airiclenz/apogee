@@ -12,6 +12,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -193,6 +194,39 @@ func TestUsageThroughputClockResetsOnReStream(t *testing.T) {
 	m = step(t, m, eventMsg{Event: domain.StreamResetEvent{}})
 	if !m.genStart.IsZero() {
 		t.Errorf("throughput clock not reset by StreamReset: %v", m.genStart)
+	}
+}
+
+// The gauge bar is a solid two-tone strip (llama-launcher look): full blocks for the filled
+// cells, an eighth-block partial cell for sub-cell granularity, and a solid track for the
+// rest — with a min-sliver floor and a clamp at the window limit.
+func TestContextGaugeBarRendering(t *testing.T) {
+	th := newTheme()
+
+	// 50% of a 10-cell bar lands on a whole-cell boundary: 5 full blocks, no partial.
+	half := contextUsage{Used: 16384, Limit: 32768}.view(th)
+	if !strings.Contains(half, "50%") {
+		t.Errorf("gauge missing percentage: %q", ansi.Strip(half))
+	}
+	if got := strings.Count(ansi.Strip(half), "█"); got != 5 {
+		t.Errorf("full blocks = %d, want 5 for 50%% of a %d-cell bar: %q", got, gaugeWidth, ansi.Strip(half))
+	}
+
+	// Zero usage hides the gauge entirely (the static window shows in the footer instead).
+	if g := (contextUsage{Used: 0, Limit: 32768}).view(th); g != "" {
+		t.Errorf("gauge lit at zero usage: %q", g)
+	}
+
+	// A tiny nonzero fraction still shows the smallest eighth sliver — never a blank bar.
+	sliver := ansi.Strip(contextUsage{Used: 1, Limit: 32768}.view(th))
+	if !strings.ContainsRune(sliver, gaugeEighths[0]) {
+		t.Errorf("min-sliver not shown for tiny usage: %q", sliver)
+	}
+
+	// An over-limit Used clamps to a full bar — gaugeWidth full blocks, no overflow.
+	full := ansi.Strip(contextUsage{Used: 40000, Limit: 32768}.view(th))
+	if got := strings.Count(full, "█"); got != gaugeWidth {
+		t.Errorf("full blocks = %d, want %d at/over the limit: %q", got, gaugeWidth, full)
 	}
 }
 
