@@ -31,10 +31,15 @@ resolves skill bodies + file contents into context.
   `@file` resolver (`loop.go resolveFileRefs`, reusing `security.SafeReadFile`; replaced
   `noteUnresolvedFileRefs`). `domain.UserInput.SkillIDs` is pre-wired (reserved, unresolved).
   **Remaining:**
-  - `/compact` real reducer — build the generative Compaction summarizer in `internal/context`
-    (today an empty Phase-0 scaffold — the TODO's "existing reducer" was wrong) and fill in the
-    `Agent.Compact()` seam (summarize → `Conversation.Replace`, fire via `runHistoryRewriteHooks`).
-    When it becomes a real upstream call it must run on a worker goroutine, not block Update.
+  - `/compact` real reducer — **SHIPPED 2026-07-01.** The generative Compaction summarizer lives
+    in `internal/context` (`Compact`): it summarizes the conversation through one silent upstream
+    call and writes the summary back via `Conversation.Replace`, keeping the protected prefix
+    (`PrefixEnd`) verbatim. `Agent.Compact` drives it (quiescent-boundary guarded like
+    `ClearContext`), and the TUI runs it on a worker goroutine (spinner + `Esc`-cancel + gauge
+    reset). Wired as the built-in **default reducer** invoked directly — NOT through
+    `runHistoryRewriteHooks` (that stays the experimental-hook / `truncate_history` path, per
+    `internal/context/doc.go`). Deferred: the *automatic* budget-driven trigger (needs the
+    Budget allocator / real token accounting — TDD §8 #8); on-demand `/compact` is the v1 surface.
   - `/skill <name>` — **SHIPPED 2026-06-26** with the Skills system below: the "/" menu offers
     `/skill`, which chains into a skill picker (`acSkill` dropdown); a pick pops a chip onto
     `Model.pendingSkills`, and submit copies it into `UserInput.SkillIDs`. The loop

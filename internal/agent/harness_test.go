@@ -48,6 +48,19 @@ func (r echoResponder) Stream(context.Context, provider.Request) iter.Seq[provid
 	return streamReply(r.reply)
 }
 
+// recordingResponder is echoResponder that also captures the last request it was handed — the
+// fake the compaction test uses to assert the summary call carried the summarizer prompt and
+// the rendered transcript. A pointer receiver so last survives across calls.
+type recordingResponder struct {
+	reply string
+	last  provider.Request
+}
+
+func (r *recordingResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	r.last = req
+	return streamReply(r.reply)
+}
+
 // blockingResponder blocks until ctx is cancelled, then surfaces the cancellation as a
 // terminal stream error — the fake that drives the cancel-mid-stream path. started is
 // closed once the stream is in flight so the test can cancel deterministically (no sleep).

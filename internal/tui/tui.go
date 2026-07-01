@@ -46,8 +46,9 @@ type Engine interface {
 	// cancelledMsg (no worker owns the engine), so the post-Esc /clear or message is not
 	// rejected with ErrInputPending.
 	AbortExchange()
-	// Compact triggers generative Compaction on demand (the /compact command); a stub
-	// today returning domain.ErrCompactionNotImplemented. Called only at idle.
+	// Compact triggers generative Compaction on demand (the /compact command): it summarizes
+	// the conversation and replaces the folded history with the summary. A real upstream call,
+	// so the TUI drives it on a worker goroutine. Called only at idle.
 	Compact(context.Context) error
 	// Mode reports the Agent's autonomy mode (for the status line).
 	Mode() domain.Mode

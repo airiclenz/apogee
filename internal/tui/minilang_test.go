@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -69,20 +70,58 @@ func TestClearCommandSurfacesEngineError(t *testing.T) {
 	}
 }
 
-func TestCompactCommandStubNotes(t *testing.T) {
-	eng := &fakeEngine{} // default Compact returns ErrCompactionNotImplemented
+func TestCompactCommandLaunchesWorker(t *testing.T) {
+	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/compact")
 	m, cmd := stepCmd(t, m, keyEnter())
 
+	if m.state != stateRunning {
+		t.Errorf("state = %v, want running (/compact opens a summary call)", m.state)
+	}
+	if cmd == nil {
+		t.Fatal("/compact returned no Cmd; the worker was not launched")
+	}
+	// Drain the worker Cmd so eng.Compact actually runs on the worker path.
+	drainCmd(t, m, cmd)
 	if eng.compactCalls != 1 {
 		t.Errorf("Compact calls = %d, want 1", eng.compactCalls)
 	}
-	if m.state != stateIdle || cmd != nil {
-		t.Errorf("/compact launched a worker (state=%v cmd!=nil=%v); it is a local stub", m.state, cmd != nil)
+}
+
+func TestCompactDoneAddsNoteAndResetsGauge(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.state = stateRunning // the /compact worker is in flight
+	m.ctxUsed = 4200       // the gauge is lit from before compaction
+
+	m = step(t, m, compactDoneMsg{Err: nil})
+
+	if m.state != stateIdle {
+		t.Errorf("state = %v after compactDoneMsg, want idle", m.state)
 	}
-	if got := plain(m.View()); !strings.Contains(got, "not yet implemented") {
-		t.Errorf("transcript missing the not-implemented note:\n%s", got)
+	if m.ctxUsed != 0 {
+		t.Errorf("ctxUsed = %d, want 0 (the gauge resets so the next turn re-measures)", m.ctxUsed)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "context compacted") {
+		t.Errorf("transcript missing the success note:\n%s", got)
+	}
+}
+
+func TestCompactDoneSurfacesError(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.state = stateRunning
+	m.ctxUsed = 4200
+
+	m = step(t, m, compactDoneMsg{Err: errors.New("upstream boom")})
+
+	if m.state != stateIdle {
+		t.Errorf("state = %v after a failed compact, want idle", m.state)
+	}
+	if m.ctxUsed != 4200 {
+		t.Errorf("ctxUsed = %d, want it unchanged on failure (nothing was compacted)", m.ctxUsed)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "compact: upstream boom") {
+		t.Errorf("transcript missing the failure note:\n%s", got)
 	}
 }
 

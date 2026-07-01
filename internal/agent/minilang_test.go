@@ -53,13 +53,61 @@ func TestClearContextRefusedMidExchange(t *testing.T) {
 	}
 }
 
-func TestCompactIsNotImplementedStub(t *testing.T) {
+func TestCompactSummarizesAndReplacesHistoryKeepingPrefix(t *testing.T) {
+	up := &recordingResponder{reply: "COMPACTED-SUMMARY"}
+	a, err := newAgent(baseConfig(&recordingSink{}), up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// Two exchanges → conv = [user "task one", assistant, user "task two", assistant] (Len 4).
+	for _, text := range []string{"task one", "task two"} {
+		if err := a.Submit(domain.UserInput{Text: text}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if _, err := a.Step(context.Background()); err != nil {
+			t.Fatalf("Step: %v", err)
+		}
+	}
+	if a.conv.Len() != 4 {
+		t.Fatalf("precondition: conv.Len() = %d, want 4", a.conv.Len())
+	}
+
+	if err := a.Compact(context.Background()); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+
+	// History folds to the protected prefix (first user message) + one assistant summary.
+	if a.conv.Len() != 2 {
+		t.Fatalf("conv.Len() = %d after compaction, want 2 (prefix + summary)", a.conv.Len())
+	}
+	if got := a.conv.At(0); got.Role != domain.RoleUser || got.Content != "task one" {
+		t.Errorf("protected prefix not preserved: %+v", got)
+	}
+	sum := a.conv.At(1)
+	if sum.Role != domain.RoleAssistant || !strings.Contains(sum.Content, "COMPACTED-SUMMARY") {
+		t.Errorf("summary message wrong: %+v", sum)
+	}
+	// The summary call carried the summarizer system prompt + the rendered transcript.
+	last := up.last
+	if len(last.Messages) == 0 || last.Messages[0].Role != "system" {
+		t.Fatalf("summary request did not lead with a system prompt: %+v", last.Messages)
+	}
+	joined := last.Messages[0].Content + "\n" + last.Messages[len(last.Messages)-1].Content
+	for _, want := range []string{"compacting", "task one", "task two"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("summary request missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestCompactRefusedMidExchange(t *testing.T) {
 	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "x"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	if err := a.Compact(context.Background()); !errors.Is(err, domain.ErrCompactionNotImplemented) {
-		t.Errorf("Compact err = %v, want ErrCompactionNotImplemented", err)
+	a.inExchange = true // a mid-Exchange boundary — compacting here would orphan a half-run turn
+	if err := a.Compact(context.Background()); !errors.Is(err, domain.ErrInputPending) {
+		t.Errorf("Compact mid-exchange err = %v, want ErrInputPending", err)
 	}
 }
 

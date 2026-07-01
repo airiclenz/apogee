@@ -24,6 +24,7 @@ var (
 	_ tea.Msg = exchangeDoneMsg{}
 	_ tea.Msg = cancelledMsg{}
 	_ tea.Msg = errMsg{}
+	_ tea.Msg = compactDoneMsg{}
 )
 
 // eventMsg carries one engine Event into the Update loop. The teaSink wraps every Event
@@ -71,5 +72,13 @@ type cancelledMsg struct {
 // localise. Recovered tool/Mechanism faults arrive as ErrorEvents through the sink (ADR
 // 0007), not here — errMsg is reserved for the rare error the drive loop itself returns.
 type errMsg struct {
+	Err error
+}
+
+// compactDoneMsg is the /compact worker's terminal Msg (startCompact): Err is nil on a
+// successful compaction and carries whatever Agent.Compact reported otherwise. The model
+// records the outcome as a transcript note and returns to idle. A cancelled compaction
+// arrives as cancelledMsg instead, not here.
+type compactDoneMsg struct {
 	Err error
 }

@@ -242,6 +242,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
+	case compactDoneMsg:
+		// The /compact worker returned (startCompact). On success the history shrank, so reset the
+		// gauge to hidden — the next Turn's UsageEvent re-measures the smaller fill (foldStats); on
+		// failure surface the reason as a note. Either way the worker is done: return to idle.
+		if msg.Err != nil {
+			m.transcript.addNote("compact: " + msg.Err.Error())
+		} else {
+			m.ctxUsed = 0
+			m.transcript.addNote("context compacted")
+		}
+		m.finishWorker(stateIdle)
+		m.refreshViewport()
+		return m, nil
+
 	case spinner.TickMsg:
 		// Keep the chain alive only while running; dropping the tick when idle lets it
 		// die naturally (the spinner's tag mechanism prevents a doubled chain on restart).
@@ -482,11 +496,12 @@ func (m Model) skillDisplayNames(ids []string) []string {
 	return names
 }
 
-// runCommand handles a recognised local /command from the idle state. /continue is the one
-// command that opens an agent turn (a canned "Please continue"); /clear and /compact act on
-// the engine's context and stay idle, recording a transcript note. The input box and the
-// autocomplete overlay are cleared either way. Reached only from submit (stateIdle), so the
-// engine is quiescent — no worker owns it — and ClearContext/Compact are safe to call here.
+// runCommand handles a recognised local /command from the idle state. /continue and /compact
+// open a worker: /continue a canned "Please continue" turn, /compact a generative summary
+// call; /clear acts on the engine's context synchronously and stays idle, recording a
+// transcript note. The input box and the autocomplete overlay are cleared either way. Reached
+// only from submit (stateIdle), so the engine is quiescent — no worker owns it — and
+// ClearContext/Compact are safe to launch here.
 func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	m.autocomplete = autocompleteState{}
@@ -519,17 +534,16 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "compact":
-		// A stub until the generative reducer lands; surface whatever Compact reports. When it
-		// becomes a real upstream call it must move onto a worker goroutine (like startExchange)
-		// so it does not block the Update loop. Staged chips are dropped (the turn is reset).
+		// Compaction is a real upstream call (summary generation), so it rides a worker goroutine
+		// like /continue rather than blocking the Update loop (ADR 0011). Esc cancels it via
+		// stopWorker; the terminal compactDoneMsg records the outcome. Staged chips are dropped
+		// (the turn is reset).
 		m.pendingSkills = nil
-		if err := m.eng.Compact(m.parent); err != nil {
-			m.transcript.addNote("compact: " + err.Error())
-		} else {
-			m.transcript.addNote("context compacted")
-		}
-		m.layout()
-		return m, nil
+		m.layout() // reflow the emptied input box back to one row
+		cmd, cancel := startCompact(m.parent, m.eng)
+		m.cancel = cancel
+		m.state = stateRunning
+		return m, tea.Batch(cmd, m.spinner.Tick)
 	}
 	return m, nil
 }

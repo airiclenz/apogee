@@ -194,12 +194,5 @@ func (a *Agent) ClearContext() error {
 	return nil
 }
 
-// Compact triggers generative Compaction on demand (the /compact command): summarize the
-// conversation and write the summary back via Conversation.Replace, fired through the
-// existing runHistoryRewriteHooks path. The reducer that does this lives in internal/context,
-// which is still a Phase-0 scaffold, so Compact returns ErrCompactionNotImplemented today.
-// The seam exists now so the follow-up slice fills in the body without touching callers.
-func (a *Agent) Compact(ctx context.Context) error {
-	_ = ctx
-	return domain.ErrCompactionNotImplemented
-}
+// Compact (the /compact command's engine half) lives in compact.go alongside its provider
+// adapter and the generative reducer it drives (internal/context.Compact).

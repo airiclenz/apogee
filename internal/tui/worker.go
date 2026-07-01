@@ -27,6 +27,24 @@ func startExchange(parent context.Context, eng Engine, input domain.UserInput) (
 	return cmd, cancel
 }
 
+// startCompact builds the cancellable worker that runs one /compact over eng — a single
+// upstream summary call that must not block the Update loop (ADR 0011), so it rides the same
+// worker path as an Exchange. It returns the tea.Cmd the model schedules and the CancelFunc
+// the model stores so Esc cancels the in-flight compaction. A cancel surfaces as the shared
+// cancelledMsg (the model's cancel handling — AbortExchange is a safe no-op here); otherwise
+// the terminal Msg is compactDoneMsg carrying whatever Compact reported.
+func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	cmd := func() tea.Msg {
+		err := eng.Compact(ctx)
+		if ctx.Err() != nil {
+			return cancelledMsg{}
+		}
+		return compactDoneMsg{Err: err}
+	}
+	return cmd, cancel
+}
+
 // driveExchange runs one Exchange from its Submit to the quiescent Exchange boundary and
 // returns the single terminal Msg the model folds. It mirrors the canonical drive loop
 // (Agent.Run / the bench's coreagent.Run): Submit the input, then Step to the boundary,

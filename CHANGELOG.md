@@ -13,6 +13,26 @@ feature-parity track. See
 `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
 `docs/handoffs/2026-06-26 - 01 - skills-system.md`.
 
+### Context compaction (`/compact`)
+
+- **`/compact` now performs real generative compaction** (replaces the
+  `ErrCompactionNotImplemented` stub). The new `internal/context.Compact` reducer
+  summarizes the conversation through a single upstream call and replaces the folded
+  history with one assistant summary message, keeping the protected prefix (leading
+  system messages + the first user message, `Conversation.PrefixEnd`) verbatim so the
+  original task framing survives. A conversation with too little past the prefix is
+  skipped; a summary-call failure or cancellation leaves the history untouched.
+- **Wired through `Agent.Compact`** (guarded to a quiescent boundary like `ClearContext`,
+  returning `ErrInputPending` mid-Exchange). The summary call is *silent* — it reuses the
+  loop's request projection but emits no `TokenEvent`/`UsageEvent`, so it neither streams
+  into the transcript nor moves the live gauge; it runs at low temperature.
+- **TUI** drives `/compact` on a worker goroutine (it is a real upstream call and must not
+  block the `Update` loop — ADR 0011): the spinner runs, `Esc` cancels, and on success a
+  "context compacted" note lands while the context-fill gauge resets so the next Turn
+  re-measures the smaller fill.
+- **Removed** the now-unused `ErrCompactionNotImplemented` sentinel (it was never in a
+  released version).
+
 ### Fixes
 
 - **Context window now reads the runtime size from llama.cpp `/props`.** Discovery

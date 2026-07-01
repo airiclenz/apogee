@@ -178,7 +178,7 @@ func (f *fakeEngine) Compact(ctx context.Context) error {
 	if fn != nil {
 		return fn(ctx)
 	}
-	return domain.ErrCompactionNotImplemented
+	return nil
 }
 
 func (f *fakeEngine) Mode() domain.Mode { return domain.ModeAskBefore }
