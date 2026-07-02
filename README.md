@@ -20,8 +20,8 @@ Apogee brings together two things most coding agents keep separate:
 
 - **A complete agentic coding assistant** — the *agent loop*, with provider
   abstraction, a ~30-tool suite (file ops, grep/glob, git, terminal, web,
-  sub-agents), an MCP client, sessions, three autonomy modes (Plan / Ask-Before /
-  Auto), and security guardrails.
+  sub-agents), an MCP client, sessions, four autonomy modes (Plan / Ask-Before /
+  Allow-Edits / Auto), and security guardrails.
 - **Self-regulating mechanisms for small models** — features that make small,
   locally-run models measurably better at sustained agentic coding: context
   compression, tool-call validation + auto-retry, behavioural nudges, and a
@@ -42,26 +42,33 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-🚧 **Early / in active construction.** This is a fresh repository; subsystems are
-being built out deliberately. The embeddable agent core comes first (so the
-eval/simulation bench can drive it throughout the rewrite), with the TUI layered
-on top. See [`docs/plans/`](docs/plans/) for the implementation plan.
+**`v1.0.0` shipped (2026-06-25).** The embeddable agent core is stable — the public
+Go API follows semver from `v1.0.0` — with the full tool suite, MCP client,
+sub-agents, and OS-confined Auto mode (Linux landlock / macOS seatbelt; Windows
+confinement comes in a later phase, so Auto is not yet available there). Current
+work is the apogee-code feature-parity track: skills, context compaction
+(`/compact`), out-of-the-box web search, and model profiles have landed since.
+See [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
+next.
 
-## Key capabilities (target)
+## Key capabilities
 
 - **Model-agnostic, local-first** — any OpenAI-compatible endpoint; zero data leaves
   your machine with a local model.
 - **Agentic tool use** — multi-step loop with file edits, shell, search, git, web,
   and sub-agents.
-- **Three autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
-  Auto (autonomous within configured limits).
+- **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
+  Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
+  at the OS level via Linux landlock / macOS seatbelt).
 - **MCP support** — connect external tool servers over stdio / SSE / streamable-http.
-- **Model profiles** — adapt to models that don't speak native tool-calls: parse
-  markdown-fenced or custom-regex tool calls and strip inline thinking / harmony
-  channels, all driven by a per-model profile (native models stay byte-identical).
-- **Small-model mechanisms** — compression, validation/auto-retry, syntax + autofix,
-  behavioural nudges, and the cross-session Library, each gated so it only fires when
-  the model needs it.
+- **Model profiles** — adapt to models that don't speak native tool-calls: the tool
+  menu and format instructions are injected as text on the request side, markdown-fenced
+  or custom-regex tool calls are parsed back out of the reply, and inline thinking /
+  harmony channels are stripped — all driven by a per-model profile (native models
+  stay byte-identical on the wire).
+- **Small-model mechanisms** — context compaction has landed; tool-call
+  validation/auto-retry, syntax + autofix, behavioural nudges, and the cross-session
+  Library are the roadmap — each gated so it only fires when the model needs it.
 - **Validated, not assumed** — every mechanism is A/B-tested against real local models
   via an eval/simulation bench (which imports Apogee as a Go library and drives
   the real loop in-process) before it earns a place in the loop.
@@ -91,12 +98,10 @@ A `Makefile` wraps the common Go invocations:
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names.
 
-> **Note:** the interactive TUI now runs (Phase 2 complete) — launch it with
-> `apogee --endpoint <openai-compatible-url> --model <name>` to hold a real coding
-> conversation with a local model: assistant text streams, tool calls appear, and writes
-> prompt for approval (Plan + Ask-Before modes, over the local file toolset). Auto mode,
-> the full 30-tool suite, and MCP land in Phase 3. Track progress in
-> [`docs/plans/`](docs/plans/).
+> **Note:** launch the TUI with `apogee --endpoint <openai-compatible-url> --model <name>`
+> to hold a real coding conversation with a local model. All four autonomy modes, the
+> full tool suite, MCP, sub-agents, and skills are live; Auto mode needs OS confinement
+> (Linux and macOS today — Windows lands in a later phase).
 
 ## License
 
