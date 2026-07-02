@@ -31,14 +31,14 @@ type Agent struct {
 
 	// modeMu guards mode — the ONE field shared across goroutines, the deliberate exception to
 	// the single-goroutine contract above. The UI cycles the autonomy mode (Shift+Tab → SetMode)
-	// while the worker goroutine reads it during dispatch (Mode() in toolMenu / dispose); the
-	// RWMutex makes that overlap race-free. cfg.Mode stays the immutable construction seed.
+	// while the worker goroutine reads it during dispatch (Mode() in toolMenu / the Resolution);
+	// the RWMutex makes that overlap race-free. cfg.Mode stays the immutable construction seed.
 	modeMu sync.RWMutex
 	mode   domain.Mode // live autonomy mode; seeded from cfg.Mode at construction, swappable via SetMode
 
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
 	// parent's modeMu-guarded Mode accessor, captured at spawn (ADR 0013). The per-call
-	// disposition takes the TIGHTER of this and the child's own spawn mode, so a parent that
+	// Resolution takes the TIGHTER of this and the child's own spawn mode, so a parent that
 	// tightens mid-delegation (Shift+Tab down from Auto to Plan) gates/refuses the still-running
 	// child's next call, while a parent loosening can never loosen it. It is a closure over the
 	// accessor — NOT the shared mode field/mutex — so the child observes the parent's mode
@@ -154,7 +154,7 @@ func (a *Agent) Mode() domain.Mode {
 }
 
 // SetMode changes the autonomy mode for subsequent tool calls. It is safe to call from another
-// goroutine while a Step runs: the tool menu (Plan filter) and the per-call disposition both
+// goroutine while a Step runs: the tool menu (Plan filter) and the per-call Resolution both
 // read the mode through Mode() under the same lock, so the change lands on the next read with no
 // registry rebuild. A switch to Auto is safe even where fs-confinement is unavailable — the
 // subprocess surface gates through Approval ("confine if you can, gate if you can't", ADR 0012),

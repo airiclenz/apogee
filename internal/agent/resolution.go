@@ -5,6 +5,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // ----------------------------------------------------------------------------
@@ -25,11 +26,11 @@ import (
 // in the workspace (EvalRealPath touches disk) — is precomputed by dispatch and passed as a
 // bool. This keeps the whole autonomy-ladder decision in one table-testable place.
 //
-// This file is currently ADDITIVE: dispatch still runs the legacy disposition path
-// (disposition.go / dispatch.go); resolve() is exercised only by resolution_test.go. Item 2
-// of the Resolution refactor rewires dispatch to execute resolutions and retires
-// disposition. classifyTool / toolClass still live in disposition.go and are reused here;
-// item 2 moves them into this file when it deletes that path.
+// resolve() is the single decision point: dispatch (dispatch.go) is a thin executor that
+// gathers the facts resolutionInput carries, calls resolve() once, and mechanically carries
+// out the verdict — it holds no ladder, guard-tier, or demote decision of its own. The
+// tool-classification the ladder keys on (classifyTool / toolClass) lives here too, beside the
+// table that consumes it.
 
 // Model-facing refusal text and human-facing Approval reasons carried on a resolution. They
 // reproduce today's exact strings (dispatch.go / disposition.go) so the rewire in item 2 is
@@ -208,6 +209,44 @@ func resolve(in resolutionInput) resolution {
 
 	// 4. The ladder table, then the leaf overlays.
 	return applyOverlays(in, resolveLadder(in))
+}
+
+// toolClass is the blast-radius class the ladder keys on (confinement-execution-contract §4).
+// The order is significant: read-only wins (a read never gates), then the unfakeable
+// workspace-scoped-writer marker, then the external-effect kinds, then the subprocess marker,
+// and finally a write-capable tool Apogee cannot vouch for (3p-write).
+type toolClass int
+
+const (
+	classReadOnly        toolClass = iota // IsReadOnly
+	classWorkspaceWrite                   // workspaceScopedWriter marker (Apogee's own write)
+	classNetwork                          // ExternalEffectTool, kind network
+	classMCP                              // ExternalEffectTool, kind mcp
+	classSubprocess                       // SubprocessTool (shell/exec; OS-confinable)
+	classThirdPartyWrite                  // write-capable, none of the above (can't vouch for scoping)
+)
+
+// classifyTool maps a tool onto its blast-radius class. The classes are checked in a fixed
+// priority so a tool implementing several markers resolves deterministically: read-only first
+// (harmless), then Apogee's own writer, then the external kinds, then the confinable subprocess
+// surface, else a third-party in-process writer.
+func classifyTool(tool domain.Tool) toolClass {
+	if domain.IsReadOnly(tool) {
+		return classReadOnly
+	}
+	if tools.IsWorkspaceScopedWriter(tool) {
+		return classWorkspaceWrite
+	}
+	if ext, ok := tool.(domain.ExternalEffectTool); ok {
+		if ext.ExternalEffect() == domain.EffectNetwork {
+			return classNetwork
+		}
+		return classMCP
+	}
+	if domain.IsSubprocessTool(tool) {
+		return classSubprocess
+	}
+	return classThirdPartyWrite
 }
 
 // resolveLadder ports dispose()/disposeAuto() verbatim: the autonomy-ladder × tool-class ×

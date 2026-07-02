@@ -7,9 +7,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// TestAgentSetModeAffectsDispatch proves a runtime SetMode changes the per-call disposition on
+// TestAgentSetModeAffectsDispatch proves a runtime SetMode changes the per-call Resolution on
 // the SAME Agent instance with no rebuild: a write tool is refused under Plan and gated under
-// Allow-Edits, flipped live between the two dispose() calls. This is the load-bearing guarantee
+// Allow-Edits, flipped live between the two ladder checks. This is the load-bearing guarantee
 // behind Shift+Tab — cycling the mode changes ACTUAL gating, not just a label.
 func TestAgentSetModeAffectsDispatch(t *testing.T) {
 	sink := &recordingSink{}
@@ -22,14 +22,14 @@ func TestAgentSetModeAffectsDispatch(t *testing.T) {
 	}
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 
-	if got := a.dispose(write, call); got != dispoRefuse {
-		t.Fatalf("Plan dispose = %d, want dispoRefuse (%d)", got, dispoRefuse)
+	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call))).kind; got != resolveRefuse {
+		t.Fatalf("Plan ladder = %s, want resolveRefuse", got)
 	}
 
 	a.SetMode(domain.ModeAllowEdits)
 
-	if got := a.dispose(write, call); got != dispoGate {
-		t.Fatalf("after SetMode(allow-edits) dispose = %d, want dispoGate (%d)", got, dispoGate)
+	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call))).kind; got != resolveGate {
+		t.Fatalf("after SetMode(allow-edits) ladder = %s, want resolveGate", got)
 	}
 	if a.Mode() != domain.ModeAllowEdits {
 		t.Fatalf("Mode() = %q, want allow-edits", a.Mode())
@@ -59,7 +59,7 @@ func TestNewChildAgentInheritsLiveMode(t *testing.T) {
 }
 
 // TestSubAgentSeesParentTighteningMidRun is the ADR-0013 realisation acceptance: a sub-agent's
-// disposition tracks the parent's LIVE mode tighten-only. A child spawned in Auto auto-runs a
+// Resolution tracks the parent's LIVE mode tighten-only. A child spawned in Auto auto-runs a
 // write; the moment the parent tightens to Plan mid-delegation (Shift+Tab down), the child's
 // NEXT write refuses — the child no longer keeps auto-approving on its frozen spawn mode.
 func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
@@ -68,7 +68,7 @@ func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModeAuto
 	cfg.Confiner = eligibleConfiner{} // Auto needs a Confiner at construction (ADR 0012)
-	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (dispoRun)
+	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (resolveRun)
 	parent, err := newAgent(cfg, &scriptedResponder{})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -80,14 +80,14 @@ func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 
 	// Spawned in Auto, the child auto-runs the write — no refusal yet.
-	if got := child.dispose(write, call); got == dispoRefuse {
-		t.Fatalf("child spawned in Auto refused a write before any tightening (got %d)", got)
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call))).kind; got == resolveRefuse {
+		t.Fatalf("child spawned in Auto refused a write before any tightening (got %s)", got)
 	}
 
 	// The parent tightens to Plan MID-delegation; the still-running child must now refuse.
 	parent.SetMode(domain.ModePlan)
-	if got := child.dispose(write, call); got != dispoRefuse {
-		t.Fatalf("after the parent tightened to Plan, child write disposition = %d, want dispoRefuse (%d)", got, dispoRefuse)
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call))).kind; got != resolveRefuse {
+		t.Fatalf("after the parent tightened to Plan, child write ladder = %s, want resolveRefuse", got)
 	}
 }
 
@@ -109,14 +109,14 @@ func TestSubAgentParentLooseningCannotLoosenChild(t *testing.T) {
 	}
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 
-	if got := child.dispose(write, call); got != dispoRefuse {
-		t.Fatalf("child spawned in Plan write disposition = %d, want dispoRefuse (%d)", got, dispoRefuse)
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call))).kind; got != resolveRefuse {
+		t.Fatalf("child spawned in Plan write ladder = %s, want resolveRefuse", got)
 	}
 
 	// The parent loosens all the way to Auto; the child, spawned in Plan, must NOT loosen.
 	parent.SetMode(domain.ModeAuto)
-	if got := child.dispose(write, call); got != dispoRefuse {
-		t.Fatalf("after the parent loosened to Auto, child (spawned Plan) write disposition = %d, want dispoRefuse (%d) — loosening must stay impossible", got, dispoRefuse)
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call))).kind; got != resolveRefuse {
+		t.Fatalf("after the parent loosened to Auto, child (spawned Plan) write ladder = %s, want resolveRefuse — loosening must stay impossible", got)
 	}
 }
 
@@ -153,15 +153,15 @@ func TestSubAgentEffectiveModeConcurrent(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
 			_ = child.effectiveMode()
-			_ = child.dispose(write, call)
+			_ = resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call)))
 		}
 	}()
 	wg.Wait()
 }
 
 // TestAgentSetModeConcurrent runs SetMode (the UI side) against every worker-side live read
-// (Mode / dispose / toolMenu) under the race detector, proving the lock covers all of them. It
-// asserts nothing beyond "no data race" — that is the whole point of the mid-turn-switch design.
+// (Mode / the ladder / toolMenu) under the race detector, proving the lock covers all of them.
+// It asserts nothing beyond "no data race" — that is the whole point of the mid-turn-switch design.
 func TestAgentSetModeConcurrent(t *testing.T) {
 	sink := &recordingSink{}
 	write := fakeTool{name: "w"}
@@ -187,7 +187,7 @@ func TestAgentSetModeConcurrent(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
 			_ = a.Mode()
-			_ = a.dispose(write, call)
+			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call)))
 			_ = a.toolMenu()
 		}
 	}()

@@ -305,18 +305,42 @@ one level down (D2), for free, with no threading.
 
 ---
 
-## 4. The per-call disposition (D5) — the one table dispatch computes
+## 4. The per-call **Resolution** — the one verdict dispatch executes (D5)
 
-`needsApproval` becomes a disposition function returning one of four outcomes, keyed on
-`(mode, tool-class, confine-to-workspace, backend-caps)`. The **dangerous-action guard runs first**, in
-every mode, and can only *tighten* (ADR 0012 / P3.6); the table below is what runs *after* it clears.
+> **Amended 2026-07-02 (Resolution refactor, item 2).** §4 previously described only the
+> post-guard **ladder stage** (the "per-call disposition"). The **Resolution** subsumes it: the
+> single, complete verdict for one call — the guard floor, the ladder table, the confinement
+> capability, and the precomputed runtime contingency — computed in full by the pure `resolve()`
+> (`internal/agent/resolution.go`) *before* anything executes. Dispatch is a thin executor that
+> gathers facts, calls `resolve()` once, and carries out the verdict; it holds no ladder,
+> guard-tier, or demote decision of its own. "Disposition" is **retired from code** (it named only
+> the ladder stage). See CONTEXT.md → **Resolution** and the 2026-07-02 clarification in ADR 0013.
+> The section number is kept because code comments cite "§4".
+
+A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
+computed in a fixed, load-bearing order:
+
+1. **Guard floor first (tighten-only, ADR 0012 / P3.6).** A Tier-1 dangerous action or a tripped
+   circuit-breaker ⇒ **`Refuse`** in every mode. A Tier-2 dangerous action ⇒ **force** the Approver:
+   it upgrades any non-`Refuse` *leaf* verdict to a forced `Gate`. Applied to **leaf verdicts only**
+   — never to a `Delegate`.
+2. **`sub_agent` ⇒ `Delegate`** (ADR 0013): the recursion point drives a nested Agent, not a leaf
+   tool. A Tier-2 force is **deliberately not** applied here — nothing executes at delegation, so the
+   shared read-only floor re-fires on the child's own dangerous call. At the depth bound the
+   delegation is **`Refuse`d** defensively (belt-and-braces with the withheld-tool floor). An
+   **unknown tool** (a registry miss — e.g. a tool withheld at the depth bound) is `Refuse`d as a
+   dispatch fact, un-audited, before the ladder.
+3. **The ladder table (below) yields the leaf verdict**, then the leaf overlays finish it: a `Gate`
+   with **no Approver configured ⇒ `Refuse`** ("approval required but no Approver configured") — a
+   `Gate` always means the Approver is actually consulted; a `Gate` takes its `Reason` + `CacheKey`;
+   every `Confine` takes its box + a precomputed runtime `fallback` (both detailed after the table).
 
 Tool-classes: **RO** = `IsReadOnly`; **WS-write** = `workspaceScopedWriter` (§3); **subproc** =
 shell/exec subprocess tool (`terminal`/`python-exec`/`git`); **net** = `ExternalEffectTool` of kind
 `network`; **mcp** = `ExternalEffectTool` of kind `mcp`; **3p-write** = a write-capable tool that is
 neither RO, WS-write, nor External (a third-party in-process writer Apogee cannot vouch for).
 
-Outcomes: **run** = execute directly, no gate, no `Confine`; **confine** = execute inside
+Ladder-leaf outcomes: **run** = execute directly, no gate, no `Confine`; **confine** = execute inside
 `Confiner.Confine` (subprocess), no gate; **gate** = route through Approval (allow-for-session caches);
 **refuse** = Plan-mode write refusal.
 
@@ -340,6 +364,24 @@ Reading the load-bearing column (**Auto · `confine=true`**, the default): a sub
 out-of-workspace Apogee write **asks** (Apogee can inspect the path, so it can — unlike a subprocess);
 `web-fetch` **auto-runs** url-filtered (the network is open; a subprocess could `curl` the same host, and
 the native tool is the *safer* path); **MCP asks** (unfenceable server — the per-tool teeth, intact).
+
+**A `Gate` carries `Reason` + `CacheKey`.** `Reason` is the human-facing why, mapped from the tool's
+class — `network reach` (net), `unconfinable MCP tool` (mcp), `subprocess execution (confinement
+unavailable on this host)` (subproc), `out-of-workspace write` (WS-write), `write` (3p-write); a
+Tier-2-forced gate overrides it with `dangerous-action guard forced approval`. `CacheKey` is the
+allow-for-session key — the **tool name** today; a **forced** gate (Tier-2 or a runtime demote) skips
+the cache entirely and is never pre-allowable. *(Item 3 changes an **mcp** gate's `CacheKey` to the
+server grain `mcp-server:<alias>` per ADR 0012's server-grain promise; every other class keeps the
+tool-name key, so the change is a tighten-only degradation elsewhere.)*
+
+**A `Confine` carries a bounded runtime `fallback` (D4).** The caps check above is a *construction-time*
+promise; the box can still fail to establish at run time. So the **subproc, caps sufficient → confine**
+cell carries one precomputed contingency: if `Confine` returns `ErrConfinementUnavailable`, the call
+demotes to a **forced `Gate`** whose allow-continuation **re-runs the subprocess unconfined** (Approval
+is now the bound — the same "gate if you can't" outcome, decided at run time); with **no Approver** the
+fallback is a **`Refuse`** ("subprocess could not be confined and approval was not granted"). The
+fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
+it without re-deciding.
 
 > **v1 realisation gap to close in P3.7 (flagged, not silent).** The "WS-write, target out of workspace →
 > gate" row needs the write tool to actually *perform* an approved out-of-workspace write — today

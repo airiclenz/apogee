@@ -147,7 +147,7 @@ decision. Use lightweight fake tools implementing the marker interfaces (see
 
 ---
 
-## 2. Rewire dispatch to execute Resolutions; retire disposition; amend contract §4 (behavior-preserving)
+## 2. Rewire dispatch to execute Resolutions; retire disposition; amend contract §4 (behavior-preserving) — ✅ DONE (2026-07-02)
 
 **What:** make `dispatch.go` a thin executor over `resolve()`, delete `disposition.go`, and
 amend the contract — one commit.

@@ -13,6 +13,18 @@ feature-parity track. See
 `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
 `docs/handoffs/2026-06-26 - 01 - skills-system.md`.
 
+### Dispatch decision collapsed into one Resolution verdict (internal refactor)
+
+- **The per-call dispatch decision is now one `Resolution`**, computed by a single pure resolver
+  (`internal/agent/resolution.go`): the tighten-only guard floor, the autonomy-ladder × blast-radius
+  table, the confinement-capability check, and the precomputed runtime-demote contingency are all
+  decided in full before anything executes. `internal/agent/dispatch.go` is now a thin executor that
+  gathers facts, calls the resolver once, and carries the verdict out — it holds no ladder,
+  guard-tier, or demote decision of its own. The old `disposition.go` decision path is retired.
+  **No behavior change**: unexported and internal-only (no public API / semver impact). The term
+  "disposition" is retired from code, surviving in prose only as the historical name of the
+  post-guard ladder stage. `docs/design/confinement-execution-contract.md` §4 amended in place.
+
 ### Compact tool print-outs in the chat (full built-in coverage)
 
 - **The TUI's tool-presentation registry now covers every built-in tool**, not just the

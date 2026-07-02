@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // dispatchOutcome reports whether a Turn's tool dispatch ran to completion or was cut short
@@ -16,10 +19,11 @@ type dispatchOutcome int
 const (
 	dispatchDone dispatchOutcome = iota
 	dispatchCancelled
-	// dispatchConfinementUnavailable reports that a dispoConfine subprocess call could not
-	// be confined at run time (the Confiner returned ErrConfinementUnavailable). The call did
-	// NOT run; resolveAndExecute demotes it to Approval — the runtime "confine if you can,
-	// gate if you can't" net (confinement-execution-contract §2.2; carried finding #2).
+	// dispatchConfinementUnavailable reports that a Confine subprocess call could not be
+	// confined at run time (the Confiner returned ErrConfinementUnavailable). The call did NOT
+	// run; the executor follows the verdict's precomputed fallback — a forced Approval gate
+	// whose allow-continuation re-runs the call unconfined (Resolution D4;
+	// confinement-execution-contract §4).
 	dispatchConfinementUnavailable
 )
 
@@ -55,96 +59,170 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 	return dispatchDone
 }
 
-// resolveAndExecute resolves a tool call against the registry, applies the always-on
-// security guardrails (D6) and the per-call blast-radius disposition (D5), and executes
-// it — returning the result (or an error result) and whether ctx was cancelled mid-flight.
+// resolveAndExecute gathers the facts one tool call is decided from — the registry lookup, the
+// always-on guardrails, the effective mode, the caps probe, and the one on-disk write-target
+// check — computes the call's complete Resolution once (resolve(), resolution.go), and then
+// EXECUTES that verdict mechanically. It holds no ladder, guard-tier, or demote decision of its
+// own: resolve() decides, the switch below carries it out (Resolution D6;
+// confinement-execution-contract §4). It returns the tool result (or an error result) and
+// whether ctx was cancelled mid-flight.
 //
-// The guardrails (security.Guards) run FIRST, in every mode and independent of the
-// Confiner, and are tighten-only (ADR 0012): a Tier-1 dangerous action or a tripped
-// circuit-breaker refuses the call outright; a Tier-2 dangerous action forces the
-// Approver even in Auto. They run ahead of the mode disposition — they never loosen it.
-//
-// The disposition (D5; disposition.go) then decides the call's fate by blast radius:
-// run directly, run OS-confined (subprocess surface in Auto), gate through Approval, or
-// refuse (Plan-mode write). A Tier-2 force-approval upgrades any non-refuse disposition
-// to a gate (the guardrail can only tighten).
+// An unknown tool is rejected here, before resolve(): the registry miss is a dispatch fact, and
+// short-circuiting it keeps a withheld tool (e.g. sub_agent at the depth bound) resolving as an
+// unknown tool exactly as before, un-audited (Resolution D8). resolve() has a matching
+// unknown-tool row for its own test, but dispatch never reaches it.
 func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
 		return errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool)), dispatchDone
 	}
 
-	guard := a.guards.PreExecute(call)
-	if guard.Outcome == security.GuardRefuse {
-		result := errorToolResult(call.ID, guardRefusalMessage(guard))
-		a.recordBlocked(turn, call, guard.Audit, guard.Reason, result)
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: guardRefusalMessage(guard)})
-		return result, dispatchDone
-	}
+	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call)))
 
-	// The sub_agent call is the RECURSION POINT (ADR 0013, D2), not a leaf tool: drive a
-	// nested Agent rather than running the disposition table. It is never Confine-wrapped or
-	// gated AS A UNIT and carries no disposition marker — each CHILD tool call inside the
-	// nested loop gets the full per-call disposition one level down, using the parent's
-	// threaded mode / confiner / approver / guardrails. The dangerous-action floor above still
-	// applies to the delegation call itself (tighten-only), so a Tier-1 task is refused here.
-	if isSubAgentCall(call) {
-		result, outcome := a.runSubAgent(ctx, call)
-		if outcome == dispatchCancelled {
-			return result, dispatchCancelled
-		}
-		a.recordExecuted(turn, call, guard.Audit, guard.Reason, result)
-		return result, dispatchDone
+	switch verdict.kind {
+	case resolveRefuse:
+		return a.executeRefuse(turn, call, verdict), dispatchDone
+	case resolveDelegate:
+		return a.executeDelegate(ctx, turn, call, verdict)
+	case resolveGate:
+		return a.executeGate(ctx, turn, tool, call, verdict)
+	case resolveConfine:
+		return a.executeConfine(ctx, turn, tool, call, verdict)
+	default: // resolveRun
+		return a.executeRun(ctx, turn, tool, call, verdict)
 	}
+}
 
-	dispo := a.dispose(tool, call)
-	if dispo == dispoRefuse {
-		// The Plan menu hides write tools; refuse one defensively if the model calls it.
-		return errorToolResult(call.ID, "plan mode: write tools are not permitted"), dispatchDone
+// resolutionInput assembles the facts resolve() decides from for one call: the effective mode,
+// the resolved tool, the guardrail verdict, the confine-to-workspace flag, the backend caps
+// probe, the precomputed on-disk write-target check (the one I/O-tainted fact — resolve() does
+// none), the sub-agent depth bound, whether an Approver is configured, and the confinement box
+// a Confine verdict would run inside. It is dispatch's fact-gathering; the verdict logic lives
+// entirely in resolve().
+func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard security.PreCheck) resolutionInput {
+	return resolutionInput{
+		mode:                   a.effectiveMode(),
+		call:                   call,
+		tool:                   tool,
+		guard:                  guard,
+		confineToWorkspace:     a.cfg.ConfineToWorkspace,
+		fsConfineAvailable:     a.fsConfinementAvailable(),
+		writeTargetInWorkspace: a.writeTargetInWorkspace(tool, call),
+		atDepthBound:           a.depth >= maxSubAgentDepth,
+		approverPresent:        a.cfg.Approver != nil,
+		box: domain.ConfinementBox{
+			WorkspaceRoot: a.cfg.WorkspaceDir,
+			WritablePaths: a.cfg.ConfineWritablePaths,
+			NetworkAllow:  a.cfg.ConfineNetworkAllow,
+		},
 	}
+}
 
-	// A Tier-2 dangerous action forces the Approver even where the disposition would not
-	// (e.g. an Auto confine/run): the guardrail can only tighten.
-	forceApproval := guard.Outcome == security.GuardForceApproval
-	needGate := dispo == dispoGate || forceApproval
-	allowed, outcome := a.approve(ctx, turn, tool, call, needGate, forceApproval)
+// executeRun runs a Run verdict directly — no Approval, no Confine — and records it. It is also
+// the shared "run it now" tail for an approved Gate and an approved runtime-demote re-run, both
+// of which run unconfined once the human has authorised the call.
+func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
+	result, outcome := a.executeTool(ctx, turn, tool, call, nil /* no confinement box */)
+	if outcome == dispatchCancelled {
+		return result, dispatchCancelled
+	}
+	a.recordExecutedTrip(turn, call, verdict, result)
+	return result, dispatchDone
+}
+
+// executeGate routes a Gate verdict through the Approver and, if allowed, runs it unconfined.
+// The resolver guarantees an Approver is present for a Gate (a gate with none is folded to a
+// Refuse — Resolution D5), so nothing runs unapproved here. A forced gate skips the
+// allow-for-session cache; a deny (or a nil Approver defensively) refuses the call.
+func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
+	allowed, outcome := a.approve(ctx, turn, call, verdict.force, verdict.cacheKey, verdict.reason)
 	if outcome == dispatchCancelled {
 		return domain.ToolResult{}, dispatchCancelled
 	}
 	if !allowed {
 		result := errorToolResult(call.ID, "tool call denied by approver")
-		a.recordBlocked(turn, call, guard.Audit, guard.Reason, result)
+		a.recordBlocked(turn, call, verdict.auditDecision, verdict.auditReason, result)
+		return result, dispatchDone
+	}
+	return a.executeRun(ctx, turn, tool, call, verdict)
+}
+
+// executeConfine runs a Confine verdict's subprocess inside the verdict's box. If the box
+// cannot be established at run time (the subprocess tool returns ErrConfinementUnavailable
+// rather than running unconfined), it follows the verdict's precomputed fallback instead of
+// deciding anew — the runtime "confine if you can, gate if you can't" net (Resolution D4).
+func (a *Agent) executeConfine(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
+	result, outcome := a.executeTool(ctx, turn, tool, call, &verdict.box)
+	if outcome == dispatchCancelled {
+		return result, dispatchCancelled
+	}
+	if outcome == dispatchConfinementUnavailable {
+		return a.executeConfineFallback(ctx, turn, tool, call, verdict)
+	}
+	a.recordExecutedTrip(turn, call, verdict, result)
+	return result, dispatchDone
+}
+
+// executeConfineFallback carries out a Confine verdict's precomputed runtime-demote fallback
+// (Resolution D4) after the box could not be established: it surfaces the demote event, then
+// executes the fallback the resolver already chose — a forced Approval gate whose
+// allow-continuation re-runs the call UNCONFINED (Approval is now the bound), or, when no
+// Approver is configured, a Refuse. The executor follows the plan; it never decides.
+func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
+	a.cfg.Events.Emit(domain.ErrorEvent{
+		EventBase: a.base(turn),
+		Source:    call.Tool,
+		Err:       "confinement unavailable at run time: demoting subprocess call to Approval",
+	})
+
+	fb := verdict.fallback
+	if fb.kind == resolveRefuse {
+		// No Approver: the subprocess could not be confined and no human could authorise the
+		// unconfined run.
+		result := errorToolResult(call.ID, fb.reason)
+		a.recordBlocked(turn, call, fb.auditDecision, fb.auditReason, result)
 		return result, dispatchDone
 	}
 
-	result, execOutcome := a.executeTool(ctx, turn, tool, call, dispo)
-	if execOutcome == dispatchCancelled {
+	allowed, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, fb.reason)
+	if outcome == dispatchCancelled {
+		return domain.ToolResult{}, dispatchCancelled
+	}
+	if !allowed {
+		result := errorToolResult(call.ID, confineDemoteRefuseReason)
+		a.recordBlocked(turn, call, fb.auditDecision, fb.auditReason, result)
+		return result, dispatchDone
+	}
+	// Approval granted: re-run with NO confinement handle installed (the call already failed to
+	// confine, and Approval is the bound the human granted).
+	return a.executeRun(ctx, turn, tool, call, verdict)
+}
+
+// executeDelegate drives the sub_agent recursion point (a nested Agent) and records the
+// delegation. runSubAgent keeps its own defensive depth check — belt-and-braces with the
+// resolver's depth-bound row and the withheld-tool floor (ADR 0013 defence in depth) — so the
+// bound holds even if the call is reached by another route.
+func (a *Agent) executeDelegate(ctx context.Context, turn int, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
+	result, outcome := a.runSubAgent(ctx, call)
+	if outcome == dispatchCancelled {
 		return result, dispatchCancelled
 	}
-	if execOutcome == dispatchConfinementUnavailable {
-		// "Confine if you can, gate if you can't" at RUNTIME (carried finding #2): the
-		// disposition chose dispoConfine (caps reported sufficient at construction), but the
-		// backend could not establish the box when the subprocess tool tried to confine. The
-		// call did NOT run unconfined — runSubprocess refused. Demote to Approval and, if the
-		// human allows, re-run unconfined (Approval is now the bound, the §4 gate row).
-		result, execOutcome = a.executeWithApprovalFallback(ctx, turn, tool, call, guard)
-		if execOutcome == dispatchCancelled {
-			return result, dispatchCancelled
-		}
-	}
-
-	// Post-execution guardrails: feed the circuit-breaker the outcome (surfacing a
-	// single ErrorEvent on the trip edge so a runaway loop is halted, not crashed),
-	// append the audit record, and emit the AuditEvent so the trail is observable (M1).
-	if tripped := a.recordExecuted(turn, call, guard.Audit, guard.Reason, result); tripped {
-		a.cfg.Events.Emit(domain.ErrorEvent{
-			EventBase: a.base(turn),
-			Source:    call.Tool,
-			Err: fmt.Sprintf("circuit-breaker tripped: tool %q failed %d times with identical arguments; "+
-				"further identical calls will be refused", call.Tool, a.guards.Breaker.Threshold()),
-		})
-	}
+	a.recordExecuted(turn, call, verdict.auditDecision, verdict.auditReason, result)
 	return result, dispatchDone
+}
+
+// executeRefuse carries out a Refuse verdict: an error result plus the exact audit/event trail
+// its source produces today (Resolution D8). A guard hard-refuse and a nil-Approver refuse
+// carry the guard's pass-through audit decision, so they are recorded and surfaced; an
+// unknown-tool (rejected before resolve) and a Plan-mode write refuse carry none, so they are
+// neither.
+func (a *Agent) executeRefuse(turn int, call domain.ToolCall, verdict resolution) domain.ToolResult {
+	result := errorToolResult(call.ID, verdict.reason)
+	if verdict.auditDecision != "" {
+		a.recordBlocked(turn, call, verdict.auditDecision, verdict.auditReason, result)
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: verdict.reason})
+	}
+	return result
 }
 
 // guardRefusalMessage renders the model-facing reason a guardrail refused a call.
@@ -165,38 +243,23 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 	return a.tools.Lookup(name)
 }
 
-// approve consults the Approver when the disposition (or a forced guardrail) requires a
-// gate, returning whether the call may run. It honours allow-for-session (remembered for
-// the rest of the Session) and reports dispatchCancelled if ctx is cancelled while the
-// human deliberates.
+// approve consults the Approver for a Gate verdict, returning whether the call may run. It
+// honours allow-for-session — remembered for the rest of the Session under the verdict's
+// cacheKey — unless force is set: a forced gate (a Tier-2 speed-bump or a runtime demote) is a
+// per-call event, not a pre-allowable convenience. reason feeds the Approval prompt. It reports
+// dispatchCancelled if ctx is cancelled while the human deliberates.
 //
-// gate is the disposition's verdict that this call must clear the Approver (dispoGate, or
-// a Tier-2 force-approval). force distinguishes the Tier-2 case: a forced gate ignores the
-// allow-for-session cache — a force-approval is a per-call speed-bump, not a thing the user
-// can pre-allow for the Session. A nil Approver while a gate is required ⇒ refuse rather
-// than run unapproved.
-func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, gate, force bool) (bool, dispatchOutcome) {
-	if !gate {
-		return true, dispatchDone
-	}
-	if !force && a.approved[tool.Name()] {
+// The resolver only produces a Gate when an Approver is configured (a gate with none is a
+// Refuse — Resolution D5), so the nil-Approver guard below is defensive: it refuses rather than
+// dereferencing a nil Approver, never running unapproved.
+func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, force bool, cacheKey, reason string) (bool, dispatchOutcome) {
+	if !force && a.approved[cacheKey] {
 		return true, dispatchDone
 	}
 	if a.cfg.Approver == nil {
-		// A gate is required but the host supplied no Approver: refuse rather than run an
-		// unapproved write / unconfinable / dangerous tool.
-		a.cfg.Events.Emit(domain.ErrorEvent{
-			EventBase: a.base(turn),
-			Source:    "loop",
-			Err:       "approval required but no Approver configured",
-		})
 		return false, dispatchDone
 	}
 
-	reason := a.approvalReason(tool)
-	if force {
-		reason = "dangerous-action guard forced approval"
-	}
 	areq := domain.ApprovalRequest{Tool: call.Tool, Arguments: call.Arguments, Reason: reason}
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
@@ -213,7 +276,7 @@ func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call do
 		if a.approved == nil {
 			a.approved = make(map[string]bool)
 		}
-		a.approved[tool.Name()] = true
+		a.approved[cacheKey] = true
 		return true, dispatchDone
 	case domain.ApprovalAllow:
 		return true, dispatchDone
@@ -222,35 +285,19 @@ func (a *Agent) approve(ctx context.Context, turn int, tool domain.Tool, call do
 	}
 }
 
-// approvalReason is the human-facing why for the Approval prompt, derived from the tool's
-// blast-radius class so the human sees what kind of reach they are authorising.
-func (a *Agent) approvalReason(tool domain.Tool) string {
-	switch classifyTool(tool) {
-	case classNetwork:
-		return "network reach"
-	case classMCP:
-		return "unconfinable MCP tool"
-	case classSubprocess:
-		return "subprocess execution (confinement unavailable on this host)"
-	case classWorkspaceWrite:
-		return "out-of-workspace write"
-	default:
-		return "write"
-	}
-}
-
-// executeTool runs one tool under a recover boundary (ADR 0007): a panic becomes an
-// ErrorEvent and an error tool-result so the loop survives; a ctx cancellation propagates as
-// dispatchCancelled; any other Execute error is surfaced to the model as an error result
-// rather than failing the Turn (a tool returns a Go error only for cancellation).
+// executeTool runs one tool under a recover boundary (ADR 0007): a panic becomes an ErrorEvent
+// and an error tool-result so the loop survives; a ctx cancellation propagates as
+// dispatchCancelled; any other Execute error is surfaced to the model as an error result rather
+// than failing the Turn (a tool returns a Go error only for cancellation).
 //
-// dispo carries the blast-radius disposition: a dispoConfine subprocess call runs with the
-// Confinement handle (Confiner + box) installed in its context, so the subprocess tool
-// confines the *exec.Cmd it builds (confinement-execution-contract §2.2). An
-// ExternalEffectTool routes through the injected ExternalEffects boundary (ADR 0008) when
-// the host supplied one, so the bench can stub network/MCP deterministically; else it runs
-// live.
-func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, dispo disposition) (result domain.ToolResult, outcome dispatchOutcome) {
+// When box is non-nil the call is a Confine verdict: the Confinement handle (Confiner + box) is
+// installed in its context, so a subprocess tool confines the *exec.Cmd it builds
+// (confinement-execution-contract §2.2). A subprocess tool that cannot establish the box at run
+// time returns ErrConfinementUnavailable rather than running unconfined; executeTool surfaces
+// that as dispatchConfinementUnavailable so the caller follows the verdict's demote fallback.
+// An ExternalEffectTool routes through the injected ExternalEffects boundary (ADR 0008) when
+// the host supplied one; else it runs live.
+func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, box *domain.ConfinementBox) (result domain.ToolResult, outcome dispatchOutcome) {
 	outcome = dispatchDone
 	defer func() {
 		if r := recover(); r != nil {
@@ -264,13 +311,13 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		}
 	}()
 
-	if dispo == dispoConfine {
+	if box != nil {
 		// Install the Confinement handle so the subprocess tool confines the command it
-		// launches. The disposition only chose dispoConfine after confirming caps (§4), so
-		// the Confiner is non-nil and fs-confinement-capable here.
+		// launches. resolve() chose Confine only after confirming caps (§4), so the Confiner is
+		// non-nil and fs-confinement-capable here.
 		ctx = domain.WithConfinement(ctx, domain.Confinement{
 			Confiner: a.cfg.Confiner,
-			Box:      a.confinementBox(),
+			Box:      *box,
 		})
 	}
 
@@ -280,10 +327,10 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 			return domain.ToolResult{}, dispatchCancelled
 		}
 		// A subprocess tool that could not confine its command (the backend returned
-		// ErrConfinementUnavailable when asked to wrap the cmd) reports it as a Go error
-		// rather than running unconfined. Surface it as the demote signal so dispatch routes
-		// the call to Approval instead of failing it (carried finding #2). This only arises
-		// on a dispoConfine call (the only path that installs a Confinement handle).
+		// ErrConfinementUnavailable when asked to wrap the cmd) reports it as a Go error rather
+		// than running unconfined. Surface it as the demote signal so the caller follows the
+		// verdict's fallback (Resolution D4). This only arises on a Confine call (the only path
+		// that installs a Confinement handle).
 		if errors.Is(err, domain.ErrConfinementUnavailable) {
 			return domain.ToolResult{}, dispatchConfinementUnavailable
 		}
@@ -293,37 +340,10 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	return res, dispatchDone
 }
 
-// executeWithApprovalFallback is the runtime demote-to-Approval path for a subprocess call
-// the disposition chose to confine but whose Confiner could not establish the box at run time
-// (carried finding #2). It gates the call through the Approver (a forced gate — a runtime
-// safety event, not a pre-allowable convenience) and, if allowed, re-runs the tool UNCONFINED
-// (dispoRun): Approval is now the blast-radius bound, exactly the §4 "subproc, caps
-// insufficient → gate" row applied at run time. A nil Approver or a deny refuses the call.
-func (a *Agent) executeWithApprovalFallback(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, guard security.PreCheck) (domain.ToolResult, dispatchOutcome) {
-	a.cfg.Events.Emit(domain.ErrorEvent{
-		EventBase: a.base(turn),
-		Source:    call.Tool,
-		Err:       "confinement unavailable at run time: demoting subprocess call to Approval",
-	})
-
-	allowed, outcome := a.approve(ctx, turn, tool, call, true /* gate */, true /* force */)
-	if outcome == dispatchCancelled {
-		return domain.ToolResult{}, dispatchCancelled
-	}
-	if !allowed {
-		result := errorToolResult(call.ID, "subprocess could not be confined and approval was not granted")
-		a.recordBlocked(turn, call, guard.Audit, guard.Reason, result)
-		return result, dispatchDone
-	}
-	// Re-run with NO confinement handle installed (dispoRun): the call already failed to
-	// confine, and Approval is now the bound the human granted.
-	return a.executeTool(ctx, turn, tool, call, dispoRun)
-}
-
 // runTool routes the call to the injected ExternalEffects boundary for an external-effect
 // tool when one is configured (ADR 0008 — the single non-forkable-effect seam, both network
 // and MCP kinds), otherwise to the tool's live Execute. The gating decision keyed on the
-// effect KIND (the disposition); routing here is the SEPARATE concern of where the effect
+// effect KIND (the Resolution); routing here is the SEPARATE concern of where the effect
 // actually runs, so the two stay distinct (confinement-execution-contract §8 / task P3.4).
 func (a *Agent) runTool(ctx context.Context, tool domain.Tool, call domain.ToolCall) (domain.ToolResult, error) {
 	if _, isExternal := tool.(domain.ExternalEffectTool); isExternal && a.cfg.ExternalEffects != nil {
@@ -332,19 +352,54 @@ func (a *Agent) runTool(ctx context.Context, tool domain.Tool, call domain.ToolC
 	return tool.Execute(ctx, call)
 }
 
-// confinementBox builds the ConfinementBox a confined subprocess runs inside: the injected
-// workspace as the writable root, plus the per-project writable/network allowlists the host
-// folded into Config. Box construction (toolchain cache/temp dirs, etc.) is the host's
-// concern (confinement-execution-contract §7); the loop confines to whatever box it builds
-// from the injected roots. Backends canonicalize the roots to the kernel's view where their
-// matching model requires it (seatbelt resolves symlinks; landlock is fd-based, so neither
-// needs the caller to pre-resolve).
-func (a *Agent) confinementBox() domain.ConfinementBox {
-	return domain.ConfinementBox{
-		WorkspaceRoot: a.cfg.WorkspaceDir,
-		WritablePaths: a.cfg.ConfineWritablePaths,
-		NetworkAllow:  a.cfg.ConfineNetworkAllow,
+// effectiveMode is the autonomy mode the per-call Resolution runs under. For a top-level Agent
+// it is simply the Agent's own live mode. For a sub-agent (liveMode != nil) it is the TIGHTER of
+// the child's spawn mode and the parent's live mode (ADR 0013), so a parent tightening
+// mid-delegation (Shift+Tab from Auto down to Plan) gates/refuses the still-running child's next
+// call, while a parent loosening never loosens the child. Both modes are read under their own
+// modeMu locks (Mode() and the captured accessor), so a concurrent SetMode on either agent is
+// observed race-free.
+func (a *Agent) effectiveMode() domain.Mode {
+	own := a.Mode()
+	if a.liveMode == nil {
+		return own
 	}
+	return domain.TighterMode(own, a.liveMode())
+}
+
+// writeTargetInWorkspace reports whether a workspace-scoped writer's call targets a path inside
+// the workspace root. A call with no inspectable target (ok==false) is treated as in-bounds (the
+// Resolution then runs it, path-safety bounding it at Execute). A tool that is not a
+// workspace-scoped writer is never in-workspace by this seam. This is the one I/O-tainted fact
+// dispatch precomputes for resolve() (EvalRealPath touches disk).
+func (a *Agent) writeTargetInWorkspace(tool domain.Tool, call domain.ToolCall) bool {
+	abs, ok := tools.WorkspaceWriteTarget(tool, call)
+	if !ok {
+		return true // nothing inspectable to classify ⇒ treat as in-bounds (Execute path-bounds it)
+	}
+	return pathWithin(abs, a.cfg.WorkspaceDir)
+}
+
+// fsConfinementAvailable reports whether the injected Confiner can enforce filesystem
+// confinement on this host — the caps gate the Resolution checks before choosing to confine a
+// subprocess tool (confinement-execution-contract §4/§5).
+func (a *Agent) fsConfinementAvailable() bool {
+	return a.cfg.Confiner != nil && a.cfg.Confiner.Capabilities().FSWrite
+}
+
+// pathWithin reports whether abs (an already-resolved real path) is the workspace root or lives
+// beneath it, resolving the root through symlinks the same way the write tool's target resolver
+// does so the two agree (e.g. macOS /tmp). An empty root cannot contain anything, so a write is
+// treated as out-of-workspace — the safe default that gates.
+func pathWithin(abs, root string) bool {
+	if root == "" {
+		return false
+	}
+	realRoot := security.EvalRealPath(filepath.Clean(root))
+	if abs == realRoot {
+		return true
+	}
+	return strings.HasPrefix(abs, realRoot+string(filepath.Separator))
 }
 
 // appendToolResult commits a tool result to the conversation as a tool message (linked to
@@ -358,6 +413,20 @@ func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
 // than returned as a Go error, which the loop reserves for ctx cancellation (ADR 0007).
 func errorToolResult(callID, message string) domain.ToolResult {
 	return domain.ToolResult{CallID: callID, Content: message, IsError: true}
+}
+
+// recordExecutedTrip records an executed call's audit + circuit-breaker outcome and surfaces the
+// single ErrorEvent on the breaker's trip edge (so a runaway identical-failure loop is halted,
+// not crashed). It is the shared post-execution tail of a Run and a Confine verdict.
+func (a *Agent) recordExecutedTrip(turn int, call domain.ToolCall, verdict resolution, result domain.ToolResult) {
+	if tripped := a.recordExecuted(turn, call, verdict.auditDecision, verdict.auditReason, result); tripped {
+		a.cfg.Events.Emit(domain.ErrorEvent{
+			EventBase: a.base(turn),
+			Source:    call.Tool,
+			Err: fmt.Sprintf("circuit-breaker tripped: tool %q failed %d times with identical arguments; "+
+				"further identical calls will be refused", call.Tool, a.guards.Breaker.Threshold()),
+		})
+	}
 }
 
 // recordExecuted appends the executed call's audit record (feeding the circuit-breaker) AND
