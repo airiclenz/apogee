@@ -71,6 +71,28 @@ its `provider/` package; there is no intervening proxy.
 _Avoid_: "the model server", "the backend" (a `backend` detector package may exist, but
 it detects Upstreams — it is not the Upstream).
 
+**Model profile**:
+The per-model description Apogee carries of *how a given small model speaks the wire* — two
+**orthogonal** axes: its **tool-call format** (native structured `tool_calls`, or a text format
+the model emits inline in its content — **markdown-fenced** or a **custom regex**) and its
+**thinking channel** style. Orthogonal because a model can emit native tool calls *and* inline
+thinking (gpt-oss does both). The profile drives which parser and content-stripper the loop
+selects at the parse seam; a **zero profile is the native, no-inline-thinking default** (today's
+behaviour). It is a `domain` type on `Config` (declarative data — [ADR 0010](docs/adr/0010-package-layout-domain-core-and-thin-root-facade.md)),
+translated to the `processing` parsers at the boundary, not the parsers' own config.
+_Avoid_: "model config" (overloaded with sampling/endpoint knobs), "adapter", "format" alone
+(there are two axes, not one).
+
+**Thinking channel** (a model's private reasoning):
+The reasoning stream a model emits separately from its user-facing answer — either **delimited**
+inline (`<think>…</think>`), **harmony** (gpt-oss's `<|channel|>analysis…<|message|>…`), or split
+out by the Upstream into a `reasoning_content` field. Apogee **strips** inline channels from
+visible content and preserves them as reasoning in history; it never sends them back Upstream.
+Harmony is a *content-stripping* concern only — a harmony model's tool calls arrive **native**
+(the Upstream parses harmony server-side), so there is no harmony tool-call text parser.
+_Avoid_: "chain-of-thought" (a prompting technique, not the wire channel), "commentary" (that is
+one harmony sub-channel, not the whole concept).
+
 ### Turns and stepping
 
 **Turn**:
