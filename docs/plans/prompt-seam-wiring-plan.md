@@ -128,7 +128,7 @@ empty; fenced with default knobs; fenced with overridden knobs; regex with `Patt
 
 ---
 
-## 2. Wire it in `toProviderRequest` (native byte-identical on the wire)
+## 2. Wire it in `toProviderRequest` (native byte-identical on the wire) — ✅ DONE (2026-07-02)
 
 **What:** consume `InstructionsFor` at the request seam per D2/D3/D4, in one commit with its
 loop tests and docs.

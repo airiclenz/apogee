@@ -659,12 +659,63 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 			ToolCallID: m.ToolCallID,
 		})
 	}
+
+	tools := toProviderTools(st.Tools)
+
+	// A non-native tool-call format learns its tools from a text menu + emission instructions,
+	// not the wire tools array (D2/D3/D4): render the block over THIS request's (mode-filtered)
+	// menu, fold it into the wire system channel, and suppress the native array — sending both
+	// would double-tell the model in two formats, and a template without tool support can error
+	// on the array. The block is wire-only: it never enters domain history, the snapshot, or any
+	// event. A native/zero profile renders "" (processing.InstructionsFor), so the request is
+	// byte-identical — no injection, no suppression.
+	if block := a.toolInstructions(st.Tools); block != "" {
+		messages = injectSystemInstructions(messages, block)
+		tools = nil
+	}
+
 	return provider.Request{
 		Model:    st.Model,
 		Messages: messages,
-		Tools:    toProviderTools(st.Tools),
+		Tools:    tools,
 		Sampling: toProviderSampling(st.Sampling),
 	}
+}
+
+// toolInstructions renders the non-native profile's wire-only tool menu + emission instructions
+// for menu (this request's mode-filtered tool menu) — the emit-side mirror of the parse seam's
+// ParserFor (processing.InstructionsFor). A native/zero profile or an empty menu renders "". The
+// error path is unreachable at runtime: an unknown tool-call format fails construction via
+// ParserFor before any request is built, so a defensively-caught error degrades to no injection
+// (the request keeps the native array) rather than propagating up the no-error wire seam.
+func (a *Agent) toolInstructions(menu []domain.ToolDef) string {
+	block, err := processing.InstructionsFor(a.cfg.Profile, menu)
+	if err != nil {
+		return ""
+	}
+	return block
+}
+
+// injectSystemInstructions folds the rendered tool menu + format instructions into the wire
+// request's system channel (D3): it appends block to the FIRST system message when the wire
+// projection already carries one (an embedder can seed one via a hook), else prepends a new sole
+// system message at position 0. One merged system message is the shape llama.cpp chat templates
+// reliably render — the domain.Request.appendOrCreateSystem semantics applied at the wire seam.
+// messages is freshly built by the caller, so the in-place edit is local to this request.
+func injectSystemInstructions(messages []provider.Message, block string) []provider.Message {
+	for i := range messages {
+		if messages[i].Role != string(domain.RoleSystem) {
+			continue
+		}
+		if messages[i].Content == "" {
+			messages[i].Content = block
+		} else {
+			messages[i].Content += "\n\n" + block
+		}
+		return messages
+	}
+	sys := provider.Message{Role: string(domain.RoleSystem), Content: block}
+	return append([]provider.Message{sys}, messages...)
 }
 
 // toProviderToolCalls maps domain tool calls onto the provider's "function" wire shape so

@@ -29,6 +29,15 @@
 // the oracle config types never surface in the loop. A zero profile yields the native no-op
 // parser and no-op stripper, so a native model's content path is byte-identical.
 //
+// InstructionsFor is the emit-side mirror of ParserFor at the request seam: for a non-native
+// profile it renders the text tool menu plus the format-specific tool-call instructions the model
+// needs to LEARN its tools and the exact markup to emit (ported from the apogee-code context
+// builder — the same profile knobs and withDefaults() the parser reads, so what we tell the model
+// and what we parse cannot drift). internal/agent injects the block as a wire-only system message
+// and suppresses the native tools array for a non-native format; a native/zero profile or an empty
+// menu renders "", so the wire request stays byte-identical. Emission-side format knowledge lives
+// here beside the parsers, never in the loop.
+//
 // The package depends only on internal/domain (+ stdlib): the loop adapts provider wire
 // tool calls into NativeToolCall at the seam, so wire types stay provider-local (ADR 0010).
 package processing

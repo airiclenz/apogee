@@ -68,6 +68,27 @@ feature-parity track. See
   partial prefix live (matching the oracle's `isThinking`); this recorded edge is accepted — the
   post-stream strip still removes it from the committed message and final `MessageEvent`.
 
+### Fenced/regex models now receive a text tool menu + emission instructions (native unchanged)
+
+- **A new `processing.InstructionsFor(domain.ModelProfile, []domain.ToolDef)` renders the emit
+  side of a non-native profile:** the text tool menu (name, description, JSON-schema parameters)
+  plus the format-specific tool-call instructions and a live example — ported from the apogee-code
+  context builder, driven by the *same* profile knobs and defaults the parser reads, so what the
+  model is told and what the loop parses cannot drift. It is the request-seam mirror of `ParserFor`.
+- **`toProviderRequest` now injects the block and suppresses the native `tools` array for a
+  non-native tool-call format.** The rendered menu + instructions are folded into the wire request's
+  system channel (appended to a hook-seeded system message, else a sole system message at position
+  0) and the native `tools` array is dropped — sending both would double-tell the model in two
+  formats, and a chat template without tool support can error on the array. For a non-native profile
+  the text menu is the **only** channel the model learns its tools from; before this change a
+  fenced/regex model received a native array its template may not render and no instructions.
+- **Wire-only, tracked per request:** the block never enters domain history, the snapshot, or any
+  event — exactly like the native `tools` array, which is also rebuilt per request and never
+  persisted. It is re-rendered over each request's **mode-filtered** menu, so a Plan-mode switch (or
+  any menu change) is reflected on the next Turn with no history rewrite.
+- **A native/zero profile is byte-identical:** `InstructionsFor` returns `""`, so there is no
+  injection and no suppression — the native `tools` array and the message list are exactly today's.
+
 ### Dispatch decision collapsed into one Resolution verdict (internal refactor)
 
 - **The per-call dispatch decision is now one `Resolution`**, computed by a single pure resolver
