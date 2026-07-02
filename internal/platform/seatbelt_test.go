@@ -5,7 +5,9 @@ package platform
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -86,6 +88,42 @@ func TestSeatbeltProfileSkipsEmptyRoots(t *testing.T) {
 	}
 	if !strings.Contains(profile, `(subpath "/tmp/build")`) {
 		t.Errorf("profile must still honour the non-empty writable path:\n%s", profile)
+	}
+}
+
+func TestSeatbeltProfileCanonicalizesSymlinkedRoot(t *testing.T) {
+	t.Parallel()
+
+	// seatbelt matches a write against its kernel-canonical path, so a root reached
+	// through a symlink (as on macOS, where /tmp and /var are symlinks into /private)
+	// must appear RESOLVED in the profile — otherwise the (subpath ...) never matches and
+	// every in-box write is wrongly denied (the v1.0.0 box-root-canonicalization bug).
+	// This runs on any host: a symlinked root is constructed explicitly rather than
+	// relying on the OS's tmp layout.
+	tmp := t.TempDir()
+	realDir := filepath.Join(tmp, "real")
+	if err := os.Mkdir(realDir, 0o700); err != nil {
+		t.Fatalf("mkdir real dir: %v", err)
+	}
+	link := filepath.Join(tmp, "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// The canonical path the kernel resolves the symlinked root to.
+	want, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatalf("resolve real dir: %v", err)
+	}
+
+	box := domain.ConfinementBox{WorkspaceRoot: link}
+	profile := seatbeltProfile(box)
+
+	if !strings.Contains(profile, `(subpath "`+want+`")`) {
+		t.Errorf("profile must allow writes beneath the RESOLVED root %q:\n%s", want, profile)
+	}
+	if strings.Contains(profile, `(subpath "`+link+`")`) {
+		t.Errorf("profile must not embed the un-resolved symlinked root %q:\n%s", link, profile)
 	}
 }
 

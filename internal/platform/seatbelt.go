@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -143,6 +144,13 @@ func (c *seatbeltConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 //     when the box opts into network-deny via a non-empty NetworkAllow — a coarse
 //     tightening matching landlock's deny-all-TCP behaviour (per-host allow is a later
 //     additive change, like landlock's deferred per-port rule).
+//
+// Each writable root is canonicalized through symlinks first (seatbeltCanonicalRoot):
+// sandbox-exec resolves a write target to its kernel-canonical path before matching it
+// against a (subpath ...), and on macOS /tmp and /var are symlinks into /private, so a
+// subpath left as /var/folders/... would never match the resolved /private/var/folders/...
+// and every in-box write would be wrongly denied. Resolving the root makes the profile
+// match the kernel's view — and agree with path-safety, which resolves the same way.
 func seatbeltProfile(box domain.ConfinementBox) string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n")
@@ -153,11 +161,11 @@ func seatbeltProfile(box domain.ConfinementBox) string {
 
 	roots := make([]string, 0, 1+len(box.WritablePaths))
 	if box.WorkspaceRoot != "" {
-		roots = append(roots, box.WorkspaceRoot)
+		roots = append(roots, seatbeltCanonicalRoot(box.WorkspaceRoot))
 	}
 	for _, p := range box.WritablePaths {
 		if p != "" {
-			roots = append(roots, p)
+			roots = append(roots, seatbeltCanonicalRoot(p))
 		}
 	}
 	if len(roots) > 0 {
@@ -178,6 +186,20 @@ func seatbeltProfile(box domain.ConfinementBox) string {
 	}
 
 	return b.String()
+}
+
+// seatbeltCanonicalRoot resolves root through symlinks so the profile's (subpath ...)
+// matches the kernel-canonical path sandbox-exec checks writes against (see seatbeltProfile).
+// A confinement-box root is a directory the child writes into, so at confine time it exists
+// and EvalSymlinks resolves it; if it cannot be resolved (a not-yet-created root) the cleaned
+// path is used as-is — the profile then simply won't match a path that does not exist, which
+// is the correct outcome. This is the same resolution security.EvalRealPath performs for
+// path-safety, kept dependency-free here so internal/platform stays domain-only.
+func seatbeltCanonicalRoot(root string) string {
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		return resolved
+	}
+	return filepath.Clean(root)
 }
 
 // seatbeltQuote renders s as a TinyScheme string literal for the profile, escaping

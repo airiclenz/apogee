@@ -35,6 +35,21 @@ feature-parity track. See
 
 ### Fixes
 
+- **Auto mode now works on macOS — seatbelt fences the workspace correctly.** The
+  `sandbox-exec` profile embedded the box's writable roots verbatim, but seatbelt
+  matches a write against its *kernel-canonical* path; on macOS `/tmp` and `/var`
+  are symlinks into `/private`, so a box rooted at `/var/folders/...` never matched
+  the resolved `/private/var/folders/...` and seatbelt denied **every** in-workspace
+  write — Auto mode could not write at all. `seatbeltProfile`
+  (`internal/platform/seatbelt.go`) now resolves each writable root through symlinks
+  (`filepath.EvalSymlinks`, falling back to the cleaned path for a not-yet-created
+  root) before emitting the `(subpath ...)`, so the profile matches the kernel's view
+  and agrees with path-safety (which already resolves the same way). Landlock is
+  unaffected — it is fd-based (`unix.Open(root, O_PATH)`), so the kernel resolves
+  symlinks to the inode the rule keys on. Closes the `v1.0.0` "Box-root
+  canonicalization" post-release residual; verified on real macOS hardware
+  (`TestSeatbeltProbe` in-box write rows now pass under live `sandbox-exec`).
+
 - **Context window now reads the runtime size from llama.cpp `/props`.** Discovery
   (`internal/provider.Discover`) probes `GET /props` after `/v1/models` and prefers
   its `default_generation_settings.n_ctx` — the `-c`/`--ctx-size` the server was
@@ -255,16 +270,21 @@ where the OS cannot enforce:
   Confirm on a landlock-enabled kernel (≥5.13 fs, ≥6.7 net) that a confined
   subprocess's out-of-workspace write and non-allowlisted connect are OS-denied
   while the parent stays unrestricted.
-- **macOS seatbelt live enforcement** — no macOS host is available; the
-  `sandbox-exec` escape-probe self-skips off darwin. Confirm on macOS that a
-  confined subprocess is fenced to the workspace and that network-deny tightens.
+- **macOS seatbelt live enforcement** — ✅ **confirmed on macOS hardware
+  (2026-07-02).** `confinetest.Probe` now runs under live `sandbox-exec` on a real
+  Mac: a confined subprocess is fenced to the workspace, out-of-box and `~/.ssh`
+  writes are OS-denied, the parent stays unrestricted, and network-deny tightens
+  while network-open connects. (This surfaced and fixed the box-root canonicalization
+  bug below.) The Linux landlock arm above is still open.
 - **Live Auto-confined deliverable run** — the opt-in `APOGEE_LIVE_ENDPOINT`
   end-to-end run (a real coding conversation in Auto, a shell write outside the
   workspace OS-denied, an MCP tool still raising Approval, a sub-agent delegated
   and its nested work rendered) is owner-run on Linux (landlock) and macOS
-  (seatbelt).
-- **Box-root canonicalization** — confirm box roots are canonicalized via
-  `EvalRealPath` so a symlinked root (e.g. macOS `/tmp` → `/private/tmp`)
-  matches the confinement profile.
+  (seatbelt). *(Still open.)*
+- **Box-root canonicalization** — ✅ **resolved (2026-07-02).** Was a real bug, not
+  just a verification gap: seatbelt embedded box roots verbatim and denied every
+  in-workspace write when the root passed through a symlink (macOS `/var`, `/tmp`).
+  Fixed by resolving each writable root through symlinks in `seatbeltProfile`; see
+  the `[Unreleased]` Fixes entry.
 
 [1.0.0]: https://github.com/airiclenz/apogee/releases/tag/v1.0.0

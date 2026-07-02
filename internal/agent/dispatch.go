@@ -336,7 +336,9 @@ func (a *Agent) runTool(ctx context.Context, tool domain.Tool, call domain.ToolC
 // workspace as the writable root, plus the per-project writable/network allowlists the host
 // folded into Config. Box construction (toolchain cache/temp dirs, etc.) is the host's
 // concern (confinement-execution-contract §7); the loop confines to whatever box it builds
-// from the injected roots.
+// from the injected roots. Backends canonicalize the roots to the kernel's view where their
+// matching model requires it (seatbelt resolves symlinks; landlock is fd-based, so neither
+// needs the caller to pre-resolve).
 func (a *Agent) confinementBox() domain.ConfinementBox {
 	return domain.ConfinementBox{
 		WorkspaceRoot: a.cfg.WorkspaceDir,
