@@ -66,6 +66,13 @@ type Model struct {
 	// (commands on "/", workspace files on "@", skills on "/skill"). The zero value is hidden.
 	autocomplete autocompleteState
 
+	// skillRegion tracks whether the input currently sits in a "/skill <partial>" region, so
+	// recomputeAutocomplete can edge-trigger a catalog reload only when the picker OPENS (the
+	// false→true transition) rather than on every keystroke inside it. It follows the region
+	// itself, not autocomplete.active, so a region that momentarily shows no matches still
+	// counts as open and does not re-reload on the next matching keystroke.
+	skillRegion bool
+
 	// files memoises the workspace listing behind the "@" autocomplete so a typing burst reuses
 	// one filesystem walk (filecache.go). A pointer — shared across the value-copied Model so
 	// the cache survives each Update (ADR 0011); nil-safe (fileSuggestions falls back).
@@ -202,7 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle {
-			m.autocomplete = m.computeAutocomplete() // re-derive the overlay from the pasted-into input
+			m = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input (reloads on /skill open)
 		}
 		m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
 		return m, cmd
@@ -428,7 +435,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle {
-			m.autocomplete = m.computeAutocomplete() // re-derive the overlay from the edited input
+			m = m.recomputeAutocomplete() // re-derive the overlay from the edited input (reloads on /skill open)
 		}
 		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd

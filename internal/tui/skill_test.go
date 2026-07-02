@@ -355,3 +355,102 @@ func TestNilCatalogGuards(t *testing.T) {
 		t.Errorf("chip with nil catalog did not fall back to the raw id:\n%s", got)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Live refresh: the picker reloads the catalog when it opens
+// ----------------------------------------------------------------------------
+
+// reloadableCatalog is a SkillCatalog whose List reads through a pointer, so a ReloadSkills
+// closure that mutates the same backing slice is reflected on the next List — modelling the
+// shared skills.Provider whose Reload swaps in a fresh catalog both the picker and loop read.
+type reloadableCatalog struct {
+	skills *[]skills.Skill
+}
+
+func (f reloadableCatalog) List() []skills.Skill { return *f.skills }
+
+func (f reloadableCatalog) Get(id string) (skills.Skill, bool) {
+	for _, s := range *f.skills {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return skills.Skill{}, false
+}
+
+// reloadOpts wires a reloadable catalog whose ReloadSkills closure appends a "fresh" skill (as if
+// it had just been added on disk) and counts reloads. The returned pointers let a test assert how
+// many reloads fired and what the picker then shows.
+func reloadOpts() (Options, *int) {
+	current := []skills.Skill{
+		{ID: "clean-code", DisplayName: "Clean Code", Summary: "tidy the code", Body: "BE TIDY"},
+	}
+	backing := &current
+	reloads := 0
+	o := testOpts
+	o.Skills = reloadableCatalog{skills: backing}
+	o.ReloadSkills = func() {
+		reloads++
+		*backing = append(*backing, skills.Skill{
+			ID: "fresh", DisplayName: "Fresh", Summary: "added after launch", Body: "NEW",
+		})
+	}
+	return o, &reloads
+}
+
+// Typing "/skill " open (the manual path) re-scans the catalog exactly once, and the picker then
+// lists the skill the reload discovered — the live-refresh the user asked for.
+func TestSkillPickerReloadsOnOpenByTyping(t *testing.T) {
+	o, reloads := reloadOpts()
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	m.input.SetValue("/skill")   // bare command, not yet a /skill region
+	m = step(t, m, keyRune(' ')) // the space opens the picker → one reload
+	if *reloads != 1 {
+		t.Fatalf("opening the /skill picker triggered %d reloads, want exactly 1", *reloads)
+	}
+	if m.autocomplete.kind != acSkill || !m.autocomplete.active {
+		t.Fatalf("picker not open after '/skill ': %+v", m.autocomplete)
+	}
+	var got []string
+	for _, it := range m.autocomplete.items {
+		got = append(got, it.value)
+	}
+	if !containsString(got, "fresh") {
+		t.Errorf("picker did not show the skill the reload added: %v", got)
+	}
+
+	// Typing further inside the already-open picker must NOT re-scan disk (edge-triggered on open).
+	m = step(t, m, keyRune('f'))
+	if *reloads != 1 {
+		t.Errorf("typing inside the open picker re-scanned: %d reloads, want it to stay 1", *reloads)
+	}
+}
+
+// Selecting /skill from the "/" command menu chains into the picker and reloads once too.
+func TestSkillPickerReloadsViaCommandChain(t *testing.T) {
+	o, reloads := reloadOpts()
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	m.input.SetValue("/skill")
+	m.autocomplete = m.computeAutocomplete() // command menu, "skill" highlighted
+	m = step(t, m, keyTab())                 // accept → acceptAutocomplete splices "/skill " and opens the picker
+	if *reloads != 1 {
+		t.Fatalf("the /skill command chain triggered %d reloads, want exactly 1", *reloads)
+	}
+	if m.autocomplete.kind != acSkill || !m.autocomplete.active {
+		t.Fatalf("command chain did not open the picker: %+v", m.autocomplete)
+	}
+}
+
+// Leaving and re-opening the picker reloads again (each invocation re-reads), and a nil
+// ReloadSkills is simply a no-op (no panic) — the existing catalog stays as loaded.
+func TestSkillPickerReloadNilSafe(t *testing.T) {
+	o := skillOpts() // has a catalog but no ReloadSkills
+	m := newTestModelEng(t, &fakeEngine{}, o)
+	m.input.SetValue("/skill")
+	m = step(t, m, keyRune(' ')) // must not panic with a nil ReloadSkills
+	if m.autocomplete.kind != acSkill {
+		t.Fatalf("picker did not open with a nil ReloadSkills: %+v", m.autocomplete)
+	}
+}

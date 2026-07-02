@@ -67,11 +67,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 
 	// Discover the user's skills from the layered source dirs: the global library
 	// (~/.apogee/skills), the project's .apogee/skills, and — when use-project-skills is on —
-	// the project's bare skills/. The load error is soft (a missing dir is skipped, a malformed
-	// skill is skipped), so the catalog is always usable; it is dropped intentionally. The same
-	// *skills.Catalog feeds both the loop (Config.Skills resolves attached IDs into the turn)
-	// and the TUI's /skill picker (Options.Skills lists/labels them).
-	skillCatalog, _ := skills.Load(skills.Sources{
+	// the project's bare skills/. The Provider holds the current catalog and can Reload it from
+	// these same dirs on demand: the /skill picker refreshes it each time it opens, so a skill
+	// added or edited after launch is picked up without restarting. The initial load error is
+	// soft (a missing dir is skipped, a malformed skill is skipped), so the catalog is always
+	// usable. The SAME *skills.Provider feeds both the loop (Config.Skills resolves attached IDs
+	// into the turn) and the TUI's /skill picker (Options.Skills lists/labels them), so a
+	// refreshed skill both shows in the picker AND resolves when attached.
+	skillProvider := skills.NewProvider(skills.Sources{
 		Home:             roots.config,
 		Workspace:        roots.workspace,
 		UseProjectSkills: opts.useProjectSkills,
@@ -101,7 +104,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Confiner:           platform.NewConfiner(),
 		ConfineToWorkspace: opts.confineToWorkspace,
 		WebSearchEndpoint:  opts.webSearchEndpoint,
-		Skills:             skillCatalog,
+		Skills:             skillProvider,
 		// The discovered runtime context window (0 when the server did not report one). It is the
 		// budget /compact bounds its summary request against so compaction survives high fill
 		// (the summary call would otherwise overflow near n_ctx); the same value drives the TUI's
@@ -151,8 +154,13 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Workspace:     roots.workspace,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
-		Skills:        skillCatalog,
-		Save:          saver.save,
+		Skills:        skillProvider,
+		// Re-scan the skill source dirs when the /skill picker opens, swapping in a fresh catalog
+		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
+		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
+		// unusable), so it is dropped.
+		ReloadSkills: func() { _ = skillProvider.Reload() },
+		Save:         saver.save,
 	})
 	if path := saver.saved(); path != "" {
 		fmt.Fprintf(os.Stdout, "Session saved · resume with: apogee --resume %s\n", path)

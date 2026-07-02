@@ -91,6 +91,25 @@ func (m Model) computeAutocomplete() autocompleteState {
 	return autocompleteState{}
 }
 
+// recomputeAutocomplete re-derives the overlay from the current input and stores it, reloading
+// the skill catalog the moment the /skill picker OPENS (the input entering a "/skill <partial>"
+// region it was not in before). The reload swaps the shared skills.Provider that both this picker
+// and the agent loop read, so a skill added since launch — or since the picker last closed —
+// both shows in the dropdown and resolves when attached. It is edge-triggered on skillRegion so a
+// burst of keystrokes inside one open picker re-scans disk once, not per byte (mirroring the
+// filecache TTL's "reuse one walk" intent, but keyed to opens). Callers use this instead of
+// assigning m.computeAutocomplete() directly; computeAutocomplete itself stays a pure function of
+// the input, so unit tests that call it keep working.
+func (m Model) recomputeAutocomplete() Model {
+	_, _, inSkill := skillArgToken(m.input.Value())
+	if inSkill && !m.skillRegion && m.opts.ReloadSkills != nil {
+		m.opts.ReloadSkills() // picker opening: re-scan before computeAutocomplete lists suggestions
+	}
+	m.skillRegion = inSkill
+	m.autocomplete = m.computeAutocomplete()
+	return m
+}
+
 // trailingFileToken reports the "@" token at the very end of value (the word being typed):
 // its start offset, the partial path after "@", and whether value ends in such a token. The
 // token must sit at a word boundary (start of value or after whitespace); a value ending in
@@ -292,7 +311,7 @@ func (m Model) acceptAutocomplete() Model {
 	}
 	m.input.SetValue(value[:start] + sigil + ac.items[ac.selected].value + " ")
 	m.input.MoveToEnd()
-	m.autocomplete = m.computeAutocomplete() // chains "/skill " → picker; else closes (trailing space)
+	m = m.recomputeAutocomplete() // chains "/skill " → picker (reloading the catalog); else closes
 	m.layout()
 	return m
 }
@@ -312,7 +331,7 @@ func (m Model) attachSkill(id string) Model {
 	}
 	m.input.SetValue(value[:start])
 	m.input.MoveToEnd()
-	m.autocomplete = m.computeAutocomplete()
+	m = m.recomputeAutocomplete() // leaving the /skill region (chip popped): closes, never reloads
 	m.layout()
 	return m
 }

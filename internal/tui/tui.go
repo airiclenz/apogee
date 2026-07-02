@@ -87,9 +87,18 @@ type Options struct {
 
 	// Skills is the discovered skill catalog the /skill picker lists and the attached chips
 	// label; nil ⇒ no skills are wired (the picker offers nothing, chips fall back to the raw
-	// ID). The binary loads it from disk (internal/skills) and the agent loop resolves the same
-	// catalog through Config.Skills, so the body the model sees matches what the picker showed.
+	// ID). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
+	// provider through Config.Skills, so the body the model sees matches what the picker showed —
+	// including skills ReloadSkills swapped in mid-session.
 	Skills SkillCatalog
+
+	// ReloadSkills re-scans the skill source dirs and swaps in a fresh catalog, so a skill added
+	// or edited after launch is picked up the next time the /skill picker opens. nil disables the
+	// refresh (the catalog stays as loaded at launch). The binary wires it to the shared
+	// skills.Provider both this picker (Skills) and the agent loop (Config.Skills) read, so a
+	// refreshed skill both shows in the picker AND resolves when attached. The picker edge-
+	// triggers it on open, not per keystroke; every caller guards for nil.
+	ReloadSkills func()
 
 	// Save persists a snapshot of the conversation; nil disables session saving. The
 	// binary supplies a store-backed saver (it owns the path and on-disk format — phase-2
