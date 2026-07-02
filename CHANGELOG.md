@@ -13,6 +13,22 @@ feature-parity track. See
 `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
 `docs/handoffs/2026-06-26 - 01 - skills-system.md`.
 
+### Compact tool print-outs in the chat (full built-in coverage)
+
+- **The TUI's tool-presentation registry now covers every built-in tool**, not just the
+  Phase-2 four: the edit family, `view_diff`, `open_file`, `terminal`, `python_exec`, the
+  git family, `diagnostics`, `web_fetch`, `http_request`, `web_search`, `sub_agent`, and
+  `ask_user` each render as `✦ [Label] target` — no more raw tool names with JSON argument
+  braces in the transcript. Only a dynamic (MCP) tool keeps the raw-name + JSON fallback.
+- **Results no longer dump raw into the chat**: `web_search` shows "N results", the fetch/
+  request tools their `HTTP 200 OK` status line, free-form output (a command run, a
+  diagnostics or sub-agent report) its first line plus a "+N more lines" count, `open_file`
+  its Located line or a line count. `view_diff` renders red/green diff lines (the reserved
+  diff detail kinds get their first producer), capped at 20 lines.
+- Detail and target lines are clipped at 160 runes so a minified blob cannot flood a row.
+  The approval dialog still shows the full pretty-printed arguments — the security surface
+  (the model's request is never hidden) is unchanged.
+
 ### Web search works out of the box (DuckDuckGo default)
 
 - **`web_search` is now default-ON**: with no `web-search-endpoint` configured it uses a
