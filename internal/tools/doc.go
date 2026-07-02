@@ -32,7 +32,8 @@
 // provider (§3a).
 //
 // Phase 3 (P3.11) adds the network and host tools: web_fetch (GET), http_request (general
-// request), and web_search (a config'd, default-off search endpoint) — in-process net/http
+// request), and web_search (DuckDuckGo by default; a config'd custom endpoint, or "off" to
+// disable) — in-process net/http
 // ExternalEffectTools of kind network (the disposition auto-runs them in Auto, url-filtered,
 // and routes them through ExternalEffects for the bench), each filtering every URL through a
 // security.URLGuard whose default-on, resolved-IP SSRF floor blocks loopback / private /

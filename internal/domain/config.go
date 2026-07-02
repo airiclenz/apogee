@@ -71,10 +71,11 @@ type Config struct {
 	// record/replay slots in behind the same interface later (ADR 0008).
 	ExternalEffects ExternalEffects
 
-	// WebSearchEndpoint is the OpenAI-compatible-ish search backend the web_search tool
-	// posts a query to (P3.11). It is DEFAULT-OFF: empty ⇒ web_search is registered but
-	// reports "web search is not configured" (graceful, never a crash) — there is no
-	// hard-wired provider. The host folds a configured endpoint in from config.yaml.
+	// WebSearchEndpoint is the search backend the web_search tool sends a query to
+	// (P3.11). DEFAULT-ON: empty ⇒ the tool falls back to its built-in DuckDuckGo
+	// provider (no API key needed); the sentinel "off" disables it (a graceful "web
+	// search is disabled", never a crash). The host folds a configured endpoint in from
+	// config.yaml.
 	WebSearchEndpoint string
 
 	// Budget / Compaction knobs (context/) are structural and load-bearing — they

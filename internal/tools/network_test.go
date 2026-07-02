@@ -293,19 +293,58 @@ func TestHTTPRequest_BlockedURLIsResultError(t *testing.T) {
 
 // ---- web_search ------------------------------------------------------------
 
-func TestWebSearch_UnconfiguredIsGraceful(t *testing.T) {
+// TestWebSearch_EmptyEndpointDefaultsToDuckDuckGo is deliberately white-box and does NOT
+// call Execute: an empty endpoint now resolves to the LIVE DuckDuckGo default, so an
+// Execute here would dial the real network and break hermeticity.
+func TestWebSearch_EmptyEndpointDefaultsToDuckDuckGo(t *testing.T) {
 	t.Parallel()
-	res, err := NewWebSearch(security.URLGuard{}, "").Execute(context.Background(), domain.ToolCall{
-		ID: "c1", Tool: "web_search", Arguments: jsonArgs(t, map[string]any{"query": "go testing"}),
-	})
-	if err != nil {
-		t.Fatalf("unexpected Go error: %v", err)
+	tool := NewWebSearch(security.URLGuard{}, "")
+	if tool.endpoint != defaultSearchEndpoint {
+		t.Errorf("empty endpoint resolved to %q, want %q", tool.endpoint, defaultSearchEndpoint)
 	}
-	if res.IsError {
-		t.Errorf("an unconfigured search endpoint must be graceful (not an error): %q", res.Content)
+	if tool.provider != providerDuckDuckGo {
+		t.Errorf("empty endpoint selected provider %v, want providerDuckDuckGo", tool.provider)
 	}
-	if !strings.Contains(res.Content, "not configured") {
-		t.Errorf("result should say search is not configured: %q", res.Content)
+	if tool.disabled {
+		t.Error("empty endpoint must not disable the tool")
+	}
+}
+
+func TestWebSearch_OffSentinelIsGraceful(t *testing.T) {
+	t.Parallel()
+	for _, sentinel := range []string{"off", "OFF", " none ", "Disabled"} {
+		tool := NewWebSearch(security.URLGuard{}, sentinel)
+		// White-box: the sentinel must set the flag and store NO endpoint, so Execute
+		// short-circuits before any URL is built — no HTTP request can be made.
+		if !tool.disabled || tool.endpoint != "" {
+			t.Errorf("%q: want disabled with no endpoint, got disabled=%v endpoint=%q",
+				sentinel, tool.disabled, tool.endpoint)
+		}
+		res, err := tool.Execute(context.Background(), domain.ToolCall{
+			ID: "c1", Tool: "web_search", Arguments: jsonArgs(t, map[string]any{"query": "go testing"}),
+		})
+		if err != nil {
+			t.Fatalf("%q: unexpected Go error: %v", sentinel, err)
+		}
+		if res.IsError {
+			t.Errorf("%q: the off sentinel must be graceful (not an error): %q", sentinel, res.Content)
+		}
+		if !strings.Contains(res.Content, "disabled") {
+			t.Errorf("%q: result should say search is disabled: %q", sentinel, res.Content)
+		}
+	}
+}
+
+// TestWebSearch_SchemeLessEndpointSelfHeals: a custom endpoint without a scheme parses to
+// Host == "" and url-safety would reject every request; NewWebSearch heals it to https://.
+func TestWebSearch_SchemeLessEndpointSelfHeals(t *testing.T) {
+	t.Parallel()
+	tool := NewWebSearch(security.URLGuard{}, "search.example.com/s")
+	if tool.endpoint != "https://search.example.com/s" {
+		t.Errorf("scheme-less endpoint healed to %q, want https://search.example.com/s", tool.endpoint)
+	}
+	if tool.provider != providerCustom {
+		t.Errorf("a healed endpoint is still a custom provider, got %v", tool.provider)
 	}
 }
 
@@ -315,6 +354,7 @@ func TestWebSearch_QueriesConfiguredEndpoint(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.Query().Get("q")
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"results":[]}`))
 	}))
 	defer srv.Close()
@@ -330,6 +370,9 @@ func TestWebSearch_QueriesConfiguredEndpoint(t *testing.T) {
 	}
 	if gotQuery != "needle" {
 		t.Errorf("endpoint saw q=%q, want needle", gotQuery)
+	}
+	if !strings.Contains(res.Content, `{"results":[]}`) {
+		t.Errorf("a custom endpoint's JSON body must pass through verbatim: %q", res.Content)
 	}
 }
 

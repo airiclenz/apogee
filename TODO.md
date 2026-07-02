@@ -157,7 +157,8 @@ config key). The floor is the security-relevant part; a user-tunable host allow/
 top is a convenience that can wait. This mirrors the **P3.6** deferral of surfacing the
 dangerous-rule config + the breaker threshold into `config.yaml` (the merge logic is built and
 tested; only the file-key surfacing waits). The `WebSearchEndpoint` key **is** surfaced in
-P3.11 (file-only, default-off) because web_search is unusable without it.
+P3.11 (file-only; empty now falls back to the built-in DuckDuckGo default and `off` disables —
+the key selects or disables a provider rather than enabling the tool).
 
 **The tighten-only law (must hold when built):** like the dangerous-rule merge and the SSRF
 floor, a config url-safety layer may only **tighten** (add `DenyHosts`, narrow `AllowHosts`) —

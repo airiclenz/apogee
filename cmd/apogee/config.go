@@ -41,7 +41,7 @@ type settings struct {
 	confineToWorkspace bool
 
 	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
-	// file-only and default-off (empty ⇒ web_search reports "not configured").
+	// file-only (empty ⇒ the built-in DuckDuckGo default; "off" disables the tool).
 	webSearchEndpoint string
 
 	// useProjectSkills gates whether the workspace's bare skills/ folder is discovered (in
@@ -72,7 +72,7 @@ type layer struct {
 	confineToWorkspace *bool
 
 	// webSearchEndpoint is set only by the FILE layer (P3.11 — web-search is config'd,
-	// default-off, with no flag/env). Empty/absent ⇒ web_search reports "not configured".
+	// with no flag/env). Empty/absent ⇒ the built-in DuckDuckGo default; "off" disables.
 	webSearchEndpoint *string
 
 	// useProjectSkills is set only by the FILE layer (skills are config'd, default-on, with no
@@ -144,9 +144,9 @@ type fileConfig struct {
 	// secure default true). It has no flag or env — editing the global config IS the
 	// deliberate acknowledgement required to run Auto unconfined.
 	ConfineToWorkspace *bool `yaml:"confine-to-workspace"`
-	// WebSearch is the search endpoint the web_search tool posts a query to (P3.11). Absent
-	// ⇒ web_search is registered but reports "not configured" (default-off, no hard-wired
-	// provider). Empty string is treated as absent.
+	// WebSearch is the search endpoint the web_search tool sends a query to (P3.11).
+	// Absent ⇒ the built-in DuckDuckGo default; `off` disables the tool. Empty string is
+	// treated as absent.
 	WebSearch string `yaml:"web-search-endpoint"`
 	// UseProjectSkills gates discovery of the workspace's bare skills/ folder. A pointer so an
 	// explicit `use-project-skills: false` is distinguishable from an absent key (default true).

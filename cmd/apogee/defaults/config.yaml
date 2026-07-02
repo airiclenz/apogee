@@ -44,11 +44,12 @@
 #            a warning every session.
 # confine-to-workspace: true
 
-# Search endpoint for the web_search tool. Default-OFF: with no endpoint set, web_search is
-# offered to the model but reports that web search is unavailable (it never fails the turn).
-# There is no hard-wired provider — point this at your own search backend, which receives the
-# query as the `q` URL parameter. Config-file only (no flag or env). The SSRF floor (loopback,
-# private, and metadata addresses are always blocked, by resolved IP) applies regardless.
+# Search endpoint for the web_search tool. With no endpoint set, web_search uses DuckDuckGo
+# (HTML, no API key needed) — it works out of the box. Set it to `off` to disable web search,
+# or point it at your own search backend, which receives the query as the `q` URL parameter
+# (an HTML response is cleaned into title/url/snippet results; JSON/text passes through
+# unchanged). Config-file only (no flag or env). The SSRF floor (loopback, private, and
+# metadata addresses are always blocked, by resolved IP) applies regardless.
 # web-search-endpoint: https://search.example.com/search
 
 # External MCP (Model Context Protocol) servers to connect on startup. Default-EMPTY: with no
@@ -70,8 +71,6 @@
 #   - name: docs
 #     transport: streamable-http         # sse | streamable-http: a remote http(s) server
 #     endpoint: https://mcp.example.com/ # the server URL (passes the SSRF floor)
-
-
 
 # Discover skills from the workspace's bare skills/ folder, in addition to the global library
 # (~/.apogee/skills) and the project's .apogee/skills (both always loaded). A skill is a folder

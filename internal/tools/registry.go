@@ -7,8 +7,8 @@ import (
 
 // HostTools carries the host-supplied configuration the network and ask-user tools need but
 // the workspace-scoped file tools do not: the url-safety guard (with its default-on SSRF
-// floor) for the network tools, the configured web-search endpoint (empty ⇒ web_search is
-// registered but reports "not configured"), and the Asker delegate (nil ⇒ ask_user is NOT
+// floor) for the network tools, the configured web-search endpoint (empty ⇒ the built-in
+// DuckDuckGo default; "off" disables the tool), and the Asker delegate (nil ⇒ ask_user is NOT
 // registered, so the model is never offered a question it cannot have answered). It is the
 // seam NewDefaultRegistryWithHost threads from Config so the registry stays the single place
 // the default tool set is assembled (P3.11).
@@ -25,8 +25,8 @@ type HostTools struct {
 // registry by hand and Register its own.
 //
 // It wires the network/host tools (P3.11) with a zero HostTools: the network tools run with
-// the default URLGuard (SSRF floor on, no extra allow/deny), web_search reports "not
-// configured", and ask_user is omitted (nil Asker). NewDefaultRegistryWithHost is the variant
+// the default URLGuard (SSRF floor on, no extra allow/deny), web_search uses its built-in
+// DuckDuckGo default, and ask_user is omitted (nil Asker). NewDefaultRegistryWithHost is the variant
 // the composition root uses to thread the host's url-safety policy, search endpoint, and Asker.
 //
 // Registration cannot fail here: the names are distinct and non-empty, the only

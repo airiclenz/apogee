@@ -34,7 +34,8 @@ type options struct {
 	confineToWorkspace bool
 
 	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
-	// loaded from the config file only (default-off). applyConfig sets it from settings.
+	// loaded from the config file only (empty ⇒ the built-in DuckDuckGo default; "off"
+	// disables the tool). applyConfig sets it from settings.
 	webSearchEndpoint string
 
 	// useProjectSkills gates discovery of the workspace's bare skills/ folder (default true),

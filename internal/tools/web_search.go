@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,23 +24,56 @@ type webSearchArgs struct {
 	Query string `json:"query"`
 }
 
-// WebSearch runs a query against a CONFIGURED search endpoint and returns the raw results
-// (capped). There is no hard-wired provider: the endpoint is injected from config and is
-// DEFAULT-OFF — an empty endpoint makes the tool report "web search is not configured" (a
-// graceful result, never a crash). It is an ExternalEffectTool of kind network, filtered by
-// the same URLGuard + SSRF floor as the other network tools. Stateless across Turns.
-//
-// The request is a GET to endpoint with the query appended as the `q` parameter — the common
-// shape for a search backend; a host whose endpoint differs can front it with a thin adapter.
+// defaultSearchEndpoint is the built-in provider used when no endpoint is configured:
+// DuckDuckGo's HTML front-end needs no API key, so web search works out of the box.
+const defaultSearchEndpoint = "https://html.duckduckgo.com/html/"
+
+// searchProvider identifies which backend the endpoint points at, because rendering
+// differs: the built-in DuckDuckGo default is always parsed structurally, while a custom
+// endpoint is cleaned only when its response looks like HTML (web_search_render.go).
+type searchProvider int
+
+const (
+	providerDuckDuckGo searchProvider = iota // the built-in default (endpoint unset)
+	providerCustom                           // a host-configured endpoint
+)
+
+// WebSearch runs a query against a search endpoint and renders the results for the model.
+// DEFAULT-ON: an empty endpoint selects the built-in DuckDuckGo provider
+// (defaultSearchEndpoint), so web search works with no configuration and no API key. The
+// sentinel endpoint "off" (or "none"/"disabled") disables the tool — a graceful "web search
+// is disabled" result, never a crash. A custom endpoint receives the query as the `q` GET
+// parameter (the common shape for a search backend; a host whose endpoint differs can front
+// it with a thin adapter): an HTML response is cleaned into title/url/snippet results, a
+// JSON/text response passes through verbatim. It is an ExternalEffectTool of kind network,
+// filtered by the same URLGuard + SSRF floor as the other network tools. Stateless across
+// Turns.
 type WebSearch struct {
 	guard    security.URLGuard
 	endpoint string
+	provider searchProvider
+	disabled bool // the endpoint was the off sentinel — Execute reports gracefully, no request
 }
 
-// NewWebSearch returns a web_search tool posting to endpoint (empty ⇒ unavailable, reported
-// gracefully), filtering the endpoint URL through guard.
+// NewWebSearch returns the web_search tool. An empty endpoint selects the built-in
+// DuckDuckGo default; the sentinels "off"/"none"/"disabled" (case-insensitive) disable the
+// tool; anything else is a custom endpoint, filtered through guard. A scheme-less custom
+// endpoint (e.g. "search.example.com/s") self-heals to https:// — url.Parse reads it as a
+// bare path (Host == ""), and url-safety would otherwise reject every request.
 func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
-	return &WebSearch{guard: guard, endpoint: strings.TrimSpace(endpoint)}
+	endpoint = strings.TrimSpace(endpoint)
+	switch strings.ToLower(endpoint) {
+	case "":
+		return &WebSearch{guard: guard, endpoint: defaultSearchEndpoint, provider: providerDuckDuckGo}
+	case "off", "none", "disabled":
+		return &WebSearch{guard: guard, disabled: true}
+	}
+	if u, err := url.Parse(endpoint); err != nil || u.Host == "" {
+		if healed, herr := url.Parse("https://" + endpoint); herr == nil && healed.Host != "" {
+			endpoint = "https://" + endpoint
+		}
+	}
+	return &WebSearch{guard: guard, endpoint: endpoint, provider: providerCustom}
 }
 
 // Name returns the stable identifier the model calls.
@@ -49,7 +81,7 @@ func (t *WebSearch) Name() string { return "web_search" }
 
 // Description returns the model-facing summary of the tool.
 func (t *WebSearch) Description() string {
-	return "Search the web for a query and return the results. Requires a configured search endpoint; when none is configured the tool reports that web search is unavailable (it does not fail the turn)."
+	return "Search the web for a query and return the top results (title, url, snippet). Works with no configuration (DuckDuckGo by default); a host may point it at a custom search backend or disable it, in which case the tool says so instead of failing the turn."
 }
 
 // Schema returns the JSON schema of the tool's arguments.
@@ -58,9 +90,9 @@ func (t *WebSearch) Schema() json.RawMessage { return webSearchSchema }
 // ExternalEffect reports that web_search reaches the network (kind network).
 func (t *WebSearch) ExternalEffect() domain.ExternalEffectKind { return domain.EffectNetwork }
 
-// Execute runs the search. A missing endpoint is a graceful "not configured" result; a
-// blocked endpoint URL or a transport error are surfaced as results; only ctx cancellation
-// is a Go error (ADR 0007).
+// Execute runs the search. A disabled tool (off sentinel) is a graceful "disabled" result;
+// a blocked endpoint URL, a transport error, or a non-2xx status are surfaced as results;
+// only ctx cancellation is a Go error (ADR 0007).
 func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -73,10 +105,10 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if strings.TrimSpace(args.Query) == "" {
 		return errorResult(call.ID, "query is required"), nil
 	}
-	if t.endpoint == "" {
-		// Default-off: no provider configured. Graceful, not an error (§3a — an optional,
-		// detected enhancement, never a hard dependency).
-		return okResult(call.ID, "web search is not configured (no search endpoint set); web_search is unavailable on this host."), nil
+	if t.disabled {
+		// The host set the off sentinel. Graceful, not an error (§3a) — the model learns
+		// web search is unavailable and the turn continues. No request is made.
+		return okResult(call.ID, "web search is disabled on this host (web-search-endpoint: off); web_search is unavailable."), nil
 	}
 
 	reqURL, err := buildSearchURL(t.endpoint, args.Query)
@@ -99,6 +131,16 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return errorResult(call.ID, "could not build search request for host "+endpointHost), nil
 	}
+	if t.provider == providerDuckDuckGo {
+		// Browser-like headers: DuckDuckGo's HTML front-end serves challenge pages to bare
+		// clients far more often. Scoped to the built-in provider so a custom backend sees
+		// the same request it always did (a content-negotiating backend must keep returning
+		// its clean JSON/text). No Accept-Encoding — Go's transport only transparently
+		// un-gzips when it set that header itself.
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "text/html")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	}
 
 	client := newHTTPClient(t.guard, defaultNetworkTimeout)
 	resp, err := client.Do(req)
@@ -116,7 +158,12 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	defer resp.Body.Close()
 
 	body, truncated := readCappedBody(resp.Body)
-	return okResult(call.ID, renderSearchResult(resp, body, truncated)), nil
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Non-2xx is a failed search, surfaced with only status + host: the body of a
+		// rate-limit or challenge page is noise, and the URL must stay scrubbed (M2).
+		return errorResult(call.ID, "search endpoint returned HTTP "+resp.Status+" (host "+endpointHost+")"), nil
+	}
+	return okResult(call.ID, renderSearch(t.provider, resp, body, args.Query, truncated)), nil
 }
 
 // endpointHost returns the bare host (no scheme, no path, no query) of the configured
@@ -169,16 +216,4 @@ func buildSearchURL(endpoint, query string) (string, error) {
 	q.Set("q", query)
 	u.RawQuery = q.Encode()
 	return u.String(), nil
-}
-
-// renderSearchResult formats the search response for the model: a status line and the
-// (capped) raw body (the backend's result document).
-func renderSearchResult(resp *http.Response, body string, truncated bool) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "HTTP %s\n\n", resp.Status)
-	b.WriteString(body)
-	if truncated {
-		fmt.Fprintf(&b, "\n\n[results truncated at %d bytes]", maxNetworkResponseBytes)
-	}
-	return b.String()
 }

@@ -13,6 +13,26 @@ feature-parity track. See
 `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
 `docs/handoffs/2026-06-26 - 01 - skills-system.md`.
 
+### Web search works out of the box (DuckDuckGo default)
+
+- **`web_search` is now default-ON**: with no `web-search-endpoint` configured it uses a
+  built-in DuckDuckGo HTML provider — no config, no API key (reverses the P3.11 default-off
+  decision; the predecessor apogee-code shipped the same built-in). Set
+  `web-search-endpoint: off` (or `none`/`disabled`) to disable the tool — a graceful
+  "web search is disabled" result, no request made.
+- **Results are auto-cleaned**: the DuckDuckGo page (and any custom endpoint's HTML
+  response, by Content-Type or body sniff) is parsed into numbered `title / url / snippet`
+  results; a custom endpoint's JSON/text response still passes through verbatim. A
+  rate-limit/consent page degrades to "No results found", never a crash.
+- **Non-2xx responses are now tool errors** naming only the status and endpoint host
+  (previously the status + raw body passed through as a normal result). The M2 key
+  redaction (`endpointHost`/`scrubURLError`) and the always-on SSRF floor are unchanged.
+- **Scheme-less custom endpoints self-heal**: an endpoint like `search.example.com/s`
+  (no `https://`) used to parse with an empty host and every request was rejected by
+  url-safety; it now self-heals to `https://`. This repairs hand-edited configs — the
+  shipped config template never carried a broken value (its endpoint line was always
+  commented out), and first-run seeding never overwrites an existing config.
+
 ### Context compaction (`/compact`)
 
 - **`/compact` now performs real generative compaction** (replaces the
