@@ -3,6 +3,7 @@ package skills
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -13,6 +14,17 @@ import (
 // skillFileName is the marker file that makes a folder a skill. The match is case-insensitive
 // (SKILL.md / skill.md), mirroring the oracle.
 const skillFileName = "SKILL.md"
+
+// maxSkillFileBytes bounds a single SKILL.md read so a hostile repo cannot OOM discovery with
+// a giant marker file — the `.apogee/skills` dir is always scanned. Skills are prose
+// instructions; 1 MiB is far past any real one. Mirrors the read_file tool's
+// stat-or-limit-before-materialize discipline (internal/tools/read_file.go).
+const maxSkillFileBytes = 1 << 20 // 1 MiB
+
+// maxSkills caps how many skills discovery loads across all source dirs, so a repo that plants
+// thousands of skill folders cannot make the in-memory catalog unbounded. Well past any real
+// library; the /skill picker only ever surfaces a handful at once.
+const maxSkills = 1024
 
 // Sources are the injected roots Load discovers skills under (ADR 0001 — no implicit ~/.apogee).
 // Home is the apogee home (its skills/ subdir is the global library); Workspace is the project
@@ -83,6 +95,13 @@ func loadDir(cat *Catalog, dir string) []error {
 		if !strings.EqualFold(d.Name(), skillFileName) {
 			return nil
 		}
+		if cat.Len() >= maxSkills {
+			// Cap reached: a hostile repo cannot grow the catalog without bound. Stop this dir's
+			// walk and note the skip once rather than per remaining file.
+			errs = append(errs, fmt.Errorf("skills: skill cap (%d) reached; skipped %s and any later skills under %s",
+				maxSkills, p, dir))
+			return fs.SkipAll
+		}
 		if err := loadSkillFile(cat, fsys, dir, p); err != nil {
 			errs = append(errs, err)
 		}
@@ -96,7 +115,7 @@ func loadDir(cat *Catalog, dir string) []error {
 // A read or parse failure is returned as a soft error so the walk continues past one bad file.
 func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) error {
 	abs := filepath.Join(dir, filepath.FromSlash(p))
-	data, err := fs.ReadFile(fsys, p)
+	data, err := readBounded(fsys, p, maxSkillFileBytes)
 	if err != nil {
 		return fmt.Errorf("skills: read %s: %w", abs, err)
 	}
@@ -114,4 +133,26 @@ func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) error {
 	sk.Dir = filepath.Join(dir, filepath.FromSlash(skillDirRel))
 	cat.set(sk)
 	return nil
+}
+
+// readBounded reads at most max bytes of the file at p through fsys, REFUSING (rather than
+// materializing) a file larger than the cap. It opens and LimitReads instead of fs.ReadFile so
+// a hostile oversized marker file is never slurped whole into memory before being rejected —
+// the untrusted-file discipline the read_file tool applies at its own ceiling. The reader is
+// bounded to max+1 so a file exactly at the cap still reads fully while an over-cap one is
+// caught without reading it all.
+func readBounded(fsys fs.FS, p string, max int64) ([]byte, error) {
+	f, err := fsys.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("file exceeds the %d-byte skill limit", max)
+	}
+	return data, nil
 }

@@ -194,15 +194,10 @@ func (m Model) skillSuggestions(partial string) []acItem {
 }
 
 // fileSuggestions lists workspace files matching the typed partial as "@path" rows, served
-// through the Model's file cache so a typing burst reuses one workspace walk (filecache.go). A
-// Model built without a cache (a bare test fixture) falls back to an uncached walk.
+// through the Model's file cache so a typing burst reuses one workspace walk (filecache.go).
+// newModel always installs the cache, so m.files is never nil here.
 func (m Model) fileSuggestions(partial string) []acItem {
-	var paths []string
-	if m.files != nil {
-		paths = m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
-	} else {
-		paths = workspaceFiles(m.opts.Workspace, partial, maxAutocompleteItems)
-	}
+	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
 		items = append(items, acItem{value: p, label: "@" + p})
@@ -362,15 +357,12 @@ func (m Model) renderSkillChips() string {
 	if len(m.pendingSkills) == 0 {
 		return ""
 	}
-	chips := make([]string, 0, len(m.pendingSkills))
-	for _, id := range m.pendingSkills {
-		label := id
-		if m.opts.Skills != nil {
-			if sk, ok := m.opts.Skills.Get(id); ok {
-				label = sk.DisplayName
-			}
-		}
-		chips = append(chips, m.th.skillChip.Render(" "+glyphSkill+" "+label+" "))
+	// One resolver (skillDisplayNames) and one chip renderer (renderSkillChip), shared with the
+	// sent-block chip row — so the pending strip and the transcript chips never drift.
+	names := m.skillDisplayNames(m.pendingSkills)
+	chips := make([]string, 0, len(names))
+	for _, name := range names {
+		chips = append(chips, renderSkillChip(m.th, name))
 	}
 	// ANSI-aware clip: the chips carry styling, so a rune-count truncation could cut mid-escape.
 	return ansi.Truncate(strings.Join(chips, " "), max(0, m.width), "…")

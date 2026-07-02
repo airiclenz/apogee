@@ -151,7 +151,7 @@ func renderUserBlock(th theme, text string, skills []string, width int) []string
 func renderUserChipRow(th theme, marker string, skills []string, width int) string {
 	chips := make([]string, 0, len(skills))
 	for _, name := range skills {
-		chips = append(chips, th.skillChip.Render(" "+glyphSkill+" "+name+" "))
+		chips = append(chips, renderSkillChip(th, name))
 	}
 	lead := th.userBlock.Render(marker)
 	body := strings.Join(chips, " ")
@@ -160,6 +160,13 @@ func renderUserChipRow(th theme, marker string, skills []string, width int) stri
 	}
 	pad := th.userBlock.Render(strings.Repeat(" ", max(0, width-lipgloss.Width(lead)-lipgloss.Width(body))))
 	return lead + body + pad
+}
+
+// renderSkillChip renders one attached-skill badge — the violet " ✦ name " pill the chip row
+// (renderUserChipRow) and the pending-chip strip (renderSkillChips) both show. It is the single
+// source of a chip's look, so the two rows never drift.
+func renderSkillChip(th theme, name string) string {
+	return th.skillChip.Render(" " + glyphSkill + " " + name + " ")
 }
 
 // renderToolBlock renders a tool call: the ✦ [Label] target header, then each summary detail
@@ -331,23 +338,6 @@ func clampInt(n, lo, hi int) int {
 		return hi
 	}
 	return n
-}
-
-// fitLeftRight composes the footer's content body: " left … right " padded to exactly width
-// columns, with one-column margins inside the borders. When the two segments do not fit, the
-// left segment is kept and the body truncated, so the footer never overflows its row.
-func fitLeftRight(left, right string, width int) string {
-	if width < 1 {
-		return ""
-	}
-	l := " " + left
-	r := right + " "
-	gap := width - lipgloss.Width(l) - lipgloss.Width(r)
-	if gap >= 1 {
-		return l + strings.Repeat(" ", gap) + r
-	}
-	truncated := ansi.Truncate(l, width, "…")
-	return truncated + strings.Repeat(" ", max(0, width-lipgloss.Width(truncated)))
 }
 
 // ruleMix composes one of the footer's decorative rules: a heavy ━ bar with a lighter ─

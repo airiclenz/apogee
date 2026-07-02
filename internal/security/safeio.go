@@ -92,6 +92,30 @@ func SafeReadFile(root, input string) ([]byte, error) {
 	return data, nil
 }
 
+// SafeStat returns the fs metadata for input (relative to root, or absolute-inside-root)
+// with the workspace fence enforced through an os.Root pinned at root, so a symlinked
+// component pointing outside the root is refused rather than followed. It lets a caller BOUND
+// a file by size before reading it — the stat-then-read discipline the read_file tool uses —
+// so an oversized or hostile file is rejected without being materialized. A path escape
+// returns an error wrapping ErrPathEscape and nothing is stat'd outside the root.
+func SafeStat(root, input string) (os.FileInfo, error) {
+	rel, err := rootRelative(input, root)
+	if err != nil {
+		return nil, err
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPathEscape, err)
+	}
+	defer r.Close()
+
+	info, err := r.Stat(rel)
+	if err != nil {
+		return nil, mapRootEscape(err)
+	}
+	return info, nil
+}
+
 // rootRelative validates that input stays within root (the same containment property
 // ResolveInRoot enforces) and returns the path RELATIVE to root, suitable for an os.Root
 // operation. It rejects traversal and out-of-root absolute paths up front (wrapping

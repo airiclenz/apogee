@@ -178,6 +178,35 @@ feature-parity track. See
   spawned tighter (loosening mid-flight stays impossible). A top-level agent (nil view)
   behaves exactly as before.
 
+- **Cleanup batch — leaked cancels, bounded untrusted reads, escape hardening, quit race,
+  dead code.** A sweep of small hardening fixes on shipped behaviour:
+  - *Leaked cancels.* `finishWorker` (`internal/tui/model.go`) nil'd the worker's `CancelFunc`
+    without calling it, leaking one cancellable child context (and its timer resources) per
+    completed exchange for the session. It now cancels before clearing.
+  - *Bounded reads of untrusted files.* Skills discovery read `SKILL.md` unbounded at startup
+    (`.apogee/skills` is always scanned — a hostile-repo OOM), and the `@file` 10 MB cap was
+    checked only *after* `SafeReadFile` had already slurped the whole file. Both now bound
+    before materializing — skills via an `io.LimitReader` (1 MiB/file) plus a global skill-count
+    cap, `@file` via a new `security.SafeStat` fenced size check — mirroring the read_file tool.
+  - *Terminal-escape hardening.* Untrusted model text and skill display names are now
+    escape-stripped at the transcript boundary (`internal/tui/transcript.go`), so a
+    model- or `SKILL.md`-supplied `\x1b]52;…` (OSC 52 clipboard write) or CSI payload can never
+    reach the terminal. Not exploitable in the current layout (verified empirically at review),
+    but this closes it at the source rather than relying on the cellbuf and footer ordering.
+  - *Quit-while-busy teardown race.* `quit()` returned `tea.Quit` without joining the in-flight
+    worker, so `runRoot`'s deferred `Close()` teardown could race a worker still inside `Step`
+    (benign while `Close` is a no-op, a use-after-close the moment it gains real teardown). The
+    exit is now deferred until the worker's single terminal Msg arrives.
+  - *Dead code.* Removed the zero-caller `Engine.Mode()` seam method, the unused `fitLeftRight`
+    footer helper, and the standalone `workspaceFiles` walk plus its unreachable `m.files == nil`
+    autocomplete fallback (`newModel` always installs the cache). The three skill-chip
+    render/ID-resolution copies were merged onto one `renderSkillChip` renderer and the shared
+    `skillDisplayNames` resolver.
+  - *Test gaps.* Added coverage for the loop's `UsageEvent` emission hop (Delta.Usage → event
+    fields/Depth, and no event when Usage is nil), the combined skills→files→text injection
+    order in one Submit, the `@file` oversize refusal, the escape-strip boundary, and the
+    bounded skill-file read.
+
 ### TUI
 
 - **Context-fill gauge restyled** to match `llama-launcher`: a solid two-tone strip —

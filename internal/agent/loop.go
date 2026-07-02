@@ -454,17 +454,25 @@ func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 }
 
 // readFileRef resolves one workspace-relative reference to its bounded content. An empty
-// WorkspaceDir means no file tools are wired, so references cannot be honoured.
+// WorkspaceDir means no file tools are wired, so references cannot be honoured. The size is
+// checked by statting within the workspace fence BEFORE the read, so a hostile @ref cannot
+// force a huge file fully into memory before being rejected — the read_file tool's
+// stat-then-read discipline (the cap used to be checked only after SafeReadFile had already
+// materialized the whole file).
 func (a *Agent) readFileRef(ref string) (string, error) {
 	if a.cfg.WorkspaceDir == "" {
 		return "", errors.New("no workspace is configured for file references")
 	}
-	data, err := security.SafeReadFile(a.cfg.WorkspaceDir, ref)
+	info, err := security.SafeStat(a.cfg.WorkspaceDir, ref)
 	if err != nil {
 		return "", err
 	}
-	if len(data) > maxRefFileBytes {
-		return "", fmt.Errorf("file too large: %d bytes (max %d)", len(data), maxRefFileBytes)
+	if info.Size() > maxRefFileBytes {
+		return "", fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxRefFileBytes)
+	}
+	data, err := security.SafeReadFile(a.cfg.WorkspaceDir, ref)
+	if err != nil {
+		return "", err
 	}
 	return string(data), nil
 }

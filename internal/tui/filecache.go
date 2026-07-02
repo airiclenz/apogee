@@ -53,16 +53,6 @@ func (c *fileCache) suggest(root, partial string, limit int, now time.Time) []st
 	return filterFiles(c.files, partial, limit)
 }
 
-// workspaceFiles returns up to limit workspace-relative file paths matching partial — the
-// uncached path, used by tests and as the fallback when a Model is built without a cache. It
-// walks the fenced workspace tree and filters in one shot.
-func workspaceFiles(root, partial string, limit int) []string {
-	if root == "" {
-		return nil
-	}
-	return filterFiles(walkWorkspaceFiles(root, maxCachedFiles), partial, limit)
-}
-
 // walkWorkspaceFiles lists up to limit workspace-relative file paths via a bounded walk rooted
 // at root through os.Root — so the walk cannot escape the workspace or follow a symlink out of
 // it. It skips .git and other hidden directories/files, lists files only, sorts the result, and

@@ -60,6 +60,7 @@ type Model struct {
 	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
 	lastErr    error              // the error behind stateErrored, shown in the status line
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
+	quitting   bool               // a quit requested while busy; the exit waits for the worker's terminal Msg (C4)
 
 	// autocomplete is the chat mini-language suggestion overlay shown while typing at idle
 	// (commands on "/", workspace files on "@", skills on "/skill"). The zero value is hidden.
@@ -238,8 +239,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.input.Focus()
 
 	case exchangeDoneMsg:
-		m.finishWorker(stateIdle)
-		return m, nil
+		return m, m.finishWorker(stateIdle)
 
 	case cancelledMsg:
 		// The worker cancelled at a quiescent boundary and has returned, so the engine is the
@@ -250,9 +250,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// stay in scrollback); only the model's memory drops the scrapped Exchange.
 		m.eng.AbortExchange()
 		m.transcript.addNote("cancelled")
-		m.finishWorker(stateIdle)
+		cmd := m.finishWorker(stateIdle)
 		m.refreshViewport()
-		return m, nil
+		return m, cmd
 
 	case errMsg:
 		// A loop-level fault also returns the engine to the Update loop (C1), so — exactly as on
@@ -264,9 +264,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.eng.AbortExchange()
 		m.lastErr = msg.Err
 		m.transcript.addError("loop", msg.Err.Error(), 0)
-		m.finishWorker(stateErrored)
+		cmd := m.finishWorker(stateErrored)
 		m.refreshViewport()
-		return m, nil
+		return m, cmd
 
 	case compactDoneMsg:
 		// The /compact worker returned (startCompact). On success the history shrank, so reset the
@@ -283,9 +283,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ctxUsed = 0
 			m.transcript.addNote("context compacted")
 		}
-		m.finishWorker(stateIdle)
+		cmd := m.finishWorker(stateIdle)
 		m.refreshViewport()
-		return m, nil
+		return m, cmd
 
 	case spinner.TickMsg:
 		// Keep the chain alive only while running; dropping the tick when idle lets it
@@ -522,7 +522,10 @@ func (m Model) skillDisplayNames(ids []string) []string {
 				name = sk.DisplayName
 			}
 		}
-		names = append(names, name)
+		// The display name is untrusted (repo-supplied SKILL.md front-matter) and this resolver
+		// feeds both the transcript chips and the pending-chip strip, so escape-strip it here too
+		// (the transcript boundary strips again — cheap defense in depth).
+		names = append(names, stripEscapes(name))
 	}
 	return names
 }
@@ -613,31 +616,50 @@ func (m *Model) stopWorker() {
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
-// arrives: it clears the CancelFunc and any pending Approval or ask_user question. The new
-// state is idle for a completed or cancelled Exchange, errored for a loop fault.
+// arrives: it cancels and clears the CancelFunc and any pending Approval or ask_user
+// question. The new state is idle for a completed or cancelled Exchange, errored for a loop
+// fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit), else nil.
+//
+// It CALLS the CancelFunc before clearing it: a completed Exchange leaves its worker's
+// cancellable child context un-cancelled otherwise, leaking one context (and its goroutine's
+// timer resources) per completed exchange for the life of the session. Cancelling a context
+// whose work already finished is the documented, idempotent way to release it.
 //
 // It also clears the generation clock: a cancelled or faulted stream emits no terminal
 // UsageEvent, so foldStats never zeroes genStart, and a stale start would time the *next*
 // turn's tok/s from the dead one. A normal completion has already zeroed it in foldStats, so
 // this is a harmless no-op there and the safety net for every abnormal terminal path.
-func (m *Model) finishWorker(next uiState) {
+func (m *Model) finishWorker(next uiState) tea.Cmd {
+	if m.cancel != nil {
+		m.cancel() // release the worker's child context — un-cancelled it leaks per exchange
+	}
 	m.cancel = nil
 	m.pending = nil
 	m.pendingAsk = nil
 	m.genStart = time.Time{}
 	m.state = next
+	if m.quitting {
+		// A quit was requested while busy (quit deferred the exit to here); the worker has now
+		// returned its terminal Msg, so its goroutine has unwound and the teardown cannot race it.
+		return tea.Quit
+	}
+	return nil
 }
 
 // quit ends the program. On a clean quit — idle or errored, where the worker has already
 // returned — it first snapshots the conversation to the host saver; the Agent is
 // single-goroutine, so reading it from the Update goroutine is only safe once no worker
-// owns it (the busy() states). While busy it cancels the in-flight worker instead (so its
-// goroutine unwinds rather than racing a snapshot) and quits without saving — snapshotting
-// the last boundary mid-run is deferred (plan §6.1; handoff 16).
+// owns it (the busy() states). While busy it cancels the in-flight worker and DEFERS the
+// exit: returning tea.Quit here would let runRoot's deferred mcpClient.Close()/agent.Close()
+// run while the worker is still inside Step (benign while Close is a no-op, a use-after-close
+// the moment it gains its teardown — cmd/apogee/wire.go). Arming quitting instead makes the
+// worker's single terminal Msg fire tea.Quit via finishWorker, once the goroutine has
+// unwound. Snapshotting the last boundary mid-run stays deferred (plan §6.1; handoff 16).
 func (m Model) quit() (tea.Model, tea.Cmd) {
 	if m.busy() {
 		m.stopWorker()
-		return m, tea.Quit
+		m.quitting = true
+		return m, nil
 	}
 	m.saveSession()
 	return m, tea.Quit

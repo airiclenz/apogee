@@ -52,8 +52,6 @@ type Engine interface {
 	// conversation was too small to fold (no call made, history untouched) so the UI reports
 	// "nothing to compact" and leaves the gauge alone; it is always false on error.
 	Compact(context.Context) (skipped bool, err error)
-	// Mode reports the Agent's autonomy mode (for the status line).
-	Mode() domain.Mode
 	// SetMode changes the Agent's autonomy mode (Shift+Tab cycling). It is goroutine-safe, so
 	// the UI may call it while the worker drives a Step; the change takes effect on the next
 	// tool call.

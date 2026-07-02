@@ -225,6 +225,66 @@ func TestTranscriptMessageEventEmptyFallsBackToTokens(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Terminal-escape hardening (item 8 — strip ESC from untrusted text)
+// ----------------------------------------------------------------------------
+
+// Untrusted model text and skill display names are escape-stripped at the transcript boundary,
+// so an OSC 52 clipboard-write or a CSI screen game embedded by the model (or a repo-supplied
+// SKILL.md) can never reach the terminal. Each path (streamed tokens, canonical message text,
+// attached skill name) is pinned, and the benign text around the payload is preserved.
+func TestTranscriptStripsTerminalEscapes(t *testing.T) {
+	const osc52 = "\x1b]52;c;cGFyaQ==\a" // an OSC 52 clipboard-write payload
+	const csi = "\x1b[2J\x1b[H"          // a clear-screen + cursor-home CSI payload
+
+	assertNoESC := func(t *testing.T, tr *transcript) {
+		t.Helper()
+		for i, e := range tr.entries {
+			if strings.ContainsRune(e.text, 0x1b) {
+				t.Errorf("entry %d text still carries an ESC byte: %q", i, e.text)
+			}
+			for _, s := range e.skills {
+				if strings.ContainsRune(s, 0x1b) {
+					t.Errorf("entry %d skill name still carries an ESC byte: %q", i, s)
+				}
+			}
+		}
+		for _, ln := range tr.renderLines(newTheme(), 80) {
+			if strings.Contains(ln, "\x1b]") { // the OSC introducer never survives to a rendered line
+				t.Errorf("rendered line leaks an OSC escape introducer: %q", ln)
+			}
+		}
+	}
+
+	t.Run("streamed tokens (TokenEvent)", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.TokenEvent{Text: "stream " + osc52 + "tokens"})
+		tr.apply(domain.MessageEvent{Text: ""}) // commit the streamed buffer verbatim
+		assertNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "stream") || !strings.Contains(got, "tokens") {
+			t.Errorf("stripping ate the benign token text:\n%s", got)
+		}
+	})
+
+	t.Run("canonical message text (MessageEvent)", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.MessageEvent{Text: "final " + csi + "message"})
+		assertNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "final") || !strings.Contains(got, "message") {
+			t.Errorf("stripping ate the benign message text:\n%s", got)
+		}
+	})
+
+	t.Run("attached skill display name", func(t *testing.T) {
+		tr := &transcript{}
+		tr.addUser("please review", []string{"Review" + osc52 + "Skill"})
+		assertNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "Review") || !strings.Contains(got, "Skill") {
+			t.Errorf("stripping ate the benign skill name:\n%s", got)
+		}
+	})
+}
+
+// ----------------------------------------------------------------------------
 // ErrorEvent renders inline and the transcript keeps going
 // ----------------------------------------------------------------------------
 

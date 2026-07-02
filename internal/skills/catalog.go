@@ -45,6 +45,10 @@ func (c *Catalog) List() []Skill {
 	return out
 }
 
+// Len reports how many distinct skills the catalog holds. Discovery reads it to enforce a
+// global count cap so a hostile repo cannot grow the catalog without bound (load.go).
+func (c *Catalog) Len() int { return len(c.byID) }
+
 // Get looks up a skill by exact ID — the by-id lookup the TUI uses to label an attached chip.
 func (c *Catalog) Get(id string) (Skill, bool) {
 	s, ok := c.byID[id]

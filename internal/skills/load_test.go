@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -115,6 +116,27 @@ func TestLoadMalformedSkillSkippedWithSoftError(t *testing.T) {
 	}
 	if _, ok := cat.Get("bad"); ok {
 		t.Error("the malformed skill was loaded instead of skipped")
+	}
+}
+
+// TestLoadOversizeSkillFileRefused pins the bounded read (item 8): a SKILL.md past the byte
+// cap is refused as a soft error and never materialized, while a well-sized sibling still loads
+// — a hostile repo cannot OOM discovery with a giant marker file.
+func TestLoadOversizeSkillFileRefused(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "ok", "---\nid: ok\nsummary: fine\n---\nbody")
+	big := "---\nid: huge\nsummary: s\n---\n" + strings.Repeat("A", maxSkillFileBytes+1)
+	writeSkill(t, filepath.Join(home, "skills"), "huge", big)
+
+	cat, err := Load(Sources{Home: home})
+	if err == nil {
+		t.Error("expected a soft error reporting the oversized skill file, got nil")
+	}
+	if _, ok := cat.Get("huge"); ok {
+		t.Error("an oversized SKILL.md was loaded instead of refused")
+	}
+	if _, ok := cat.Get("ok"); !ok {
+		t.Error("the well-sized skill was dropped because a sibling was oversized")
 	}
 }
 

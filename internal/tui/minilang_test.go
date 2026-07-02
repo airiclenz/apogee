@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -348,18 +349,21 @@ func TestWorkspaceFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".git", "config"), "[core]") // hidden dir, must be skipped
 	mustWrite(t, filepath.Join(dir, ".env"), "SECRET=1")         // hidden file, must be skipped
 
-	all := workspaceFiles(dir, "", 20)
+	// Exercised through the fileCache (the only surviving path — the standalone workspaceFiles
+	// helper was removed as dead code; newModel always installs the cache).
+	now := time.Now()
+	all := (&fileCache{}).suggest(dir, "", 20, now)
 	want := []string{"README.md", "internal/loop.go", "main.go"}
 	if !reflect.DeepEqual(all, want) {
-		t.Errorf("workspaceFiles(all) = %v, want %v (.git/.env excluded)", all, want)
+		t.Errorf("workspace listing = %v, want %v (.git/.env excluded)", all, want)
 	}
-	if got := workspaceFiles(dir, "loop", 20); !reflect.DeepEqual(got, []string{"internal/loop.go"}) {
+	if got := (&fileCache{}).suggest(dir, "loop", 20, now); !reflect.DeepEqual(got, []string{"internal/loop.go"}) {
 		t.Errorf("filtered walk = %v, want [internal/loop.go]", got)
 	}
-	if got := workspaceFiles(dir, "", 2); len(got) != 2 {
+	if got := (&fileCache{}).suggest(dir, "", 2, now); len(got) != 2 {
 		t.Errorf("cap not honoured: got %d, want 2", len(got))
 	}
-	if got := workspaceFiles("", "", 20); got != nil {
+	if got := (&fileCache{}).suggest("", "", 20, now); got != nil {
 		t.Errorf("empty root = %v, want nil", got)
 	}
 }

@@ -331,7 +331,7 @@ the child's next write gates/refuses. Amend ADR 0013 with a realisation note.
 
 ---
 
-## 8. Cleanup batch (each small; batch in one or two commits)
+## 8. Cleanup batch (each small; batch in one or two commits) — ✅ DONE (2026-07-02)
 
 - **Lost cancels:** `finishWorker` nils `m.cancel` without calling it — one leaked child
   context per completed exchange for the session (`internal/tui/model.go:582`). Call

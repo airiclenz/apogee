@@ -472,17 +472,35 @@ func TestModelStopKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("ctrl+c twice within the window quits and cancels any worker", func(t *testing.T) {
+	t.Run("ctrl+c twice at idle quits immediately", func(t *testing.T) {
+		m := newTestModel(t)
+		_, cmd := ctrlCQuit(t, m)
+		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+			t.Error("ctrl+c×2 at idle did not quit")
+		}
+	})
+
+	t.Run("ctrl+c twice while busy defers the quit until the worker returns", func(t *testing.T) {
 		m := newTestModel(t)
 		cancelled := false
 		m.cancel = func() { cancelled = true }
 		m.state = stateRunning
-		_, cmd := ctrlCQuit(t, m)
+		next, cmd := ctrlCQuit(t, m)
 		if !cancelled {
-			t.Error("ctrl+c×2 did not cancel the in-flight worker before quitting")
+			t.Error("ctrl+c×2 did not cancel the in-flight worker")
 		}
-		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
-			t.Error("ctrl+c×2 did not quit")
+		// The exit is DEFERRED: returning tea.Quit here would race runRoot's Close() teardown
+		// against a worker still inside Step. The quit is armed instead.
+		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
+			t.Error("ctrl+c×2 while busy quit immediately instead of deferring to the worker")
+		}
+		if !next.quitting {
+			t.Error("ctrl+c×2 while busy did not arm the deferred quit")
+		}
+		// The worker's single terminal Msg fires the real quit once its goroutine has unwound.
+		_, doneCmd := stepCmd(t, next, cancelledMsg{})
+		if _, isQuit := cmdMsg(doneCmd).(tea.QuitMsg); !isQuit {
+			t.Error("the worker's terminal Msg did not fire the deferred quit")
 		}
 	})
 
@@ -755,8 +773,8 @@ func TestModelDoesNotSaveEmptyConversation(t *testing.T) {
 }
 
 // Quitting while a worker is in flight must NOT snapshot — the worker owns the Agent, and
-// the Agent is single-goroutine, so a snapshot here would race its Step. ctrl+c cancels
-// and quits instead (the last boundary is unsaved this phase).
+// the Agent is single-goroutine, so a snapshot here would race its Step. ctrl+c cancels and
+// DEFERS the exit until the worker returns (item 8), and the last boundary stays unsaved.
 func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	snapshotted := false
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) {
@@ -769,12 +787,23 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	m.state = stateRunning
 	m.cancel = func() {}
 
-	_, cmd := ctrlCQuit(t, m)
+	next, cmd := ctrlCQuit(t, m)
 	if snapshotted || rec.called {
 		t.Error("snapshotted while a worker was running (would race the single-goroutine Agent)")
 	}
-	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
-		t.Error("ctrl+c×2 while busy did not quit")
+	// The exit is DEFERRED while busy: an immediate tea.Quit would race runRoot's Close()
+	// teardown against the still-running worker.
+	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
+		t.Error("ctrl+c×2 while busy quit immediately instead of waiting for the worker")
+	}
+	// The worker's terminal Msg fires the deferred quit — and still saves nothing (the busy
+	// path never armed a save; the last boundary stays unsaved this phase).
+	_, doneCmd := stepCmd(t, next, cancelledMsg{})
+	if snapshotted || rec.called {
+		t.Error("the deferred quit snapshotted the cancelled boundary; the busy path must not save")
+	}
+	if _, isQuit := cmdMsg(doneCmd).(tea.QuitMsg); !isQuit {
+		t.Error("the worker's terminal Msg did not fire the deferred quit")
 	}
 }
 

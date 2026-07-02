@@ -181,8 +181,7 @@ func (f *fakeEngine) Compact(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (f *fakeEngine) Mode() domain.Mode { return domain.ModeAskBefore }
-func (f *fakeEngine) Close() error      { return nil }
+func (f *fakeEngine) Close() error { return nil }
 
 func (f *fakeEngine) SetMode(m domain.Mode) {
 	f.mu.Lock()
