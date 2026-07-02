@@ -1071,8 +1071,9 @@ func (m Model) statusLine() string {
 }
 
 // statusRight is the status line's right slot: the live context gauge when token usage is
-// known, else a state-appropriate key hint. The gauge is empty until Phase 4 routes usage, so
-// for now the hint shows; once usage is wired, the gauge takes the slot with no rework.
+// known, else a state-appropriate key hint. The gauge is empty only until the first UsageEvent
+// folds a turn's total into ctxUsed (or after /clear and /compact zero it) — so the hint shows
+// before any usage is measured and the gauge takes the slot the moment it is.
 func (m Model) statusRight() string {
 	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
 	if !m.lastCtrlC.IsZero() {

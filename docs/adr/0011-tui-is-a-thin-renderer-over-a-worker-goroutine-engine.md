@@ -149,3 +149,39 @@ composition root and the only place that speaks the public `apogee.*` surface.
   — both moved there at these versions, exactly as Bubble Tea did. The v2 `View()` returns a
   `tea.View` struct (alt-screen is a view field, not a program option) and key presses arrive
   as `tea.KeyPressMsg` — the seam message types stay plain values, unaffected.
+
+## Post-v1 realisation (apogee-code track) — synchronous engine calls from the `Update` goroutine
+
+C1 states the invariant as "the `Update` goroutine never touches the Agent." The apogee-code
+feature-parity track (mini-language, `/clear`, `/compact`, live Shift+Tab, session-save on quit)
+added four deliberate `Update`-goroutine calls into the engine, so the contract the next
+interactive consumer must copy is narrower than that one-line summary. It refines — it does not
+change — the Decision: the Agent's **Exchange is still driven from exactly one worker at a time**
+(the single-worker invariant is untouched, `p.Send` is still the only cross-goroutine event path,
+the approval rendezvous is unchanged). Beyond driving an Exchange, the `Update` goroutine may call
+the engine only under one of two conditions.
+
+- **Idle-only synchronous calls — the engine is quiescent, no worker owns it.** The context and
+  snapshot seams run straight on the `Update` goroutine because each is reached only where no
+  worker is in flight: `ClearContext` (`/clear`) and the `Compact` launch decision are reached
+  only from `submit` at `stateIdle` (`runCommand`); `AbortExchange` runs on `cancelledMsg` /
+  `errMsg`, i.e. *after* the worker has returned its terminal `Msg` and handed the engine back
+  (the post-Esc / post-fault un-wedge — without it the Agent stays in-Exchange and the next
+  `/clear` or message is refused with `ErrInputPending`); `Snapshot` runs from `quit` only on the
+  `!busy()` path (`saveSession`). The single-goroutine contract forbids *concurrent* use, not a
+  synchronous call made once the sole driver has already returned — so all four are safe by
+  construction, each guarded by the **state machine** rather than by a lock.
+
+- **The one mid-`Step`-safe call — `SetMode`, mutex-guarded.** Shift+Tab cycles the autonomy
+  mode live in *every* state, including while a worker is mid-`Step`. This is the single method
+  the Agent documents as goroutine-safe: `SetMode`/`Mode` take an `RWMutex` (`modeMu`, `agent.go`)
+  over the one field shared across goroutines, so the UI's write can race-free overlap the
+  worker's dispatch-time read and takes effect at the next tool call. It is the explicit exception
+  named in the Agent's own doc — nothing else may be called while a worker is in flight.
+
+**The seam a consumer must copy, precisely stated.** Drive each Exchange from one worker; call the
+context/snapshot seams (`ClearContext`, `Compact`, `AbortExchange`, `Snapshot`) from the `Update`
+goroutine **only where the state machine proves no worker is running**; and add a new mid-`Step`
+call **only** behind the same mutex-guarded, documented-goroutine-safe surface `SetMode` carries.
+This mirrors [ADR 0007](0007-step-turn-and-the-quiescent-boundary.md)'s realisation notes: the
+boundary contract is unchanged; these entries record the exact control-flow calls that live at it.

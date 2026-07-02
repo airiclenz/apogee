@@ -1,8 +1,8 @@
 # Plan — Post-v1.0.0 review remediation (fix before the next stage)
 
 **Date:** 2026-07-02
-**Status:** IN PROGRESS — items 1–3 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
-2026-07-02); items 4–8 open. Ordered
+**Status:** IN PROGRESS — items 1–4 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
++ item 4 docs 2026-07-02); items 5–8 open. Ordered
 action list from the 2026-07-02 code review of
 `v1.0.0..HEAD` (the apogee-code feature-parity track: mini-language, skills, quick-wins
 bundle, `/props` discovery, gauge restyle, mouse support, un-wedge fix, `/compact` reducer).
@@ -165,7 +165,28 @@ and `/compact` runs exactly when the upstream is likeliest to fault.
 
 ---
 
-## 4. Docs/CHANGELOG reconciliation (must precede the next tag)
+## 4. Docs/CHANGELOG reconciliation (must precede the next tag) — ✅ DONE (2026-07-02)
+
+**Done:** all three reconciliations landed (docs/markdown only — `go build ./...`, `go vet
+./internal/tui/`, and `gofmt` all clean).
+- **CHANGELOG.** Rewrote the two self-contradicting `[Unreleased]` entries to the as-shipped
+  state: the mini-language `/compact` line no longer calls it "**stubbed**" (it now points at the
+  "Context compaction (`/compact`)" section describing the shipped reducer), and the Public-API
+  entry now reads `Agent.Compact(context.Context) (skipped bool, err error)` with the skip
+  semantics, dropping the removed `ErrCompactionNotImplemented` sentinel. The two remaining
+  sentinel mentions (lines ~19/33) are the *correct* ones — they document the stub's replacement
+  and the sentinel's removal.
+- **Stale gauge comments.** The three "gauge is reserved until Phase 4 routes usage" comments
+  (`internal/tui/doc.go`, `tui.go` `Options.ContextWindow`, `model.go` `statusRight`) now describe
+  the live `UsageEvent → ctxUsed → contextGauge → statusRight` wiring against the discovered
+  window. Same pass: `doc.go` now narrates `markdown.go`, `filecache.go`, and `mouse.go` (it
+  already narrated every other file).
+- **ADR 0011 realisation note.** Added a "Post-v1 realisation (apogee-code track)" section
+  recording the four deliberate `Update`-goroutine engine calls as the two documented exceptions
+  to C1's "the `Update` goroutine never touches the Agent": idle-only synchronous seams
+  (`ClearContext`/`Compact`/`AbortExchange`/`Snapshot`, each state-machine-guarded to a quiescent
+  boundary) and the one mid-`Step`-safe `modeMu`-guarded `SetMode` — the exact contract the next
+  interactive consumer copies (ADR-0007 realisation pattern).
 
 - **CHANGELOG [Unreleased] contradicts itself:** lines ~97 and ~110 still call `/compact`
   "**stubbed**" and advertise `Agent.Compact` "returns the new

@@ -26,8 +26,10 @@
 // soft-wrap so the last user prompt sticks to the top while a reply streams). The transcript now
 // groups a tool call with its result by ToolCall ID, the input box is a rounded, auto-growing
 // black field, and the chrome is a braille status line plus a footer bar (host-alias ✦ model ✦
-// context-window, mode). The live token gauge is reserved until Phase 4 routes usage; the
-// red/green diff detail is a reserved renderer awaiting its Phase-3 producer.
+// context-window, mode). The live token gauge (reserved at P2.7) is now wired: the post-v1
+// track folds each top-level UsageEvent's total into the status-line context-fill gauge,
+// measured against the discovered context window ([Model.contextGauge] / [Model.statusRight]). The
+// red/green diff detail is still a reserved renderer awaiting its Phase-3 producer.
 //
 // P3.14 turns the Depth-tolerating renderer into a Depth-rendering one: a sub-agent (Depth > 0)
 // run is framed as a vertical-ruled sub-section — each line carries one "│ " rail gutter per
@@ -53,6 +55,16 @@
 // prepended skill body) stays in the agent loop, through Config.Skills. /skill is deliberately
 // NOT a parser command (it never submits as a message) — attachment is the only way it acts,
 // mirroring the oracle's selectSkill, which keeps an unknown "/skill foo" an ordinary message.
+//
+// Three files round out the renderer without touching the state machine. markdown.go turns the
+// common markdown subset in assistant text (**bold**, # headings, `inline`/fenced code, bullet/
+// numbered lists) into styled physical lines — a spare, pure, lipgloss-only renderer matching
+// toolpresent.go's posture, with render.go still owning the marker and depth framing. filecache.go
+// backs the "@" overlay with a short-TTL, single-walk workspace listing filtered in memory, so a
+// typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke. mouse.go
+// implements the prompt's click-to-position caret and drag-to-select (with OSC52 copy) on top of
+// the textarea — apogee captures the mouse for transcript scrolling, which turns off the
+// terminal's own click-drag selection, so the prompt re-implements it here.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole

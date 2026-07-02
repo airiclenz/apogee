@@ -134,8 +134,10 @@ feature-parity track. See
   references, and an autocomplete overlay (commands + workspace files, the latter
   via a bounded `os.Root` walk) mirrors the approval-prompt overlay.
 - **Commands**: `/clear` (drop the model's context, keep the visible transcript),
-  `/continue` ("Please continue"), and a **stubbed** `/compact` (the generative
-  reducer is a follow-up; the command surface and `Agent.Compact()` seam exist now).
+  `/continue` ("Please continue"), and `/compact` (generative compaction — the command
+  surface and the `Agent.Compact` seam landed here; the reducer that folds the history
+  through them shipped in the same track, see the "Context compaction (`/compact`)"
+  section above).
 - **`@file` references now resolve** (behaviour change): the loop reads each
   `UserInput.FileRefs` entry within the workspace fence (`security.SafeReadFile`,
   `os.Root`-pinned) and injects its content into the user message — replacing the
@@ -146,8 +148,11 @@ feature-parity track. See
 
 - `Agent.ClearContext() error` — drop the conversation history at a quiescent
   boundary (the host's transcript is unaffected); refused mid-Exchange.
-- `Agent.Compact(context.Context) error` — on-demand generative Compaction seam;
-  returns the new `ErrCompactionNotImplemented` sentinel until the reducer lands.
+- `Agent.Compact(context.Context) (skipped bool, err error)` — on-demand generative
+  Compaction: summarizes the conversation and folds the history at a quiescent boundary
+  (refused mid-Exchange with `ErrInputPending`, like `ClearContext`). `skipped` is true
+  when the conversation was too small past the protected prefix to fold — no upstream
+  call, history untouched; always false on error.
 - `UserInput.SkillIDs []string` — the skills attached in chat; the loop resolves
   each through `Config.Skills` and prepends its body to the Turn (was reserved).
 - `Config.Skills SkillResolver` — host-supplied resolver for attached skill IDs
