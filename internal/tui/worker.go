@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -33,14 +34,20 @@ func startExchange(parent context.Context, eng Engine, input domain.UserInput) (
 // the model stores so Esc cancels the in-flight compaction. A cancel surfaces as the shared
 // cancelledMsg (the model's cancel handling — AbortExchange is a safe no-op here); otherwise
 // the terminal Msg is compactDoneMsg carrying whatever Compact reported.
+//
+// The outcome is classified from Compact's returned error, NOT a fresh ctx.Err() read: an Esc
+// that lands after Compact has already committed the fold returns a nil error, so it must be
+// reported as compacted, not cancelled. Only an error that is context.Canceled — which the
+// reducer returns exactly when the cancel pre-empted the summary and left the conversation
+// untouched — becomes cancelledMsg.
 func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 	cmd := func() tea.Msg {
-		err := eng.Compact(ctx)
-		if ctx.Err() != nil {
+		skipped, err := eng.Compact(ctx)
+		if errors.Is(err, context.Canceled) {
 			return cancelledMsg{}
 		}
-		return compactDoneMsg{Err: err}
+		return compactDoneMsg{Skipped: skipped, Err: err}
 	}
 	return cmd, cancel
 }

@@ -76,9 +76,12 @@ type errMsg struct {
 }
 
 // compactDoneMsg is the /compact worker's terminal Msg (startCompact): Err is nil on a
-// successful compaction and carries whatever Agent.Compact reported otherwise. The model
-// records the outcome as a transcript note and returns to idle. A cancelled compaction
-// arrives as cancelledMsg instead, not here.
+// successful compaction and carries whatever Agent.Compact reported otherwise. Skipped is
+// true when the conversation was too small to fold (no upstream call, history untouched) —
+// the model then reports "nothing to compact" and leaves the gauge alone rather than falsely
+// claiming a compaction. The model records the outcome as a transcript note and returns to
+// idle. A cancelled compaction arrives as cancelledMsg instead, not here.
 type compactDoneMsg struct {
-	Err error
+	Skipped bool
+	Err     error
 }

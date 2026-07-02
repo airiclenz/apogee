@@ -48,8 +48,10 @@ type Engine interface {
 	AbortExchange()
 	// Compact triggers generative Compaction on demand (the /compact command): it summarizes
 	// the conversation and replaces the folded history with the summary. A real upstream call,
-	// so the TUI drives it on a worker goroutine. Called only at idle.
-	Compact(context.Context) error
+	// so the TUI drives it on a worker goroutine. Called only at idle. skipped is true when the
+	// conversation was too small to fold (no call made, history untouched) so the UI reports
+	// "nothing to compact" and leaves the gauge alone; it is always false on error.
+	Compact(context.Context) (skipped bool, err error)
 	// Mode reports the Agent's autonomy mode (for the status line).
 	Mode() domain.Mode
 	// SetMode changes the Agent's autonomy mode (Shift+Tab cycling). It is goroutine-safe, so

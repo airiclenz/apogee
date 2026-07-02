@@ -244,11 +244,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactDoneMsg:
 		// The /compact worker returned (startCompact). On success the history shrank, so reset the
-		// gauge to hidden — the next Turn's UsageEvent re-measures the smaller fill (foldStats); on
-		// failure surface the reason as a note. Either way the worker is done: return to idle.
-		if msg.Err != nil {
+		// gauge to hidden — the next Turn's UsageEvent re-measures the smaller fill (foldStats). A
+		// skip (conversation too small to fold) touched nothing, so leave the gauge as it was and
+		// say so plainly rather than claiming a compaction. A failure surfaces its reason as a note.
+		// Either way the worker is done: return to idle.
+		switch {
+		case msg.Err != nil:
 			m.transcript.addNote("compact: " + msg.Err.Error())
-		} else {
+		case msg.Skipped:
+			m.transcript.addNote("nothing to compact")
+		default:
 			m.ctxUsed = 0
 			m.transcript.addNote("context compacted")
 		}
@@ -528,6 +533,11 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 		if err := m.eng.ClearContext(); err != nil {
 			m.transcript.addNote("could not clear context: " + err.Error())
 		} else {
+			// The conversation is empty again, so the live gauge and throughput readout must fall
+			// with it — otherwise they stay lit from the discarded session (the next Turn re-measures
+			// from zero), the same reason compactDoneMsg zeroes the gauge on a fold.
+			m.ctxUsed = 0
+			m.tokPerSec = 0
 			m.transcript.addNote("context cleared — the model's memory of this session is reset")
 		}
 		m.layout()
@@ -579,10 +589,16 @@ func (m *Model) stopWorker() {
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
 // arrives: it clears the CancelFunc and any pending Approval or ask_user question. The new
 // state is idle for a completed or cancelled Exchange, errored for a loop fault.
+//
+// It also clears the generation clock: a cancelled or faulted stream emits no terminal
+// UsageEvent, so foldStats never zeroes genStart, and a stale start would time the *next*
+// turn's tok/s from the dead one. A normal completion has already zeroed it in foldStats, so
+// this is a harmless no-op there and the safety net for every abnormal terminal path.
 func (m *Model) finishWorker(next uiState) {
 	m.cancel = nil
 	m.pending = nil
 	m.pendingAsk = nil
+	m.genStart = time.Time{}
 	m.state = next
 }
 

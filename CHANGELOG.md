@@ -62,6 +62,22 @@ feature-parity track. See
   deferred `llamacpp-props` strategy; the `ollama-show`/`ollama-tags` strategies
   remain unported (additive, not needed yet).
 
+- **`/compact` and the context gauge now tell the truth.** Four fixes to the
+  compaction/gauge seam that had it reporting outcomes it did not produce:
+  (a) an Esc landing *after* a compaction committed reported "cancelled" while the
+  history had already folded — `startCompact` (`internal/tui/worker.go`) now
+  classifies the outcome from `Compact`'s returned error (`context.Canceled`), not a
+  post-hoc `ctx.Err()` read, so a committed fold reports as compacted;
+  (b) a no-op compaction (conversation too small to fold — the reducer's
+  `Result.Skipped`) printed "context compacted" and hid the gauge — `Agent.Compact`
+  now returns the skip signal through the `Engine` seam and the TUI says "nothing to
+  compact" and leaves the gauge untouched;
+  (c) `/clear` left the gauge and tok/s readout lit from the discarded session —
+  `ClearContext` now zeroes `ctxUsed`/`tokPerSec` like a fold does;
+  (d) a cancelled or faulted stream emits no terminal `UsageEvent`, so the
+  generation clock survived into the next turn and mistimed its tok/s — `finishWorker`
+  now clears `genStart` on every terminal message.
+
 ### TUI
 
 - **Context-fill gauge restyled** to match `llama-launcher`: a solid two-tone strip —

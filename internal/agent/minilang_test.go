@@ -72,8 +72,10 @@ func TestCompactSummarizesAndReplacesHistoryKeepingPrefix(t *testing.T) {
 		t.Fatalf("precondition: conv.Len() = %d, want 4", a.conv.Len())
 	}
 
-	if err := a.Compact(context.Background()); err != nil {
+	if skipped, err := a.Compact(context.Background()); err != nil {
 		t.Fatalf("Compact: %v", err)
+	} else if skipped {
+		t.Fatal("Compact skipped a conversation with 4 messages past the prefix; want a fold")
 	}
 
 	// History folds to the protected prefix (first user message) + one assistant summary.
@@ -106,7 +108,7 @@ func TestCompactRefusedMidExchange(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.inExchange = true // a mid-Exchange boundary — compacting here would orphan a half-run turn
-	if err := a.Compact(context.Background()); !errors.Is(err, domain.ErrInputPending) {
+	if _, err := a.Compact(context.Background()); !errors.Is(err, domain.ErrInputPending) {
 		t.Errorf("Compact mid-exchange err = %v, want ErrInputPending", err)
 	}
 }

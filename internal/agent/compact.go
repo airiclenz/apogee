@@ -24,12 +24,17 @@ const (
 // boundary; calling it mid-Exchange is refused (ErrInputPending) so a half-streamed Turn is
 // never orphaned, mirroring ClearContext. The Turn counter is untouched and the Agent stays
 // snapshot-safe after it returns. A summary-call failure leaves the conversation unchanged.
-func (a *Agent) Compact(ctx context.Context) error {
+//
+// skipped reports that the conversation was too small to be worth folding (the reducer's
+// Result.Skipped — no upstream call, conv untouched), so the caller can say "nothing to
+// compact" and leave the context gauge alone rather than falsely claiming a compaction. It is
+// always false on error (a fault is not a skip).
+func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 	if a.inExchange {
-		return domain.ErrInputPending
+		return false, domain.ErrInputPending
 	}
-	_, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv)
-	return err
+	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv)
+	return res.Skipped, err
 }
 
 // compactCompleter adapts the Agent's provider seam to context.Completer: a single, SILENT

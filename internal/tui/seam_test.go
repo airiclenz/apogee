@@ -121,7 +121,7 @@ type fakeEngine struct {
 	stepFn     func(ctx context.Context, call int) (domain.StepResult, error)
 	snapshotFn func() (domain.Session, error)
 	clearFn    func() error
-	compactFn  func(context.Context) error
+	compactFn  func(context.Context) (skipped bool, err error)
 }
 
 // fakeEngine satisfies the narrow Engine seam the worker drives.
@@ -170,7 +170,7 @@ func (f *fakeEngine) AbortExchange() {
 	f.mu.Unlock()
 }
 
-func (f *fakeEngine) Compact(ctx context.Context) error {
+func (f *fakeEngine) Compact(ctx context.Context) (bool, error) {
 	f.mu.Lock()
 	f.compactCalls++
 	fn := f.compactFn
@@ -178,7 +178,7 @@ func (f *fakeEngine) Compact(ctx context.Context) error {
 	if fn != nil {
 		return fn(ctx)
 	}
-	return nil
+	return false, nil
 }
 
 func (f *fakeEngine) Mode() domain.Mode { return domain.ModeAskBefore }
