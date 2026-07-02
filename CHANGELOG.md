@@ -78,6 +78,15 @@ feature-parity track. See
   generation clock survived into the next turn and mistimed its tok/s — `finishWorker`
   now clears `genStart` on every terminal message.
 
+- **A loop fault no longer risks re-wedging the engine.** The `errMsg` handler
+  (`internal/tui/model.go`) now calls `AbortExchange` before returning to the errored
+  state, mirroring the `cancelledMsg` recovery: if a `Step` ever faults mid-Exchange
+  the interrupted Exchange is discarded so the next `/clear` or message is accepted
+  rather than refused with `ErrInputPending`. A latent fix — `Step` surfaces faults as
+  an `ErrorEvent` at a boundary today — but it closes the error flavour of the post-Esc
+  un-wedge. The `/compact` failure/cancel spine (both `startCompact` outcomes and the
+  reducer's overflow/cancel/silence faults) is now covered by tests.
+
 ### TUI
 
 - **Context-fill gauge restyled** to match `llama-launcher`: a solid two-tone strip —

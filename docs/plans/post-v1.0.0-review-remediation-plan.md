@@ -1,8 +1,8 @@
 # Plan — Post-v1.0.0 review remediation (fix before the next stage)
 
 **Date:** 2026-07-02
-**Status:** IN PROGRESS — item 1 done (commit `8dc295e`, 2026-07-02); item 2 code done
-(2026-07-02, its dedicated fault/cancel tests are item 3, still open); items 3–8 open. Ordered
+**Status:** IN PROGRESS — items 1–3 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
+2026-07-02); items 4–8 open. Ordered
 action list from the 2026-07-02 code review of
 `v1.0.0..HEAD` (the apogee-code feature-parity track: mini-language, skills, quick-wins
 bundle, `/props` discovery, gauge restyle, mouse support, un-wedge fix, `/compact` reducer).
@@ -113,7 +113,33 @@ green.
 
 ---
 
-## 3. Tests for the `/compact` failure/cancel spine (write alongside item 2)
+## 3. Tests for the `/compact` failure/cancel spine (write alongside item 2) — ✅ DONE (2026-07-02)
+
+**Done:** the fault side of compaction is now covered at both seams; `go test ./... -race` on
+the touched packages is green.
+- **Agent reducer faults** (`internal/agent/compact_test.go`, new): `DeltaContextOverflow` ⇒
+  error + `skipped=false` + conv untouched (the deterministic high-fill failure item 6 will make
+  survivable); ctx-cancel mid-summary ⇒ `ctx.Err()` (`context.Canceled`) wins over the
+  masqueraded terminal `DeltaError`, conv untouched (via `blockingResponder`); the silence
+  contract — after a real exchange's events are dropped, `Compact` emits no `TokenEvent`/
+  `UsageEvent`; and a fold over a real tool-call conversation (assistant `ToolCalls` + `RoleTool`
+  results) leaves **no dangling tool message** (clean prefix→summary), the summarizer still saw
+  the inlined tool work, and the folded Agent `Snapshot`→`Resume`→`Submit`→`Step`s to completion.
+- **`startCompact` outcomes** (`internal/tui/worker_test.go`): Esc-cancel ⇒ `cancelledMsg` (not
+  `compactDoneMsg`); the 2a inverse — a late cancel after a nil-error return still reports
+  `compactDoneMsg` (classified from the returned error, not a fresh `ctx.Err()` read).
+- **TUI folding** (`internal/tui/minilang_test.go`): a `Skipped` compact ⇒ "nothing to compact"
+  with the gauge left lit (2b); a cancelled `/compact` leaves `ctxUsed` unchanged, calls
+  `AbortExchange`, and records the "cancelled" note.
+- **The un-wedge, error flavour** — resolved by the *fix*, not just a pin. `errMsg`
+  (`internal/tui/model.go`) now calls `AbortExchange` before going to `stateErrored`, mirroring
+  `cancelledMsg`, so a (latent) mid-Exchange `Step` fault can no longer wedge the engine at
+  `ErrInputPending`. Pinned by a new `TestModelSeamMessageTransitions` sub-test; CHANGELOG
+  `[Unreleased] → Fixes` records it. (This is the fourth deliberate Update-goroutine engine call
+  — feeds item 4's ADR-0011 realisation note.)
+
+<details>
+<summary>Original plan text (superseded by the Done note above)</summary>
 
 The whole fault side of compaction shipped untested — and it is precisely where 2a/2b live,
 and `/compact` runs exactly when the upstream is likeliest to fault.
@@ -134,6 +160,8 @@ and `/compact` runs exactly when the upstream is likeliest to fault.
   `AbortExchange` the way `cancelledMsg` does (`internal/tui/model.go:238`) — pin the
   recovery (or make `errMsg` abort too; that's the likely fix). Today `Step` never returns
   a mid-Exchange error, so this is a latent re-wedge, not a live one.
+
+</details>
 
 ---
 

@@ -320,6 +320,25 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		}
 	})
 
+	t.Run("errMsg discards the open Exchange so the next input is accepted", func(t *testing.T) {
+		// The error flavour of the post-Esc wedge: a loop fault must abort the open Exchange the
+		// same way a cancel does, otherwise a mid-Exchange Step error would leave the engine
+		// inExchange and the next /clear or message would be rejected with ErrInputPending. Latent
+		// today (Step surfaces faults as an ErrorEvent at a boundary), so this pins the guard.
+		eng := &fakeEngine{}
+		m := newModel(context.Background(), eng, testOpts)
+		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		m.cancel = func() {} // stand in for a live worker
+		m.state = stateRunning
+		m = step(t, m, errMsg{Err: errors.New("loop fault mid-exchange")})
+		if m.state != stateErrored {
+			t.Fatalf("state = %v, want errored", m.state)
+		}
+		if got := eng.aborts(); got != 1 {
+			t.Fatalf("AbortExchange called %d times, want 1 (a loop fault must discard the open Exchange)", got)
+		}
+	})
+
 	t.Run("errored → enter dismisses to idle", func(t *testing.T) {
 		m := newTestModel(t)
 		m.state = stateErrored

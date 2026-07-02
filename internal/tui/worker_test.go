@@ -125,3 +125,64 @@ func TestStartExchangeCancelYieldsCancelledMsg(t *testing.T) {
 		t.Errorf("Submit calls = %d; want 1", eng.submits())
 	}
 }
+
+// TestStartCompactCancelYieldsCancelledMsg proves the /compact worker's cancel path: the
+// CancelFunc cancels the in-flight summary call, Compact returns context.Canceled (the
+// reducer's contract when a cancel pre-empts the summary, leaving the conversation untouched),
+// and startCompact classifies that as the shared cancelledMsg — never a compactDoneMsg.
+func TestStartCompactCancelYieldsCancelledMsg(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{
+		compactFn: func(ctx context.Context) (bool, error) {
+			<-ctx.Done()
+			return false, ctx.Err() // context.Canceled — the pre-empted-summary contract
+		},
+	}
+
+	cmd, cancel := startCompact(context.Background(), eng)
+
+	out := make(chan tea.Msg, 1)
+	go func() { out <- cmd() }()
+
+	cancel()
+
+	select {
+	case msg := <-out:
+		if _, ok := msg.(cancelledMsg); !ok {
+			t.Fatalf("msg = %T; want cancelledMsg (a pre-empted compaction is a cancel)", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("compact worker did not return after cancel (deadlock)")
+	}
+	if eng.compactCalls != 1 {
+		t.Errorf("Compact calls = %d; want 1", eng.compactCalls)
+	}
+}
+
+// TestStartCompactLateCancelStillReportsCompacted is the 2a inverse: an Esc that lands after
+// Compact has already committed the fold returns a nil error, so the outcome must be classified
+// from that returned error (compacted), not a fresh ctx.Err() read — which, with a cancelled
+// ctx, would wrongly report "cancelled" and leave the gauge stale though the history had folded.
+func TestStartCompactLateCancelStillReportsCompacted(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{
+		// The fold committed before the (late) Esc landed: a nil error regardless of ctx.
+		compactFn: func(context.Context) (bool, error) { return false, nil },
+	}
+
+	cmd, cancel := startCompact(context.Background(), eng)
+	cancel() // the late Esc — the ctx is now cancelled, but Compact already returned nil
+
+	msg := cmd()
+
+	done, ok := msg.(compactDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %T; want compactDoneMsg (a committed fold reports compacted despite a late cancel)", msg)
+	}
+	if done.Err != nil {
+		t.Errorf("compactDoneMsg.Err = %v; want nil (a committed fold is not a failure)", done.Err)
+	}
+	if done.Skipped {
+		t.Error("compactDoneMsg.Skipped = true; want false (a real fold, not a skip)")
+	}
+}

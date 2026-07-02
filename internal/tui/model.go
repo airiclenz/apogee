@@ -236,6 +236,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case errMsg:
+		// A loop-level fault also returns the engine to the Update loop (C1), so — exactly as on
+		// a cancel — discard the interrupted Exchange. Today Step never returns a mid-Exchange
+		// error (a fault surfaces as an ErrorEvent at a boundary), so this is a no-op guard, not a
+		// live path; but the moment Step *can* fault mid-Exchange, the engine would stay inExchange
+		// and the next /clear or message would be rejected with ErrInputPending — the same post-Esc
+		// wedge cancelledMsg already prevents. AbortExchange is a safe no-op at a quiescent boundary.
+		m.eng.AbortExchange()
 		m.lastErr = msg.Err
 		m.transcript.addError("loop", msg.Err.Error(), 0)
 		m.finishWorker(stateErrored)

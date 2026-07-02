@@ -125,6 +125,59 @@ func TestCompactDoneSurfacesError(t *testing.T) {
 	}
 }
 
+// A skipped compaction (the reducer's Result.Skipped — conversation too small to fold) folded
+// nothing, so the gauge must stay lit and the note must say so plainly rather than falsely
+// claiming a compaction. This pins the 2b truthfulness fix at the TUI seam.
+func TestCompactDoneSkippedLeavesGaugeAndSaysNothing(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.state = stateRunning // the /compact worker is in flight
+	m.ctxUsed = 4200       // the gauge is lit from before; a skip must leave it alone
+
+	m = step(t, m, compactDoneMsg{Skipped: true})
+
+	if m.state != stateIdle {
+		t.Errorf("state = %v after a skipped compact, want idle", m.state)
+	}
+	if m.ctxUsed != 4200 {
+		t.Errorf("ctxUsed = %d, want unchanged (a skip folded nothing)", m.ctxUsed)
+	}
+	got := plain(m.View())
+	if !strings.Contains(got, "nothing to compact") {
+		t.Errorf("transcript missing the skip note:\n%s", got)
+	}
+	if strings.Contains(got, "context compacted") {
+		t.Errorf("a skip wrongly claimed a compaction:\n%s", got)
+	}
+}
+
+// A cancelled /compact folds nothing, so — unlike a committed compaction, which zeroes the
+// gauge — the cancel must leave ctxUsed exactly as it was, discard the open Exchange
+// (AbortExchange, so the next input is accepted), and record the "cancelled" note. The outcome
+// is classified from Compact's error (startCompact), so a cancel never masquerades as a
+// gauge-resetting compaction.
+func TestCancelledCompactLeavesGaugeUntouched(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.state = stateRunning // the /compact worker is in flight
+	m.ctxUsed = 4200       // the gauge is lit from before compaction
+	m.cancel = func() {}   // stand in for the live worker
+
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+
+	if m.state != stateIdle {
+		t.Fatalf("state = %v after a cancelled compact, want idle", m.state)
+	}
+	if m.ctxUsed != 4200 {
+		t.Errorf("ctxUsed = %d, want unchanged (a cancelled compact folded nothing)", m.ctxUsed)
+	}
+	if got := eng.aborts(); got != 1 {
+		t.Errorf("AbortExchange called %d times, want 1 (the cancel discards the open Exchange)", got)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "cancelled") {
+		t.Errorf("transcript missing the cancelled note:\n%s", got)
+	}
+}
+
 func TestContinueCommandLaunchesWorker(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
