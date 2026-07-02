@@ -105,8 +105,9 @@ type resolution struct {
 	// or a runtime-demote fallback). Gate only.
 	force bool
 
-	// cacheKey is the allow-for-session cache key for a Gate. In this item it is always the
-	// tool name (today's exact semantics); item 3 changes it for MCP. Gate only.
+	// cacheKey is the allow-for-session cache key for a Gate: the tool name for most classes,
+	// but the SERVER grain "mcp-server:<alias>" for an MCP tool, so approving one of a server's
+	// tools clears its siblings for the Session (ADR 0012's server-grain promise). Gate only.
 	cacheKey string
 
 	// box is the confinement box a Confine subprocess runs inside. Confine only.
@@ -355,8 +356,9 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 
 // finishGate completes a Gate leaf. A gate with no Approver configured cannot actually
 // consult a human, so it refuses rather than run unapproved (D5) — a Gate always means the
-// Approver is consulted. Otherwise it takes the allow-for-session cache key (the tool name in
-// this item) and, unless a forced reason was already set, its blast-radius class reason.
+// Approver is consulted. Otherwise it takes its allow-for-session cache key (gateCacheKey: the
+// tool name, or the MCP server grain) and, unless a forced reason was already set, its
+// blast-radius class reason.
 func finishGate(in resolutionInput, gate resolution) resolution {
 	if !in.approverPresent {
 		return resolution{
@@ -366,13 +368,41 @@ func finishGate(in resolutionInput, gate resolution) resolution {
 			auditReason:   in.guard.Reason,
 		}
 	}
-	gate.cacheKey = in.call.Tool
+	gate.cacheKey = gateCacheKey(in.tool, in.call)
 	if gate.reason == "" {
 		gate.reason = gateReason(in.tool)
 	}
 	gate.auditDecision = in.guard.Audit
 	gate.auditReason = in.guard.Reason
 	return gate
+}
+
+// mcpServerCacheKeyPrefix namespaces an MCP gate's server-grain allow-for-session key so it can
+// never collide with an ordinary tool-name key (ADR 0012's server-grain promise).
+const mcpServerCacheKeyPrefix = "mcp-server:"
+
+// serverAliaser is the optional interface an MCP tool implements to expose the server alias it
+// was qualified with. It lets resolve() key an MCP gate's allow-for-session cache at SERVER
+// grain WITHOUT internal/agent importing internal/mcp — the surfaced serverTool (internal/mcp)
+// satisfies it structurally. An MCP tool that does not implement it degrades to the per-tool
+// key (a safe, tighten-only fallback).
+type serverAliaser interface {
+	ServerAlias() string
+}
+
+// gateCacheKey is the allow-for-session cache key a Gate carries. For an MCP tool it is the
+// SERVER grain "mcp-server:<alias>", so approving one of a server's tools clears its siblings
+// for the Session (ADR 0012); the "mcp-server:" prefix keeps that grain collision-proof against
+// ordinary tool names, and the empty-alias (single unnamed server) case is still one grain.
+// Every other class — and an MCP tool that does not expose its alias — keys on the tool name,
+// today's tighter per-tool grain, so the change never loosens a non-MCP gate.
+func gateCacheKey(tool domain.Tool, call domain.ToolCall) string {
+	if classifyTool(tool) == classMCP {
+		if sa, ok := tool.(serverAliaser); ok {
+			return mcpServerCacheKeyPrefix + sa.ServerAlias()
+		}
+	}
+	return call.Tool
 }
 
 // finishConfine completes a Confine leaf: it attaches the prebuilt box and the precomputed

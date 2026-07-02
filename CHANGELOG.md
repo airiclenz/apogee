@@ -25,6 +25,18 @@ feature-parity track. See
   "disposition" is retired from code, surviving in prose only as the historical name of the
   post-guard ladder stage. `docs/design/confinement-execution-contract.md` §4 amended in place.
 
+### MCP "allow for this session" now caches at server grain (ADR 0012 conformance)
+
+- **Approving one of an MCP server's tools "for this session" now clears the whole server**, not
+  just that one qualified tool: approving `github__search` pre-clears `github__create_issue` and
+  every other `github__*` tool for the Session, honouring ADR 0012's server-grain promise (the
+  cache had always keyed on the qualified tool name, so each `github__*` tool re-prompted). The
+  allow-for-session cache key for an `mcp` gate is now `mcp-server:<alias>`; the `mcp-server:`
+  prefix keeps that grain collision-proof against ordinary tool names, and a **different** server
+  (`jira__*`) is never pre-cleared by another's approval. A **forced** gate (a Tier-2
+  dangerous-action speed-bump) still skips the cache and re-prompts, unchanged. Every non-MCP
+  class keeps the tighter tool-name grain, so nothing else loosens.
+
 ### Compact tool print-outs in the chat (full built-in coverage)
 
 - **The TUI's tool-presentation registry now covers every built-in tool**, not just the

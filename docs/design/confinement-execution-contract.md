@@ -369,10 +369,12 @@ the native tool is the *safer* path); **MCP asks** (unfenceable server — the p
 class — `network reach` (net), `unconfinable MCP tool` (mcp), `subprocess execution (confinement
 unavailable on this host)` (subproc), `out-of-workspace write` (WS-write), `write` (3p-write); a
 Tier-2-forced gate overrides it with `dangerous-action guard forced approval`. `CacheKey` is the
-allow-for-session key — the **tool name** today; a **forced** gate (Tier-2 or a runtime demote) skips
-the cache entirely and is never pre-allowable. *(Item 3 changes an **mcp** gate's `CacheKey` to the
-server grain `mcp-server:<alias>` per ADR 0012's server-grain promise; every other class keeps the
-tool-name key, so the change is a tighten-only degradation elsewhere.)*
+allow-for-session key — the **tool name** for every class **except mcp**, whose key is the **server
+grain** `mcp-server:<alias>` so approving one of a server's tools clears its siblings for the Session
+(ADR 0012's server-grain promise; the `mcp-server:` prefix keeps the grain collision-proof, and an
+MCP tool that does not expose its alias — or the single unnamed server — degrades to the tool-name /
+`mcp-server:` grain, a tighten-only fallback). A **forced** gate (Tier-2 or a runtime demote) skips
+the cache entirely and is never pre-allowable.
 
 **A `Confine` carries a bounded runtime `fallback` (D4).** The caps check above is a *construction-time*
 promise; the box can still fail to establish at run time. So the **subproc, caps sufficient → confine**

@@ -207,7 +207,7 @@ fact-gathering/verdict-execution); contract §4 amended; CHANGELOG updated. Comm
 
 ---
 
-## 3. Cache MCP allow-for-session at server grain (ADR 0012 conformance — the one behavior change)
+## 3. Cache MCP allow-for-session at server grain (ADR 0012 conformance — the one behavior change) — ✅ DONE (2026-07-02)
 
 **What:** ADR 0012 promises MCP "allow for this session" caches at **server** grain
 ("approving one `github` tool allows `github.*` for the Session"), but the cache has always

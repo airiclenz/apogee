@@ -35,6 +35,7 @@ const toolNameSeparator = "__"
 type serverTool struct {
 	name        string          // registry-qualified: "<serverAlias>__<remoteName>"
 	remoteName  string          // the server's own tool name (what CallTool addresses)
+	alias       string          // the server alias this tool was qualified with ("" = unnamed server)
 	description string          // the server's advertised description (untrusted presentation)
 	schema      json.RawMessage // the server's input schema, normalised to JSON (untrusted)
 	caller      toolCaller      // the live session this tool forwards a call to
@@ -56,6 +57,7 @@ func newServerTool(serverAlias string, t *mcpsdk.Tool, caller toolCaller) server
 	return serverTool{
 		name:        qualifyToolName(serverAlias, t.Name),
 		remoteName:  t.Name,
+		alias:       serverAlias,
 		description: t.Description,
 		schema:      normaliseSchema(t.InputSchema),
 		caller:      caller,
@@ -94,6 +96,13 @@ var emptyObjectSchema = json.RawMessage(`{"type":"object"}`)
 
 // Name returns the registry-qualified identifier the model calls and the registry keys on.
 func (t serverTool) Name() string { return t.name }
+
+// ServerAlias returns the alias this tool's MCP server was registered under — the grain the
+// dispatch Resolution keys the allow-for-session approval cache on, so approving one of a
+// server's tools allows the whole server for the Session (ADR 0012's server-grain promise). An
+// empty alias is the degenerate single-unnamed-server case, which is still one grain. The
+// resolver reaches this through an optional interface (it does not import this package).
+func (t serverTool) ServerAlias() string { return t.alias }
 
 // Description returns the server's advertised description (untrusted presentation data shown to
 // the model, never executed). An empty server description is given a minimal stand-in so the
