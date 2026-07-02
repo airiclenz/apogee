@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 )
 
 // ----------------------------------------------------------------------------
@@ -91,8 +92,48 @@ func (m *Model) caretTo(visRow, visCol int) int {
 		m.input.CursorDown()
 	}
 	li := m.input.LineInfo()
-	m.input.SetCursorColumn(li.StartColumn + min(visCol, li.CharWidth))
+	// visCol is a display-cell offset from the row's start, but SetCursorColumn indexes runes
+	// into the logical line — the two diverge on any CJK/emoji row. Walk the landed visual
+	// sub-line's runes, accumulating display width, to convert the cell column to a rune offset;
+	// StartColumn (a rune offset) then anchors it back into the logical line. Feeding the raw
+	// cell column would drop the caret on the wrong rune, and a drag-copy would then put
+	// different text on the clipboard than the highlight showed.
+	sub := visualSubline(m.input.Value(), m.input.Line(), li.StartColumn, li.Width)
+	m.input.SetCursorColumn(li.StartColumn + cellToRuneOffset(sub, visCol))
 	return caretOffset(m.input.Value(), m.input.Line(), m.input.Column())
+}
+
+// visualSubline returns the runes of one visual (soft-wrapped) sub-line: the [start, start+width)
+// rune slice of the row-th logical line of value. LineInfo supplies start (the sub-line's rune
+// offset into its logical line) and width (its rune count), so the slice is exactly the runes the
+// textarea drew on that visual row — bounded so a click near the wrap point never reads into the
+// next row's runes.
+func visualSubline(value string, row, start, width int) []rune {
+	lines := strings.Split(value, "\n")
+	if row < 0 || row >= len(lines) {
+		return nil
+	}
+	runes := []rune(lines[row])
+	lo := clampInt(start, 0, len(runes))
+	hi := clampInt(start+width, lo, len(runes))
+	return runes[lo:hi]
+}
+
+// cellToRuneOffset maps a display-cell column within a run of runes to the rune offset at that
+// column, accumulating each rune's width with the same runewidth the textarea's own cursor math
+// uses (so the mapping inverts the widget's rendering). A column that lands inside a wide rune
+// resolves to that rune's left edge; a column past the run's end returns the full rune count —
+// the clamp the caller relies on, expressed in runes rather than cells.
+func cellToRuneOffset(runes []rune, cells int) int {
+	acc := 0
+	for i, r := range runes {
+		w := runewidth.RuneWidth(r)
+		if acc+w > cells {
+			return i
+		}
+		acc += w
+	}
+	return len(runes)
 }
 
 // caretOffset converts a (logical row, column) cursor position into a rune offset into value,

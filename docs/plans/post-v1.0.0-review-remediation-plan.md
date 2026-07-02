@@ -1,8 +1,8 @@
 # Plan — Post-v1.0.0 review remediation (fix before the next stage)
 
 **Date:** 2026-07-02
-**Status:** IN PROGRESS — items 1–4 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
-+ item 4 docs 2026-07-02); items 5–8 open. Ordered
+**Status:** IN PROGRESS — items 1–5 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
++ item 4 docs + item 5 mouse/paste 2026-07-02); items 6–8 open. Ordered
 action list from the 2026-07-02 code review of
 `v1.0.0..HEAD` (the apogee-code feature-parity track: mini-language, skills, quick-wins
 bundle, `/props` discovery, gauge restyle, mouse support, un-wedge fix, `/compact` reducer).
@@ -207,7 +207,32 @@ and `/compact` runs exactly when the upstream is likeliest to fault.
 
 ---
 
-## 5. Mouse + paste input correctness
+## 5. Mouse + paste input correctness — ✅ DONE (2026-07-02)
+
+**Done:** both fixes landed as described below (`go test ./internal/tui/ -race` green; `go vet`
+and `gofmt` clean).
+- **5a.** `caretTo` (`internal/tui/mouse.go`) no longer feeds the display-cell `visCol` into
+  the rune-indexed `SetCursorColumn`. It reconstructs the landed visual sub-line (new
+  `visualSubline` — the `[StartColumn, StartColumn+Width)` rune slice of the logical line, so a
+  click near a wrap never reads into the next row) and maps the cell column to a rune offset via
+  new `cellToRuneOffset`, which walks the sub-line accumulating `runewidth.RuneWidth` — the same
+  width source the textarea's own cursor math uses (`textarea.go:705`), so the mapping inverts the
+  widget's rendering. A column inside a wide rune resolves to its left edge; a column past the end
+  clamps to the **rune** count. (Note: `LineInfo.Width` is the sub-line's rune count and
+  `CharWidth` its display width — the field doc comments read inverted vs. the code, which set the
+  old clamp up to fail.) go-runewidth was promoted from an indirect to a direct dependency.
+- **5b.** A new `case tea.PasteMsg` in `Update` (`internal/tui/model.go`) mirrors handleKey's
+  idle/ask edit path: clear the selection, `input.Update`, recompute autocomplete (idle), and
+  `layout()`. A paste outside the editable states is dropped, as keystrokes are.
+- **Tests** (`internal/tui/mouse_test.go`): `cellToRuneOffset` table + a width-inversion invariant
+  (every rune boundary round-trips, any script); `visualSubline` bounds/clamps; end-to-end
+  `日本語 text` click and drag (the clipboard-vs-highlight regression, `copied 3 chars`); a
+  self-calibrating soft-wrap drag on the second visual row; and three paste cases (multi-line
+  insert grows the box, `/comp` re-opens the command overlay, paste-while-running dropped).
+- CHANGELOG `[Unreleased] → Fixes` records the cluster.
+
+<details>
+<summary>Original plan text (superseded by the Done note above)</summary>
 
 - **5a. Cell-vs-rune confusion in click/drag** *(bug + missing-test, ×2)*.
   `caretTo` (`internal/tui/mouse.go:94`, with `pointInputRow` :79) feeds a display-cell
@@ -224,6 +249,8 @@ and `/compact` runs exactly when the upstream is likeliest to fault.
   multi-line paste renders wrong until the next keypress, and a live selection's cached
   offsets go stale (wrong copy). **Fix:** add a `PasteMsg` case mirroring the KeyPress
   edit path.
+
+</details>
 
 ---
 

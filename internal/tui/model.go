@@ -187,6 +187,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
+	case tea.PasteMsg:
+		// Bracketed paste (default-on in bubbletea v2) is an edit, so it must run the same
+		// post-edit refresh a keypress does — without it a multi-line paste renders unwrapped
+		// until the next key, the autocomplete overlay is computed from stale input, and a live
+		// drag-selection's cached cell offsets no longer match the value (a later copy would take
+		// the wrong runes). Only the editable states accept it; a paste while a worker runs is
+		// dropped, exactly as keys are refused there. Mirrors handleKey's idle/ask edit path.
+		if m.state != stateIdle && m.state != stateAwaitingAsk {
+			return m, nil
+		}
+		m.sel = promptSel{} // the value is about to change; drop the selection before its coords go stale
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		if m.state == stateIdle {
+			m.autocomplete = m.computeAutocomplete() // re-derive the overlay from the pasted-into input
+		}
+		m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
+		return m, cmd
+
 	case ctrlCResetMsg:
 		// The Ctrl+C quit window elapsed without a second press: disarm the gesture so the
 		// "press ctrl+c again to quit" hint clears (handleKey's ctrl+c case).

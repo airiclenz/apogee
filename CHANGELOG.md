@@ -87,6 +87,23 @@ feature-parity track. See
   un-wedge. The `/compact` failure/cancel spine (both `startCompact` outcomes and the
   reducer's overflow/cancel/silence faults) is now covered by tests.
 
+- **Mouse selection and bracketed paste now handle the prompt correctly.** Two input
+  fixes on shipped TUI behaviour:
+  (a) a click or drag on a prompt row with wide glyphs (CJK, emoji) landed the caret on
+  the wrong rune — `caretTo` (`internal/tui/mouse.go`) fed a display-**cell** column into
+  the textarea's rune-indexed `SetCursorColumn` (clamped by cell width, not rune count),
+  so a drag-copy could put **different text on the clipboard than was highlighted**. It
+  now converts the cell column to a rune offset by walking the visual sub-line's runes and
+  accumulating `runewidth` (the same width the widget's own cursor math uses), clamped by
+  rune count;
+  (b) bracketed paste (default-on in bubbletea v2) fell into `Update`'s `default:` case,
+  so the textarea inserted the text but skipped the post-edit refresh — a multi-line paste
+  rendered unwrapped until the next keypress, the autocomplete overlay went stale, and a
+  live drag-selection's cached offsets no longer matched the value (a later copy took the
+  wrong runes). A new `tea.PasteMsg` case (`internal/tui/model.go`) mirrors the keypress
+  edit path: it clears the selection, inserts, recomputes autocomplete, and re-lays out;
+  a paste while a worker runs is dropped, as keystrokes are.
+
 ### TUI
 
 - **Context-fill gauge restyled** to match `llama-launcher`: a solid two-tone strip —

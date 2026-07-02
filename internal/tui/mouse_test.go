@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 )
 
 // ----------------------------------------------------------------------------
@@ -241,5 +242,215 @@ func TestViewRendersSelectionHighlight(t *testing.T) {
 	}
 	if got := m.View().Content; !strings.Contains(got, selectionBg) {
 		t.Fatal("active selection did not reach the rendered View (no highlight background)")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Cell-vs-rune caret mapping: clicks/drags land on the right rune with wide glyphs
+// ----------------------------------------------------------------------------
+
+// TestCellToRuneOffset pins the conversion at the heart of the caret fix: a display-cell column
+// maps to a rune offset, a column inside a wide rune resolves to that rune's left edge, and a
+// column past the run clamps to the rune count (not the cell count).
+func TestCellToRuneOffset(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		cells int
+		want  int
+	}{
+		{"ascii midline", "hello", 3, 3},
+		{"ascii clamps to rune count", "hi", 10, 2},
+		{"zero cells", "abc", 0, 0},
+		{"empty run", "", 5, 0},
+		{"cjk start of 2nd glyph", "日本語", 2, 1}, // each Han rune is 2 cells wide
+		{"cjk start of 3rd glyph", "日本語", 4, 2},
+		{"cjk end", "日本語", 6, 3},
+		{"cjk inside wide rune → left edge", "日本語", 5, 2},
+		{"mixed: first ascii after the cjk run", "日本語 text", 7, 4}, // 6 cells cjk + 1 space, then 't'
+		{"mixed clamps past end", "日本語 text", 999, 8},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := cellToRuneOffset([]rune(c.value), c.cells); got != c.want {
+				t.Fatalf("cellToRuneOffset(%q, %d) = %d, want %d", c.value, c.cells, got, c.want)
+			}
+		})
+	}
+}
+
+// TestCellToRuneOffsetInvertsWidth is the invariant the caret relies on: at every rune boundary,
+// the offset that renders at that boundary's cumulative cell width maps back to that same
+// boundary — for any script — using the same runewidth the textarea's cursor math uses. It holds
+// only for runs of non-zero-width runes (the prompt content), so the fixtures avoid combining
+// marks.
+func TestCellToRuneOffsetInvertsWidth(t *testing.T) {
+	for _, s := range []string{"hello", "日本語 text", "aあb🙂c", ""} {
+		runes := []rune(s)
+		acc := 0
+		for k := 0; k <= len(runes); k++ {
+			if got := cellToRuneOffset(runes, acc); got != k {
+				t.Errorf("%q: cellToRuneOffset(., %d cells) = %d, want boundary %d", s, acc, got, k)
+			}
+			if k < len(runes) {
+				acc += runewidth.RuneWidth(runes[k])
+			}
+		}
+	}
+}
+
+// TestVisualSubline checks the sub-line slice caretTo feeds the cell→rune conversion: it returns
+// exactly the [start, start+width) runes of the row-th logical line, bounds a wrapped row so a
+// click near the wrap point cannot read into the next visual row, and clamps out-of-range inputs
+// to an empty slice.
+func TestVisualSubline(t *testing.T) {
+	cases := []struct {
+		name              string
+		value             string
+		row, start, width int
+		want              string
+	}{
+		{"whole unwrapped line", "hello", 0, 0, 5, "hello"},
+		{"second logical line", "ab\ncd", 1, 0, 2, "cd"},
+		{"wrapped row starts mid-line, bounded", "abcdef", 0, 3, 3, "def"},
+		{"width clamps to line end", "abc", 0, 1, 99, "bc"},
+		{"row out of range → empty", "abc", 5, 0, 3, ""},
+		{"start past end → empty", "abc", 0, 10, 2, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := string(visualSubline(c.value, c.row, c.start, c.width)); got != c.want {
+				t.Fatalf("visualSubline(%q, %d, %d, %d) = %q, want %q", c.value, c.row, c.start, c.width, got, c.want)
+			}
+		})
+	}
+}
+
+// TestClickPositionsCaretCJK is the end-to-end regression for the caret fix: a click at a display
+// column on a line of wide glyphs lands the caret on the rune under that column, not the rune at
+// that column's numeric value (offset 4 = 't' under the buggy cell-as-rune path).
+func TestClickPositionsCaretCJK(t *testing.T) {
+	m := modelWithInput(t, "日本語 text")
+	const y = 24 - footerHeight - 1
+
+	m = step(t, m, leftClick(2+4, y)) // display cell 4 = the start of 語
+	if m.input.Line() != 0 || m.input.Column() != 2 {
+		t.Fatalf("caret at row %d col %d, want row 0 col 2 (the rune 語)", m.input.Line(), m.input.Column())
+	}
+	if !m.sel.active || m.sel.anchorOff != 2 {
+		t.Fatalf("click should arm a collapsed selection at rune offset 2, got %+v", m.sel)
+	}
+}
+
+// TestDragCopyCJKMatchesHighlight is the clipboard-vs-highlight regression: a drag over wide
+// glyphs must copy the runes actually under the highlighted cells. Dragging cells [0,6) over
+// "日本語 text" highlights the three Han glyphs, so the clipboard must hold exactly "日本語" —
+// the buggy path copied "日本語 te" (six runes, treating the cell span as a rune span).
+func TestDragCopyCJKMatchesHighlight(t *testing.T) {
+	m := modelWithInput(t, "日本語 text")
+	const y = 24 - footerHeight - 1
+
+	m = step(t, m, leftClick(2+0, y)) // anchor at cell 0
+	m = step(t, m, leftDrag(2+6, y))  // head at cell 6 → the three wide glyphs
+	if m.sel.anchorOff != 0 || m.sel.headOff != 3 {
+		t.Fatalf("selection rune offsets = (%d,%d), want (0,3)", m.sel.anchorOff, m.sel.headOff)
+	}
+	if got := selectionText(m.input.Value(), m.sel.anchorOff, m.sel.headOff); got != "日本語" {
+		t.Fatalf("copied text = %q, want %q (must match the highlighted cells)", got, "日本語")
+	}
+
+	m, cmd := stepCmd(t, m, leftRelease(2+6, y))
+	if cmd == nil {
+		t.Fatal("release of a non-empty selection should return a copy Cmd, got nil")
+	}
+	if !strings.Contains(m.flash, "copied 3 chars") {
+		t.Fatalf("flash = %q, want 'copied 3 chars'", m.flash)
+	}
+}
+
+// TestDragCopyAcrossSoftWrap drives a click and drag on the second visual row of a soft-wrapped
+// logical line and checks the copied runes are the ones under the cells. The wrap width is
+// discovered at runtime (a max-x click lands the caret at the end of row 0), so the test does not
+// hard-code the textarea's wrap column.
+func TestDragCopyAcrossSoftWrap(t *testing.T) {
+	// One logical line (no '\n') long enough to wrap; a distinctive tail makes the copied slice
+	// unambiguous.
+	value := strings.Repeat("a", 90) + "0123456789tail"
+	m := modelWithInput(t, value)
+
+	x0, y0, w, h := m.inputContentRect()
+	if h < 2 {
+		t.Fatalf("value did not wrap: box height %d, want ≥2 visual rows", h)
+	}
+
+	// Calibrate: a click past the right edge of row 0 clamps to the row end; Column() is then the
+	// rune count of the first visual sub-line (the wrap width).
+	m = step(t, m, leftClick(x0+w, y0))
+	wrap := m.input.Column()
+	if wrap <= 0 || wrap >= len([]rune(value)) {
+		t.Fatalf("calibrated wrap width = %d, want a genuine soft wrap", wrap)
+	}
+
+	// Now click+drag on row 1 (the last visual row, at y0+1): cells [3,8) → rune offsets
+	// [wrap+3, wrap+8) of the single logical line.
+	row1Y := y0 + 1
+	m = step(t, m, leftClick(x0+3, row1Y))
+	if got, want := m.input.Column(), wrap+3; got != want {
+		t.Fatalf("caret column after row-1 click = %d, want %d (wrap %d + 3)", got, want, wrap)
+	}
+	m = step(t, m, leftDrag(x0+8, row1Y))
+	if m.sel.anchorOff != wrap+3 || m.sel.headOff != wrap+8 {
+		t.Fatalf("selection offsets = (%d,%d), want (%d,%d)", m.sel.anchorOff, m.sel.headOff, wrap+3, wrap+8)
+	}
+	runes := []rune(value)
+	want := string(runes[wrap+3 : wrap+8])
+	if got := selectionText(value, m.sel.anchorOff, m.sel.headOff); got != want {
+		t.Fatalf("copied text = %q, want %q (the runes under cells [3,8) of row 1)", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Bracketed paste runs the same edit path as a keypress (model.go Update)
+// ----------------------------------------------------------------------------
+
+// TestPasteInsertsAndRefreshes checks a PasteMsg inserts the content, drops any live selection,
+// and runs layout() — the box grows to fit a multi-line paste, which the buggy default-case path
+// deferred until the next keypress.
+func TestPasteInsertsAndRefreshes(t *testing.T) {
+	m := modelWithInput(t, "")
+	before := m.input.Height()
+	m.sel = promptSel{active: true, anchorOff: 0, headOff: 3} // a stale selection to be dropped
+
+	m = step(t, m, tea.PasteMsg{Content: "line1\nline2\nline3"})
+
+	if got := m.input.Value(); got != "line1\nline2\nline3" {
+		t.Fatalf("paste did not insert: value = %q", got)
+	}
+	if m.sel.active {
+		t.Fatal("paste should clear the live selection before its coords go stale")
+	}
+	if m.input.Height() <= before {
+		t.Fatalf("box did not grow for the multi-line paste (layout ran?): before %d, after %d", before, m.input.Height())
+	}
+}
+
+// TestPasteRecomputesAutocomplete checks the paste path re-derives the autocomplete overlay: a
+// pasted "/comp" opens the command overlay exactly as typing it would.
+func TestPasteRecomputesAutocomplete(t *testing.T) {
+	m := modelWithInput(t, "")
+	m = step(t, m, tea.PasteMsg{Content: "/comp"})
+	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+		t.Fatalf("paste did not recompute the command autocomplete: %+v", m.autocomplete)
+	}
+}
+
+// TestPasteIgnoredWhileRunning checks a paste is dropped while a worker holds the input, the same
+// way keypress edits are refused in that state.
+func TestPasteIgnoredWhileRunning(t *testing.T) {
+	m := modelWithInput(t, "keep")
+	m.state = stateRunning
+	m = step(t, m, tea.PasteMsg{Content: "junk"})
+	if got := m.input.Value(); got != "keep" {
+		t.Fatalf("paste while running must not edit the input, got %q", got)
 	}
 }
