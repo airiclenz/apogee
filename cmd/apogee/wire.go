@@ -102,6 +102,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		ConfineToWorkspace: opts.confineToWorkspace,
 		WebSearchEndpoint:  opts.webSearchEndpoint,
 		Skills:             skillCatalog,
+		// The discovered runtime context window (0 when the server did not report one). It is the
+		// budget /compact bounds its summary request against so compaction survives high fill
+		// (the summary call would otherwise overflow near n_ctx); the same value drives the TUI's
+		// footer/gauge below.
+		Context: apogee.ContextConfig{MaxContextTokens: opts.contextWindow},
 	}
 
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false

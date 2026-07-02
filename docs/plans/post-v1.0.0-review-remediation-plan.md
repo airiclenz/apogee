@@ -1,8 +1,8 @@
 # Plan — Post-v1.0.0 review remediation (fix before the next stage)
 
 **Date:** 2026-07-02
-**Status:** IN PROGRESS — items 1–5 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
-+ item 4 docs + item 5 mouse/paste 2026-07-02); items 6–8 open. Ordered
+**Status:** IN PROGRESS — items 1–6 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
++ item 4 docs + item 5 mouse/paste + item 6 compact-budget 2026-07-02); items 7–8 open. Ordered
 action list from the 2026-07-02 code review of
 `v1.0.0..HEAD` (the apogee-code feature-parity track: mini-language, skills, quick-wins
 bundle, `/props` discovery, gauge restyle, mouse support, un-wedge fix, `/compact` reducer).
@@ -254,7 +254,48 @@ and `gofmt` clean).
 
 ---
 
-## 6. `/compact` must survive high context fill *(needs one design call)*
+## 6. `/compact` must survive high context fill — ✅ DONE (2026-07-02)
+
+**Design call made: the tail-budget option** (the plan's recommended small change), implemented
+proactively — no chunked summarization, no reactive retry.
+
+**Done:**
+- **`internal/context.Compact` gained a `maxTranscriptChars` budget.** The rendered transcript is
+  bounded by `renderBudgetedTranscript`: the protected prefix stays verbatim, the most recent
+  messages are kept backwards until the next would exceed the budget (the latest is *always* kept —
+  the next turn depends on it), and the dropped middle is marked with a
+  `[... N earlier message(s) omitted to fit the compaction budget ...]` notice so the summarizer
+  treats prefix and tail as non-contiguous. A non-positive budget renders the whole conversation
+  (renderTranscript), so the window-unknown path is byte-for-byte the old behaviour. `renderMessage`
+  was factored out so the full and budgeted paths share one rendering and one length measure.
+- **`Agent.compactTranscriptChars` computes the budget** from the discovered window:
+  `(MaxContextTokens − compactMaxTokens − compactPromptOverheadTokens) × CharsPerToken`, floored at
+  `compactMinTranscriptTokens`, and **0 (unbounded) when the window is unknown** — there is no safe
+  basis to bound against an unknown window, so the pre-item-6 full render stands (documented, not a
+  guess). The response reserve stays `compactMaxTokens`; overhead (512 tok) covers the system
+  prompt, trailer, role headers, and chars→token slack.
+- **The window is now threaded into the Agent.** `cmd/apogee/wire.go` sets
+  `cfg.Context.MaxContextTokens = opts.contextWindow` (the runtime `/props` window) — previously the
+  discovered window reached only the TUI footer/gauge, never the agent, so *every* compaction ran
+  unbudgeted. Safe: no live Mechanism reads `Budget().ContextLimit`, and the budget is a hook-view
+  only (never on the wire), so the loop is unaffected.
+- **Verify — done.** Item 3's overflow test flipped: `TestCompactSurvivesHighFillViaTranscriptBudget`
+  (new `windowResponder` that overflows iff the prompt exceeds the window) proves a large
+  conversation now folds because the request is budgeted under the window and is smaller than the
+  raw transcript. The unbudgetable case is retained as
+  `TestCompactUnbudgetableOverflowErrorsAndLeavesConvUntouched` (unconditional overflow ⇒ clean error,
+  conv untouched). Plus reducer-level unit tests: unbounded == full render, a fitting transcript is
+  untouched (no notice), the middle elides keeping prefix+tail, the most recent message survives a
+  tiny budget, and the budget threads through `Compact`. `go test ./... -race` green; `go vet` and
+  `gofmt` clean. CHANGELOG `[Unreleased] → Fixes` and `context/doc.go` updated.
+
+Left for the automatic-compaction trigger (parked in `TODO.md`): the trigger fires *at* high fill by
+definition, so it will lean on this budget; a reactive retry-on-overflow backstop (shrink and retry
+if the chars→token estimate still overflows) can be added there if the proactive estimate proves too
+loose in practice.
+
+<details>
+<summary>Original plan text (superseded by the Done note above)</summary>
 
 The reducer sends the **entire** rendered transcript as one request with
 `compactMaxTokens=4096` and no fallback (`internal/context/compact.go:56`,
@@ -268,6 +309,8 @@ middle with an elision marker), **or** summarize in chunks. The tail-budget opti
 small change and is probably enough for v1's on-demand `/compact`; decide before Phase 4
 makes compaction automatic (the trigger will fire *at* high fill by definition).
 **Verify:** item 3's overflow test flips from "errors cleanly" to "succeeds via fallback".
+
+</details>
 
 ---
 

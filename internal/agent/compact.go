@@ -16,6 +16,16 @@ import (
 const (
 	compactTemperature = 0.2
 	compactMaxTokens   = 4096
+
+	// compactPromptOverheadTokens reserves headroom, on top of compactMaxTokens (the summary
+	// response's reserve), for the summarizer's system prompt, the trailing instruction, the
+	// per-message role headers, and the slack in the chars→tokens estimate. The rendered
+	// transcript is budgeted to whatever the discovered window has left after both reserves.
+	compactPromptOverheadTokens = 512
+
+	// compactMinTranscriptTokens floors the transcript budget so a very small window still
+	// sends a useful (if heavily elided) tail rather than collapsing to nothing.
+	compactMinTranscriptTokens = 256
 )
 
 // Compact triggers generative Compaction on demand — the engine half of the /compact command.
@@ -33,8 +43,27 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 	if a.inExchange {
 		return false, domain.ErrInputPending
 	}
-	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv)
+	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
 	return res.Skipped, err
+}
+
+// compactTranscriptChars returns the character budget for the rendered transcript the summary
+// call carries, derived from the discovered context window so the call itself cannot overflow at
+// exactly the high fill /compact exists to relieve (post-v1 remediation item 6). The window (in
+// tokens) minus the response reserve (compactMaxTokens) minus prompt overhead is the transcript's
+// token budget, converted to characters via the budget's chars→token estimate. It returns 0
+// (unbounded — render the whole conversation) when the window is unknown: neither discovery nor
+// config reported one, so there is no safe basis to bound, and the pre-item-6 full render stands.
+func (a *Agent) compactTranscriptChars() int {
+	window := a.cfg.Context.MaxContextTokens
+	if window <= 0 {
+		return 0
+	}
+	transcriptTokens := window - compactMaxTokens - compactPromptOverheadTokens
+	if transcriptTokens < compactMinTranscriptTokens {
+		transcriptTokens = compactMinTranscriptTokens
+	}
+	return int(float64(transcriptTokens) * a.budget().CharsPerToken)
 }
 
 // compactCompleter adapts the Agent's provider seam to context.Completer: a single, SILENT

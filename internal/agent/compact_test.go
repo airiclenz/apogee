@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"strings"
 	"testing"
@@ -20,15 +21,42 @@ import (
 )
 
 // overflowResponder is the fake for the "prompt too long" path: it answers every stream with a
-// single terminal DeltaContextOverflow, the 400 the server sends when the request itself
-// exceeds the context window. This is the deterministic failure item 6 will later make
-// survivable (a budgeted-tail fallback); today it must surface as a clean error.
+// single terminal DeltaContextOverflow, the 400 the server sends when the request itself exceeds
+// the context window — unconditionally, regardless of prompt size. It stands for the unbudgetable
+// case (no discovered window, so the transcript is rendered in full) and a server that rejects
+// even a minimal prompt: item 6's transcript budget cannot help either, so the fault must still
+// surface cleanly and leave the conversation untouched.
 type overflowResponder struct{}
 
 func (overflowResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
 	return func(yield func(provider.Delta) bool) {
 		yield(provider.Delta{Kind: provider.DeltaContextOverflow, Err: "apogee: context window exceeded"})
 	}
+}
+
+// windowResponder models a real server's context limit: it overflows (the 400 a server sends when
+// the prompt itself exceeds the window) exactly when the request's estimated prompt tokens exceed
+// window, and otherwise echoes reply. It records the last request so a test can assert what the
+// budgeted summary call actually carried. It uses the same 4-chars-per-token estimate the Agent's
+// budget does (defaultCharsPerToken), so the responder and the reducer agree on when a prompt fits.
+type windowResponder struct {
+	window int
+	reply  string
+	last   provider.Request
+}
+
+func (r *windowResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	r.last = req
+	chars := 0
+	for _, m := range req.Messages {
+		chars += len(m.Content)
+	}
+	if chars/4 > r.window {
+		return func(yield func(provider.Delta) bool) {
+			yield(provider.Delta{Kind: provider.DeltaContextOverflow, Err: "apogee: context window exceeded"})
+		}
+	}
+	return streamReply(r.reply)
 }
 
 // seedFoldable appends a text-only conversation with enough messages past the protected prefix
@@ -42,11 +70,13 @@ func seedFoldable(a *Agent) {
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "done"})
 }
 
-// TestCompactContextOverflowErrorsAndLeavesConvUntouched pins the overflow fault: the summary
-// call itself overflows, so Compact surfaces the error, reports skipped=false (a fault is not a
-// skip), and leaves the conversation untouched. Item 6 will flip this from "errors cleanly" to
-// "succeeds via fallback"; until then this is the deterministic-failure guard.
-func TestCompactContextOverflowErrorsAndLeavesConvUntouched(t *testing.T) {
+// TestCompactUnbudgetableOverflowErrorsAndLeavesConvUntouched pins the residual fault: when the
+// transcript budget cannot help — no discovered window (baseConfig sets none, so the render is
+// unbounded) and a server that overflows unconditionally — the summary call still overflows, so
+// Compact surfaces the error, reports skipped=false (a fault is not a skip), and leaves the
+// conversation untouched. This is the "budget can't save it" backstop; the survivable high-fill
+// case is TestCompactSurvivesHighFillViaTranscriptBudget below.
+func TestCompactUnbudgetableOverflowErrorsAndLeavesConvUntouched(t *testing.T) {
 	a, err := newAgent(baseConfig(&recordingSink{}), overflowResponder{})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -66,6 +96,81 @@ func TestCompactContextOverflowErrorsAndLeavesConvUntouched(t *testing.T) {
 	}
 	if a.conv.Len() != before {
 		t.Errorf("conv mutated despite an overflow fault: Len = %d, want %d", a.conv.Len(), before)
+	}
+}
+
+// seedLargeConv appends a conversation whose full rendered transcript far exceeds the test's
+// context window, so an unbudgeted summary request would overflow: one protected-prefix message
+// plus 60 turns of ~700 chars each (~42k chars ≈ 10.5k tokens against an 8k window).
+func seedLargeConv(a *Agent) {
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the OVERARCHING-GOAL to keep in the prefix"})
+	for i := 0; i < 60; i++ {
+		role := domain.RoleAssistant
+		if i%2 == 0 {
+			role = domain.RoleUser
+		}
+		a.conv.Append(domain.Message{Role: role, Content: fmt.Sprintf("turn %d: %s", i, strings.Repeat("detail ", 100))})
+	}
+}
+
+// convContentChars sums the raw content length across the whole conversation — the size the
+// summary request would carry if the transcript were rendered unbudgeted.
+func convContentChars(a *Agent) int {
+	total := 0
+	for i := 0; i < a.conv.Len(); i++ {
+		total += len(a.conv.At(i).Content)
+	}
+	return total
+}
+
+// TestCompactSurvivesHighFillViaTranscriptBudget is the item-6 flip: at a fill where the full
+// transcript would overflow the summary call, Compact now succeeds because the reducer budgets
+// the rendered transcript to the discovered window. windowResponder overflows iff the prompt
+// exceeds the window, so a successful fold *is* proof the request was budgeted under it — and the
+// request it received is both within the window and smaller than the raw conversation.
+func TestCompactSurvivesHighFillViaTranscriptBudget(t *testing.T) {
+	const window = 8192
+	up := &windowResponder{window: window, reply: "FOLDED-SUMMARY"}
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = window
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedLargeConv(a)
+	rawChars := convContentChars(a)
+	if rawChars/4 <= window {
+		t.Fatalf("test setup: conversation (%d chars) does not exceed the window; it must overflow unbudgeted", rawChars)
+	}
+	before := a.conv.Len()
+
+	skipped, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("Compact errored despite the transcript budget (item 6 regression): %v", err)
+	}
+	if skipped {
+		t.Fatal("skipped = true; want a real fold of a large conversation")
+	}
+
+	// Folded to the clean prefix → summary shape.
+	if a.conv.Len() >= before {
+		t.Errorf("conv not folded: Len = %d, want < %d", a.conv.Len(), before)
+	}
+	if got := a.conv.At(a.conv.Len() - 1); got.Role != domain.RoleAssistant || !strings.Contains(got.Content, "FOLDED-SUMMARY") {
+		t.Errorf("last message is not the summary: %+v", got)
+	}
+
+	// The request the server actually saw fit under the window (else it would have overflowed) and
+	// was reduced from the raw conversation — the budget did real elision work.
+	reqChars := 0
+	for _, m := range up.last.Messages {
+		reqChars += len(m.Content)
+	}
+	if reqChars/4 > window {
+		t.Errorf("budgeted summary prompt still exceeds the window: %d tokens > %d", reqChars/4, window)
+	}
+	if reqChars >= rawChars {
+		t.Errorf("summary prompt was not reduced by the budget: %d chars >= raw %d", reqChars, rawChars)
 	}
 }
 

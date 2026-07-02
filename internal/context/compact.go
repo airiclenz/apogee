@@ -39,11 +39,18 @@ const minCompactTail = 2
 // conversation, and Replaces the messages after the prefix with a single assistant summary
 // message. It is a no-op (Result.Skipped) when there are too few messages past the prefix.
 //
+// maxTranscriptChars bounds the rendered transcript the summary call carries, so the call itself
+// cannot overflow at exactly the high context fill /compact exists to relieve (a full-transcript
+// request near n_ctx overflows deterministically). When the rendering exceeds the budget the
+// middle is elided — the protected prefix and a budgeted tail of the most recent messages are
+// kept, with a marker where history was dropped (renderBudgetedTranscript). A non-positive
+// budget renders the whole conversation (the window is unknown, so there is no basis to bound).
+//
 // conv is mutated only on success: a Completer error, a cancelled ctx, or an empty summary all
 // return with conv untouched, so a failed /compact never corrupts the history. The result is a
 // clean prefix → assistant-summary shape with no dangling tool calls, so the next user message
 // keeps strict-template role alternation.
-func Compact(ctx context.Context, c Completer, conv *domain.Conversation) (Result, error) {
+func Compact(ctx context.Context, c Completer, conv *domain.Conversation, maxTranscriptChars int) (Result, error) {
 	before := conv.Len()
 	prefix := conv.PrefixEnd()
 	if before-prefix < minCompactTail {
@@ -51,11 +58,12 @@ func Compact(ctx context.Context, c Completer, conv *domain.Conversation) (Resul
 	}
 
 	msgs := conv.Messages()
-	// Give the model the whole conversation (prefix included) for the best summary, even though
-	// the prefix is kept verbatim below — the redundancy is cheap and the context helps.
+	// Give the model the conversation (prefix included) for the best summary, even though the
+	// prefix is kept verbatim below — the redundancy is cheap and the context helps. The
+	// rendering is budgeted so a high-fill transcript cannot overflow the summary call itself.
 	req := []domain.Message{
 		{Role: domain.RoleSystem, Content: summaryInstruction},
-		{Role: domain.RoleUser, Content: renderTranscript(msgs) + "\n\nSummarize the conversation above as instructed."},
+		{Role: domain.RoleUser, Content: renderBudgetedTranscript(msgs, prefix, maxTranscriptChars) + "\n\nSummarize the conversation above as instructed."},
 	}
 
 	text, err := c.Complete(ctx, req)
@@ -109,15 +117,73 @@ func summaryMessage(text string) domain.Message {
 func renderTranscript(msgs []domain.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
-		fmt.Fprintf(&b, "[%s]\n", m.Role)
-		if m.Content != "" {
-			b.WriteString(m.Content)
-			b.WriteString("\n")
-		}
-		for _, tc := range m.ToolCalls {
-			fmt.Fprintf(&b, "(called tool %s with %s)\n", tc.Tool, string(tc.Arguments))
-		}
+		b.WriteString(renderMessage(m))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderMessage renders one message the way renderTranscript does — a "[role]" header, its
+// content, and any tool calls inline — so the whole-transcript and budgeted-transcript paths
+// share one rendering and one length measure.
+func renderMessage(m domain.Message) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s]\n", m.Role)
+	if m.Content != "" {
+		b.WriteString(m.Content)
 		b.WriteString("\n")
+	}
+	for _, tc := range m.ToolCalls {
+		fmt.Fprintf(&b, "(called tool %s with %s)\n", tc.Tool, string(tc.Arguments))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderBudgetedTranscript renders the transcript within a character budget so the summary call
+// cannot overflow at high context fill. A non-positive budget renders the whole conversation
+// (renderTranscript) — the window is unknown, so there is no basis to bound. Otherwise the
+// protected prefix (msgs[:prefixEnd]) is kept verbatim and the most recent messages are kept
+// backwards until the next would exceed the budget; the most recent message is always kept (the
+// next turn depends on it) even if it alone is over budget. When any middle messages are
+// dropped, an elision notice marks the gap so the summarizer treats the prefix and tail as
+// non-contiguous rather than one continuous history.
+func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) string {
+	if maxChars <= 0 {
+		return renderTranscript(msgs)
+	}
+
+	rendered := make([]string, len(msgs))
+	for i, m := range msgs {
+		rendered[i] = renderMessage(m)
+	}
+
+	// The protected prefix is always kept — it is small by construction (leading system
+	// messages + the first user message) and load-bearing — even if it alone exceeds the budget.
+	used := 0
+	for i := 0; i < prefixEnd; i++ {
+		used += len(rendered[i])
+	}
+
+	// Fill the tail from the most recent message backwards. The first tail message is kept
+	// unconditionally (continuation depends on it); earlier ones join only while they fit.
+	keepFrom := len(msgs)
+	for i := len(msgs) - 1; i >= prefixEnd; i-- {
+		if keepFrom < len(msgs) && used+len(rendered[i]) > maxChars {
+			break
+		}
+		used += len(rendered[i])
+		keepFrom = i
+	}
+
+	var b strings.Builder
+	for i := 0; i < prefixEnd; i++ {
+		b.WriteString(rendered[i])
+	}
+	if keepFrom > prefixEnd {
+		fmt.Fprintf(&b, "[... %d earlier message(s) omitted to fit the compaction budget ...]\n\n", keepFrom-prefixEnd)
+	}
+	for i := keepFrom; i < len(msgs); i++ {
+		b.WriteString(rendered[i])
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

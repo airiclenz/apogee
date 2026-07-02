@@ -5,6 +5,9 @@
 //
 // Generative Compaction is implemented (Compact): it summarizes a conversation and
 // replaces the folded history with a single summary message, keeping the protected
-// prefix verbatim. Agent.Compact drives it on demand (the /compact command). Budget
+// prefix verbatim. The transcript the summary call carries is bounded to a character
+// budget derived from the discovered context window (keep the prefix + a budgeted tail,
+// elide the middle) so the call cannot overflow at exactly the high fill /compact exists
+// to relieve. Agent.Compact drives it on demand (the /compact command). Budget
 // allocation, the context builder, and tool-result capping remain scaffolds.
 package context

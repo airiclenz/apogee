@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -43,7 +44,7 @@ func TestCompactReplacesTailWithSummaryKeepingPrefix(t *testing.T) {
 	)
 	c := &fakeCompleter{reply: "the user wants a parser with error handling"}
 
-	res, err := Compact(context.Background(), c, conv)
+	res, err := Compact(context.Background(), c, conv, 0)
 	if err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestCompactKeepsLeadingSystemInPrefix(t *testing.T) {
 		msg(domain.RoleAssistant, "ok again"),
 	)
 	c := &fakeCompleter{reply: "summary"}
-	if _, err := Compact(context.Background(), c, conv); err != nil {
+	if _, err := Compact(context.Background(), c, conv, 0); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
 	if conv.Len() != 3 {
@@ -103,7 +104,7 @@ func TestCompactSkipsTinyConversation(t *testing.T) {
 	)
 	c := &fakeCompleter{reply: "unused"}
 
-	res, err := Compact(context.Background(), c, conv)
+	res, err := Compact(context.Background(), c, conv, 0)
 	if err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestCompactCompleterErrorLeavesConvUntouched(t *testing.T) {
 	want := conv.Len()
 	c := &fakeCompleter{err: errors.New("upstream boom")}
 
-	if _, err := Compact(context.Background(), c, conv); err == nil {
+	if _, err := Compact(context.Background(), c, conv, 0); err == nil {
 		t.Fatal("Compact err = nil, want the Completer's error surfaced")
 	}
 	if conv.Len() != want {
@@ -146,7 +147,7 @@ func TestCompactEmptySummaryLeavesConvUntouched(t *testing.T) {
 	want := conv.Len()
 	c := &fakeCompleter{reply: "   \n  "} // whitespace only
 
-	if _, err := Compact(context.Background(), c, conv); !errors.Is(err, errEmptySummary) {
+	if _, err := Compact(context.Background(), c, conv, 0); !errors.Is(err, errEmptySummary) {
 		t.Fatalf("Compact err = %v, want errEmptySummary", err)
 	}
 	if conv.Len() != want {
@@ -162,7 +163,7 @@ func TestCompactSendsSystemPromptAndTranscript(t *testing.T) {
 		msg(domain.RoleAssistant, "ACK-TWO"),
 	)
 	c := &fakeCompleter{reply: "ok"}
-	if _, err := Compact(context.Background(), c, conv); err != nil {
+	if _, err := Compact(context.Background(), c, conv, 0); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
 	if len(c.got) != 2 {
@@ -191,5 +192,113 @@ func TestRenderTranscriptIncludesRolesContentAndToolCalls(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendered transcript missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestRenderBudgetedTranscriptUnboundedMatchesFullRender pins that a non-positive budget (the
+// window-unknown case) renders the whole conversation exactly as renderTranscript — the pre-item-6
+// behaviour, unchanged.
+func TestRenderBudgetedTranscriptUnboundedMatchesFullRender(t *testing.T) {
+	msgs := []domain.Message{
+		{Role: domain.RoleUser, Content: "goal"},
+		{Role: domain.RoleAssistant, Content: "step one"},
+		{Role: domain.RoleUser, Content: "step two"},
+		{Role: domain.RoleAssistant, Content: "done"},
+	}
+	if got, want := renderBudgetedTranscript(msgs, 1, 0), renderTranscript(msgs); got != want {
+		t.Errorf("unbounded budget diverged from full render:\n got: %q\nwant: %q", got, want)
+	}
+	if got, want := renderBudgetedTranscript(msgs, 1, -5), renderTranscript(msgs); got != want {
+		t.Errorf("negative budget diverged from full render:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRenderBudgetedTranscriptFitsRendersEverythingWithoutElision pins that when the whole
+// rendering fits the budget, nothing is dropped and no elision notice appears.
+func TestRenderBudgetedTranscriptFitsRendersEverythingWithoutElision(t *testing.T) {
+	msgs := []domain.Message{
+		{Role: domain.RoleUser, Content: "goal"},
+		{Role: domain.RoleAssistant, Content: "step one"},
+		{Role: domain.RoleUser, Content: "step two"},
+		{Role: domain.RoleAssistant, Content: "done"},
+	}
+	got := renderBudgetedTranscript(msgs, 1, 100_000)
+	if got != renderTranscript(msgs) {
+		t.Errorf("a fitting transcript was altered:\n got: %q\nwant: %q", got, renderTranscript(msgs))
+	}
+	if strings.Contains(got, "omitted") {
+		t.Errorf("elision notice present though everything fit:\n%s", got)
+	}
+}
+
+// TestRenderBudgetedTranscriptElidesMiddleKeepingPrefixAndTail is the core item-6 assertion: an
+// over-budget transcript keeps the protected prefix and the most recent tail, drops the middle,
+// and marks the gap — so the summary call the reducer sends stays within its budget.
+func TestRenderBudgetedTranscriptElidesMiddleKeepingPrefixAndTail(t *testing.T) {
+	prefix := domain.Message{Role: domain.RoleUser, Content: "OVERARCHING-GOAL"}
+	last := domain.Message{Role: domain.RoleAssistant, Content: "MOST-RECENT-REPLY"}
+	mid := func(i int) domain.Message {
+		return domain.Message{Role: domain.RoleUser, Content: fmt.Sprintf("MIDDLE-%d %s", i, strings.Repeat("x", 80))}
+	}
+	msgs := []domain.Message{prefix, mid(1), mid(2), mid(3), mid(4), last}
+
+	// A budget that fits the prefix and the last message but nothing between them.
+	budget := len(renderMessage(prefix)) + len(renderMessage(last)) + 8
+	got := renderBudgetedTranscript(msgs, 1, budget)
+
+	if !strings.Contains(got, "OVERARCHING-GOAL") {
+		t.Errorf("protected prefix dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "MOST-RECENT-REPLY") {
+		t.Errorf("most recent message dropped:\n%s", got)
+	}
+	if strings.Contains(got, "MIDDLE-") {
+		t.Errorf("an over-budget middle message survived:\n%s", got)
+	}
+	if !strings.Contains(got, "4 earlier message(s) omitted") {
+		t.Errorf("missing/incorrect elision notice for the 4 dropped middles:\n%s", got)
+	}
+}
+
+// TestRenderBudgetedTranscriptAlwaysKeepsMostRecentMessage pins the tail guarantee: even when the
+// single most recent message alone exceeds the budget, it is kept (the next turn depends on it)
+// rather than the transcript collapsing to prefix-only.
+func TestRenderBudgetedTranscriptAlwaysKeepsMostRecentMessage(t *testing.T) {
+	msgs := []domain.Message{
+		{Role: domain.RoleUser, Content: "goal"},
+		{Role: domain.RoleAssistant, Content: "older"},
+		{Role: domain.RoleUser, Content: "RECENT-" + strings.Repeat("y", 500)},
+	}
+	got := renderBudgetedTranscript(msgs, 1, 10) // absurdly small budget
+	if !strings.Contains(got, "RECENT-") {
+		t.Errorf("most recent message not kept under a tiny budget:\n%s", got)
+	}
+}
+
+// TestCompactAppliesTranscriptBudget proves the budget threads through Compact into the summary
+// call: with a small budget an over-budget conversation's request carries the prefix and recent
+// tail plus an elision notice, not the earliest middle turns.
+func TestCompactAppliesTranscriptBudget(t *testing.T) {
+	msgs := []domain.Message{msg(domain.RoleUser, "REMEMBER-THE-GOAL")}
+	for i := 0; i < 8; i++ {
+		msgs = append(msgs, msg(domain.RoleAssistant, fmt.Sprintf("MIDDLE-%d %s", i, strings.Repeat("z", 60))))
+	}
+	msgs = append(msgs, msg(domain.RoleUser, "FINAL-STEP"))
+	conv := convOf(msgs...)
+	c := &fakeCompleter{reply: "ok"}
+
+	budget := len(renderMessage(msgs[0])) + len(renderMessage(msgs[len(msgs)-1])) + 8
+	if _, err := Compact(context.Background(), c, conv, budget); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	body := c.got[1].Content
+	if !strings.Contains(body, "REMEMBER-THE-GOAL") || !strings.Contains(body, "FINAL-STEP") {
+		t.Errorf("budgeted summary request missing prefix or recent tail:\n%s", body)
+	}
+	if !strings.Contains(body, "omitted to fit the compaction budget") {
+		t.Errorf("budgeted summary request missing the elision notice:\n%s", body)
+	}
+	if strings.Contains(body, "MIDDLE-0") {
+		t.Errorf("budgeted summary request still carries an early middle turn:\n%s", body)
 	}
 }

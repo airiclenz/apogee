@@ -131,6 +131,23 @@ feature-parity track. See
   un-wedge. The `/compact` failure/cancel spine (both `startCompact` outcomes and the
   reducer's overflow/cancel/silence faults) is now covered by tests.
 
+- **`/compact` now survives high context fill.** The reducer sent the *entire* rendered
+  transcript as one summary request, so near `n_ctx − compactMaxTokens` the summary call
+  itself overflowed (`DeltaContextOverflow`) — compaction deterministically failed at exactly
+  the fill it exists to relieve, leaving `/clear` as the only recovery. `internal/context.Compact`
+  now bounds the rendered transcript to a character budget derived from the discovered context
+  window: it keeps the protected prefix and a budgeted tail of the most recent messages (the
+  latest is always kept) and elides the middle with a `[... N earlier message(s) omitted ...]`
+  marker, so the summary call stays within the window. The budget is computed in
+  `Agent.compactTranscriptChars` from `Context.MaxContextTokens` (now threaded from upstream
+  discovery in `cmd/apogee/wire.go`) minus the response reserve and prompt overhead; it is 0
+  (render everything, as before) when the window is unknown, since there is no safe basis to
+  bound. The overflow test flips from "errors cleanly" to "succeeds via the budget"; the
+  unbudgetable case (no discovered window, or a server that rejects even a minimal prompt) still
+  surfaces the fault cleanly with the conversation untouched. This makes on-demand `/compact`
+  robust; the automatic compaction trigger (which fires *at* high fill by definition) is still
+  parked in `TODO.md`.
+
 - **Mouse selection and bracketed paste now handle the prompt correctly.** Two input
   fixes on shipped TUI behaviour:
   (a) a click or drag on a prompt row with wide glyphs (CJK, emoji) landed the caret on
