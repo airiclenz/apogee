@@ -203,6 +203,17 @@ config may add *or* remove entries (it is the user's machine), a project config 
 _Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is
 not — it guards against mistakes, not attackers).
 
+**Resolution**:
+The single, complete verdict for one tool call, computed in full before anything executes —
+covering *every* rule that decides the call's fate: the tighten-only guardrail floor, the
+autonomy-ladder × blast-radius table, confinement capabilities, and the contingencies for what
+can only be discovered at run time. Dispatch *executes* a Resolution; it never decides.
+Subsumes the Phase-3 term **"per-call disposition"**, which named only the ladder-table stage
+that runs *after* the guard clears (ADR 0012/0013 and the confinement-execution contract use
+"disposition" in that narrower sense).
+_Avoid_: "disposition" in new code and docs (retired — it under-claimed what the verdict
+covers); "policy decision" (vague).
+
 **MCP client** (Model Context Protocol):
 Apogee's client for external **MCP** servers, on the official Go SDK over **stdio / SSE /
 streamable-http** (`internal/mcp`, P3.15). It connects the servers a host lists in `config.yaml`'s

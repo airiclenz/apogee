@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — apogee</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 5 5; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .faded { opacity: .42; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .grid-bg { background-image: radial-gradient(#e7e5e4 1px, transparent 1px); background-size: 16px 16px; }
+      .band { transition: all .2s; }
+      h1,h2,h3 { letter-spacing: -0.01em; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+
+      <!-- ===================== HEADER ===================== -->
+      <header class="space-y-5">
+        <div class="flex items-baseline justify-between flex-wrap gap-3">
+          <h1 class="text-4xl font-serif font-semibold">Architecture review — <span class="mono text-slate-700">apogee</span></h1>
+          <span class="text-sm text-slate-500">2026-06-29 · deepening opportunities</span>
+        </div>
+        <p class="text-slate-600 max-w-3xl leading-relaxed">
+          apogee is a terminal coding agent that owns the whole loop for a small local LLM. The packages are
+          mostly well-shaped — the <span class="mono text-sm">Confiner</span> seam (three real adapters), the
+          worker/bridge threading model, and the tool catalogue all earn their keep. What follows are the places
+          where an <strong>interface is nearly as complex as its implementation</strong> (shallow), where behaviour
+          is <strong>smeared across files with no single test surface</strong> (no locality), or where a
+          <strong>deep module exists but no caller crosses its seam</strong> (dormant leverage).
+        </p>
+        <!-- legend -->
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-600 border-t border-b border-slate-200 py-3">
+          <span class="inline-flex items-center gap-2"><span class="inline-block w-5 h-4 border border-slate-400 bg-white"></span> module</span>
+          <span class="inline-flex items-center gap-2"><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#64748b" stroke-width="2" class="seam"/></svg> seam</span>
+          <span class="inline-flex items-center gap-2"><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage / override path</span>
+          <span class="inline-flex items-center gap-2"><span class="inline-block w-5 h-4 deep"></span> deep module</span>
+          <span class="inline-flex items-center gap-2"><span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">Speculative</span></span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-12">
+
+      <!-- ===================== CANDIDATE 1 ===================== -->
+      <article id="c1" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="px-7 pt-7">
+          <div class="flex items-center gap-2 flex-wrap mb-2">
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            <span class="text-xs text-slate-400 mono">#1</span>
+          </div>
+          <h2 class="text-2xl font-serif font-semibold">Collapse the dispatch decision into one Resolution</h2>
+          <p class="mono text-sm text-slate-500 mt-2">internal/agent/dispatch.go · internal/agent/disposition.go · internal/security/guard.go</p>
+        </div>
+
+        <!-- before / after -->
+        <div class="grid md:grid-cols-2 gap-px bg-slate-200 mt-6 border-y border-slate-200">
+          <!-- BEFORE -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — the verdict is smeared</div>
+            <pre class="mermaid">
+flowchart TD
+  C([tool call]) --> G[guards.PreExecute]
+  G -->|Refuse| X1((refuse))
+  G --> SA{isSubAgentCall?}
+  SA -->|yes| REC[runSubAgent]
+  SA -->|no| D[dispose: mode x class x caps]
+  D --> UP{{Tier-2 forces gate}}
+  D --> EX[executeTool]
+  EX --> CF{{install Confinement box}}
+  EX --> RT{{runtime: cannot confine -> demote to gate}}
+  UP -.override.-> EX
+  RT -.override.-> AP[approve fallback]
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2,color:#7f1d1d;
+  classDef tbl fill:#eef2ff,stroke:#6366f1,color:#3730a3;
+  class UP,RT,CF leak
+  class D tbl
+            </pre>
+            <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+              <span class="mono">dispose()</span> claims to be "the single place the autonomy ladder becomes code,"
+              but two verdict-changing rules — the <span class="text-rose-600">Tier-2 force-gate</span> and the
+              <span class="text-rose-600">runtime confine-unavailable demote</span> — live in
+              <span class="mono">dispatch.go</span> prose, not the table.
+            </p>
+          </div>
+          <!-- AFTER -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one deep module, one verdict</div>
+            <div class="relative h-[230px] grid-bg rounded-lg border border-slate-200 p-4">
+              <div class="deep rounded-lg text-white p-4 h-full flex flex-col">
+                <div class="text-xs uppercase tracking-wider text-slate-300">resolve(mode, call, guard, caps)</div>
+                <div class="text-sm font-medium mt-1">→ Resolution</div>
+                <div class="mt-3 grid grid-cols-2 gap-1.5 text-[11px] faded">
+                  <span class="bg-white/10 rounded px-2 py-1">ladder × class</span>
+                  <span class="bg-white/10 rounded px-2 py-1">Tier-2 force</span>
+                  <span class="bg-white/10 rounded px-2 py-1">caps / confine</span>
+                  <span class="bg-white/10 rounded px-2 py-1">runtime demote</span>
+                  <span class="bg-white/10 rounded px-2 py-1">box build</span>
+                  <span class="bg-white/10 rounded px-2 py-1">refuse reason</span>
+                </div>
+                <div class="mt-auto text-[11px] text-emerald-300">Run · Confine(box) · Gate(reason, forcible) · Refuse(why)</div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+              <span class="mono">dispatch.go</span> shrinks to: <em>compute the Resolution, then execute it.</em>
+              Every override becomes a field of the verdict, not a branch in the executor.
+            </p>
+          </div>
+        </div>
+
+        <div class="px-7 py-6 space-y-4">
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Problem</div>
+              <p class="text-sm text-slate-700 mt-1">The "will this call run, confine, gate, or refuse?" decision has no single seam — three of its rules sit outside the disposition table.</p>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Solution</div>
+              <p class="text-sm text-slate-700 mt-1">Return a complete <span class="mono">Resolution</span> verdict (including force-gate, confine-box, and the runtime-demote rule) so dispatch only executes it.</p>
+            </div>
+          </div>
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Wins</div>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-slate-700">
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> locality: the whole safety matrix in one place</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> interface shrinks to one verdict type</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> one test surface: guard × mode × caps together</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> dispatch becomes a thin executor</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> deletion test: complexity concentrates, not moves</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> the table stops lying about being "single"</li>
+            </ul>
+          </div>
+        </div>
+      </article>
+
+      <!-- ===================== CANDIDATE 2 ===================== -->
+      <article id="c2" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="px-7 pt-7">
+          <div class="flex items-center gap-2 flex-wrap mb-2">
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">ports &amp; adapters</span>
+            <span class="text-xs text-slate-400 mono">#2</span>
+          </div>
+          <h2 class="text-2xl font-serif font-semibold">Cross the parser seam that already exists</h2>
+          <p class="mono text-sm text-slate-500 mt-2">internal/processing/* · internal/agent/loop.go · internal/domain/config.go</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-px bg-slate-200 mt-6 border-y border-slate-200">
+          <!-- BEFORE -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — a deep module nobody calls</div>
+            <div class="relative h-[230px] rounded-lg border border-slate-200 p-4 flex items-center justify-between gap-3">
+              <div class="w-[42%]">
+                <div class="border border-slate-300 rounded-lg p-3 bg-white">
+                  <div class="text-xs uppercase tracking-wider text-slate-400">loop.go</div>
+                  <div class="text-sm mt-1">parse response</div>
+                  <div class="mt-2 text-[11px] bg-slate-100 rounded px-2 py-1 mono">ParseNativeToolCalls()</div>
+                  <div class="mt-1 text-[11px] text-rose-600">native only · raw content kept</div>
+                </div>
+              </div>
+              <!-- the gap -->
+              <svg width="60" height="120" class="shrink-0">
+                <line x1="2" y1="60" x2="40" y2="60" stroke="#94a3b8" stroke-width="2" class="seam"/>
+                <text x="6" y="50" font-size="10" fill="#dc2626">no caller</text>
+              </svg>
+              <div class="w-[46%] faded">
+                <div class="deep rounded-lg text-white p-3">
+                  <div class="text-xs uppercase tracking-wider text-slate-300">processing/</div>
+                  <div class="text-sm font-medium mt-1">ToolCallParser</div>
+                  <div class="mt-2 grid grid-cols-2 gap-1 text-[10px]">
+                    <span class="bg-white/10 rounded px-1.5 py-0.5">markdown-fenced</span>
+                    <span class="bg-white/10 rounded px-1.5 py-0.5">custom-regex</span>
+                    <span class="bg-white/10 rounded px-1.5 py-0.5">StripThinking</span>
+                    <span class="bg-white/10 rounded px-1.5 py-0.5">StripHarmony</span>
+                  </div>
+                  <div class="mt-2 text-[10px] text-emerald-300">8 files · oracle-tested · 0 prod callers</div>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+              <span class="mono">NewToolCallParser</span>, the strippers, and <span class="mono">ToolCallingConfig</span>
+              have <strong>zero non-test callers</strong>. A small model emitting a fenced tool call or a
+              <span class="mono">&lt;think&gt;</span> channel today gets it silently ignored — or leaked into visible text.
+            </p>
+          </div>
+          <!-- AFTER -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — the loop crosses the seam</div>
+            <pre class="mermaid">
+flowchart TD
+  R([raw model text]) --> S[StripThinking / StripHarmony]
+  S --> N{native calls?}
+  N -->|yes| PN[ParseNativeToolCalls]
+  N -->|no| PT[ToolCallParser.ParseToolCall]
+  CFG[(Config.ToolCalling)] -.selects.-> PT
+  PN --> TC([domain.ToolCall])
+  PT --> TC
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a;
+  classDef ok fill:#ecfdf5,stroke:#10b981,color:#065f46;
+  class S,PT deep
+  class TC ok
+            </pre>
+            <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+              One config field (<span class="mono">ToolCalling</span>) selects the adapter; the loop strips channels
+              and parses through the same interface. The deep module stops being dormant.
+            </p>
+          </div>
+        </div>
+
+        <div class="px-7 py-6 space-y-4">
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Problem</div>
+              <p class="text-sm text-slate-700 mt-1">The format-aware parser is built and tested but the loop never crosses its seam — production parsing is native-only and thinking/harmony channels leak into content.</p>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Solution</div>
+              <p class="text-sm text-slate-700 mt-1">Add a <span class="mono">ToolCalling</span> field to <span class="mono">domain.Config</span> and call the factory + strippers at the parse seam in <span class="mono">loop.go</span>.</p>
+            </div>
+          </div>
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Wins</div>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-slate-700">
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> leverage: one interface, four formats</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> channel text stops leaking into replies</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> oracle-tested module becomes load-bearing</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> small-model coverage stops being native-only</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> deletion test: today it deletes for free</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> loop test surface gains text-format cases</li>
+            </ul>
+          </div>
+          <div class="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">
+            <strong>Note —</strong> this is a missing wire, not a redesign. Confirm it is genuinely deferred work
+            (a Phase gap) rather than intentionally-off behaviour before treating it as friction.
+          </div>
+        </div>
+      </article>
+
+      <!-- ===================== CANDIDATE 3 ===================== -->
+      <article id="c3" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="px-7 pt-7">
+          <div class="flex items-center gap-2 flex-wrap mb-2">
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            <span class="text-xs text-slate-400 mono">#3</span>
+          </div>
+          <h2 class="text-2xl font-serif font-semibold">Lift the chat input out of the god-Model</h2>
+          <p class="mono text-sm text-slate-500 mt-2">internal/tui/model.go · autocomplete.go · command.go · mouse.go · filecache.go</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-px bg-slate-200 mt-6 border-y border-slate-200">
+          <!-- BEFORE: cross-section of fat struct -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — 25 fields, 8 concerns, one struct</div>
+            <div class="space-y-1">
+              <div class="band h-7 border-l-4 border-slate-300 bg-slate-50 px-3 text-xs flex items-center text-slate-500">wiring · eng · save</div>
+              <div class="band h-7 border-l-4 border-slate-300 bg-slate-50 px-3 text-xs flex items-center text-slate-500">lifecycle state machine</div>
+              <div class="band h-7 border-l-4 border-indigo-400 bg-indigo-50 px-3 text-xs flex items-center text-indigo-700 font-medium">input box + textarea</div>
+              <div class="band h-7 border-l-4 border-indigo-400 bg-indigo-50 px-3 text-xs flex items-center text-indigo-700 font-medium">autocomplete state + accept</div>
+              <div class="band h-7 border-l-4 border-indigo-400 bg-indigo-50 px-3 text-xs flex items-center text-indigo-700 font-medium">pendingSkills + chips</div>
+              <div class="band h-7 border-l-4 border-indigo-400 bg-indigo-50 px-3 text-xs flex items-center text-indigo-700 font-medium">file cache + walk (I/O)</div>
+              <div class="band h-7 border-l-4 border-indigo-400 bg-indigo-50 px-3 text-xs flex items-center text-indigo-700 font-medium">mouse drag-selection</div>
+              <div class="band h-7 border-l-4 border-slate-300 bg-slate-50 px-3 text-xs flex items-center text-slate-500">live stats · gauge · tok/sec</div>
+              <div class="band h-7 border-l-4 border-slate-300 bg-slate-50 px-3 text-xs flex items-center text-slate-500">transcript render cache</div>
+            </div>
+            <p class="text-xs text-slate-500 mt-3 leading-relaxed">
+              The <span class="text-indigo-600 font-medium">five indigo bands</span> are one coherent concept — the
+              <em>chat input</em> — but they are loose fields on <span class="mono">Model</span>.
+              <span class="mono">acceptAutocomplete</span> mutates <span class="mono">m.input</span> across a file boundary;
+              it is only testable through the full <span class="mono">Update</span> loop.
+            </p>
+          </div>
+          <!-- AFTER -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — Model coordinates; input is deep</div>
+            <div class="relative h-[250px] grid-bg rounded-lg border border-slate-200 p-4 flex flex-col gap-3">
+              <div class="border border-slate-300 rounded-lg bg-white px-3 py-2">
+                <div class="text-xs uppercase tracking-wider text-slate-400">Model (thin coordinator)</div>
+                <div class="text-[11px] text-slate-500 mt-1">lifecycle · transcript · status · stats</div>
+              </div>
+              <div class="flex items-center gap-2 pl-6 text-[11px] text-slate-400">
+                <svg width="20" height="20"><line x1="10" y1="0" x2="10" y2="20" stroke="#64748b" stroke-width="2" class="seam"/></svg>
+                embeds &amp; delegates keys
+              </div>
+              <div class="deep rounded-lg text-white px-4 py-3 flex-1">
+                <div class="text-xs uppercase tracking-wider text-slate-300">promptEditor</div>
+                <div class="text-sm font-medium mt-1">Update(key) · Submit() → text, fileRefs, skillIDs</div>
+                <div class="mt-2 grid grid-cols-2 gap-1 text-[10px] faded">
+                  <span class="bg-white/10 rounded px-2 py-0.5">parse mini-language</span>
+                  <span class="bg-white/10 rounded px-2 py-0.5">autocomplete</span>
+                  <span class="bg-white/10 rounded px-2 py-0.5">skill chips</span>
+                  <span class="bg-white/10 rounded px-2 py-0.5">drag-select</span>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-3 leading-relaxed">
+              One module, one small interface, tested without a fake engine or a terminal.
+            </p>
+          </div>
+        </div>
+
+        <div class="px-7 py-6 space-y-4">
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Problem</div>
+              <p class="text-sm text-slate-700 mt-1">The input mini-language (parse, autocomplete, skills, file-refs, mouse-select) is spread across the 1185-line Model as loose fields, so its real logic is only reachable through <span class="mono">Update</span>.</p>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Solution</div>
+              <p class="text-sm text-slate-700 mt-1">Group it behind a <span class="mono">promptEditor</span> module the Model embeds and delegates to, with a small Submit-shaped interface.</p>
+            </div>
+          </div>
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Wins</div>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-slate-700">
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> locality: input logic in one module</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> mini-language tested without a fake engine</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> Model returns toward "thin renderer"</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> accept/attach stop leaking across files</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> file-walk I/O hides behind one seam</li>
+            </ul>
+          </div>
+          <div class="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">
+            <strong>Tension with the framework —</strong> Bubble Tea favours a flat value-Model. The deepening is the
+            <em>input cluster</em>, not every concern; stats and transcript-cache are genuinely fused to
+            <span class="mono">View</span>/<span class="mono">layout</span> and should stay.
+          </div>
+          <div class="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900">
+            <strong>Re-verified 2026-07-01 —</strong> the god-Model still holds (25 fields, 8 concerns; <span class="mono">model.go</span>
+            now 1199 lines). One secondary observation has since been addressed: commit <span class="mono">6463ac4</span> moved
+            <span class="mono">/compact</span> onto a worker goroutine (<span class="mono">startCompact</span> → <span class="mono">compactDoneMsg</span>),
+            so the generative call no longer runs synchronously in <span class="mono">Update</span>. Only the cheap, non-generative
+            <span class="mono">/clear</span> stays inline (documented idle-only). The <span class="mono">promptEditor</span> deepening is unaffected.
+          </div>
+        </div>
+      </article>
+
+      <!-- ===================== CANDIDATE 4 ===================== -->
+      <article id="c4" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="px-7 pt-7">
+          <div class="flex items-center gap-2 flex-wrap mb-2">
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            <span class="text-xs text-slate-400 mono">#4</span>
+          </div>
+          <h2 class="text-2xl font-serif font-semibold">Make <span class="mono text-xl">Fired()</span> real, or delete the seam</h2>
+          <p class="mono text-sm text-slate-500 mt-2">internal/domain/hooks.go:217 · internal/domain/hookview.go:16 · internal/agent/hookrun.go</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-px bg-slate-200 mt-6 border-y border-slate-200">
+          <!-- BEFORE -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — a seam with zero adapters</div>
+            <div class="relative h-[210px] rounded-lg border border-slate-200 p-4 flex flex-col items-center justify-center gap-4">
+              <div class="border border-slate-300 rounded-lg px-4 py-2 bg-white text-sm mono">Mechanism reads view.Fired(id)</div>
+              <svg width="40" height="44"><line x1="20" y1="0" x2="20" y2="40" stroke="#dc2626" stroke-width="2"/><polygon points="20,44 15,36 25,36" fill="#dc2626"/></svg>
+              <div class="border-2 border-dashed border-rose-300 rounded-lg px-4 py-3 bg-rose-50 text-center">
+                <div class="text-sm mono text-rose-700">fired map → nil</div>
+                <div class="text-[11px] text-rose-500 mt-1">never populated · always returns 0</div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-3 leading-relaxed">
+              The interface promises cross-Mechanism coordination ("fire only if X hasn't"). The backing map is never
+              filled, so every author who trusts it codes a gate that never trips. <strong>One declared seam, zero adapters.</strong>
+            </p>
+          </div>
+          <!-- AFTER -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — pick one</div>
+            <div class="space-y-3 h-[210px] flex flex-col justify-center">
+              <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <div class="text-xs uppercase tracking-wider text-emerald-700 mb-1">Deepen</div>
+                <p class="text-xs text-emerald-900 leading-relaxed">Thread the per-Session fire counts (already emitted as <span class="mono">MechanismFiredEvent</span>) into <span class="mono">View()</span> so <span class="mono">Fired()</span> returns the truth.</p>
+              </div>
+              <div class="text-center text-xs text-slate-400">— or —</div>
+              <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Remove</div>
+                <p class="text-xs text-slate-600 leading-relaxed">Delete the method until a Mechanism needs it. A seam with no adapter is a hypothetical seam; one that lies is worse than absent.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-7 py-6 space-y-4">
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Problem</div>
+              <p class="text-sm text-slate-700 mt-1">A documented interface method on the hook working-value always returns 0 — its backing state is never wired, so it silently misleads Mechanism authors.</p>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-400">Solution</div>
+              <p class="text-sm text-slate-700 mt-1">Either populate the fire-count map through the engine seam (deepen) or drop the method (no adapter justifies it yet).</p>
+            </div>
+          </div>
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Wins</div>
+            <ul class="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-slate-700">
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> the interface stops lying</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> testable coordination, or none promised</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> one adapter ⇒ a real seam</li>
+              <li class="flex gap-2"><span class="text-emerald-600">▪</span> smaller interface for hook authors</li>
+            </ul>
+          </div>
+        </div>
+      </article>
+
+      <!-- ===================== CANDIDATE 5 ===================== -->
+      <article id="c5" class="rounded-2xl border border-slate-300 bg-white shadow-sm overflow-hidden opacity-90">
+        <div class="bg-slate-100 border-b border-slate-300 px-7 py-2 text-xs uppercase tracking-wider text-slate-500">
+          Re-verified 2026-07-01 · <span class="text-rose-600 font-semibold">retracted</span> — the claim does not hold
+        </div>
+        <div class="px-7 pt-7">
+          <div class="flex items-center gap-2 flex-wrap mb-2">
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-500 line-through">Speculative</span>
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">Withdrawn</span>
+            <span class="text-xs text-slate-400 mono">#5</span>
+          </div>
+          <h2 class="text-2xl font-serif font-semibold text-slate-500"><s>Drop the path-safety pass-through</s></h2>
+          <p class="mono text-sm text-slate-500 mt-2">internal/tools/path_safety.go · internal/security/*</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-px bg-slate-200 mt-6 border-y border-slate-200">
+          <!-- BEFORE: mass diagram, interface == implementation -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — interface as wide as implementation</div>
+            <div class="h-[200px] flex items-end justify-center gap-8">
+              <div class="text-center">
+                <div class="w-24 bg-slate-700 rounded-t" style="height:120px"></div>
+                <div class="w-24 bg-slate-300 rounded-b flex items-center justify-center text-[10px] text-slate-600" style="height:108px">forwards 1:1</div>
+                <div class="text-[11px] text-slate-500 mt-1 mono">tools/pathsafety</div>
+              </div>
+              <div class="text-center">
+                <div class="w-24 bg-slate-700 rounded-t" style="height:120px"></div>
+                <div class="w-24 bg-slate-700 rounded-b flex items-center justify-center text-[10px] text-white" style="height:60px">real logic</div>
+                <div class="text-[11px] text-slate-500 mt-1 mono">security/*</div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-3 leading-relaxed text-center">
+              Dark = interface surface, light = implementation. <span class="mono">pathsafety.go</span> is nearly all
+              interface: three functions that forward to <span class="mono">security.*</span> verbatim.
+            </p>
+          </div>
+          <!-- AFTER -->
+          <div class="bg-white p-5">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one layer</div>
+            <div class="h-[200px] flex items-end justify-center">
+              <div class="text-center">
+                <div class="w-28 bg-slate-700 rounded-t flex items-center justify-center text-[10px] text-white" style="height:70px">interface</div>
+                <div class="w-28 bg-slate-700/70 rounded-b flex items-center justify-center text-[10px] text-white" style="height:110px">real logic</div>
+                <div class="text-[11px] text-slate-500 mt-1 mono">security/* (called directly)</div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-3 leading-relaxed text-center">
+              Tools call <span class="mono">security.SafeWriteFile/ResolveInRoot</span> directly. One fewer hop to learn.
+            </p>
+          </div>
+        </div>
+
+        <div class="px-7 py-6 space-y-4">
+          <div class="rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-900">
+            <strong>Verification verdict —</strong> the original card cited <span class="mono">tools/pathsafety.go</span>;
+            no such file exists. The real file is <span class="mono">tools/path_safety.go</span>, and it is
+            <strong>not a naked pass-through</strong>. Its header documents the aliases as the seam that let path-safety
+            <em>consolidate</em> into <span class="mono">internal/security</span> (P3.6 / D6) without editing every built-in
+            tool and test call site — and <span class="mono">readFileErrorMessage</span> carries real behaviour
+            (escape-vs-not-found phrasing). The counter-weight the card already raised — "verify intent before deleting" —
+            resolves in favour of <strong>keeping the file</strong>. Deletion test now reads: complexity would <em>reappear</em>
+            across the tool call sites and the sentinel re-export. Withdrawn.
+          </div>
+          <div class="text-xs text-slate-400">
+            Root cause of the false positive: a sub-agent mis-cited the filename and did not read the file's own rationale.
+            The other four candidates were re-verified against current code and stand.
+          </div>
+        </div>
+      </article>
+
+      </section>
+
+      <!-- ===================== TOP RECOMMENDATION ===================== -->
+      <section id="top-recommendation">
+        <div class="rounded-2xl deep text-white p-8 shadow-md">
+          <div class="text-xs uppercase tracking-wider text-emerald-300 mb-2">Top recommendation</div>
+          <h2 class="text-2xl font-serif font-semibold mb-3">Start with <a href="#c1" class="underline decoration-emerald-400 underline-offset-4">#1 — collapse the dispatch decision into one Resolution</a></h2>
+          <p class="text-slate-300 leading-relaxed max-w-3xl">
+            It is the load-bearing safety invariant of the whole agent, and it is the one place where the code's own
+            claim — "the single place the autonomy ladder becomes code" — is <em>false</em>: the Tier-2 force-gate and
+            the runtime confine-unavailable demote live in the executor, not the table. Deepening it concentrates the
+            entire mode × class × caps × guard matrix behind one verdict, gives it a single test surface, and shrinks
+            <span class="mono">dispatch.go</span> to an executor. <span class="text-slate-400">#2 is close behind and
+            cheaper</span> — wiring the dormant parser seam is mostly connection, not redesign — so it is the natural
+            second move once the decision core is clean.
+          </p>
+        </div>
+        <p class="text-center text-xs text-slate-400 mt-6">
+          Vocabulary: module · interface · implementation · depth · seam · adapter · leverage · locality.
+          Domain terms from CONTEXT.md.
+        </p>
+      </section>
+
+    </main>
+  </body>
+</html>
