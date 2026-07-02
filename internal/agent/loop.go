@@ -332,20 +332,26 @@ type reply struct {
 	errMsg    string // the terminal fault message when failed
 }
 
-// streamResponse consumes the provider's Delta stream, emitting a TokenEvent per content
-// chunk as it arrives (the live half of §6 #6) and accumulating text, reasoning, and the
-// fully-joined tool calls. The SSE body is drained to its terminal Delta and closed before
-// this returns — so Approval, consulted afterward in dispatchTools, never blocks an open
-// Upstream connection. A cancellation surfaces as a terminal DeltaError; the caller
-// distinguishes it from a real fault by checking ctx.Err().
+// streamResponse consumes the provider's Delta stream, emitting a TokenEvent for the newly-
+// revealed VISIBLE content as it arrives (the live half of §6 #6) and accumulating text,
+// reasoning, and the fully-joined tool calls. While the accumulated content ends inside an
+// unclosed inline reasoning span (stripper.IsMidChannel), token emission is HELD so a model that
+// inlines thinking/harmony channels never leaks that markup onto a live stream (item 3); the
+// channel's visible text is revealed once its span closes. A native / no-inline-thinking profile's
+// stripper is never mid-channel and returns the content untouched, so every content delta emits
+// verbatim and unbuffered — byte-identical to the pre-profile loop. The SSE body is drained to its
+// terminal Delta and closed before this returns — so Approval, consulted afterward in
+// dispatchTools, never blocks an open Upstream connection. A cancellation surfaces as a terminal
+// DeltaError; the caller distinguishes it from a real fault by checking ctx.Err().
 func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) reply {
 	var out reply
 	var content, thinking strings.Builder
+	emitted := 0 // bytes of stripped visible content already sent as TokenEvents this stream
 	for delta := range a.upstream.Stream(ctx, a.toProviderRequest(req)) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
-			a.cfg.Events.Emit(domain.TokenEvent{EventBase: a.base(turn), Text: delta.Content})
+			emitted = a.emitVisibleDelta(turn, content.String(), emitted)
 		case provider.DeltaThinking:
 			thinking.WriteString(delta.Thinking)
 		case provider.DeltaToolCall:
@@ -373,6 +379,32 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 	out.content = content.String()
 	out.thinking = thinking.String()
 	return out
+}
+
+// emitVisibleDelta emits the newly-revealed VISIBLE tail of the accumulated content as a
+// TokenEvent and returns the running count of visible bytes emitted so far this stream. While acc
+// ends inside an unclosed inline reasoning span (stripper.IsMidChannel) it emits nothing — holding
+// the channel's opening markup and in-flight reasoning off the live stream — and once the span
+// closes it strips the reasoning channel and emits only the visible bytes past the count already
+// sent. The no-op stripper of a native / no-inline-thinking profile never reports mid-channel and
+// returns acc untouched, so this emits each content delta verbatim (the provider filters empty
+// content chunks, so len(visible) always advances past emitted) — byte-identical to today.
+//
+// A channel start token split across two deltas (e.g. "<thi" then "nk>") briefly reveals the
+// partial prefix live, because IsMidChannel only turns true once the whole token has accumulated;
+// this mirrors the oracle's isThinking and is accepted parity — assembleResponse's post-stream
+// strip still removes it from the committed message and final MessageEvent, so no suffix buffering
+// is added here (item 3's recorded chunk-boundary edge).
+func (a *Agent) emitVisibleDelta(turn int, acc string, emitted int) int {
+	if a.stripper.IsMidChannel(acc) {
+		return emitted
+	}
+	visible, _ := a.stripper.Strip(acc)
+	if len(visible) <= emitted {
+		return emitted
+	}
+	a.cfg.Events.Emit(domain.TokenEvent{EventBase: a.base(turn), Text: visible[emitted:]})
+	return len(visible)
 }
 
 // parseToolCalls adapts the provider's wire tool calls onto processing's native shape and

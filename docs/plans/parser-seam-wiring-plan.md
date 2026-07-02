@@ -240,7 +240,7 @@ agent` + docs change). Commit:
 
 ---
 
-## 3. (Completion) Suppress in-flight channel tokens while streaming — native no-op
+## 3. (Completion) Suppress in-flight channel tokens while streaming — native no-op — ✅ DONE (2026-07-02)
 
 **What:** the batch strip in item 2 fixes committed history + the final `MessageEvent`, but
 `streamResponse` still emits a `TokenEvent` for raw `delta.Content` **as it arrives**, so a model

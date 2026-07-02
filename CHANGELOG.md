@@ -55,6 +55,19 @@ feature-parity track. See
   in-flight token suppression while streaming is a following change; this fixes committed history
   and the final message.**
 
+### In-flight thinking/harmony tokens held off the live stream (native unchanged)
+
+- **`streamResponse` now emits a `TokenEvent` for the newly-revealed *visible* content**, not the
+  raw content delta, using the same `ContentStripper`. While the accumulated content ends inside an
+  unclosed inline reasoning span (`IsMidChannel`), token emission is held, so a model that inlines
+  `<think>…</think>` or gpt-oss harmony channels no longer flashes that markup (or its reasoning)
+  onto a live UI before the post-stream strip; the visible text is revealed once the span closes.
+- **A native / no-inline-thinking profile is byte-identical, event-for-event:** the no-op stripper
+  is never mid-channel and returns the content untouched, so every content delta emits verbatim and
+  unbuffered exactly as before. A channel start token split across two deltas briefly reveals its
+  partial prefix live (matching the oracle's `isThinking`); this recorded edge is accepted — the
+  post-stream strip still removes it from the committed message and final `MessageEvent`.
+
 ### Dispatch decision collapsed into one Resolution verdict (internal refactor)
 
 - **The per-call dispatch decision is now one `Resolution`**, computed by a single pure resolver
