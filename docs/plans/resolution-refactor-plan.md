@@ -80,7 +80,7 @@ ADR 0012, ADR 0013 (incl. the 2026-07-02 clarification), `CONTEXT.md` → **Reso
 
 ---
 
-## 1. Add the Resolution type, the pure resolver, and the exhaustive table test (additive — nothing rewired)
+## 1. Add the Resolution type, the pure resolver, and the exhaustive table test (additive — nothing rewired) — ✅ DONE (2026-07-02)
 
 **What:** create `internal/agent/resolution.go` and `internal/agent/resolution_test.go`. Pure
 addition: no existing file changes, no behavior changes. Dispatch keeps running the old path;
