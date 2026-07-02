@@ -20,6 +20,14 @@ feature-parity track. See
   decision; the predecessor apogee-code shipped the same built-in). Set
   `web-search-endpoint: off` (or `none`/`disabled`) to disable the tool — a graceful
   "web search is disabled" result, no request made.
+- **The DuckDuckGo provider POSTs the query** as a form field, the way DDG's own search
+  form submits: the HTML front-end answers a plain GET with its bot-challenge ("anomaly")
+  page — zero result anchors, so every search rendered "No results found". A custom
+  endpoint keeps the `q` GET-parameter contract unchanged.
+- **An explicitly configured DuckDuckGo endpoint selects the built-in provider**: an
+  endpoint whose host is `html.duckduckgo.com` (with or without scheme) now gets the same
+  POST + browser-header treatment as the default, instead of degrading to the
+  custom-endpoint GET that DDG answers with the challenge page.
 - **Results are auto-cleaned**: the DuckDuckGo page (and any custom endpoint's HTML
   response, by Content-Type or body sniff) is parsed into numbered `title / url / snippet`
   results; a custom endpoint's JSON/text response still passes through verbatim. A

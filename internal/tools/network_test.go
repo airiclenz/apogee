@@ -348,6 +348,65 @@ func TestWebSearch_SchemeLessEndpointSelfHeals(t *testing.T) {
 	}
 }
 
+// TestWebSearch_ConfiguredDDGEndpointIsBuiltInProvider: an endpoint EXPLICITLY pointing at
+// the DuckDuckGo host must select the built-in provider (POST + browser headers) — treated
+// as custom, its GET would draw DDG's bot-challenge page and never a result. White-box and
+// no Execute, like the empty-endpoint test, so nothing dials the live host.
+func TestWebSearch_ConfiguredDDGEndpointIsBuiltInProvider(t *testing.T) {
+	t.Parallel()
+	for _, endpoint := range []string{
+		"https://html.duckduckgo.com/html/", // the default, spelled out in config
+		"html.duckduckgo.com/html/",         // scheme-less: heals, then matches the host
+	} {
+		tool := NewWebSearch(security.URLGuard{}, endpoint)
+		if tool.provider != providerDuckDuckGo {
+			t.Errorf("%q: want providerDuckDuckGo, got %v", endpoint, tool.provider)
+		}
+		if tool.endpoint != defaultSearchEndpoint {
+			t.Errorf("%q: endpoint resolved to %q, want %q", endpoint, tool.endpoint, defaultSearchEndpoint)
+		}
+	}
+}
+
+// TestWebSearch_DuckDuckGoProviderPosts: the built-in provider sends the query as a POST
+// form field with NO query in the URL — DDG answers a GET with its bot-challenge page. The
+// provider is forced onto an httptest endpoint (white-box) to keep the test hermetic.
+func TestWebSearch_DuckDuckGoProviderPosts(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotForm, gotRawQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotRawQuery = r.Method, r.URL.RawQuery
+		gotForm = r.FormValue("q")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(ddgFixture))
+	}))
+	defer srv.Close()
+
+	tool := &WebSearch{guard: loopbackGuard(), endpoint: srv.URL, provider: providerDuckDuckGo}
+	res, err := tool.Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_search", Arguments: jsonArgs(t, map[string]any{"query": "golang docs"}),
+	})
+	if err != nil {
+		t.Fatalf("Execute Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("result is error: %q", res.Content)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("DDG provider sent %s, want POST", gotMethod)
+	}
+	if gotForm != "golang docs" {
+		t.Errorf("POST form q=%q, want %q", gotForm, "golang docs")
+	}
+	if gotRawQuery != "" {
+		t.Errorf("the request URL must carry no query, got %q", gotRawQuery)
+	}
+	if !strings.Contains(res.Content, "1. Go Documentation & Guides") {
+		t.Errorf("structured render missing results: %q", res.Content)
+	}
+}
+
 func TestWebSearch_QueriesConfiguredEndpoint(t *testing.T) {
 	t.Parallel()
 

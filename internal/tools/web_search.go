@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,7 +27,12 @@ type webSearchArgs struct {
 
 // defaultSearchEndpoint is the built-in provider used when no endpoint is configured:
 // DuckDuckGo's HTML front-end needs no API key, so web search works out of the box.
-const defaultSearchEndpoint = "https://html.duckduckgo.com/html/"
+// defaultSearchHost also marks an EXPLICITLY config'd DDG endpoint as the built-in
+// provider (NewWebSearch), because DDG only works with the provider's request shape.
+const (
+	defaultSearchHost     = "html.duckduckgo.com"
+	defaultSearchEndpoint = "https://" + defaultSearchHost + "/html/"
+)
 
 // searchProvider identifies which backend the endpoint points at, because rendering
 // differs: the built-in DuckDuckGo default is always parsed structurally, while a custom
@@ -42,12 +48,13 @@ const (
 // DEFAULT-ON: an empty endpoint selects the built-in DuckDuckGo provider
 // (defaultSearchEndpoint), so web search works with no configuration and no API key. The
 // sentinel endpoint "off" (or "none"/"disabled") disables the tool — a graceful "web search
-// is disabled" result, never a crash. A custom endpoint receives the query as the `q` GET
-// parameter (the common shape for a search backend; a host whose endpoint differs can front
-// it with a thin adapter): an HTML response is cleaned into title/url/snippet results, a
-// JSON/text response passes through verbatim. It is an ExternalEffectTool of kind network,
-// filtered by the same URLGuard + SSRF floor as the other network tools. Stateless across
-// Turns.
+// is disabled" result, never a crash. The DuckDuckGo provider POSTs the query as a form
+// field (a bare GET gets DDG's bot-challenge page, never results); a custom endpoint
+// receives the query as the `q` GET parameter (the common shape for a search backend; a
+// host whose endpoint differs can front it with a thin adapter): an HTML response is
+// cleaned into title/url/snippet results, a JSON/text response passes through verbatim. It
+// is an ExternalEffectTool of kind network, filtered by the same URLGuard + SSRF floor as
+// the other network tools. Stateless across Turns.
 type WebSearch struct {
 	guard    security.URLGuard
 	endpoint string
@@ -59,7 +66,10 @@ type WebSearch struct {
 // DuckDuckGo default; the sentinels "off"/"none"/"disabled" (case-insensitive) disable the
 // tool; anything else is a custom endpoint, filtered through guard. A scheme-less custom
 // endpoint (e.g. "search.example.com/s") self-heals to https:// — url.Parse reads it as a
-// bare path (Host == ""), and url-safety would otherwise reject every request.
+// bare path (Host == ""), and url-safety would otherwise reject every request. An endpoint
+// whose host is the built-in DuckDuckGo host IS the built-in provider: DDG answers only the
+// provider's request shape (POST + browser headers), so a config'd
+// "html.duckduckgo.com/html/" must not degrade to the custom-endpoint GET.
 func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
 	endpoint = strings.TrimSpace(endpoint)
 	switch strings.ToLower(endpoint) {
@@ -73,7 +83,11 @@ func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
 			endpoint = "https://" + endpoint
 		}
 	}
-	return &WebSearch{guard: guard, endpoint: endpoint, provider: providerCustom}
+	provider := providerCustom
+	if u, err := url.Parse(endpoint); err == nil && strings.EqualFold(u.Hostname(), defaultSearchHost) {
+		provider = providerDuckDuckGo
+	}
+	return &WebSearch{guard: guard, endpoint: endpoint, provider: provider}
 }
 
 // Name returns the stable identifier the model calls.
@@ -111,9 +125,17 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return okResult(call.ID, "web search is disabled on this host (web-search-endpoint: off); web_search is unavailable."), nil
 	}
 
-	reqURL, err := buildSearchURL(t.endpoint, args.Query)
-	if err != nil {
-		return errorResult(call.ID, "could not build search url: "+err.Error()), nil
+	// The DuckDuckGo provider carries the query in a POST form body, so its reqURL is the
+	// bare endpoint: DDG's HTML front-end answers a GET with its bot-challenge ("anomaly")
+	// page — results come only over POST, the way its own search form submits. A custom
+	// endpoint keeps the `q` GET-parameter contract.
+	reqURL := t.endpoint
+	if t.provider != providerDuckDuckGo {
+		var err error
+		reqURL, err = buildSearchURL(t.endpoint, args.Query)
+		if err != nil {
+			return errorResult(call.ID, "could not build search url: "+err.Error()), nil
+		}
 	}
 	// endpointHost is the bare host of the configured endpoint — the ONLY part of the
 	// endpoint safe to surface to the model. The constructed reqURL carries the query and
@@ -127,7 +149,13 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, "search endpoint blocked by url-safety (host "+endpointHost+")"), nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	method := http.MethodGet
+	var reqBody io.Reader
+	if t.provider == providerDuckDuckGo {
+		method = http.MethodPost
+		reqBody = strings.NewReader(url.Values{"q": {args.Query}}.Encode())
+	}
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, reqBody)
 	if err != nil {
 		return errorResult(call.ID, "could not build search request for host "+endpointHost), nil
 	}
@@ -137,6 +165,7 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		// the same request it always did (a content-negotiating backend must keep returning
 		// its clean JSON/text). No Accept-Encoding — Go's transport only transparently
 		// un-gzips when it set that header itself.
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 		req.Header.Set("Accept", "text/html")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
