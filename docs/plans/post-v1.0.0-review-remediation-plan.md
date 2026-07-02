@@ -1,7 +1,8 @@
 # Plan — Post-v1.0.0 review remediation (fix before the next stage)
 
 **Date:** 2026-07-02
-**Status:** IN PROGRESS — item 1 done (commit `8dc295e`, 2026-07-02); items 2–8 open. Ordered
+**Status:** IN PROGRESS — item 1 done (commit `8dc295e`, 2026-07-02); item 2 code done
+(2026-07-02, its dedicated fault/cancel tests are item 3, still open); items 3–8 open. Ordered
 action list from the 2026-07-02 code review of
 `v1.0.0..HEAD` (the apogee-code feature-parity track: mini-language, skills, quick-wins
 bundle, `/props` discovery, gauge restyle, mouse support, un-wedge fix, `/compact` reducer).
@@ -71,7 +72,17 @@ already pass). This also closes the macOS half of the owner-run enforcement proo
 
 ---
 
-## 2. `/compact` + gauge truthfulness cluster (one pass over worker/model/compact)
+## 2. `/compact` + gauge truthfulness cluster (one pass over worker/model/compact) — ✅ CODE DONE (2026-07-02)
+
+**Done:** all four fixes landed as described below. `Agent.Compact` now returns
+`(skipped bool, err error)` — the reducer's `Result.Skipped` threaded through the `Engine`
+seam (a `bool`, keeping the TUI's "public types via `internal/domain`" contract; no new
+`internal/context` import) into a `compactDoneMsg{Skipped, Err}`. 2a reclassifies from the
+returned error, not `ctx.Err()`; 2c zeroes `ctxUsed`/`tokPerSec` on a successful
+`ClearContext`; 2d clears `genStart` in `finishWorker` (every terminal path). Existing gauge/
+throughput and compact tests updated to the new signature and stay green (`go test ./...`,
+`-race` clean). The dedicated fault/cancel spine tests are **item 3** (still open). CHANGELOG
+`[Unreleased] → Fixes` records the cluster.
 
 Four small fixes; land together, they touch the same seam.
 
