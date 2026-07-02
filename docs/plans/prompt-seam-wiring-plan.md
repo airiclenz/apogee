@@ -105,7 +105,7 @@ never read `media/chat.js`, a minified bundle), `internal/agent/harness_test.go`
 
 ---
 
-## 1. `processing.InstructionsFor` — port the menu + instruction renderers (no consumer yet)
+## 1. `processing.InstructionsFor` — port the menu + instruction renderers (no consumer yet) — ✅ DONE (2026-07-02)
 
 **What:** the new entry point per D5/D6, landed with its parity vectors and **no** loop caller,
 so the port is one reviewable commit.
