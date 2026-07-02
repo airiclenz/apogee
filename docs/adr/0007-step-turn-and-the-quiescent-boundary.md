@@ -64,7 +64,7 @@ suspended sub-agent.
 Building the full Turn/Step state machine (P1.2) forced two control-flow sub-decisions this
 ADR's Decision left abstract. They refine — they do not change — the boundary contract above.
 (They were the two "decide within Phase 1" calls the
-[Phase-1 detail plan](../plans/phase-1-detail-plan.md) §5 flagged against this ADR; recorded
+[Phase-1 detail plan](../plans/archived/phase-1-detail-plan.md) §5 flagged against this ADR; recorded
 here as the canonical home, mirrored in the TDD §6 status notes.)
 
 - **Streaming + Approval interleave — *stream fully, then gate*.** When a streamed reply

@@ -225,7 +225,7 @@ apogee/
 the root is a thin alias facade — so the tool and Mechanism *catalogues* can live in their own
 `internal/` packages (seeded by the engine) without the root↔subsystem cycle a fat root would
 force. P0.6's root-package loop was an explicit throwaway; **P1.0 moves it to this layout**
-([phase-1 detail plan](./phase-1-detail-plan.md) §3).
+([phase-1 detail plan](./archived/phase-1-detail-plan.md) §3).
 
 **Key architectural seams:**
 - **The public Go API (the single most important seam — ADR 0001).** `Agent` + `Config`,
@@ -281,7 +281,7 @@ Ask-Before). Apogee never runs a tool call unsupervised *and* unconfined.
 ## 4. Phased build sequence
 
 ### Phase 0 — Scaffold & architecture (foundation)
-*Status: ✅ **Complete** — detail & acceptance in [`phase-0-detail-plan.md`](./phase-0-detail-plan.md).*
+*Status: ✅ **Complete** — detail & acceptance in [`phase-0-detail-plan.md`](./archived/phase-0-detail-plan.md).*
 
 - Stand up the Go module (`github.com/airiclenz/apogee`), Cobra root command,
   CI/build, and the package skeleton above.
@@ -316,7 +316,7 @@ Ask-Before). Apogee never runs a tool call unsupervised *and* unconfined.
   the in-process step/snapshot/hook pattern is exercised by a test.
 
 ### Phase 1 — Embeddable agent core (highest-value first step)
-*Status: ✅ **Complete** — detail & acceptance in [`phase-1-detail-plan.md`](./phase-1-detail-plan.md).*
+*Status: ✅ **Complete** — detail & acceptance in [`phase-1-detail-plan.md`](./archived/phase-1-detail-plan.md).*
 
 Port apogee-code's loop as an embeddable vertical slice (TS as oracle):
 - provider (openai-compatible) + model discovery,
@@ -340,7 +340,7 @@ Port apogee-code's loop as an embeddable vertical slice (TS as oracle):
   steps, snapshots, and scores it **in-process via the library API**.
 
 ### Phase 2 — Minimal modular TUI shell
-*Status: ✅ **Complete** (2026-06-23) — detail & acceptance in [`phase-2-detail-plan.md`](./phase-2-detail-plan.md); the deliverable holds end-to-end against a hermetic and a live model.*
+*Status: ✅ **Complete** (2026-06-23) — detail & acceptance in [`phase-2-detail-plan.md`](./archived/phase-2-detail-plan.md); the deliverable holds end-to-end against a hermetic and a live model.*
 
 - Build a thin Bubble Tea app over the Phase-1 **Events** (consuming the public API like
   any other consumer): input box, streaming output pane, tool-call/approval display,

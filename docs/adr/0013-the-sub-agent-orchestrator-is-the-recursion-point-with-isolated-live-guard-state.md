@@ -16,7 +16,7 @@ settled in code:
   level down. It is exposed to the model as a tool (`sub_agent`), but it is unlike every other
   tool: it is the **recursion point**, not a leaf — its "execution" is a whole nested loop,
   each of whose child tool calls must itself get the full per-call blast-radius disposition
-  ([D5](../plans/phase-3-detail-plan.md) / [ADR 0012](0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)).
+  ([D5](../plans/archived/phase-3-detail-plan.md) / [ADR 0012](0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)).
 - **What does a sub-agent inherit, and how is "≤ parent" made structural** rather than a thing
   a careless port can drop (apogee-code's `SubAgentOrchestrator` constructed the loop with *no*
   approval manager and *no* mode — the exact hole ADR 0005 closed)?

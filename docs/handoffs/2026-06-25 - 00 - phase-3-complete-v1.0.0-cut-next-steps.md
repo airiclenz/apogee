@@ -16,7 +16,7 @@ tools → P3.8 execution tools (first `Confiner` consumers) → P3.9 git tool �
 P3.11 network + host tools (SSRF floor) → P3.13 sub-agent orchestrator (**ADR 0013**) → P3.14 TUI
 `Depth>0` render → P3.15 MCP client (go-sdk v1.6.1) → `/security-review` checkpoint → P3.16
 acceptance + release. Each is a `feat/fix/chore` commit on `main` with the session trailers; the
-`#### ✅ P3.x result` notes in `docs/plans/phase-3-detail-plan.md` carry the decisions.
+`#### ✅ P3.x result` notes in `docs/plans/archived/phase-3-detail-plan.md` carry the decisions.
 
 ### Release artifacts
 - `CHANGELOG.md` → `v1.0.0` section + **"Known post-release verification"** list.
@@ -72,7 +72,7 @@ prompt so agents can't push, or explicitly decide push-as-you-go is fine.
   the two deferred Low security findings).
 
 ## Pointers (don't re-read into context unless you need them)
-- Plan + ✅ result notes: `docs/plans/phase-3-detail-plan.md`
+- Plan + ✅ result notes: `docs/plans/archived/phase-3-detail-plan.md`
 - Confinement policy: `docs/adr/0012-*.md`; mechanism: `docs/design/confinement-execution-contract.md`
 - Sub-agent orchestration: `docs/adr/0013-*.md`
 - Security review: `docs/handoffs/2026-06-24 - 04 - phase-3-security-review.md`

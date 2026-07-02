@@ -23,7 +23,7 @@ values, and scores the workspace (proven under `-race` by a hermetic OpenAI-comp
 `panic("sketch")` remains on the public surface.**
 Verify stays green: `go test -race ./...`, `gofmt`/`vet`/`build`, 6-target cross-build,
 `apogee --help` exit 0. Detail + acceptance:
-[`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md). **Next: run the live
+[`../plans/archived/phase-1-detail-plan.md`](../plans/archived/phase-1-detail-plan.md). **Next: run the live
 file-edit eval against the local model, then Phase 2 (the TUI consuming the Phase-1 Events).**
 
 **Purpose of this revision:** a `/handoff` to the next session. The job next session is
@@ -262,13 +262,13 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    the tool + Mechanism catalogues *into* root to avoid the seeding cycle (a god-package) — and
    over a halfway `internal/core` that collapses into the same shape. **Realised by P1.0**
    (the first Phase-1 task; a pure move, verify stays green). See
-   [`../plans/phase-1-detail-plan.md`](../plans/phase-1-detail-plan.md) §3.
+   [`../plans/archived/phase-1-detail-plan.md`](../plans/archived/phase-1-detail-plan.md) §3.
 
 **Process / scaffolding (Phase 0):**
 - ✅ **Done (P0.2):** `go.mod` (`go 1.26`, no deps) + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles and `go vet`/`go vet -race` pass in-tree.
 - ✅ **Done (P0.4):** CI — `.github/workflows/ci.yml` cross-compiles Win/Mac/Linux × amd64/arm64 and gates `gofmt`/`go vet`/`go build`/`go test -race`.
 - ✅ **Done (P0.3):** dependency versions pinned-by-decision (Cobra, Charm v2 stack, MCP go-sdk v1.6.1, yaml.v3, shlex, ulid) in the detail plan §1 — added per-task, graph still empty.
-- ✅ **Done (P0.3):** the **Phase-0 detail plan** — [`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md) (task-level breakdown, acceptance criteria).
+- ✅ **Done (P0.3):** the **Phase-0 detail plan** — [`../plans/archived/phase-0-detail-plan.md`](../plans/archived/phase-0-detail-plan.md) (task-level breakdown, acceptance criteria).
 - ✅ **Done (P0.5):** `internal/platform` seam — `Shell`/`Path` interfaces (real POSIX impl, Windows stub) + a deny-all `denyConfiner` stub (`AutoEligible()==false`) so New's Auto gate is testable before the real backends (Phase 3).
 - No throwaway in-process harness proving construct→Step→snapshot→resume→register-hook yet (the **P0.6 capstone harness** — spec'd in the detail plan, awaiting build).
 - Tests exist only in `internal/platform` (P0.5 table tests); the rest of the tree is untested until the **P0.6 capstone harness** — the first cross-cutting test (`testing.go.md`: table-driven + golden files).
@@ -297,7 +297,7 @@ The handoff payload. Each item: raise a §5 row from ∅/S toward a real design,
 **P0 — unblocks everything else**
 1. ✅ **Hook mutation API** (§6.2) — **DONE (designed P0.1, bodies P1.5):** `Request`/`Response`/`Conversation`/`LoopView`/`ConversationView` accessors+mutators designed from apogee-sim's Transform/Injector signatures (`docs/design/hook-mutation-api.md`) and now implemented in `internal/domain` (panic stubs replaced). **Pre-request hook mutations flow into the Upstream request** (`buildRequest`→hooks→`toProviderRequest` in `loop.go`), closing the P0.6 gap. `Conversation` carries a deferred-action queue with JSON round-trip so an `ActionDefer` survives a snapshot; the loop integration of the post-response + history-rewrite hooks is P1.2.
 2. ✅ **Stand up `go.mod` + minimal `internal/` stubs** — **DONE (P0.2):** module + `cmd/apogee` + empty `internal/` skeleton; `apogee.go` compiles, `go vet`/`go vet -race` pass in-tree.
-3. ✅ **Phase-0 detail plan + CI** — **DONE (P0.3+P0.4, `c7d4f61`):** [`../plans/phase-0-detail-plan.md`](../plans/phase-0-detail-plan.md) (version pins, CI spec, acceptance-tested task list) + `.github/workflows/ci.yml`.
+3. ✅ **Phase-0 detail plan + CI** — **DONE (P0.3+P0.4, `c7d4f61`):** [`../plans/archived/phase-0-detail-plan.md`](../plans/archived/phase-0-detail-plan.md) (version pins, CI spec, acceptance-tested task list) + `.github/workflows/ci.yml`.
 3a. ✅ **`platform/` seam** — **DONE (P0.5):** `internal/platform` `Shell`/`Path` interfaces (real POSIX, Windows stub) + deny-all `denyConfiner` (`AutoEligible()==false`); cross-matrix builds, table-tested (detail plan §3).
 3b. ✅ **Capstone harness** — **DONE (P0.6):** four gate decisions confirmed (Charm v2, MCP verdict, the `Responder` seam, P0.6 scope); construct→Step→Snapshot→Resume→`AddExperimental` runs for real over the `internal/agent.Responder` seam — 12 tests under `-race`, 6-target cross-build, `apogee --help` exit 0 (detail plan §3 "as built"). **Phase 0 is complete.**
 

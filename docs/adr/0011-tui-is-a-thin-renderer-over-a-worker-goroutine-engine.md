@@ -7,7 +7,7 @@ Status: accepted
 ## Context
 
 Phase 2 makes the agent a product: an interactive terminal UI you hold a coding
-conversation in ([phase-2 detail plan](../plans/phase-2-detail-plan.md)). The TUI is the
+conversation in ([phase-2 detail plan](../plans/archived/phase-2-detail-plan.md)). The TUI is the
 first *interactive* consumer of the Phase-1 public surface; the bench (P1.7) was the first
 programmatic one, and they consume the **same** surface ([ADR 0001](0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md)).
 Five forces collide, and wiring them without a deadlock or a data race is the real work of

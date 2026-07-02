@@ -56,7 +56,7 @@ resolves skill bodies + file contents into context.
     "cursor-position-free, robust" design for cursor-tracking edge cases.
 
 - **[P0] Skills system** (prerequisite for `/skill`) — **SHIPPED 2026-06-26**
-  (`docs/plans/skills-system-plan.md`). New `internal/skills` package discovers **directory +
+  (`docs/plans/archived/skills-system-plan.md`). New `internal/skills` package discovers **directory +
   `SKILL.md`** skills (not flat `.md` — matches the apogee-code oracle and the Anthropic
   agent-skills convention) from the layered dirs `~/.apogee/skills/`, workspace `.apogee/skills/`,
   and workspace `skills/` (the last gated by the new file-only `use-project-skills` config key,
