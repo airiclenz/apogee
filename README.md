@@ -56,6 +56,9 @@ on top. See [`docs/plans/`](docs/plans/) for the implementation plan.
 - **Three autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
   Auto (autonomous within configured limits).
 - **MCP support** — connect external tool servers over stdio / SSE / streamable-http.
+- **Model profiles** — adapt to models that don't speak native tool-calls: parse
+  markdown-fenced or custom-regex tool calls and strip inline thinking / harmony
+  channels, all driven by a per-model profile (native models stay byte-identical).
 - **Small-model mechanisms** — compression, validation/auto-retry, syntax + autofix,
   behavioural nudges, and the cross-session Library, each gated so it only fires when
   the model needs it.
