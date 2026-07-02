@@ -1,13 +1,14 @@
 # Plan — Post-v1.0.0 review remediation (fix before the next stage)
 
 **Date:** 2026-07-02
-**Status:** READY — not started. Ordered action list from the 2026-07-02 code review of
+**Status:** IN PROGRESS — item 1 done (commit `8dc295e`, 2026-07-02); items 2–8 open. Ordered
+action list from the 2026-07-02 code review of
 `v1.0.0..HEAD` (the apogee-code feature-parity track: mini-language, skills, quick-wins
 bundle, `/props` discovery, gauge restyle, mouse support, un-wedge fix, `/compact` reducer).
 **Source:** six-specialist review (mission/security/bugs/concurrency/health/tests) + a docs
 pass over all ADRs and design docs. Items marked *(×N)* were found independently by N
 reviewers. Suite status at review time: `go test ./...` and `-race` green **except**
-`TestSeatbeltProbe` (= item 1, a real bug, not flakiness).
+`TestSeatbeltProbe` (= item 1, a real bug, not flakiness) — now green after item 1.
 **Track:** post-`v1.0.0` hardening. Everything here is a fix or test on shipped behaviour —
 no freeze break. Items 6 and 7 each need one small design call (flagged inline).
 
@@ -15,7 +16,33 @@ Work the items in order; 1–4 are the "before moving on" core, 5–8 can trail.
 
 ---
 
-## 1. Canonicalize ConfinementBox roots — Auto mode is broken on macOS (P0)
+## 1. Canonicalize ConfinementBox roots — Auto mode is broken on macOS (P0) — ✅ DONE (`8dc295e`, 2026-07-02)
+
+**Done:** fixed in the seatbelt backend, not `confinementBox()`. Two deliberate departures from
+the suggested fix below, decided after reading the code:
+- **Backend, not `confinementBox()`.** The "preferred" central spot cannot satisfy the
+  acceptance test — `TestSeatbeltProbe` builds its own box and drives the backend directly, so
+  `confinementBox()` canonicalization would never turn it green, and the backend would stay
+  fragile for the bench / third-party embedders that construct boxes directly. The need to
+  canonicalize is a property of *how `sandbox-exec` matches* (kernel-canonical), so its correct
+  home is `seatbeltProfile` (`internal/platform/seatbelt.go`, new `seatbeltCanonicalRoot`).
+- **Stdlib `filepath.EvalSymlinks`, not `security.EvalRealPath`.** `internal/platform` is
+  pristine (imports only `internal/domain`); pulling in `internal/security` would invert the
+  layer direction. For existing dirs (box roots always exist at confine time) the two resolve
+  identically, so agreement with path-safety holds.
+- **Landlock confirmed unaffected** — it is fd-based (`unix.Open(root, O_PATH)`), so the kernel
+  resolves symlinks to the inode the rule keys on. Left untouched.
+- **Coverage:** live `TestSeatbeltProbe` in-box rows now pass on macOS hardware, plus a new
+  hermetic `TestSeatbeltProfileCanonicalizesSymlinkedRoot` (constructs a real symlink) that runs
+  on every non-Windows host — including Linux CI, where the live probe self-skips.
+- Closes the `v1.0.0` "Box-root canonicalization" residual and the macOS arm of the seatbelt
+  live-enforcement proof (CHANGELOG updated). The **Linux landlock** live run and the **live
+  Auto-confined deliverable** run remain open (out of scope — need a landlock host/CI).
+
+---
+
+<details>
+<summary>Original plan text (superseded by the Done note above)</summary>
 
 **What:** seatbelt denies writes *inside* the workspace whenever the workspace path
 contains a symlink component. On macOS `/tmp` and `/var` are symlinks into `/private`, and
@@ -39,6 +66,8 @@ covers it regardless.
 `write_in_workspace_succeeds` / `write_in_writable_path_succeeds` go green (the deny rows
 already pass). This also closes the macOS half of the owner-run enforcement proofs in the
 `2026-06-25 - 00` handoff.
+
+</details>
 
 ---
 
