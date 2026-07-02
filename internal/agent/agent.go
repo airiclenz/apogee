@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -28,6 +29,14 @@ type Agent struct {
 	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
 	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry)
 	guards   security.Guards           // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
+
+	// textParser and stripper are the parse-seam collaborators selected from cfg.Profile at
+	// construction (processing.ParserFor): the text-format tool-call parser recovers a call from
+	// the visible content of a non-native model, and stripper lifts the inline thinking/harmony
+	// channel out of that content. A native, no-inline-thinking profile (the zero value) yields
+	// no-op parsers, so the content path is byte-identical to the pre-profile loop.
+	textParser processing.ToolCallParser
+	stripper   processing.ContentStripper
 
 	// modeMu guards mode — the ONE field shared across goroutines, the deliberate exception to
 	// the single-goroutine contract above. The UI cycles the autonomy mode (Shift+Tab → SetMode)

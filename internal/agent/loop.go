@@ -67,13 +67,24 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, domain.ErrAutoUnavailable
 	}
 
+	// Translate the model profile into the loop's parse-seam collaborators once (D2). A bad
+	// profile (unknown tool-call format / thinking style) fails construction here rather than
+	// silently falling back to native; a zero profile yields the native no-op parser + no-op
+	// stripper, so the content path stays byte-identical.
+	textParser, stripper, err := processing.ParserFor(cfg.Profile)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Agent{
-		cfg:      cfg,
-		upstream: up,
-		registry: registry,
-		tools:    resolveTools(cfg),
-		guards:   security.NewDefaultGuards(),
-		mode:     cfg.Mode, // seed the live, swappable mode from the construction config
+		cfg:        cfg,
+		upstream:   up,
+		registry:   registry,
+		tools:      resolveTools(cfg),
+		guards:     security.NewDefaultGuards(),
+		mode:       cfg.Mode, // seed the live, swappable mode from the construction config
+		textParser: textParser,
+		stripper:   stripper,
 	}, nil
 }
 
@@ -244,15 +255,15 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			return nil, turnFailed
 		}
 
-		calls, err := parseToolCalls(reply.toolCalls)
+		nativeCalls, err := parseToolCalls(reply.toolCalls)
 		if err != nil {
 			// A malformed tool call degrades to a parse-error path, not a panic: surface
 			// it and treat the Turn as a final no-tool response.
 			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "processing", Err: err.Error()})
-			calls = nil
+			nativeCalls = nil
 		}
 
-		resp := domain.NewResponse(reply.content, reply.thinking, calls, reply.finish, req.View())
+		resp := a.assembleResponse(turn, req.View(), reply, nativeCalls)
 		retry, hookErr := a.runPostResponseHooks(ctx, turn, resp)
 		if hookErr != nil {
 			// A post-response hook panicked (recovered into an ErrorEvent): the model did
@@ -266,6 +277,48 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			continue
 		}
 		return resp, turnOK
+	}
+}
+
+// assembleResponse applies the model profile at the parse seam (D5/D6). It strips the reply's
+// inline thinking/harmony channel out of the visible content and — only when the structured
+// native path produced no calls — recovers a text-format tool call from that stripped content,
+// removing the call's markup from the committed text and assigning it a deterministic
+// Turn-derived ID (so snapshot/resume and tests stay stable, unlike the oracle's wall-clock ID).
+// The model's reasoning (the Upstream-split reasoning_content joined with any stripped inline
+// channel) rides on the Response so assistantMessage can preserve it in history. For a native,
+// no-inline-thinking profile the stripper and text parser are no-ops, so visible == reply.content
+// and calls == nativeCalls — byte-identical to the pre-profile path.
+func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep reply, nativeCalls []domain.ToolCall) *domain.Response {
+	visible, reasoning := a.stripper.Strip(rep.content)
+
+	calls := nativeCalls
+	if len(calls) == 0 {
+		// The native channel found nothing, so the text parser is the only tool-call source
+		// (D5). It yields at most one call; native profiles return the no-op parser, so this is
+		// a no-op there.
+		if call, found := a.textParser.ParseToolCall(visible); found {
+			visible = a.textParser.StripToolCall(visible)
+			call.ID = fmt.Sprintf("text_call_%d", turn)
+			calls = []domain.ToolCall{call}
+		}
+	}
+
+	return domain.NewResponse(visible, joinThinking(rep.thinking, reasoning), calls, rep.finish, view)
+}
+
+// joinThinking combines the Upstream-split reasoning (reply.thinking, the reasoning_content
+// field) with the reasoning the stripper lifted out of the inline content, Upstream first and
+// blank-line joined. Either being empty returns the other unchanged, so a native reply with no
+// inline channel returns reply.thinking untouched (the byte-identical anchor).
+func joinThinking(upstream, inline string) string {
+	switch {
+	case upstream == "":
+		return inline
+	case inline == "":
+		return upstream
+	default:
+		return upstream + "\n\n" + inline
 	}
 }
 

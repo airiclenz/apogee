@@ -20,6 +20,15 @@
 // riskiest-port discipline — the TS is the oracle); a malformed payload degrades to the
 // no-call path, never a panic and never a Turn failure (the P1.3 contract).
 //
+// The package is wired into the loop through ParserFor: it translates the declarative
+// domain.ModelProfile on Config into the two parse-seam collaborators — the text-format
+// ToolCallParser (native / markdown-fenced / custom-regex) and a unified ContentStripper over the
+// thinking styles (none / delimited / harmony) — by mapping the profile onto the frozen
+// ToolCallingConfig / ThinkingConfig and calling NewToolCallParser. internal/agent selects both
+// once at construction and calls them at the seam, so the format→parser knowledge stays here and
+// the oracle config types never surface in the loop. A zero profile yields the native no-op
+// parser and no-op stripper, so a native model's content path is byte-identical.
+//
 // The package depends only on internal/domain (+ stdlib): the loop adapts provider wire
 // tool calls into NativeToolCall at the seam, so wire types stay provider-local (ADR 0010).
 package processing

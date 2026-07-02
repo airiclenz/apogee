@@ -196,7 +196,7 @@ Model profile config surface). Commit:
 
 ---
 
-## 2. Cross the seam in loop.go via processing.ParserFor (native byte-identical)
+## 2. Cross the seam in loop.go via processing.ParserFor (native byte-identical) — ✅ DONE (2026-07-02)
 
 **What:** consume `Config.Profile` at the loop's parse seam. One commit: the new
 `processing.ParserFor` entry point + the seam wiring + oracle-vector loop tests + the doc updates.

@@ -27,6 +27,34 @@ feature-parity track. See
   yet**: the loop's parse seam is crossed in a following change, so this is a pure, provably
   behaviour-neutral config-surface addition.
 
+### Model profile wired into the loop (fenced/regex tool calls + thinking/harmony stripping)
+
+- **The loop now consumes `Config.Profile` at the parse seam.** A new `processing.ParserFor(domain.
+  ModelProfile)` translates the declarative profile onto `internal/processing`'s existing, frozen
+  `ToolCallingConfig`/`ThinkingConfig` and returns the text-format `ToolCallParser` plus a unified
+  `ContentStripper` (the `none`/`delimited`/`harmony` thinking styles behind one `Strip` +
+  `IsMidChannel` interface). `internal/agent` selects both once in `newAgent`, so the oracle config
+  types never surface in the loop and a bad profile (unknown format / thinking style) fails
+  construction loudly rather than falling back to native.
+- **At the seam:** the reply's inline thinking/harmony channel is stripped out of the visible
+  content and preserved as `reasoning_content` in history (the harmony `commentary` channel folds
+  into reasoning); when the structured **native** path produced no calls, a markdown-fenced or
+  custom-regex tool call is recovered from the *stripped* visible content, its markup removed from
+  the committed assistant text, and it is assigned a deterministic `text_call_<turn>` ID (not the
+  oracle's wall-clock ID, so snapshot/resume and tests stay stable). Native calls always win when
+  present.
+- **A recorded, deliberate divergence from the apogee-code oracle:** a text-parsed call is stored
+  **structurally** on the assistant message (`ToolCalls`), so dispatch, events, and snapshot/resume
+  keep **one** path for every format; the oracle instead commits stripped text with only a
+  tool-role result. Chat templates tolerate native-shaped history better than the loop tolerates two
+  history shapes.
+- **A zero profile is byte-identical** to the pre-change loop: the no-op stripper and no-op parser
+  leave `reply.content` and the native calls untouched, so every shipped (native) model behaves
+  exactly as before. The frozen `internal/processing` oracle types, parsers, and parity tests are
+  unchanged — only the new `ParserFor`/`ContentStripper` and the loop caller were added. **Live
+  in-flight token suppression while streaming is a following change; this fixes committed history
+  and the final message.**
+
 ### Dispatch decision collapsed into one Resolution verdict (internal refactor)
 
 - **The per-call dispatch decision is now one `Resolution`**, computed by a single pure resolver
