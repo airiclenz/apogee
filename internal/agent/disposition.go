@@ -71,14 +71,29 @@ func classifyTool(tool domain.Tool) toolClass {
 	return classThirdPartyWrite
 }
 
-// dispose computes the disposition for one tool call under the Agent's mode, the
+// effectiveMode is the autonomy mode the per-call disposition runs under. For a top-level Agent
+// it is simply the Agent's own live mode. For a sub-agent (liveMode != nil) it is the TIGHTER of
+// the child's spawn mode and the parent's live mode (ADR 0013), so a parent tightening
+// mid-delegation (Shift+Tab from Auto down to Plan) gates/refuses the still-running child's next
+// call, while a parent loosening never loosens the child. Both modes are read under their own
+// modeMu locks (Mode() and the captured accessor), so a concurrent SetMode on either agent is
+// observed race-free.
+func (a *Agent) effectiveMode() domain.Mode {
+	own := a.Mode()
+	if a.liveMode == nil {
+		return own
+	}
+	return domain.TighterMode(own, a.liveMode())
+}
+
+// dispose computes the disposition for one tool call under the Agent's effective mode, the
 // confine-to-workspace flag, and the Confiner's capabilities (confinement-execution-
 // contract §4). It is pure given those inputs and the call, so the ladder table is a
 // table test (dispatch_test.go).
 func (a *Agent) dispose(tool domain.Tool, call domain.ToolCall) disposition {
 	class := classifyTool(tool)
 
-	switch a.Mode() {
+	switch a.effectiveMode() {
 	case domain.ModePlan:
 		// Plan filters the menu to read-only tools; anything else is refused defensively.
 		if class == classReadOnly {

@@ -314,7 +314,7 @@ makes compaction automatic (the trigger will fire *at* high fill by definition).
 
 ---
 
-## 7. Sub-agent must see a live mode tightening *(needs one design call)*
+## 7. Sub-agent must see a live mode tightening *(needs one design call)* — ✅ DONE (2026-07-02)
 
 `newChildAgent` freezes the parent's mode at spawn (`internal/agent/subagent.go:108`) and
 the child runs its whole Exchange on it (`sub.Run`, subagent.go:80) — many Turns on a small

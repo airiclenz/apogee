@@ -131,6 +131,41 @@ func NextMode(cur Mode) Mode {
 	return ModePlan
 }
 
+// TighterMode returns the more restrictive of two autonomy modes — the one lower on the
+// privilege ladder (Plan < Ask-Before < Allow-Edits < Auto). It is the sub-agent tighten-only
+// helper (ADR 0013): a sub-agent's disposition takes the tighter of the parent's LIVE mode and
+// the child's spawn mode, so a parent tightening mid-delegation (Shift+Tab down) reaches the
+// still-running child, while a parent loosening can never loosen it. An off-ladder mode
+// (empty/unknown) ranks with Ask-Before — the same safe default the dispatch disposition
+// applies to an unrecognised mode — so a stray value can neither loosen nor over-tighten the
+// result.
+func TighterMode(a, b Mode) Mode {
+	if modeRank(a) <= modeRank(b) {
+		return a
+	}
+	return b
+}
+
+// modeRank is a mode's restriction rank: its index on the privilege ladder, where a lower rank
+// is tighter. An off-ladder mode (empty/unknown) ranks with Ask-Before, matching the
+// disposition's safe default for an unrecognised mode, so TighterMode's ordering agrees with
+// the ladder the dispatch table keys on.
+func modeRank(m Mode) int {
+	rank, fallback := -1, 0
+	for i, lm := range modeLadder {
+		if lm == m {
+			rank = i
+		}
+		if lm == ModeAskBefore {
+			fallback = i
+		}
+	}
+	if rank < 0 {
+		return fallback
+	}
+	return rank
+}
+
 // ----------------------------------------------------------------------------
 // Stepping & Turns (ADR 0007)
 // ----------------------------------------------------------------------------

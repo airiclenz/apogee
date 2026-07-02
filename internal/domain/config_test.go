@@ -35,3 +35,29 @@ func TestNextMode(t *testing.T) {
 		t.Errorf("four NextMode steps from Plan landed on %q, want a full wrap back to Plan", m)
 	}
 }
+
+// TestTighterMode proves the sub-agent tighten-only helper (ADR 0013): the more restrictive of
+// two modes (lower on the Plan < Ask-Before < Allow-Edits < Auto ladder) wins, the result is
+// symmetric, tightening below the spawn mode takes effect while loosening above it never does,
+// and an off-ladder mode ranks with Ask-Before so a stray value can neither loosen nor
+// over-tighten the result.
+func TestTighterMode(t *testing.T) {
+	cases := []struct {
+		a, b, want domain.Mode
+	}{
+		{domain.ModeAuto, domain.ModePlan, domain.ModePlan}, // parent tightens Auto→Plan below the child
+		{domain.ModePlan, domain.ModeAuto, domain.ModePlan}, // symmetric: order does not matter
+		{domain.ModeAllowEdits, domain.ModeAskBefore, domain.ModeAskBefore},
+		{domain.ModeAuto, domain.ModeAllowEdits, domain.ModeAllowEdits},
+		{domain.ModePlan, domain.ModePlan, domain.ModePlan},       // equal ⇒ itself
+		{domain.ModeAuto, domain.ModeAuto, domain.ModeAuto},       // a parent loosening back to Auto stays Auto only when the child is Auto too
+		{domain.Mode(""), domain.ModeAuto, domain.Mode("")},       // off-ladder ranks as Ask-Before ⇒ tighter than Auto
+		{domain.ModePlan, domain.Mode("bogus"), domain.ModePlan},  // Plan is tighter than an off-ladder (Ask-Before-ranked) mode
+		{domain.ModeAllowEdits, domain.Mode(""), domain.Mode("")}, // off-ladder (Ask-Before rank) is tighter than Allow-Edits
+	}
+	for _, tc := range cases {
+		if got := domain.TighterMode(tc.a, tc.b); got != tc.want {
+			t.Errorf("TighterMode(%q, %q) = %q, want %q", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

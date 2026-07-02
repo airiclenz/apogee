@@ -58,6 +58,107 @@ func TestNewChildAgentInheritsLiveMode(t *testing.T) {
 	}
 }
 
+// TestSubAgentSeesParentTighteningMidRun is the ADR-0013 realisation acceptance: a sub-agent's
+// disposition tracks the parent's LIVE mode tighten-only. A child spawned in Auto auto-runs a
+// write; the moment the parent tightens to Plan mid-delegation (Shift+Tab down), the child's
+// NEXT write refuses — the child no longer keeps auto-approving on its frozen spawn mode.
+func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
+	sink := &recordingSink{}
+	write := fakeTool{name: "w"} // readOnly:false, no markers ⇒ third-party write class
+	cfg := configWithTools(sink, write)
+	cfg.Mode = domain.ModeAuto
+	cfg.Confiner = eligibleConfiner{} // Auto needs a Confiner at construction (ADR 0012)
+	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (dispoRun)
+	parent, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := parent.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	call := domain.ToolCall{ID: "c1", Tool: "w"}
+
+	// Spawned in Auto, the child auto-runs the write — no refusal yet.
+	if got := child.dispose(write, call); got == dispoRefuse {
+		t.Fatalf("child spawned in Auto refused a write before any tightening (got %d)", got)
+	}
+
+	// The parent tightens to Plan MID-delegation; the still-running child must now refuse.
+	parent.SetMode(domain.ModePlan)
+	if got := child.dispose(write, call); got != dispoRefuse {
+		t.Fatalf("after the parent tightened to Plan, child write disposition = %d, want dispoRefuse (%d)", got, dispoRefuse)
+	}
+}
+
+// TestSubAgentParentLooseningCannotLoosenChild proves the other half of tighten-only: a parent
+// LOOSENING mid-delegation never loosens a child spawned tighter. A child spawned in Plan keeps
+// refusing writes even after the parent cycles up to Auto — loosening mid-flight stays impossible.
+func TestSubAgentParentLooseningCannotLoosenChild(t *testing.T) {
+	sink := &recordingSink{}
+	write := fakeTool{name: "w"}
+	cfg := configWithTools(sink, write)
+	cfg.Mode = domain.ModePlan
+	parent, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := parent.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	call := domain.ToolCall{ID: "c1", Tool: "w"}
+
+	if got := child.dispose(write, call); got != dispoRefuse {
+		t.Fatalf("child spawned in Plan write disposition = %d, want dispoRefuse (%d)", got, dispoRefuse)
+	}
+
+	// The parent loosens all the way to Auto; the child, spawned in Plan, must NOT loosen.
+	parent.SetMode(domain.ModeAuto)
+	if got := child.dispose(write, call); got != dispoRefuse {
+		t.Fatalf("after the parent loosened to Auto, child (spawned Plan) write disposition = %d, want dispoRefuse (%d) — loosening must stay impossible", got, dispoRefuse)
+	}
+}
+
+// TestSubAgentEffectiveModeConcurrent runs the parent's SetMode (the UI side) against the child's
+// worker-side effectiveMode/dispose, proving the parent's modeMu covers the child's cross-agent
+// read of the live mode through the captured accessor. It asserts nothing beyond "no data race" —
+// the tighten-only view must be observed race-free while the parent's mode is being cycled.
+func TestSubAgentEffectiveModeConcurrent(t *testing.T) {
+	sink := &recordingSink{}
+	write := fakeTool{name: "w"}
+	cfg := configWithTools(sink, write)
+	cfg.Mode = domain.ModeAskBefore
+	parent, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := parent.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	call := domain.ToolCall{ID: "c1", Tool: "w"}
+	ladder := []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto}
+
+	const iters = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			parent.SetMode(ladder[i%len(ladder)])
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = child.effectiveMode()
+			_ = child.dispose(write, call)
+		}
+	}()
+	wg.Wait()
+}
+
 // TestAgentSetModeConcurrent runs SetMode (the UI side) against every worker-side live read
 // (Mode / dispose / toolMenu) under the race detector, proving the lock covers all of them. It
 // asserts nothing beyond "no data race" — that is the whole point of the mid-turn-switch design.

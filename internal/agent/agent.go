@@ -36,6 +36,16 @@ type Agent struct {
 	modeMu sync.RWMutex
 	mode   domain.Mode // live autonomy mode; seeded from cfg.Mode at construction, swappable via SetMode
 
+	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
+	// parent's modeMu-guarded Mode accessor, captured at spawn (ADR 0013). The per-call
+	// disposition takes the TIGHTER of this and the child's own spawn mode, so a parent that
+	// tightens mid-delegation (Shift+Tab down from Auto to Plan) gates/refuses the still-running
+	// child's next call, while a parent loosening can never loosen it. It is a closure over the
+	// accessor — NOT the shared mode field/mutex — so the child observes the parent's mode
+	// race-free but cannot mutate it. nil for a top-level Agent, which then behaves exactly as
+	// before (its own mode governs).
+	liveMode func() domain.Mode
+
 	conv          domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
 	inExchange    bool                // true between Submit and the Step that completes the Exchange

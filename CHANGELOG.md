@@ -165,6 +165,19 @@ feature-parity track. See
   edit path: it clears the selection, inserts, recomputes autocomplete, and re-lays out;
   a paste while a worker runs is dropped, as keystrokes are.
 
+- **A sub-agent now sees a mid-delegation mode tightening (ADR 0013).** `newChildAgent`
+  froze the parent's mode at spawn, so a Shift+Tab from Auto down to Plan while a sub-agent
+  ran (many Turns on a small model) flipped the footer but left the child auto-approving
+  writes until its Exchange ended — a tighten-direction ADR-0005 violation. The orchestrator
+  now injects a tighten-only view of the parent's live mode into the child (`Agent.liveMode`,
+  the parent's `modeMu`-guarded `Mode` accessor captured as a closure — never the shared field
+  or mutex). The child's disposition (`effectiveMode`) takes `TighterMode(parentLive,
+  spawnMode)` — a new ladder-index helper in `internal/domain/config.go` where Plan <
+  Ask-Before < Allow-Edits < Auto — so a parent tightening below the child's spawn mode
+  gates/refuses the child's next call, while a parent loosening can never loosen a child
+  spawned tighter (loosening mid-flight stays impossible). A top-level agent (nil view)
+  behaves exactly as before.
+
 ### TUI
 
 - **Context-fill gauge restyled** to match `llama-launcher`: a solid two-tone strip —

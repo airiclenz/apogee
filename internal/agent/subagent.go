@@ -96,8 +96,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges
 // bounded (ADR 0005/0013): the parent's LIVE Mode at spawn (Shift+Tab can change it mid-session) /
-// Approver / Confiner / confine-to-workspace flag verbatim (never loosened), a Guards bundle that
-// isolates live state but shares the dangerous
+// Approver / Confiner / confine-to-workspace flag verbatim (never loosened), PLUS a tighten-only
+// live view of the parent's mode (child.liveMode) so a mid-delegation tightening reaches the
+// still-running child, a Guards bundle that isolates live state but shares the dangerous
 // floor read-only (Guards.ForSubAgent), a tool set that is a SUBSET of this Agent's tools
 // (defaultSubAgentTools — never an expansion, and withholding sub_agent at the depth bound),
 // the SAME Upstream responder and EventSink, and Depth = parent+1 so its events nest. The
@@ -117,6 +118,11 @@ func (a *Agent) newChildAgent() (*Agent, error) {
 	}
 	child.depth = a.depth + 1
 	child.guards = a.guards.ForSubAgent()
+	// A tighten-only view of the parent's live mode (ADR 0013): the child's disposition takes
+	// TighterMode(parentLive, spawnMode), so a parent tightening mid-delegation reaches the child
+	// while a parent loosening cannot loosen it. Capture the parent's modeMu-guarded accessor, not
+	// the raw field/mutex, so the child can read the parent's mode race-free but never mutate it.
+	child.liveMode = a.Mode
 	return child, nil
 }
 
