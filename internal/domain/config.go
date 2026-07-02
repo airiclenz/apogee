@@ -78,6 +78,16 @@ type Config struct {
 	// config.yaml.
 	WebSearchEndpoint string
 
+	// Profile describes how the configured model speaks the wire (CONTEXT: Model profile) —
+	// its tool-call format and inline thinking-channel style — so the loop selects the matching
+	// tool-call parser and content-stripper at the parse seam. A ZERO Profile == native tool
+	// calls with no inline thinking == today's exact behaviour (the byte-identical anchor): a
+	// native profile selects no-op parsers, so the content path is unchanged. The host folds a
+	// configured profile in from config.yaml; an embedder sets it directly. It is declarative
+	// DATA translated to internal/processing's parsers at the boundary (ADR 0010) — not the
+	// parsers' own config types, which cannot move up the DAG since processing imports domain.
+	Profile ModelProfile
+
 	// Budget / Compaction knobs (context/) are structural and load-bearing — they
 	// run even under Bypass. Defaults are sane; overrides are advanced.
 	Context ContextConfig
@@ -90,6 +100,82 @@ type ContextConfig struct {
 	ResponseReserve   int
 	CompactionEnabled bool // generative summarisation; default true
 }
+
+// ----------------------------------------------------------------------------
+// Model profile (CONTEXT: Model profile) — the per-model wire description
+// ----------------------------------------------------------------------------
+
+// ModelProfile describes how a given small model speaks the wire (CONTEXT: Model profile):
+// two ORTHOGONAL axes — its tool-call format and its inline thinking-channel style (a model
+// can emit native tool calls AND inline thinking; gpt-oss does both). It is declarative domain
+// DATA on Config (host- or embedder-settable) that the loop translates to the internal/processing
+// parsers at the parse seam, not the parsers' own config types — those cannot move up the
+// dependency DAG because internal/processing imports domain (ADR 0010), and profile-as-data
+// snapshots cleanly and seeds the deferred switchable-profile / `apogee probe` work. A ZERO
+// ModelProfile == native tool calls, no inline thinking == today's exact behaviour (the
+// byte-identical anchor).
+type ModelProfile struct {
+	// ToolCallFormat selects how the model emits tool calls. "" and FormatNative both mean the
+	// structured out-of-band tool_calls path (nothing to recover from visible content); a text
+	// format (FormatMarkdownFenced / FormatCustomRegex) is parsed from the model's visible
+	// content at the seam.
+	ToolCallFormat ToolCallFormat
+
+	// Pattern is the custom-regex tool-call pattern — mandatory for FormatCustomRegex, ignored
+	// for the other formats. Named capture groups name the tool and its arguments; the parser's
+	// own group/flag defaults apply at the boundary when its finer knobs are unset.
+	Pattern string
+
+	// Thinking selects the model's inline reasoning-channel style. A zero Thinking (ThinkingNone)
+	// leaves the Upstream-split reasoning_content path untouched (the default).
+	Thinking ThinkingProfile
+}
+
+// ToolCallFormat identifies how a model emits tool calls, so the loop can select the matching
+// parser at the seam. Its values mirror internal/processing's ToolCallFormat so the boundary
+// translation is a straight map. "" is treated as FormatNative.
+type ToolCallFormat string
+
+const (
+	// FormatNative is the structured tool_calls path: calls arrive out-of-band and the text
+	// parser finds nothing in the visible content ("" is treated the same).
+	FormatNative ToolCallFormat = "native"
+	// FormatMarkdownFenced is the markdown-fenced code-block tool-call format.
+	FormatMarkdownFenced ToolCallFormat = "markdown-fenced"
+	// FormatCustomRegex is the user-supplied named-group regex tool-call format (needs Pattern).
+	FormatCustomRegex ToolCallFormat = "custom-regex"
+)
+
+// ThinkingProfile selects a model's inline thinking-channel style (CONTEXT: Thinking channel):
+// the private reasoning the loop strips from visible content and preserves as reasoning in
+// history. A zero ThinkingProfile (ThinkingNone) means no inline channel — content passes
+// through untouched, the right default when the Upstream already splits reasoning into a
+// separate reasoning_content field.
+type ThinkingProfile struct {
+	// Style selects the stripping strategy: ThinkingNone (no inline channel, the default),
+	// ThinkingDelimited (a literal Start/End token pair), or ThinkingHarmony (gpt-oss channels,
+	// which need no tokens).
+	Style ThinkingStyle
+
+	// Start and End are the literal delimiter tokens for ThinkingDelimited (e.g. "<think>" /
+	// "</think>"); both must be set for stripping to run. They are ignored for the other styles.
+	Start string
+	End   string
+}
+
+// ThinkingStyle names a model's inline reasoning-channel format. "" is treated as ThinkingNone.
+type ThinkingStyle string
+
+const (
+	// ThinkingNone is the default: no inline channel (the model emits none, or the Upstream
+	// already split reasoning into reasoning_content). "" is treated the same.
+	ThinkingNone ThinkingStyle = "none"
+	// ThinkingDelimited is a literal Start/End token pair bracketing reasoning (e.g. gemma's
+	// <think>…</think>).
+	ThinkingDelimited ThinkingStyle = "delimited"
+	// ThinkingHarmony is gpt-oss's harmony channel format (<|channel|>analysis<|message|>…).
+	ThinkingHarmony ThinkingStyle = "harmony"
+)
 
 // Mode is the autonomy level governing whether tool calls need human approval
 // (CONTEXT: Agent mode). It is orthogonal to Config.Bypass.

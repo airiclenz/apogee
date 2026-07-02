@@ -69,6 +69,32 @@ type Config = domain.Config
 // ContextConfig governs the structural context reducers (Budget, Compaction).
 type ContextConfig = domain.ContextConfig
 
+// ModelProfile describes how the configured model speaks the wire — its tool-call format and
+// inline thinking-channel style; the host sets it via Config.Profile (a zero profile is native
+// tool calls with no inline thinking).
+type ModelProfile = domain.ModelProfile
+
+// ToolCallFormat selects how a model emits tool calls (native / markdown-fenced / custom-regex).
+type ToolCallFormat = domain.ToolCallFormat
+
+const (
+	FormatNative         = domain.FormatNative
+	FormatMarkdownFenced = domain.FormatMarkdownFenced
+	FormatCustomRegex    = domain.FormatCustomRegex
+)
+
+// ThinkingProfile selects a model's inline thinking-channel style (none / delimited / harmony).
+type ThinkingProfile = domain.ThinkingProfile
+
+// ThinkingStyle names a model's inline reasoning-channel format.
+type ThinkingStyle = domain.ThinkingStyle
+
+const (
+	ThinkingNone      = domain.ThinkingNone
+	ThinkingDelimited = domain.ThinkingDelimited
+	ThinkingHarmony   = domain.ThinkingHarmony
+)
+
 // Mode is the autonomy level governing whether tool calls need human approval.
 type Mode = domain.Mode
 

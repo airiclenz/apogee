@@ -13,6 +13,20 @@ feature-parity track. See
 `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
 `docs/handoffs/2026-06-26 - 01 - skills-system.md`.
 
+### Model profile config surface (tool-call format + thinking channels)
+
+- **`Config` gains a `Profile ModelProfile` seam** describing how the configured model speaks the
+  wire (CONTEXT: Model profile) — its tool-call format (native / markdown-fenced / custom-regex)
+  and its inline thinking-channel style (none / delimited `<think>…</think>` / gpt-oss harmony).
+  The new public domain types are re-exported from the root facade (`apogee.ModelProfile`,
+  `ToolCallFormat`, `ThinkingProfile`, `ThinkingStyle` and their consts) — an **additive minor**
+  (decision #18). A **zero profile is native tool calls with no inline thinking**, so every
+  shipped model behaves exactly as before (the byte-identical anchor).
+- **Plumbed from `config.yaml`** as a file-only `model-profile:` block (a per-model concern, like
+  `mcp-servers` — no flag/env), mapped to the domain type at the host boundary. **No loop consumer
+  yet**: the loop's parse seam is crossed in a following change, so this is a pure, provably
+  behaviour-neutral config-surface addition.
+
 ### Dispatch decision collapsed into one Resolution verdict (internal refactor)
 
 - **The per-call dispatch decision is now one `Resolution`**, computed by a single pure resolver

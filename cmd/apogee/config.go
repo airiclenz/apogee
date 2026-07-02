@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"gopkg.in/yaml.v3"
 )
@@ -54,6 +55,12 @@ type settings struct {
 	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	mcpServers []mcp.ServerConfig
+
+	// profile is the model profile (CONTEXT: Model profile) — the model's tool-call format and
+	// inline thinking-channel style — file-only (a per-model concern, like mcpServers, with no
+	// flag/env). A zero ModelProfile is native tool calls with no inline thinking (today's
+	// behaviour), so an absent profile block leaves it unchanged.
+	profile apogee.ModelProfile
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -83,6 +90,11 @@ type layer struct {
 	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
 	// with no flag/env). A nil slice means the source does not configure servers (fall through).
 	mcpServers []mcp.ServerConfig
+
+	// profile is set only by the FILE layer (the model profile is config'd, default-zero, with no
+	// flag/env). A nil pointer means the source does not configure a profile, so resolution falls
+	// through to the zero/native default.
+	profile *apogee.ModelProfile
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -105,6 +117,9 @@ func resolveSettings(file, env, flag layer) settings {
 		s.useProjectSkills = *file.useProjectSkills
 	}
 	s.mcpServers = file.mcpServers // file-only (P3.15); env/flag never set MCP servers
+	if file.profile != nil {       // file-only; env/flag never carry a model profile
+		s.profile = *file.profile
+	}
 	for _, l := range []layer{file, env, flag} {
 		if l.endpoint != nil {
 			s.endpoint = *l.endpoint
@@ -155,6 +170,12 @@ type fileConfig struct {
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
+	// ModelProfile describes how the configured model speaks the wire (CONTEXT: Model profile) —
+	// its tool-call format and inline thinking-channel style. A per-model concern (like
+	// mcp-servers): file-only, no flag/env. Absent ⇒ the zero profile (native tool calls, no
+	// inline thinking — today's behaviour). A pointer so an absent block falls through to that
+	// default rather than being an explicit zero setting.
+	ModelProfile *modelProfileConfig `yaml:"model-profile"`
 }
 
 // mcpServerConfig is the on-disk schema for one MCP server (P3.15). It mirrors mcp.ServerConfig
@@ -179,6 +200,38 @@ func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
 		Args:      m.Args,
 		Env:       m.Env,
 		Endpoint:  m.Endpoint,
+	}
+}
+
+// modelProfileConfig is the on-disk schema for the model profile (CONTEXT: Model profile). It
+// mirrors apogee.ModelProfile with yaml tags; toModelProfile maps it across so the on-disk shape
+// and the value type stay independently evolvable (as mcpServerConfig does for mcp.ServerConfig).
+type modelProfileConfig struct {
+	ToolCallFormat  string         `yaml:"tool-call-format"`
+	ToolCallPattern string         `yaml:"tool-call-pattern"`
+	Thinking        thinkingConfig `yaml:"thinking"`
+}
+
+// thinkingConfig is the on-disk schema for a model's inline thinking channel (part of the model
+// profile). It mirrors apogee.ThinkingProfile with yaml tags.
+type thinkingConfig struct {
+	Style string `yaml:"style"`
+	Start string `yaml:"start"`
+	End   string `yaml:"end"`
+}
+
+// toModelProfile maps the on-disk model-profile schema onto the apogee.ModelProfile value the
+// loop translates to its parsers at the seam. An empty tool-call-format / thinking style resolves
+// to the native, no-inline-thinking default downstream.
+func (p modelProfileConfig) toModelProfile() apogee.ModelProfile {
+	return apogee.ModelProfile{
+		ToolCallFormat: apogee.ToolCallFormat(p.ToolCallFormat),
+		Pattern:        p.ToolCallPattern,
+		Thinking: apogee.ThinkingProfile{
+			Style: apogee.ThinkingStyle(p.Thinking.Style),
+			Start: p.Thinking.Start,
+			End:   p.Thinking.End,
+		},
 	}
 }
 
@@ -216,6 +269,10 @@ func (fc fileConfig) layer() layer {
 			servers[i] = m.toServerConfig()
 		}
 		l.mcpServers = servers
+	}
+	if fc.ModelProfile != nil {
+		p := fc.ModelProfile.toModelProfile()
+		l.profile = &p
 	}
 	return l
 }
@@ -342,6 +399,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.webSearchEndpoint = s.webSearchEndpoint
 	opts.useProjectSkills = s.useProjectSkills
 	opts.mcpServers = s.mcpServers
+	opts.profile = s.profile
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

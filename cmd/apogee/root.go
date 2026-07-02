@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -45,6 +46,12 @@ type options struct {
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), loaded from
 	// the config file only (default-empty ⇒ MCP dormant). applyConfig sets it from settings.
 	mcpServers []mcp.ServerConfig
+
+	// profile is the model profile (CONTEXT: Model profile) — the model's tool-call format and
+	// inline thinking-channel style — loaded from the config file only (a per-model concern, no
+	// flag/env). applyConfig sets it from settings; a zero profile is native tool calls with no
+	// inline thinking (today's behaviour). runRoot folds it into apogee.Config.Profile.
+	profile apogee.ModelProfile
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

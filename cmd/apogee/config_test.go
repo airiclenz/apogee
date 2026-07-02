@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 )
 
@@ -88,6 +89,23 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "mcp servers are NOT settable by env or flag (file-only)",
 			env:  layer{mcpServers: []mcp.ServerConfig{{Name: "fromenv"}}},
 			flag: layer{mcpServers: []mcp.ServerConfig{{Name: "fromflag"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+		},
+		{
+			name: "model profile is file-only (default zero)",
+			file: layer{profile: &apogee.ModelProfile{
+				ToolCallFormat: apogee.FormatMarkdownFenced,
+				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
+			}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, profile: apogee.ModelProfile{
+				ToolCallFormat: apogee.FormatMarkdownFenced,
+				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
+			}},
+		},
+		{
+			name: "model profile is NOT settable by env or flag (file-only)",
+			env:  layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatCustomRegex}},
+			flag: layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}},
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
 		},
 	}
@@ -189,6 +207,50 @@ func TestApplyConfigMCPServers(t *testing.T) {
 	}
 	if !reflect.DeepEqual(opts.mcpServers, want) {
 		t.Errorf("mcpServers = %+v; want %+v", opts.mcpServers, want)
+	}
+}
+
+// The model-profile config block reaches opts.profile — which runRoot folds directly into
+// apogee.Config.Profile: a markdown-fenced tool-call format plus a <think> thinking block map
+// across to the domain ModelProfile the loop translates to its parsers at the seam (item 1 has
+// no loop consumer yet; this proves the config surface lands end-to-end).
+func TestApplyConfigModelProfile(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	const configYAML = `model-profile:
+  tool-call-format: markdown-fenced
+  thinking:
+    style: delimited
+    start: "<think>"
+    end: "</think>"
+`
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+
+	want := apogee.ModelProfile{
+		ToolCallFormat: apogee.FormatMarkdownFenced,
+		Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
+	}
+	if !reflect.DeepEqual(opts.profile, want) {
+		t.Errorf("opts.profile = %+v; want %+v", opts.profile, want)
+	}
+}
+
+// With no model-profile block, opts.profile is the zero ModelProfile — native tool calls with no
+// inline thinking (today's behaviour), the byte-identical anchor this item must preserve.
+func TestApplyConfigNoProfileIsZero(t *testing.T) {
+	t.Parallel()
+	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if (opts.profile != apogee.ModelProfile{}) {
+		t.Errorf("opts.profile = %+v; want the zero ModelProfile", opts.profile)
 	}
 }
 

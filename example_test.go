@@ -17,6 +17,10 @@ var (
 	_ apogee.Agent
 	_ apogee.Config
 	_ apogee.ContextConfig
+	_ apogee.ModelProfile
+	_ apogee.ToolCallFormat
+	_ apogee.ThinkingProfile
+	_ apogee.ThinkingStyle
 	_ apogee.Mode
 	_ apogee.UserInput
 	_ apogee.StepResult
@@ -88,6 +92,14 @@ var (
 
 // Re-exported consts and sentinel errors — one reference each.
 var (
+	_ = apogee.FormatNative
+	_ = apogee.FormatMarkdownFenced
+	_ = apogee.FormatCustomRegex
+
+	_ = apogee.ThinkingNone
+	_ = apogee.ThinkingDelimited
+	_ = apogee.ThinkingHarmony
+
 	_ = apogee.ModePlan
 	_ = apogee.ModeAskBefore
 	_ = apogee.ModeAuto

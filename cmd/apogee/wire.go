@@ -104,7 +104,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Confiner:           platform.NewConfiner(),
 		ConfineToWorkspace: opts.confineToWorkspace,
 		WebSearchEndpoint:  opts.webSearchEndpoint,
-		Skills:             skillProvider,
+		// The model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
+		// resolved from config.yaml (file-only). A zero profile is native tool calls with no
+		// inline thinking, so an unconfigured model behaves exactly as today.
+		Profile: opts.profile,
+		Skills:  skillProvider,
 		// The discovered runtime context window (0 when the server did not report one). It is the
 		// budget /compact bounds its summary request against so compaction survives high fill
 		// (the summary call would otherwise overflow near n_ctx); the same value drives the TUI's
