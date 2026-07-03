@@ -1,7 +1,7 @@
 # Plan — Parser-seam follow-through: verify live, close the prompt-side gap, release, pick the next track
 
 **Date:** 2026-07-02
-**Status:** QUEUED — blocked on `parser-seam-wiring-plan.md` (all three items landed, gates green).
+**Status:** IN PROGRESS 2026-07-03 — items 1 & 2 done; executing items 3–4 (release + track decision).
 **NOT an `implement-plan` target:** items 1, 3 and 4 are user-in-the-loop (live model, tagging,
 a track decision) and item 2 starts as a `grill-with-docs` design session, not code. Work this
 plan interactively, top to bottom.
@@ -164,6 +164,16 @@ prompt text). CONTEXT.md/ADR updates as the grill decides.
 
 ## 3. Release chores (after item 1 passes; item 2 may ship in the same minor or the next)
 
+> **DONE 2026-07-03; FULFILLED 2026-07-03** — CHANGELOG `[Unreleased]` rolled up to
+> **`[1.1.0]` — 2026-07-03** (heading + bottom link-ref; the stale v1.0.0 cross-reference
+> repointed), and the **`v1.1.0`** annotated tag was cut on the release commit. Both plan files
+> are archived: `parser-seam-wiring-plan.md` earlier, and **this file** to `docs/plans/archived/`
+> in the same release commit (item 4 having ended the plan). **Deliberately local:** the release
+> commit, the `v1.1.0` tag, and the archive move are committed but **left unpushed**, and **no
+> GitHub release is cut** — pushing the branch + tag and publishing the release are the
+> maintainer's manual step (owner decision 2026-07-03, superseding the "tag pushed" wording in the
+> Acceptance below). `git status` is clean after the commit.
+
 - Roll up the `[Unreleased]` CHANGELOG entries (the seam-wiring plan added one per item).
 - Tag the next **additive minor** — current tag is `v1.0.0`, so `v1.1.0` (ADR 0001 / decision
   #18; the Model profile + seam wiring are additive, native byte-identical).
@@ -197,3 +207,13 @@ the lighter alternative:
 
 **Acceptance:** next plan started (grill session opened) or the choice recorded here with a
 reason; then archive this file (item 3).
+
+### Decision — recorded 2026-07-03
+
+**Next track: [P1] Server / model switching** (`TODO.md` ~line 73), route `grill-with-docs` —
+user confirmed 2026-07-03. Reasons: it was this plan's own recommendation; it builds directly
+on the just-shipped Model-profile + parser/prompt seams (profile-as-data is exactly what the
+seam plan's D1 seeded); and it was the only candidate left — **candidate #3 shipped
+independently** as the `promptEditor` lift before this item was reached
+(`docs/plans/archived/tui-input-deepening-plan.md`, commits 8b0e072 / 8084ec4 / 4119d2a).
+The grill session opens as its own plan file; this file is archived per item 3.

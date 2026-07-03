@@ -6,7 +6,7 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
-## [Unreleased]
+## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
 feature-parity track. See
@@ -586,6 +586,7 @@ where the OS cannot enforce:
   just a verification gap: seatbelt embedded box roots verbatim and denied every
   in-workspace write when the root passed through a symlink (macOS `/var`, `/tmp`).
   Fixed by resolving each writable root through symlinks in `seatbeltProfile`; see
-  the `[Unreleased]` Fixes entry.
+  the `[1.1.0]` Fixes entry.
 
+[1.1.0]: https://github.com/airiclenz/apogee/releases/tag/v1.1.0
 [1.0.0]: https://github.com/airiclenz/apogee/releases/tag/v1.0.0
