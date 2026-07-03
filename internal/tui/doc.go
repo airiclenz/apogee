@@ -66,6 +66,20 @@
 // the textarea — apogee captures the mouse for transcript scrolling, which turns off the
 // terminal's own click-drag selection, so the prompt re-implements it here.
 //
+// Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
+// five loose input-side concerns the architecture review called one coherent concept — the
+// textarea, the autocomplete overlay (+ its skillRegion edge-trigger), the staged-skill chips, the
+// workspace file cache, and the prompt drag-selection — into a [promptEditor] type the [Model]
+// embeds anonymously. Field and self-contained-method promotion keeps the value-copied Model idiom
+// and every call site unchanged (m.input, m.pendingSkills, m.caretTo(...) resolve through it). The
+// lift is deliberately partial: only methods touching nothing but the editor's own fields move
+// there (newPromptEditor, submitParse, reset, rows, and the caret re-seat trio caretTo/reseatCaret/
+// reseatInput); methods that also read Model-owned state — theme, width/height, opts, lifecycle —
+// stay on the Model rather than duplicate that state (computeAutocomplete, acceptAutocomplete,
+// attachSkill, highlightInput, inputContentRect, the region-arbitrating mouse handlers). The Model
+// stays the coordinator that owns the lifecycle state machine, the transcript + render cache, the
+// stats/gauge, the theme, and the layout; the editor never touches the engine.
+//
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole
 // Model — every field it holds, recursively — is copied on every Update. A type that records

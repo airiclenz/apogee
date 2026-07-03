@@ -48,8 +48,16 @@ type Model struct {
 	opts   Options
 	save   func(domain.Session) error // persists a snapshot on a clean quit; nil ⇒ off
 
-	// Sub-models (Bubbles widgets).
-	input    textarea.Model
+	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
+	// skillRegion edge-trigger), the staged-skill chips, the workspace file cache, and the prompt
+	// drag-selection (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its
+	// self-contained methods promote onto the Model (m.input, m.pendingSkills, m.caretTo(...) all
+	// resolve through it): the value-copied Model idiom and every existing call site stay unchanged
+	// while the input state gains its own home. Model state the editor does not own — theme,
+	// width/height, opts, lifecycle — stays on the Model rather than be duplicated onto the editor.
+	promptEditor
+
+	// Sub-models (Bubbles widgets). The input textarea lives on the embedded promptEditor above.
 	viewport viewport.Model
 	spinner  spinner.Model
 
@@ -62,28 +70,6 @@ type Model struct {
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
 	quitting   bool               // a quit requested while busy; the exit waits for the worker's terminal Msg (C4)
 
-	// autocomplete is the chat mini-language suggestion overlay shown while typing at idle
-	// (commands on "/", workspace files on "@", skills on "/skill"). The zero value is hidden.
-	autocomplete autocompleteState
-
-	// skillRegion tracks whether the input currently sits in a "/skill <partial>" region, so
-	// recomputeAutocomplete can edge-trigger a catalog reload only when the picker OPENS (the
-	// false→true transition) rather than on every keystroke inside it. It follows the region
-	// itself, not autocomplete.active, so a region that momentarily shows no matches still
-	// counts as open and does not re-reload on the next matching keystroke.
-	skillRegion bool
-
-	// files memoises the workspace listing behind the "@" autocomplete so a typing burst reuses
-	// one filesystem walk (filecache.go). A pointer — shared across the value-copied Model so
-	// the cache survives each Update (ADR 0011); nil-safe (fileSuggestions falls back).
-	files *fileCache
-
-	// pendingSkills are the skill IDs attached via the /skill picker, awaiting the next submit
-	// (which copies them into UserInput.SkillIDs and clears them). A plain []string — a
-	// reference header, safe in the value-copied Model (ADR 0011) — rendered as chips above the
-	// input. Backspace on an empty input pops the last one.
-	pendingSkills []string
-
 	// Live stats folded from the engine's UsageEvent (server token accounting). ctxUsed is
 	// the latest top-level (Depth 0) total-token count, driving the context-usage gauge;
 	// genStart marks when the current Turn began streaming content (set on its first token,
@@ -93,9 +79,6 @@ type Model struct {
 	genStart  time.Time
 	tokPerSec float64
 
-	// sel is the prompt's mouse drag-selection (mouse.go); the zero value is "no selection". It
-	// is cleared by any keypress, a submit/reset, or a resize, so its visual coords never go stale.
-	sel promptSel
 	// transcriptSel is the transcript viewport's screen-space drag-selection (mouse.go), anchored
 	// in content coordinates into m.lines; the zero value is "no selection". It is cleared whenever
 	// the rendered lines regenerate (refreshViewport — a stream token, resize, or submit) so its
@@ -126,18 +109,6 @@ type Model struct {
 func newModel(parent context.Context, eng Engine, opts Options) Model {
 	th := newTheme()
 
-	ta := textarea.New()
-	ta.Placeholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ⌃c quit"
-	ta.Prompt = "" // the rounded border is the frame; no inline prompt gutter (layout.md)
-	ta.ShowLineNumbers = false
-	ta.CharLimit = 0 // no limit; the model, not the widget, bounds a turn
-	// Plain Enter submits (intercepted in handleKey), so the textarea's newline binding is
-	// repurposed: shift+enter works on terminals that support the Kitty keyboard protocol,
-	// and alt+enter / ctrl+j are byte-distinct fallbacks that insert a newline everywhere.
-	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+j")
-	blackenInput(&ta)
-	ta.Focus()
-
 	vp := viewport.New()
 	vp.SoftWrap = true // wrap long transcript lines to the viewport width
 
@@ -145,16 +116,15 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 	sp.Style = lipgloss.NewStyle().Background(colBlack) // match the status bar's black field
 
 	return Model{
-		parent:   parent,
-		eng:      eng,
-		opts:     opts,
-		save:     opts.Save,
-		input:    ta,
-		viewport: vp,
-		spinner:  sp,
-		th:       th,
-		state:    stateIdle,
-		files:    &fileCache{},
+		parent:       parent,
+		eng:          eng,
+		opts:         opts,
+		save:         opts.Save,
+		promptEditor: newPromptEditor(),
+		viewport:     vp,
+		spinner:      sp,
+		th:           th,
+		state:        stateIdle,
 	}
 }
 
@@ -497,19 +467,16 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // tick. A blank message is ignored. Only reachable from stateIdle, so the single-worker
 // invariant holds.
 func (m Model) submit() (tea.Model, tea.Cmd) {
-	parsed := parseInput(m.input.Value())
+	parsed, attached := m.promptEditor.submitParse()
 	if parsed.kind == kindCommand {
 		return m.runCommand(parsed.command)
 	}
 	// Nothing to send only when there is neither text NOR an attached skill: an empty message
 	// with skills attached is a valid send (the skill bodies are the payload).
-	if parsed.text == "" && len(m.pendingSkills) == 0 {
+	if parsed.text == "" && len(attached) == 0 {
 		return m, nil
 	}
-	attached := m.pendingSkills
-	m.input.Reset()
-	m.autocomplete = autocompleteState{}
-	m.pendingSkills = nil
+	m.promptEditor.reset() // empties the textarea, closes the overlay, drops the staged chips
 	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
 	m.transcript.addUser(parsed.text, m.skillDisplayNames(attached))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
@@ -753,34 +720,11 @@ func (m *Model) inputInnerWidth() int {
 	return max(1, m.width-borderFrame-inputPadding)
 }
 
-// inputRows is the textarea's height: the number of rows its current content wraps to,
-// clamped to [minInputRows, maxInputRows]. The box grows as the human types a multi-line
-// message and stops growing at the cap, where the textarea scrolls internally.
+// inputRows is the textarea's height in visual rows at the current window width — the editor's
+// own rows() clamp, fed the width the Model derives (inputInnerWidth). The box grows as the human
+// types a multi-line message and stops growing at the cap, where the textarea scrolls internally.
 func (m *Model) inputRows() int {
-	rows := inputContentRows(m.input.Value(), m.inputInnerWidth())
-	return clampInt(rows, minInputRows, maxInputRows)
-}
-
-// reseatInput re-clamps the prompt textarea's internal scroll after a SetHeight changed the
-// box's height. bubbles repositions the view only when the caret falls outside it, so a box that
-// auto-grows keeps a stale downward offset — the first content line scrolls out of sight with a
-// phantom blank row below (ISSUES #2). Re-seating the caret onto its own visual row through the
-// shared reseatCaret idiom unscrolls to the top and re-clamps the offset to the current height,
-// leaving the caret exactly where it was. The caret's visual row is the wrapped rows above its
-// logical line — counted here with the widget's own CursorDown so no wrap is re-derived — plus
-// its within-line sub-row; the logical column is captured and restored so the caret does not
-// move. layout() calls this only on a height change, which never happens during vertical caret
-// navigation, so the textarea's remembered goal column is untouched.
-func (m *Model) reseatInput() {
-	row, col := m.input.Line(), m.input.Column()
-	visRow := m.input.LineInfo().RowOffset // the caret's sub-row within its logical line
-	m.input.MoveToBegin()
-	for m.input.Line() < row { // count the wrapped rows of the logical lines above the caret
-		m.input.CursorDown()
-		visRow++
-	}
-	m.reseatCaret(visRow)
-	m.input.SetCursorColumn(col)
+	return m.promptEditor.rows(m.inputInnerWidth())
 }
 
 // refreshViewport re-renders the transcript into the viewport and, unless the human has

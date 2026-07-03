@@ -154,9 +154,11 @@ Commit: `fix(tui): clamp the prompt textarea scroll after auto-grow (re-seat the
 
 ---
 
-## 2. Lift the chat input into a `promptEditor` module (review candidate #3)
+## 2. Lift the chat input into a `promptEditor` module (review candidate #3) — ✅ DONE (2026-07-03)
 
-> **⚠️ BLOCKED — design call required (2026-07-03)**
+> **✅ RESOLVED — design call made 2026-07-03: Option C chosen (anonymous-embed, partial method
+> move). C1 intentionally relaxed; C2 fully met (all existing tests pass unmodified); C3 partially
+> met. Implemented — see below. The original blocking analysis is kept for the record.**
 >
 > Item 2's three acceptance constraints cannot all hold against the current codebase. Any
 > two are satisfiable; all three are not:

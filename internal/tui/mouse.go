@@ -120,39 +120,6 @@ func (m Model) pointTranscriptRow(x, y int) (line, col int, ok bool) {
 	return line, col, true
 }
 
-// reseatCaret drives the textarea caret to an absolute visual (soft-wrapped) row through the
-// widget's own primitives: MoveToBegin resets to the top — which "unscrolls" its internal
-// viewport to offset 0 — and each CursorDown steps down one visual row, clamping at the end.
-// Walking down from the top re-clamps a scroll offset the widget left stale (its SetHeight only
-// repositions when the caret falls outside the view, never when the box grows), so the caret
-// lands on its real visual row with the least scroll that keeps it visible. It re-derives none
-// of the textarea's wrap, so the geometry holds across bubbles releases. Shared by caretTo (a
-// mouse click's target row) and reseatInput (the caret's own row, after a height change).
-func (m *Model) reseatCaret(visRow int) {
-	m.input.MoveToBegin()
-	for i := 0; i < visRow; i++ {
-		m.input.CursorDown()
-	}
-}
-
-// caretTo positions the textarea caret at the given absolute visual cell and returns the
-// caret's rune offset into the value. It re-seats to the target visual row through reseatCaret
-// (the widget's own wrap-aware walk), then LineInfo locates the landed visual line — so the
-// result matches what the textarea actually draws without re-deriving its wrap.
-func (m *Model) caretTo(visRow, visCol int) int {
-	m.reseatCaret(visRow)
-	li := m.input.LineInfo()
-	// visCol is a display-cell offset from the row's start, but SetCursorColumn indexes runes
-	// into the logical line — the two diverge on any CJK/emoji row. Walk the landed visual
-	// sub-line's runes, accumulating display width, to convert the cell column to a rune offset;
-	// StartColumn (a rune offset) then anchors it back into the logical line. Feeding the raw
-	// cell column would drop the caret on the wrong rune, and a drag-copy would then put
-	// different text on the clipboard than the highlight showed.
-	sub := visualSubline(m.input.Value(), m.input.Line(), li.StartColumn, li.Width)
-	m.input.SetCursorColumn(li.StartColumn + cellToRuneOffset(sub, visCol))
-	return caretOffset(m.input.Value(), m.input.Line(), m.input.Column())
-}
-
 // visualSubline returns the runes of one visual (soft-wrapped) sub-line: the [start, start+width)
 // rune slice of the row-th logical line of value. LineInfo supplies start (the sub-line's rune
 // offset into its logical line) and width (its rune count), so the slice is exactly the runes the

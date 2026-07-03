@@ -30,6 +30,25 @@ feature-parity track. See
   Drag auto-scroll at the viewport edge is deferred. (`internal/tui/mouse.go`, `model.go`.) Closes
   the "cannot select text in the transcript" ISSUES entry.
 
+### Chat input lifted into a `promptEditor` module (internal refactor)
+
+- **The chat input cluster now lives in its own type**, `promptEditor` (`internal/tui/prompteditor.
+  go`), instead of scattered across the god-Model. It gathers the five loose input-side concerns the
+  architecture review (candidate #3) called one coherent concept — the textarea, the autocomplete
+  overlay (+ its `skillRegion` edge-trigger), the staged-skill chips, the workspace file cache, and
+  the prompt drag-selection. The `Model` embeds it **anonymously**, so the fields and the
+  self-contained methods promote onto the Model (`m.input`, `m.pendingSkills`, `m.caretTo(...)` all
+  resolve through it) and every existing call site — and all package tests — stay unchanged. Model
+  top-level field count drops **32 → 27**; the six input-cluster fields now have a single home.
+- **Purely structural — no behaviour changes.** Only methods that touch nothing but the editor's own
+  fields moved to it (`newPromptEditor`, `submitParse`, `reset`, `rows`, and the caret re-seat trio
+  `caretTo`/`reseatCaret`/`reseatInput`); methods that also read Model-owned state (theme, window
+  size, `Options`, lifecycle) deliberately stay on the Model rather than duplicate that state. The
+  Model stays the coordinator (lifecycle state machine, transcript + render cache, stats/gauge,
+  theme, layout); the editor never touches the engine — it only turns typed input into
+  send-ingredients the Model routes. New editor-direct unit tests exercise the lifted logic without
+  a Model or a fake engine (`internal/tui/prompteditor_test.go`).
+
 ### Model profile config surface (tool-call format + thinking channels)
 
 - **`Config` gains a `Profile ModelProfile` seam** describing how the configured model speaks the
