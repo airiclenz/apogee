@@ -252,7 +252,7 @@ viewport row.
 
 ---
 
-## 4. Docs close-outs
+## 4. Docs close-outs — ✅ DONE (2026-07-03)
 
 - Tick ISSUES #1 (`/clear` gauge) as **stale** — cite `6cc2c94` (fix predates the entry by
   54 min) and the grilled acceptance of the self-hiding gauge (D2). ISSUES #5 (parity umbrella)

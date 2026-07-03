@@ -339,6 +339,22 @@ flowchart TD
             so the generative call no longer runs synchronously in <span class="mono">Update</span>. Only the cheap, non-generative
             <span class="mono">/clear</span> stays inline (documented idle-only). The <span class="mono">promptEditor</span> deepening is unaffected.
           </div>
+          <div class="rounded-lg bg-indigo-50 border border-indigo-300 px-4 py-3 text-sm text-indigo-900">
+            <strong>Shipped 2026-07-03 —</strong> the lift landed in commit <span class="mono">8b0e072</span>
+            (<span class="mono">refactor(tui): lift the chat input into a promptEditor module</span>): the five indigo bands now
+            live in <span class="mono">internal/tui/prompteditor.go</span>, a <span class="mono">promptEditor</span> type the
+            <span class="mono">Model</span> embeds <em>anonymously</em>. Model top-level fields drop <strong>32 → 27</strong>
+            (measured at the lift). Per the framework tension above the deepening is deliberately partial (Option C): only the
+            self-contained methods (<span class="mono">newPromptEditor</span>, <span class="mono">submitParse</span>,
+            <span class="mono">reset</span>, <span class="mono">rows</span>, and the caret re-seat trio
+            <span class="mono">caretTo</span>/<span class="mono">reseatCaret</span>/<span class="mono">reseatInput</span>) moved onto the
+            editor receiver; the Model-state-coupled methods (<span class="mono">computeAutocomplete</span>,
+            <span class="mono">acceptAutocomplete</span>, <span class="mono">attachSkill</span>,
+            <span class="mono">highlightInput</span>, <span class="mono">inputContentRect</span>, the region-arbitrating mouse
+            handlers) stay on the <span class="mono">Model</span> with no state duplicated. All existing package tests pass
+            <strong>unmodified</strong>; new editor-direct unit tests exercise the lifted logic without a fake engine or a
+            terminal — the review's payoff. (Stats and transcript-cache stayed on the Model, as the tension flagged.)
+          </div>
         </div>
       </article>
 
