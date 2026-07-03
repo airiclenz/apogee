@@ -156,6 +156,54 @@ Commit: `fix(tui): clamp the prompt textarea scroll after auto-grow (re-seat the
 
 ## 2. Lift the chat input into a `promptEditor` module (review candidate #3)
 
+> **⚠️ BLOCKED — design call required (2026-07-03)**
+>
+> Item 2's three acceptance constraints cannot all hold against the current codebase. Any
+> two are satisfiable; all three are not:
+> - **(C1) Named value field** — the Model embeds `editor promptEditor` (access like
+>   `m.editor.input`).
+> - **(C2) All existing `internal/tui` tests pass UNMODIFIED.**
+> - **(C3) The input-cluster fields AND their Model-receiver methods move onto the
+>   `promptEditor` receiver** (all of `autocomplete.go`'s methods, `attachSkill`, the
+>   input-rect mouse handlers, `highlightInput`, etc.).
+>
+> **Why they collide:**
+> - Existing tests reference the cluster fields directly and heavily: `m.input` (~107 sites),
+>   `m.sel` (~36), `m.autocomplete` (~35), `m.pendingSkills` (~23), plus promoted method calls
+>   `m.computeAutocomplete()` (~20), `m.inputInnerWidth()` (~3), `m.highlightInput()`,
+>   `m.inputContentRect()`. A **named** `editor` field breaks all ~200 of these sites →
+>   **C1 contradicts C2.** Only **anonymous** embedding (`type Model struct { promptEditor; ... }`),
+>   which promotes fields/methods so `m.input` and `m.computeAutocomplete()` still resolve, can
+>   keep the tests unmodified.
+> - But moving the methods onto the `promptEditor` receiver (C3) requires Model-owned state
+>   those methods currently read: `opts` (`Skills`/`Workspace`/`ReloadSkills`), `th` (theme),
+>   `width`, `height`. Since the promoted call sites can't gain parameters without editing
+>   tests, the editor would have to carry **duplicated** copies of that Model state and keep
+>   them in sync — genuine new logic, **not** the "mechanical, behaviour-preserving" move the
+>   plan promises, and it re-couples exactly what the lift is meant to decouple. So
+>   **C3 (with C2) breaks the "mechanical" promise.**
+> - Conversely, keeping those methods on the Model (reading the promoted embedded fields) is
+>   clean, mechanical, and keeps every test green — but then the methods are **not** moved onto
+>   `promptEditor`, contradicting **C3 / design note D3.**
+>
+> **Resolution options (a design call is required before implementing — pick one):**
+> - **Option A** — literal named `editor promptEditor` field: **RULED OUT**, rewrites ~200 test
+>   sites, violates C2.
+> - **Option B** — anonymous-embed `promptEditor` AND move all methods onto its receiver:
+>   forces the editor to duplicate `opts`/`th`/`width`/`height` with sync logic; non-mechanical,
+>   partial re-coupling.
+> - **Option C (recommended by the blocked implementer)** — anonymous-embed `promptEditor`;
+>   move only the genuinely self-contained methods (`Submit`/`Reset`/`Rows`/`Focus`/`Blur`) onto
+>   the editor and add editor-direct tests; **keep** the Model-state-coupled methods
+>   (`computeAutocomplete`, `highlightInput`, `inputContentRect`, `attachSkill`, the input-rect
+>   mouse handlers) on the Model. Clean, mechanical, zero state duplication, all ~200 tests stay
+>   green; only **partially** meets "all methods move to the editor."
+>
+> **The single open decision:** how `promptEditor` attaches to the Model and how far the method
+> move goes — choose **B** or **C**, or relax one of C1–C3 in the acceptance criteria below.
+> **Branch baseline when resuming:** item 1 (commit `a7afbf1`) and item 3 (commit `ffd1cd5`) are
+> committed; no `promptEditor` type exists yet.
+
 **What:** per D3 — new `internal/tui/prompteditor.go` defining `promptEditor` with the five
 concerns moved off the Model (fields AND their methods: construction `model.go:124-134`, sizing,
 the editing key/paste path, all of `autocomplete.go`'s Model-receiver methods, `attachSkill`,
