@@ -33,12 +33,14 @@ model reason; confirm (1) no `<think>` markup in the committed assistant text or
 (3) live `TokenEvent`s hold mid-channel text (seam-wiring item 3), and a native run (profile
 removed) streams unchanged.
 
-**Check B — tool-call axis** (`tool-call-format: markdown-fenced`): **known caveat — nothing
-prompts the model to emit fenced calls yet (that is item 2)**, so instruct it manually: paste the
-fenced format (take a passing vector from `internal/processing/markdown_fenced_test.go`) into the
-user message and ask it to call a tool that way. Confirm the fenced block parses, dispatches, the
+**Check B — tool-call axis** (`tool-call-format: markdown-fenced`): **the prompt-seam plan
+(shipped, item 2 above) now renders the fenced tool menu + emission instructions into the
+request automatically — the manual-instruction workaround is no longer needed.** Configure the
+fenced profile and ask the model to call a tool; confirm the fenced block parses, dispatches, the
 markup is stripped from the committed text, and the follow-up turn (result in context, call
-echoed native-shaped) doesn't derail the model — the D6 watch.
+echoed native-shaped) doesn't derail the model — the D6 watch. (To exercise the parse path in
+isolation you can still paste a passing vector from `internal/processing/markdown_fenced_test.go`
+into the user message.)
 
 **Harmony:** no gpt-oss profile exists in llama-launcher today. Either add one and repeat Check A
 with `harmony`, or record it as untested-live (the ported oracle vectors still gate it) and move
@@ -51,13 +53,14 @@ fail / surprises, esp. the D6 watch). Anything broken goes back through a fix co
 
 ## 2. Close the prompt-side parity gap — grill first, then its own plan
 
-> **DONE (grill) 2026-07-02** — grilled the same day; the resulting plan is
-> **`docs/plans/prompt-seam-wiring-plan.md`** (READY, queued behind the seam-wiring run). All
-> decisions below are settled there: engine-owned, request-scoped wire injection (never
-> history), native `tools` array suppressed for non-native tool-call formats,
-> `processing.InstructionsFor` next to `ParserFor`, oracle-parity text vectors, narrow scope
-> (general system-prompt template parked as a TODO entry). Once it ships, item 1's Check B no
-> longer needs the manual-instruction workaround.
+> **DONE (grill) 2026-07-02; FULFILLED 2026-07-02** — grilled the same day; the resulting plan
+> **`docs/plans/prompt-seam-wiring-plan.md`** has **shipped** its wire injection (items 1 & 2
+> committed after the seam-wiring run). All decisions below are settled there: engine-owned,
+> request-scoped wire injection (never history), native `tools` array suppressed for non-native
+> tool-call formats, `processing.InstructionsFor` next to `ParserFor`, oracle-parity text
+> vectors, narrow scope (general system-prompt template parked as a TODO entry). **Now that it
+> ships, item 1's Check B no longer needs the manual-instruction workaround** — a non-native
+> profile is prompted to emit its tool-call format automatically.
 
 **The gap (found reviewing the seam plan; verified 2026-07-02):** the TS oracle injects
 **format-specific tool-calling instructions into the system prompt** when the profile is

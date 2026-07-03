@@ -159,7 +159,7 @@ oracle types/tests untouched. Commit:
 
 ---
 
-## 3. Parked doc updates (apply once the parser-seam run has landed — avoid mid-run conflicts)
+## 3. Parked doc updates (apply once the parser-seam run has landed — avoid mid-run conflicts) — ✅ DONE (2026-07-03)
 
 - **`CONTEXT.md` — extend the *Model profile* term** with the emission side: the profile drives
   *both* directions at the seams — what the loop parses out of content *and* what the engine

@@ -76,9 +76,14 @@ The per-model description Apogee carries of *how a given small model speaks the 
 **orthogonal** axes: its **tool-call format** (native structured `tool_calls`, or a text format
 the model emits inline in its content — **markdown-fenced** or a **custom regex**) and its
 **thinking channel** style. Orthogonal because a model can emit native tool calls *and* inline
-thinking (gpt-oss does both). The profile drives which parser and content-stripper the loop
-selects at the parse seam; a **zero profile is the native, no-inline-thinking default** (today's
-behaviour). It is a `domain` type on `Config` (declarative data — [ADR 0010](docs/adr/0010-package-layout-domain-core-and-thin-root-facade.md)),
+thinking (gpt-oss does both). The profile drives **both directions at the seams**: on the
+**parse** side it selects which parser and content-stripper the loop applies to incoming
+content; on the **emit** side, for a non-native tool-call format, the engine tells the model
+how to speak — rendering the tool menu and format-emission instructions as text into the
+request and suppressing the native `tools` array (a non-native template would otherwise be
+double-told, or choke on an array it cannot render). A **zero profile is the native,
+no-inline-thinking default** (today's behaviour) — it adds nothing to the request in either
+direction. It is a `domain` type on `Config` (declarative data — [ADR 0010](docs/adr/0010-package-layout-domain-core-and-thin-root-facade.md)),
 translated to the `processing` parsers at the boundary, not the parsers' own config.
 _Avoid_: "model config" (overloaded with sampling/endpoint knobs), "adapter", "format" alone
 (there are two axes, not one).

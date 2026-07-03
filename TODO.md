@@ -101,6 +101,33 @@ disposition table but no user-facing override. See *Configurable tool × mode se
 
 ---
 
+## General system-prompt / template story
+
+**Status:** parked 2026-07-02 (prompt-seam grill — `docs/plans/prompt-seam-wiring-plan.md`,
+scope guard). Post-v1, **additive** (a new `Config` field + a template renderer; the
+byte-identical native anchor is preserved).
+
+**The idea:** apogee has **no built-in system prompt** — the conversation starts empty. The
+prompt-seam plan ships only the **narrow** profile-driven block: the text tool menu + format-
+emission instructions rendered for a non-native tool-call format. The apogee-code oracle
+assembles a much larger system-prompt template *around* that block — `{{tools_block}}` plus
+`{{agent_mode_directive}}` / `{{datetime}}` / `{{workspace}}` / a persona preamble
+(`~/Repos/Airic/apogee-code/src/context/context-builder.ts:38-45`). Porting that general
+template (a system-prompt `Config` field / template engine) is the separate, larger
+feature-parity item, **explicitly out of scope** of the prompt-seam plan per its grilled scope
+guard.
+
+**Extension point noted for when it lands:** a **host-override knob** for the rendered
+instruction block — D1's *rejected hybrid* in the prompt-seam plan (engine-owned won; an
+override is additive later if a real embedder needs to supply or replace the block). Design it
+*together with* the general template so the two compose rather than fight.
+
+**Native byte-identical anchor (must hold when built):** a zero/native profile must still add
+**zero bytes** to the wire request — the template applies only when a profile (or a future
+prompt field) asks for it.
+
+---
+
 ## Configurable tool × mode security matrix
 
 **Status:** parked 2026-06-24 (Phase-3 grill). Post-v1, **additive** — config is additive,
