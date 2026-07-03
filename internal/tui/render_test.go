@@ -79,3 +79,48 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// inputContentRows sizes the prompt box to what the textarea actually draws
+// ----------------------------------------------------------------------------
+
+// TestInputContentRows pins the box-sizing count against the textarea's own wrap, including the
+// edge that used to under-count: a logical line whose final wrapped segment exactly fills the
+// width takes one extra visual row (the widget reserves a trailing row for the caret past a full
+// line). Under-counting it left the box a row short at the wrap boundary, stranding the scroll the
+// layout re-seat then could not clamp (ISSUES #2).
+func TestInputContentRows(t *testing.T) {
+	const w = 10
+	cases := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{"empty is one row", "", 1},
+		{"short line", "abc", 1},
+		{"one under the width", strings.Repeat("a", 9), 1},
+		{"exact width gains a trailing row", strings.Repeat("a", 10), 2},
+		{"one over the width", strings.Repeat("a", 11), 2},
+		{"two full widths", strings.Repeat("a", 20), 3},
+		{"two full widths plus one", strings.Repeat("a", 21), 3},
+		{"trailing newline adds a row", "abc\n", 2},
+		{"two logical lines", "abc\ndef", 2},
+		{"each full logical line gets its trailing row", strings.Repeat("a", 10) + "\n" + strings.Repeat("b", 10), 4},
+		{"wide glyphs count by display cells", strings.Repeat("あ", 5), 2}, // 5×2 = 10 cells = exact width
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := inputContentRows(c.value, w); got != c.want {
+				t.Errorf("inputContentRows(%q, %d) = %d, want %d", c.value, w, got, c.want)
+			}
+		})
+	}
+}
+
+// A zero or negative width floors to one column rather than dividing by zero, and still returns at
+// least one row.
+func TestInputContentRowsZeroWidth(t *testing.T) {
+	if got := inputContentRows("ab", 0); got < 1 {
+		t.Errorf("inputContentRows with zero width = %d, want >= 1 (width floored to one)", got)
+	}
+}

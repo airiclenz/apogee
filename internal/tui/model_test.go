@@ -1077,6 +1077,127 @@ func TestInputAutoGrowReflowsViewport(t *testing.T) {
 	}
 }
 
+// typeText drives each rune of s through the real key path (handleKey → input.Update → layout),
+// the same as a human typing, so the box auto-grows and the scroll re-seat runs per keystroke.
+func typeText(t *testing.T, m Model, s string) Model {
+	t.Helper()
+	for _, r := range s {
+		m = step(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	return m
+}
+
+// TestPromptScrollClampedWhileGrowing is the ISSUES #2 regression: typing past the wrap width
+// grows the box, and after every keystroke below the max the textarea's internal scroll must sit
+// at 0 so the first content row stays visible — not the stale downward offset SetHeight used to
+// leave (first line hidden, phantom blank row below). It types a long unbroken run so the box
+// grows through several rows, including the exact-width fill points where the widget's own wrap
+// adds a trailing row.
+func TestPromptScrollClampedWhileGrowing(t *testing.T) {
+	m := newTestModel(t)
+	iw := m.inputInnerWidth()
+	maxHeightSeen := 1
+	for i := 1; i <= iw*3+5; i++ {
+		m = step(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+		rows := inputContentRows(m.input.Value(), iw)
+		if rows <= maxInputRows { // still growing: the box holds all its rows, so nothing scrolls
+			if off := m.input.ScrollYOffset(); off != 0 {
+				t.Fatalf("keystroke %d (rows=%d, height=%d): ScrollYOffset = %d, want 0 (stale scroll after grow)",
+					i, rows, m.input.Height(), off)
+			}
+		}
+		if h := m.input.Height(); h > maxHeightSeen {
+			maxHeightSeen = h
+		}
+	}
+	if maxHeightSeen < 3 {
+		t.Fatalf("box never grew past %d rows; the test did not exercise auto-grow", maxHeightSeen)
+	}
+	// The caret is at the end of the value, and the last visual row it sits on must be visible.
+	if got, want := m.input.Column(), iw*3+5; got != want {
+		t.Errorf("caret column = %d, want %d (re-seat must not move the caret)", got, want)
+	}
+}
+
+// TestPromptScrollClampAtMaxHeight pins the clamp formula: once the content exceeds maxInputRows
+// the box stops growing and the textarea scrolls internally, so the offset is exactly
+// contentRows - maxInputRows — keeping the caret (at the end) on the bottom visible row.
+func TestPromptScrollClampAtMaxHeight(t *testing.T) {
+	m := newTestModel(t)
+	iw := m.inputInnerWidth()
+	m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows of content, well past the 10-row cap
+	rows := inputContentRows(m.input.Value(), iw)
+	if rows <= maxInputRows {
+		t.Fatalf("content only wrapped to %d rows; expected more than the %d cap", rows, maxInputRows)
+	}
+	if m.input.Height() != maxInputRows {
+		t.Fatalf("box height = %d at max, want %d", m.input.Height(), maxInputRows)
+	}
+	if got, want := m.input.ScrollYOffset(), rows-maxInputRows; got != want {
+		t.Errorf("ScrollYOffset at max = %d, want %d (contentRows %d - height %d)", got, want, rows, maxInputRows)
+	}
+}
+
+// TestPromptScrollShrinkBack deletes a grown box back to a single line: the box shrinks and the
+// re-seat clamps the offset back to 0 (a shrink must not strand a downward offset either).
+func TestPromptScrollShrinkBack(t *testing.T) {
+	m := newTestModel(t)
+	iw := m.inputInnerWidth()
+	m = typeText(t, m, strings.Repeat("a", iw*3))
+	if m.input.Height() <= 1 {
+		t.Fatalf("box did not grow before the shrink; height = %d", m.input.Height())
+	}
+	for m.input.Value() != "" {
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	if h, off := m.input.Height(), m.input.ScrollYOffset(); h != 1 || off != 0 {
+		t.Errorf("after deleting back to empty: height = %d, ScrollYOffset = %d; want 1 and 0", h, off)
+	}
+}
+
+// TestPromptScrollMultiLinePaste checks a multi-line paste (which auto-grows the box in one step)
+// leaves the scroll clamped to 0 with the first pasted line visible — the paste path runs the same
+// layout re-seat a keystroke does.
+func TestPromptScrollMultiLinePaste(t *testing.T) {
+	m := newTestModel(t)
+	m = step(t, m, tea.PasteMsg{Content: "alpha\nbravo\ncharlie\ndelta"})
+	if m.input.Height() < 4 {
+		t.Fatalf("box did not grow for the four-line paste: height = %d", m.input.Height())
+	}
+	if off := m.input.ScrollYOffset(); off != 0 {
+		t.Fatalf("ScrollYOffset after paste = %d, want 0", off)
+	}
+	if top := firstInputRow(m); !strings.Contains(top, "alpha") {
+		t.Errorf("first visible input row = %q, want the first pasted line 'alpha'", top)
+	}
+}
+
+// firstInputRow returns the plain text of the textarea's first rendered visual row.
+func firstInputRow(m Model) string {
+	return strings.Split(ansi.Strip(m.input.View()), "\n")[0]
+}
+
+// TestReseatPreservesStickyColumn guards the re-seat's height-change gate: vertical caret
+// navigation does not change the box height, so the re-seat must not run and clobber the
+// textarea's remembered goal column. Moving down through a short line and on to a long one lands
+// the caret back near the original column — proof the gate left the widget's sticky column intact.
+func TestReseatPreservesStickyColumn(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("aaaaaaaaaa\nbb\ncccccccccc")
+	m.layout()
+	m.input.MoveToBegin()
+	m.input.SetCursorColumn(10) // end of the first long line
+
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // onto the short line "bb"
+	if m.input.Line() != 1 {
+		t.Fatalf("after one Down: line = %d, want 1", m.input.Line())
+	}
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // onto the second long line
+	if got := m.input.Column(); got != 10 {
+		t.Errorf("caret column after crossing the short line = %d, want 10 (sticky column lost — the re-seat gate must skip a no-op height)", got)
+	}
+}
+
 // TestDisplayModel proves the footer strips a discovered model path to just its name and drops a
 // known weight-file extension, while leaving version dots ("qwen2.5") and bare ids untouched. The
 // strip is display-only; opts.Model (sent to the server) is unaffected.

@@ -725,7 +725,11 @@ const (
 func (m *Model) layout() {
 	m.viewport.SetWidth(max(1, m.width-scrollbarWidth)) // reserve the scroll-bar gutter column
 	m.input.SetWidth(m.inputInnerWidth())
+	before := m.input.Height()
 	m.input.SetHeight(m.inputRows())
+	if m.input.Height() != before {
+		m.reseatInput() // the box grew/shrank: re-clamp a scroll offset SetHeight left stale (ISSUES #2)
+	}
 
 	inputBoxHeight := m.input.Height() + 1 // content rows + top border (no bottom — it is the footer's divider)
 	vpHeight := m.height - statusHeight - gapHeight - inputBoxHeight - footerHeight
@@ -748,6 +752,28 @@ func (m *Model) inputInnerWidth() int {
 func (m *Model) inputRows() int {
 	rows := inputContentRows(m.input.Value(), m.inputInnerWidth())
 	return clampInt(rows, minInputRows, maxInputRows)
+}
+
+// reseatInput re-clamps the prompt textarea's internal scroll after a SetHeight changed the
+// box's height. bubbles repositions the view only when the caret falls outside it, so a box that
+// auto-grows keeps a stale downward offset — the first content line scrolls out of sight with a
+// phantom blank row below (ISSUES #2). Re-seating the caret onto its own visual row through the
+// shared reseatCaret idiom unscrolls to the top and re-clamps the offset to the current height,
+// leaving the caret exactly where it was. The caret's visual row is the wrapped rows above its
+// logical line — counted here with the widget's own CursorDown so no wrap is re-derived — plus
+// its within-line sub-row; the logical column is captured and restored so the caret does not
+// move. layout() calls this only on a height change, which never happens during vertical caret
+// navigation, so the textarea's remembered goal column is untouched.
+func (m *Model) reseatInput() {
+	row, col := m.input.Line(), m.input.Column()
+	visRow := m.input.LineInfo().RowOffset // the caret's sub-row within its logical line
+	m.input.MoveToBegin()
+	for m.input.Line() < row { // count the wrapped rows of the logical lines above the caret
+		m.input.CursorDown()
+		visRow++
+	}
+	m.reseatCaret(visRow)
+	m.input.SetCursorColumn(col)
 }
 
 // refreshViewport re-renders the transcript into the viewport and, unless the human has

@@ -127,7 +127,7 @@ source at `~/go/pkg/mod/charm.land/bubbles/v2@v2.1.0/textarea/textarea.go` (`Set
 
 ---
 
-## 1. Fix the prompt-box scroll re-seat after auto-grow (+ close ISSUES #2 and #4)
+## 1. Fix the prompt-box scroll re-seat after auto-grow (+ close ISSUES #2 and #4) — ✅ DONE (2026-07-03)
 
 **What:** per D1 — in `layout()` after `m.input.SetHeight(...)`, re-seat the caret through the
 `MoveToBegin()`+walk idiom (extract a shared helper so `caretTo` and `layout` use one

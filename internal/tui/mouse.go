@@ -81,16 +81,27 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 	return visRow, visCol, true
 }
 
-// caretTo positions the textarea caret at the given absolute visual cell and returns the
-// caret's rune offset into the value. It drives the caret with the widget's own wrap-aware
-// primitives — MoveToBegin resets to the top (and unscrolls), CursorDown steps by visual row
-// and clamps at the end, LineInfo locates the landed visual line — so the result matches what
-// the textarea actually draws without re-deriving its wrap.
-func (m *Model) caretTo(visRow, visCol int) int {
+// reseatCaret drives the textarea caret to an absolute visual (soft-wrapped) row through the
+// widget's own primitives: MoveToBegin resets to the top — which "unscrolls" its internal
+// viewport to offset 0 — and each CursorDown steps down one visual row, clamping at the end.
+// Walking down from the top re-clamps a scroll offset the widget left stale (its SetHeight only
+// repositions when the caret falls outside the view, never when the box grows), so the caret
+// lands on its real visual row with the least scroll that keeps it visible. It re-derives none
+// of the textarea's wrap, so the geometry holds across bubbles releases. Shared by caretTo (a
+// mouse click's target row) and reseatInput (the caret's own row, after a height change).
+func (m *Model) reseatCaret(visRow int) {
 	m.input.MoveToBegin()
 	for i := 0; i < visRow; i++ {
 		m.input.CursorDown()
 	}
+}
+
+// caretTo positions the textarea caret at the given absolute visual cell and returns the
+// caret's rune offset into the value. It re-seats to the target visual row through reseatCaret
+// (the widget's own wrap-aware walk), then LineInfo locates the landed visual line — so the
+// result matches what the textarea actually draws without re-deriving its wrap.
+func (m *Model) caretTo(visRow, visCol int) int {
+	m.reseatCaret(visRow)
 	li := m.input.LineInfo()
 	// visCol is a display-cell offset from the row's start, but SetCursorColumn indexes runes
 	// into the logical line — the two diverge on any CJK/emoji row. Walk the landed visual

@@ -318,15 +318,28 @@ func railLines(th theme, lines []string, depth int) []string {
 // Chrome layout helpers
 // ----------------------------------------------------------------------------
 
-// inputContentRows reports how many rows the input value wraps to at innerWidth, mirroring
-// the textarea's own word-then-hard wrap so the box sizes to its content exactly. An empty
-// value is one row.
+// inputContentRows reports how many visual rows the input value occupies at innerWidth, mirroring
+// the textarea's own wrap so the box sizes to exactly what the widget draws. Each logical line is
+// word-then-hard wrapped like the widget; a line whose final wrapped segment exactly fills the
+// width gains one extra row, because the textarea's wrap reserves a trailing row there (its
+// `>= width` branch) so the caret has somewhere to sit past a full line. Under-counting that row
+// leaves the box one row too short at a width-fill boundary — the source of the scroll artifact
+// the layout re-seat then can no longer reach (ISSUES #2). An empty value is one row.
 func inputContentRows(value string, innerWidth int) int {
 	if innerWidth < 1 {
 		innerWidth = 1
 	}
-	wrapped := ansi.Hardwrap(ansi.Wordwrap(value, innerWidth, ""), innerWidth, true)
-	return strings.Count(wrapped, "\n") + 1
+	total := 0
+	for _, line := range strings.Split(value, "\n") {
+		wrapped := ansi.Hardwrap(ansi.Wordwrap(line, innerWidth, ""), innerWidth, true)
+		segs := strings.Split(wrapped, "\n")
+		rows := len(segs)
+		if ansi.StringWidth(segs[len(segs)-1]) >= innerWidth {
+			rows++ // the widget's trailing full-line row
+		}
+		total += rows
+	}
+	return total
 }
 
 // clampInt clamps n to [lo, hi].

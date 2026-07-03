@@ -179,6 +179,21 @@ feature-parity track. See
 
 ### Fixes
 
+- **Prompt box no longer scrolls the first line out of view as it auto-grows.** Typing past the
+  wrap width grew the input box, but bubbles' `textarea.SetHeight` only repositions its internal
+  view when the caret falls *outside* it — never when the box grows — so a stale downward scroll
+  offset survived: the first line was hidden above and a phantom blank row showed below, with the
+  caret pinned to the top visual row. `layout` (`internal/tui/model.go`) now re-seats the caret
+  after a height change through the shared `reseatCaret` idiom (`MoveToBegin` "unscrolls" to the
+  top, then the widget's own `CursorDown` walks back to the caret's real row, re-clamping the
+  offset with none of the textarea's wrap re-derived); it runs only on an actual height change, so
+  vertical caret navigation keeps the widget's sticky goal column. A companion fix corrects
+  `inputContentRows` (`internal/tui/render.go`) to count the trailing row the textarea reserves for
+  a logical line that exactly fills the width, so the box no longer sizes one row short at a
+  wrap-fill boundary (which had stranded the same offset the re-seat could not then reach). At the
+  `maxInputRows` cap the textarea's legitimate internal scrolling is preserved (offset =
+  contentRows − height). Closes the prompt-scroll and auto-sizing ISSUES entries.
+
 - **Auto mode now works on macOS — seatbelt fences the workspace correctly.** The
   `sandbox-exec` profile embedded the box's writable roots verbatim, but seatbelt
   matches a write against its *kernel-canonical* path; on macOS `/tmp` and `/var`
