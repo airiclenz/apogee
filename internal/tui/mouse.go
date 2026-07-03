@@ -12,18 +12,23 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Mouse support for the prompt: click-to-position + drag-to-select (layout.md)
+// Mouse support: click-to-position + drag-to-select in the prompt AND transcript (layout.md)
 // ----------------------------------------------------------------------------
 //
 // The terminal does its own click-drag text selection only while no application captures the
 // mouse. apogee captures it (MouseModeCellMotion, set in View) so the wheel can scroll the
 // transcript and a click can position the caret — which is exactly why the terminal's own
-// selection is off. So the prompt's selection is implemented here, on top of the textarea's
-// public API: no copy of the widget's internal word-wrap is needed, which keeps the geometry
-// correct across bubbles releases.
+// selection is off. So selection is implemented here, on top of the widgets' public API: no
+// copy of the widgets' internal wrapping is needed, which keeps the geometry correct across
+// releases.
 //
-// Scope (the user's choice): the prompt/input box only. Selecting in the transcript is a later
-// rung (ISSUES.md).
+// Two rectangles, two selection models. The prompt (textarea) selection carries rune offsets
+// into the source Value, so it copies the exact typed text. The transcript (viewport) selection
+// is screen-space — "copy what you see": it anchors in content coordinates (rendered-line index
+// + display cell) and slices the cached rendered lines on release, so markers, rail gutters, and
+// soft-wraps are copied verbatim (the accepted terminal-native semantics, D4). The mouse
+// handlers arbitrate by region — a point in the input rect drives the editor, a point in the
+// viewport drives the transcript — so the two selections never coexist.
 
 // cell is an absolute visual position inside the textarea content: row counts wrapped (visual)
 // lines from the top of the value; col is the display column within that row.
@@ -38,6 +43,21 @@ type promptSel struct {
 	active             bool
 	anchorOff, headOff int
 	anchorVis, headVis cell
+}
+
+// contentCell is an absolute position in the rendered transcript: line indexes into the cached
+// m.lines and col is the display column within that line. The transcript selection anchors in
+// these content coordinates (not screen coordinates) so it survives a wheel-scroll mid-drag —
+// the scroll moves what is on screen, not the line the anchor names.
+type contentCell struct{ line, col int }
+
+// transcriptSel is the transcript's drag-selection in content coordinates. anchor is the drag's
+// fixed end (set on press); head is the moving end (updated on drag). The zero value is none.
+// Unlike promptSel it stores no rune offsets: the copied text is sliced from the rendered lines
+// (screen-space), not from a source string.
+type transcriptSel struct {
+	active       bool
+	anchor, head contentCell
 }
 
 // flashClearMsg clears the transient status-line note (m.flash) once flashDuration elapses.
@@ -79,6 +99,25 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 	visRow = m.input.ScrollYOffset() + (y - y0)
 	visCol = clampInt(x-x0, 0, w)
 	return visRow, visCol, true
+}
+
+// pointTranscriptRow maps a screen point to a content coordinate in the rendered transcript: the
+// line index into m.lines and the display cell within it. The viewport is top-anchored at the
+// screen origin (View stacks it first) and its content spans the width left of the scroll-bar
+// gutter. ok is false when the point falls outside the viewport rows or past the last rendered
+// line (the blank pad the sticky-to-top pin leaves below short content), so a click there selects
+// nothing. viewport.YOffset folds in the scroll, so the mapping holds at any scroll position.
+func (m Model) pointTranscriptRow(x, y int) (line, col int, ok bool) {
+	w, h := m.viewport.Width(), m.viewport.Height()
+	if h < 1 || y < 0 || y >= h {
+		return 0, 0, false
+	}
+	line = m.viewport.YOffset() + y
+	if line < 0 || line >= len(m.lines) {
+		return 0, 0, false
+	}
+	col = clampInt(x, 0, w)
+	return line, col, true
 }
 
 // reseatCaret drives the textarea caret to an absolute visual (soft-wrapped) row through the
@@ -173,64 +212,104 @@ func selectionText(value string, a, b int) string {
 	return string(r[lo:hi])
 }
 
-// handleMouseClick positions the caret at a left-click inside the prompt's text area and starts
-// a fresh, collapsed selection there. A left-click off the field clears any selection. Only the
-// editable states act; other buttons and other states are ignored (transcript clicks are a
-// later rung).
+// handleMouseClick starts a fresh, collapsed selection under a left-click. It arbitrates by
+// region: a click in the prompt's editable text area positions the caret and arms a prompt
+// selection there; otherwise a click in the transcript viewport arms a transcript selection at
+// that rendered cell; a click in neither region clears both. Starting one selection clears the
+// other, so the two never coexist. Non-left buttons are ignored.
 func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
-	if msg.Button != tea.MouseLeft || !m.inputEditable() {
+	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
-	visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y)
-	if !ok {
-		m.sel = promptSel{} // a click off the field deselects
+	if m.inputEditable() {
+		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
+			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
+			off := m.caretTo(visRow, visCol)
+			m.sel = promptSel{
+				active:    true,
+				anchorOff: off, headOff: off,
+				anchorVis: cell{visRow, visCol}, headVis: cell{visRow, visCol},
+			}
+			return m, nil
+		}
+	}
+	if line, col, ok := m.pointTranscriptRow(msg.X, msg.Y); ok {
+		m.sel = promptSel{} // the transcript claims it: drop any prompt selection
+		m.transcriptSel = transcriptSel{
+			active: true,
+			anchor: contentCell{line, col}, head: contentCell{line, col},
+		}
 		return m, nil
 	}
-	off := m.caretTo(visRow, visCol)
-	m.sel = promptSel{
-		active:    true,
-		anchorOff: off, headOff: off,
-		anchorVis: cell{visRow, visCol}, headVis: cell{visRow, visCol},
-	}
+	m.sel = promptSel{} // a click off both fields deselects
+	m.transcriptSel = transcriptSel{}
 	return m, nil
 }
 
-// handleMouseMotion extends the selection as the mouse drags with the left button held: the
-// caret tracks the drag head (as in a GUI editor) and head advances while the click-set anchor
-// stays put. Motion outside the text rows is ignored so a vertical stray does not collapse the
-// selection. CellMotion reports motion only while a button is down, so this fires only mid-drag.
+// handleMouseMotion extends whichever selection is live as the mouse drags with the left button
+// held: head advances while the click-set anchor stays put. A drag never STARTS a selection
+// (only a click does), so at most one of the two is active and they cannot both extend. Motion
+// outside the owning rectangle is ignored so a stray past the edge does not collapse or hijack
+// the selection. CellMotion reports motion only while a button is down, so this fires only
+// mid-drag.
 func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
-	if !m.sel.active || msg.Button != tea.MouseLeft || !m.inputEditable() {
+	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
-	visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y)
-	if !ok {
+	if m.sel.active && m.inputEditable() {
+		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
+			off := m.caretTo(visRow, visCol)
+			m.sel.headOff = off
+			m.sel.headVis = cell{visRow, visCol}
+		}
 		return m, nil
 	}
-	off := m.caretTo(visRow, visCol)
-	m.sel.headOff = off
-	m.sel.headVis = cell{visRow, visCol}
+	if m.transcriptSel.active {
+		if line, col, ok := m.pointTranscriptRow(msg.X, msg.Y); ok {
+			m.transcriptSel.head = contentCell{line, col}
+		}
+	}
 	return m, nil
 }
 
-// handleMouseRelease finalises a drag. A non-empty selection is copied to the system clipboard
-// over OSC52 (tea.SetClipboard — cross-terminal and SSH-safe, no pbcopy dependency) and a
-// transient note confirms it; the highlight stays until the next click or edit so the human
-// sees what was taken. A bare click (anchor == head) is not a selection and just leaves the
-// caret where it landed.
+// handleMouseRelease finalises a drag on whichever selection is live. A non-empty span is copied
+// to the system clipboard over OSC52 and a transient note confirms it; the highlight stays until
+// the next click, edit, or transcript change so the human sees what was taken. A bare click
+// (anchor == head) is not a selection and just leaves the caret/anchor where it landed. The
+// prompt copies the exact typed runes; the transcript copies the rendered text under the span.
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
-	if !m.sel.active {
-		return m, nil
+	switch {
+	case m.sel.active:
+		if m.sel.anchorOff == m.sel.headOff {
+			m.sel.active = false
+			return m, nil
+		}
+		text := selectionText(m.input.Value(), m.sel.anchorOff, m.sel.headOff)
+		if text == "" {
+			m.sel.active = false
+			return m, nil
+		}
+		return m.copyFlash(text)
+	case m.transcriptSel.active:
+		if m.transcriptSel.anchor == m.transcriptSel.head {
+			m.transcriptSel.active = false
+			return m, nil
+		}
+		text := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+		if strings.TrimSpace(text) == "" {
+			m.transcriptSel.active = false // a drag over blank pad copies nothing
+			return m, nil
+		}
+		return m.copyFlash(text)
 	}
-	if m.sel.anchorOff == m.sel.headOff {
-		m.sel.active = false
-		return m, nil
-	}
-	text := selectionText(m.input.Value(), m.sel.anchorOff, m.sel.headOff)
-	if text == "" {
-		m.sel.active = false
-		return m, nil
-	}
+	return m, nil
+}
+
+// copyFlash copies text to the system clipboard over OSC52 (tea.SetClipboard — cross-terminal and
+// SSH-safe, no pbcopy dependency) and shows a transient confirmation counting the runes taken
+// (flashClearMsg clears it after flashDuration). Shared by the prompt and transcript drag-release
+// paths so both confirm a copy identically.
+func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	n := len([]rune(text))
 	noun := "chars"
 	if n == 1 {
@@ -289,4 +368,74 @@ func shadeCells(line string, c0, c1 int, style lipgloss.Style) string {
 	mid := ansi.Cut(line, c0, c1)
 	right := ansi.Cut(line, c1, w)
 	return left + style.Render(ansi.Strip(mid)) + right
+}
+
+// transcriptSelectionText extracts the plain text under a content-coordinate span from the
+// cached rendered lines — the "copy what you see" slice. It normalises the span to reading order,
+// then for each spanned line cuts the display-cell range [c0,c1) with ansi.Cut (cell-accurate and
+// escape-safe), strips the styling, and trims the block's trailing pad; the lines join with '\n'.
+// The first and last lines cut to the span's own columns; the lines between take the whole width.
+// Markers, rail gutters, and soft-wrap breaks are copied verbatim — the accepted terminal-native
+// semantics of a screen-space selection (D4).
+func transcriptSelectionText(lines []string, a, b contentCell) string {
+	top, bot := a, b
+	if bot.line < top.line || (bot.line == top.line && bot.col < top.col) {
+		top, bot = bot, top // normalise to reading order
+	}
+	out := make([]string, 0, bot.line-top.line+1)
+	for row := top.line; row <= bot.line; row++ {
+		if row < 0 || row >= len(lines) {
+			continue
+		}
+		line := lines[row]
+		c0, c1 := 0, lipgloss.Width(line)
+		if row == top.line {
+			c0 = top.col
+		}
+		if row == bot.line {
+			c1 = bot.col
+		}
+		if c1 <= c0 {
+			out = append(out, "") // an empty or fully-clipped row is a blank line in the copy
+			continue
+		}
+		out = append(out, strings.TrimRight(ansi.Strip(ansi.Cut(line, c0, c1)), " "))
+	}
+	return strings.Join(out, "\n")
+}
+
+// highlightTranscript overlays the transcript drag-selection's background on the viewport's
+// visible block, mirroring highlightInput: it shades the display cells between the selection's
+// two content-anchored ends on each visible line. viewport.YOffset maps the stored absolute
+// content rows onto the visible rows, so the highlight tracks the selection through a mid-drag
+// wheel-scroll. It is applied after the sticky header so a header row highlights as a plain
+// viewport row. With no active (non-empty) selection the view is returned unchanged.
+func (m Model) highlightTranscript(view string) string {
+	if !m.transcriptSel.active || m.transcriptSel.anchor == m.transcriptSel.head {
+		return view
+	}
+	top, bot := m.transcriptSel.anchor, m.transcriptSel.head
+	if bot.line < top.line || (bot.line == top.line && bot.col < top.col) {
+		top, bot = bot, top // normalise to reading order
+	}
+	off := m.viewport.YOffset()
+	lines := strings.Split(view, "\n")
+	for r := range lines {
+		absRow := off + r
+		if absRow < top.line || absRow > bot.line {
+			continue
+		}
+		c0, c1 := 0, lipgloss.Width(lines[r])
+		if absRow == top.line {
+			c0 = top.col
+		}
+		if absRow == bot.line {
+			c1 = bot.col
+		}
+		if c1 <= c0 {
+			continue
+		}
+		lines[r] = shadeCells(lines[r], c0, c1, m.th.selection)
+	}
+	return strings.Join(lines, "\n")
 }

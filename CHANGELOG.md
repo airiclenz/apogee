@@ -13,6 +13,23 @@ feature-parity track. See
 `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md` and
 `docs/handoffs/2026-06-26 - 01 - skills-system.md`.
 
+### Drag-select-to-copy in the transcript (screen-space)
+
+- **You can now drag-select text in the chat transcript and copy it to the clipboard**, the same
+  gesture the prompt box already supported. A left-click-drag inside the transcript viewport
+  highlights the span and, on release, copies the rendered text over OSC52 (`tea.SetClipboard` —
+  cross-terminal and SSH-safe) with the usual "copied N chars" confirmation. The selection is
+  **screen-space** ("copy what you see"): it anchors in content coordinates (rendered-line index +
+  display cell) into the cached `m.lines`, so it survives a mid-drag wheel-scroll; on release it
+  slices each spanned line with `ansi.Cut`, strips the styling, and trims the block's trailing pad.
+  Markers, rail gutters, and soft-wrap breaks are copied verbatim (the accepted terminal-native
+  semantics — the one-way render pipeline stays one-way, no line→entry reverse index). The mouse
+  handlers arbitrate by region — a point in the input rectangle drives the prompt editor, a point
+  in the viewport drives the transcript — so the two selections never coexist. The selection clears
+  on any transcript change (a streamed token, a submit) and on resize; a bare click copies nothing.
+  Drag auto-scroll at the viewport edge is deferred. (`internal/tui/mouse.go`, `model.go`.) Closes
+  the "cannot select text in the transcript" ISSUES entry.
+
 ### Model profile config surface (tool-call format + thinking channels)
 
 - **`Config` gains a `Profile ModelProfile` seam** describing how the configured model speaks the

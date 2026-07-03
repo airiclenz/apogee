@@ -178,7 +178,7 @@ drops (record before/after in the commit message). Commit:
 
 ---
 
-## 3. Transcript drag-select-to-copy, screen-space (+ close ISSUES #3)
+## 3. Transcript drag-select-to-copy, screen-space (+ close ISSUES #3) — ✅ DONE (2026-07-03)
 
 **What:** per D4 — `transcriptSel` (content-coordinate anchor/head) on the Model; mouse
 arbitration (input rect → editor, viewport → transcript); motion extends; release extracts from

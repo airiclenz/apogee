@@ -96,6 +96,11 @@ type Model struct {
 	// sel is the prompt's mouse drag-selection (mouse.go); the zero value is "no selection". It
 	// is cleared by any keypress, a submit/reset, or a resize, so its visual coords never go stale.
 	sel promptSel
+	// transcriptSel is the transcript viewport's screen-space drag-selection (mouse.go), anchored
+	// in content coordinates into m.lines; the zero value is "no selection". It is cleared whenever
+	// the rendered lines regenerate (refreshViewport — a stream token, resize, or submit) so its
+	// content-anchored coords never index stale lines. It and sel never coexist (region arbitration).
+	transcriptSel transcriptSel
 	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy and
 	// cleared by flashClearMsg after flashDuration.
 	flash string
@@ -311,15 +316,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.scrollViewport(msg)
 
 	case tea.MouseClickMsg:
-		// A left-click positions the caret in the prompt and starts a selection (mouse.go).
+		// A left-click starts a selection — in the prompt (positioning the caret) or the
+		// transcript, by which rectangle it lands in (mouse.go).
 		return m.handleMouseClick(msg)
 
 	case tea.MouseMotionMsg:
-		// A drag (button held) extends the prompt selection (mouse.go).
+		// A drag (button held) extends whichever selection is live — prompt or transcript (mouse.go).
 		return m.handleMouseMotion(msg)
 
 	case tea.MouseReleaseMsg:
-		// Releasing after a drag copies the prompt selection to the clipboard (mouse.go).
+		// Releasing after a drag copies the live selection — prompt or transcript — to the
+		// clipboard (mouse.go).
 		return m.handleMouseRelease(msg)
 
 	case flashClearMsg:
@@ -785,6 +792,7 @@ func (m *Model) refreshViewport() {
 	rendered := m.transcript.renderView(m.th, m.viewport.Width())
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.userBlocks = rendered.userBlocks
+	m.transcriptSel = transcriptSel{} // the rendered lines regenerated: content-anchored coords are stale (mouse.go)
 	if m.userScrolled {
 		m.viewport.SetContentLines(rendered.lines)
 		return
@@ -856,6 +864,7 @@ func (m Model) View() tea.View {
 	// edge. The bar's height matches the viewport's current height (already shrunk above when an
 	// overlay is shown), so the two columns line up row-for-row.
 	body := m.applyStickyHeader(m.viewport.View())
+	body = m.highlightTranscript(body) // overlay any transcript drag-selection on the composed rows
 	body = lipgloss.JoinHorizontal(lipgloss.Top, body, m.renderScrollbar(m.viewport.Height()))
 	rows := []string{body}
 	if prompt != "" {

@@ -5,8 +5,11 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -452,5 +455,220 @@ func TestPasteIgnoredWhileRunning(t *testing.T) {
 	m = step(t, m, tea.PasteMsg{Content: "junk"})
 	if got := m.input.Value(); got != "keep" {
 		t.Fatalf("paste while running must not edit the input, got %q", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Transcript: screen-space drag-to-select-to-copy in the viewport (mouse.go)
+// ----------------------------------------------------------------------------
+
+// modelWithTranscript builds a ready idle model whose transcript holds a single user prompt,
+// rendered into m.lines and laid out so the viewport rectangle is settled before any mouse event.
+func modelWithTranscript(t *testing.T, prompt string) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser(prompt, nil)
+	m.refreshViewport()
+	return m
+}
+
+// TestTranscriptSelectionText is the extraction math: it slices display-cell ranges out of fake
+// rendered lines (ANSI-styled, wide glyphs, a blank between-blocks line, trailing pad) and checks
+// the plain text copied — trailing pad trimmed, styling stripped, reading order normalised.
+func TestTranscriptSelectionText(t *testing.T) {
+	sty := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	lines := []string{
+		sty.Render("hello world") + "     ", // ANSI-styled content with 5 cells of trailing pad
+		"日本語 text",                          // wide (2-cell) glyphs
+		"",                                  // a blank between-blocks line
+		"tail",
+	}
+	cases := []struct {
+		name string
+		a, b contentCell
+		want string
+	}{
+		{"single line trims trailing pad", contentCell{0, 0}, contentCell{0, 20}, "hello world"},
+		{"reversed span reads the same", contentCell{0, 20}, contentCell{0, 0}, "hello world"},
+		{"mid-line cut", contentCell{0, 0}, contentCell{0, 5}, "hello"},
+		{"wide glyphs by display cell", contentCell{1, 0}, contentCell{1, 6}, "日本語"},
+		{"multi-line spans to the last cut", contentCell{0, 0}, contentCell{1, 6}, "hello world\n日本語"},
+		{"blank line preserved across blocks", contentCell{0, 0}, contentCell{3, 4}, "hello world\n日本語 text\n\ntail"},
+		{"rows past the end are clamped", contentCell{3, 0}, contentCell{9, 9}, "tail"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := transcriptSelectionText(lines, c.a, c.b)
+			if got != c.want {
+				t.Fatalf("transcriptSelectionText(%+v,%+v) = %q, want %q", c.a, c.b, got, c.want)
+			}
+			if strings.Contains(got, "\x1b") {
+				t.Fatalf("copied text still carries ANSI escapes: %q", got)
+			}
+		})
+	}
+}
+
+// TestTranscriptDragSelectsAndCopies drives a click → drag → release over the rendered prompt row
+// and checks the extracted plain text, the copy Cmd, and the confirmation flash.
+func TestTranscriptDragSelectsAndCopies(t *testing.T) {
+	m := modelWithTranscript(t, "hello world")
+	w := m.viewport.Width()
+
+	m = step(t, m, leftClick(0, 0)) // anchor at the row's first cell (the viewport is top-anchored)
+	m = step(t, m, leftDrag(w, 0))  // drag past the right edge → the whole row
+	if !m.transcriptSel.active {
+		t.Fatal("a transcript drag did not arm a selection")
+	}
+	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	if want := glyphUser + " hello world"; got != want {
+		t.Fatalf("selected text = %q, want %q (the rendered user block, pad trimmed)", got, want)
+	}
+
+	m, cmd := stepCmd(t, m, leftRelease(w, 0))
+	if cmd == nil {
+		t.Fatal("release of a non-empty transcript selection should return a copy Cmd, got nil")
+	}
+	if !strings.Contains(m.flash, "copied") {
+		t.Fatalf("flash = %q, want a copy confirmation", m.flash)
+	}
+}
+
+// TestTranscriptBareClickCopiesNothing checks a click without a drag copies nothing (no flash, no
+// Cmd) and collapses the selection — the same bare-click rule the prompt follows.
+func TestTranscriptBareClickCopiesNothing(t *testing.T) {
+	m := modelWithTranscript(t, "hello world")
+
+	m = step(t, m, leftClick(2, 0))
+	m, cmd := stepCmd(t, m, leftRelease(2, 0))
+	if cmd != nil {
+		t.Fatal("a bare transcript click+release should not copy, got a Cmd")
+	}
+	if m.flash != "" {
+		t.Fatalf("flash = %q, want empty after a bare click", m.flash)
+	}
+	if m.transcriptSel.active {
+		t.Fatal("a bare transcript click+release should collapse the selection")
+	}
+}
+
+// TestTranscriptSelectionSurvivesWheelScroll checks the content-anchored selection is untouched by
+// a mid-drag wheel scroll: the anchor names a content line, not a screen row, so scrolling moves
+// what is on screen without moving (or clearing) the selection.
+func TestTranscriptSelectionSurvivesWheelScroll(t *testing.T) {
+	m := newTestModel(t)
+	m.transcript.addUser("top prompt", nil)
+	for i := 0; i < 40; i++ {
+		m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
+	}
+	m.refreshViewport()
+	m.viewport.GotoBottom() // scroll down so there is room to wheel back up
+
+	m = step(t, m, leftClick(0, 0)) // start a selection on the top visible row
+	m = step(t, m, leftDrag(3, 0))
+	if !m.transcriptSel.active {
+		t.Fatal("precondition: no transcript selection armed")
+	}
+	anchor := m.transcriptSel.anchor
+
+	before := m.viewport.YOffset()
+	m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.viewport.YOffset() == before {
+		t.Fatal("precondition: wheel-up did not scroll the viewport")
+	}
+	if !m.transcriptSel.active {
+		t.Fatal("a wheel-scroll cleared the transcript selection")
+	}
+	if m.transcriptSel.anchor != anchor {
+		t.Fatalf("wheel-scroll moved the content-anchored anchor: %+v → %+v", anchor, m.transcriptSel.anchor)
+	}
+}
+
+// TestTranscriptSelectionClearsOnStreamToken checks the selection drops when the rendered lines
+// regenerate under a streamed token (its content-anchored coords would otherwise index stale lines).
+func TestTranscriptSelectionClearsOnStreamToken(t *testing.T) {
+	m := modelWithTranscript(t, "hello world")
+	m = step(t, m, leftClick(0, 0))
+	m = step(t, m, leftDrag(5, 0))
+	if !m.transcriptSel.active {
+		t.Fatal("precondition: no transcript selection armed")
+	}
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "hi"}})
+	if m.transcriptSel.active {
+		t.Fatal("a stream token did not clear the transcript selection")
+	}
+}
+
+// TestTranscriptSelectionClearsOnResize checks a window resize drops the selection (the lines
+// reflow to the new width, so the stored cells go stale) — the prompt selection clears the same way.
+func TestTranscriptSelectionClearsOnResize(t *testing.T) {
+	m := modelWithTranscript(t, "hello world")
+	m = step(t, m, leftClick(0, 0))
+	m = step(t, m, leftDrag(5, 0))
+	if !m.transcriptSel.active {
+		t.Fatal("precondition: no transcript selection armed")
+	}
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	if m.transcriptSel.active {
+		t.Fatal("a resize did not clear the transcript selection")
+	}
+}
+
+// TestPromptAndTranscriptSelectionsAreExclusive checks the region arbitration: starting one
+// selection clears the other, so the prompt and transcript selections never coexist.
+func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
+	m := newTestModel(t)
+	m.transcript.addUser("hello world", nil)
+	m.input.SetValue("prompt text")
+	m.layout() // sizes the input box and populates m.lines
+
+	// Arm a transcript selection.
+	m = step(t, m, leftClick(0, 0))
+	m = step(t, m, leftDrag(5, 0))
+	if !m.transcriptSel.active {
+		t.Fatal("precondition: transcript selection not armed")
+	}
+
+	// A click into the prompt arms the prompt selection and clears the transcript one.
+	const yInput = 24 - footerHeight - 1
+	m = step(t, m, leftClick(2, yInput))
+	if m.transcriptSel.active {
+		t.Fatal("a prompt click did not clear the transcript selection")
+	}
+	if !m.sel.active {
+		t.Fatal("a prompt click did not arm the prompt selection")
+	}
+
+	// And the reverse: a click into the transcript clears the prompt selection.
+	m = step(t, m, leftClick(0, 0))
+	m = step(t, m, leftDrag(3, 0))
+	if m.sel.active {
+		t.Fatal("a transcript click did not clear the prompt selection")
+	}
+	if !m.transcriptSel.active {
+		t.Fatal("a transcript click did not arm the transcript selection")
+	}
+}
+
+// TestTranscriptSelectionOnStickyHeaderRow checks the pinned sticky-header row behaves as a plain
+// viewport row for selection: a drag over it copies its rendered text and the highlight reaches
+// the composed View (which layers the highlight over the sticky-header overlay).
+func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
+	m := newTestModel(t)
+	m.transcript.addUser("HEADERPROMPT", nil)
+	for i := 0; i < 40; i++ {
+		m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
+	}
+	m.refreshViewport() // the sole user prompt pins to row 0 as the sticky header
+
+	w := m.viewport.Width()
+	m = step(t, m, leftClick(0, 0))
+	m = step(t, m, leftDrag(w, 0))
+	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	if !strings.Contains(got, "HEADERPROMPT") {
+		t.Fatalf("selecting the sticky-header row copied %q, want it to contain the prompt text", got)
+	}
+	if !strings.Contains(m.View().Content, selectionBg) {
+		t.Fatal("a selection over the sticky-header row did not reach the rendered View")
 	}
 }
