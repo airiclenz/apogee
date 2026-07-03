@@ -71,7 +71,7 @@ type noneStripper struct{}
 func (noneStripper) Strip(raw string) (string, string) { return raw, "" }
 func (noneStripper) IsMidChannel(string) bool          { return false }
 
-// delimitedStripper strips a literal Start/End thinking-token pair (e.g. gemma's
+// delimitedStripper strips a literal Start/End thinking-token pair (e.g.
 // <think>…</think>) over the frozen StripThinking / IsThinking oracle functions.
 type delimitedStripper struct {
 	cfg *ThinkingConfig

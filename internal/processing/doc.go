@@ -5,8 +5,8 @@
 //
 // Phase 1 (P1.3) ported one tool-call format end-to-end — the native/JSON shape the
 // provider already extracts structurally (FunctionCall.Arguments kept verbatim) and that
-// the bench relies on — plus single-pair thinking-channel stripping (gemma `<think>`,
-// gpt-oss harmony `<|channel|>analysis<|message|>…<|end|>`).
+// the bench relies on — plus single-pair thinking-channel stripping (a delimited
+// `<think>`-style pair, gpt-oss harmony `<|channel|>analysis<|message|>…<|end|>`).
 //
 // Phase 3 (P3.5) completes the parity port. The two text tool-call formats are added behind
 // the ToolCallParser interface: MarkdownFencedParser (a ```tool fenced block with named

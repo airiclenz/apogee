@@ -3,8 +3,8 @@ package processing
 import "strings"
 
 // ThinkingConfig describes a model's inline thinking-channel delimiters — the literal
-// tokens that bracket reasoning the user should not see. Two shapes are common: gemma's
-// `<think>…</think>` and gpt-oss's harmony `<|channel|>analysis<|message|>…<|end|>`. The
+// tokens that bracket reasoning the user should not see. Two shapes are common: a delimited
+// `<think>…</think>`-style pair and gpt-oss's harmony `<|channel|>analysis<|message|>…<|end|>`. The
 // tokens are matched literally (not as regular expressions). A nil *ThinkingConfig means
 // the model emits no inline channel — content passes through untouched, which is also the
 // right default when the server already split reasoning into the response's separate

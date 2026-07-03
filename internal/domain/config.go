@@ -170,8 +170,10 @@ const (
 	// ThinkingNone is the default: no inline channel (the model emits none, or the Upstream
 	// already split reasoning into reasoning_content). "" is treated the same.
 	ThinkingNone ThinkingStyle = "none"
-	// ThinkingDelimited is a literal Start/End token pair bracketing reasoning (e.g. gemma's
-	// <think>…</think>).
+	// ThinkingDelimited is a literal Start/End token pair bracketing reasoning (e.g.
+	// <think>…</think>). The exact tokens vary per model and even per build — the live smoke
+	// test found gemma-4-e4b-it-qat emits <|channel>thought…<channel|> — so Start/End must be
+	// set to what the model actually emits, not assumed from the model family.
 	ThinkingDelimited ThinkingStyle = "delimited"
 	// ThinkingHarmony is gpt-oss's harmony channel format (<|channel|>analysis<|message|>…).
 	ThinkingHarmony ThinkingStyle = "harmony"
