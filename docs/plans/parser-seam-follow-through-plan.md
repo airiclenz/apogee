@@ -49,6 +49,70 @@ on — do not block the release on it.
 **Acceptance:** findings recorded in this file under a `### Smoke-test findings` heading (pass /
 fail / surprises, esp. the D6 watch). Anything broken goes back through a fix commit before item 3.
 
+### Smoke-test findings
+
+**Date:** 2026-07-03 · **Model:** `gemma-4-e4b-it-qat` (llama-server, `127.0.0.1:1111`) ·
+**Verdict:** PASS on all literal checks; nothing broken; no fix commit needed before item 3.
+
+**How it was run.** Item 1 is framed as a manual TUI session, but the TUI can't be driven
+head­lessly by an agent, so the run was codified as an opt-in live harness in the repo's existing
+`TestE2ELiveModel` idiom — **`internal/tui/smoke_live_test.go`, `TestSmokeLiveProfileSeam`**
+(gated on `APOGEE_LIVE_ENDPOINT`, `-count=1`; NEW, untracked — keep or discard). It drives the
+real `agent.Agent` through the real provider client with a non-zero `Profile` set, records the
+event stream, and inspects `Snapshot().State` for `reasoning_content`. Command:
+`APOGEE_LIVE_ENDPOINT=http://127.0.0.1:1111 go test -race -count=1 -run TestSmokeLiveProfileSeam -v ./internal/tui/`.
+
+**Check A — thinking axis (`delimited`): PASS — mechanism proven live; two surprises.**
+
+*Run 1 — default server (`--reasoning-format` unset).* All three literal checks passed: committed
+`MessageEvent` had no markup, `reasoning_content` present in the snapshot, live stream clean. BUT
+the **native control run (zero profile) ALSO came back clean with `reasoning_content` present** —
+proof that **llama-server was splitting the reasoning out-of-band into `reasoning_content` itself**
+(arrives via `DeltaThinking` → `rep.thinking` → `joinThinking`, `loop.go:307`). So apogee never saw
+an inline channel, the profile's stripper was a **no-op**, and the delimited profile made **no
+observable difference** vs. native. The inline-strip path was NOT exercised here — only the
+reasoning_content plumbing and the zero-profile anchor were.
+
+*Run 2 — `llama-server --reasoning-format none` (server-side parsing off, inline markers exposed).*
+This is where the two surprises landed:
+
+- **Surprise 1 — gemma-4-e4b-it-qat is NOT a `<think>` model.** With the server no longer parsing,
+  the raw inline reasoning showed its actual delimiters: **`<|channel>thought … <channel|>`**, not
+  `<think>`/`</think>`. So the `<think>`-configured profile correctly matched nothing and left the
+  reasoning in the visible text (a **fail-safe** — no false stripping — but check (1)/(2) "failed"
+  only because the configured markers don't match this model). **This contradicts
+  `internal/processing/doc.go:8`, which names gemma as the `<think>` reference.** Worth the
+  maintainer's attention — either the doc is stale for this build or a different gemma was meant.
+
+- **Surprise 2 (the confirmation) — the inline delimited-strip path works live.** Re-running with
+  the profile's delimiters set to the model's ACTUAL markers (`start="<|channel>"`,
+  `end="<channel|>"`) → **PASS**: 432-byte committed answer with **no markup and no leaked
+  reasoning**, `reasoning_content` populated in the snapshot (2938 bytes), clean live stream. This
+  **definitively exercises the inline strip end-to-end against a real streaming model** — the
+  earlier "miss" was purely a marker mismatch, not a broken path.
+
+Net: the seam is correct on both the out-of-band (`rep.thinking`) and inline-strip axes. Harness
+change to support run 2: the delimited markers are now env-overridable
+(`APOGEE_SMOKE_THINK_START` / `_END`, default `<think>`/`</think>`), so the same test points at any
+model's real delimiters. Reproduce run 2 with:
+`APOGEE_SMOKE_THINK_START='<|channel>' APOGEE_SMOKE_THINK_END='<channel|>' go test -run TestSmokeLiveProfileSeam/CheckA_thinking_delimited ...`
+against a `--reasoning-format none` server. (Server config was reverted after the run.)
+
+**Check B — tool-call axis (`markdown-fenced`): PASS; D6 watch clean, friction noted.**
+- The prompt-seam wiring injected the fenced menu + emission instructions automatically (no manual
+  workaround): the model emitted fenced blocks, **4 calls parsed & dispatched**, the file
+  `greeting.txt` landed, and the committed final text had the fence markup stripped (no ` ``` `). ✓
+- **D6 watch — no derail.** The 4B model fumbled the JSON args across turns — `{"content":…}`
+  (no path) ×2, then `{"path":"greeting.txt"}` (no content), then finally the complete
+  `{"content":"Hello, Apogee!","path":"greeting.txt"}`. Each text-parsed call was echoed back
+  native-shaped in history; **the model recovered from the tool-error feedback and its own echoed
+  calls and converged to a valid write** rather than derailing or looping. The seam handled the
+  echo correctly — the D6 divergence did not bite. Friction (4 attempts) is a small-model
+  fenced-schema limitation, not a seam defect.
+
+**Harmony axis:** untested-live (no gpt-oss profile in llama-launcher) — as the plan allows,
+recorded as untested-live (oracle vectors still gate it); not blocking the release.
+
 ---
 
 ## 2. Close the prompt-side parity gap — grill first, then its own plan
