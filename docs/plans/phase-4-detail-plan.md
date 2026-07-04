@@ -303,7 +303,7 @@ the catalogue's off-ramp rows.
 
 ---
 
-## 7. Wave 2 — loop-native: `truncate_history` (`correct_tool_result` deferred)
+## 7. Wave 2 — loop-native: `truncate_history` (`correct_tool_result` deferred) — ✅ DONE (2026-07-04)
 
 **Design call — RESOLVED (owner-ratified 2026-07-04):** `correct_tool_result` is
 **DEFERRED, not ported.** The pinned sim defines no production trigger — it is a lab-only
@@ -328,6 +328,17 @@ histories); gap note inserted once.
 
 **Acceptance:** gates green; diff confined to `internal/mechanisms` + docs/CHANGELOG.
 Commit: `feat(mechanisms): port the truncate-history rewrite; correct_tool_result deferred`.
+
+**NOTES (2026-07-04):** the sim supplied `KeepLastTurns`/`TruncateNote` per operator command,
+but a catalogued Mechanism has no per-Mechanism config surface (item 4's `mechanisms:` block is
+enabled-only), so both are built-in defaults: `defaultKeepLastTurns = 4` (a conservative window
+a bench win would motivate exposing as config) and a fixed context-window gap-note string. The
+behaviour is a faithful port of the pinned sim's drop-the-middle + static-gap-note (no divergence
+from the source): apogee-sim relied on the proxy's role-alternation sanitizer to merge the
+user-role gap note into the preceding user message; apogee has no such sanitizer, so the note
+stands as its own user message after the protected prefix — recorded in the code comment. Also
+updated `catalogue_test.go`'s un-ported-ID sentinel (`truncate_history` → `decompose`) now that
+`truncate_history` is a real catalogue row.
 
 ---
 

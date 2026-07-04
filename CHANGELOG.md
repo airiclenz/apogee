@@ -215,6 +215,27 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   3, 5, and 6. (Docs: `docs/design/mechanism-catalogue.md`,
   `docs/plans/phase-4-detail-plan.md`.)
 
+### Wave 2: the `truncate_history` drop-the-middle history rewrite (`correct_tool_result` deferred)
+
+- **A cheap, structural alternative to generative Compaction is ported (catalogue Table A).**
+  `truncate_history` is a history-rewrite Mechanism that drops the middle of the conversation,
+  keeping the protected prefix (leading system messages + the first user message,
+  `Conversation.PrefixEnd`) and the last few assistant-anchored exchanges, cutting **only** at
+  `Conversation.AssistantBoundaries()` so a tool result never gets separated from the assistant
+  call that produced it (strict chat templates reject an orphaned tool message). At the cut it
+  inserts a single static gap note; when fewer exchanges exist than the keep window it is a
+  no-op (and books no fire — the loop keys acted fires on `Conversation.Revision`, R4). Ported
+  verbatim from apogee-sim `internal/sim/intervention.go` `truncateHistory` @pin. Capability
+  **proactive-nudge** (a context-shaper — disabled under Bypass, D5, while the structural Budget
+  and Compaction stay on, D6), SuppressionPolicy **strikes-3**, default **off** (D1). It ships in
+  the `internal/mechanisms` catalogue, buildable via the `mechanisms:` config block.
+- **`correct_tool_result` is deferred, not ported (owner-ratified 2026-07-04).** The pinned sim
+  defines no production trigger for it — it is a lab-only intervention with an operator-supplied
+  correction — so inventing gating logic would ship behaviour with no evidence. The loop already
+  exposes the lab surface (an experimental post-tool-result hook can replace a result via the
+  mutation API), so the bench plays the operator without a catalogued Mechanism; a bench-discovered
+  trigger would motivate a new plan item. (`internal/mechanisms`; catalogue Table A/B.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
