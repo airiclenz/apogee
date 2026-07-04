@@ -13,14 +13,19 @@ import (
 // three are post-response Mechanisms with Capability response-repair and SuppressionPolicy
 // strikes-3, dispatched in the deterministic order validate → syntax → autofix.
 //
-// Correction delivery is by ActionDefer, not ActionRetry (catalogue C5). apogee streams every
-// reply live, so a bad tool call cannot be "retried in place" the way the sim's non-streaming
-// path re-called upstream with an appended correction; instead validate/syntax return
-// ActionDefer{Inject: correction}, which the loop holds in conversation state
-// (Conversation.Defer) and injects role-safely into the NEXT request — the sim's streaming
-// feed-forward path, and the fold of its feed_forward_correction Mechanism (C5). autofix repairs
-// in place: the loop dispatches a Response's tool calls only after post-response review, so a
-// formatter write-back via Response.SetToolCallArguments reaches the tool that runs.
+// Correction delivery is by ActionRetry — retry-in-place per the amended C5 (R1, owner-ratified
+// 2026-07-04; docs/plans/phase-4-review-fixes-plan.md). The loop, unlike the sim's proxy, owns
+// the stream and can reset it (StreamResetEvent), so validate/syntax return ActionRetry{Inject:
+// correction} and the loop re-streams the corrected request in the SAME Turn: the superseded
+// assistant message (text + tool calls) and then the correction as a role-safe user message are
+// appended to the in-flight request — request-scoped, never committed to history — exactly the
+// exchange the sim's retryWithCorrection built (internal/proxy/response_validator.go @pin). The
+// retry short-circuits the remaining post-response cascade and is bounded by the loop's
+// maxPostResponseRetries; at the cap the last response passes through. C5's substance stands:
+// feed_forward_correction stays folded — no standalone Mechanism — and ActionDefer keeps its
+// next-request semantics, but Wave 1 no longer uses it. autofix repairs in place: the loop
+// dispatches a Response's tool calls only after post-response review, so a formatter write-back
+// via Response.SetToolCallArguments reaches the tool that runs.
 const (
 	validateID domain.MechanismID = "validate"
 	syntaxID   domain.MechanismID = "syntax"
@@ -28,7 +33,7 @@ const (
 )
 
 // robustnessIssue is one problem validate or syntax found in a tool call — the correctable unit
-// buildCorrectionMessage renders into the model-facing feed-forward correction. context carries
+// buildCorrectionMessage renders into the model-facing retry correction. context carries
 // the optional supporting lists the sim's message includes (available_tools, required_params).
 type robustnessIssue struct {
 	message string
@@ -36,10 +41,10 @@ type robustnessIssue struct {
 }
 
 // hasIssues reports whether any correctable problem was found — the gate validate/syntax use to
-// decide between an ActionDefer correction and a no-op.
+// decide between an ActionRetry correction and a no-op.
 func hasIssues(issues []robustnessIssue) bool { return len(issues) > 0 }
 
-// buildCorrectionMessage renders the model-facing feed-forward correction from the issues found,
+// buildCorrectionMessage renders the model-facing retry correction from the issues found,
 // ported verbatim from apogee-sim's buildCorrectionMessage (internal/proxy/response_validator.go
 // @pin) so a ported Mechanism speaks to the model in the wording its A/B measured.
 func buildCorrectionMessage(issues []robustnessIssue) string {

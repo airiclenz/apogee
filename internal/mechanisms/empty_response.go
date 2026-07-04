@@ -13,10 +13,11 @@ func init() { catalogue[emptyResponseRecoveryID] = newEmptyResponseRecovery }
 
 // emptyResponseRecoveryMechanism is the post-response empty-reply off-ramp (catalogue Table A
 // `empty_response_recovery`; ported from apogee-sim internal/proxy/empty_recovery.go @pin). When
-// the model returns nothing — no text and no tool calls — mid-task, it asks the loop to re-stream
-// the request so the model gets another chance rather than the empty reply ending the conversation
-// (CONTEXT "Off-ramp"). See offramps.go for why the action is ActionRetry and how the loop's
-// maxPostResponseRetries bounds it.
+// the model returns nothing — no text and no tool calls — mid-task, it retries in place with the
+// sim's completion-check nudge (R1): the loop re-streams the request carrying the nudge as a
+// role-safe user correction, so the model gets a directed second chance rather than the empty
+// reply ending the conversation (CONTEXT "Off-ramp"). See offramps.go for the delivery (R1/R2)
+// and how the loop's maxPostResponseRetries bounds it.
 //
 // It carries no per-Mechanism state: the retry cap is the loop's, and its off-ramp descriptor keeps
 // it out of self-regulation (SuppressExempt) so the guarantee always holds.
@@ -44,16 +45,26 @@ func (emptyResponseRecoveryMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{}
 }
 
-// PostResponse asks the loop to re-stream the request when the model returned an empty reply
-// mid-task; every other response is a no-op. The trigger mirrors apogee-sim's shouldRecoverEmpty
-// @pin: tools were available, the reply is empty, there is a real user request, and the model has
-// made recent progress worth recovering (so a model spinning uselessly is not endlessly retried —
-// beyond the loop's own attempt cap).
+// completionCheckNudge is the correction the retried request carries, ported verbatim from
+// apogee-sim's first-attempt nudge (empty_recovery.go @pin) so the off-ramp speaks to the model
+// in the wording its A/B measured. Directive nudge rather than a question: small models (7B-14B)
+// respond to "Have you completed all parts?" by claiming they're done, even mid-task; telling
+// them to review remaining steps produces continuation tool calls (observed with Qwen3.5-9B on
+// multi-file creation prompts, 2025-05). The sim's attempt-2 context-aware nudge ladder, system
+// directive, and per-attempt temperature escalation are recorded bench-pending divergences (R2),
+// not ported.
+const completionCheckNudge = "Your response was empty. Review the original task — there are likely remaining steps or files you haven't addressed yet. Use a tool call to continue with the next unfinished part. Do not summarize or stop until every part of the task is complete."
+
+// PostResponse retries in place with the completion-check nudge when the model returned an empty
+// reply mid-task; every other response is a no-op. The trigger mirrors apogee-sim's
+// shouldRecoverEmpty @pin: tools were available, the reply is empty, there is a real user
+// request, and the model has made recent progress worth recovering (so a model spinning
+// uselessly is not endlessly retried — beyond the loop's own attempt cap).
 func (emptyResponseRecoveryMechanism) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
 	if !shouldRecoverEmpty(resp) {
 		return domain.PostResponseDecision{}, nil
 	}
-	return domain.PostResponseDecision{Action: domain.ActionRetry}, nil
+	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: completionCheckNudge}, nil
 }
 
 // shouldRecoverEmpty is the pure shape check behind the off-ramp (apogee-sim shouldRecoverEmpty

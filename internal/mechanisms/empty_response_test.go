@@ -6,9 +6,11 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// An empty reply (no text, no tool calls) mid-task asks the loop to re-stream — ActionRetry. The
-// hard attempt cap that stops an always-empty model is the loop's maxPostResponseRetries (verified
-// in internal/agent); at the Mechanism level the guarantee is that the trigger returns ActionRetry.
+// An empty reply (no text, no tool calls) mid-task retries in place carrying the sim's
+// completion-check nudge (R1) — the loop re-streams the request with the nudge as a role-safe
+// user correction. The hard attempt cap that stops an always-empty model is the loop's
+// maxPostResponseRetries (verified in internal/agent); at the Mechanism level the guarantee is
+// that the trigger returns ActionRetry with the verbatim nudge.
 func TestEmptyResponseRecoveryRetriesOnEmptyReply(t *testing.T) {
 	t.Parallel()
 	history := []domain.Message{
@@ -21,8 +23,8 @@ func TestEmptyResponseRecoveryRetriesOnEmptyReply(t *testing.T) {
 	if decision.Action != domain.ActionRetry {
 		t.Fatalf("Action = %q, want %q", decision.Action, domain.ActionRetry)
 	}
-	if decision.Inject != "" {
-		t.Errorf("Inject = %q, want empty (ActionRetry carries no payload)", decision.Inject)
+	if decision.Inject != completionCheckNudge {
+		t.Errorf("Inject = %q, want the sim's completion-check nudge verbatim", decision.Inject)
 	}
 }
 

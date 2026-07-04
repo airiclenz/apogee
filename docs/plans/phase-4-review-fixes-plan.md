@@ -102,7 +102,7 @@ docs + CHANGELOG. Commit:
 
 ---
 
-## 2. Wave-1 delivery switch: validate, syntax, enforcer, empty-recovery ride the seam
+## 2. Wave-1 delivery switch: validate, syntax, enforcer, empty-recovery ride the seam — ✅ DONE (2026-07-04)
 
 **What:** switch the four shipped Mechanisms to R1 delivery, per the pinned sim.
 `validate` (`internal/mechanisms/validate.go:60`): `ActionDefer` → `ActionRetry` with the

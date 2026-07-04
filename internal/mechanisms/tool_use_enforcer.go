@@ -15,9 +15,11 @@ func init() { catalogue[toolUseEnforcerID] = newToolUseEnforcer }
 // toolUseEnforcerMechanism is the post-response narration off-ramp (catalogue Table A
 // `tool_use_enforcer`; ported from apogee-sim internal/proxy/tooluse_enforcer.go @pin). When the
 // user asked for an action but the model answered with prose instead of calling a tool — twice
-// running, without ever having used a tool — it defers a correction telling the model to act,
-// injected into the next request (CONTEXT "Off-ramp"). See offramps.go for why the action is
-// ActionDefer (the streaming feed-forward path) rather than ActionRetry.
+// running, without ever having used a tool — it retries in place with a correction telling the
+// model to act (R1, amending catalogue C5): the loop re-streams the corrected request in the
+// same Turn, carrying the superseded narration and the role-safe correction — exactly the sim's
+// retryForToolUse exchange (tooluse_enforcer.go @pin). See offramps.go for the delivery
+// rationale (CONTEXT "Off-ramp").
 //
 // It carries no per-Mechanism state: its off-ramp descriptor keeps it out of self-regulation
 // (SuppressExempt) so the guarantee always holds, and its trigger already requires two consecutive
@@ -44,14 +46,15 @@ func (toolUseEnforcerMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{}
 }
 
-// PostResponse defers a "use a tool" correction when the model narrated instead of acting; every
-// other response is a no-op. The trigger mirrors apogee-sim's shouldEnforceToolUse @pin.
+// PostResponse retries in place with a "use a tool" correction when the model narrated instead
+// of acting — the retried request carries the narration and the correction (R1); every other
+// response is a no-op. The trigger mirrors apogee-sim's shouldEnforceToolUse @pin.
 func (toolUseEnforcerMechanism) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
 	if !shouldEnforceToolUse(resp) {
 		return domain.PostResponseDecision{}, nil
 	}
 	correction := buildToolUseCorrection(toolNames(resp.View().Tools()))
-	return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: correction}, nil
+	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: correction}, nil
 }
 
 // shouldEnforceToolUse is the pure shape check behind the off-ramp (apogee-sim shouldEnforceToolUse

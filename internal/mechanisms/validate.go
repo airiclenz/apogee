@@ -18,8 +18,10 @@ func init() { catalogue[validateID] = newValidate }
 // ported from apogee-sim internal/validate + internal/proxy/response_validator.go @pin). It
 // checks each requested tool call against the tool menu the model was shown (LoopView.Tools())
 // and its own arguments: an unknown tool name, empty/malformed JSON arguments, or a missing
-// required parameter each yield a correction the model receives on the next request
-// (ActionDefer — see robustness.go for why apogee defers rather than retries in place).
+// required parameter each yield a correction the loop re-streams in the same Turn (ActionRetry
+// — the retry-in-place delivery of the amended C5, R1; see robustness.go). The retry
+// short-circuits the rest of the response-repair cascade, so a malformed call is corrected
+// before the finer content passes ever see it.
 //
 // It carries no per-Mechanism state: the descriptor's strikes-3 policy routes its
 // self-regulation through the loop's per-Session tracker (item 3), the same as every catalogued
@@ -46,8 +48,9 @@ func (validateMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{syntaxID, autofixID}}
 }
 
-// PostResponse validates the response's tool calls and, on any error, defers a correction into
-// the next request. A response with no tool calls, or with only valid calls, is a no-op.
+// PostResponse validates the response's tool calls and, on any error, retries in place with a
+// correction — the loop re-streams the corrected request in the same Turn (R1). A response with
+// no tool calls, or with only valid calls, is a no-op.
 func (validateMechanism) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
@@ -57,7 +60,7 @@ func (validateMechanism) PostResponse(_ context.Context, resp *domain.Response) 
 	if !hasIssues(issues) {
 		return domain.PostResponseDecision{}, nil
 	}
-	return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: buildCorrectionMessage(issues)}, nil
+	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: buildCorrectionMessage(issues)}, nil
 }
 
 // validateToolCalls collects the validation problems across every requested call (apogee-sim's

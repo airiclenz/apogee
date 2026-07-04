@@ -81,12 +81,11 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   JSON, missing required parameter); `syntax` checks a file-writing call's content (Go through the
   real parser, other languages through a bracket/string/truncation heuristic); `autofix` runs a
   formatter over write content and writes the tidied payload back to the call the loop will dispatch.
-- **Corrections are deferred, not retried in place (catalogue C5).** Apogee streams every reply
-  live, so `validate`/`syntax` return `ActionDefer` with the sim's correction message — the loop
-  holds it in conversation state (`Conversation.Defer`) and injects it role-safely into the next
-  request, the fold of the sim's `feed_forward_correction`. `autofix` intercepts in place via
-  `Response.SetToolCallArguments`, which is effective because a Response's tool calls are dispatched
-  only after post-response review.
+- **Corrections retry in place (amended C5 — R1; superseding this entry's original ActionDefer
+  delivery).** `validate`/`syntax` return `ActionRetry` with the sim's correction message — the
+  loop re-streams the corrected request in the same Turn (see the delivery-switch entry below).
+  `autofix` intercepts in place via `Response.SetToolCallArguments`, which is effective because a
+  Response's tool calls are dispatched only after post-response review.
 - **`gofmt` is always in-process; other formatters are PATH-gated and gracefully absent.** Go is
   formatted with the standard library's `go/format` — no external dependency — with `goimports`
   preferred when on PATH; `black` / `prettier` / `rustfmt` run only when detected, and a formatter's
@@ -103,13 +102,12 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   mid-task with tools available and recent progress; `tool_use_enforcer` fires when the user asked for
   an action but the model answered with prose twice running, having never used a tool (the sim's
   intent classifier, folded in inline per catalogue C6).
-- **Empty replies re-stream; narration is corrected forward.** `empty_response_recovery` returns
-  `ActionRetry` — the loop re-streams the request so the model gets another chance, bounded by the
-  loop's existing `maxPostResponseRetries` cap so an always-empty model still terminates.
-  `tool_use_enforcer` returns `ActionDefer` with the sim's "use a tool" correction, injected
-  role-safely into the next request (the same streaming feed-forward path `validate`/`syntax` use,
-  C5) — the plan sanctions retry/defer for the enforcer, and the narration reply is committed so the
-  correction rides forward. (`internal/mechanisms`.)
+- **Empty replies and narration both retry in place (amended C5 — R1; superseding this entry's
+  original retry/defer split).** `empty_response_recovery` returns `ActionRetry` carrying the sim's
+  first-attempt completion-check nudge verbatim; `tool_use_enforcer` returns `ActionRetry` with the
+  sim's "use a tool" correction, the retried request carrying the superseded narration (the sim's
+  `retryForToolUse` exchange). Both stay bounded by the loop's existing `maxPostResponseRetries`
+  cap so an always-empty model still terminates. (`internal/mechanisms`.)
 
 ### ActionRetry now carries the corrective exchange onto the retried request
 
@@ -123,6 +121,23 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   cap the last response passes through. An `Inject`-less retry stays a bare re-stream, and
   `ActionDefer` keeps its next-request semantics unchanged. (`internal/domain`,
   `internal/agent`.)
+
+### Wave 1 rides the retry seam: corrections deliver in the same Turn
+
+- **The four shipped Mechanisms switch `ActionDefer` → `ActionRetry` (amended C5, R1).**
+  `validate` and `syntax` now short-circuit the response-repair cascade on a failing call —
+  the correction re-streams the corrected request in the same Turn instead of waiting for the
+  next request — so the catalogue's "short-circuits cascade on fail" holds for real.
+  `tool_use_enforcer` re-calls in-cycle exactly like the sim's `retryForToolUse`: the retried
+  request carries the superseded narration plus the "use a tool" correction, fixing the review
+  finding that the correction sat until the next user Submit. `empty_response_recovery`
+  upgrades its bare re-stream to carry the sim's first-attempt completion-check nudge verbatim
+  (`empty_recovery.go` @pin); the attempt-2 nudge ladder, system directive, and temperature
+  escalation stay recorded bench-pending divergences (R2). Everything remains bounded by
+  `maxPostResponseRetries` — an always-empty model terminates, its final reply passing through.
+  Proven loop-level through the scripted-responder harness, including both off-ramps firing at
+  dispatch (registry-built) under Bypass and through a tripped Turn Budget.
+  (`internal/mechanisms`; tests in `internal/agent`.)
 
 ## [1.1.0] — 2026-07-03
 

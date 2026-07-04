@@ -20,16 +20,17 @@ func narrationHistory() []domain.Message {
 	}
 }
 
-// The model narrates a third time on an action request it never acted on: the enforcer defers a
-// "use a tool" correction (the sim's wording) into the next request — ActionDefer, not ActionRetry
-// (offramps.go), because the narration reply is committed and the correction rides forward.
-func TestToolUseEnforcerDefersCorrectionOnNarration(t *testing.T) {
+// The model narrates a third time on an action request it never acted on: the enforcer retries
+// in place with the "use a tool" correction (the sim's wording) — ActionRetry per the amended C5
+// (R1, offramps.go), so the loop re-streams the corrected request in the same Turn, carrying the
+// superseded narration and the correction (the sim's retryForToolUse exchange).
+func TestToolUseEnforcerRetriesWithCorrectionOnNarration(t *testing.T) {
 	t.Parallel()
 	resp := offrampResponse(narrationHistory(), toolMenu(), "I would edit main.go to add the parser.")
 	decision := postResponse(t, toolUseEnforcerID, resp)
 
-	if decision.Action != domain.ActionDefer {
-		t.Fatalf("Action = %q, want %q", decision.Action, domain.ActionDefer)
+	if decision.Action != domain.ActionRetry {
+		t.Fatalf("Action = %q, want %q", decision.Action, domain.ActionRetry)
 	}
 	if !strings.Contains(decision.Inject, "You MUST use one of the available tools: read_file, write_file") {
 		t.Errorf("Inject = %q, want it to name the available tools", decision.Inject)

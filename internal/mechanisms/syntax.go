@@ -15,7 +15,8 @@ func init() { catalogue[syntaxID] = newSyntax }
 // ported from apogee-sim internal/syntax + internal/proxy/response_analysis.go's
 // validateWriteSyntax @pin). For each file-writing tool call it detects the language from the
 // path and checks the content — Go through the real parser, other languages through a
-// bracket/string/truncation heuristic — deferring a correction when the content is broken.
+// bracket/string/truncation heuristic — retrying in place with a correction when the content is
+// broken (ActionRetry, the retry-in-place delivery of the amended C5, R1; see robustness.go).
 //
 // It runs after validate and before autofix (catalogue Table A): validate has already ruled out a
 // malformed call, and autofix's in-place formatting comes last. Broken content that reaches
@@ -44,8 +45,9 @@ func (syntaxMechanism) Ordering() domain.OrderingConstraints {
 	}
 }
 
-// PostResponse checks the syntax of every write tool call's content and, on any error, defers a
-// correction into the next request. A response with no correctable write content is a no-op.
+// PostResponse checks the syntax of every write tool call's content and, on any error, retries in
+// place with a correction — the loop re-streams the corrected request in the same Turn (R1). A
+// response with no correctable write content is a no-op.
 func (syntaxMechanism) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
@@ -55,7 +57,7 @@ func (syntaxMechanism) PostResponse(_ context.Context, resp *domain.Response) (d
 	if !hasIssues(issues) {
 		return domain.PostResponseDecision{}, nil
 	}
-	return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: buildCorrectionMessage(issues)}, nil
+	return domain.PostResponseDecision{Action: domain.ActionRetry, Inject: buildCorrectionMessage(issues)}, nil
 }
 
 // validateWriteSyntax collects the syntax problems across every write tool call whose content is

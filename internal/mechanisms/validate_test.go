@@ -18,14 +18,15 @@ func toolMenu() []domain.ToolDef {
 	}
 }
 
-// A call to a tool the model was never shown defers a correction naming the tool and the menu.
-func TestValidateUnknownToolDefersCorrection(t *testing.T) {
+// A call to a tool the model was never shown retries in place (R1) with a correction naming the
+// tool and the menu.
+func TestValidateUnknownToolRetriesWithCorrection(t *testing.T) {
 	t.Parallel()
 	resp := responseWith(toolMenu(), domain.ToolCall{ID: "c1", Tool: "frobnicate", Arguments: json.RawMessage(`{}`)})
 	decision := postResponse(t, validateID, resp)
 
-	if decision.Action != domain.ActionDefer {
-		t.Fatalf("Action = %q, want %q", decision.Action, domain.ActionDefer)
+	if decision.Action != domain.ActionRetry {
+		t.Fatalf("Action = %q, want %q", decision.Action, domain.ActionRetry)
 	}
 	if !strings.Contains(decision.Inject, `function "frobnicate" not in the tool set`) {
 		t.Errorf("Inject = %q, want it to flag the unknown tool", decision.Inject)
@@ -69,8 +70,8 @@ func TestValidateMalformedAndMissingArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			decision := postResponse(t, validateID, responseWith(toolMenu(), tt.call))
-			if decision.Action != domain.ActionDefer {
-				t.Fatalf("Action = %q, want %q", decision.Action, domain.ActionDefer)
+			if decision.Action != domain.ActionRetry {
+				t.Fatalf("Action = %q, want %q", decision.Action, domain.ActionRetry)
 			}
 			if !strings.Contains(decision.Inject, tt.want) {
 				t.Errorf("Inject = %q, want it to contain %q", decision.Inject, tt.want)

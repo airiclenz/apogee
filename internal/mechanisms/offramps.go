@@ -15,19 +15,23 @@ import (
 // — has no way out (CONTEXT "Off-ramp"). Exempt-from-suppression is not exempt-from-validation
 // (decision 13): their bench leave-one-out stays pending like everyone else's.
 //
-// Recovery action (the streaming-loop adaptation, catalogue C5 / item 5's precedent):
-//   - empty_response_recovery returns ActionRetry — the loop re-streams the request, giving the
-//     model another chance to produce a real reply. The empty reply carries nothing to defer a
-//     correction against, so an immediate reroll is the recovery. The loop's maxPostResponseRetries
-//     is the hard attempt cap (loop.go) so an always-empty model still terminates: after the cap
-//     the reply passes through as the Turn's final message. ActionRetry re-streams the SAME request
-//     — the sim's per-retry nudge/temperature escalation enriches the re-request and is a loop-level
-//     concern a post-response Mechanism cannot express today; recorded as a bench-pending refinement
-//     (D1 default-off).
-//   - tool_use_enforcer returns ActionDefer with the sim's correction text — the model DID reply
-//     (narration), so that reply is committed and the "use a tool" correction is injected role-safely
-//     into the next request, the streaming feed-forward path validate/syntax already use (C5). This
-//     delivers the sim's nudge text; the plan sanctions "retry/defer" for the enforcer.
+// Recovery action — retry-in-place (R1, the owner-ratified amendment of catalogue C5,
+// docs/plans/phase-4-review-fixes-plan.md): an ActionRetry{Inject} decision makes the loop
+// re-stream the corrected request in the SAME Turn, appending the superseded assistant message
+// (when non-empty) and the correction as a role-safe user message — request-scoped, never
+// committed to history — bounded by the loop's maxPostResponseRetries (loop.go).
+//   - empty_response_recovery returns ActionRetry{Inject: completionCheckNudge} — the sim's
+//     first-attempt nudge rides the retried request (empty_recovery.go @pin), giving the model a
+//     directed second chance. An always-empty model still terminates: at the cap the empty reply
+//     passes through as the Turn's final message. The sim's attempt-2 nudge ladder, its
+//     injectSystemDirective, its per-attempt temperature escalation, and its per-session throttle
+//     counters (2-cap/cooldown) are recorded bench-pending divergences (R2) — the shared loop cap
+//     substitutes for the throttles.
+//   - tool_use_enforcer returns ActionRetry{Inject: buildToolUseCorrection(...)} — the retried
+//     request carries the superseded narration plus the "use a tool" correction, exactly the
+//     sim's retryForToolUse exchange (tooluse_enforcer.go @pin). The narration never commits to
+//     history unless the cap passes the final response through; the sim's 3/session enforcer
+//     throttle is likewise subsumed by the loop cap (R2).
 const (
 	emptyResponseRecoveryID domain.MechanismID = "empty_response_recovery"
 	toolUseEnforcerID       domain.MechanismID = "tool_use_enforcer"
