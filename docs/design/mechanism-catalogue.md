@@ -135,7 +135,8 @@ consolidate or rename.
 
 ¹ The sim tracks `validate` indirectly: validation itself is untracked, but its **streaming
 deferred correction** is the exempt `feed_forward_correction` Mechanism. apogee folds that path
-into `validate`'s `ActionDefer` (C5), so the apogee `validate` Mechanism subsumes both.
+into `validate`'s `ActionRetry{Inject}` retry-in-place delivery (C5 as amended 2026-07-04), so
+the apogee `validate` Mechanism subsumes both.
 ² Context-shapers (`truncate_history`, `tool_result_cap`) are neither off-ramps nor
 response-repairs; classified `proactive-nudge` so Bypass disables them (D5) while the structural
 Budget + Compaction stay on (D6). Not a nudge to the model in the literal sense — the label
@@ -182,7 +183,7 @@ backstop.
 |---|---|---|---|
 | `codeinfo` | `codeinfo` (untracked) | **DROP** | Broad plan §2 deprioritized (modest effect, superseded by shell-out diagnostics). Sim A/B (gpt-oss-20b-MXFP4, `propagate-lookup-rename`, N=75/arm): full pipeline good-rate 54.7% vs 32.0% (+22.7pp, Fisher p=0.008) is multi-stage; the codeinfo-specific missed-call-site shape 37→30 is **not significant** (OR 0.69, p=0.32). Not ported. |
 | `intent` | — (helper) | **FOLD (helper)** | Shared intent classifier (`intent.go`), no hook/descriptor; ports inline with `cot`/`decompose`/`tool_use_enforcer`/`empty_response_recovery`/`library` (C6). |
-| `feed_forward_correction` | `feed_forward_correction` | **FOLD into `validate`** | The streaming deferred-correction delivery path; apogee expresses it as `ActionDefer{Inject}` held in conversation state (C5; hook-mutation-api §4.1). No standalone Mechanism. |
+| `feed_forward_correction` | `feed_forward_correction` | **FOLD into `validate`** | The streaming deferred-correction delivery path; apogee expresses it as `ActionRetry{Inject}` — retry-in-place, appended to the in-flight request (C5 as amended 2026-07-04; hook-mutation-api §4.1). No standalone Mechanism. |
 | `compress` | `context_compression` | **SPLIT (D6)** | → `tool_result_cap` (item 9, Mechanism) · generative Compaction (item 9, structural `context/`, on in Bypass, **not** a Mechanism) · `truncate_history` (item 7, Mechanism). External-client-compaction sniffing **DROPPED** (no external client — broad plan §4). |
 | `cot` | `cot` (Transform, untracked) | **SPLIT → `stall_nudge` / `list_nudge` / `tool_use_directive` (C4)** | The sim's `cot` Transform is not itself a tracked Mechanism — it emits the three tracked completion nudges (`internal/cot/cot.go`; desc `descriptor.go:63/70/77`). They port as three plain pre-request `proactive-nudge` Mechanisms in item 12. (Row added 2026-07-04, review-fixes item 6 — the SPLIT was decided in C4 but missing from this table.) |
 | `read_loop_detector`, `greenfield_read_loop_detector`, `successful_read_loop_detector` | same | **CONSOLIDATE → `read_loop`** | Three sim variants exist only to give each an independent suppression counter and are pairwise-incompatible (one fires per request). Folded into one apogee `read_loop` with internal branch selection (C2). |
