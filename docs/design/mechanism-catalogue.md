@@ -70,6 +70,22 @@ until bench-proven (D1).
   as `validate`/`syntax` returning `ActionDefer{Inject}` held in conversation state
   (`hook-mutation-api.md` §4.1; `PostResponseDecision.Inject` survives snapshot/resume). No
   standalone `feed_forward_correction` Mechanism.
+  **Amended 2026-07-04 (R1, `docs/plans/phase-4-review-fixes-plan.md` — owner-ratified):**
+  the delivery expression is `ActionRetry{Inject}` — retry-in-place — not `ActionDefer`. The
+  sim deferred only because its streaming proxy had already sent the response downstream and
+  could not unsay it; the apogee loop owns the stream and can reset it (`StreamResetEvent`
+  was built for exactly this). On ActionRetry the loop re-streams the corrected request **in
+  the same Turn**, appending to the in-flight request — request-scoped, never committed to
+  history — the superseded assistant message (text + tool calls, when non-empty) and then
+  the `Inject` text as a role-safe user correction, mirroring the sim's own retry builders
+  (`retryWithCorrection` `response_validator.go:366-391`, `retryForToolUse`
+  `tooluse_enforcer.go:59-83`, `retryForEmptyResponseWithStrategy`
+  `empty_recovery.go:131-176`), bounded by the loop's `maxPostResponseRetries = 3` (at the
+  cap the last response passes through). Table A `validate`'s "short-circuits cascade on
+  fail" becomes literally true via the retry semantics (ActionRetry short-circuits the
+  post-response cascade). `ActionDefer` keeps its next-request semantics and remains
+  available, but wave 1 no longer uses it. The fold's *substance* stands: still no
+  standalone `feed_forward_correction` Mechanism.
 - **C6 — `intent` is a shared helper, dropped as a Mechanism.** `internal/intent/intent.go` is
   an intent classifier (`HasActionIntent` / `HasAnalysisIntent` / `LastUserMessage`) consumed by
   `cot`, `decompose`, `tool_use_enforcer`, `empty_response_recovery`, and `library`. It fires no

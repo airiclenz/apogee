@@ -66,7 +66,7 @@ only that nothing of this plan's leaks outside its commit.
 
 ---
 
-## 1. Loop seam: ActionRetry carries the corrective exchange
+## 1. Loop seam: ActionRetry carries the corrective exchange — ✅ DONE (2026-07-04)
 
 **What:** implement R1 in `internal/domain` + `internal/agent`.
 Domain: `PostResponseDecision.Inject` doc changes to "the correction text — injected into

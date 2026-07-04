@@ -111,6 +111,19 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   C5) — the plan sanctions retry/defer for the enforcer, and the narration reply is committed so the
   correction rides forward. (`internal/mechanisms`.)
 
+### ActionRetry now carries the corrective exchange onto the retried request
+
+- **A post-response retry delivers its correction in the same Turn (R1, amending catalogue
+  C5).** `PostResponseDecision.Inject` now rides `ActionRetry` too: when a post-response
+  Mechanism retries with a correction, the loop appends the superseded assistant message
+  (text + tool calls, when non-empty) and then the correction as a role-safe user message
+  to the in-flight request before re-streaming — request-scoped, never committed to history
+  — mirroring apogee-sim's own retry builders. Corrections accumulate across attempts (the
+  sim's escalating re-asks), bounded by the existing `maxPostResponseRetries` cap; at the
+  cap the last response passes through. An `Inject`-less retry stays a bare re-stream, and
+  `ActionDefer` keeps its next-request semantics unchanged. (`internal/domain`,
+  `internal/agent`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

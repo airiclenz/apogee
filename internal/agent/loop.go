@@ -247,8 +247,15 @@ const (
 
 // respondAndReview streams one Upstream reply, parses its tool calls, builds the post-
 // response working value, and runs the post-response hooks — re-calling the Upstream in
-// place for an ActionRetry decision (bounded by maxPostResponseRetries). It returns the
-// reviewed *Response on turnOK, or nil with turnCancelled / turnFailed.
+// place for an ActionRetry decision (bounded by maxPostResponseRetries). A retrying
+// decision that carries a correction (Inject != "") re-streams a corrected request in the
+// same Turn (R1, amending catalogue C5): the superseded assistant message (text + tool
+// calls, when non-empty) and then the correction as a role-safe user message are appended
+// to the in-flight request — request-scoped, never committed to history — the exchange the
+// sim's retry builders carried. Corrections accumulate across attempts (each retry appends
+// onto the same request — the sim's escalating re-asks), bounded by the cap; at the cap
+// the last response passes through with no further append. It returns the reviewed
+// *Response on turnOK, or nil with turnCancelled / turnFailed.
 func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Request) (*domain.Response, turnOutcome) {
 	for attempt := 0; ; attempt++ {
 		reply := a.streamResponse(ctx, turn, req)
@@ -269,7 +276,7 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 		}
 
 		resp := a.assembleResponse(turn, req.View(), reply, nativeCalls)
-		retry, hookErr := a.runPostResponseHooks(ctx, turn, resp)
+		retry, inject, hookErr := a.runPostResponseHooks(ctx, turn, resp)
 		if hookErr != nil {
 			// A post-response hook panicked (recovered into an ErrorEvent): the model did
 			// reply, so proceed with the response as reviewed so far rather than abandon.
@@ -279,6 +286,13 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			// The Turn re-streams: tell observers the tokens emitted this attempt are
 			// superseded, so a streaming UI discards them before the retry streams afresh.
 			a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
+			if inject != "" {
+				// Carry the corrective exchange onto the retried request (R1): the
+				// superseded assistant message, then the correction as a role-safe user
+				// message. An Inject-less retry stays a bare re-stream of the request.
+				req.AppendSupersededAssistant(resp.Text(), resp.ToolCalls())
+				req.InjectContext(inject)
+			}
 			continue
 		}
 		return resp, turnOK

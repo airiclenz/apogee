@@ -111,9 +111,11 @@ func (a *Agent) firePreRequest(ctx context.Context, id domain.MechanismID, hook 
 // ActionIntercept is expressed by the hook mutating resp in place (SetText / SetToolCallArguments)
 // — the loop reads resp back afterward. ActionDefer schedules its correction into the next request
 // (held in conversation state so it survives a snapshot). ActionRetry asks the loop to re-call the
-// Upstream and short-circuits the remaining hooks. retry reports whether a re-call was requested;
-// err is non-nil only when a hook panicked (recovered).
-func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain.Response) (retry bool, err error) {
+// Upstream and short-circuits the remaining hooks. retry reports whether a re-call was requested,
+// and inject carries the retrying decision's correction text so respondAndReview can append the
+// corrective exchange to the retried request (R1); err is non-nil only when a hook panicked
+// (recovered).
+func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain.Response) (retry bool, inject string, err error) {
 	for _, m := range a.registry.Ordered(domain.HookPostResponse) {
 		if a.skipMechanism(m) {
 			continue
@@ -122,12 +124,12 @@ func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain
 		if !ok {
 			continue
 		}
-		wantRetry, fireErr := a.applyPostResponse(ctx, turn, m.Descriptor().ID, hook, resp)
+		wantRetry, retryInject, fireErr := a.applyPostResponse(ctx, turn, m.Descriptor().ID, hook, resp)
 		if fireErr != nil {
-			return false, fireErr
+			return false, "", fireErr
 		}
 		if wantRetry {
-			return true, nil
+			return true, retryInject, nil
 		}
 	}
 	for _, raw := range a.registry.Experimental(domain.HookPostResponse) {
@@ -135,37 +137,38 @@ func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain
 		if !ok {
 			continue
 		}
-		wantRetry, fireErr := a.applyPostResponse(ctx, turn, experimentalMechanismID, hook, resp)
+		wantRetry, retryInject, fireErr := a.applyPostResponse(ctx, turn, experimentalMechanismID, hook, resp)
 		if fireErr != nil {
-			return false, fireErr
+			return false, "", fireErr
 		}
 		if wantRetry {
-			return true, nil
+			return true, retryInject, nil
 		}
 	}
-	return false, nil
+	return false, "", nil
 }
 
 // applyPostResponse fires one post-response hook, emits its MechanismFiredEvent, and carries out
-// its decision: ActionRetry short-circuits the cascade (retry=true), ActionDefer schedules its
-// correction into the next request, and ActionIntercept (and the zero action) leaves the hook's
-// in-place mutation of resp untouched. err is non-nil only when the hook panicked (recovered).
-func (a *Agent) applyPostResponse(ctx context.Context, turn int, id domain.MechanismID, hook domain.PostResponseHook, resp *domain.Response) (retry bool, err error) {
+// its decision: ActionRetry short-circuits the cascade (retry=true) and surfaces its Inject as the
+// correction the loop carries onto the retried request (R1), ActionDefer schedules its correction
+// into the next request, and ActionIntercept (and the zero action) leaves the hook's in-place
+// mutation of resp untouched. err is non-nil only when the hook panicked (recovered).
+func (a *Agent) applyPostResponse(ctx context.Context, turn int, id domain.MechanismID, hook domain.PostResponseHook, resp *domain.Response) (retry bool, inject string, err error) {
 	decision, fireErr := a.firePostResponse(ctx, id, hook, turn, resp)
 	if fireErr != nil {
-		return false, fireErr
+		return false, "", fireErr
 	}
 	a.fired(turn, id, domain.HookPostResponse, string(decision.Action))
 	switch decision.Action {
 	case domain.ActionRetry:
-		return true, nil
+		return true, decision.Inject, nil
 	case domain.ActionDefer:
 		if decision.Inject != "" {
 			a.conv.Defer(decision.Inject)
 		}
 	}
 	// ActionIntercept (and the zero action): the hook already mutated resp; continue.
-	return false, nil
+	return false, "", nil
 }
 
 func (a *Agent) firePostResponse(ctx context.Context, id domain.MechanismID, hook domain.PostResponseHook, turn int, resp *domain.Response) (decision domain.PostResponseDecision, err error) {

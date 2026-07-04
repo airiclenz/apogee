@@ -66,14 +66,19 @@ type HistoryRewriter interface {
 
 // PostResponseDecision is the action a post-response Mechanism chooses (CONTEXT:
 // Post-response decision). ActionIntercept is expressed by mutating the *Response in
-// place (SetText / SetToolCallArguments) and carries no payload. ActionDefer carries
-// the role-safe correction text to inject into the *next* request — the
-// streaming-safe feed-forward path — held in conversation state as a Deferred
-// Response Action so it survives a snapshot boundary. ActionRetry carries nothing.
+// place (SetText / SetToolCallArguments) and carries no payload. ActionRetry re-calls
+// the Upstream in the same Turn; a non-empty Inject makes it a correction retry — the
+// loop re-streams the request with the superseded assistant message and the correction
+// appended, request-scoped, never committed to history (R1, amending catalogue C5).
+// ActionDefer carries the correction into the *next* request — the feed-forward path —
+// held in conversation state as a Deferred Response Action so it survives a snapshot
+// boundary.
 type PostResponseDecision struct {
 	Action PostResponseAction
-	// Inject is the correction text injected into the next request when Action ==
-	// ActionDefer (role-safe, like Request.InjectContext). Empty otherwise.
+	// Inject is the correction text — injected into the retried request for
+	// ActionRetry, or the next request for ActionDefer (role-safe, like
+	// Request.InjectContext). Empty carries no correction (for ActionRetry, a bare
+	// re-stream).
 	Inject string
 }
 

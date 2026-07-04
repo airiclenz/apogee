@@ -224,6 +224,9 @@ func (r *Response) SetText(s string)                   // rare; intercept the as
 
 ### 4.1 `PostResponseDecision` — pin the `ActionDefer` payload
 
+> **2026-07-04:** C5 amended (R1) → wave-1 corrections deliver by `ActionRetry{Inject}`
+> retry-in-place — `Inject` now rides ActionRetry too; see `mechanism-catalogue.md` §C5.
+
 `PostResponseDecision` (`apogee.go:430`) already enumerates Retry / Intercept / Defer. The
 survey grounds what each *carries*:
 

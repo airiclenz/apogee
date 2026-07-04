@@ -323,22 +323,46 @@ func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 	return true
 }
 
-// InjectContext inserts a user message at the role-safe position: before the last
-// user message, or appended to the system prompt if the conversation ends in a tool
-// result (a user message after a tool result breaks strict chat templates). With no
-// user message present it appends at the end.
+// InjectContext inserts a user message at the role-safe position: appended to the
+// system prompt if the conversation ends in a tool result (a user message after a
+// tool result breaks strict chat templates); appended at the end if it ends in an
+// assistant message (the retry-exchange shape — the correction answers the superseded
+// assistant message it follows, R1); otherwise inserted before the last user message.
+// With no user message present it appends at the end.
 func (r *Request) InjectContext(text string) {
 	if n := len(r.messages); n > 0 && r.messages[n-1].Role == RoleTool {
 		r.appendOrCreateSystem(text)
 		return
 	}
 	msg := Message{Role: RoleUser, Content: text}
+	if n := len(r.messages); n > 0 && r.messages[n-1].Role == RoleAssistant {
+		r.messages = append(r.messages, msg)
+		return
+	}
 	idx := lastIndex(r.messages, RoleUser)
 	if idx < 0 {
 		r.messages = append(r.messages, msg)
 		return
 	}
 	r.messages = insertMessage(r.messages, idx, msg)
+}
+
+// AppendSupersededAssistant appends a superseded assistant message (text + tool calls)
+// to the end of the request — the loop's retry-exchange seam (engine seam, R1), NOT a
+// hook-mutation primitive: on an ActionRetry correction the loop appends the response
+// it is retrying, then the correction via InjectContext, so the re-streamed request
+// carries the exchange the sim's retry builders carried. The append is request-scoped
+// — it is never committed to history. A wholly empty superseded response (empty text,
+// no calls) appends nothing. calls is copied, so the caller's slice stays independent.
+func (r *Request) AppendSupersededAssistant(text string, calls []ToolCall) {
+	if text == "" && len(calls) == 0 {
+		return
+	}
+	r.messages = append(r.messages, Message{
+		Role:      RoleAssistant,
+		Content:   text,
+		ToolCalls: append([]ToolCall(nil), calls...),
+	})
 }
 
 // SetMessageContent edits one message's content in place by index — tool-result
