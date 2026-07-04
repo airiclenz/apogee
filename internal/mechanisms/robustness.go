@@ -64,9 +64,14 @@ func buildCorrectionMessage(issues []robustnessIssue) string {
 	return b.String()
 }
 
-// writeToolNames is apogee-sim's write-tool set (internal/toolsets/toolsets.go @pin): the tool
-// names syntax and autofix inspect for code content. A tool outside this set is not a file write,
-// so it carries no path/content to check or format.
+// writeToolNames is apogee-sim's write-tool set (internal/toolsets/toolsets.go @pin) and backs
+// semantic (a) of this package's TWO write-detection semantics: CONTENT REPAIR — "this call carries
+// a full file payload whose content can be syntax-checked/formatted" (syntax.go, autofix.go). A tool
+// outside this set is not a full-file write, so it carries no path/content to check or format. It is
+// deliberately NOT extended with apogee's own edit tools: their payloads are old/new-string fragments
+// or patches, not files, so syntax/autofix must never act on them (S1, 2026-07-04). Semantic (b) —
+// "this call mutated a file / was a write action" — is isFileMutatingTool below, the apogee-complete
+// superset the history family uses.
 var writeToolNames = map[string]bool{
 	"write_file":      true,
 	"writeFile":       true,
@@ -77,9 +82,20 @@ var writeToolNames = map[string]bool{
 	"replace_in_file": true,
 }
 
-// isWriteTool reports whether name is one of the file-writing tools whose content syntax and
-// autofix inspect.
+// isWriteTool reports whether name is one of the sim's full-file-writing tools whose content syntax
+// and autofix inspect — semantic (a), content-repair-only (see writeToolNames). It is NOT the "did
+// this call mutate a file" predicate; that is isFileMutatingTool.
 func isWriteTool(name string) bool { return writeToolNames[name] }
+
+// isFileMutatingTool reports whether name mutated a file / was a write action — semantic (b) of this
+// package's two write-detection semantics (see writeToolNames for (a)). It is the apogee-complete
+// superset: apogee-sim's writeToolNames UNION apogee's own edit tools (edit_existing_file,
+// single_find_and_replace, multi_find_and_replace; names verified against internal/tools), reusing
+// wave4WriteTools (decompose.go) as the single source of that superset. The history-family
+// Mechanisms — read_repeat, read_loop, cached_content_intercept, error_enrichment,
+// tool_loop_interceptor, the off-ramps, and deriveWriteTarget — use it so their write-since /
+// read-then-write / progress detection sees apogee's real edit menu, not just the sim spellings.
+func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
 
 // writePathContent extracts the file path and content a write tool call carries, matching the
 // sim's arg-shape handling (path or file_path; content). ok is false when the arguments are not a

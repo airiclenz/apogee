@@ -350,6 +350,16 @@ deciding by scanning the conversation across Turns at its **relocated** hook poi
   startup gate). In the post-response cascade the resolved dispatch order is
   `read_repeat → tool_loop_interceptor → validate → autofix → syntax` (the sim's response-side
   priority).
+- **Write detection now sees apogee's own edit tools (second-review fix).** The history family's
+  "did this call mutate a file / was it a write action" checks (`read_repeat`, `read_loop`,
+  `cached_content_intercept`, `error_enrichment`, `tool_loop_interceptor`, the off-ramps,
+  `deriveWriteTarget`) moved from the sim-only `isWriteTool` set to a new apogee-complete
+  `isFileMutatingTool` predicate that also counts `edit_existing_file` /
+  `single_find_and_replace` / `multi_find_and_replace`; the content-repair Mechanisms (`syntax`,
+  `autofix`) stay on the narrower sim-only set (their payloads are file fragments, not full files).
+  `open_file` joins the family read set (its result places file content in the conversation like
+  `read_file`). And `read_repeat` now collects each turn's write paths **before** its reads, so a
+  same-turn read-then-write to a path no longer counts that read as a redundant re-read.
 
 ### Wave 4: the `decompose` request shaper + the `stall_nudge` / `list_nudge` / `tool_use_directive` completion nudges
 

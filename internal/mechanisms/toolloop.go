@@ -167,7 +167,7 @@ func extractConversationContext(conv domain.ConversationView) conversationContex
 			switch {
 			case isReadTool(tc.Tool):
 				ctx.filesRead = appendUnique(ctx.filesRead, p)
-			case isWriteTool(tc.Tool):
+			case isFileMutatingTool(tc.Tool):
 				ctx.filesWritten = appendUnique(ctx.filesWritten, p)
 			}
 		}

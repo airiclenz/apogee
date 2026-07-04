@@ -113,7 +113,7 @@ func (errorEnrichmentMechanism) Ordering() domain.OrderingConstraints {
 func (errorEnrichmentMechanism) PostToolResult(_ context.Context, call domain.ToolCall, result *domain.ToolResult, view domain.LoopView) error {
 	// The current failure uses the authoritative flag; prior failures in history string-sniff,
 	// because the committed tool-result Message no longer carries IsError (hook-mutation-api §5).
-	if !result.IsError || !isWriteTool(call.Tool) {
+	if !result.IsError || !isFileMutatingTool(call.Tool) {
 		return nil
 	}
 	rawPath := toolCallPath(call.Arguments)
@@ -151,7 +151,7 @@ func priorWriteErrorMatches(conv domain.ConversationView, np, currentCallID stri
 			return true
 		}
 		for _, tc := range m.ToolCalls {
-			if tc.ID == currentCallID || !isWriteTool(tc.Tool) {
+			if tc.ID == currentCallID || !isFileMutatingTool(tc.Tool) {
 				continue
 			}
 			p := toolCallPath(tc.Arguments)

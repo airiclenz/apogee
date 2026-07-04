@@ -100,7 +100,7 @@ func isGreenfieldContext(conv domain.ConversationView) bool {
 		}
 		for _, tc := range m.ToolCalls {
 			switch {
-			case isWriteTool(tc.Tool):
+			case isFileMutatingTool(tc.Tool):
 				greenfield = false
 			case isReadTool(tc.Tool) && !resultIsReadError(conv, tc.ID):
 				greenfield = false
@@ -186,7 +186,7 @@ func detectSuccessfulReadLoopPaths(conv domain.ConversationView) map[string]int 
 			switch {
 			case isReadTool(tc.Tool) && !resultIsReadError(conv, tc.ID):
 				counts[np]++
-			case isWriteTool(tc.Tool) && counts[np] > 0:
+			case isFileMutatingTool(tc.Tool) && counts[np] > 0:
 				counts[np]--
 			}
 		}

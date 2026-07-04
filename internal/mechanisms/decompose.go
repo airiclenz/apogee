@@ -106,7 +106,9 @@ type decomposeComplexityResult struct {
 // written a file yet" — apogee-sim toolsets.WriteTools @pin extended with apogee's own write-tool
 // spellings (edit_existing_file / single_&_multi_find_and_replace), so the nudges fire on apogee's
 // real menu (the item-10 filehint precedent — apogee's read_file / list_dir / grep already appear
-// in the sim's read/list/search sets, so only the write set needs the apogee names added).
+// in the sim's read/list/search sets, so only the write set needs the apogee names added). It is the
+// apogee-complete file-mutation superset and doubles as the single source for isFileMutatingTool
+// (robustness.go, semantic (b) of write detection — S1, 2026-07-04): both point at this one set.
 var wave4WriteTools = map[string]bool{
 	"write_file": true, "writeFile": true, "write_to_file": true, "create_file": true,
 	"edit_file": true, "editFile": true, "replace_in_file": true,

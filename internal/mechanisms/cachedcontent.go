@@ -111,7 +111,7 @@ func priorSuccessfulReadUnchanged(conv domain.ConversationView, np, currentCallI
 				continue
 			}
 			switch {
-			case isWriteTool(tc.Tool):
+			case isFileMutatingTool(tc.Tool):
 				lastWrite = i
 			case isReadTool(tc.Tool) && !resultIsReadError(conv, tc.ID):
 				lastSuccessfulRead = i

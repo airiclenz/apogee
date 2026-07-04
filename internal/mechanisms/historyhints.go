@@ -19,9 +19,12 @@ import (
 //
 // This file carries the helpers the family shares. The read/write tool-name sets and the
 // path/error-content sniffers are ported from apogee-sim (internal/toolsets/toolsets.go,
-// internal/proxy/{read_loop_detector,error_enrichment,next_step}.go @pin); the read-tool set
-// (readToolNames / isReadTool / toolCallPath, offramps.go) and the write-tool set (writeToolNames
-// / isWriteTool, robustness.go) already live in the package and are reused here.
+// internal/proxy/{read_loop_detector,error_enrichment,next_step}.go @pin). The read-tool set
+// (readToolNames / isReadTool / toolCallPath, offramps.go) already lives in the package and is
+// reused here. Write detection has TWO semantics (robustness.go): the history family asks "did this
+// call mutate a file / was it a write action" and so uses isFileMutatingTool — the apogee-complete
+// superset that also carries apogee's own edit tools; only the content-repair Mechanisms (syntax,
+// autofix) use the narrower sim-only isWriteTool.
 
 // listToolNames is apogee-sim's list-tool set (internal/toolsets/toolsets.go ListTools @pin),
 // carrying apogee's own list_dir spelling alongside the sim's — the directory-listing calls
@@ -100,7 +103,7 @@ func writtenPaths(conv domain.ConversationView) map[string]bool {
 			return true
 		}
 		for _, tc := range m.ToolCalls {
-			if !isWriteTool(tc.Tool) {
+			if !isFileMutatingTool(tc.Tool) {
 				continue
 			}
 			if p := toolCallPath(tc.Arguments); p != "" {

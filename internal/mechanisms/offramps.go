@@ -37,11 +37,17 @@ const (
 	toolUseEnforcerID       domain.MechanismID = "tool_use_enforcer"
 )
 
-// readToolNames is apogee-sim's read-tool set (internal/toolsets/toolsets.go ReadTools @pin): the
-// tools whose calls count as a file read when the off-ramps measure recent progress.
+// readToolNames is apogee-sim's read-tool set (internal/toolsets/toolsets.go ReadTools @pin),
+// carrying apogee's own open_file spelling alongside the sim's: open_file's result places file
+// content into the conversation exactly like read_file (open_file.go renderOpenFile is read-only and
+// returns the file body), so it counts as a file read for the whole history family — matching the
+// cot/filehint/library read sets that already carry open_file (item-10 precedent). These are the
+// tools whose calls count as a file read when the off-ramps and the history family measure recent
+// progress / recent successful reads.
 var readToolNames = map[string]bool{
 	"read_file": true,
 	"readFile":  true,
+	"open_file": true,
 }
 
 // isReadTool reports whether name is one of the file-reading tools progress detection counts.
@@ -89,7 +95,7 @@ func wroteRecently(conv domain.ConversationView, window int) bool {
 		}
 		seen++
 		for _, tc := range m.ToolCalls {
-			if isWriteTool(tc.Tool) {
+			if isFileMutatingTool(tc.Tool) {
 				return true
 			}
 		}
@@ -140,7 +146,7 @@ func hasRecentProgress(conv domain.ConversationView) bool {
 		}
 		assistantCount++
 		for _, tc := range m.ToolCalls {
-			if isWriteTool(tc.Tool) {
+			if isFileMutatingTool(tc.Tool) {
 				hasWrites = true
 			}
 			if isReadTool(tc.Tool) {
