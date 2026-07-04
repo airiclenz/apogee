@@ -217,7 +217,20 @@ key is set or discovery succeeds.
 
 ---
 
-## 4. Library observe/inject content hygiene
+## 4. Library observe/inject content hygiene — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** (a) "keep the existing length cap" — `Store.Record` never had a content-length
+cap (the only 200-char cap lived in `observeSuccessfulComplexToolCalls`, which (b) replaces with
+parameter names, naturally short), so `SanitizeContent` applies NO length cap: adding an arbitrary one
+would both invent a magic number and break `TestLibraryInjectBudgetCap` (its ~700-char note must stay
+over the 200-token budget to be dropped). The inject-side token budget remains the size bound, stated
+in the helper doc. The helper is EXPORTED (`library.SanitizeContent`) because (c)'s render-time
+re-sanitize lives in the `mechanisms` package. (c) The data-not-instructions frame is folded into the
+existing header line (keeping `libraryInjectionMarker` as its prefix so `AppendToSystem` idempotency
+holds) rather than added as a separate line; wording differs from the item's illustrative "e.g." text.
+The (b) audit of other `Record` callers is satisfied structurally: sanitisation lives inside
+`Store.Record`, so every content string (validation-failure/hallucination messages, example shapes)
+is sanitized at record time; mechanism-authored constant notes pass through unchanged.
 
 **Finding:** review "Library store persists model-controlled text and re-injects it
 unsanitised into future system prompts" (High, Security). Ground truth: the review's attack

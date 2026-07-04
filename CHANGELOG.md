@@ -461,6 +461,16 @@ implementing BOTH hooks. Ported from apogee-sim's `library` observer/transform. 
   inject and observe halves share one identity, and a config without `library` reads no store file.
   Two agents on two `LibraryDir`s stay isolated (decision 11). Longitudinal bench validation
   (improves-over-sessions AND never-below-baseline) stays **pending**.
+- **Stored observations are now treated as untrusted data (second-review fix, Security).** Library
+  entries persist model- and tool-result-derived text and re-inject it into a future system prompt, so
+  the store is now hardened against a hostile-repo → store → system-prompt payload channel. A new
+  `library.SanitizeContent` strips control characters, folds CR/LF (and any whitespace) into single
+  spaces, and collapses runs; it runs at `Store.Record` time — so poison never lands on disk in
+  directive-capable form — **and** again when the injection block is rendered, defending stores written
+  before this landed. The complex-call "example" observer records only the call **shape** — the tool
+  name and its sorted parameter **names** — never argument **values**. The injected block's header now
+  opens with an explicit data-not-instructions frame so entries cannot read as directives. No store
+  schema bump (entries stay compatible). (`internal/library`, `internal/mechanisms`.)
 
 ### Bench-readiness proof: the embeddable two-arm contract is now a permanent regression
 

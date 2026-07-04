@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -133,6 +134,10 @@ func (s *Store) Record(fp domain.ModelFingerprint, cat Category, tags []string, 
 	if fp.IsZero() {
 		return ""
 	}
+
+	// Observation content is untrusted, model- or tool-result-derived text (item S4): sanitize it
+	// before it ever reaches disk so poison never lands on the store in directive-capable form.
+	content = SanitizeContent(content)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -313,6 +318,40 @@ func (s *Store) evictExcess() {
 	for i := 0; i < len(all)-defaultMaxEntries; i++ {
 		delete(s.entries, all[i].ID)
 	}
+}
+
+// SanitizeContent scrubs untrusted observation text into a single-line, directive-inert form
+// (item S4). Library entries persist model- and tool-result-derived strings and later re-inject
+// them into a system prompt, so an unsanitized entry is a hostile-repo → store → future-system-prompt
+// payload channel. It (1) strips control characters — so a stored note carries no ANSI/escape
+// sequences or embedded NULs; (2) folds every CR/LF (and any other whitespace) into a single
+// space — so a note can never open a fresh system-prompt line and masquerade as an instruction;
+// and (3) collapses whitespace runs, trimming the result. It applies no length cap: Store.Record
+// never capped content length (the only length cap lived in the mechanism's example-call observer,
+// which now records parameter names, not values), and the inject side's token budget remains the
+// size bound. It is applied at Record time (defends the store) and again at injection-render time
+// (defends pre-existing stores written before this defence landed).
+func SanitizeContent(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	prevSpace := false
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			// Fold every whitespace rune (incl. CR/LF/tab) into a single space, collapsing runs.
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		case unicode.IsControl(r):
+			// Drop other control characters entirely — they carry no display value.
+			continue
+		default:
+			b.WriteRune(r)
+			prevSpace = false
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // entryID is a stable, collision-resistant id for the (fingerprint, category, tags) triple:
