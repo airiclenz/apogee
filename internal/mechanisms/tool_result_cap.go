@@ -67,13 +67,14 @@ func (toolResultCapMechanism) Descriptor() domain.MechanismDescriptor {
 	}
 }
 
-// Ordering declares no constraints (catalogue Table A: "none — protects the most-recent Turn;
-// per-result 40%-budget cap"): tool_result_cap is the only pre-request shaper the loop carries at
-// item 9, so it has nothing to order against yet. The sim's "runs last among the pre-request
-// shapers" seed becomes live edges when items 10/12 add the other shapers (those items own their
-// order, D7).
+// Ordering declares tool_result_cap After decompose (§Ordering seed, ratified into Table A
+// 2026-07-04, review-fixes item 11 / option A): it trims tool results after the other pre-request
+// shapers assemble context, so it runs last among them. decompose is the last transform (the nudges
+// and library precede toolfilter, which precedes decompose), so an After-decompose edge pushes
+// tool_result_cap behind the whole shaper chain; filehint/grammar/read_loop are request-prep
+// injectors with no hard order and fall by the D4 ID tiebreak.
 func (toolResultCapMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
+	return domain.OrderingConstraints{After: []domain.MechanismID{decomposeID}}
 }
 
 // PreRequest caps each oversized tool result in req, protecting the most recent tool-call Turn.

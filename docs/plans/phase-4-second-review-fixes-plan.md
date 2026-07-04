@@ -449,7 +449,20 @@ mechanism views change.
 
 ---
 
-## 11. Catalogue ordering seeds vs Table A — DESIGN CALL, consult the owner first
+## 11. Catalogue ordering seeds vs Table A — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** OPTION A implemented per the owner's design call. Edges added: `Before toolfilter`
+on `stall_nudge`/`list_nudge`/`tool_use_directive` (cot.go) and `library` (library.go); `After decompose`
+on `tool_result_cap` (tool_result_cap.go). Table A cells amended with dated D7 ratification notes, plus a
+dated reconciliation note in §Ordering. The resulting-order pinning test lives in
+`internal/mechanisms/catalogue_test.go` (`TestPreRequestOrderingSeeds`) rather than the item's named
+`registry_ordered_test.go`/`mechanism_dispatch_test.go`: both of those use STUB mechanisms (domain
+white-box topo-sort / agent synthetic dispatch) and cannot pin the REAL catalogue's edges, which is the
+whole point of option A (rename-proof); catalogue_test.go already builds the real Mechanisms. Two existing
+descriptor tests (tool_result_cap_test.go, library_test.go) that asserted the old "none" ordering were
+updated to the new edges. Bench-readiness `[toolfilter decompose experimental]` expectation re-verified
+unchanged (library is enabled there but inject is confidence-gated, so it does not fire; toolfilter still
+sorts strictly before decompose).
 
 **Finding:** review "Catalogue contradicts itself on the pre-request ordering seeds; the
 sim's order holds only by alphabetical accident" (Medium, S6). Ground truth: catalogue

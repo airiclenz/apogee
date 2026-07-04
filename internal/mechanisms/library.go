@@ -120,9 +120,13 @@ func (*libraryMechanism) Descriptor() domain.MechanismDescriptor {
 	}
 }
 
-// Ordering declares no constraints (catalogue Table A `library`: "none"): the inject side shapes the
-// request independently of the other pre-request shapers, and the observe side is a pure reader.
-func (*libraryMechanism) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
+// Ordering declares library Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
+// review-fixes item 11 / option A): the inject side shapes the system prompt before toolfilter
+// narrows the tool menu, matching the sim's cot → library → filter Transform order. The observe
+// (post-response) side is a pure reader and carries no ordering edge.
+func (*libraryMechanism) Ordering() domain.OrderingConstraints {
+	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
+}
 
 // PreRequest injects qualifying observations into the system prompt when the fingerprint clears the
 // confidence gate (apogee-sim Injector.Transform @pin). It books a fire only when it actually injects

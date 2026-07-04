@@ -56,8 +56,8 @@ func TestLibraryDescriptorAndHooks(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering(); len(o.Before) != 0 || len(o.After) != 0 {
-		t.Errorf("Ordering = %+v, want none (catalogue Table A)", o)
+	if o := m.Ordering(); len(o.After) != 0 || len(o.Before) != 1 || o.Before[0] != toolFilterID {
+		t.Errorf("Ordering = %+v, want Before [toolfilter] (§Ordering seed, ratified into Table A 2026-07-04)", o)
 	}
 	if _, ok := domain.Mechanism(m).(domain.PreRequestHook); !ok {
 		t.Error("library does not implement PreRequestHook (the inject half)")

@@ -100,9 +100,13 @@ func (toolUseDirectiveMechanism) Descriptor() domain.MechanismDescriptor {
 	}
 }
 
-// Ordering declares no constraints (catalogue Table A: "none — fires only before first tool use").
+// Ordering declares tool_use_directive Before toolfilter (§Ordering seed, ratified into Table A
+// 2026-07-04, review-fixes item 11 / option A): the cot nudges shape the system prompt before
+// toolfilter narrows the tool menu, matching the sim's cot → filter Transform order. Rename-proof
+// and sim-faithful; the "fires only before first tool use" gate stays a runtime condition in
+// PreRequest, not an ordering edge.
 func (toolUseDirectiveMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
+	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }
 
 // PreRequest injects the tool-use directive when the user asked for an action (not analysis), tools
@@ -136,8 +140,12 @@ func (stallNudgeMechanism) Descriptor() domain.MechanismDescriptor {
 	}
 }
 
-// Ordering declares no positive edge (the incompatibility with list_nudge is the only constraint).
-func (stallNudgeMechanism) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
+// Ordering declares stall_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
+// review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows
+// the menu. The incompatibility with list_nudge is carried in the descriptor.
+func (stallNudgeMechanism) Ordering() domain.OrderingConstraints {
+	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
+}
 
 // PreRequest injects the stall directive when an action request has stalled — read-only for at least
 // the stall threshold of turns (but still within the nudge window), a write tool available
@@ -172,8 +180,12 @@ func (listNudgeMechanism) Descriptor() domain.MechanismDescriptor {
 	}
 }
 
-// Ordering declares no positive edge (the incompatibility with stall_nudge is the only constraint).
-func (listNudgeMechanism) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
+// Ordering declares list_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
+// review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows
+// the menu. The incompatibility with stall_nudge is carried in the descriptor.
+func (listNudgeMechanism) Ordering() domain.OrderingConstraints {
+	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
+}
 
 // PreRequest injects the list nudge when an analysis request has listed directories but read no
 // files (within the nudge window), with a read tool available and no file written (apogee-sim

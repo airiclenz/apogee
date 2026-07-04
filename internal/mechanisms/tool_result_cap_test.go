@@ -47,8 +47,8 @@ func TestToolResultCapDescriptorAndOrdering(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering(); len(o.Before) != 0 || len(o.After) != 0 {
-		t.Errorf("Ordering = %+v, want none (catalogue Table A)", o)
+	if o := m.Ordering(); len(o.Before) != 0 || len(o.After) != 1 || o.After[0] != decomposeID {
+		t.Errorf("Ordering = %+v, want After [decompose] (§Ordering seed, ratified into Table A 2026-07-04)", o)
 	}
 	if _, ok := m.(domain.PreRequestHook); !ok {
 		t.Error("tool_result_cap does not implement PreRequestHook")

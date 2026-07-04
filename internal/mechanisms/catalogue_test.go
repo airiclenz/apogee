@@ -125,6 +125,64 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	}
 }
 
+// TestPreRequestOrderingSeeds pins the pre-request dispatch order the §Ordering seeds declare
+// (review-fixes item 11 / option A, ratified into Table A 2026-07-04): the cot nudges and library
+// inject before toolfilter, toolfilter before decompose, and tool_result_cap runs last among the
+// pre-request shapers. It builds the REAL Mechanisms and topo-sorts them through the registry, so a
+// future rename or a dropped Before/After edge fails loudly here — the finding this item closes was
+// that the seeds lived only in catalogue prose, not in the code.
+func TestPreRequestOrderingSeeds(t *testing.T) {
+	t.Parallel()
+	deps := Deps{Library: library.NewStore(t.TempDir())}
+	// Every pre-request Mechanism, including the unordered request-prep injectors (filehint/grammar/
+	// read_loop), so the pin reflects the production registry. stall_nudge and list_nudge are
+	// IncompatibleWith each other and never co-enabled in production, but Ordered is a pure topo-sort
+	// that does not gate on incompatibility, so registering both here only exercises their shared
+	// Before edge.
+	ids := []domain.MechanismID{
+		"toolfilter", "decompose", "tool_result_cap",
+		"stall_nudge", "list_nudge", "tool_use_directive", "library",
+		"filehint", "grammar", "read_loop",
+	}
+	reg := domain.NewMechanismRegistry()
+	for _, id := range ids {
+		m, err := Build(id, deps)
+		if err != nil {
+			t.Fatalf("Build(%q): %v", id, err)
+		}
+		if err := reg.Add(m); err != nil {
+			t.Fatalf("Add(%q): %v", id, err)
+		}
+	}
+
+	ordered := reg.Ordered(domain.HookPreRequest)
+	if len(ordered) != len(ids) {
+		t.Fatalf("Ordered(pre-request) returned %d Mechanisms, want %d", len(ordered), len(ids))
+	}
+	pos := make(map[domain.MechanismID]int, len(ordered))
+	for i, m := range ordered {
+		pos[m.Descriptor().ID] = i
+	}
+
+	// Every cot nudge and library injects before toolfilter narrows the menu.
+	for _, before := range []domain.MechanismID{"stall_nudge", "list_nudge", "tool_use_directive", "library"} {
+		if pos[before] >= pos["toolfilter"] {
+			t.Errorf("%s@%d is not before toolfilter@%d", before, pos[before], pos["toolfilter"])
+		}
+	}
+	// The transform chain: toolfilter before decompose before tool_result_cap.
+	if !(pos["toolfilter"] < pos["decompose"] && pos["decompose"] < pos["tool_result_cap"]) {
+		t.Errorf("want toolfilter@%d < decompose@%d < tool_result_cap@%d",
+			pos["toolfilter"], pos["decompose"], pos["tool_result_cap"])
+	}
+	// tool_result_cap runs last among the pre-request shapers (§Ordering: it trims after context is
+	// assembled), which here means the final position overall — the injectors are in-degree-0 and
+	// emit early, so nothing sorts after tool_result_cap.
+	if last := ordered[len(ordered)-1].Descriptor().ID; last != "tool_result_cap" {
+		t.Errorf("last pre-request Mechanism = %q, want tool_result_cap (runs last among shapers)", last)
+	}
+}
+
 // knownList renders "(none)" for the empty catalogue rather than a dangling tail.
 func TestKnownListEmptyRendersNone(t *testing.T) {
 	t.Parallel()

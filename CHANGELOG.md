@@ -350,6 +350,14 @@ on the public surface — so this is a **minor** bump, not a major one.
   (`filehint`) holds the sim's `listFiles` — completing the item-10 "plus the sim spellings" claim so
   a mixed MCP menu with camelCase tool names still narrows and hints. (The write-tool and file-read
   sets already carried every sim spelling.) (`internal/mechanisms`.)
+- **The sim-seeded pre-request ordering edges are now declared (second-review fix).** The catalogue's
+  §Ordering seeds are now live `OrderingConstraints`, not just prose: the `cot` nudges (`stall_nudge`,
+  `list_nudge`, `tool_use_directive`) and `library` inject `Before toolfilter`, and `tool_result_cap`
+  runs `After decompose` — so it sorts last among the pre-request shapers, trimming tool results after
+  context is assembled. Previously the order rested on the D4 ID tiebreak alone, which matched the sim
+  for the nudges/library but sorted `tool_result_cap` *before* `toolfilter`. Table A's "none" cells
+  were amended per D7 to record the edges, so §Ordering, Table A, and the code now agree, and a
+  regression test pins the resulting order. (`internal/mechanisms`, `docs/design/mechanism-catalogue.md`.)
 
 ### Wave 3: the history-aware `error_enrichment` / `read_loop` / `read_repeat` / `tool_loop_interceptor` / `cached_content_intercept` family
 

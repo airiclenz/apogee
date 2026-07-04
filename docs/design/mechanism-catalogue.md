@@ -120,7 +120,7 @@ consolidate or rename.
 | `autofix` | (untracked analyzer) | `internal/autofix/{autofix,formatters}.go` | post-response | response-repair | strikes-3 | After `validate`; Before `syntax` (repair precedes correction — sim `response_analysis.go:72-88`; in-process gofmt always; external formatters LookPath-cached at construction) |
 | `correct_tool_result` | `correct_tool_result` (lab-only) | `internal/sim/intervention.go:22,94` | post-tool-result | response-repair | strikes-3 | none — **DEFERRED (owner-ratified 2026-07-04): not ported — no production trigger in the source; the bench experiments via an experimental post-tool-result hook (see Table B)** |
 | `truncate_history` | `truncate_history` (lab-only) | `internal/sim/intervention.go:23,99` | history-rewrite | proactive-nudge² | strikes-3 | none — cut only at `AssistantBoundaries()`, never `PrefixEnd()` |
-| `tool_result_cap` | `context_compression` (cap half) | `internal/compress/compress.go` (`capToolResults` `:428/431`) | pre-request | proactive-nudge² | strikes-3 | none — protects the most-recent Turn; per-result 40%-budget cap |
+| `tool_result_cap` | `context_compression` (cap half) | `internal/compress/compress.go` (`capToolResults` `:428/431`) | pre-request | proactive-nudge² | strikes-3 | After `decompose` — runs last among pre-request shapers (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); protects the most-recent Turn; per-result 40%-budget cap |
 | `toolfilter` | `tool_filtering` | `internal/toolfilter/toolfilter.go:33,70` | pre-request | proactive-nudge | strikes-3³ | Before `decompose` (trim menu before user-msg rewrite) |
 | `filehint` | `file_hint` | `internal/filehint/filehint.go`; `internal/proxy/file_hint_detector.go`; desc `descriptor.go:130` | pre-request | proactive-nudge | strikes-3 | none (greenfield-suppressed internally) |
 | `grammar` | `grammar` | `internal/grammar/grammar.go`; `internal/proxy/proxy.go:625` | pre-request | proactive-nudge | strikes-3³ | none — backend-capability gated (D3; see Table C) |
@@ -128,10 +128,10 @@ consolidate or rename.
 | `read_loop` | `read_loop_detector` (+ greenfield/successful) | `internal/proxy/read_loop_detector.go`; desc `descriptor.go:89-109` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `cached_content_intercept`, `read_repeat` (C2 folds the 3 sim variants) |
 | `cached_content_intercept` | `cached_content_intercept` | `internal/proxy/cached_content_intercept.go`; desc `descriptor.go:110` | pre-tool-exec | proactive-nudge | strikes-3 | IncompatibleWith `read_loop`, `read_repeat` (relocated from request-prep) |
 | `decompose` | `prompt_decomposition` | `internal/decompose/decompose.go:89`; desc `descriptor.go:148` | pre-request | proactive-nudge | strikes-3 | After `toolfilter`; muted when `read_loop` has Fired (D2 — `Fired` query or ordering edge) |
-| `stall_nudge` | `stall_nudge` | `internal/cot/cot.go`; desc `descriptor.go:63` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `list_nudge`; 4-nudge cap |
-| `list_nudge` | `list_nudge` | `internal/cot/cot.go`; desc `descriptor.go:70` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `stall_nudge`; 3-nudge cap |
-| `tool_use_directive` | `tool_use_directive` | `internal/cot/cot.go`; desc `descriptor.go:77` | pre-request | proactive-nudge | strikes-3 | none (fires only before first tool use) |
-| `library` | `library_injection` + observer | `internal/library/{transform,observer,store}.go` | pre-request (inject); **post-response (observe)** — hook point decided 2026-07-04, item 14 | proactive-nudge | strikes-3⁴ | none — confidence gates injection; fully inert in Bypass (inject **and** observe) |
+| `stall_nudge` | `stall_nudge` | `internal/cot/cot.go`; desc `descriptor.go:63` | pre-request | proactive-nudge | strikes-3 | Before `toolfilter` (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); IncompatibleWith `list_nudge`; 4-nudge cap |
+| `list_nudge` | `list_nudge` | `internal/cot/cot.go`; desc `descriptor.go:70` | pre-request | proactive-nudge | strikes-3 | Before `toolfilter` (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); IncompatibleWith `stall_nudge`; 3-nudge cap |
+| `tool_use_directive` | `tool_use_directive` | `internal/cot/cot.go`; desc `descriptor.go:77` | pre-request | proactive-nudge | strikes-3 | Before `toolfilter` (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); fires only before first tool use |
+| `library` | `library_injection` + observer | `internal/library/{transform,observer,store}.go` | pre-request (inject); **post-response (observe)** — hook point decided 2026-07-04, item 14 | proactive-nudge | strikes-3⁴ | Before `toolfilter` (inject) — ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule; confidence gates injection; fully inert in Bypass (inject **and** observe) |
 
 ¹ The sim tracks `validate` indirectly: validation itself is untracked, but its **streaming
 deferred correction** is the exempt `feed_forward_correction` Mechanism. apogee folds that path
@@ -205,6 +205,14 @@ low-confidence metadata label does not inject); observe records on any identifie
 The catalogue records the sim's declared orders so item 2's deterministic topo-sort
 (stable tiebreak by canonical ID, D4) has a grounded seed. These are *declared* Before/After
 edges, not the total order (the loop computes that).
+
+**Ratified 2026-07-04 (review-fixes item 11 / option A):** the pre-request seeds below are now
+*live* code edges (`OrderingConstraints`) — the `cot` nudges (`stall_nudge`, `list_nudge`,
+`tool_use_directive`) and `library` declare `Before toolfilter`, and `tool_result_cap` declares
+`After decompose` (so it sorts last among the shapers). The matching Table A cells, which read
+"none" through item 12, were amended per D7 to record these edges, so §Ordering, Table A, and the
+code now agree; the resulting order is pinned by `TestPreRequestOrderingSeeds`
+(`internal/mechanisms/catalogue_test.go`).
 
 - **Pre-request pipeline (sim Transform order, `catalogue.md` §Pipeline ordering):**
   `cot` → `library` → `codeinfo`(dropped) → `filter` → `decompose` → `compress`(split).
