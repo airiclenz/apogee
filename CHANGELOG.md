@@ -282,6 +282,17 @@ on the public surface — so this is a **minor** bump, not a major one.
   overflows its window — decision 12), with a file-only `auto-compact: false` opt-out
   (`ContextConfig.CompactionEnabled`). The on-demand `/compact` is unaffected by the gate.
   (`internal/context`, `internal/agent`, `cmd/apogee`.)
+- **Auto-compaction is Exchange-boundary-only and saturates on an oversized prefix (second-review
+  fix).** The automatic trigger now also requires **not** `inExchange`: a mid-Exchange over-budget
+  Turn (a tool continuation) defers the fold to the next Exchange opening rather than folding a
+  half-finished Turn into a summary (`tool_result_cap` is the mid-Exchange relief valve). A fold that
+  still cannot bring the history under its `History` allocation — the protected prefix (system prompt
+  + first user message) alone exceeds it — emits exactly one `compaction` `ErrorEvent` and then
+  **stands down** until the estimate drops back under the allocation (growth alone no longer thrashes
+  the fold every Turn); the on-demand `/compact` ignores saturation. And a mid-Exchange history
+  rewrite (`truncate_history`) now **repairs `exchangeStart`** by the drop delta, floored just past
+  the prefix + gap note, so `AbortExchange` (Esc) rolls back to exactly the Exchange boundary with no
+  orphaned tool results. (`internal/agent`.)
 
 ### Wave 3: the `toolfilter` / `filehint` / `grammar` request shapers
 

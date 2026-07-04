@@ -72,6 +72,7 @@ type Agent struct {
 	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
 	inExchange    bool                // true between Submit and the Step that completes the Exchange
 	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
+	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
 	exchangeStart int                 // conv length before this Exchange's first user message — the boundary AbortExchange rolls back to
 	turnIndex     int                 // 0-based index of the next Turn
 	approved      map[string]bool     // tools the human allowed for the rest of this Session

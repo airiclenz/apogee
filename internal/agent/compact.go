@@ -60,7 +60,10 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 // UsageEvent re-measures the reduced fill); a fault surfaces as an ErrorEvent and leaves the
 // conversation untouched (Compact's own guarantee), so a failed auto-fold never corrupts history and
 // the Turn proceeds with the full conversation. A cancellation is not a fault: the Turn's own stream
-// carries the cancel to a clean boundary.
+// carries the cancel to a clean boundary. Two S2 refinements govern WHEN it folds: the trigger is
+// Exchange-boundary-only (shouldAutoCompact's inExchange guard — a mid-Exchange over-budget Turn
+// defers to the next opening), and a successful fold that STILL leaves the history over its
+// allocation saturates the trigger (one ErrorEvent, then it stands down until the estimate drops).
 func (a *Agent) autoCompact(ctx context.Context, turn int) {
 	if a.compacting || !a.shouldAutoCompact() {
 		return
@@ -72,18 +75,60 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 			return // a cancel masquerades as a stream error; the Turn's main stream handles it
 		}
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "compaction", Err: err.Error()})
+		return
+	}
+	// S2 saturation: a successful fold that still leaves the history over its allocation cannot
+	// help — the protected prefix (leading system messages + the first user message) alone exceeds
+	// the History allocation. Latch the trigger off (compactSat) so the still-oversized history is
+	// not re-folded at every Exchange opening, and emit exactly one ErrorEvent naming the cause.
+	// shouldAutoCompact clears the latch once the estimate drops back under the allocation.
+	if a.historyExceedsAllocation() {
+		a.compactSat = true
+		a.cfg.Events.Emit(domain.ErrorEvent{
+			EventBase: a.base(turn),
+			Source:    "compaction",
+			Err: "compaction could not bring the history under its allocation: the protected prefix " +
+				"(system prompt + first user message) alone exceeds it; automatic folding is paused " +
+				"until the history estimate drops below the allocation",
+		})
 	}
 }
 
-// shouldAutoCompact reports whether the automatic Compaction trigger should fire: it is enabled
-// (cfg.Context.CompactionEnabled — the `auto-compact` key, on by default; the on-demand /compact
-// ignores this gate and always folds) AND the conversation's estimated token size has outgrown the
-// Budget's History allocation (internal/context.HistoryExceedsAllocation). A zero History allocation
-// (the window is unknown) never trips, so an unbudgeted Agent never auto-folds.
+// shouldAutoCompact reports whether the automatic Compaction trigger should fire. It fires only when
+// compaction is enabled (cfg.Context.CompactionEnabled — the `auto-compact` key, on by default; the
+// on-demand /compact ignores this gate and always folds), at an Exchange boundary (NOT inExchange —
+// S2), and when the history has outgrown its Budget History allocation
+// (internal/context.HistoryExceedsAllocation) AND the trigger is not saturated (compactSat). It
+// clears the saturation latch the moment the estimate falls back under the allocation, so growth
+// alone cannot re-trigger a fold that already proved it cannot help. A zero History allocation (the
+// window is unknown) never trips, so an unbudgeted Agent never auto-folds.
 func (a *Agent) shouldAutoCompact() bool {
 	if !a.cfg.Context.CompactionEnabled {
 		return false
 	}
+	// S2: auto-compaction is Exchange-boundary-only. At the top-of-step() placement inExchange is
+	// false only at an Exchange opening (before pendingInput is consumed), so a mid-Exchange
+	// over-budget Turn (a tool-continuation) defers the fold to the next opening — tool_result_cap
+	// is the mid-Exchange relief valve (D6). Folding mid-Exchange would leave the request ending in
+	// an assistant summary.
+	if a.inExchange {
+		return false
+	}
+	if !a.historyExceedsAllocation() {
+		a.compactSat = false // under the allocation again — a later overflow may fold afresh
+		return false
+	}
+	// Over the allocation: fold unless a prior fold already proved it cannot help (compactSat — an
+	// oversized protected prefix). Growth alone must not re-trigger while saturated; only dropping
+	// back under the allocation (cleared above) rearms the trigger.
+	return !a.compactSat
+}
+
+// historyExceedsAllocation reports whether the conversation's estimated token size has outgrown the
+// Budget's History allocation — the raw over-budget signal both the auto-fold trigger and the
+// post-fold saturation check read (internal/context.HistoryExceedsAllocation). A zero History
+// allocation (an unknown window) never trips.
+func (a *Agent) historyExceedsAllocation() bool {
 	return apogeectx.HistoryExceedsAllocation(a.budget().History, a.tokens, a.conv.Messages())
 }
 

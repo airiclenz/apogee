@@ -121,7 +121,17 @@ edit-tool calls (regression pin for S1's non-extension).
 
 ---
 
-## 2. Auto-compaction: Exchange-boundary guard, `exchangeStart` repair, fold saturation
+## 2. Auto-compaction: Exchange-boundary guard, `exchangeStart` repair, fold saturation — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** (c) The `exchangeStart` clamp is applied only on a SHRINK (`dropped > 0`),
+not unconditionally when `inExchange`. The plan's literal "afterwards, when `a.inExchange`, clamp(…)"
+corrupts `exchangeStart` on an Exchange-opening Turn: there the just-appended user message sits at
+`PrefixEnd()`, so a zero-drop clamp with floor `PrefixEnd()+1` has lo > hi (`min(max(…))` would then
+force `exchangeStart` past the user message). Guarding on a real shrink also avoids mis-shifting a
+hypothetical growing rewrite (no registered history-rewriter grows). Behaviour is identical to the
+intended repair for the truncate case the item targets. (b) Saturation is tracked as a boolean latch
+(`compactSat`) re-checked against the live estimate rather than caching a stale token number — same
+semantics, no drift.
 
 **Findings:** review "Auto-compaction fires mid-Exchange … also leaves `exchangeStart`
 stale" (High, found independently twice) + "Auto-compact thrashes when the protected prefix

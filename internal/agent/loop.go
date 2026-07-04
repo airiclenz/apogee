@@ -196,8 +196,21 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 
 	// History-rewrite hooks edit conversation state before it is projected (truncation,
 	// generative compaction). A recovered panic degrades the Turn with no Upstream call.
+	beforeRewrite := a.conv.Len()
 	if err := a.runHistoryRewriteHooks(ctx, turn); err != nil {
 		return a.abandonTurn(turn, start), nil
+	}
+	// exchangeStart repair (S2): a mid-Exchange history rewrite (truncate_history) drops the middle
+	// of the conversation, shifting the current Exchange's messages down. Re-anchor exchangeStart by
+	// the drop delta so AbortExchange still rolls back to this Exchange's boundary rather than
+	// over-dropping into the protected prefix or leaving orphaned tool results. The floor is just
+	// past the protected prefix + gap note (PrefixEnd()+1): after a truncation everything from there
+	// to Len is current-Exchange tail, so exchangeStart validly sits anywhere in that span. Only a
+	// shrink is repaired — a grow (no registered rewrite does this) would mis-shift, and on an
+	// Exchange-opening Turn a zero-drop clamp could wrongly push exchangeStart past the just-appended
+	// user message.
+	if dropped := beforeRewrite - a.conv.Len(); dropped > 0 && a.inExchange {
+		a.exchangeStart = min(max(a.exchangeStart-dropped, a.conv.PrefixEnd()+1), a.conv.Len())
 	}
 
 	// rollback marks the boundary a cancellation restores to: this Turn's assistant
