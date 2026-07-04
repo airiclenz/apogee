@@ -5,7 +5,7 @@
 **How to run:** `implement-plan docs/plans/phase-4-second-review-fixes-plan.md with skills: coding-standards`
 (the broad plan's standing requirement #1 makes `coding-standards` mandatory for every item).
 **Source of direction:** the 2026-07-04 six-lens review of the complete Phase 4
-(`code-review-2026-07-04.md`, repo root until item 12 files it) — 5 High / 9 Medium findings,
+(`docs/code-review-2026-07-04.md`, filed there by item 12) — 5 High / 9 Medium findings,
 no Critical; `docs/plans/archived/phase-4-detail-plan.md` (D1–D8) and
 `docs/plans/archived/phase-4-review-fixes-plan.md` (R1–R5) still bind;
 `docs/design/mechanism-catalogue.md` (composition); the pinned sim @
@@ -498,7 +498,17 @@ and the nudges are not armed in that test).
 
 ---
 
-## 12. Docs close-out (owning item for every cross-cutting doc amendment)
+## 12. Docs close-out (owning item for every cross-cutting doc amendment) — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** (b) The preflight filed the review as a handoff at
+`docs/handoffs/2026-07-04 - 01 - code-review.md` (committed `58887a7`), not at repo root as
+`code-review-2026-07-04.md`. So the literal `git mv code-review-2026-07-04.md docs/` is moot; item 12
+instead `git mv`s that handoff to `docs/code-review-2026-07-04.md` — the docs/-top-level architecture-
+review precedent (`docs/architecture-review-20260629-110828.html`) the item cites, a stable home the
+archive-handoffs skill will not relocate — and repoints the plan's header pointer there. (a) All items
+1–11 that warranted a CHANGELOG line have one under `[1.2.0]`; item 9 shipped as `docs(library):` with
+no CHANGELOG entry per its own NOTES, so none was added. `git tag -l` shows only v1.0.0/v1.1.0 — no
+`[Unreleased]` split needed. (c) ISSUES.md tracks none of this plan's findings — left untouched.
 
 **What:** the residue with exactly one owner (items above carry their own code-adjacent
 CHANGELOG lines in their commits).

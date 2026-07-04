@@ -525,6 +525,10 @@ Commit: `feat(mechanisms): port the history-aware error/read-loop hint family`.
   map-iteration order) so hints and keys are bench-reproducible. `error_enrichment` classifies prior
   failures by string (a committed tool-result `Message` drops `IsError`); the current failure uses
   the authoritative flag.
+- *Correction (2026-07-04).* The `cached_content_intercept` write-since check above (and the whole
+  family's write detection) was inert for apogee's own edit tools — it recognised only the sim's write
+  spellings, never `edit_existing_file` / the find-and-replace tools — until 2026-07-04, fixed by
+  phase-4-second-review-fixes item 1 (the apogee-complete `isFileMutatingTool` predicate).
 
 ---
 
