@@ -476,7 +476,7 @@ Commit: `feat(mechanisms): port the toolfilter/filehint request-shaper wave`.
 
 ---
 
-## 11. Wave 3 — history-aware hint family: `error_enrichment`, `read_loop`, `read_repeat`, `cached_content_intercept`
+## 11. Wave 3 — history-aware hint family: `error_enrichment`, `read_loop`, `read_repeat`, `cached_content_intercept` — ✅ DONE (2026-07-04)
 
 **What:** the cross-turn aggregators, at their **relocated** hook points per the
 catalogue: `error_enrichment` at post-tool-result (classifies read-vs-write errors from
@@ -494,6 +494,37 @@ normally (non-exempt).
 
 **Acceptance:** gates green; diff confined to `internal/mechanisms` + docs/CHANGELOG.
 Commit: `feat(mechanisms): port the history-aware error/read-loop hint family`.
+
+**NOTES (2026-07-04):** deviations from the item's literal text, all recorded here.
+- *Five members, not four.* The item title names four, but the catalogue Table B + ledger assign a
+  FIFTH — `tool_loop_interceptor` (inventory-missed, found in the checkout) — to item 11. Per D7 the
+  catalogue is authoritative for wave composition, so all five were ported/registered.
+- *Post-response cascade order follows the sim, not Table A.* The sim (`response_analysis.go:54-94`
+  @pin) checks repeat-reads → tool-loop → validate, earliest match short-circuiting, so `read_repeat`
+  and `tool_loop_interceptor` are HIGHER priority than `validate`. This contradicts catalogue Table
+  A's `read_repeat` "After validate" cell. Per D7 as amended (behaviour ground-truth is the pinned
+  source), `read_repeat` declares `Before [tool_loop_interceptor, validate]` and `tool_loop_interceptor`
+  `Before [validate]`, resolving to `read_repeat → tool_loop_interceptor → validate → autofix →
+  syntax`. The Table A defect (item 1, ✅ done) is on the report FOLLOW-UP line; the catalogue was NOT
+  self-amended (that needs owner ratification).
+- *`cached_content_intercept` fidelity gap (surfaced).* The sim rewrites the redundant read's RESULT
+  to an "already in context, proceed" stub (post-execution). apogee's pre-tool-exec surface can only
+  mutate the pending `*ToolCall` (no result-substitution / execution-skip primitive; adding one is
+  outside this item's confined diff), so the port expresses the same token-saving intent by CAPPING
+  the redundant read to a header-only slice (`max_lines` on the arguments) — the content is already
+  in context. The sim's directive text is not carried at this hook; that guidance is delivered by
+  `read_repeat` (the declared-incompatible alternative on the same symptom, C2). The cap couples to
+  the read-file arg schema and no-ops on a read tool lacking `max_lines`. Detection was strengthened
+  beyond the sim's `detectCachedReread` with a write-since check to honour the item's "unchanged path".
+  Default-off (D1), bench-gated — nothing un-vetted ships.
+- *`tool_loop_interceptor` throttles dropped (R2 precedent).* The sim's per-Session `ToolLoopCount`
+  threshold and 30s wall-clock cooldown are not ported; the loop's strikes-3 self-regulation +
+  `maxPostResponseRetries` substitute, and wall-clock time is meaningless in the deterministic bench.
+  Firing keys on the `isLoop` signal (response repeats the previous Turn's tool-call key).
+- *Determinism.* Read-loop / successful-read / repeat-read path lists are sorted (the sim used
+  map-iteration order) so hints and keys are bench-reproducible. `error_enrichment` classifies prior
+  failures by string (a committed tool-result `Message` drops `IsError`); the current failure uses
+  the authoritative flag.
 
 ---
 

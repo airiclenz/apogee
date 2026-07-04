@@ -304,6 +304,46 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
 - All three ship default **off** (D1), `proactive-nudge` / `strikes-3` (disabled under Bypass, D5;
   self-regulating), buildable via the `mechanisms:` config block. (`internal/mechanisms`.)
 
+### Wave 3: the history-aware `error_enrichment` / `read_loop` / `read_repeat` / `tool_loop_interceptor` / `cached_content_intercept` family
+
+The cross-turn aggregators, ported from the pinned apogee-sim source (catalogue Table A/B), each
+deciding by scanning the conversation across Turns at its **relocated** hook point. All ship default
+**off** (D1), `strikes-3` and non-exempt (so disabled under Bypass, D5), buildable via the
+`mechanisms:` block. (`internal/mechanisms`.)
+
+- **`error_enrichment`: repeated-error clarification at post-tool-result.** Ported from apogee-sim
+  `internal/proxy/error_enrichment` @pin and relocated to post-tool-result: when a write-tool call
+  fails, and the same file already failed the same way earlier this Session, it appends
+  category-specific guidance (syntax / import / type / build / permission / runtime) to the failing
+  result the model reads next. The current failure uses the authoritative `ToolResult.IsError`; prior
+  failures in history are string-classified (a committed tool-result message no longer carries the
+  flag). A marker keeps one hint per repeated-error episode.
+- **`read_loop`: the consolidated read-loop detector at pre-request.** Ported from apogee-sim
+  `internal/proxy/read_loop_detector` @pin, folding the sim's three variants (normal / greenfield /
+  successful) into one Mechanism (catalogue C2): a role-safe hint fires on repeated failed reads of
+  the same file (threshold 1 on an empty workspace, 2 otherwise) or three successful re-reads without
+  a write. The deterministic hint is its own idempotency marker.
+- **`read_repeat`: redundant re-read retry at post-response.** Ported from apogee-sim
+  `internal/proxy/read_repeat_interceptor` @pin: when the whole response only re-reads files already
+  read successfully in a recent Turn, it retries in place (`ActionRetry`, R1) with a "you already
+  read these, proceed" correction.
+- **`tool_loop_interceptor`: identical-repeat-turn detector at post-response.** Ported from apogee-sim
+  `internal/proxy/tool_loop_interceptor` @pin (inventory-missed, found in the checkout — catalogue
+  Table B): when the response repeats the previous Turn's exact tool-call key, it retries with a
+  loop-breaking directive. The sim's per-Session count threshold and 30s cooldown are dropped (R2 —
+  self-regulation and the loop retry cap substitute).
+- **`cached_content_intercept`: redundant-re-read cap at pre-tool-exec.** Ported from apogee-sim
+  `internal/proxy/cached_content_intercept` @pin and relocated to pre-tool-exec: a re-read of a file
+  already read successfully and unchanged since is capped to a header-only slice, reclaiming the
+  window the full re-dump would cost (the content is already in context). The sim rewrote the result
+  post-execution; pre-tool-exec has no result-substitution primitive, so the port expresses the same
+  token-saving intent through the pending call's arguments.
+- The re-read family (`read_loop` / `read_repeat` / `cached_content_intercept`) is pairwise
+  **incompatible** — at most one is enabled at a time (the sim's per-request exclusivity as an apogee
+  startup gate). In the post-response cascade the resolved dispatch order is
+  `read_repeat → tool_loop_interceptor → validate → autofix → syntax` (the sim's response-side
+  priority).
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
