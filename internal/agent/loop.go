@@ -89,6 +89,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		mode:       cfg.Mode, // seed the live, swappable mode from the construction config
 		textParser: textParser,
 		stripper:   stripper,
+		tracker:    newSelfRegulator(),
 	}, nil
 }
 
@@ -449,6 +450,9 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 // Submit); a tool-call Turn leaves the Exchange open (StatusTurnComplete — the next Step
 // calls the Upstream again with the tool results in context).
 func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus) domain.StepResult {
+	// Judge the completed Turn for self-regulation (plan item 3): its productivity strikes or
+	// clears the Mechanisms that fired, and advances or resets the global Turn Budget.
+	a.tracker.endTurn()
 	if status == domain.StatusExchangeComplete {
 		a.inExchange = false
 	}
@@ -461,6 +465,10 @@ func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus
 // Exchange ends (there is nothing to continue from) and the counter advances so resume
 // does not re-run the failed Turn.
 func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
+	// A faulted Turn (an Upstream fault or a recovered hook panic) produced no usable outcome, so
+	// self-regulation discards it WITHOUT judging — an infra fault neither strikes a Mechanism nor
+	// advances the Turn Budget, and this Turn's fires do not bleed into the next Turn's judgment.
+	a.tracker.discardTurn()
 	a.inExchange = false
 	a.turnIndex++
 	return domain.StepResult{Status: domain.StatusExchangeComplete, TurnIndex: turn, Elapsed: time.Since(start)}
@@ -479,6 +487,9 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 // result — both of which a strict chat template rejects). Clearing it here contradicted the
 // un-advanced turnIndex (which says "re-attempt"), opening that exact hole.
 func (a *Agent) cancelTurn(turn, rollback int, deferred []string, start time.Time) domain.StepResult {
+	// The Turn is rolled back and re-attempted on resume, so self-regulation discards it WITHOUT
+	// judging — the re-attempt repopulates the fired-this-Turn set and productivity from scratch.
+	a.tracker.discardTurn()
 	a.conv.DropRange(rollback, a.conv.Len())
 	a.restoreDeferred(deferred)
 	return domain.StepResult{Status: domain.StatusCancelled, TurnIndex: turn, Elapsed: time.Since(start)}
@@ -499,7 +510,7 @@ func (a *Agent) restoreDeferred(deferred []string) {
 // re-queue them. The request carries the tool menu (Plan-filtered) and a trivial Budget so
 // a hook can read them through req.View().
 func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
-	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn)
+	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
 	deferred, ok := a.conv.TakeDeferred()
 	if ok {
 		for _, inject := range deferred {
@@ -644,7 +655,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // and the Turn index. It is rebuilt per call from current state so a hook counting prior
 // failures across Turns sees up-to-date history.
 func (a *Agent) loopView(turn int) domain.LoopView {
-	return domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn).View()
+	return domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts).View()
 }
 
 // toProviderRequest drains the post-hook req onto the provider seam's wire shape — the

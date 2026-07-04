@@ -166,7 +166,7 @@ root re-exports if needed, + docs. Commit:
 
 ---
 
-## 3. Self-regulation: effectiveness tracking, Adaptive Suppression, Turn Budget
+## 3. Self-regulation: effectiveness tracking, Adaptive Suppression, Turn Budget — ✅ DONE (2026-07-04)
 
 **What:** the per-Session tracker behind `LoopView.Fired` and the two withdrawal rules
 (CONTEXT "Self-regulation"; decision 12 — these are proxy-signal heuristics, explicitly

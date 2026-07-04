@@ -53,6 +53,10 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 			return dispatchCancelled
 		}
 
+		// Feed this call's outcome to self-regulation's Turn-productivity signal (plan item 3): a
+		// new-file read or a successful write marks the Turn productive. Done before the
+		// post-tool-result hooks so their own fires are judged against the outcome they saw.
+		a.noteToolProductivity(call, result)
 		a.runPostToolResultHooks(ctx, turn, call, &result)
 		a.appendToolResult(turn, result)
 	}

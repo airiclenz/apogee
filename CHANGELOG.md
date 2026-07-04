@@ -35,6 +35,27 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   `ErrOrderingCycle`, so a config that enables two mutually-exclusive Mechanisms is refused
   rather than silently running both. (`internal/domain`, `internal/agent`, root re-exports.)
 
+### Mechanisms now self-regulate: effectiveness tracking, Adaptive Suppression, the Turn Budget
+
+- **A catalogued Mechanism that is not helping is now withdrawn for the rest of the
+  Session.** A per-Session tracker judges each Turn on proxy signals — a Turn is
+  **productive** when it reads a new file or writes one (a tool error or an empty/no-op
+  response is not). **Adaptive Suppression** (per Mechanism): a Mechanism that fires through
+  three consecutive non-productive Turns is skipped at dispatch for the rest of the Session,
+  with a clear-path that re-opens every Mechanism on the next productive Turn. **The Turn
+  Budget** (global): after eight consecutive non-productive Turns every non-exempt Mechanism
+  is withdrawn until productive activity resumes. A `SuppressionPolicy: exempt` off-ramp
+  bypasses both — suppressing it would leave a failed Turn with no way out (ADR 0006).
+- **`LoopView.Fired` finally answers.** The declared-but-inert per-Session fire counter now
+  reports real fires, read live within a hook pass (a Mechanism sees a peer's fire from
+  earlier in the same pass — the cross-Mechanism coupling seam). No new public surface: the
+  tracker is internal to `internal/agent`; `domain.NewRequest` gains a `fired` ledger
+  argument on the engine seam only.
+- **Reset on Resume.** The tracker is per-Session and not serialized: a resumed Agent starts
+  with clean suppression state (the accepted v1 posture — fresh state can only cause a
+  withdrawn Mechanism to be re-tried, never wrongly withheld). (`internal/agent`,
+  `internal/domain`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

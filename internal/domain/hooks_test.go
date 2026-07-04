@@ -16,7 +16,7 @@ func sysUserReq(t *testing.T) *Request {
 	return NewRequest("m", []Message{
 		{Role: RoleSystem, Content: "base"},
 		{Role: RoleUser, Content: "do it"},
-	}, nil, Budget{}, 0)
+	}, nil, Budget{}, 0, nil)
 }
 
 func roles(msgs []Message) []Role {
@@ -51,7 +51,7 @@ func TestRequestAppendToSystem(t *testing.T) {
 	})
 
 	t.Run("creates a system message when absent", func(t *testing.T) {
-		r := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0)
+		r := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0, nil)
 		if injected := r.AppendToSystem("[m1]", "[m1] new"); !injected {
 			t.Fatal("AppendToSystem did not inject when no system message existed")
 		}
@@ -83,7 +83,7 @@ func TestRequestInjectContext(t *testing.T) {
 			{Role: RoleUser, Content: "go"},
 			{Role: RoleAssistant, Content: "", ToolCalls: []ToolCall{{ID: "c1", Tool: "read"}}},
 			{Role: RoleTool, Content: "file body", ToolCallID: "c1"},
-		}, nil, Budget{}, 0)
+		}, nil, Budget{}, 0, nil)
 		r.InjectContext("note")
 		msgs := r.State().Messages
 		if len(msgs) != 4 {
@@ -95,7 +95,7 @@ func TestRequestInjectContext(t *testing.T) {
 	})
 
 	t.Run("appends at the end when there is no user message", func(t *testing.T) {
-		r := NewRequest("m", []Message{{Role: RoleSystem, Content: "base"}}, nil, Budget{}, 0)
+		r := NewRequest("m", []Message{{Role: RoleSystem, Content: "base"}}, nil, Budget{}, 0, nil)
 		r.InjectContext("note")
 		msgs := r.State().Messages
 		if len(msgs) != 2 || msgs[1].Role != RoleUser || msgs[1].Content != "note" {
@@ -162,7 +162,7 @@ func TestRequestView(t *testing.T) {
 		{Role: RoleUser, Content: "u1"},
 		{Role: RoleAssistant, Content: "a"},
 		{Role: RoleUser, Content: "u2"},
-	}, []ToolDef{{Name: "t"}}, budget, 7)
+	}, []ToolDef{{Name: "t"}}, budget, 7, nil)
 	v := r.View()
 
 	if r.Model() != "model-x" {
@@ -484,7 +484,7 @@ func TestConversationDeferSurvivesRoundTrip(t *testing.T) {
 	}
 
 	// Feed-forward: the drained corrections inject into the next request.
-	req := NewRequest("m", restored.Messages(), nil, Budget{}, 1)
+	req := NewRequest("m", restored.Messages(), nil, Budget{}, 1, nil)
 	for _, in := range injects {
 		req.InjectContext(in)
 	}

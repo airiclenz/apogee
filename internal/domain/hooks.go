@@ -248,20 +248,26 @@ type Request struct {
 	tools    []ToolDef
 	budget   Budget
 	turn     int
+	fired    map[MechanismID]int
 	sampling SamplingParams
 	extras   map[string]json.RawMessage
 }
 
 // NewRequest builds the pre-request working value from loop state (engine seam). The
 // messages and tools slices are copied, so a hook mutating the Request never reaches
-// back into the loop's conversation storage.
-func NewRequest(model string, messages []Message, tools []ToolDef, budget Budget, turn int) *Request {
+// back into the loop's conversation storage. fired, in contrast, is shared BY REFERENCE:
+// it is the loop's live per-Session fire ledger LoopView.Fired reads, so a Mechanism can
+// see a peer's fire from earlier in the same hook pass (the decompose↔read_loop coupling
+// seam). It is only ever read through the view — no view operation mutates it — so the
+// shared reference is safe. nil is fine (Fired then reports 0 for every Mechanism).
+func NewRequest(model string, messages []Message, tools []ToolDef, budget Budget, turn int, fired map[MechanismID]int) *Request {
 	return &Request{
 		model:    model,
 		messages: append([]Message(nil), messages...),
 		tools:    append([]ToolDef(nil), tools...),
 		budget:   budget,
 		turn:     turn,
+		fired:    fired,
 	}
 }
 
@@ -292,7 +298,7 @@ func (r *Request) State() RequestState {
 
 // View exposes the read-only conversation/tools/budget window.
 func (r *Request) View() LoopView {
-	return loopView{messages: r.messages, tools: r.tools, budget: r.budget, turn: r.turn}
+	return loopView{messages: r.messages, tools: r.tools, budget: r.budget, turn: r.turn, fired: r.fired}
 }
 
 // Model is the target model id (the Library keys its lookup on this).

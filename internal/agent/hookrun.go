@@ -18,15 +18,18 @@ import (
 // records each successful fire for attribution, under the firing Mechanism's ID (a
 // descriptor-less experimental hook carries the synthetic experimentalMechanismID).
 //
-// Bypass gate (D5): under cfg.Bypass every catalogued non-off-ramp Mechanism is skipped at
-// dispatch (proactive-nudge + response-repair off — ADR 0006), while the off-ramp recovery
-// guarantees still run. Experimental hooks are NEVER Bypass-gated — they are the bench's own
-// instruments. Adaptive self-regulation (per-Session suppression / the Turn Budget) is item 3;
-// this file adds only the deterministic order and the Bypass gate.
+// A catalogued Mechanism is skipped at dispatch when skipMechanism reports it off (selfreg.go):
+// the Bypass gate (D5) or self-regulation (Adaptive Suppression / the Turn Budget, D2). Under
+// cfg.Bypass every catalogued non-off-ramp Mechanism is skipped (proactive-nudge + response-repair
+// off — ADR 0006), while the off-ramp recovery guarantees still run; self-regulation withdraws a
+// Mechanism it has judged not-helpful (per-Session, exempt off-ramps bypass it). Experimental
+// hooks are NEVER gated by either — they are the bench's own instruments. Each successful fire is
+// booked through fired (the Session ledger LoopView.Fired reads + the productivity judgment input).
 
 // skipUnderBypass reports whether a catalogued Mechanism is switched off by Bypass: a
 // non-off-ramp catalogued Mechanism is skipped at dispatch, an off-ramp survives (D5). It
-// governs only catalogued Mechanisms; experimental hooks never consult it.
+// governs only catalogued Mechanisms; experimental hooks never consult it. skipMechanism
+// (selfreg.go) combines it with the self-regulation withdrawal.
 func (a *Agent) skipUnderBypass(m domain.Mechanism) bool {
 	return a.cfg.Bypass && m.Descriptor().Capability != domain.CapOffRamp
 }
@@ -36,7 +39,7 @@ func (a *Agent) skipUnderBypass(m domain.Mechanism) bool {
 // is the history. A recovered panic returns errHookPanicked so the Turn degrades.
 func (a *Agent) runHistoryRewriteHooks(ctx context.Context, turn int) error {
 	for _, m := range a.registry.Ordered(domain.HookHistoryRewrite) {
-		if a.skipUnderBypass(m) {
+		if a.skipMechanism(m) {
 			continue
 		}
 		hook, ok := m.(domain.HistoryRewriter)
@@ -73,7 +76,7 @@ func (a *Agent) fireHistoryRewrite(ctx context.Context, id domain.MechanismID, h
 // Upstream call (no assistant message).
 func (a *Agent) runPreRequestHooks(ctx context.Context, turn int, req *domain.Request) error {
 	for _, m := range a.registry.Ordered(domain.HookPreRequest) {
-		if a.skipUnderBypass(m) {
+		if a.skipMechanism(m) {
 			continue
 		}
 		hook, ok := m.(domain.PreRequestHook)
@@ -112,7 +115,7 @@ func (a *Agent) firePreRequest(ctx context.Context, id domain.MechanismID, hook 
 // err is non-nil only when a hook panicked (recovered).
 func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain.Response) (retry bool, err error) {
 	for _, m := range a.registry.Ordered(domain.HookPostResponse) {
-		if a.skipUnderBypass(m) {
+		if a.skipMechanism(m) {
 			continue
 		}
 		hook, ok := m.(domain.PostResponseHook)
@@ -176,7 +179,7 @@ func (a *Agent) firePostResponse(ctx context.Context, id domain.MechanismID, hoo
 func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.ToolCall) error {
 	view := a.loopView(turn)
 	for _, m := range a.registry.Ordered(domain.HookPreToolExec) {
-		if a.skipUnderBypass(m) {
+		if a.skipMechanism(m) {
 			continue
 		}
 		hook, ok := m.(domain.PreToolExecHook)
@@ -214,7 +217,7 @@ func (a *Agent) firePreToolExec(ctx context.Context, id domain.MechanismID, hook
 func (a *Agent) runPostToolResultHooks(ctx context.Context, turn int, call domain.ToolCall, result *domain.ToolResult) {
 	view := a.loopView(turn)
 	for _, m := range a.registry.Ordered(domain.HookPostToolResult) {
-		if a.skipUnderBypass(m) {
+		if a.skipMechanism(m) {
 			continue
 		}
 		hook, ok := m.(domain.PostToolResultHook)
@@ -260,9 +263,12 @@ func (a *Agent) recoverHook(turn int, id domain.MechanismID, errp *error) func()
 	}
 }
 
-// fired emits a MechanismFiredEvent for a successful fire, attributed to the firing Mechanism's
-// id (experimentalMechanismID for a descriptor-less experimental hook).
+// fired books a successful fire with self-regulation (the Session fire ledger LoopView.Fired
+// reads, and the fired-this-Turn set the Turn's productivity judges — plan item 3) and emits a
+// MechanismFiredEvent attributed to the firing Mechanism's id (experimentalMechanismID for a
+// descriptor-less experimental hook).
 func (a *Agent) fired(turn int, id domain.MechanismID, hook domain.HookPoint, action string) {
+	a.tracker.recordFire(id)
 	a.cfg.Events.Emit(domain.MechanismFiredEvent{
 		EventBase: a.base(turn),
 		Mechanism: id,

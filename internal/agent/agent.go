@@ -55,6 +55,11 @@ type Agent struct {
 	// before (its own mode governs).
 	liveMode func() domain.Mode
 
+	// tracker is the per-Session self-regulation state (effectiveness tracking, Adaptive
+	// Suppression, the Turn Budget — internal/agent/selfreg.go). It is NOT serialized: Resume
+	// rebuilds it fresh via newAgent, the accepted v1 reset-on-resume posture (plan item 3).
+	tracker *selfRegulator
+
 	conv          domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
 	inExchange    bool                // true between Submit and the Step that completes the Exchange
