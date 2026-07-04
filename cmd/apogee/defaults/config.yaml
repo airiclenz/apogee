@@ -87,6 +87,13 @@
 # way. Config-file only (no flag or env). Default: true.
 # auto-compact: true
 
+# The model's context window in tokens. Leave it unset and apogee discovers the window from the
+# server at startup — for a pinned model above too. Set it only when your server does not advertise
+# a window, or to start a pinned model offline. It drives the Budget and the automatic compaction
+# above: with no window known, both stay inactive and apogee says so once at startup. Config-file
+# only (no flag or env).
+# context-window: 32768
+
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false

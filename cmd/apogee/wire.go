@@ -53,6 +53,19 @@ func discoverUpstreamModel(ctx context.Context, endpoint string) (discoveredUpst
 	return discoveredUpstream{model: info.ActiveModel, contextWindow: info.ContextWindow}, nil
 }
 
+// contextWindowNotice returns the one-line startup notice to print when the context window is
+// unknown (0) while automatic Compaction is enabled — the Budget and the automatic fold both
+// bind against the window, so with none known they are inactive (item 3 / S3). It returns "" (no
+// notice) when the window is known or Compaction is off. Pure so the startup message is
+// table-testable without capturing os.Stderr.
+func contextWindowNotice(maxContextTokens int, compactionEnabled bool) string {
+	if maxContextTokens != 0 || !compactionEnabled {
+		return ""
+	}
+	return "apogee: context window unknown — automatic compaction and the Budget are inactive; " +
+		"set context-window: in config.yaml or let discovery run"
+}
+
 // ----------------------------------------------------------------------------
 // Root command body
 // ----------------------------------------------------------------------------
@@ -129,6 +142,13 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		fmt.Fprintln(os.Stderr, "apogee: WARNING — auto mode is running UNCONFINED "+
 			"(confine-to-workspace: false). This is safe only inside a VM/container; "+
 			"the dangerous-action guard is a footgun-net, not a security boundary.")
+	}
+
+	// When the context window is still unknown (discovery found none and no context-window: key
+	// was set) but automatic Compaction is on, the Budget and the fold have nothing to bind
+	// against — both silently do nothing. Say so once, and name the fix (item 3 / S3).
+	if notice := contextWindowNotice(cfg.Context.MaxContextTokens, cfg.Context.CompactionEnabled); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
 	}
 
 	// Connect the configured external MCP servers (P3.15) and surface their tools into the

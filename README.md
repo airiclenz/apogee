@@ -106,6 +106,12 @@ next request. It is structural and load-bearing — it stays on even under `--by
 — so it is on by default; set `auto-compact: false` (a file-only key) to manage the
 window yourself with `/compact` instead.
 
+The context **window** these budgets are measured against is discovered from the
+server at startup — for a pinned `model:` too. Set `context-window:` (a file-only
+key, in tokens) only when your server does not advertise a window, or to start a
+pinned model offline; with no window known, the Budget and automatic compaction stay
+inactive and apogee says so once at startup.
+
 ## Building from source
 
 **Prerequisites:** Go 1.26+ (the toolchain version pinned in `go.mod`).

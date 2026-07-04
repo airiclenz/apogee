@@ -293,6 +293,14 @@ on the public surface — so this is a **minor** bump, not a major one.
   rewrite (`truncate_history`) now **repairs `exchangeStart`** by the drop delta, floored just past
   the prefix + gap note, so `AbortExchange` (Esc) rolls back to exactly the Exchange boundary with no
   orphaned tool results. (`internal/agent`.)
+- **Context-window discovery for pinned models + a `context-window:` key (second-review fix).** A
+  configured `model:` no longer silently disables the Budget and automatic Compaction. Window
+  discovery is split out of `resolveModel` and now runs for a pinned model too — keeping the pinned
+  id but adopting the server's advertised window — and is **non-fatal**: a failed probe leaves the
+  window unknown with a one-line notice, so an offline pinned-model start still works (the no-model
+  path keeps its existing fatal semantics). A new file-only `context-window:` key (tokens) overrides
+  discovery and skips the probe. When the window is still unknown while Compaction is on, startup
+  prints one notice naming the consequence and the key. (`cmd/apogee`, `internal/domain` comment.)
 
 ### Wave 3: the `toolfilter` / `filehint` / `grammar` request shapers
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -15,6 +16,7 @@ import (
 
 func strptr(s string) *string { return &s }
 func boolptr(b bool) *bool    { return &b }
+func intptr(i int) *int       { return &i }
 
 // The precedence rule itself: a flag beats an env var beats the file beats the default,
 // resolved per field (phase-2 detail plan §4 P2.5).
@@ -78,6 +80,17 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "auto-compact is NOT set by env or flag (file-only)",
 			env:  layer{autoCompact: boolptr(false)},
 			flag: layer{autoCompact: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
+		},
+		{
+			name: "context-window is file-only (default 0 ⇒ discover)",
+			file: layer{contextWindow: intptr(65536)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, contextWindow: 65536},
+		},
+		{
+			name: "context-window is NOT set by env or flag (file-only)",
+			env:  layer{contextWindow: intptr(65536)},
+			flag: layer{contextWindow: intptr(65536)},
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
@@ -217,6 +230,24 @@ func TestApplyConfigAutoCompactOptOut(t *testing.T) {
 	}
 	if opts.autoCompact {
 		t.Error("opts.autoCompact = true; want the file's explicit false to opt out")
+	}
+}
+
+// The context-window config block parses into opts.contextWindow (item 3): a file-only key (no
+// flag/env) whose value is threaded through to ContextConfig.MaxContextTokens, overriding
+// discovery. This proves the config surface lands end-to-end.
+func TestApplyConfigContextWindow(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("context-window: 65536\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if opts.contextWindow != 65536 {
+		t.Errorf("opts.contextWindow = %d; want the file's explicit 65536", opts.contextWindow)
 	}
 }
 
@@ -496,6 +527,83 @@ func TestResolveModelDiscoveryErrorPropagates(t *testing.T) {
 	}
 	if opts.model != "" {
 		t.Errorf("opts.model = %q; want it left empty on failure", opts.model)
+	}
+}
+
+// A PINNED model (configured id) still gets its context window discovered — resolveModel
+// early-returns on the id, so resolveContextWindow probes for the window (item 3 / S3). The
+// pinned id is kept regardless; only the window is adopted, so the Budget is no longer disabled.
+func TestResolveContextWindowPinnedModelDiscovers(t *testing.T) {
+	t.Parallel()
+	discover := func(_ context.Context, endpoint string) (discoveredUpstream, error) {
+		if endpoint != "http://server" {
+			t.Errorf("discover called with endpoint %q; want the resolved endpoint", endpoint)
+		}
+		return discoveredUpstream{model: "server-says-other", contextWindow: 32768}, nil
+	}
+	opts := options{endpoint: "http://server", model: "m-pinned"}
+	resolveContextWindow(context.Background(), &opts, discover, func(string) {
+		t.Error("notify must not fire on a successful probe")
+	})
+	if opts.model != "m-pinned" {
+		t.Errorf("opts.model = %q; want the pinned id kept regardless of what the probe reports", opts.model)
+	}
+	if opts.contextWindow != 32768 {
+		t.Errorf("opts.contextWindow = %d; want the discovered window 32768", opts.contextWindow)
+	}
+}
+
+// Window discovery for a pinned model is NEVER fatal: a failed probe leaves the window unknown (0)
+// and emits a one-line notice, so an offline pinned-model start still works (item 3 / S3).
+func TestResolveContextWindowDiscoveryNonFatal(t *testing.T) {
+	t.Parallel()
+	discover := func(context.Context, string) (discoveredUpstream, error) {
+		return discoveredUpstream{}, errors.New("connection refused")
+	}
+	opts := options{endpoint: "http://server", model: "m-pinned"}
+	var notices []string
+	resolveContextWindow(context.Background(), &opts, discover, func(s string) { notices = append(notices, s) })
+	if opts.contextWindow != 0 {
+		t.Errorf("opts.contextWindow = %d; want 0 (window left unknown on a failed probe)", opts.contextWindow)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("notices = %v; want exactly one non-fatal notice", notices)
+	}
+	if !strings.Contains(notices[0], "context-window") {
+		t.Errorf("notice %q does not name the context-window key", notices[0])
+	}
+}
+
+// A context-window: key (opts.contextWindow already > 0) wins and skips the probe entirely — the
+// discoverer must not be called (item 3).
+func TestResolveContextWindowKeySkipsProbe(t *testing.T) {
+	t.Parallel()
+	discover := func(context.Context, string) (discoveredUpstream, error) {
+		t.Fatal("discover must not be called when a context-window is already configured")
+		return discoveredUpstream{}, nil
+	}
+	opts := options{endpoint: "http://server", model: "m-pinned", contextWindow: 8192}
+	resolveContextWindow(context.Background(), &opts, discover, func(string) {
+		t.Error("notify must not fire when the probe is skipped")
+	})
+	if opts.contextWindow != 8192 {
+		t.Errorf("opts.contextWindow = %d; want the configured key value preserved", opts.contextWindow)
+	}
+}
+
+// With no endpoint there is nothing to ask, so window discovery is a silent no-op (item 3).
+func TestResolveContextWindowNoEndpointNoOp(t *testing.T) {
+	t.Parallel()
+	discover := func(context.Context, string) (discoveredUpstream, error) {
+		t.Fatal("discover must not be called with no endpoint")
+		return discoveredUpstream{}, nil
+	}
+	opts := options{model: "m-pinned"}
+	resolveContextWindow(context.Background(), &opts, discover, func(string) {
+		t.Error("notify must not fire with no endpoint")
+	})
+	if opts.contextWindow != 0 {
+		t.Errorf("opts.contextWindow = %d; want 0 (no probe ran)", opts.contextWindow)
 	}
 }
 

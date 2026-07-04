@@ -25,7 +25,8 @@ type options struct {
 
 	// Resolved display values handed to the TUI (not bound to flags). hostAlias is the
 	// footer's friendly host name (config key, else the endpoint host); contextWindow is the
-	// active model's window in tokens, captured during model discovery (0 when unknown).
+	// active model's window in tokens — the context-window config key when set, else discovered
+	// from the server (for a pinned model too, item 3); 0 when still unknown.
 	hostAlias     string
 	contextWindow int
 
@@ -121,6 +122,11 @@ func newRootCommand(launch launcher) *cobra.Command {
 			} else if model != "" {
 				cmd.PrintErrln("apogee: discovered model", model, "at", opts.endpoint)
 			}
+			// Discover the context window even for a PINNED model (item 3): a configured model
+			// makes resolveModel early-return, but the Budget and automatic Compaction still need
+			// the window. A context-window: key (or a window learned during model discovery) skips
+			// the probe; a failure here is non-fatal, so an offline pinned-model start still works.
+			resolveContextWindow(cmd.Context(), &opts, discoverUpstreamModel, func(msg string) { cmd.PrintErrln(msg) })
 			return runRoot(cmd.Context(), opts, launch)
 		},
 	}

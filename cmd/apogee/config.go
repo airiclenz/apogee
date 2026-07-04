@@ -57,6 +57,13 @@ type settings struct {
 	// is unaffected by it (that always folds on request).
 	autoCompact bool
 
+	// contextWindow overrides the discovered model context window in tokens (item 3 / S3). File-only
+	// (no flag/env, like autoCompact) and default 0 ⇒ no override, so the CLI discovers the window
+	// from the server; a positive value wins and skips the probe (the escape hatch for a server that
+	// does not advertise its window, or an offline pinned-model start). It feeds
+	// ContextConfig.MaxContextTokens, which the Budget and automatic Compaction bind against.
+	contextWindow int
+
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), file-only
 	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
@@ -106,6 +113,11 @@ type layer struct {
 	// distinguishable from an absent key (which keeps the default true).
 	autoCompact *bool
 
+	// contextWindow is set only by the FILE layer (the window override is config'd, no flag/env —
+	// like autoCompact). A nil pointer means the source does not set a window, so resolution falls
+	// through to discovery; only a positive `context-window:` projects to a non-nil pointer.
+	contextWindow *int
+
 	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
 	// with no flag/env). A nil slice means the source does not configure servers (fall through).
 	mcpServers []mcp.ServerConfig
@@ -142,6 +154,9 @@ func resolveSettings(file, env, flag layer) settings {
 	}
 	if file.autoCompact != nil {
 		s.autoCompact = *file.autoCompact
+	}
+	if file.contextWindow != nil {
+		s.contextWindow = *file.contextWindow
 	}
 	s.mcpServers = file.mcpServers // file-only (P3.15); env/flag never set MCP servers
 	s.mechanisms = file.mechanisms // file-only (Phase 4); env/flag never enable Mechanisms
@@ -198,6 +213,12 @@ type fileConfig struct {
 	// so an explicit `auto-compact: false` is distinguishable from an absent key (default true).
 	// Compaction is structural (it stays on under Bypass), so this is the only way to turn it off.
 	AutoCompact *bool `yaml:"auto-compact"`
+	// ContextWindow overrides the discovered model context window in tokens (item 3 / S3). File-only
+	// (no flag/env), like auto-compact. Absent or ≤ 0 ⇒ the CLI discovers the window from the server
+	// (for a pinned model too); a positive value wins and skips the probe — the escape hatch for a
+	// server that does not advertise its window, or an offline pinned-model start. It feeds
+	// ContextConfig.MaxContextTokens, which the Budget and automatic Compaction bind against.
+	ContextWindow int `yaml:"context-window"`
 	// MCPServers configures external MCP servers to connect on startup (P3.15). Absent/empty ⇒
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
@@ -303,6 +324,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.AutoCompact != nil {
 		l.autoCompact = fc.AutoCompact
+	}
+	if fc.ContextWindow > 0 {
+		l.contextWindow = &fc.ContextWindow
 	}
 	if len(fc.MCPServers) > 0 {
 		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
@@ -443,6 +467,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.webSearchEndpoint = s.webSearchEndpoint
 	opts.useProjectSkills = s.useProjectSkills
 	opts.autoCompact = s.autoCompact
+	opts.contextWindow = s.contextWindow
 	opts.mcpServers = s.mcpServers
 	opts.profile = s.profile
 	opts.mechanisms = s.mechanisms
@@ -507,14 +532,16 @@ type discoveredUpstream struct {
 // (wire.go) probes /v1/models through the provider client.
 type modelDiscoverer func(ctx context.Context, endpoint string) (discoveredUpstream, error)
 
-// resolveModel fills opts.model (and opts.contextWindow) by asking the server when no model
-// was configured by any layer (flag, env, and file all empty) but an endpoint is known — so a single-model
-// server (e.g. llama.cpp's llama-server, which serves whatever model was loaded) runs with
-// no model set at all. It returns the discovered id ("" when discovery did not run) so the
-// caller can surface a one-line notice. A discovery failure is returned rather than
+// resolveModel fills opts.model (and, in the same probe, opts.contextWindow) by asking the server
+// when no model was configured by any layer (flag, env, and file all empty) but an endpoint is
+// known — so a single-model server (e.g. llama.cpp's llama-server, which serves whatever model was
+// loaded) runs with no model set at all. It returns the discovered id ("" when discovery did not
+// run) so the caller can surface a one-line notice. A discovery failure is returned rather than
 // swallowed: the user learns the server is unreachable or advertises no model, instead of
 // silently sending a model-less request. With no endpoint there is nothing to ask, so it is
-// a no-op — construction then surfaces the missing-endpoint error, the real problem.
+// a no-op — construction then surfaces the missing-endpoint error, the real problem. A PINNED
+// model early-returns here; its context window is resolved separately by resolveContextWindow
+// (item 3 / S3), so a configured model no longer disables the Budget.
 func resolveModel(ctx context.Context, opts *options, discover modelDiscoverer) (string, error) {
 	if opts.model != "" || opts.endpoint == "" {
 		return "", nil
@@ -526,6 +553,30 @@ func resolveModel(ctx context.Context, opts *options, discover modelDiscoverer) 
 				"set one with --model, APOGEE_MODEL, or model: in config.yaml", opts.endpoint, err)
 	}
 	opts.model = got.model
-	opts.contextWindow = got.contextWindow
+	if opts.contextWindow == 0 { // a context-window: key wins over what the server advertises
+		opts.contextWindow = got.contextWindow
+	}
 	return got.model, nil
+}
+
+// resolveContextWindow discovers the model context window when it is still unknown — including for
+// a PINNED model, whose configured id makes resolveModel early-return before it can probe (item 3 /
+// S3: a configured model must not silently disable the Budget and automatic Compaction). It is a
+// no-op when a context-window: key already supplied the window or model discovery already learned
+// it (opts.contextWindow > 0 — the key/probe wins and this probe is skipped), and when no endpoint
+// is known (nothing to ask). The pinned model id is kept regardless of what the probe reports; only
+// the window is adopted. Unlike model discovery this is NEVER fatal: a pinned-model user can start
+// offline, so a failed probe leaves the window unknown (0) and emits a one-line notice via notify —
+// the Budget then stays inactive, which runRoot surfaces once at startup.
+func resolveContextWindow(ctx context.Context, opts *options, discover modelDiscoverer, notify func(string)) {
+	if opts.contextWindow > 0 || opts.endpoint == "" {
+		return
+	}
+	got, err := discover(ctx, opts.endpoint)
+	if err != nil {
+		notify(fmt.Sprintf("apogee: context-window discovery from %s failed: %v; "+
+			"the Budget and automatic compaction stay inactive — set context-window: in config.yaml", opts.endpoint, err))
+		return
+	}
+	opts.contextWindow = got.contextWindow
 }

@@ -61,6 +61,37 @@ func TestDiscoverUpstreamModelUnreachable(t *testing.T) {
 	}
 }
 
+// The loud-zero notice fires exactly when the context window is unknown (0) while automatic
+// Compaction is on — the Budget and the fold then have nothing to bind against (item 3 / S3). It
+// is suppressed once a window is known (a context-window: key or successful discovery) or when
+// Compaction is off.
+func TestContextWindowNotice(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		maxTokens  int
+		compaction bool
+		wantNotice bool
+	}{
+		{name: "unknown window + compaction on → notice", maxTokens: 0, compaction: true, wantNotice: true},
+		{name: "unknown window + compaction off → silent", maxTokens: 0, compaction: false, wantNotice: false},
+		{name: "known window + compaction on → silent", maxTokens: 32768, compaction: true, wantNotice: false},
+		{name: "known window + compaction off → silent", maxTokens: 32768, compaction: false, wantNotice: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := contextWindowNotice(tt.maxTokens, tt.compaction)
+			if (got != "") != tt.wantNotice {
+				t.Errorf("contextWindowNotice(%d, %v) = %q; wantNotice = %v", tt.maxTokens, tt.compaction, got, tt.wantNotice)
+			}
+			if tt.wantNotice && !strings.Contains(got, "context-window") {
+				t.Errorf("notice %q does not name the context-window key", got)
+			}
+		})
+	}
+}
+
 func TestParseMode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

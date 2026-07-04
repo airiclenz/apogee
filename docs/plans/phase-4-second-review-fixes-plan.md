@@ -171,7 +171,16 @@ existing autocompact tests keep passing.
 
 ---
 
-## 3. Context-window discovery for pinned models + `context-window` key
+## 3. Context-window discovery for pinned models + `context-window` key — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** (a) "Split window resolution out of `resolveModel`" is done as an ADDITIVE
+split, not a full extraction: `resolveModel` still sets the window in its no-model path (that one
+probe returns both id and window — extracting it would force a second probe on the zero-config
+startup and break the existing `resolveModel` window assertion), now guarded by `if opts.contextWindow
+== 0` so a `context-window:` key wins. The new `resolveContextWindow` owns the PINNED path and
+self-guards on `opts.contextWindow > 0 || endpoint == ""`, so it fires the single extra probe only
+for a pinned model with no key — no redundant probe on the common no-model path. Both the discovery
+notice and the loud-zero notice name the `context-window` key.
 
 **Finding:** review "Pinning `model:` silently disables the entire Budget machinery" (High,
 independently verified). Ground truth: `cmd/apogee/config.go:518-531` (`resolveModel` early
