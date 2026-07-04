@@ -187,6 +187,24 @@ func TestToolFilterInertWithinLimit(t *testing.T) {
 	}
 }
 
+// An analysis-focused request keeps the read-only exploration tools whole even with a zero keyword
+// score, including the sim's camelCase readFile spelling on a mixed MCP menu (item-7 sim-spelling
+// carry). Without the analysis-keep protection a zero-scored readFile would be trimmed.
+func TestToolFilterKeepsCamelCaseReadFileOnAnalysisIntent(t *testing.T) {
+	t.Parallel()
+	tools := append(genericTools(30), domain.ToolDef{Name: "readFile", Description: "reads a file"})
+	// "analyze" trips hasAnalysisIntent; the word carries no affinity for readFile's name/desc, so
+	// only the analysis-keep set can save it.
+	msgs := []domain.Message{{Role: domain.RoleUser, Content: "analyze the project"}}
+	req := shaperRequest(msgs, tools)
+	if err := (toolFilterMechanism{}).PreRequest(context.Background(), req); err != nil {
+		t.Fatalf("PreRequest: %v", err)
+	}
+	if !nameSet(req.State().Tools)["readFile"] {
+		t.Error("analysis-intent narrowing dropped the sim's readFile spelling; the analysis-keep set must carry it")
+	}
+}
+
 func TestToolFilterBuildsFromCatalogue(t *testing.T) {
 	t.Parallel()
 	m, err := Build(toolFilterID, Deps{})

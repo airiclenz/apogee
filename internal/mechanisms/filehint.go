@@ -39,9 +39,10 @@ const fileHintMarker = "Based on the directory listing, these files are likely m
 
 // fileHintListTools / fileHintReadTools name the directory-listing and file-reading tools whose
 // interplay opens and closes a hint opportunity. apogee's own tools are list_dir / read_file; the
-// sim's list_files/list_directory/readFile spellings are kept so a mixed MCP menu still triggers.
+// sim's list_files/listFiles/list_directory listing and readFile reading spellings are kept so a
+// mixed MCP menu still triggers.
 var (
-	fileHintListTools = map[string]bool{"list_dir": true, "list_files": true, "list_directory": true}
+	fileHintListTools = map[string]bool{"list_dir": true, "list_files": true, "listFiles": true, "list_directory": true}
 	fileHintReadTools = map[string]bool{"read_file": true, "readFile": true, "open_file": true}
 )
 

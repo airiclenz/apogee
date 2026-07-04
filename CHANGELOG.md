@@ -336,6 +336,11 @@ on the public surface — so this is a **minor** bump, not a major one.
   today** (catalogue Table B). An existing `response_format` always wins.
 - All three ship default **off** (D1), `proactive-nudge` / `strikes-3` (disabled under Bypass, D5;
   self-regulating), buildable via the `mechanisms:` config block. (`internal/mechanisms`.)
+- **`toolfilter` / `filehint` carry the sim's camelCase spellings (second-review fix).** The
+  analysis-keep set (`toolfilter`) now also holds the sim's `readFile`, and the directory-listing set
+  (`filehint`) holds the sim's `listFiles` — completing the item-10 "plus the sim spellings" claim so
+  a mixed MCP menu with camelCase tool names still narrows and hints. (The write-tool and file-read
+  sets already carried every sim spelling.) (`internal/mechanisms`.)
 
 ### Wave 3: the history-aware `error_enrichment` / `read_loop` / `read_repeat` / `tool_loop_interceptor` / `cached_content_intercept` family
 

@@ -41,11 +41,13 @@ var toolFilterStopWords = map[string]bool{
 }
 
 // toolFilterAnalysisKeep are the read-only exploration tools kept regardless of keyword score when
-// the user's request is analysis-focused (apogee-sim toolfilter.go:57-62 @pin, mapped to apogee's
-// own tool names: list_dir/read_file/grep/open_file rather than the sim's list_files/readFile).
+// the user's request is analysis-focused (apogee-sim toolfilter.go:57-62 @pin). It carries apogee's
+// own tool names (list_dir/read_file/grep/open_file) alongside the sim's spellings
+// (list_files/list_directory/readFile/search_files) so a mixed MCP menu still triggers.
 var toolFilterAnalysisKeep = map[string]bool{
 	"list_dir": true, "list_files": true, "list_directory": true,
-	"read_file": true, "open_file": true, "grep": true, "search_files": true,
+	"read_file": true, "readFile": true, "open_file": true,
+	"grep": true, "search_files": true,
 }
 
 // toolFilterMechanism is the pre-request Mechanism that narrows the tool menu (catalogue Table A

@@ -317,7 +317,15 @@ existing cachedcontent tests keep passing.
 
 ---
 
-## 7. Item-10 sets: carry the dropped camelCase sim spellings
+## 7. Item-10 sets: carry the dropped camelCase sim spellings — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** Added the two named spellings — `readFile` to `toolFilterAnalysisKeep` and
+`listFiles` to `fileHintListTools` — and reworded both sets' doc comments (the toolfilter one had
+falsely claimed the sim spellings were mapped away). Scan result for the "add or NOTE" clause: the
+remaining sim-spelling sets are already complete against the pin — `fileHintReadTools` carries both
+`read_file`/`readFile` (sim `file_hint_detector.go:63`), and `fileHintWriteTools` carries all seven
+`toolsets.WriteTools` entries (sim `toolsets.go:9-16`). No other spelling was dropped, so nothing
+else to add.
 
 **Finding:** review "Item-10 NOTES claim 'plus the sim spellings' is incomplete" (Medium).
 Ground truth: sim `internal/toolfilter/toolfilter.go:59` (keeps `readFile` on analysis

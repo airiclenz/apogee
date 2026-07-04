@@ -150,6 +150,30 @@ func TestFileHintSuppressesGreenfieldCreation(t *testing.T) {
 	}
 }
 
+// The sim's camelCase listFiles spelling opens a hint opportunity just like list_dir does, so a
+// mixed MCP menu still triggers (item-7 sim-spelling carry). Mirrors TestFileHintInjectsRoleSafeHint
+// with the listing tool renamed.
+func TestFileHintInjectsForCamelCaseListFiles(t *testing.T) {
+	t.Parallel()
+	msgs := []domain.Message{
+		{Role: domain.RoleUser, Content: "fix the config in config.go"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "listFiles"}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: "main.go\nconfig.go\nserver.go"},
+	}
+	req := shaperRequest(msgs, nil)
+	before := req.Revision()
+
+	if err := (fileHintMechanism{}).PreRequest(context.Background(), req); err != nil {
+		t.Fatalf("PreRequest: %v", err)
+	}
+	if req.Revision() == before {
+		t.Fatal("a listFiles listing should open a hint opportunity")
+	}
+	if !hasMarker(req) {
+		t.Error("hint not injected for the camelCase listFiles spelling")
+	}
+}
+
 func TestFileHintBuildsFromCatalogue(t *testing.T) {
 	t.Parallel()
 	m, err := Build(fileHintID, Deps{})
