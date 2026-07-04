@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -59,6 +60,13 @@ type Agent struct {
 	// Suppression, the Turn Budget — internal/agent/selfreg.go). It is NOT serialized: Resume
 	// rebuilds it fresh via newAgent, the accepted v1 reset-on-resume posture (plan item 3).
 	tracker *selfRegulator
+
+	// tokens is the structural token accounting behind the Budget view: a chars→token estimator
+	// the loop calibrates against each Turn's server-reported usage (internal/context). Like the
+	// tracker it is per-Session and NOT serialized — a resumed Agent recalibrates from its first
+	// UsageEvent, reporting the default ratio and a zero Used until then. It is structural, not a
+	// Mechanism, so it stays live under Bypass (D5/D6).
+	tokens *apogeectx.TokenEstimator
 
 	conv          domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step

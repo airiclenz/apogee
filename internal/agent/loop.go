@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -20,12 +21,6 @@ import (
 // self-regulation). The constant itself lives in domain (R5, phase-4-review-fixes item 4)
 // so MechanismRegistry.Add can refuse a catalogued Mechanism claiming it.
 const experimentalMechanismID = domain.ExperimentalMechanismID
-
-// defaultCharsPerToken is the Phase-1 trivial chars→tokens estimate the Budget view
-// reports until real token accounting and the Budget allocator land (TDD §8 #8). No
-// Phase-1 hook reads the budget meaningfully; it is here so the value is usable rather
-// than a zero that a future Mechanism might divide by.
-const defaultCharsPerToken = 4.0
 
 // maxPostResponseRetries caps how many times an ActionRetry post-response decision may
 // re-call the Upstream within one Turn, so a response-repair hook that always retries
@@ -91,6 +86,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		textParser: textParser,
 		stripper:   stripper,
 		tracker:    newSelfRegulator(),
+		tokens:     apogeectx.NewTokenEstimator(),
 	}, nil
 }
 
@@ -386,6 +382,13 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 		case provider.DeltaDone:
 			out.finish = domain.FinishReason(delta.FinishReason)
 			if u := delta.Usage; u != nil {
+				// Calibrate the token accounting against the server's own count before surfacing
+				// it: the reported prompt tokens are the honest fill, and prompt-tokens vs the
+				// characters actually sent recomputes this model's chars→token ratio (bounded and
+				// smoothed), so LoopView.Budget() tracks the real tokenizer instead of a fixed
+				// guess (TDD §8 #8, plan item 8).
+				st := req.State()
+				a.tokens.Calibrate(apogeectx.PromptChars(st.Messages, st.Tools), u.PromptTokens)
 				// Surface the server's token accounting so a streaming observer can light up
 				// the context-usage gauge and time the completion for a tokens/sec readout. A
 				// server that omits usage sends no Usage here, so no event fires (events.go).
@@ -645,9 +648,23 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 	return b.String()
 }
 
-// budget reports the trivial Phase-1 context budget (no token accounting yet — TDD §8 #8).
+// budget reports the model's context Budget: the discovered window (n_ctx), the token accounting
+// the estimator has calibrated against server usage (an honest Used fill and chars→token ratio),
+// and the window Allocation the context reducers consume (internal/context.Allocate). It is
+// structural — read even under Bypass (D5/D6) — and advisory here: no request is reshaped by it
+// until the reducers land (plan item 9).
 func (a *Agent) budget() domain.Budget {
-	return domain.Budget{ContextLimit: a.cfg.Context.MaxContextTokens, CharsPerToken: defaultCharsPerToken}
+	window := a.cfg.Context.MaxContextTokens
+	alloc := apogeectx.Allocate(window, a.cfg.Context.ResponseReserve)
+	return domain.Budget{
+		ContextLimit:    window,
+		Used:            a.tokens.Used(),
+		CharsPerToken:   a.tokens.CharsPerToken(),
+		ResponseReserve: alloc.ResponseReserve,
+		SystemPrompt:    alloc.SystemPrompt,
+		FileContext:     alloc.FileContext,
+		History:         alloc.History,
+	}
 }
 
 // toolMenu builds the model's tool menu from the resolved registry (nil ⇒ no tools). In

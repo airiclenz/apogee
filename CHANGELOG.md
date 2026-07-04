@@ -236,6 +236,26 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   mutation API), so the bench plays the operator without a catalogued Mechanism; a bench-discovered
   trigger would motivate a new plan item. (`internal/mechanisms`; catalogue Table A/B.)
 
+### The Budget allocator + usage-calibrated token accounting make `LoopView.Budget()` honest
+
+- **`LoopView.Budget()` now reports honest token accounting.** The loop's former trivial
+  `defaultCharsPerToken = 4.0` estimate is replaced by a per-Session `TokenEstimator`
+  (`internal/context`) the loop **calibrates against server-reported usage**: each Turn, the
+  reported prompt tokens snap `Budget.Used` to the real context fill, and prompt-tokens vs the
+  characters actually sent recompute the chars→token ratio — bounded to a sane range `[2, 8]` and
+  smoothed (an exponential moving average) so the ratio converges toward the model's real
+  tokenizer across Turns while a single anomalous report cannot swing it. Uncalibrated (a fresh
+  or resumed Agent, before its first `UsageEvent`) it reports the default ratio and a zero `Used`.
+- **The Budget is now the single authority on how much room each part gets (CONTEXT: Budget).**
+  `internal/context.Allocate` splits the discovered context window (`n_ctx`) across a response
+  reserve and the prompt's parts — system prompt, file context, conversation history — with the
+  parts summing to the window exactly; an unknown window yields the zero allocation (treated as
+  unbounded). `domain.Budget` gains the advisory `ResponseReserve`/`SystemPrompt`/`FileContext`/
+  `History` fields (additive; the root `apogee.Budget` alias picks them up), which the item-9
+  context reducers will consume. It is **structural**, not a Mechanism: it stays live under
+  Bypass (D5/D6). Nothing in the request path is reshaped by it yet — the allocation is advisory
+  until the reducers land. (`internal/context`, `internal/agent`, `internal/domain`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

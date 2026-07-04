@@ -342,7 +342,7 @@ updated `catalogue_test.go`'s un-ported-ID sentinel (`truncate_history` → `dec
 
 ---
 
-## 8. Budget allocator + honest token accounting (structural, `internal/context`)
+## 8. Budget allocator + honest token accounting (structural, `internal/context`) — ✅ DONE (2026-07-04)
 
 **What:** the Budget from CONTEXT ("the single authority on how much room each part
 gets"): allocate the model's context window (provider-discovered `n_ctx`) across system
@@ -365,6 +365,16 @@ it).
 `feat(context): budget allocator with usage-calibrated token accounting`.
 
 **Depends on:** nothing in waves 5–7 (can run right after item 4 if resuming out of order).
+
+**NOTES (2026-07-04):** the item says "recompute the ratio from actual chars-sent (bounded to a
+sane range)"; the calibration recompute is implemented as a **bounded exponential moving average**
+(`calibrationWeight = 0.5`) rather than a hard set-to-sample, so the ratio "converges toward
+reported usage across simulated turns" (the acceptance criterion) while one anomalous usage report
+cannot swing it — the recompute-and-clamp is the sample the EMA folds in. Also surfaced the
+allocation on the `domain.Budget` view (advisory `ResponseReserve`/`SystemPrompt`/`FileContext`/
+`History` fields) so the Budget is genuinely "the single authority" reachable by item 9's consumers
+(item 9's diff is confined to mechanisms/context/agent/cmd, not domain — the domain surface must
+exist here); additive, no request behaviour changed.
 
 ---
 

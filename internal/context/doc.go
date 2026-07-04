@@ -8,6 +8,12 @@
 // prefix verbatim. The transcript the summary call carries is bounded to a character
 // budget derived from the discovered context window (keep the prefix + a budgeted tail,
 // elide the middle) so the call cannot overflow at exactly the high fill /compact exists
-// to relieve. Agent.Compact drives it on demand (the /compact command). Budget
-// allocation, the context builder, and tool-result capping remain scaffolds.
+// to relieve. Agent.Compact drives it on demand (the /compact command).
+//
+// Budget allocation and honest token accounting are implemented (Allocate, TokenEstimator):
+// Allocate splits the discovered context window across the parts of a request (response reserve,
+// system prompt, file context, history — the single authority CONTEXT names), and TokenEstimator
+// calibrates a chars→token ratio against each Turn's server-reported usage so LoopView.Budget()
+// reports an honest fill. They are advisory until the context reducers consume them: the automatic
+// Compaction trigger and tool-result capping remain scaffolds.
 package context

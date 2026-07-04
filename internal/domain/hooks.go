@@ -193,11 +193,26 @@ type ToolDef struct {
 }
 
 // Budget is the read-only context-budget view a hook reads to gate token-sensitive
-// behaviour (e.g. Library injection backs off as the window fills).
+// behaviour (e.g. Library injection backs off as the window fills, tool-result capping trims
+// a result to its fraction). It is the CONTEXT "Budget": the single authority on how much
+// room each part of a request gets. Its token accounting is calibrated against server-reported
+// usage (internal/context.TokenEstimator), so Used and CharsPerToken are honest measures rather
+// than a fixed guess.
 type Budget struct {
-	ContextLimit  int
-	Used          int     // estimated tokens used so far
-	CharsPerToken float64 // model-specific estimate
+	ContextLimit  int     // the model's full context window (n_ctx tokens); 0 when unknown
+	Used          int     // tokens the last server usage reported the prompt occupied; 0 until the first UsageEvent
+	CharsPerToken float64 // the chars→token ratio, calibrated against reported usage
+
+	// The window allocation (internal/context.Allocate): how many tokens of ContextLimit each
+	// part of a request may claim. ResponseReserve is held back for the reply; the rest is split
+	// across SystemPrompt, FileContext, and History (they sum to ContextLimit - ResponseReserve).
+	// Every field is 0 when the window is unknown. It is ADVISORY: the context reducers
+	// (tool-result capping, automatic Compaction) read it; nothing in the request path is
+	// reshaped by it here.
+	ResponseReserve int
+	SystemPrompt    int
+	FileContext     int
+	History         int
 }
 
 // LoopView is the read-only window every hook has onto loop state beyond its own
