@@ -1,0 +1,107 @@
+package mechanisms
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
+
+// The Wave-1 response-robustness Mechanisms (Phase-4 item 5): validate, syntax, and autofix,
+// ported from the pinned apogee-sim source (docs/design/mechanism-catalogue.md Table A). All
+// three are post-response Mechanisms with Capability response-repair and SuppressionPolicy
+// strikes-3, dispatched in the deterministic order validate → syntax → autofix.
+//
+// Correction delivery is by ActionDefer, not ActionRetry (catalogue C5). apogee streams every
+// reply live, so a bad tool call cannot be "retried in place" the way the sim's non-streaming
+// path re-called upstream with an appended correction; instead validate/syntax return
+// ActionDefer{Inject: correction}, which the loop holds in conversation state
+// (Conversation.Defer) and injects role-safely into the NEXT request — the sim's streaming
+// feed-forward path, and the fold of its feed_forward_correction Mechanism (C5). autofix repairs
+// in place: the loop dispatches a Response's tool calls only after post-response review, so a
+// formatter write-back via Response.SetToolCallArguments reaches the tool that runs.
+const (
+	validateID domain.MechanismID = "validate"
+	syntaxID   domain.MechanismID = "syntax"
+	autofixID  domain.MechanismID = "autofix"
+)
+
+// robustnessIssue is one problem validate or syntax found in a tool call — the correctable unit
+// buildCorrectionMessage renders into the model-facing feed-forward correction. context carries
+// the optional supporting lists the sim's message includes (available_tools, required_params).
+type robustnessIssue struct {
+	message string
+	context map[string]string
+}
+
+// hasIssues reports whether any correctable problem was found — the gate validate/syntax use to
+// decide between an ActionDefer correction and a no-op.
+func hasIssues(issues []robustnessIssue) bool { return len(issues) > 0 }
+
+// buildCorrectionMessage renders the model-facing feed-forward correction from the issues found,
+// ported verbatim from apogee-sim's buildCorrectionMessage (internal/proxy/response_validator.go
+// @pin) so a ported Mechanism speaks to the model in the wording its A/B measured.
+func buildCorrectionMessage(issues []robustnessIssue) string {
+	var b strings.Builder
+	b.WriteString("Your previous tool call had errors. Please fix and try again:\n")
+	for _, issue := range issues {
+		fmt.Fprintf(&b, "- %s\n", issue.message)
+		if tools, ok := issue.context["available_tools"]; ok {
+			fmt.Fprintf(&b, "  Available tools: %s\n", tools)
+		}
+		if params, ok := issue.context["required_params"]; ok {
+			fmt.Fprintf(&b, "  Required parameters: %s\n", params)
+		}
+	}
+	b.WriteString("Produce a valid tool call with correct JSON arguments, e.g.: {\"param\": \"value\"}")
+	return b.String()
+}
+
+// writeToolNames is apogee-sim's write-tool set (internal/toolsets/toolsets.go @pin): the tool
+// names syntax and autofix inspect for code content. A tool outside this set is not a file write,
+// so it carries no path/content to check or format.
+var writeToolNames = map[string]bool{
+	"write_file":      true,
+	"writeFile":       true,
+	"write_to_file":   true,
+	"create_file":     true,
+	"edit_file":       true,
+	"editFile":        true,
+	"replace_in_file": true,
+}
+
+// isWriteTool reports whether name is one of the file-writing tools whose content syntax and
+// autofix inspect.
+func isWriteTool(name string) bool { return writeToolNames[name] }
+
+// writePathContent extracts the file path and content a write tool call carries, matching the
+// sim's arg-shape handling (path or file_path; content). ok is false when the arguments are not a
+// JSON object or either field is absent/empty — the "nothing to check" case syntax/autofix skip.
+func writePathContent(args json.RawMessage) (path, content string, ok bool) {
+	var m map[string]any
+	if json.Unmarshal(args, &m) != nil {
+		return "", "", false
+	}
+	path, _ = m["path"].(string)
+	if path == "" {
+		path, _ = m["file_path"].(string)
+	}
+	content, _ = m["content"].(string)
+	if path == "" || content == "" {
+		return "", "", false
+	}
+	return path, content, true
+}
+
+// replaceContentArg returns args with its "content" field replaced by content — how autofix folds
+// the formatted payload back into a tool call's arguments before Response.SetToolCallArguments
+// writes it to the call the loop will dispatch. It preserves the call's other arguments.
+func replaceContentArg(args json.RawMessage, content string) (json.RawMessage, error) {
+	var m map[string]any
+	if err := json.Unmarshal(args, &m); err != nil {
+		return nil, err
+	}
+	m["content"] = content
+	return json.Marshal(m)
+}

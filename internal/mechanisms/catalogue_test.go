@@ -82,15 +82,25 @@ func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 	}
 }
 
-// The production catalogue ships EMPTY (D1 — no Mechanism ported until its wave): Build of any ID
-// is an unknown-ID error and KnownIDs is empty. Waves 5–14 flip this by adding rows.
-func TestProductionCatalogueStartsEmpty(t *testing.T) {
+// The production catalogue carries the ported Mechanisms and only those: Wave 1 (item 5)
+// registered validate/syntax/autofix, so each is buildable and KnownIDs reports it, while an ID no
+// wave has ported is still an unknown-ID error. Later waves add rows the same way.
+func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
-	if got := KnownIDs(); len(got) != 0 {
-		t.Errorf("KnownIDs() = %v; want empty until a wave adds a row", got)
+	known := make(map[domain.MechanismID]bool)
+	for _, id := range KnownIDs() {
+		known[id] = true
 	}
-	if _, err := Build("validate", Deps{}); err == nil {
-		t.Error("Build against the empty catalogue: want an unknown-ID error, got nil")
+	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix"} {
+		if !known[want] {
+			t.Errorf("KnownIDs() missing the Wave-1 Mechanism %q; got %v", want, KnownIDs())
+		}
+		if _, err := Build(want, Deps{}); err != nil {
+			t.Errorf("Build(%q): %v", want, err)
+		}
+	}
+	if _, err := Build("truncate_history", Deps{}); err == nil {
+		t.Error("Build of an un-ported ID: want an unknown-ID error, got nil")
 	}
 }
 

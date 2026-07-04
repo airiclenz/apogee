@@ -72,6 +72,27 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   `mechanisms:` block behaves exactly as before. (`cmd/apogee`, `internal/mechanisms`, README +
   starter `config.yaml`.)
 
+### Wave 1: the `validate` / `syntax` / `autofix` response-robustness Mechanisms
+
+- **The measured-win response cascade is ported.** Three post-response Mechanisms — dispatched in
+  the deterministic order `validate` → `syntax` → `autofix` (catalogue Table A) — now ship in the
+  `internal/mechanisms` catalogue (default **off**, D1). `validate` checks each requested tool call
+  against the tool menu the model was shown and its own arguments (unknown tool name, empty/malformed
+  JSON, missing required parameter); `syntax` checks a file-writing call's content (Go through the
+  real parser, other languages through a bracket/string/truncation heuristic); `autofix` runs a
+  formatter over write content and writes the tidied payload back to the call the loop will dispatch.
+- **Corrections are deferred, not retried in place (catalogue C5).** Apogee streams every reply
+  live, so `validate`/`syntax` return `ActionDefer` with the sim's correction message — the loop
+  holds it in conversation state (`Conversation.Defer`) and injects it role-safely into the next
+  request, the fold of the sim's `feed_forward_correction`. `autofix` intercepts in place via
+  `Response.SetToolCallArguments`, which is effective because a Response's tool calls are dispatched
+  only after post-response review.
+- **`gofmt` is always in-process; other formatters are PATH-gated and gracefully absent.** Go is
+  formatted with the standard library's `go/format` — no external dependency — with `goimports`
+  preferred when on PATH; `black` / `prettier` / `rustfmt` run only when detected, and a formatter's
+  absence, failure, or timeout leaves the payload untouched (standing requirement #2). Broken syntax
+  is left for `syntax` to correct — a formatter cannot repair unparseable input. (`internal/mechanisms`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

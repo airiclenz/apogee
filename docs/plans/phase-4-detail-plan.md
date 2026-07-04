@@ -215,7 +215,7 @@ item 2's gate).
 
 ---
 
-## 5. Wave 1 — response robustness: `validate`, `syntax`, `autofix`
+## 5. Wave 1 — response robustness: `validate`, `syntax`, `autofix` — ✅ DONE (2026-07-04)
 
 **What:** port the measured-win robustness stages (broad plan: "these carried most of the
 win") from the pinned sim source as post-response Mechanisms per the catalogue.
