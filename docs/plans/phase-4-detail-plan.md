@@ -189,6 +189,13 @@ Budget trips globally and clears; `Fired` counts visible to a test hook; reset-o
 `internal/agent` sub-file — NOT a new public surface) + `internal/domain` + docs. Commit:
 `feat(agent): per-session effectiveness tracking with adaptive suppression and the turn budget`.
 
+**NOTES (2026-07-04 review):** deviations found — judgment was same-Turn on two proxy
+signals (novel read / write) and fires were booked per invocation, not per intervention;
+fixed by `phase-4-review-fixes` item 4 (R3: next-Turn three-way judgment on four signals,
+with cancelled-Turn read-novelty rollback; R4: acted-fires only). Accepted per R5:
+cancelled-Turn `fireCounts` may over-report toward the decompose coupling; the reserved
+experimental ID moved to `internal/domain`.
+
 ---
 
 ## 4. Config surface: the `mechanisms:` block + wire-up seam — ✅ DONE (2026-07-04)
@@ -238,6 +245,13 @@ missing external formatter degrades silently; suppression kicks in after strikes
 `internal/agent` seams if the port exposes a gap — name it in NOTES) + docs/CHANGELOG.
 Commit: `feat(mechanisms): port the validate/syntax/autofix response-robustness wave`.
 
+**NOTES (2026-07-04 review):** deviations found — corrections delivered by `ActionDefer`
+(next request) instead of the sim's in-cycle retry; `autofix` probed formatters at fire
+time (D3 violation), beautified unconditionally, and ran after `syntax`. Fixed by
+`phase-4-review-fixes` items 1–3 (R1 retry-in-place per amended catalogue C5;
+construction-probed formatter table; issue-count-gated repair; cascade reordered to
+validate → autofix → syntax).
+
 ---
 
 ## 6. Wave 1 — off-ramps: `empty_response_recovery`, `tool_use_enforcer` — ✅ DONE (2026-07-04)
@@ -257,6 +271,14 @@ Turn Budget.
 
 **Acceptance:** gates green; diff confined to `internal/mechanisms` + docs/CHANGELOG.
 Commit: `feat(mechanisms): port the empty-response-recovery and tool-use-enforcer off-ramps`.
+
+**NOTES (2026-07-04 review):** deviations found — the enforcer's correction sat deferred
+until the next user Submit (the sim re-calls in-cycle) and empty recovery retried bare,
+without the sim's nudge; fixed by `phase-4-review-fixes` items 1–2 (R1 retry-in-place
+carrying the superseded narration + correction / the first-attempt completion-check nudge).
+The sim's retry-ladder refinements (attempt-2 nudge ladder, system directive, temperature
+escalation, per-Session throttle counters) stay un-ported — accepted per R2, recorded on
+the catalogue's off-ramp rows.
 
 ---
 

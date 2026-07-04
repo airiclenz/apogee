@@ -251,7 +251,7 @@ change needed). Commit:
 
 ---
 
-## 6. Docs close-out: catalogue amendments + the NOTES trail
+## 6. Docs close-out: catalogue amendments + the NOTES trail — ✅ DONE (2026-07-04)
 
 **What:** the record-keeping the reviews found missing (items 1–5 above carry their own
 code-adjacent doc edits in their commits; this item is the residue).

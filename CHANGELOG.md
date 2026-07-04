@@ -200,6 +200,21 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   the error lists the known catalogue exactly like the enabled-key path.
   (`internal/domain`, `cmd/apogee`.)
 
+### The Phase-4 wave-1 review pass is closed out
+
+- **The 2026-07-04 review of Phase-4 items 1–6 landed as five corrective fixes plus a docs
+  close-out** (`docs/plans/phase-4-review-fixes-plan.md`), each detailed in its own entry
+  above. The behaviour changes in one line: post-response corrections **retry in place**
+  within the same Turn (amended catalogue C5, R1); `autofix` probes formatters **at
+  construction** and repairs only when it reduces the issue count, running **before**
+  `syntax`; self-regulation judges the **next Turn** three-way on four proxy signals and
+  books only **acted** fires; the registry and config **refuse duplicate, reserved, and
+  unknown** mechanism IDs loudly. The deliberate divergences from the sim (the R2 retry-
+  ladder refinements and per-mechanism throttle counters — bench-pending) are recorded in
+  the catalogue, and the Phase-4 detail plan carries the review's NOTES trail under items
+  3, 5, and 6. (Docs: `docs/design/mechanism-catalogue.md`,
+  `docs/plans/phase-4-detail-plan.md`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
