@@ -13,8 +13,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// recordingMech is a catalogued pre-request Mechanism that counts its fires; cap sets the
-// Capability the Bypass gate reads.
+// recordingMech is a catalogued pre-request Mechanism that counts its invocations; cap sets
+// the Capability the Bypass gate reads. It mutates the request so each invocation is an
+// ACTED fire (R4) and is booked/attributed.
 type recordingMech struct {
 	id    domain.MechanismID
 	cap   domain.Capability
@@ -25,8 +26,9 @@ func (m recordingMech) Descriptor() domain.MechanismDescriptor {
 	return domain.MechanismDescriptor{ID: m.id, Capability: m.cap}
 }
 func (recordingMech) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
-func (m recordingMech) PreRequest(context.Context, *domain.Request) error {
+func (m recordingMech) PreRequest(_ context.Context, req *domain.Request) error {
 	*m.fired++
+	req.AppendToSystem("[dispatch-test "+string(m.id)+"]", "[dispatch-test "+string(m.id)+"] nudge")
 	return nil
 }
 

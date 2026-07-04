@@ -211,9 +211,13 @@ type LoopView interface {
 	Tools() []ToolDef
 	Budget() Budget
 	Turn() int
-	// Fired reports how many times a Mechanism has fired this Session — the seam for
-	// cross-Mechanism coupling (e.g. decompose muting itself once a read-loop
-	// Mechanism has fired) without a shared mutable meta map.
+	// Fired reports how many times a Mechanism has ACTED this Session (R4): an
+	// invocation is booked only when it mutated its working value or returned a
+	// non-zero post-response Action — an inspect-and-do-nothing invocation is not a
+	// fire. It is the seam for cross-Mechanism coupling (e.g. decompose muting itself
+	// once a read-loop Mechanism has fired) without a shared mutable meta map. An
+	// experimental hook's synthetic ID keeps counting every invocation (bench
+	// observability).
 	Fired(id MechanismID) int
 }
 
@@ -251,6 +255,7 @@ type Request struct {
 	fired    map[MechanismID]int
 	sampling SamplingParams
 	extras   map[string]json.RawMessage
+	revision int // bumped by each mutator — the acted-fire probe (R4), read via Revision
 }
 
 // NewRequest builds the pre-request working value from loop state (engine seam). The
@@ -304,6 +309,11 @@ func (r *Request) View() LoopView {
 // Model is the target model id (the Library keys its lookup on this).
 func (r *Request) Model() string { return r.model }
 
+// Revision reports how many mutations have been applied to the Request — the loop's
+// acted-fire probe (R4, engine seam): hookrun snapshots it around each catalogued fire
+// and books the fire only when the counter moved. A hook never needs it.
+func (r *Request) Revision() int { return r.revision }
+
 // Extra reports a preserved unknown request field (e.g. a grammar Mechanism checks
 // for an existing response_format before setting one).
 func (r *Request) Extra(key string) (json.RawMessage, bool) {
@@ -320,6 +330,7 @@ func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 		return false
 	}
 	r.appendOrCreateSystem(text)
+	r.revision++
 	return true
 }
 
@@ -330,6 +341,7 @@ func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 // assistant message it follows, R1); otherwise inserted before the last user message.
 // With no user message present it appends at the end.
 func (r *Request) InjectContext(text string) {
+	r.revision++
 	if n := len(r.messages); n > 0 && r.messages[n-1].Role == RoleTool {
 		r.appendOrCreateSystem(text)
 		return
@@ -372,11 +384,15 @@ func (r *Request) SetMessageContent(index int, content string) {
 		return
 	}
 	r.messages[index].Content = content
+	r.revision++
 }
 
 // SetTools replaces and reorders the tool menu (the tool-filter Mechanism). The slice
 // is copied so the caller cannot mutate the menu after the call.
-func (r *Request) SetTools(tools []ToolDef) { r.tools = append([]ToolDef(nil), tools...) }
+func (r *Request) SetTools(tools []ToolDef) {
+	r.tools = append([]ToolDef(nil), tools...)
+	r.revision++
+}
 
 // SetExtra sets an unknown request field, allocating the carrier if needed (e.g. a
 // grammar constraint sets response_format).
@@ -385,11 +401,15 @@ func (r *Request) SetExtra(key string, v json.RawMessage) {
 		r.extras = make(map[string]json.RawMessage)
 	}
 	r.extras[key] = v
+	r.revision++
 }
 
 // SetSampling overrides sampling parameters. Forward-looking — no current Mechanism
 // mutates these; included so the surface need not change to add one.
-func (r *Request) SetSampling(p SamplingParams) { r.sampling = p }
+func (r *Request) SetSampling(p SamplingParams) {
+	r.sampling = p
+	r.revision++
+}
 
 // appendOrCreateSystem appends text to the first system message, creating one at the
 // front of the conversation if none exists.
@@ -425,6 +445,7 @@ type Response struct {
 	toolCalls    []ToolCall
 	finishReason FinishReason
 	view         LoopView
+	revision     int // bumped by each mutator — the acted-fire probe (R4), read via Revision
 }
 
 // NewResponse builds the post-response working value from the parsed reply (engine
@@ -462,7 +483,10 @@ func (r *Response) FinishReason() FinishReason { return r.finishReason }
 func (r *Response) Thinking() (text string, ok bool) { return r.thinking, r.thinking != "" }
 
 // SetText replaces the assistant text — the intercept path (ActionIntercept).
-func (r *Response) SetText(s string) { r.text = s }
+func (r *Response) SetText(s string) {
+	r.text = s
+	r.revision++
+}
 
 // SetToolCallArguments rewrites one tool call's arguments in place — the auto-fix
 // Mechanism writing back repaired/formatted content (ActionIntercept). An out-of-range
@@ -472,7 +496,14 @@ func (r *Response) SetToolCallArguments(index int, args json.RawMessage) {
 		return
 	}
 	r.toolCalls[index].Arguments = args
+	r.revision++
 }
+
+// Revision reports how many mutations have been applied to the Response — the loop's
+// acted-fire probe (R4, engine seam): hookrun snapshots it around each catalogued fire
+// and books the fire only when the counter moved or a non-zero Action was returned. A
+// hook never needs it.
+func (r *Response) Revision() int { return r.revision }
 
 // FinishReason is the model's stop reason; the set is open (treat unknown values
 // defensively).
@@ -503,6 +534,10 @@ const (
 type Conversation struct {
 	messages []Message
 	deferred []string // pending ActionDefer injections, FIFO
+	// revision is bumped by each mutator — the acted-fire probe (R4), read via
+	// Revision. Runtime-only: it is deliberately NOT serialized (it carries no
+	// history, only "did a hook just mutate me").
+	revision int
 }
 
 // NewConversation builds a Conversation over a copy of messages (engine seam).
@@ -562,6 +597,7 @@ func (c *Conversation) SetMessageContent(i int, content string) {
 		return
 	}
 	c.messages[i].Content = content
+	c.revision++
 }
 
 // DropRange drops messages in [start, end) — history truncation drops the middle,
@@ -577,27 +613,46 @@ func (c *Conversation) DropRange(start, end int) {
 		return
 	}
 	c.messages = append(c.messages[:start:start], c.messages[end:]...)
+	c.revision++
 }
 
 // Insert places a message at index i — e.g. a static gap note at a truncation cut.
 // i is clamped to [0, Len].
-func (c *Conversation) Insert(i int, m Message) { c.messages = insertMessage(c.messages, i, m) }
+func (c *Conversation) Insert(i int, m Message) {
+	c.messages = insertMessage(c.messages, i, m)
+	c.revision++
+}
 
 // Append adds m to the end of the history — the engine's per-Turn commit of a user,
 // assistant, or tool-result message, and the natural primitive a history-rewrite hook
 // uses to grow the conversation (a summary, a gap note). It is Insert at Len with a
 // name that reads at the call site.
-func (c *Conversation) Append(m Message) { c.messages = append(c.messages, m) }
+func (c *Conversation) Append(m Message) {
+	c.messages = append(c.messages, m)
+	c.revision++
+}
 
 // Replace swaps the entire message list — generative Compaction writes its
 // summarised history back through here. The slice is copied.
-func (c *Conversation) Replace(msgs []Message) { c.messages = append([]Message(nil), msgs...) }
+func (c *Conversation) Replace(msgs []Message) {
+	c.messages = append([]Message(nil), msgs...)
+	c.revision++
+}
 
 // Defer records a deferred correction (the Inject payload of an ActionDefer
 // PostResponseDecision) to be injected, role-safe, into the next request. It is held
 // in conversation state so it survives a snapshot/resume boundary — the streaming
 // feed-forward path (design §4.1).
-func (c *Conversation) Defer(inject string) { c.deferred = append(c.deferred, inject) }
+func (c *Conversation) Defer(inject string) {
+	c.deferred = append(c.deferred, inject)
+	c.revision++
+}
+
+// Revision reports how many mutations have been applied to the Conversation — the
+// loop's acted-fire probe (R4, engine seam): hookrun snapshots it around each
+// catalogued history-rewrite fire and books the fire only when the counter moved. A
+// hook never needs it, and it does not survive a snapshot round-trip.
+func (c *Conversation) Revision() int { return c.revision }
 
 // TakeDeferred removes and returns the pending deferred corrections in FIFO order —
 // the loop drains them when building the next request and InjectContexts each. ok is

@@ -172,7 +172,7 @@ docs/CHANGELOG. Commit:
 
 ---
 
-## 4. Self-regulation: next-turn judgment, four signals, acted fires
+## 4. Self-regulation: next-turn judgment, four signals, acted fires — ✅ DONE (2026-07-04)
 
 **What:** implement R3 + R4 in `internal/agent/selfreg.go` / `hookrun.go` / `loop.go` /
 `dispatch.go` + `internal/domain`.

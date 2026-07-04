@@ -15,10 +15,11 @@ import (
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
-// experimentalMechanismID is the synthetic MechanismID a descriptor-less experimental
-// hook fires under (ADR 0002 — no descriptor, no self-regulation). It exists only so
-// MechanismFiredEvent.Mechanism is never empty for bench attribution.
-const experimentalMechanismID domain.MechanismID = "experimental"
+// experimentalMechanismID is the loop's shorthand for the reserved synthetic MechanismID a
+// descriptor-less experimental hook fires under (ADR 0002 — no descriptor, no
+// self-regulation). The constant itself lives in domain (R5, phase-4-review-fixes item 4)
+// so MechanismRegistry.Add can refuse a catalogued Mechanism claiming it.
+const experimentalMechanismID = domain.ExperimentalMechanismID
 
 // defaultCharsPerToken is the Phase-1 trivial chars→tokens estimate the Budget view
 // reports until real token accounting and the Budget allocator land (TDD §8 #8). No
@@ -221,7 +222,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
-		// Final no-tool response: commit the assistant message and end the Exchange.
+		// Final no-tool response: commit the assistant message and end the Exchange. An
+		// empty final (whitespace-only text, no calls) is a harmful proxy signal for
+		// self-regulation's next-Turn judgment (R3); a substantive answer is neutral.
+		if strings.TrimSpace(resp.Text()) == "" {
+			a.tracker.noteEmptyResponse()
+		}
 		a.conv.Append(assistantMessage(resp, nil))
 		a.cfg.Events.Emit(domain.MessageEvent{EventBase: a.base(turn), Text: resp.Text()})
 		return a.completeTurn(turn, start, domain.StatusExchangeComplete), nil
@@ -464,8 +470,9 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 // Submit); a tool-call Turn leaves the Exchange open (StatusTurnComplete — the next Step
 // calls the Upstream again with the tool results in context).
 func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus) domain.StepResult {
-	// Judge the completed Turn for self-regulation (plan item 3): its productivity strikes or
-	// clears the Mechanisms that fired, and advances or resets the global Turn Budget.
+	// Resolve the completed Turn for self-regulation (R3, next-Turn judgment): this Turn's
+	// outcome judges the PREVIOUS Turn's fires — striking, freezing, or clearing — and this
+	// Turn's fires shift into the pending set the next Turn's outcome will judge.
 	a.tracker.endTurn()
 	if status == domain.StatusExchangeComplete {
 		a.inExchange = false
@@ -482,6 +489,8 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 	// A faulted Turn (an Upstream fault or a recovered hook panic) produced no usable outcome, so
 	// self-regulation discards it WITHOUT judging — an infra fault neither strikes a Mechanism nor
 	// advances the Turn Budget, and this Turn's fires do not bleed into the next Turn's judgment.
+	// The pending set (the previous Turn's fires) stays in place for the next completed Turn to
+	// judge (R3).
 	a.tracker.discardTurn()
 	a.inExchange = false
 	a.turnIndex++
@@ -502,7 +511,10 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 // un-advanced turnIndex (which says "re-attempt"), opening that exact hole.
 func (a *Agent) cancelTurn(turn, rollback int, deferred []string, start time.Time) domain.StepResult {
 	// The Turn is rolled back and re-attempted on resume, so self-regulation discards it WITHOUT
-	// judging — the re-attempt repopulates the fired-this-Turn set and productivity from scratch.
+	// judging — the re-attempt repopulates the fired-this-Turn set and the proxy signals from
+	// scratch. The discard also rolls this Turn's novel-read keys back out of seenReads, so the
+	// mandated re-attempt regains its novelty credit; the pending set (the previous Turn's fires)
+	// stays in place for the re-attempt's outcome to judge (R3).
 	a.tracker.discardTurn()
 	a.conv.DropRange(rollback, a.conv.Len())
 	a.restoreDeferred(deferred)

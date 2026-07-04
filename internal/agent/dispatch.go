@@ -53,9 +53,10 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 			return dispatchCancelled
 		}
 
-		// Feed this call's outcome to self-regulation's Turn-productivity signal (plan item 3): a
-		// new-file read or a successful write marks the Turn productive. Done before the
-		// post-tool-result hooks so their own fires are judged against the outcome they saw.
+		// Feed this call's outcome to self-regulation's proxy signals (R3): a novel read or a
+		// successful write is the productive signal, an error result the harmful one. Ordering
+		// relative to the post-tool-result hooks is immaterial to their judgment — fires are
+		// judged by the NEXT Turn's outcome (next-Turn judgment), not this one's.
 		a.noteToolProductivity(call, result)
 		a.runPostToolResultHooks(ctx, turn, call, &result)
 		a.appendToolResult(turn, result)

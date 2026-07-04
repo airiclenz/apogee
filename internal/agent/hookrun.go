@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -15,7 +16,7 @@ import (
 //
 // Every hook runs under the same recover boundary, so a panicking extension degrades to a
 // clean quiescent boundary instead of unwinding the host (ADR 0007); a MechanismFiredEvent
-// records each successful fire for attribution, under the firing Mechanism's ID (a
+// records each ACTED fire for attribution, under the firing Mechanism's ID (a
 // descriptor-less experimental hook carries the synthetic experimentalMechanismID).
 //
 // A catalogued Mechanism is skipped at dispatch when skipMechanism reports it off (selfreg.go):
@@ -23,8 +24,16 @@ import (
 // cfg.Bypass every catalogued non-off-ramp Mechanism is skipped (proactive-nudge + response-repair
 // off — ADR 0006), while the off-ramp recovery guarantees still run; self-regulation withdraws a
 // Mechanism it has judged not-helpful (per-Session, exempt off-ramps bypass it). Experimental
-// hooks are NEVER gated by either — they are the bench's own instruments. Each successful fire is
-// booked through fired (the Session ledger LoopView.Fired reads + the productivity judgment input).
+// hooks are NEVER gated by either — they are the bench's own instruments.
+//
+// Fired means ACTED (R4, phase-4-review-fixes item 4): each catalogued fire is bracketed — the
+// working value's Revision counter (Request/Response/Conversation) or a before/after snapshot
+// (ToolCall/ToolResult) around the invocation, plus a non-zero post-response Action — and
+// recordFire + MechanismFiredEvent are booked only when the invocation intervened. An
+// inspect-and-do-nothing invocation is not a fire (apogee-sim's FiredCounts: interventions, not
+// invocations). Experimental hooks keep today's always-booked behaviour under the synthetic ID
+// (bench observability). Booked fires feed the Session ledger LoopView.Fired reads and the
+// next-Turn judgment (selfreg.go).
 
 // skipUnderBypass reports whether a catalogued Mechanism is switched off by Bypass: a
 // non-off-ramp catalogued Mechanism is skipped at dispatch, an off-ramp survives (D5). It
@@ -47,10 +56,13 @@ func (a *Agent) runHistoryRewriteHooks(ctx context.Context, turn int) error {
 			continue
 		}
 		id := m.Descriptor().ID
+		before := a.conv.Revision()
 		if err := a.fireHistoryRewrite(ctx, id, hook, turn); err != nil {
 			return err
 		}
-		a.fired(turn, id, domain.HookHistoryRewrite, "fired")
+		if a.conv.Revision() != before {
+			a.fired(turn, id, domain.HookHistoryRewrite, "fired")
+		}
 	}
 	for _, raw := range a.registry.Experimental(domain.HookHistoryRewrite) {
 		hook, ok := raw.(domain.HistoryRewriter)
@@ -84,10 +96,13 @@ func (a *Agent) runPreRequestHooks(ctx context.Context, turn int, req *domain.Re
 			continue
 		}
 		id := m.Descriptor().ID
+		before := req.Revision()
 		if err := a.firePreRequest(ctx, id, hook, turn, req); err != nil {
 			return err
 		}
-		a.fired(turn, id, domain.HookPreRequest, "fired")
+		if req.Revision() != before {
+			a.fired(turn, id, domain.HookPreRequest, "fired")
+		}
 	}
 	for _, raw := range a.registry.Experimental(domain.HookPreRequest) {
 		hook, ok := raw.(domain.PreRequestHook)
@@ -148,17 +163,24 @@ func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain
 	return false, "", nil
 }
 
-// applyPostResponse fires one post-response hook, emits its MechanismFiredEvent, and carries out
+// applyPostResponse fires one post-response hook, books it when it acted, and carries out
 // its decision: ActionRetry short-circuits the cascade (retry=true) and surfaces its Inject as the
 // correction the loop carries onto the retried request (R1), ActionDefer schedules its correction
 // into the next request, and ActionIntercept (and the zero action) leaves the hook's in-place
-// mutation of resp untouched. err is non-nil only when the hook panicked (recovered).
+// mutation of resp untouched. A catalogued invocation is booked only when it acted (R4): it
+// returned a non-zero Action or mutated resp in place (the Revision bracket); an experimental
+// hook is always booked under the synthetic ID. err is non-nil only when the hook panicked
+// (recovered).
 func (a *Agent) applyPostResponse(ctx context.Context, turn int, id domain.MechanismID, hook domain.PostResponseHook, resp *domain.Response) (retry bool, inject string, err error) {
+	before := resp.Revision()
 	decision, fireErr := a.firePostResponse(ctx, id, hook, turn, resp)
 	if fireErr != nil {
 		return false, "", fireErr
 	}
-	a.fired(turn, id, domain.HookPostResponse, string(decision.Action))
+	acted := decision.Action != "" || resp.Revision() != before
+	if id == experimentalMechanismID || acted {
+		a.fired(turn, id, domain.HookPostResponse, string(decision.Action))
+	}
 	switch decision.Action {
 	case domain.ActionRetry:
 		return true, decision.Inject, nil
@@ -190,10 +212,13 @@ func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.
 			continue
 		}
 		id := m.Descriptor().ID
+		before := callSnapshot(*call)
 		if err := a.firePreToolExec(ctx, id, hook, turn, call, view); err != nil {
 			return err
 		}
-		a.fired(turn, id, domain.HookPreToolExec, "fired")
+		if callChanged(before, *call) {
+			a.fired(turn, id, domain.HookPreToolExec, "fired")
+		}
 	}
 	for _, raw := range a.registry.Experimental(domain.HookPreToolExec) {
 		hook, ok := raw.(domain.PreToolExecHook)
@@ -228,10 +253,13 @@ func (a *Agent) runPostToolResultHooks(ctx context.Context, turn int, call domai
 			continue
 		}
 		id := m.Descriptor().ID
+		before := *result
 		if err := a.firePostToolResult(ctx, id, hook, turn, call, result, view); err != nil {
 			return
 		}
-		a.fired(turn, id, domain.HookPostToolResult, "fired")
+		if *result != before {
+			a.fired(turn, id, domain.HookPostToolResult, "fired")
+		}
 	}
 	for _, raw := range a.registry.Experimental(domain.HookPostToolResult) {
 		hook, ok := raw.(domain.PostToolResultHook)
@@ -250,6 +278,22 @@ func (a *Agent) firePostToolResult(ctx context.Context, id domain.MechanismID, h
 	return hook.PostToolResult(ctx, call, result, view)
 }
 
+// callSnapshot deep-copies a tool call (Arguments included) so an in-place hook mutation —
+// even one writing through the original Arguments backing array — is detected by the
+// acted-fire comparison (R4).
+func callSnapshot(c domain.ToolCall) domain.ToolCall {
+	c.Arguments = append([]byte(nil), c.Arguments...)
+	return c
+}
+
+// callChanged reports whether the pending call differs from its pre-fire snapshot — the
+// pre-tool-exec acted probe (R4).
+func callChanged(before, after domain.ToolCall) bool {
+	return before.ID != after.ID ||
+		before.Tool != after.Tool ||
+		!bytes.Equal(before.Arguments, after.Arguments)
+}
+
 // recoverHook returns a deferred closure that converts a hook panic into an ErrorEvent
 // attributed to the firing Mechanism's id and signals errHookPanicked through errp — the single
 // recover-at-extension-boundary primitive every fire* helper shares (ADR 0007 / ADR 0002).
@@ -266,10 +310,11 @@ func (a *Agent) recoverHook(turn int, id domain.MechanismID, errp *error) func()
 	}
 }
 
-// fired books a successful fire with self-regulation (the Session fire ledger LoopView.Fired
-// reads, and the fired-this-Turn set the Turn's productivity judges — plan item 3) and emits a
-// MechanismFiredEvent attributed to the firing Mechanism's id (experimentalMechanismID for a
-// descriptor-less experimental hook).
+// fired books one ACTED fire with self-regulation (the Session fire ledger LoopView.Fired
+// reads, and the fired-this-Turn set the NEXT Turn's outcome judges — R3/R4) and emits a
+// MechanismFiredEvent attributed to the firing Mechanism's id. The callers gate it: a
+// catalogued invocation reaches here only when it intervened, while an experimental hook
+// (experimentalMechanismID) is booked on every invocation.
 func (a *Agent) fired(turn int, id domain.MechanismID, hook domain.HookPoint, action string) {
 	a.tracker.recordFire(id)
 	a.cfg.Events.Emit(domain.MechanismFiredEvent{

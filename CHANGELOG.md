@@ -160,6 +160,32 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   review's double-correction finding. Catalogue Table A and the post-response cascade section
   record the amendment. (`internal/mechanisms`, `cmd/apogee`.)
 
+### Self-regulation judges the NEXT Turn on four proxy signals, and only acted fires count
+
+- **Next-Turn judgment (R3).** Fires recorded in Turn N are now judged by Turn N+1's outcome —
+  a Mechanism's intervention can only show up in what the model does next — instead of by the
+  Turn they fired in. Each completed Turn is classified **three-way**: *productive* (a novel
+  file read, or a successful write/action), *harmful* (a tool-result error, or an empty final
+  response — both newly-recognized harmful signals; they used to merely be "not productive"),
+  or *neutral* (neither — e.g. a substantive text-only answer), with productive winning when
+  signals mix. Adaptive-Suppression strikes and the Turn-Budget streak advance **only on a
+  harmful Turn**; a neutral Turn freezes both; a productive Turn stays the global clear-path.
+  Consequence (the review's point): a pure Q&A session neither strikes Mechanisms nor trips
+  the Turn Budget. A cancelled Turn's rollback now also restores the novelty credit of the
+  reads it booked, so the mandated re-attempt is not penalized as a wasted re-read.
+- **Fired means acted (R4).** A catalogued Mechanism is booked (`recordFire` +
+  `MechanismFiredEvent` + the judgment set) only when its invocation **intervened**: it
+  returned a non-zero post-response Action, or it mutated its working value —
+  `Request`/`Response`/`Conversation` gain an internal revision counter with an engine-seam
+  `Revision()` accessor, and the tool-stage hooks compare call/result snapshots. An
+  inspect-and-do-nothing invocation is no longer a fire, matching apogee-sim's `FiredCounts`
+  (interventions, not invocations); `LoopView.Fired` therefore counts actions. Experimental
+  hooks keep the always-booked behaviour under the synthetic ID (bench observability).
+- **The experimental sentinel ID is now reserved in domain (R5).** The `"experimental"`
+  constant moves to `domain.ExperimentalMechanismID`, and `MechanismRegistry.Add` refuses a
+  catalogued Mechanism claiming it — a real Mechanism can no longer masquerade as the bench's
+  own instrument. (`internal/agent`, `internal/domain`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

@@ -363,7 +363,7 @@ func TestWave1_OffRampsFireUnderBypassAndTrippedBudget(t *testing.T) {
 			t.Fatalf("newAgent: %v", err)
 		}
 		a.tracker.budgetTripped = true
-		a.tracker.nonProductiveStreak = turnBudgetLimit
+		a.tracker.harmfulStreak = turnBudgetLimit
 		runExchange(t, a, "please implement the parser")
 
 		if len(responder.got) != 2 {
@@ -401,7 +401,7 @@ func TestWave1_OffRampsFireUnderBypassAndTrippedBudget(t *testing.T) {
 			t.Fatalf("newAgent: %v", err)
 		}
 		a.tracker.budgetTripped = true
-		a.tracker.nonProductiveStreak = turnBudgetLimit
+		a.tracker.harmfulStreak = turnBudgetLimit
 		runExchange(t, a, "please implement feature X")
 		runExchange(t, a, "continue")
 		runExchange(t, a, "please implement feature X now")

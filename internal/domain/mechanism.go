@@ -104,6 +104,14 @@ type Mechanism interface {
 // tiebreak in the deterministic total order (ADR 0003).
 type MechanismID string
 
+// ExperimentalMechanismID is the synthetic MechanismID a descriptor-less experimental
+// hook fires under (ADR 0002 — no descriptor, no self-regulation). It exists so
+// MechanismFiredEvent.Mechanism is never empty for bench attribution, and it is
+// RESERVED: Add refuses a catalogued Mechanism claiming it, so a real Mechanism can
+// never masquerade as the bench's own instrument or inherit its always-booked fire
+// accounting (R5, phase-4-review-fixes item 4).
+const ExperimentalMechanismID MechanismID = "experimental"
+
 // MechanismDescriptor is per-Mechanism metadata orthogonal to its hook point
 // (CONTEXT: Mechanism descriptor). The single source of truth for what Bypass turns
 // off (by Capability) and what may co-fire (IncompatibleWith).
@@ -164,11 +172,15 @@ func NewMechanismRegistry() *MechanismRegistry {
 	return &MechanismRegistry{experimental: make(map[HookPoint][]any)}
 }
 
-// Add registers a catalogued Mechanism. It returns an error if the Mechanism
-// implements no hook interface. (The constraint-cycle check is performed by New over
-// the whole graph — a startup gate, ADR 0003 — so a registry under construction can
-// hold constraints that only close a cycle once every Mechanism is present.)
+// Add registers a catalogued Mechanism. It returns an error if the Mechanism claims
+// the reserved experimental sentinel ID or implements no hook interface. (The
+// constraint-cycle check is performed by New over the whole graph — a startup gate,
+// ADR 0003 — so a registry under construction can hold constraints that only close a
+// cycle once every Mechanism is present.)
 func (r *MechanismRegistry) Add(m Mechanism) error {
+	if id := m.Descriptor().ID; id == ExperimentalMechanismID {
+		return fmt.Errorf("apogee: mechanism ID %q is reserved for experimental hooks", id)
+	}
 	if !implementsAnyHook(m) {
 		return fmt.Errorf("apogee: mechanism %q: %w", m.Descriptor().ID, errNoHookInterface)
 	}
