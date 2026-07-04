@@ -56,6 +56,22 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   withdrawn Mechanism to be re-tried, never wrongly withheld). (`internal/agent`,
   `internal/domain`.)
 
+### A file-only `mechanisms:` config block wires the catalogue into the loop
+
+- **Catalogued Mechanisms are now opt-in from `config.yaml`.** A new file-only `mechanisms:`
+  block (no flag/env, like `mcp-servers` / `model-profile`) maps a canonical mechanism ID to
+  `enabled: true|false`. Every Mechanism defaults **off** (D1 — default-off until bench-proven);
+  a `true` entry turns one on. An **unknown ID is a loud startup error** listing the catalogue
+  this build knows, so a typo'd key never silently disables a Mechanism. `--bypass` still wins:
+  an enabled non-off-ramp Mechanism is not dispatched under bypass (ADR 0006 / the item-2 gate).
+- **The catalogue constructor seam.** `internal/mechanisms` gains `Build(id, deps)` over a
+  constructor table (`Deps` carries the construction-injected collaborators — D3; the Library
+  store is nil until it lands). The composition root (`cmd/apogee`) drives the table for each
+  enabled ID and folds the built Mechanisms into `Config.Mechanisms` before construction. The
+  table ships **empty** — the port waves fill one row per Mechanism — so a config with no
+  `mechanisms:` block behaves exactly as before. (`cmd/apogee`, `internal/mechanisms`, README +
+  starter `config.yaml`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

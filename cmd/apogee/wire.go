@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
@@ -138,6 +140,19 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpTools)
 	}
 
+	// Build the catalogued Mechanisms enabled in config.yaml and fold them into Config.Mechanisms
+	// (Phase 4). deps is the construction-injected collaborator set (D3): the Library store is nil
+	// until it lands (item 13), so today it is empty. mechanisms.Build drives the catalogue's
+	// constructor table; an unknown ID or an incompatible pair is a loud startup error surfaced
+	// here (the latter via New's ValidateIncompatibilities gate). With nothing enabled this is a
+	// no-op (nil registry ⇒ New defaults to an empty one), so a config without a mechanisms block
+	// behaves exactly as before.
+	registry, err := buildMechanismRegistry(opts.mechanisms, mechanisms.Deps{}, mechanisms.Build)
+	if err != nil {
+		return err
+	}
+	cfg.Mechanisms = registry
+
 	agent, err := buildAgent(cfg, opts.resume)
 	if err != nil {
 		return friendlyConstructErr(err)
@@ -192,6 +207,45 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		}
 	}
 	return registry
+}
+
+// mechanismBuilder constructs one catalogued Mechanism by canonical ID from the injected Deps
+// (D3). internal/mechanisms.Build fills it in production (driving the catalogue's constructor
+// table); a test injects a fake row so buildMechanismRegistry is table-testable while the real
+// catalogue is still empty (waves 5–14 fill it). apogee.MechanismID / apogee.Mechanism are the
+// public aliases for the domain types Build returns, so the assignment is a no-op.
+type mechanismBuilder func(apogee.MechanismID, mechanisms.Deps) (apogee.Mechanism, error)
+
+// buildMechanismRegistry builds a MechanismRegistry from the enabled-mechanism config (Phase 4),
+// driving build for each ID whose `mechanisms:` value is true and Add-ing the result. Enabled IDs
+// are sorted by canonical spelling so registration (and any error) is deterministic; the dispatch
+// order is the registry's own topo-sort (ADR 0003), independent of registration order. An unknown
+// ID (build's error) or a Mechanism implementing no hook interface (Add's error) is a loud startup
+// failure — a typo'd or half-built Mechanism never silently vanishes. With nothing enabled it
+// returns a nil registry so New falls back to its default empty one (today's behaviour unchanged).
+func buildMechanismRegistry(enabled map[string]bool, deps mechanisms.Deps, build mechanismBuilder) (*apogee.MechanismRegistry, error) {
+	ids := make([]string, 0, len(enabled))
+	for id, on := range enabled {
+		if on {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	sort.Strings(ids)
+
+	registry := apogee.NewMechanismRegistry()
+	for _, id := range ids {
+		m, err := build(apogee.MechanismID(id), deps)
+		if err != nil {
+			return nil, err
+		}
+		if err := registry.Add(m); err != nil {
+			return nil, fmt.Errorf("apogee: register mechanism %q: %w", id, err)
+		}
+	}
+	return registry, nil
 }
 
 // sessionSaver adapts a session.Store to the TUI's func(Session) error saver seam and

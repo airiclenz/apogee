@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -253,6 +254,91 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 	if !errors.Is(err, apogee.ErrSessionVersion) {
 		t.Fatalf("buildAgent resume of a future version: err = %v; want ErrSessionVersion", err)
 	}
+}
+
+// fakePreRequestMechanism is a minimal catalogued Mechanism (a pre-request hook) for exercising
+// the mechanism wire-up while the real catalogue is empty. buildFake is the injected builder that
+// mints it, standing in for internal/mechanisms.Build.
+type fakePreRequestMechanism struct {
+	id apogee.MechanismID
+}
+
+func (f fakePreRequestMechanism) Descriptor() apogee.MechanismDescriptor {
+	return apogee.MechanismDescriptor{ID: f.id, Capability: apogee.CapProactiveNudge, Suppression: apogee.SuppressStrikesThree}
+}
+func (f fakePreRequestMechanism) Ordering() apogee.OrderingConstraints {
+	return apogee.OrderingConstraints{}
+}
+func (f fakePreRequestMechanism) PreRequest(context.Context, *apogee.Request) error { return nil }
+
+func buildFake(id apogee.MechanismID, _ mechanisms.Deps) (apogee.Mechanism, error) {
+	return fakePreRequestMechanism{id: id}, nil
+}
+
+// An enabled ID is built and registered; a `false` entry is not. The registered Mechanism is
+// visible in the registry's deterministic dispatch order (Ordered).
+func TestBuildMechanismRegistryEnablesOnlyTrue(t *testing.T) {
+	t.Parallel()
+	enabled := map[string]bool{"alpha": true, "beta": false}
+	registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake)
+	if err != nil {
+		t.Fatalf("buildMechanismRegistry: %v", err)
+	}
+	if registry == nil {
+		t.Fatal("registry is nil; want the enabled Mechanism registered")
+	}
+	ordered := registry.Ordered(apogee.HookPreRequest)
+	if len(ordered) != 1 {
+		t.Fatalf("Ordered = %d Mechanisms; want exactly the one enabled (the `false` entry is skipped)", len(ordered))
+	}
+	if got := ordered[0].Descriptor().ID; got != "alpha" {
+		t.Errorf("registered ID = %q; want the enabled %q", got, "alpha")
+	}
+}
+
+// Nothing enabled ⇒ a nil registry, so New falls back to its default empty one (today's
+// behaviour unchanged for a config with no mechanisms block).
+func TestBuildMechanismRegistryDefaultNone(t *testing.T) {
+	t.Parallel()
+	for _, enabled := range []map[string]bool{nil, {}, {"off": false}} {
+		registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake)
+		if err != nil {
+			t.Fatalf("buildMechanismRegistry(%+v): %v", enabled, err)
+		}
+		if registry != nil {
+			t.Errorf("buildMechanismRegistry(%+v) = non-nil; want nil (nothing enabled)", enabled)
+		}
+	}
+}
+
+// An unknown ID is a loud startup error — proven end-to-end against the real (empty) catalogue via
+// mechanisms.Build, so a typo'd `mechanisms:` key fails startup rather than silently vanishing.
+func TestBuildMechanismRegistryUnknownIDErrors(t *testing.T) {
+	t.Parallel()
+	_, err := buildMechanismRegistry(map[string]bool{"nope": true}, mechanisms.Deps{}, mechanisms.Build)
+	if err == nil {
+		t.Fatal("enabling an unknown mechanism: want an error, got nil")
+	}
+}
+
+// A built registry threads through New even under Bypass: enabling a Mechanism and running Bypass
+// construct cleanly together (the dispatch gate that skips it under Bypass is item 2's, exercised
+// in internal/agent). This proves the config → registry → Config.Mechanisms path is coherent.
+func TestBuildMechanismRegistryConstructsUnderBypass(t *testing.T) {
+	t.Parallel()
+	registry, err := buildMechanismRegistry(map[string]bool{"alpha": true}, mechanisms.Deps{}, buildFake)
+	if err != nil {
+		t.Fatalf("buildMechanismRegistry: %v", err)
+	}
+	cfg := validCfg(t)
+	cfg.Bypass = true
+	cfg.Mechanisms = registry
+
+	agent, err := apogee.New(cfg)
+	if err != nil {
+		t.Fatalf("New with an enabled Mechanism under Bypass: %v", err)
+	}
+	t.Cleanup(func() { _ = agent.Close() })
 }
 
 func TestFriendlyConstructErr(t *testing.T) {

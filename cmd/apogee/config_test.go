@@ -108,6 +108,17 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			flag: layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}},
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
 		},
+		{
+			name: "mechanisms are file-only (default empty)",
+			file: layer{mechanisms: map[string]bool{"validate": true, "syntax": false}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, mechanisms: map[string]bool{"validate": true, "syntax": false}},
+		},
+		{
+			name: "mechanisms are NOT settable by env or flag (file-only)",
+			env:  layer{mechanisms: map[string]bool{"fromenv": true}},
+			flag: layer{mechanisms: map[string]bool{"fromflag": true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -207,6 +218,44 @@ func TestApplyConfigMCPServers(t *testing.T) {
 	}
 	if !reflect.DeepEqual(opts.mcpServers, want) {
 		t.Errorf("mcpServers = %+v; want %+v", opts.mcpServers, want)
+	}
+}
+
+// The mechanisms config block parses into opts.mechanisms (Phase 4): a map of canonical ID →
+// enabled, which runRoot drives the catalogue constructor table with. It is file-only, like
+// mcp-servers, so this proves the config surface lands end-to-end.
+func TestApplyConfigMechanisms(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	const configYAML = `mechanisms:
+  validate: true
+  syntax: true
+  truncate_history: false
+`
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+
+	want := map[string]bool{"validate": true, "syntax": true, "truncate_history": false}
+	if !reflect.DeepEqual(opts.mechanisms, want) {
+		t.Errorf("opts.mechanisms = %+v; want %+v", opts.mechanisms, want)
+	}
+}
+
+// With no mechanisms block, opts.mechanisms is nil — every Mechanism default-off (D1), the
+// byte-identical anchor: a config without the block behaves exactly as before.
+func TestApplyConfigNoMechanismsIsNil(t *testing.T) {
+	t.Parallel()
+	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if opts.mechanisms != nil {
+		t.Errorf("opts.mechanisms = %+v; want nil (no block ⇒ nothing enabled)", opts.mechanisms)
 	}
 }
 

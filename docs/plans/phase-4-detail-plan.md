@@ -191,7 +191,7 @@ Budget trips globally and clears; `Fired` counts visible to a test hook; reset-o
 
 ---
 
-## 4. Config surface: the `mechanisms:` block + wire-up seam
+## 4. Config surface: the `mechanisms:` block + wire-up seam — ✅ DONE (2026-07-04)
 
 **What:** a file-only `mechanisms:` config block (like `mcp-servers` / `model-profile` —
 no flag/env), mapping canonical ID → `enabled: true|false`. All defaults **off** (D1).

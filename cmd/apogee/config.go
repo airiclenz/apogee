@@ -61,6 +61,14 @@ type settings struct {
 	// flag/env). A zero ModelProfile is native tool calls with no inline thinking (today's
 	// behaviour), so an absent profile block leaves it unchanged.
 	profile apogee.ModelProfile
+
+	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), file-only
+	// (a per-model tuning concern, like mcpServers, with no flag/env) and default-empty. All
+	// Mechanisms ship OFF (D1 — default-off until bench-proven); a `true` entry turns one on. The
+	// composition root drives the mechanisms catalogue's constructor table for each enabled ID; an
+	// unknown ID is a loud startup error. Bypass still wins (an enabled non-off-ramp Mechanism is
+	// not dispatched under bypass — ADR 0006 / item 2's gate).
+	mechanisms map[string]bool
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -95,6 +103,11 @@ type layer struct {
 	// flag/env). A nil pointer means the source does not configure a profile, so resolution falls
 	// through to the zero/native default.
 	profile *apogee.ModelProfile
+
+	// mechanisms is set only by the FILE layer (Mechanisms are config'd, default-empty, with no
+	// flag/env — like mcpServers). A nil map means the source does not enable any Mechanism (fall
+	// through to the empty default).
+	mechanisms map[string]bool
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -117,6 +130,7 @@ func resolveSettings(file, env, flag layer) settings {
 		s.useProjectSkills = *file.useProjectSkills
 	}
 	s.mcpServers = file.mcpServers // file-only (P3.15); env/flag never set MCP servers
+	s.mechanisms = file.mechanisms // file-only (Phase 4); env/flag never enable Mechanisms
 	if file.profile != nil {       // file-only; env/flag never carry a model profile
 		s.profile = *file.profile
 	}
@@ -176,6 +190,12 @@ type fileConfig struct {
 	// inline thinking — today's behaviour). A pointer so an absent block falls through to that
 	// default rather than being an explicit zero setting.
 	ModelProfile *modelProfileConfig `yaml:"model-profile"`
+	// Mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4): a map of
+	// canonical mechanism ID → enabled. File-only (no flag/env), like mcp-servers. Absent/empty ⇒
+	// no Mechanism is enabled — ALL default OFF (D1, default-off until bench-proven), so an entry
+	// is required to turn one on. An unknown ID is a loud startup error listing the known
+	// catalogue; Bypass still disables enabled non-off-ramp Mechanisms (ADR 0006).
+	Mechanisms map[string]bool `yaml:"mechanisms"`
 }
 
 // mcpServerConfig is the on-disk schema for one MCP server (P3.15). It mirrors mcp.ServerConfig
@@ -273,6 +293,9 @@ func (fc fileConfig) layer() layer {
 	if fc.ModelProfile != nil {
 		p := fc.ModelProfile.toModelProfile()
 		l.profile = &p
+	}
+	if len(fc.Mechanisms) > 0 {
+		l.mechanisms = fc.Mechanisms
 	}
 	return l
 }
@@ -400,6 +423,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.useProjectSkills = s.useProjectSkills
 	opts.mcpServers = s.mcpServers
 	opts.profile = s.profile
+	opts.mechanisms = s.mechanisms
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

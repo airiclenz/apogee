@@ -52,6 +52,12 @@ type options struct {
 	// flag/env). applyConfig sets it from settings; a zero profile is native tool calls with no
 	// inline thinking (today's behaviour). runRoot folds it into apogee.Config.Profile.
 	profile apogee.ModelProfile
+
+	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), loaded from
+	// the config file only (default-empty ⇒ no Mechanism enabled; all default OFF, D1). applyConfig
+	// sets it from settings; runRoot drives the mechanisms catalogue's constructor table for each
+	// enabled ID and folds the built registry into apogee.Config.Mechanisms.
+	mechanisms map[string]bool
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

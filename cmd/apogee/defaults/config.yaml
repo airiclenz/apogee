@@ -82,3 +82,17 @@
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false
+
+# Catalogued small-model Mechanisms to enable, by canonical ID (Phase 4). Config-file only (no
+# flag or env). Each Mechanism ships OFF by default — enabled only once its A/B bench run has
+# proven it a win — so this block is how you opt one in. Map each ID to true to enable it; an
+# unknown ID is a startup error that lists the IDs this build knows. Bypass still wins: an enabled
+# non-off-ramp Mechanism does not fire under --bypass. The catalogue fills in as the port waves
+# land (see docs/design/mechanism-catalogue.md); until a Mechanism's wave ships, enabling its ID
+# errors. Example (uncomment once the named Mechanisms have shipped):
+#
+# mechanisms:
+#   validate: true          # tool-call validation + auto-retry
+#   syntax: true            # write-content syntax check
+#   autofix: true           # formatter pass on tool-call payloads
+#   truncate_history: false # explicitly off (the default) — shown for reference

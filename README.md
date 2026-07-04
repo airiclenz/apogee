@@ -73,6 +73,32 @@ next.
   via an eval/simulation bench (which imports Apogee as a Go library and drives
   the real loop in-process) before it earns a place in the loop.
 
+## Configuration
+
+Settings resolve by precedence, highest first: a command-line flag overrides an
+`APOGEE_*` environment variable, which overrides `~/.apogee/config.yaml`, which
+overrides the built-in default. A fully-commented starter `config.yaml` is written
+to `~/.apogee` on first run (your edits are never overwritten). Some settings are
+**file-only** (no flag or env) — the model profile, MCP servers, web-search
+endpoint, and the small-model mechanisms.
+
+Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
+until its A/B bench run proves it a win, so enabling one is a deliberate config
+choice:
+
+```yaml
+# ~/.apogee/config.yaml
+mechanisms:
+  validate: true   # tool-call validation + auto-retry
+  syntax: true     # write-content syntax check
+  autofix: true    # formatter pass on tool-call payloads
+```
+
+An unknown ID is a startup error that lists the IDs this build knows; `--bypass`
+still wins (an enabled non-off-ramp mechanism does not fire under bypass). The
+catalogue fills in as the port waves land — see
+[`docs/design/mechanism-catalogue.md`](docs/design/mechanism-catalogue.md).
+
 ## Building from source
 
 **Prerequisites:** Go 1.26+ (the toolchain version pinned in `go.mod`).
