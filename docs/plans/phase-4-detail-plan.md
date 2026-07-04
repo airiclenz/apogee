@@ -733,7 +733,7 @@ sequence.
 
 ---
 
-## 16. Docs close-out + v1.2.0 roll-up
+## 16. Docs close-out + v1.2.0 roll-up — ✅ DONE (2026-07-04)
 
 **What:** the release bookkeeping. Roll the accumulated Unreleased CHANGELOG entries into
 a `[1.2.0]` section (additive minor — new Config fields, new Events usage, no breaking

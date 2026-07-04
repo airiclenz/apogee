@@ -282,9 +282,14 @@ Four positions plus a cross-cutting capability:
 _Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase".
 
 **Post-response decision**:
-The action a post-response Mechanism chooses: **retry** (re-call the Upstream now),
-**intercept** (alter the response before the loop acts on it), or **defer** (schedule a
-correction into the *next* request). Streaming failures can only defer.
+The action a post-response Mechanism chooses: **retry** (re-call the Upstream now, **in
+place** — the correction rides `ActionRetry`'s `Inject` onto the in-flight request and
+re-streams **within the same Turn**, R1), **intercept** (alter the response before the loop
+acts on it), or **defer** (schedule a correction into the *next* request). Corrections deliver
+by **retry-in-place**: the loop owns the stream and can reset it (`StreamResetEvent`), so —
+unlike the proxy-era predecessor, which had already streamed the response downstream and could
+only defer — a streaming response is **not** forced to defer. `defer` remains available but the
+wave-1 repairs no longer use it.
 _Avoid_: "interceptor" (intercept is one decision, not the Mechanism).
 
 **Deferred Response Action vs Request-prep Hint**:
@@ -307,19 +312,24 @@ The runtime machinery that keeps a Mechanism from hurting the model — the oper
 half of the hard constraint. All of it is per-Session; a new Session starts clean.
 
 **Effectiveness tracking**:
-Per-Mechanism, per-Session bookkeeping that records each time a Mechanism fires and judges
-whether the next Turn was better for it. The data behind Adaptive Suppression and the Turn
-Budget.
+Per-Mechanism, per-Session bookkeeping that records each time a Mechanism **acts** — an
+intervention (a non-zero decision or a mutated working value), **not** a bare inspect-only
+invocation (R4, so `LoopView.Fired` counts actions, matching the sim's `FiredCounts`) — and
+judges the **next** Turn for it. That judgment is **three-way** (R3): a Turn is **productive**
+(a novel file read, or a successful write/action), **harmful** (a tool-result error, or an
+empty final response), or **neutral** (neither), with productive winning when signals mix. The
+data behind Adaptive Suppression and the Turn Budget.
 
 **Adaptive Suppression**:
-The **per-Mechanism** withdrawal rule: a Mechanism judged not-helpful several consecutive
-times in a Session is suppressed for the rest of it, with a configurable clear-path that
-re-opens it on a productive Turn.
+The **per-Mechanism** withdrawal rule: a Mechanism whose next Turn is judged **harmful** several
+consecutive times in a Session (a strike advances only on a harmful Turn; a neutral Turn freezes
+the count, R3) is suppressed for the rest of it, with a configurable clear-path that re-opens it
+on a productive Turn.
 
 **Turn Budget**:
-The **global** withdrawal rule: after several consecutive non-productive Turns (no new file
-read, no file written), all non-exempt Mechanisms are suppressed for the rest of the
-Session, cleared when productive activity resumes.
+The **global** withdrawal rule: after several consecutive **harmful** Turns (the streak advances
+only on a harmful Turn; a neutral Turn freezes it, R3), all non-exempt Mechanisms are suppressed,
+cleared when productive activity resumes.
 
 **Off-ramp** (Exempt Mechanism):
 A Mechanism never subject to Adaptive Suppression or the Turn Budget, because suppressing

@@ -6,11 +6,18 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
-## [Unreleased]
+## [1.2.0] — 2026-07-04
 
 Post-`v1.1.0`, **additive** (minor) — Phase 4 merges the apogee-sim Mechanisms into the
 loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
-`docs/design/mechanism-catalogue.md`).
+`docs/design/mechanism-catalogue.md`). **No breaking change** (sanity-checked against the
+`v1.1.0..HEAD` diff): the public facade (`apogee.go`) only *gains* symbols — the sole new
+top-level export is `ErrIncompatibleMechanisms`; nothing exported is removed or re-typed. Every
+other new surface is additive — new `Config` fields (the `mechanisms:` block, the `auto-compact`
+key, `LibraryDir`), new advisory `domain.Budget` fields, and new `domain` types
+(`ModelFingerprint`, `FingerprintResolver`) that are *not* re-exported at the root. The one
+changed signature (`domain.NewRequest`'s fired-ledger argument) is an internal engine seam, never
+on the public surface — so this is a **minor** bump, not a major one.
 
 ### Catalogued Mechanisms now dispatch in a deterministic order behind the Bypass gate
 

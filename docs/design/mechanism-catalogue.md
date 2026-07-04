@@ -251,9 +251,11 @@ Turns → suppress all non-exempt; productive-Turn clear-path (default `zero`).
 ## Ledger (shipped-in-item · bench validation)
 
 Every ported row's **bench validation is `pending`** — no per-Mechanism default flips to ON in
-this plan (D1/D8); flips are one-line follow-ups gated on the bench A/B campaign (item 16
-handoff). "Shipped in item N" is filled by the verifier as each wave lands (item 16 closes the
-ledger).
+this plan (D1/D8); flips are one-line follow-ups gated on the bench A/B campaign (see the
+`docs/handoffs/2026-07-04 - 00 - phase-4-complete-bench-campaign-next.md` handoff). "Shipped in
+item N" was filled as each wave landed; **the ledger is closed here (item 16, 2026-07-04)** —
+every ported Mechanism carries its shipping item and a **pending** bench validation, and every
+DROP / FOLD / SPLIT / DEFER row carries its verdict. Nothing remains porting-undecided.
 
 | apogee ID | Shipped in item | Bench validation |
 |---|---|---|

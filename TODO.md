@@ -106,6 +106,41 @@ disposition table but no user-facing override. See *Configurable tool × mode se
 
 ---
 
+## Phase-4 mechanism catalogue — deliberately dropped / folded / deferred
+
+**Status:** recorded 2026-07-04 at the Phase-4 close-out (`v1.2.0`). The ratified catalogue
+(`docs/design/mechanism-catalogue.md`, Table C + ledger) ported most apogee-sim Mechanisms but
+deliberately did **not** port these. Logged here so the deferral trail stays deliberate, not a
+silent drop — **none is a live gap**; each is an evidence-backed verdict that can be revisited if
+the bench finds a specific win.
+
+- **`codeinfo` — DROPPED (catalogue C7).** Broad plan §2 deprioritized it (modest effect,
+  superseded by shell-out diagnostics); the sim's own A/B shows its specific missed-call-site
+  signal is **not significant** (OR 0.69, p=0.32 on gpt-oss-20b, N=75/arm). Not ported to any wave.
+- **`correct_tool_result` — DEFERRED, not dropped (owner-ratified 2026-07-04).** The pinned sim
+  defines **no production trigger** — it is a lab-only intervention with an operator-supplied
+  correction — so inventing gating would ship behaviour with no evidence (D7). The loop already
+  exposes the lab surface (an experimental post-tool-result hook can replace a result via the
+  mutation API), so the bench plays the operator without a catalogued Mechanism. A **bench-discovered
+  trigger motivates a NEW plan item** + a fresh Table B verdict — that is the only path to porting it.
+- **`compress` external-client-compaction sniffing — DROPPED (C3).** apogee owns the loop; there is
+  no external client to sniff pre-compressed content from (broad plan §4). The *surviving* halves of
+  `compress` shipped: `tool_result_cap` (Mechanism, item 9), generative Compaction (structural, item
+  9), and `truncate_history` (Mechanism, item 7).
+- **`intent` / `cot` / `feed_forward_correction` — FOLDED, not standalone Mechanisms (C4/C5/C6).**
+  `intent` is a shared inline classifier (no hook/descriptor); `cot` split into the three completion
+  nudges (`stall_nudge` / `list_nudge` / `tool_use_directive`, item 12); `feed_forward_correction`
+  folded into `validate`'s retry-in-place `ActionRetry{Inject}` delivery (item 5, R1). No catalogue
+  rows of their own.
+- **Un-ported sim refinements — recorded bench-pending (R2).** The off-ramps' retry-ladder
+  refinements (attempt-2 nudge ladder, system directive, temperature escalation, per-Session throttle
+  counters) and `tool_loop_interceptor`'s per-Session count threshold + 30s wall-clock cooldown are
+  not ported — the loop's strikes-3 self-regulation + the `maxPostResponseRetries` cap substitute, and
+  wall-clock time is meaningless in the deterministic bench. Revisit only if the bench shows a specific
+  refinement carries a win.
+
+---
+
 ## General system-prompt / template story
 
 **Status:** parked 2026-07-02 (prompt-seam grill — `docs/plans/prompt-seam-wiring-plan.md`,
