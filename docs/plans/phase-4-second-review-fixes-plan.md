@@ -398,7 +398,21 @@ case). Commit (pick by outcome):
 
 ---
 
-## 10. Sim-parity check: retry-appendage visibility to post-response scanners
+## 10. Sim-parity check: retry-appendage visibility to post-response scanners — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** Sim-parity outcome = *FIX (the sim differs)*. The sim's retry builders
+(`retryWithReadRepeatHint`/`retryWithToolLoopDirective`/`retryWithCorrection`, `read_repeat_interceptor.go`/
+`tool_loop_interceptor.go`/`response_validator.go` @pin) COPY the request and append the superseded
+attempt + hint only to the throwaway copy marshalled upstream; `forwardWithValidation`'s retry loop
+re-runs `analyzeToolCalls(req, …)` with the ORIGINAL unmutated `req.Messages` on every iteration, so
+`detectRepeatReads`/`detectToolCallLoop` never see the appendage. apogee mutated `req` in place, so
+`req.View()` leaked the superseded read/call to `read_repeat`/`tool_loop_interceptor`. Fix: internal
+`Request.committedLen` (unexported, no public surface), frozen at the FIRST `AppendSupersededAssistant`
+and NOT advanced per retry (the sim uses the original committed request for ALL retry iterations, so
+the scanner view stays pinned across accumulated corrections — a clarification of "record the pre-append
+length" for the multi-retry case); `View()` bounds the scanner history to it while `State()` still sends
+the full appendage to the model. Tests live in `internal/agent` (the loop-level scripted harness, within
+the item's `internal/agent` scope) rather than `internal/mechanisms`.
 
 **Finding:** review "Retry-in-place superseded messages masquerade as committed history to
 post-response scanners" (Medium, *(uncertain — confirm against the sim)*). Ground truth: the

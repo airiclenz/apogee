@@ -131,6 +131,15 @@ on the public surface — so this is a **minor** bump, not a major one.
   cap the last response passes through. An `Inject`-less retry stays a bare re-stream, and
   `ActionDefer` keeps its next-request semantics unchanged. (`internal/domain`,
   `internal/agent`.)
+- **The retry appendage is hidden from post-response scanners (second-review fix, sim
+  parity).** On a retry cycle the request-scoped superseded attempt + correction no longer
+  masquerade as committed history to the history-aware Mechanisms: `Request.View()` is now
+  bounded to the length frozen at the first `AppendSupersededAssistant`, so `read_repeat`
+  never counts a never-executed superseded read as already-read and `tool_loop_interceptor`
+  compares the retried response against the last **committed** turn, not the superseded
+  attempt. The appendage still reaches the model through `Request.State()` — only the
+  mechanism view changes — matching apogee-sim, whose retry builders ran their detectors
+  against the unmutated request. (`internal/domain`, `internal/agent`.)
 
 ### Wave 1 rides the retry seam: corrections deliver in the same Turn
 

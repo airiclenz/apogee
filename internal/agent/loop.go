@@ -312,6 +312,10 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 				// Carry the corrective exchange onto the retried request (R1): the
 				// superseded assistant message, then the correction as a role-safe user
 				// message. An Inject-less retry stays a bare re-stream of the request.
+				// AppendSupersededAssistant freezes the request's committed length, so the
+				// next attempt's post-response scanners (req.View() below) see committed
+				// history + the response under review, NOT this superseded appendage — the
+				// sim ran its retry-cycle detectors against the unmutated request (item 10).
 				req.AppendSupersededAssistant(resp.Text(), resp.ToolCalls())
 				req.InjectContext(inject)
 			}

@@ -271,6 +271,15 @@ type Request struct {
 	sampling SamplingParams
 	extras   map[string]json.RawMessage
 	revision int // bumped by each mutator — the acted-fire probe (R4), read via Revision
+
+	// committedLen bounds the history View() exposes to the post-response scanners: it is
+	// frozen at the first retry-in-place append (AppendSupersededAssistant), so the
+	// request-scoped superseded attempt + correction never masquerade as committed history
+	// to read_repeat / tool_loop_interceptor (item 10, sim parity — the sim's retry builders
+	// left the detector's request unmutated). -1 means no retry appendage has been recorded,
+	// so View() exposes the whole request. State() (the model-facing projection) is never
+	// bounded — the appendage still reaches the Upstream.
+	committedLen int
 }
 
 // NewRequest builds the pre-request working value from loop state (engine seam). The
@@ -282,12 +291,13 @@ type Request struct {
 // shared reference is safe. nil is fine (Fired then reports 0 for every Mechanism).
 func NewRequest(model string, messages []Message, tools []ToolDef, budget Budget, turn int, fired map[MechanismID]int) *Request {
 	return &Request{
-		model:    model,
-		messages: append([]Message(nil), messages...),
-		tools:    append([]ToolDef(nil), tools...),
-		budget:   budget,
-		turn:     turn,
-		fired:    fired,
+		model:        model,
+		messages:     append([]Message(nil), messages...),
+		tools:        append([]ToolDef(nil), tools...),
+		budget:       budget,
+		turn:         turn,
+		fired:        fired,
+		committedLen: -1, // no retry appendage yet — View() exposes the whole request
 	}
 }
 
@@ -316,9 +326,17 @@ func (r *Request) State() RequestState {
 	}
 }
 
-// View exposes the read-only conversation/tools/budget window.
+// View exposes the read-only conversation/tools/budget window. The conversation is bounded
+// to committedLen once a retry-in-place has appended a superseded exchange (item 10): the
+// post-response scanners then see only committed history + the response under review, never
+// the request-scoped superseded attempt/correction — matching the sim, whose retry builders
+// ran their detectors against the unmutated request. The tool menu and budget are unbounded.
 func (r *Request) View() LoopView {
-	return loopView{messages: r.messages, tools: r.tools, budget: r.budget, turn: r.turn, fired: r.fired}
+	messages := r.messages
+	if r.committedLen >= 0 && r.committedLen <= len(r.messages) {
+		messages = r.messages[:r.committedLen]
+	}
+	return loopView{messages: messages, tools: r.tools, budget: r.budget, turn: r.turn, fired: r.fired}
 }
 
 // Model is the target model id (the Library keys its lookup on this).
@@ -381,7 +399,18 @@ func (r *Request) InjectContext(text string) {
 // carries the exchange the sim's retry builders carried. The append is request-scoped
 // — it is never committed to history. A wholly empty superseded response (empty text,
 // no calls) appends nothing. calls is copied, so the caller's slice stays independent.
+//
+// The FIRST call freezes committedLen at the current length (item 10, sim parity): this
+// superseded attempt, its correction, and every later accumulated retry are request-scoped
+// and stay out of the post-response scanners' View(). It is frozen once — not advanced per
+// retry — because the sim's detectors ran against the ORIGINAL committed request on every
+// retry iteration, so the scanner view stays pinned to the pre-retry length throughout. The
+// freeze precedes the empty-response short-circuit, so an empty superseded + a correction is
+// bounded too.
 func (r *Request) AppendSupersededAssistant(text string, calls []ToolCall) {
+	if r.committedLen < 0 {
+		r.committedLen = len(r.messages)
+	}
 	if text == "" && len(calls) == 0 {
 		return
 	}
