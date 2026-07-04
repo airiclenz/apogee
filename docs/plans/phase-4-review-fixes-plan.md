@@ -139,7 +139,7 @@ test-gap).
 
 ---
 
-## 3. autofix: construction-injected availability + sim repair semantics + cascade order
+## 3. autofix: construction-injected availability + sim repair semantics + cascade order — ✅ DONE (2026-07-04)
 
 **What:** three review findings on `internal/mechanisms/autofix.go`, all grounded in the
 pinned sim (`internal/autofix/{autofix,formatters}.go`).

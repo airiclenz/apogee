@@ -76,14 +76,14 @@ func TestWave1Descriptors(t *testing.T) {
 	}
 }
 
-// Registered together, the three resolve to the deterministic cascade validate → syntax → autofix
-// (catalogue Table A ordering), independent of registration order, and co-register cleanly (no
-// ordering cycle, no incompatibility).
+// Registered together, the three resolve to the deterministic cascade validate → autofix → syntax
+// (catalogue Table A ordering — repair precedes correction), independent of registration order,
+// and co-register cleanly (no ordering cycle, no incompatibility).
 func TestWave1DeterministicOrder(t *testing.T) {
 	t.Parallel()
 	registry := domain.NewMechanismRegistry()
 	// Register out of cascade order to prove the topo-sort — not insertion order — sets dispatch.
-	for _, id := range []domain.MechanismID{autofixID, validateID, syntaxID} {
+	for _, id := range []domain.MechanismID{syntaxID, autofixID, validateID} {
 		if err := registry.Add(mustBuild(t, id)); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}
@@ -100,7 +100,7 @@ func TestWave1DeterministicOrder(t *testing.T) {
 	for i, m := range ordered {
 		got[i] = m.Descriptor().ID
 	}
-	want := []domain.MechanismID{validateID, syntaxID, autofixID}
+	want := []domain.MechanismID{validateID, autofixID, syntaxID}
 	if len(got) != len(want) {
 		t.Fatalf("Ordered = %v, want %v", got, want)
 	}

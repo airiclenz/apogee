@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -141,13 +142,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	}
 
 	// Build the catalogued Mechanisms enabled in config.yaml and fold them into Config.Mechanisms
-	// (Phase 4). deps is the construction-injected collaborator set (D3): the Library store is nil
-	// until it lands (item 13), so today it is empty. mechanisms.Build drives the catalogue's
+	// (Phase 4). deps is the construction-injected collaborator set (D3): LookPath is the host's
+	// real PATH prober — autofix resolves its formatter table through it once at construction —
+	// and the Library store is nil until it lands (item 13). mechanisms.Build drives the catalogue's
 	// constructor table; an unknown ID or an incompatible pair is a loud startup error surfaced
 	// here (the latter via New's ValidateIncompatibilities gate). With nothing enabled this is a
 	// no-op (nil registry ⇒ New defaults to an empty one), so a config without a mechanisms block
 	// behaves exactly as before.
-	registry, err := buildMechanismRegistry(opts.mechanisms, mechanisms.Deps{}, mechanisms.Build)
+	registry, err := buildMechanismRegistry(opts.mechanisms, mechanisms.Deps{LookPath: exec.LookPath}, mechanisms.Build)
 	if err != nil {
 		return err
 	}

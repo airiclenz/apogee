@@ -21,6 +21,13 @@ type Deps struct {
 	// to that store's type when item 14 wires it; no constructor in the table consumes it yet, so
 	// today it is an inert forward seam that keeps the injection shape stable across waves.
 	Library any
+
+	// LookPath resolves an executable name against the host PATH (exec.LookPath's contract). A
+	// Mechanism that shells out probes its external commands ONCE at construction through this
+	// seam and caches the resolved paths (D3 — autofix's formatter table), so fires never probe
+	// and a test injects formatter availability without touching the real PATH. nil falls back
+	// to exec.LookPath.
+	LookPath func(string) (string, error)
 }
 
 // constructor builds one catalogued Mechanism from the injected Deps (D3). It returns an error so

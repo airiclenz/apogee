@@ -75,22 +75,25 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
 ### Wave 1: the `validate` / `syntax` / `autofix` response-robustness Mechanisms
 
 - **The measured-win response cascade is ported.** Three post-response Mechanisms — dispatched in
-  the deterministic order `validate` → `syntax` → `autofix` (catalogue Table A) — now ship in the
+  the deterministic order `validate` → `autofix` → `syntax` (catalogue Table A as amended by the
+  reorder entry below; originally shipped `validate` → `syntax` → `autofix`) — now ship in the
   `internal/mechanisms` catalogue (default **off**, D1). `validate` checks each requested tool call
   against the tool menu the model was shown and its own arguments (unknown tool name, empty/malformed
   JSON, missing required parameter); `syntax` checks a file-writing call's content (Go through the
-  real parser, other languages through a bracket/string/truncation heuristic); `autofix` runs a
-  formatter over write content and writes the tidied payload back to the call the loop will dispatch.
+  real parser, other languages through a bracket/string/truncation heuristic); `autofix` repairs
+  syntax-broken write content and writes the improved payload back to the call the loop will dispatch.
 - **Corrections retry in place (amended C5 — R1; superseding this entry's original ActionDefer
   delivery).** `validate`/`syntax` return `ActionRetry` with the sim's correction message — the
   loop re-streams the corrected request in the same Turn (see the delivery-switch entry below).
   `autofix` intercepts in place via `Response.SetToolCallArguments`, which is effective because a
   Response's tool calls are dispatched only after post-response review.
-- **`gofmt` is always in-process; other formatters are PATH-gated and gracefully absent.** Go is
+- **`gofmt` is always in-process; other formatters are construction-probed and gracefully absent
+  (superseding this entry's original fire-time PATH-gating — see the autofix entry below).** Go is
   formatted with the standard library's `go/format` — no external dependency — with `goimports`
-  preferred when on PATH; `black` / `prettier` / `rustfmt` run only when detected, and a formatter's
-  absence, failure, or timeout leaves the payload untouched (standing requirement #2). Broken syntax
-  is left for `syntax` to correct — a formatter cannot repair unparseable input. (`internal/mechanisms`.)
+  preferred when found; `black` / `prettier` / `rustfmt` repair only when their executable was
+  resolved at construction, and a formatter's absence, failure, or timeout leaves the payload
+  untouched (standing requirement #2). What no formatter can improve is left for `syntax` to
+  correct. (`internal/mechanisms`.)
 
 ### Wave 1: the `empty_response_recovery` / `tool_use_enforcer` off-ramps
 
@@ -138,6 +141,24 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   Proven loop-level through the scripted-responder harness, including both off-ramps firing at
   dispatch (registry-built) under Bypass and through a tripped Turn Budget.
   (`internal/mechanisms`; tests in `internal/agent`.)
+
+### autofix repairs like the sim: construction-probed formatters, issue-count gating, repair-before-correct
+
+- **The formatter table is resolved once at construction (D3).** `mechanisms.Deps` gains
+  `LookPath` (nil ⇒ `exec.LookPath`); `newAutofix` probes goimports/black/prettier/rustfmt
+  through it exactly once and caches the resolved paths — the sim's LookPath-cached formatter
+  table — so a fire never touches PATH. The package-var-at-fire-time probe is deleted, and
+  `cmd/apogee` wires the production `exec.LookPath`.
+- **Repair only, gated on improvement.** autofix now acts only on syntax-broken write content
+  and keeps a formatter's output only when it *reduces* the `checkSyntax` issue count (the
+  sim's `AttemptFix` gate) — clean content is never beautified, and a "fix" that fixes nothing
+  is discarded. The sim's `sanitizePath` NUL/CR/LF guard is restored alongside the kept `-`
+  prefix hardening on formatter argv.
+- **Cascade reorder: `validate` → `autofix` → `syntax`.** The sim runs detect → `tryAutoFix` →
+  correct-the-remainder (`response_analysis.go:72-88` @pin), so repair now precedes the
+  correction stage — `syntax`'s retry covers only what a formatter could not fix, ending the
+  review's double-correction finding. Catalogue Table A and the post-response cascade section
+  record the amendment. (`internal/mechanisms`, `cmd/apogee`.)
 
 ## [1.1.0] — 2026-07-03
 

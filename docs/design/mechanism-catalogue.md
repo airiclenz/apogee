@@ -114,8 +114,8 @@ consolidate or rename.
 | `read_repeat` | `read_repeat_interceptor` | `internal/proxy/read_repeat_interceptor.go`; desc `descriptor.go:117` | post-response | response-repair | strikes-3 | After `validate` in cascade; IncompatibleWith `cached_content_intercept` |
 | `tool_loop_interceptor` | `tool_loop_interceptor` | `internal/proxy/tool_loop_interceptor.go`; desc `descriptor.go:124` | post-response | response-repair | strikes-3 | Before `validate` in cascade (fires on 2nd identical turn; 30s cooldown) |
 | `validate` | `feed_forward_correction`¹ | `internal/validate/{validate,bridge}.go`; `internal/proxy/response_validator.go` | post-response | response-repair | strikes-3 | Before `syntax`,`autofix` (short-circuits cascade on fail) |
-| `syntax` | (untracked analyzer) | `internal/syntax/{syntax,go_check,generic_check}.go` | post-response | response-repair | strikes-3 | After `validate`; Before `autofix`; own per-Session syntax-fail counter |
-| `autofix` | (untracked analyzer) | `internal/autofix/{autofix,formatters}.go` | post-response | response-repair | strikes-3 | After `syntax` (in-process gofmt always; external formatters PATH-gated) |
+| `syntax` | (untracked analyzer) | `internal/syntax/{syntax,go_check,generic_check}.go` | post-response | response-repair | strikes-3 | After `validate`,`autofix` (corrects the post-repair remainder); own per-Session syntax-fail counter |
+| `autofix` | (untracked analyzer) | `internal/autofix/{autofix,formatters}.go` | post-response | response-repair | strikes-3 | After `validate`; Before `syntax` (repair precedes correction — sim `response_analysis.go:72-88`; in-process gofmt always; external formatters LookPath-cached at construction) |
 | `correct_tool_result` | `correct_tool_result` (lab-only) | `internal/sim/intervention.go:22,94` | post-tool-result | response-repair | strikes-3 | none — **production trigger undefined in source (see Table C / item-7 flag)** |
 | `truncate_history` | `truncate_history` (lab-only) | `internal/sim/intervention.go:23,99` | history-rewrite | proactive-nudge² | strikes-3 | none — cut only at `AssistantBoundaries()`, never `PrefixEnd()` |
 | `tool_result_cap` | `context_compression` (cap half) | `internal/compress/compress.go` (`capToolResults` ~`:458`) | pre-request | proactive-nudge² | strikes-3 | none — protects the most-recent Turn; per-result 40%-budget cap |
@@ -199,10 +199,13 @@ edges, not the total order (the loop computes that).
   assembled). `filehint`/`grammar`/`read_loop` are request-prep injectors with no hard order
   against the transforms beyond the incompatibility edges in Table A.
 - **Post-response cascade (sim, `catalogue.md` §Response-side detection cascade):**
-  `read_repeat` → `tool_loop_interceptor` → `validate` → (if valid) `syntax` → (if issues)
-  `autofix`. `validate` short-circuits `syntax`/`autofix` on failure. The two text-side
-  off-ramps (`tool_use_enforcer`, `empty_response_recovery`) run separately on text-only/empty
-  responses.
+  `read_repeat` → `tool_loop_interceptor` → `validate` → (if valid) `autofix` → `syntax`:
+  the sim repairs before it corrects — detect → `tryAutoFix` → correct-the-remainder
+  (`internal/proxy/response_analysis.go:72-88` @pin) — so `autofix` precedes `syntax` or the
+  correction stage re-corrects issues a formatter would have fixed (amended 2026-07-04,
+  review-fixes item 3). `validate` short-circuits `autofix`/`syntax` on failure. The two
+  text-side off-ramps (`tool_use_enforcer`, `empty_response_recovery`) run separately on
+  text-only/empty responses.
 - **Cross-mechanism coupling:** `decompose` mutes when a `read_loop` variant has fired this
   Session (sim `RequestMeta.FiredCounts` peek, `decompose.go` gate) → apogee `LoopView.Fired`
   query or a declared ordering edge (D2). `stall_nudge` ⊥ `list_nudge` (contradictory

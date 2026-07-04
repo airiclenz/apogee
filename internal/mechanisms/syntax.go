@@ -18,10 +18,11 @@ func init() { catalogue[syntaxID] = newSyntax }
 // bracket/string/truncation heuristic — retrying in place with a correction when the content is
 // broken (ActionRetry, the retry-in-place delivery of the amended C5, R1; see robustness.go).
 //
-// It runs after validate and before autofix (catalogue Table A): validate has already ruled out a
-// malformed call, and autofix's in-place formatting comes last. Broken content that reaches
-// autofix cannot be formatted (a formatter needs parseable input), so gating it here — before the
-// tool runs — is what keeps a syntactically-broken write from being dispatched unchallenged.
+// It runs after validate AND after autofix (catalogue Table A): validate has already ruled out a
+// malformed call, and autofix has already repaired what a formatter could fix — the sim's cascade
+// is detect → tryAutoFix → correct-the-remainder (internal/proxy/response_analysis.go:72-88
+// @pin) — so the retry here corrects only the post-repair remainder instead of re-correcting
+// issues a formatter had already fixed, while still gating a broken write before the tool runs.
 type syntaxMechanism struct{}
 
 // newSyntax builds the syntax Mechanism. It needs no injected Deps (D3): the checks are in-process
@@ -37,11 +38,11 @@ func (syntaxMechanism) Descriptor() domain.MechanismDescriptor {
 	}
 }
 
-// Ordering runs syntax after validate and before autofix (catalogue Table A).
+// Ordering runs syntax after validate and after autofix (catalogue Table A): repair precedes
+// correction, so the correction covers only the post-repair remainder.
 func (syntaxMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{
-		After:  []domain.MechanismID{validateID},
-		Before: []domain.MechanismID{autofixID},
+		After: []domain.MechanismID{validateID, autofixID},
 	}
 }
 

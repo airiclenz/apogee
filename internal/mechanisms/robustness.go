@@ -11,7 +11,8 @@ import (
 // The Wave-1 response-robustness Mechanisms (Phase-4 item 5): validate, syntax, and autofix,
 // ported from the pinned apogee-sim source (docs/design/mechanism-catalogue.md Table A). All
 // three are post-response Mechanisms with Capability response-repair and SuppressionPolicy
-// strikes-3, dispatched in the deterministic order validate → syntax → autofix.
+// strikes-3, dispatched in the deterministic order validate → autofix → syntax (repair precedes
+// correction — sim internal/proxy/response_analysis.go:72-88 @pin; see autofix.go).
 //
 // Correction delivery is by ActionRetry — retry-in-place per the amended C5 (R1, owner-ratified
 // 2026-07-04; docs/plans/phase-4-review-fixes-plan.md). The loop, unlike the sim's proxy, owns
