@@ -1,7 +1,8 @@
 # Plan — Phase 4: merge the apogee-sim Mechanisms into the loop
 
 **Date:** 2026-07-04
-**Status:** ready to run.
+**Status:** items 1–6 done (2026-07-04, including the review-fixes pass — see the
+addendum under "Where things stand"); ready to resume at item 7.
 **How to run:** `implement-plan docs/plans/phase-4-detail-plan.md with skills: coding-standards`
 (the broad plan's standing requirement #1 makes `coding-standards` mandatory for every item).
 **Source of direction:** `docs/plans/implementation-plan-apogee-merge.md` §4 "Phase 4" +
@@ -61,7 +62,19 @@ Everything below was verified against the working tree at `b4ad0bb`; do not re-d
 - **Tool results are appended uncapped** (`dispatch.go:407`); individual tools self-cap
   their own output only.
 
-## Design record (settled — do not re-derive, do not re-litigate)
+**Addendum (2026-07-04, after items 1–6 + the review-fixes pass):** the bullets above are
+the pre-run baseline (`b4ad0bb`) — kept for orientation, superseded wherever items 1–6
+landed; re-verify any file:line ref before relying on it (e.g. `defaultCharsPerToken` is
+now `loop.go:28`). Current substrate for items 7–16: catalogued Mechanisms dispatch in
+deterministic order under the Bypass gate (item 2); self-regulation judges fires against
+the NEXT Turn's three-way outcome and books only acted fires (item 3 as amended — R3/R4);
+the `mechanisms:` config block + constructor table are live and hardened (item 4 +
+duplicate/reserved-ID refusal, loud unknown-key errors); wave 1 shipped — `validate`,
+`autofix`, `syntax` (cascade order validate → autofix → syntax) plus both off-ramps —
+delivering corrections by retry-in-place (R1: `ActionRetry{Inject}` re-streams in the same
+Turn; catalogue C5 as amended). The review-fixes plan and its owner-ratified design record
+**R1–R5** are archived at `docs/plans/archived/phase-4-review-fixes-plan.md`; R1–R5 bind
+items 7–16 exactly like D1–D8.
 
 - **D1 — Default-off until bench-proven.** Every catalogued Mechanism ships
   **config-gated and disabled by default**. A mechanism's default flips ON only after its
@@ -99,6 +112,14 @@ Everything below was verified against the working tree at `b4ad0bb`; do not re-d
   catalogue disagrees (a mechanism relocated, dropped, or renamed), follow the catalogue
   and say so in NOTES. An implementer must not silently invent a mechanism the catalogue
   doesn't list.
+  **Amended 2026-07-04 (review-pass lesson):** the catalogue's authority covers
+  *composition only* (which mechanisms, which wave, port-or-drop). For *behavior*, the
+  ground truth is the pinned sim source — a catalogue cell that contradicts the pinned
+  source is a defect to surface (report QUESTION, or amend the catalogue with owner
+  ratification and a dated note), never a license to diverge from the source silently.
+  Precedence rules must point at ground truth, not at an artifact an earlier item
+  produced: item 1's original C5 cell contradicted the sim's retry builders and steered
+  items 5–6 into the ActionDefer divergence the review-fixes plan had to unwind.
 - **D8 — Out of scope for this plan:** the bench A/B campaign itself, trace-driven
   attribution runs, per-mechanism default flips, the behavioral-probe fingerprint
   (`apogee probe`, Phase 5), Windows, and any change inside apogee-sim. The plan ends with
@@ -412,7 +433,9 @@ the known cross-mechanism coupling. `decompose`: pre-request focus/step directiv
 `AppendToSystem`(marker) + `InjectContext`, history-collapse of older user messages via
 `SetMessageContent`; its read-loop coupling (the sim's `meta.FiredCounts` peek) becomes a
 `LoopView.Fired` query or a declared ordering edge — whichever the catalogue ratified
-(D2). `cot` and `intent`: port or drop exactly per the catalogue's verdict; if ported
+(D2). `Fired` now counts **acted** fires (R4) — the same semantics as the sim's
+`FiredCounts`; R5 accepts that counts retained from a cancelled Turn may over-report
+toward this coupling. `cot` and `intent`: port or drop exactly per the catalogue's verdict; if ported
 they are plain pre-request shapers using the same primitives. This item also picks up
 whatever the catalogue assigned as the broad plan's "completion nudges" if they didn't
 land in wave 1.
@@ -484,8 +507,9 @@ that: constructs **two Agents from one scripted responder** — a mechanisms-on 
 roots** (LibraryDir, SessionsDir); registers an **experimental hook at each of the five
 hook points**; `Step`s both to quiescent boundaries; `Snapshot`s and `Resume`s a fork of
 each; then asserts: deterministic mechanism order is visible in the
-`MechanismFiredEvent` stream; the Bypass arm fired no non-exempt Mechanism yet all five
-experimental hooks ran; no state bled between arms or forks (Library/session files stay
+`MechanismFiredEvent` stream (drive the arms so the enabled mechanisms actually **act** —
+per R4 an inspect-only invocation books no fired event); the Bypass arm fired no
+non-exempt Mechanism yet all five experimental hooks ran; no state bled between arms or forks (Library/session files stay
 inside each injected root; nothing written outside them); resumed forks diverge
 independently. This is the executable definition of "benchable" — if a future change
 breaks the bench contract, this test breaks first.
@@ -509,7 +533,9 @@ change; sanity-check that claim against the diff since `v1.1.0`). Update `TODO.m
 auto-compact deferral is closed (item 9); note anything the catalogue dropped
 (`codeinfo` et al.) so the deferral trail stays deliberate. CONTEXT.md drift check: the
 Mechanism/self-regulation/context vocabulary should already match what was built — fix
-any drift *in the code's doc comments or the glossary, whichever is wrong*. Finish the
+any drift *in the code's doc comments or the glossary, whichever is wrong*; include the
+review pass's ratified vocabulary (retry-in-place corrections, next-Turn three-way
+judgment, acted fires — R1/R3/R4). Finish the
 catalogue doc's ledger (every row: shipped-in-item N, bench validation **pending**).
 Write a short handoff `docs/handoffs/<date> - 00 - phase-4-complete-bench-campaign-next.md`:
 what the bench (apogee-sim) must now build/run — import apogee, two-arm + leave-one-out
