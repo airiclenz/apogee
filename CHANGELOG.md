@@ -489,6 +489,10 @@ implementing BOTH hooks. Ported from apogee-sim's `library` observer/transform. 
   name and its sorted parameter **names** — never argument **values**. The injected block's header now
   opens with an explicit data-not-instructions frame so entries cannot read as directives. No store
   schema bump (entries stay compatible). (`internal/library`, `internal/mechanisms`.)
+- **Bypass leaves a pre-seeded Library store byte-for-byte untouched (second-review fix, test-only).**
+  A loop-level test seeds a populated `library.json`, wires a registry-backed agent with `library`
+  enabled and `Config.Bypass` on, drives an observe-triggering Exchange, and asserts the store file's
+  bytes are unchanged — the item-14 mandate now has its literal regression. (`internal/agent`.)
 
 ### Bench-readiness proof: the embeddable two-arm contract is now a permanent regression
 

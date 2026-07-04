@@ -344,7 +344,7 @@ opens a filehint opportunity (mirrors the existing `list_dir` case).
 
 ---
 
-## 8. Test: Bypass leaves a pre-seeded Library store byte-for-byte untouched
+## 8. Test: Bypass leaves a pre-seeded Library store byte-for-byte untouched — ✅ DONE (2026-07-04)
 
 **Finding:** review "Plan-mandated 'Bypass … byte-for-byte' test was silently dropped"
 (Medium, found independently twice). Ground truth: the item-14 mandate
