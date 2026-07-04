@@ -1,0 +1,234 @@
+# Mechanism Catalogue — Phase 4 (ratified against the pinned apogee-sim source)
+
+**Status:** ✅ **Ratified 2026-07-04** (Phase-4 plan item 1). This is the **authoritative
+map** for wave composition: every catalogued Mechanism apogee will register, its hook point,
+descriptor, ordering/incompatibility constraints, the port wave (plan items 5–14), and a
+port-or-drop verdict. Where a wave item's *expected* member set disagrees with a row below,
+**this catalogue wins** (plan D7) — an implementer must not silently invent a Mechanism this
+file does not list, nor ship one it marks DROP.
+
+**Pinned port source:** `github.com/airiclenz/apogee-sim` @
+**`d22086701ff9ba8e5565f9587945d6d97434b646`** (`chore: rename project apogee -> apogee-sim`).
+Every `path:line` in the *Sim source* column is against that commit. apogee-sim is read-only
+reference material — no item modifies it and no apogee code imports it (ADR 0001). The pin is
+recorded here (not in a lockfile) because the dependency direction is bench → apogee: apogee
+never builds against the sim.
+
+**Evidence method (grounded, honest):** the sim's own
+`docs/catalogue.md` (@ the pin) is the canonical prose mirror of its Mechanism layer and
+carries **inline A/B figures** (per-Mechanism help-rates, Fisher p-values, baseline turn
+counts). Those are cited in the *Prior evidence* column. The raw **trace archive is absent
+from this machine** — the sim writes it to `$APOGEE_SIM_HOME`/`~/.apogee-sim/traces`
+(`internal/sim/trace_archive.go:108`), which does not exist here — so no row is grounded on a
+re-run of the traces; the hook-point mapping is grounded on the **signature survey**
+(`docs/design/hook-mutation-api.md`, three-slice survey) plus the sim catalogue's recorded
+figures. Every quantitative claim below is quoted from the sim catalogue, not re-measured.
+
+**Vocabulary:** apogee's own (`internal/domain/mechanism.go`) — hook points `pre-request` /
+`post-response` / `pre-tool-exec` / `post-tool-result` / `history-rewrite`; Capability
+`off-ramp` / `proactive-nudge` / `response-repair`; SuppressionPolicy `strikes-3` / `exempt`.
+Bypass keeps only `off-ramp` (ADR 0006 / D5); every catalogued Mechanism ships default-off
+until bench-proven (D1).
+
+---
+
+## Ratified catalogue decisions (specific to this map — do not re-litigate)
+
+- **C1 — Exempt is narrowed to true off-ramps.** apogee marks **only** `tool_use_enforcer`
+  and `empty_response_recovery` as `SuppressExempt` (plan item 1 spec; ADR 0006 ties exempt to
+  the off-ramp Capability). The sim additionally exempts `error_enrichment` and
+  `feed_forward_correction` from Adaptive Suppression (`descriptor.go:136-147`); apogee does
+  **not** carry that exemption forward — `error_enrichment` becomes a `strikes-3`
+  response-repair Mechanism, and `feed_forward_correction` is not a standalone Mechanism at all
+  (see C5). Rationale: in apogee, exempt ⇒ survives Bypass; a repair that is not a recovery
+  guarantee should not run in the naked-model floor.
+- **C2 — The three sim read-loop variants consolidate into one apogee `read_loop`.** The sim
+  splits the detector into `read_loop_detector`, `greenfield_read_loop_detector`, and
+  `successful_read_loop_detector` (`descriptor.go:89-109`) purely so each variant carries an
+  **independent suppression counter**; the three are declared **pairwise-incompatible** — only
+  one fires per request, dispatched by `readLoopCandidate` on the greenfield signal. apogee
+  folds them into a single `read_loop` Mechanism whose internal branch selection reproduces
+  `readLoopCandidate`; the pairwise-incompatibility collapses to branch selection. This matches
+  the plan's canonical `read_loop` naming. (Per-variant strike independence is a self-regulation
+  detail for item 3, not a catalogue split.)
+- **C3 — `compress` is not a Mechanism; it splits three ways (D6).** Tool-result **capping**
+  → the `tool_result_cap` pre-request Mechanism (item 9). Generative **Compaction** →
+  structural `internal/context/` (item 9, on by default, survives Bypass — **not** a
+  Mechanism). History **truncation** → the `truncate_history` history-rewrite Mechanism (item 7).
+  The sim's external-client-compaction sniffing (`compress` pre-compressed-content detection) is
+  **DROPPED** — apogee owns the loop, there is no external client (broad plan §4).
+- **C4 — The "completion nudges" are the `cot` family; they land in item 12.** The broad
+  plan's wave-1 "completion nudges" are the three tracked Mechanisms the sim's `cot` Transform
+  emits — `stall_nudge`, `list_nudge`, `tool_use_directive` (`catalogue.md` §cot). They did not
+  land in items 5/6 (whose scopes are the validate/syntax/autofix and off-ramp sets), so per
+  plan item 12's explicit pick-up clause they are assigned to **item 12** alongside `decompose`
+  and `cot`. In apogee they are three plain pre-request `proactive-nudge` Mechanisms;
+  `stall_nudge` ⊥ `list_nudge` (contradictory directives on the same surface).
+- **C5 — `feed_forward_correction` is folded, not ported.** In the sim it is the exempt
+  Mechanism that *delivers* a streaming deferred correction on the next request
+  (`response_validator.go`, `session_state.go:StoreCorrection`). apogee expresses exactly this
+  as `validate`/`syntax` returning `ActionDefer{Inject}` held in conversation state
+  (`hook-mutation-api.md` §4.1; `PostResponseDecision.Inject` survives snapshot/resume). No
+  standalone `feed_forward_correction` Mechanism.
+- **C6 — `intent` is a shared helper, dropped as a Mechanism.** `internal/intent/intent.go` is
+  an intent classifier (`HasActionIntent` / `HasAnalysisIntent` / `LastUserMessage`) consumed by
+  `cot`, `decompose`, `tool_use_enforcer`, `empty_response_recovery`, and `library`. It fires no
+  hook, has no descriptor, and is not in the sim `Mechanism` enum. It ports **inline** with its
+  consumers, never as its own catalogue row.
+- **C7 — `codeinfo` is DROPPED (pre-decided).** Broad plan §2 deprioritized it (modest
+  measured effect, superseded by shell-out diagnostics); the sim's own A/B shows its specific
+  signal is not significant (see its row). Not ported to any wave.
+
+Relocations carried from the survey (plan item 1): `cached_content_intercept` → `pre-tool-exec`;
+`error_enrichment` → `post-tool-result`. `grammar` and `filehint` are pre-request (explicit
+assignment, hook-mutation-api §8 #7).
+
+---
+
+## Table A — identity & dispatch
+
+One row per catalogued Mechanism (DROP/FOLD/SPLIT rows follow in Table C). "Sim canonical ID"
+is apogee-sim's own snake_case spelling (D4); the apogee ID equals it except where C2/C3/C4
+consolidate or rename.
+
+| apogee ID | Sim canonical ID | Sim source (@pin) | Hook point | Capability | Suppression | Ordering / incompatibility |
+|---|---|---|---|---|---|---|
+| `tool_use_enforcer` | `tool_use_enforcer` | `internal/proxy/tooluse_enforcer.go`; desc `descriptor.go:57` | post-response | off-ramp | exempt | none (3-retry cap is its throttle) |
+| `empty_response_recovery` | `empty_response_recovery` | `internal/proxy/empty_recovery.go`; desc `descriptor.go:83` | post-response | off-ramp | exempt | none (2-retry cap, per-Turn cooldown) |
+| `read_repeat` | `read_repeat_interceptor` | `internal/proxy/read_repeat_interceptor.go`; desc `descriptor.go:117` | post-response | response-repair | strikes-3 | After `validate` in cascade; IncompatibleWith `cached_content_intercept` |
+| `tool_loop_interceptor` | `tool_loop_interceptor` | `internal/proxy/tool_loop_interceptor.go`; desc `descriptor.go:124` | post-response | response-repair | strikes-3 | Before `validate` in cascade (fires on 2nd identical turn; 30s cooldown) |
+| `validate` | `feed_forward_correction`¹ | `internal/validate/{validate,bridge}.go`; `internal/proxy/response_validator.go` | post-response | response-repair | strikes-3 | Before `syntax`,`autofix` (short-circuits cascade on fail) |
+| `syntax` | (untracked analyzer) | `internal/syntax/{syntax,go_check,generic_check}.go` | post-response | response-repair | strikes-3 | After `validate`; Before `autofix`; own per-Session syntax-fail counter |
+| `autofix` | (untracked analyzer) | `internal/autofix/{autofix,formatters}.go` | post-response | response-repair | strikes-3 | After `syntax` (in-process gofmt always; external formatters PATH-gated) |
+| `correct_tool_result` | `correct_tool_result` (lab-only) | `internal/sim/intervention.go:22,94` | post-tool-result | response-repair | strikes-3 | none — **production trigger undefined in source (see Table C / item-7 flag)** |
+| `truncate_history` | `truncate_history` (lab-only) | `internal/sim/intervention.go:23,99` | history-rewrite | proactive-nudge² | strikes-3 | none — cut only at `AssistantBoundaries()`, never `PrefixEnd()` |
+| `tool_result_cap` | `context_compression` (cap half) | `internal/compress/compress.go` (`capToolResults` ~`:458`) | pre-request | proactive-nudge² | strikes-3 | none — protects the most-recent Turn; per-result 40%-budget cap |
+| `toolfilter` | `tool_filtering` | `internal/toolfilter/toolfilter.go:33,70` | pre-request | proactive-nudge | strikes-3³ | Before `decompose` (trim menu before user-msg rewrite) |
+| `filehint` | `file_hint` | `internal/filehint/filehint.go`; `internal/proxy/file_hint_detector.go`; desc `descriptor.go:130` | pre-request | proactive-nudge | strikes-3 | none (greenfield-suppressed internally) |
+| `grammar` | `grammar` | `internal/grammar/grammar.go`; `internal/proxy/proxy.go:625` | pre-request | proactive-nudge | strikes-3³ | none — backend-capability gated (D3; see Table C) |
+| `error_enrichment` | `error_enrichment` | `internal/proxy/error_enrichment.go`; desc `descriptor.go:136` | post-tool-result | response-repair | strikes-3 (C1) | none (classifies read-vs-write from originating call) |
+| `read_loop` | `read_loop_detector` (+ greenfield/successful) | `internal/proxy/read_loop_detector.go`; desc `descriptor.go:89-109` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `cached_content_intercept`, `read_repeat` (C2 folds the 3 sim variants) |
+| `cached_content_intercept` | `cached_content_intercept` | `internal/proxy/cached_content_intercept.go`; desc `descriptor.go:110` | pre-tool-exec | proactive-nudge | strikes-3 | IncompatibleWith `read_loop`, `read_repeat` (relocated from request-prep) |
+| `decompose` | `prompt_decomposition` | `internal/decompose/decompose.go:89`; desc `descriptor.go:148` | pre-request | proactive-nudge | strikes-3 | After `toolfilter`; muted when `read_loop` has Fired (D2 — `Fired` query or ordering edge) |
+| `stall_nudge` | `stall_nudge` | `internal/cot/cot.go`; desc `descriptor.go:63` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `list_nudge`; 4-nudge cap |
+| `list_nudge` | `list_nudge` | `internal/cot/cot.go`; desc `descriptor.go:70` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `stall_nudge`; 3-nudge cap |
+| `tool_use_directive` | `tool_use_directive` | `internal/cot/cot.go`; desc `descriptor.go:77` | pre-request | proactive-nudge | strikes-3 | none (fires only before first tool use) |
+| `library` | `library_injection` + observer | `internal/library/{transform,observer,store}.go` | pre-request (inject) + observe | proactive-nudge | strikes-3⁴ | none — confidence gates injection; fully inert in Bypass (inject **and** observe) |
+
+¹ The sim tracks `validate` indirectly: validation itself is untracked, but its **streaming
+deferred correction** is the exempt `feed_forward_correction` Mechanism. apogee folds that path
+into `validate`'s `ActionDefer` (C5), so the apogee `validate` Mechanism subsumes both.
+² Context-shapers (`truncate_history`, `tool_result_cap`) are neither off-ramps nor
+response-repairs; classified `proactive-nudge` so Bypass disables them (D5) while the structural
+Budget + Compaction stay on (D6). Not a nudge to the model in the literal sense — the label
+carries the Bypass semantics only.
+³ Untracked in the sim (structurally gated there); apogee makes them catalogued `strikes-3`
+Mechanisms so they self-regulate uniformly. Noted per-row so the divergence is explicit.
+⁴ The sim does not per-fire-track `library` — Bayesian score-gating is its throttle (ADR 0009
+sim). apogee registers it as a catalogued Mechanism (D1 default-off, Bypass-inert); its
+injection gate remains confidence-driven, with `strikes-3` as the uniform self-regulation
+backstop.
+
+---
+
+## Table B — port decision, wave, evidence, bench status
+
+| apogee ID | Port wave (item) | Verdict + one-line rationale | Prior evidence (sim @pin) | Bench validation |
+|---|---|---|---|---|
+| `tool_use_enforcer` | Wave 1 — **item 6** | PORT — recovery guarantee; without it a text-only turn has no off-ramp | `catalogue.md` §tool_use_enforcer (3-retry cap; de-exempt siblings recorded) | pending (leave-one-out, ADR 0009) |
+| `empty_response_recovery` | Wave 1 — **item 6** | PORT — recovery guarantee; without it an empty turn ends the conversation | `catalogue.md` §empty_response_recovery (escalating-temp retries) | pending |
+| `validate` | Wave 1 — **item 5** | PORT — tool-call validation; carried most of the measured win | `catalogue.md` response cascade (validate→syntax→autofix short-circuit) | pending |
+| `syntax` | Wave 1 — **item 5** | PORT — write-content syntax check (Go parser + generic) | `catalogue.md` §syntax (per-Session fail counter) | pending |
+| `autofix` | Wave 1 — **item 5** | PORT — formatter write-back; gofmt in-process, others optional (§3a) | `catalogue.md` §autofix (LookPath-cached formatter table) | pending |
+| `correct_tool_result` | Wave 2 — **item 7** | PORT (guarded) — first-class now the loop is owned; **production trigger unresolved** | lab-only intervention, no production counterpart (`intervention.go:12-13`) | pending |
+| `truncate_history` | Wave 2 — **item 7** | PORT — cheap A/B alternative to Compaction; off by default (D1) | lab-only intervention; drop-the-middle + static gap note (`intervention.go:99-178`) | pending |
+| `tool_result_cap` | Context — **item 9** | PORT — surviving half of `compress`; 40%-budget per-result cap | `catalogue.md` §compress (40% cap, most-recent-turn protected) | pending |
+| `toolfilter` | Wave 3 — **item 10** | PORT — tool-menu narrowing (30+ tools or observed hallucination) | `catalogue.md` §filter (structurally gated) | pending |
+| `filehint` | Wave 3 — **item 10** | PORT — role-safe workspace hint; TF-IDF-ish scoring | `catalogue.md` §file_hint (greenfield-suppressed) | pending |
+| `grammar` | Wave 3 — **item 10** | PORT (capability-gated) — `response_format` only when the backend needs it | `catalogue.md`+ADR 0007 sim: fires only on llama.cpp **without** native tool-calls | pending (may no-op on all current apogee backends) |
+| `error_enrichment` | Wave 3 — **item 11** | PORT — read-vs-write error clarification; relocated to post-tool-result | `catalogue.md` §error_enrichment (exempt in sim; C1 narrows) | pending |
+| `read_loop` | Wave 3 — **item 11** | PORT — failed-re-read detector; 3 sim variants consolidated (C2) | `catalogue.md` §read_loop/§greenfield/§successful (threshold 1 vs 2 by greenfield) | pending |
+| `cached_content_intercept` | Wave 3 — **item 11** | PORT — redundant successful-re-read interceptor; relocated to pre-tool-exec | `catalogue.md` §cached_content_intercept: **help_rate 0.73** (11/4/1), repeated_tool_call 0.91→0.15/run (gpt-oss-20b); inert-but-correct on gemma | pending |
+| `tool_loop_interceptor` | Wave 3 — **item 11** | PORT — identical-repeat-turn detector; **inventory-missed, found in checkout** | `catalogue.md` §tool_loop_interceptor (atomic decision, 30s cooldown) | pending |
+| `decompose` | Wave 4 — **item 12** | PORT — one-step focus + history-collapse; read-loop coupling → `Fired`/ordering | `catalogue.md` §decompose (mute-on-read-loop, stop at completedSteps) | pending |
+| `stall_nudge` | Wave 4 — **item 12** | PORT — completion nudge (C4); read-only stall → proceed-with-writes | `catalogue.md` §stall_nudge (threshold 4, cap 4; 11-fire/0%-compliance baseline motivation) | pending |
+| `list_nudge` | Wave 4 — **item 12** | PORT — completion nudge (C4); list-without-read → read | `catalogue.md` §list_nudge (threshold 2, cap 3) | pending |
+| `tool_use_directive` | Wave 4 — **item 12** | PORT — completion nudge (C4); action-intent + no tool use → use tools | `catalogue.md` §tool_use_directive (de-exempted 2026-05-23) | pending |
+| `library` | Library — **item 14** | PORT — cross-session learning; observe + confidence-gated inject | `catalogue.md` §library + ADR 0009 sim (Bayesian `(obs-succ+1)/(obs+2)`, gate 0.5/2 obs) | pending (longitudinal: improves-over-sessions AND never-below-baseline) |
+
+---
+
+## Table C — DROP / FOLD / SPLIT (non-ported inventory members, for the deliberate trail)
+
+| Inventory member | Sim canonical ID | Disposition | Rationale + evidence |
+|---|---|---|---|
+| `codeinfo` | `codeinfo` (untracked) | **DROP** | Broad plan §2 deprioritized (modest effect, superseded by shell-out diagnostics). Sim A/B (gpt-oss-20b-MXFP4, `propagate-lookup-rename`, N=75/arm): full pipeline good-rate 54.7% vs 32.0% (+22.7pp, Fisher p=0.008) is multi-stage; the codeinfo-specific missed-call-site shape 37→30 is **not significant** (OR 0.69, p=0.32). Not ported. |
+| `intent` | — (helper) | **FOLD (helper)** | Shared intent classifier (`intent.go`), no hook/descriptor; ports inline with `cot`/`decompose`/`tool_use_enforcer`/`empty_response_recovery`/`library` (C6). |
+| `feed_forward_correction` | `feed_forward_correction` | **FOLD into `validate`** | The streaming deferred-correction delivery path; apogee expresses it as `ActionDefer{Inject}` held in conversation state (C5; hook-mutation-api §4.1). No standalone Mechanism. |
+| `compress` | `context_compression` | **SPLIT (D6)** | → `tool_result_cap` (item 9, Mechanism) · generative Compaction (item 9, structural `context/`, on in Bypass, **not** a Mechanism) · `truncate_history` (item 7, Mechanism). External-client-compaction sniffing **DROPPED** (no external client — broad plan §4). |
+| `read_loop_detector`, `greenfield_read_loop_detector`, `successful_read_loop_detector` | same | **CONSOLIDATE → `read_loop`** | Three sim variants exist only to give each an independent suppression counter and are pairwise-incompatible (one fires per request). Folded into one apogee `read_loop` with internal branch selection (C2). |
+
+---
+
+## Ordering carried from the sim (source for item-2 constraint edges)
+
+The catalogue records the sim's declared orders so item 2's deterministic topo-sort
+(stable tiebreak by canonical ID, D4) has a grounded seed. These are *declared* Before/After
+edges, not the total order (the loop computes that).
+
+- **Pre-request pipeline (sim Transform order, `catalogue.md` §Pipeline ordering):**
+  `cot` → `library` → `codeinfo`(dropped) → `filter` → `decompose` → `compress`(split).
+  apogee edges: the `cot` nudges and `library` inject before `toolfilter`; `toolfilter` before
+  `decompose`; `tool_result_cap` runs last among pre-request shapers (it trims after context is
+  assembled). `filehint`/`grammar`/`read_loop` are request-prep injectors with no hard order
+  against the transforms beyond the incompatibility edges in Table A.
+- **Post-response cascade (sim, `catalogue.md` §Response-side detection cascade):**
+  `read_repeat` → `tool_loop_interceptor` → `validate` → (if valid) `syntax` → (if issues)
+  `autofix`. `validate` short-circuits `syntax`/`autofix` on failure. The two text-side
+  off-ramps (`tool_use_enforcer`, `empty_response_recovery`) run separately on text-only/empty
+  responses.
+- **Cross-mechanism coupling:** `decompose` mutes when a `read_loop` variant has fired this
+  Session (sim `RequestMeta.FiredCounts` peek, `decompose.go` gate) → apogee `LoopView.Fired`
+  query or a declared ordering edge (D2). `stall_nudge` ⊥ `list_nudge` (contradictory
+  directives). The read-loop / re-read family (`read_loop`, `read_repeat`,
+  `cached_content_intercept`) is pairwise-exclusive on the same wasted-read symptom.
+
+Self-regulation constants the sim ships (for item 3, not this item): Adaptive Suppression =
+3 consecutive not-helped → suppress for the Session; Turn Budget = 8 consecutive non-productive
+Turns → suppress all non-exempt; productive-Turn clear-path (default `zero`).
+
+---
+
+## Open question surfaced for a later wave (not blocking item 1)
+
+- **`correct_tool_result` production trigger (item 7).** In the sim this is a **lab-only**
+  intervention (`intervention.go:12-13`: "lab-only kinds with no production counterpart") —
+  the operator supplies the correction; nothing detects a correctable tool result on its own.
+  The `PostToolResult(ctx, call, result, view)` signature already carries the originating call
+  and view it would need, but the **gating logic does not exist in the source**. Item 7's spec
+  already instructs the implementer to STOP and report QUESTION rather than invent gating.
+  Recorded here so the catalogue does not imply a production trigger exists.
+
+---
+
+## Ledger (shipped-in-item · bench validation)
+
+Every ported row's **bench validation is `pending`** — no per-Mechanism default flips to ON in
+this plan (D1/D8); flips are one-line follow-ups gated on the bench A/B campaign (item 16
+handoff). "Shipped in item N" is filled by the verifier as each wave lands (item 16 closes the
+ledger).
+
+| apogee ID | Shipped in item | Bench validation |
+|---|---|---|
+| `validate`, `syntax`, `autofix` | 5 | pending |
+| `tool_use_enforcer`, `empty_response_recovery` | 6 | pending |
+| `correct_tool_result`, `truncate_history` | 7 | pending |
+| `tool_result_cap` | 9 | pending |
+| `toolfilter`, `filehint`, `grammar` | 10 | pending |
+| `error_enrichment`, `read_loop`, `read_repeat`, `tool_loop_interceptor`, `cached_content_intercept` | 11 | pending |
+| `decompose`, `stall_nudge`, `list_nudge`, `tool_use_directive` | 12 | pending |
+| `library` | 14 | pending |
+| `codeinfo` | — (DROP, C7) | n/a |
+| `intent` | — (FOLD helper, C6) | n/a |
+| `feed_forward_correction` | — (FOLD into `validate`, C5) | n/a |
+| `compress` | — (SPLIT, C3) | n/a |

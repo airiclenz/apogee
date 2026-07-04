@@ -6,6 +6,11 @@ accessor/mutation surface for the opaque `Request`, `Response`, and `Conversatio
 five hook interfaces operate on. The surface now type-checks (`go vet` + `go build` clean in a
 throwaway module); bodies remain `panic` stubs until P0.2 stands up `go.mod` + `internal/`.
 
+> **Catalogue ratified 2026-07-04 → [`mechanism-catalogue.md`](mechanism-catalogue.md).** The
+> Phase-4 catalogue is now the authoritative per-Mechanism map (hook point, descriptor,
+> ordering, wave, port-or-drop). Where this doc's §7 traceability table and its `file:line`
+> refs disagree with the pinned apogee-sim source, the catalogue is corrected there, not here.
+
 **Date:** 2026-06-23
 **Method:** scoped from apogee-sim's *real* Transform/Injector/Intervention signatures
 (not speculation, per TDD §6.2), via a three-slice survey of

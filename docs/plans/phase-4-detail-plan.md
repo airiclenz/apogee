@@ -107,7 +107,7 @@ Everything below was verified against the working tree at `b4ad0bb`; do not re-d
 
 ---
 
-## 1. Pin the apogee-sim source and ratify the Mechanism catalogue
+## 1. Pin the apogee-sim source and ratify the Mechanism catalogue — ✅ DONE (2026-07-04)
 
 **What:** confirm the checkout at `~/Repos/Airic/apogee-sim` exists (missing → STATUS
 BLOCKED asking the owner to place it; do not clone on your own). Record
