@@ -186,6 +186,20 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   catalogued Mechanism claiming it — a real Mechanism can no longer masquerade as the bench's
   own instrument. (`internal/agent`, `internal/domain`.)
 
+### Registry + config hardening: duplicate IDs refused, every `mechanisms:` key validated
+
+- **`MechanismRegistry.Add` refuses a duplicate `MechanismID`.** Two Mechanisms registered
+  under the same ID used to pass `Add` and be silently collapsed to one by the dispatch
+  order's ID map; the second `Add` is now a loud error naming the ID — the same startup-gate
+  posture as the reserved-sentinel refusal above.
+- **A typo'd `mechanisms:` key now fails startup even when mapped to `false`.** README and
+  the starter `config.yaml` always promised a loud unknown-ID error, but only *enabled* keys
+  were checked (through the build path) — a misspelled `false` entry was silently accepted.
+  Every key is now validated against the catalogue's known IDs (`mechanisms.KnownIDs`):
+  disabled keys are checked by name — a disabled Mechanism is still never constructed — and
+  the error lists the known catalogue exactly like the enabled-key path.
+  (`internal/domain`, `cmd/apogee`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

@@ -1,17 +1,30 @@
 package agent
 
-// White-box tests for catalogued-Mechanism dispatch (Phase-4 item 2): the loop dispatches
-// registered Mechanisms under their real MechanismID, the Bypass gate drops non-off-ramp
-// Mechanisms while keeping off-ramps and never touching experimental hooks, catalogued fire
-// before experimental, and a panicking catalogued Mechanism is contained exactly like a
-// panicking experimental hook. Order/tiebreak determinism itself is proven in package domain.
+// White-box tests for catalogued-Mechanism dispatch (Phase-4 item 2, broadened by
+// phase-4-review-fixes item 5): the loop dispatches registered Mechanisms under their real
+// MechanismID; at ALL FIVE hook points the Bypass gate drops non-off-ramp Mechanisms while
+// keeping off-ramps and never touching experimental hooks, and catalogued fire before
+// experimental; the incompatibility gate surfaces at construction; and a panicking
+// catalogued Mechanism is contained exactly like a panicking experimental hook.
+// Order/tiebreak determinism itself is proven in package domain.
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 )
+
+// allHookPoints is the complete hook-point set the dispatch matrix spans.
+var allHookPoints = []domain.HookPoint{
+	domain.HookPreRequest,
+	domain.HookPostResponse,
+	domain.HookPreToolExec,
+	domain.HookPostToolResult,
+	domain.HookHistoryRewrite,
+}
 
 // recordingMech is a catalogued pre-request Mechanism that counts its invocations; cap sets
 // the Capability the Bypass gate reads. It mutates the request so each invocation is an
@@ -32,27 +45,96 @@ func (m recordingMech) PreRequest(_ context.Context, req *domain.Request) error 
 	return nil
 }
 
-// seqMech / seqHook append a label to a shared slice, so a test can assert the catalogued
-// Mechanism fired before the experimental hook.
-type seqMech struct {
-	id    domain.MechanismID
-	order *[]string
+// fivePointProbe implements all five hook interfaces, reporting each invocation (and its
+// hook point) through note without acting — the shared core of the five-point Bypass matrix
+// and the catalogued-before-experimental order probe. Registered bare via AddExperimental it
+// is an experimental hook at every point; wrapped in fivePointMech it is one catalogued
+// Mechanism spanning the whole matrix.
+type fivePointProbe struct {
+	note func(domain.HookPoint)
 }
 
-func (m seqMech) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: m.id}
-}
-func (seqMech) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
-func (m seqMech) PreRequest(context.Context, *domain.Request) error {
-	*m.order = append(*m.order, "catalogued")
+func (p fivePointProbe) RewriteHistory(context.Context, *domain.Conversation) error {
+	p.note(domain.HookHistoryRewrite)
 	return nil
 }
 
-type seqHook struct{ order *[]string }
-
-func (h seqHook) PreRequest(context.Context, *domain.Request) error {
-	*h.order = append(*h.order, "experimental")
+func (p fivePointProbe) PreRequest(context.Context, *domain.Request) error {
+	p.note(domain.HookPreRequest)
 	return nil
+}
+
+func (p fivePointProbe) PostResponse(context.Context, *domain.Response) (domain.PostResponseDecision, error) {
+	p.note(domain.HookPostResponse)
+	return domain.PostResponseDecision{}, nil
+}
+
+func (p fivePointProbe) PreToolExec(context.Context, *domain.ToolCall, domain.LoopView) error {
+	p.note(domain.HookPreToolExec)
+	return nil
+}
+
+func (p fivePointProbe) PostToolResult(context.Context, domain.ToolCall, *domain.ToolResult, domain.LoopView) error {
+	p.note(domain.HookPostToolResult)
+	return nil
+}
+
+// fivePointMech is fivePointProbe with a descriptor — a catalogued Mechanism hooking at all
+// five points at once, so one tool-carrying exchange probes the full dispatch matrix.
+type fivePointMech struct {
+	fivePointProbe
+	id  domain.MechanismID
+	cap domain.Capability
+}
+
+func (m fivePointMech) Descriptor() domain.MechanismDescriptor {
+	return domain.MechanismDescriptor{ID: m.id, Capability: m.cap}
+}
+func (fivePointMech) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
+
+// countsByPoint returns a per-hook-point invocation counter and the note func feeding it.
+func countsByPoint() (map[domain.HookPoint]int, func(domain.HookPoint)) {
+	counts := make(map[domain.HookPoint]int, len(allHookPoints))
+	return counts, func(at domain.HookPoint) { counts[at]++ }
+}
+
+// incompatMech is a minimal pre-request Mechanism declaring an IncompatibleWith constraint —
+// the fixture for the construction-time incompatibility gate.
+type incompatMech struct {
+	id       domain.MechanismID
+	incompat []domain.MechanismID
+}
+
+func (m incompatMech) Descriptor() domain.MechanismDescriptor {
+	return domain.MechanismDescriptor{ID: m.id, IncompatibleWith: m.incompat}
+}
+func (incompatMech) Ordering() domain.OrderingConstraints              { return domain.OrderingConstraints{} }
+func (incompatMech) PreRequest(context.Context, *domain.Request) error { return nil }
+
+// driveToolExchange drives one full Exchange whose first Turn carries a tool call and whose
+// second closes with text — so every one of the five hook points is exercised at least once.
+func driveToolExchange(t *testing.T, cfg domain.Config) {
+	t.Helper()
+	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("call-1", "probe", `{}`),
+		contentScript("done"),
+	}})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "do the thing"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step (tool Turn): %v", err)
+	}
+	if res.Status != domain.StatusTurnComplete {
+		t.Fatalf("tool Turn status = %q, want %q", res.Status, domain.StatusTurnComplete)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step (closing Turn): %v", err)
+	}
 }
 
 // panicMech is a catalogued pre-request Mechanism that panics — the input for the
@@ -112,66 +194,112 @@ func TestCataloguedMechanismFiresUnderRealID(t *testing.T) {
 	}
 }
 
+// TestBypassGate is the five-point Bypass dispatch matrix (phase-4-review-fixes item 5): at
+// EVERY hook point an off-ramp survives Bypass, proactive-nudge and response-repair are
+// dropped under it (and all three dispatch without it), and an experimental hook — the
+// bench's own instrument — is never gated either way.
 func TestBypassGate(t *testing.T) {
 	tests := []struct {
-		name                           string
-		bypass                         bool
-		wantOff, wantNudge, wantRepair int
+		name   string
+		bypass bool
 	}{
-		{name: "bypass off ⇒ all catalogued fire", bypass: false, wantOff: 1, wantNudge: 1, wantRepair: 1},
-		{name: "bypass on ⇒ only the off-ramp fires", bypass: true, wantOff: 1, wantNudge: 0, wantRepair: 0},
+		{name: "bypass off ⇒ all catalogued dispatch", bypass: false},
+		{name: "bypass on ⇒ only the off-ramp dispatches", bypass: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			cfg := baseConfig(sink)
+			cfg := configWithTools(sink, fakeTool{name: "probe", readOnly: true, result: "ok"})
 			cfg.Bypass = tt.bypass
 			cfg.Mechanisms = domain.NewMechanismRegistry()
 
-			var off, nudge, repair int
-			mustAddMech(t, cfg.Mechanisms, recordingMech{id: "off", cap: domain.CapOffRamp, fired: &off})
-			mustAddMech(t, cfg.Mechanisms, recordingMech{id: "nudge", cap: domain.CapProactiveNudge, fired: &nudge})
-			mustAddMech(t, cfg.Mechanisms, recordingMech{id: "repair", cap: domain.CapResponseRepair, fired: &repair})
+			offCounts, noteOff := countsByPoint()
+			nudgeCounts, noteNudge := countsByPoint()
+			repairCounts, noteRepair := countsByPoint()
+			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteOff}, "off", domain.CapOffRamp})
+			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteNudge}, "nudge", domain.CapProactiveNudge})
+			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteRepair}, "repair", domain.CapResponseRepair})
 
-			// An experimental hook is the bench's own instrument — never Bypass-gated.
-			expFired := false
-			if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firingHook{fired: &expFired}); err != nil {
-				t.Fatalf("AddExperimental: %v", err)
+			expCounts, noteExp := countsByPoint()
+			for _, at := range allHookPoints {
+				if err := cfg.Mechanisms.AddExperimental(at, fivePointProbe{noteExp}); err != nil {
+					t.Fatalf("AddExperimental(%s): %v", at, err)
+				}
 			}
 
-			driveOneStep(t, cfg, echoResponder{reply: "ok"})
+			driveToolExchange(t, cfg)
 
-			if off != tt.wantOff {
-				t.Errorf("off-ramp fired %d, want %d", off, tt.wantOff)
-			}
-			if nudge != tt.wantNudge {
-				t.Errorf("proactive-nudge fired %d, want %d", nudge, tt.wantNudge)
-			}
-			if repair != tt.wantRepair {
-				t.Errorf("response-repair fired %d, want %d", repair, tt.wantRepair)
-			}
-			if !expFired {
-				t.Errorf("experimental hook did not fire (bypass=%v); it must never be Bypass-gated", tt.bypass)
+			for _, at := range allHookPoints {
+				if offCounts[at] == 0 {
+					t.Errorf("[%s] off-ramp did not dispatch (bypass=%v); off-ramps survive Bypass", at, tt.bypass)
+				}
+				if gated := nudgeCounts[at] == 0; gated != tt.bypass {
+					t.Errorf("[%s] proactive-nudge dispatched %d times (bypass=%v)", at, nudgeCounts[at], tt.bypass)
+				}
+				if gated := repairCounts[at] == 0; gated != tt.bypass {
+					t.Errorf("[%s] response-repair dispatched %d times (bypass=%v)", at, repairCounts[at], tt.bypass)
+				}
+				if expCounts[at] == 0 {
+					t.Errorf("[%s] experimental hook did not fire (bypass=%v); it must never be Bypass-gated", at, tt.bypass)
+				}
 			}
 		})
 	}
 }
 
+// TestCataloguedFireBeforeExperimental proves the catalogued-first dispatch order at every
+// hook point: within each dispatch pass the catalogued Mechanism runs before the
+// experimental hook, so the bench observes the configured behaviour, never the reverse.
 func TestCataloguedFireBeforeExperimental(t *testing.T) {
-	sink := &recordingSink{}
-	cfg := baseConfig(sink)
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "probe", readOnly: true, result: "ok"})
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 
-	var order []string
-	mustAddMech(t, cfg.Mechanisms, seqMech{id: "cat", order: &order})
-	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, seqHook{order: &order}); err != nil {
-		t.Fatalf("AddExperimental: %v", err)
+	order := make(map[domain.HookPoint][]string, len(allHookPoints))
+	label := func(name string) func(domain.HookPoint) {
+		return func(at domain.HookPoint) { order[at] = append(order[at], name) }
+	}
+	mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{label("catalogued")}, "cat", domain.CapProactiveNudge})
+	for _, at := range allHookPoints {
+		if err := cfg.Mechanisms.AddExperimental(at, fivePointProbe{label("experimental")}); err != nil {
+			t.Fatalf("AddExperimental(%s): %v", at, err)
+		}
 	}
 
-	driveOneStep(t, cfg, echoResponder{reply: "ok"})
+	driveToolExchange(t, cfg)
 
-	if len(order) != 2 || order[0] != "catalogued" || order[1] != "experimental" {
-		t.Errorf("dispatch order = %v, want [catalogued experimental]", order)
+	// Some points run once per exchange (the tool stages), others once per Turn: assert every
+	// pass alternates catalogued → experimental rather than pinning a pass count.
+	want := [2]string{"catalogued", "experimental"}
+	for _, at := range allHookPoints {
+		got := order[at]
+		if len(got) == 0 || len(got)%2 != 0 {
+			t.Errorf("[%s] dispatch order = %v, want complete catalogued/experimental pairs", at, got)
+			continue
+		}
+		for i, name := range got {
+			if name != want[i%2] {
+				t.Errorf("[%s] dispatch order = %v, want alternating [catalogued experimental ...]", at, got)
+				break
+			}
+		}
+	}
+}
+
+// TestNewSurfacesIncompatibleMechanismsAtConstruction is the construction-time gate proven
+// end-to-end (phase-4-review-fixes item 5): a registry carrying two mutually-incompatible
+// Mechanisms is refused by New AND by the newAgent seam it delegates to — the loud startup
+// failure, not a silently co-firing pair. Method-level coverage lives in package domain.
+func TestNewSurfacesIncompatibleMechanismsAtConstruction(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "read_loop", incompat: []domain.MechanismID{"cached_content_intercept"}})
+	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "cached_content_intercept"})
+
+	if _, err := New(cfg); !errors.Is(err, domain.ErrIncompatibleMechanisms) {
+		t.Errorf("New = %v, want ErrIncompatibleMechanisms", err)
+	}
+	if _, err := newAgent(cfg, echoResponder{reply: "ok"}); !errors.Is(err, domain.ErrIncompatibleMechanisms) {
+		t.Errorf("newAgent = %v, want ErrIncompatibleMechanisms", err)
 	}
 }
 

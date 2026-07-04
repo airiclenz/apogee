@@ -173,16 +173,24 @@ func NewMechanismRegistry() *MechanismRegistry {
 }
 
 // Add registers a catalogued Mechanism. It returns an error if the Mechanism claims
-// the reserved experimental sentinel ID or implements no hook interface. (The
+// the reserved experimental sentinel ID, re-uses an already-registered MechanismID
+// (topoSort's byID map would otherwise silently drop one of the two — a loud failure
+// instead, phase-4-review-fixes item 5), or implements no hook interface. (The
 // constraint-cycle check is performed by New over the whole graph — a startup gate,
 // ADR 0003 — so a registry under construction can hold constraints that only close a
 // cycle once every Mechanism is present.)
 func (r *MechanismRegistry) Add(m Mechanism) error {
-	if id := m.Descriptor().ID; id == ExperimentalMechanismID {
+	id := m.Descriptor().ID
+	if id == ExperimentalMechanismID {
 		return fmt.Errorf("apogee: mechanism ID %q is reserved for experimental hooks", id)
 	}
+	for _, registered := range r.mechanisms {
+		if registered.Descriptor().ID == id {
+			return fmt.Errorf("apogee: mechanism ID %q is already registered", id)
+		}
+	}
 	if !implementsAnyHook(m) {
-		return fmt.Errorf("apogee: mechanism %q: %w", m.Descriptor().ID, errNoHookInterface)
+		return fmt.Errorf("apogee: mechanism %q: %w", id, errNoHookInterface)
 	}
 	r.mechanisms = append(r.mechanisms, m)
 	return nil

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee"
@@ -145,11 +146,17 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// (Phase 4). deps is the construction-injected collaborator set (D3): LookPath is the host's
 	// real PATH prober — autofix resolves its formatter table through it once at construction —
 	// and the Library store is nil until it lands (item 13). mechanisms.Build drives the catalogue's
-	// constructor table; an unknown ID or an incompatible pair is a loud startup error surfaced
-	// here (the latter via New's ValidateIncompatibilities gate). With nothing enabled this is a
-	// no-op (nil registry ⇒ New defaults to an empty one), so a config without a mechanisms block
-	// behaves exactly as before.
-	registry, err := buildMechanismRegistry(opts.mechanisms, mechanisms.Deps{LookPath: exec.LookPath}, mechanisms.Build)
+	// constructor table and mechanisms.KnownIDs is its known-key surface; an unknown ID — enabled
+	// OR disabled — or an incompatible pair is a loud startup error surfaced here (the latter via
+	// New's ValidateIncompatibilities gate). With nothing enabled this is a no-op (nil registry ⇒
+	// New defaults to an empty one), so a config without a mechanisms block behaves exactly as
+	// before.
+	registry, err := buildMechanismRegistry(
+		opts.mechanisms,
+		mechanisms.Deps{LookPath: exec.LookPath},
+		mechanisms.Build,
+		mechanisms.KnownIDs(),
+	)
 	if err != nil {
 		return err
 	}
@@ -219,23 +226,45 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 type mechanismBuilder func(apogee.MechanismID, mechanisms.Deps) (apogee.Mechanism, error)
 
 // buildMechanismRegistry builds a MechanismRegistry from the enabled-mechanism config (Phase 4),
-// driving build for each ID whose `mechanisms:` value is true and Add-ing the result. Enabled IDs
-// are sorted by canonical spelling so registration (and any error) is deterministic; the dispatch
-// order is the registry's own topo-sort (ADR 0003), independent of registration order. An unknown
-// ID (build's error) or a Mechanism implementing no hook interface (Add's error) is a loud startup
-// failure — a typo'd or half-built Mechanism never silently vanishes. With nothing enabled it
-// returns a nil registry so New falls back to its default empty one (today's behaviour unchanged).
-func buildMechanismRegistry(enabled map[string]bool, deps mechanisms.Deps, build mechanismBuilder) (*apogee.MechanismRegistry, error) {
-	ids := make([]string, 0, len(enabled))
-	for id, on := range enabled {
-		if on {
-			ids = append(ids, id)
+// validating EVERY `mechanisms:` key against the known catalogue and driving build for each ID
+// whose value is true, Add-ing the result. Keys are walked in sorted canonical spelling so
+// registration (and any error) is deterministic; the dispatch order is the registry's own
+// topo-sort (ADR 0003), independent of registration order. An unknown ID is a loud startup
+// failure whether its value is true (build's error) or false (checked by name against known —
+// phase-4-review-fixes item 5; disabled Mechanisms are never constructed), as is a Mechanism
+// implementing no hook interface (Add's error) — a typo'd or half-built Mechanism never silently
+// vanishes. With nothing enabled (and every key valid) it returns a nil registry so New falls
+// back to its default empty one (today's behaviour unchanged).
+func buildMechanismRegistry(
+	enabled map[string]bool,
+	deps mechanisms.Deps,
+	build mechanismBuilder,
+	known []apogee.MechanismID,
+) (*apogee.MechanismRegistry, error) {
+	knownSet := make(map[string]bool, len(known))
+	for _, id := range known {
+		knownSet[string(id)] = true
+	}
+
+	keys := make([]string, 0, len(enabled))
+	for id := range enabled {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+
+	ids := make([]string, 0, len(keys))
+	for _, id := range keys {
+		if enabled[id] {
+			ids = append(ids, id) // an unknown enabled ID errors through build below, as today
+			continue
+		}
+		if !knownSet[id] {
+			return nil, fmt.Errorf("apogee: unknown mechanism %q; known: %s", id, knownMechanismList(known))
 		}
 	}
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	sort.Strings(ids)
 
 	registry := apogee.NewMechanismRegistry()
 	for _, id := range ids {
@@ -248,6 +277,19 @@ func buildMechanismRegistry(enabled map[string]bool, deps mechanisms.Deps, build
 		}
 	}
 	return registry, nil
+}
+
+// knownMechanismList renders the known catalogue for the unknown-disabled-key error, matching
+// the build path's own error tail (an empty catalogue renders "(none)").
+func knownMechanismList(known []apogee.MechanismID) string {
+	if len(known) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, len(known))
+	for i, id := range known {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // sessionSaver adapts a session.Store to the TUI's func(Session) error saver seam and

@@ -221,7 +221,7 @@ docs/CHANGELOG. Commit:
 
 ---
 
-## 5. Registry + config hardening
+## 5. Registry + config hardening — ✅ DONE (2026-07-04)
 
 **What:** the three loud-failure holes.
 **Duplicate ID:** `MechanismRegistry.Add` (`domain/mechanism.go:166-172`) refuses a

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -275,12 +276,16 @@ func buildFake(id apogee.MechanismID, _ mechanisms.Deps) (apogee.Mechanism, erro
 	return fakePreRequestMechanism{id: id}, nil
 }
 
+// fakeKnown is the known-catalogue surface matching buildFake — the IDs the config-key
+// validation accepts while the builder is the injected fake.
+var fakeKnown = []apogee.MechanismID{"alpha", "beta", "off"}
+
 // An enabled ID is built and registered; a `false` entry is not. The registered Mechanism is
 // visible in the registry's deterministic dispatch order (Ordered).
 func TestBuildMechanismRegistryEnablesOnlyTrue(t *testing.T) {
 	t.Parallel()
 	enabled := map[string]bool{"alpha": true, "beta": false}
-	registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake)
+	registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake, fakeKnown)
 	if err != nil {
 		t.Fatalf("buildMechanismRegistry: %v", err)
 	}
@@ -297,11 +302,12 @@ func TestBuildMechanismRegistryEnablesOnlyTrue(t *testing.T) {
 }
 
 // Nothing enabled ⇒ a nil registry, so New falls back to its default empty one (today's
-// behaviour unchanged for a config with no mechanisms block).
+// behaviour unchanged for a config with no mechanisms block). A KNOWN key mapped to false
+// builds nothing — disabled Mechanisms are validated by name, never constructed.
 func TestBuildMechanismRegistryDefaultNone(t *testing.T) {
 	t.Parallel()
 	for _, enabled := range []map[string]bool{nil, {}, {"off": false}} {
-		registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake)
+		registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake, fakeKnown)
 		if err != nil {
 			t.Fatalf("buildMechanismRegistry(%+v): %v", enabled, err)
 		}
@@ -311,13 +317,41 @@ func TestBuildMechanismRegistryDefaultNone(t *testing.T) {
 	}
 }
 
-// An unknown ID is a loud startup error — proven end-to-end against the real (empty) catalogue via
+// An unknown ID is a loud startup error — proven end-to-end against the real catalogue via
 // mechanisms.Build, so a typo'd `mechanisms:` key fails startup rather than silently vanishing.
 func TestBuildMechanismRegistryUnknownIDErrors(t *testing.T) {
 	t.Parallel()
-	_, err := buildMechanismRegistry(map[string]bool{"nope": true}, mechanisms.Deps{}, mechanisms.Build)
+	_, err := buildMechanismRegistry(map[string]bool{"nope": true}, mechanisms.Deps{}, mechanisms.Build, mechanisms.KnownIDs())
 	if err == nil {
 		t.Fatal("enabling an unknown mechanism: want an error, got nil")
+	}
+}
+
+// A typo'd key mapped to FALSE is a startup error too (phase-4-review-fixes item 5): it used to
+// be silently accepted, contradicting README/config.yaml's promised loud error. The error lists
+// the real catalogue's known IDs; a valid disabled key still builds nothing — end-to-end against
+// mechanisms.Build / mechanisms.KnownIDs.
+func TestBuildMechanismRegistryUnknownDisabledKeyErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildMechanismRegistry(map[string]bool{"typo": false}, mechanisms.Deps{}, mechanisms.Build, mechanisms.KnownIDs())
+	if err == nil {
+		t.Fatal(`{"typo": false}: want a startup error, got nil`)
+	}
+	if !strings.Contains(err.Error(), `"typo"`) {
+		t.Errorf("error = %q, want it to name the unknown key", err)
+	}
+	if !strings.Contains(err.Error(), "validate") {
+		t.Errorf("error = %q, want it to list the known catalogue (e.g. %q)", err, "validate")
+	}
+
+	// The same key spelled correctly and disabled is fine: validated by name, never built.
+	registry, err := buildMechanismRegistry(map[string]bool{"validate": false}, mechanisms.Deps{}, mechanisms.Build, mechanisms.KnownIDs())
+	if err != nil {
+		t.Fatalf(`{"validate": false}: %v`, err)
+	}
+	if registry != nil {
+		t.Error(`{"validate": false} = non-nil registry; want nil (a disabled Mechanism is never constructed)`)
 	}
 }
 
@@ -326,7 +360,7 @@ func TestBuildMechanismRegistryUnknownIDErrors(t *testing.T) {
 // in internal/agent). This proves the config → registry → Config.Mechanisms path is coherent.
 func TestBuildMechanismRegistryConstructsUnderBypass(t *testing.T) {
 	t.Parallel()
-	registry, err := buildMechanismRegistry(map[string]bool{"alpha": true}, mechanisms.Deps{}, buildFake)
+	registry, err := buildMechanismRegistry(map[string]bool{"alpha": true}, mechanisms.Deps{}, buildFake, fakeKnown)
 	if err != nil {
 		t.Fatalf("buildMechanismRegistry: %v", err)
 	}
