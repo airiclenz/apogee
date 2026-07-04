@@ -67,6 +67,13 @@ func (e *Entry) Score() float64 {
 
 // Expired reports whether the Entry has outlived its TTL. A non-positive TTLHours means the
 // Entry never expires.
+//
+// Expiry keys on CreatedAt and is deliberately NOT refreshed by re-observation: an entry
+// reinforced within its TTL window still expires at CreatedAt + TTL, not from its last sighting.
+// This is a sim-faithful port choice, not an oversight — the pinned sim's Entry.Expired keys on
+// CreatedAt too, and its Store.Record match path bumps Observations/LastUsed/Content but leaves
+// CreatedAt untouched (apogee-sim internal/library/{entry.go,store.go} @pin). Changing it here
+// would diverge the two stores' eviction behaviour, which the bench compares.
 func (e *Entry) Expired(now time.Time) bool {
 	if e.TTLHours <= 0 {
 		return false

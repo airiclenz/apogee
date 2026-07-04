@@ -364,7 +364,17 @@ loop-level tests live.
 
 ---
 
-## 9. Sim-parity check: Library entry expiry vs reinforcement
+## 9. Sim-parity check: Library entry expiry vs reinforcement — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** Sim-parity outcome = *ported quirk, no behaviour change*. The pinned sim keys
+expiry on `CreatedAt` (`entry.go:48` `time.Since(e.CreatedAt) > TTL`) and its `Store.Record` match path
+(`store.go:161-166`) bumps `Observations`/`Confidence`/`LastUsed`/`Content` but never touches
+`CreatedAt`; a full grep of the sim's `internal/library` finds `CreatedAt` written only once, at entry
+creation. apogee already behaves identically (`Record` match path bumps `Observations`/`LastUsed`/
+`Content`, `Expired` keys on `CreatedAt`), so a re-observed entry expires at `CreatedAt + TTL`
+regardless of reinforcement — this is sim-faithful, not a defect. Per S5: no code behaviour change;
+added a sim-faithful-port comment on `Entry.Expired` (`internal/library/entry.go`). No CHANGELOG entry
+(Acceptance scopes CHANGELOG to the fix case only). Commit: the `docs(library):` option.
 
 **Finding:** review "Library entries expire on `CreatedAt` even while actively reinforced"
 (Medium, *(uncertain — check sim parity)*). Ground truth: the pinned sim's store
