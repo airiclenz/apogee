@@ -99,6 +99,13 @@ still wins (an enabled non-off-ramp mechanism does not fire under bypass). The
 catalogue fills in as the port waves land — see
 [`docs/design/mechanism-catalogue.md`](docs/design/mechanism-catalogue.md).
 
+Automatic context **Compaction** keeps a long session from overflowing the model's
+window: when the conversation history outgrows its budgeted share, apogee folds the
+older turns into a summary (the same reducer as the `/compact` command) before the
+next request. It is structural and load-bearing — it stays on even under `--bypass`
+— so it is on by default; set `auto-compact: false` (a file-only key) to manage the
+window yourself with `/compact` instead.
+
 ## Building from source
 
 **Prerequisites:** Go 1.26+ (the toolchain version pinned in `go.mod`).

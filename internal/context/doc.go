@@ -14,6 +14,12 @@
 // Allocate splits the discovered context window across the parts of a request (response reserve,
 // system prompt, file context, history — the single authority CONTEXT names), and TokenEstimator
 // calibrates a chars→token ratio against each Turn's server-reported usage so LoopView.Budget()
-// reports an honest fill. They are advisory until the context reducers consume them: the automatic
-// Compaction trigger and tool-result capping remain scaffolds.
+// reports an honest fill.
+//
+// Both Budget consumers are now wired (Phase-4 item 9). HistoryExceedsAllocation is the automatic
+// Compaction trigger's decision — the loop folds the conversation (the same generative Compact the
+// TUI's /compact drives) when the history has outgrown its Budget allocation at a quiescent
+// boundary. Tool-result capping is the second consumer, but it lives in package mechanisms
+// (tool_result_cap): it is a config-gated pre-request Mechanism, not structural, so it reads the
+// Budget through the hook surface rather than living here.
 package context

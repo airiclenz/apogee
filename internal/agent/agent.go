@@ -71,6 +71,7 @@ type Agent struct {
 	conv          domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
 	inExchange    bool                // true between Submit and the Step that completes the Exchange
+	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
 	exchangeStart int                 // conv length before this Exchange's first user message — the boundary AbortExchange rolls back to
 	turnIndex     int                 // 0-based index of the next Turn
 	approved      map[string]bool     // tools the human allowed for the rest of this Session

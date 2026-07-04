@@ -47,6 +47,46 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 	return res.Skipped, err
 }
 
+// autoCompact runs generative Compaction at a quiescent boundary when the conversation history has
+// outgrown its Budget allocation — the automatic, budget-driven trigger (Phase-4 item 9, CONTEXT:
+// Compaction "the default reducer"). It is STRUCTURAL, not a Mechanism (D6): it runs even under
+// Bypass (the gate consults only cfg.Context.CompactionEnabled, never cfg.Bypass — a naked model
+// still overflows its window without it, decision 12) and is opted out only by the file-only
+// `auto-compact: false` config key. It runs the same Compact the /compact command drives (protected
+// prefix, Replace write-back), so a fold ending the conversation at a clean prefix → summary shape;
+// the loop calls it before it consumes new input, so a just-submitted user message rides the folded
+// history as its own turn rather than being folded into the summary. It is non-reentrant (the
+// compacting guard) and quiet on success — the Replace is the visible effect (the next Turn's
+// UsageEvent re-measures the reduced fill); a fault surfaces as an ErrorEvent and leaves the
+// conversation untouched (Compact's own guarantee), so a failed auto-fold never corrupts history and
+// the Turn proceeds with the full conversation. A cancellation is not a fault: the Turn's own stream
+// carries the cancel to a clean boundary.
+func (a *Agent) autoCompact(ctx context.Context, turn int) {
+	if a.compacting || !a.shouldAutoCompact() {
+		return
+	}
+	a.compacting = true
+	defer func() { a.compacting = false }()
+	if _, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars()); err != nil {
+		if ctx.Err() != nil {
+			return // a cancel masquerades as a stream error; the Turn's main stream handles it
+		}
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "compaction", Err: err.Error()})
+	}
+}
+
+// shouldAutoCompact reports whether the automatic Compaction trigger should fire: it is enabled
+// (cfg.Context.CompactionEnabled — the `auto-compact` key, on by default; the on-demand /compact
+// ignores this gate and always folds) AND the conversation's estimated token size has outgrown the
+// Budget's History allocation (internal/context.HistoryExceedsAllocation). A zero History allocation
+// (the window is unknown) never trips, so an unbudgeted Agent never auto-folds.
+func (a *Agent) shouldAutoCompact() bool {
+	if !a.cfg.Context.CompactionEnabled {
+		return false
+	}
+	return apogeectx.HistoryExceedsAllocation(a.budget().History, a.tokens, a.conv.Messages())
+}
+
 // compactTranscriptChars returns the character budget for the rendered transcript the summary
 // call carries, derived from the discovered context window so the call itself cannot overflow at
 // exactly the high fill /compact exists to relieve (post-v1 remediation item 6). The window (in

@@ -51,6 +51,12 @@ type settings struct {
 	// references the same workspace already feeds the model.
 	useProjectSkills bool
 
+	// autoCompact gates the automatic, budget-driven generative Compaction trigger (item 9). File-only,
+	// default TRUE — Compaction is structural and load-bearing (it stays on under Bypass, D5/D6), so it
+	// runs unless a config explicitly opts out with `auto-compact: false`. The on-demand /compact command
+	// is unaffected by it (that always folds on request).
+	autoCompact bool
+
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), file-only
 	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
@@ -95,6 +101,11 @@ type layer struct {
 	// an absent key (which keeps the default true).
 	useProjectSkills *bool
 
+	// autoCompact is set only by the FILE layer (the automatic Compaction trigger is config'd,
+	// default-on, with no flag/env). A pointer so an explicit `auto-compact: false` is
+	// distinguishable from an absent key (which keeps the default true).
+	autoCompact *bool
+
 	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
 	// with no flag/env). A nil slice means the source does not configure servers (fall through).
 	mcpServers []mcp.ServerConfig
@@ -119,7 +130,7 @@ type layer struct {
 // layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
 // repo's invocation environment must not be able to loosen Auto's blast radius.
 func resolveSettings(file, env, flag layer) settings {
-	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true}
+	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true}
 	if file.confineToWorkspace != nil {
 		s.confineToWorkspace = *file.confineToWorkspace
 	}
@@ -128,6 +139,9 @@ func resolveSettings(file, env, flag layer) settings {
 	}
 	if file.useProjectSkills != nil {
 		s.useProjectSkills = *file.useProjectSkills
+	}
+	if file.autoCompact != nil {
+		s.autoCompact = *file.autoCompact
 	}
 	s.mcpServers = file.mcpServers // file-only (P3.15); env/flag never set MCP servers
 	s.mechanisms = file.mechanisms // file-only (Phase 4); env/flag never enable Mechanisms
@@ -180,6 +194,10 @@ type fileConfig struct {
 	// UseProjectSkills gates discovery of the workspace's bare skills/ folder. A pointer so an
 	// explicit `use-project-skills: false` is distinguishable from an absent key (default true).
 	UseProjectSkills *bool `yaml:"use-project-skills"`
+	// AutoCompact gates the automatic, budget-driven generative Compaction trigger (item 9). A pointer
+	// so an explicit `auto-compact: false` is distinguishable from an absent key (default true).
+	// Compaction is structural (it stays on under Bypass), so this is the only way to turn it off.
+	AutoCompact *bool `yaml:"auto-compact"`
 	// MCPServers configures external MCP servers to connect on startup (P3.15). Absent/empty ⇒
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
@@ -282,6 +300,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.UseProjectSkills != nil {
 		l.useProjectSkills = fc.UseProjectSkills
+	}
+	if fc.AutoCompact != nil {
+		l.autoCompact = fc.AutoCompact
 	}
 	if len(fc.MCPServers) > 0 {
 		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
@@ -421,6 +442,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.webSearchEndpoint = s.webSearchEndpoint
 	opts.useProjectSkills = s.useProjectSkills
+	opts.autoCompact = s.autoCompact
 	opts.mcpServers = s.mcpServers
 	opts.profile = s.profile
 	opts.mechanisms = s.mechanisms

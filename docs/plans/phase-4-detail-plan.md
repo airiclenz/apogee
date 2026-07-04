@@ -378,7 +378,7 @@ exist here); additive, no request behaviour changed.
 
 ---
 
-## 9. Tool-result capping (Mechanism) + the automatic Compaction trigger
+## 9. Tool-result capping (Mechanism) + the automatic Compaction trigger — ✅ DONE (2026-07-04)
 
 **What:** the two Budget consumers. **Tool-result capping** — the surviving half of the
 sim's `compress`, per the catalogue: a pre-request Mechanism that truncates any single
@@ -406,6 +406,33 @@ updated in the same commit. Commit:
 `feat(context): tool-result capping mechanism and the budget-driven automatic compaction trigger`.
 
 **Depends on:** item 8.
+
+**NOTES (2026-07-04):** deviations from the literal text, all recorded here.
+- *Trigger placement.* `Agent.autoCompact` runs at the TOP of `step()` — BEFORE consuming pending
+  input — not in the `runHistoryRewriteHooks` slot the loop:190 comment reserved for "generative
+  compaction". Folding after the fresh user message is appended would fold it into the summary,
+  leaving the request ending in an assistant message; running before input consumption keeps the
+  fresh message a distinct turn (the `/compact`-then-submit shape). Still "at a quiescent boundary,
+  before the next request is built".
+- *"Events visible" without a new event type.* item 9 confines the diff away from `internal/domain`,
+  so no compaction Event variant was added. A fold FAULT surfaces as an `ErrorEvent` (Source
+  "compaction"); a SUCCESS is quiet — the `Replace` write-back is the visible effect and the next
+  Turn's `UsageEvent` re-measures the reduced fill (the compaction call itself stays silent, as
+  `/compact` is).
+- *Opt-out field reused.* The `auto-compact` key maps to the pre-existing (unused)
+  `ContextConfig.CompactionEnabled` (no `internal/domain` change). The CLI defaults it ON; a bare
+  `domain.Config` zero-values it OFF, preserving "zero Config == today's behaviour" for library
+  embedders (they opt in explicitly). The gate consults only `CompactionEnabled`, never `Bypass`
+  (D5/D6), and the on-demand `/compact` ignores it entirely.
+- *Cap budget basis.* "its Budget fraction" is 40% of the WORKING window (`ContextLimit -
+  ResponseReserve`) in chars via the calibrated ratio — apogee's honest analog of the sim's
+  `ContextBudget = contextLimit - contextLimit/4` (`proxy.go:597` @pin), keeping the port faithful
+  to the sim's `budget*charsPerToken*0.4` while using apogee's real reserve (D7 behavior ground-truth).
+- *Cap fidelity.* `truncateToolResult` drops the sim's codeinfo structural summary (codeinfo DROPPED,
+  catalogue C7) and applies the head/tail form only when it actually SHRINKS the result (the sim
+  replaced unconditionally, which could grow a few-very-long-lines payload). `tool_result_cap`
+  declares NO ordering (catalogue Table A "none") — it is the only pre-request shaper at item 9; the
+  sim's "runs last among the shapers" seed becomes live edges when items 10/12 add the others.
 
 ---
 

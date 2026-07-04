@@ -79,6 +79,14 @@
 # message. Config-file only (no flag or env). Default: true.
 # use-project-skills: true
 
+# Automatic context Compaction: when the conversation history outgrows its share of the model's
+# context window, apogee summarises the older turns into a compact brief (the same fold the
+# /compact command runs) before the next request, so a long session does not overflow the window.
+# It is STRUCTURAL and load-bearing — it stays on even under --bypass — so set this to false only if
+# you want to manage the window yourself with /compact. The on-demand /compact command works either
+# way. Config-file only (no flag or env). Default: true.
+# auto-compact: true
+
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false

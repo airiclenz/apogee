@@ -3,6 +3,7 @@ package context
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -201,6 +202,34 @@ func TestPromptChars_CountsContentToolArgsAndMenu(t *testing.T) {
 	}
 	if got := PromptChars(msgs, tools); got != 5+13+11 {
 		t.Errorf("PromptChars = %d, want %d", got, 5+13+11)
+	}
+}
+
+// TestHistoryExceedsAllocation covers the automatic Compaction trigger's decision: it trips only
+// once the estimated history tokens pass the History allocation, and never trips on an unknown
+// window (a non-positive allocation, the no-basis case).
+func TestHistoryExceedsAllocation(t *testing.T) {
+	e := NewTokenEstimator() // uncalibrated: 4 chars/token
+	// 400 chars ⇒ 100 estimated tokens.
+	msgs := []domain.Message{{Role: domain.RoleUser, Content: strings.Repeat("x", 400)}}
+
+	if HistoryExceedsAllocation(0, e, msgs) {
+		t.Error("tripped on a zero History allocation (unknown window); want no-basis ⇒ false")
+	}
+	if HistoryExceedsAllocation(-5, e, msgs) {
+		t.Error("tripped on a negative History allocation; want false")
+	}
+	if HistoryExceedsAllocation(100, e, msgs) {
+		t.Error("tripped at exactly the allocation (100 == 100); want strict > only")
+	}
+	if HistoryExceedsAllocation(200, e, msgs) {
+		t.Error("tripped below the allocation (100 < 200); want false")
+	}
+	if !HistoryExceedsAllocation(99, e, msgs) {
+		t.Error("did not trip above the allocation (100 > 99); want true")
+	}
+	if HistoryExceedsAllocation(50, e, nil) {
+		t.Error("tripped on an empty history; want false")
 	}
 }
 

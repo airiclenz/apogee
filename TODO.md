@@ -38,11 +38,13 @@ resolves skill bodies + file contents into context.
     `ClearContext`), and the TUI runs it on a worker goroutine (spinner + `Esc`-cancel + gauge
     reset). Wired as the built-in **default reducer** invoked directly — NOT through
     `runHistoryRewriteHooks` (that stays the experimental-hook / `truncate_history` path, per
-    `internal/context/doc.go`). Deferred: the *automatic* budget-driven trigger. **Prerequisite
-    met 2026-07-04 (Phase-4 item 8):** the Budget allocator + usage-calibrated token accounting
-    now ship (`internal/context.Allocate` / `TokenEstimator`; honest `LoopView.Budget()`), so the
-    trigger has the real accounting it needs — the trigger that *consumes* it is Phase-4 item 9.
-    On-demand `/compact` is the v1 surface.
+    `internal/context/doc.go`). The *automatic* budget-driven trigger — **SHIPPED 2026-07-04
+    (Phase-4 item 9):** the loop folds the conversation (the same `Compact`) at a quiescent
+    boundary when `internal/context.HistoryExceedsAllocation` reports the history has outgrown its
+    Budget allocation (`Agent.autoCompact`, called before the Turn consumes new input). It is
+    structural — on by default, on even under Bypass (D5/D6) — with a file-only `auto-compact:
+    false` opt-out (`ContextConfig.CompactionEnabled`); the on-demand `/compact` is unaffected by
+    the gate. Built on Phase-4 item 8's Budget allocator + usage-calibrated token accounting.
   - `/skill <name>` — **SHIPPED 2026-06-26** with the Skills system below: the "/" menu offers
     `/skill`, which chains into a skill picker (`acSkill` dropdown); a pick pops a chip onto
     `Model.pendingSkills`, and submit copies it into `UserInput.SkillIDs`. The loop

@@ -256,6 +256,26 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   Bypass (D5/D6). Nothing in the request path is reshaped by it yet — the allocation is advisory
   until the reducers land. (`internal/context`, `internal/agent`, `internal/domain`.)
 
+### Tool-result capping + the automatic Compaction trigger — the two Budget consumers
+
+- **`tool_result_cap`: a config-gated tool-result capping Mechanism.** The surviving half of
+  apogee-sim's `compress` (catalogue C3 SPLIT), ported as a pre-request Mechanism: any single tool
+  result whose content exceeds its fraction of the Budget (40% of the working window — the window
+  less the response reserve — in characters, via the calibrated chars→token ratio) is trimmed to a
+  head/tail-plus-elision-marker form through `Request.SetMessageContent` (an in-place edit), while
+  the **most recent tool-call Turn is always protected**. Default-off (D1); `proactive-nudge` /
+  `strikes-3`, so Bypass disables it and it self-regulates like its peers. (`internal/mechanisms`.)
+- **Automatic, budget-driven Compaction.** The generative `Compact` (the `/compact` reducer) now
+  also fires **automatically**: at a quiescent boundary, before a Turn's request is built, the loop
+  folds the conversation when `internal/context.HistoryExceedsAllocation` reports the history has
+  outgrown its Budget `History` allocation. It runs the same fold (protected prefix, `Replace`
+  write-back) before it consumes new input, so a just-submitted message survives as its own turn;
+  it is non-reentrant, and a fold fault surfaces as an `ErrorEvent` leaving history untouched. It is
+  **structural**, not a Mechanism: on by default and **on even under Bypass** (a naked model still
+  overflows its window — decision 12), with a file-only `auto-compact: false` opt-out
+  (`ContextConfig.CompactionEnabled`). The on-demand `/compact` is unaffected by the gate.
+  (`internal/context`, `internal/agent`, `cmd/apogee`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

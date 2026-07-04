@@ -27,69 +27,80 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}{
 		{
 			name: "all empty → defaults",
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "file fills every field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan"), bypass: boolptr(true)},
-			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true},
+			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "env beats file, file fills the rest",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file")},
 			env:  layer{endpoint: strptr("http://env")},
-			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "flag beats env beats file, per field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan")},
 			env:  layer{endpoint: strptr("http://env"), model: strptr("m-env")},
 			flag: layer{endpoint: strptr("http://flag")},
-			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "explicit false in a higher layer overrides true below it",
 			file: layer{bypass: boolptr(true)},
 			flag: layer{bypass: boolptr(false)},
-			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true},
+			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "confine-to-workspace is file-only and defaults true",
 			file: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true},
+			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "use-project-skills is file-only and defaults true",
 			file: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false, autoCompact: true},
 		},
 		{
 			name: "use-project-skills is NOT set by env or flag (file-only)",
 			env:  layer{useProjectSkills: boolptr(false)},
 			flag: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
+		},
+		{
+			name: "auto-compact is file-only and defaults true",
+			file: layer{autoCompact: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: false},
+		},
+		{
+			name: "auto-compact is NOT set by env or flag (file-only)",
+			env:  layer{autoCompact: boolptr(false)},
+			flag: layer{autoCompact: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "confine-to-workspace is NOT loosenable by env or flag (global-config-only)",
 			env:  layer{confineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
 			flag: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "web-search endpoint is file-only (default empty)",
 			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, webSearchEndpoint: "https://search.example.com"},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, webSearchEndpoint: "https://search.example.com"},
 		},
 		{
 			name: "mcp servers are file-only (default empty)",
 			file: layer{mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
 		},
 		{
 			name: "mcp servers are NOT settable by env or flag (file-only)",
 			env:  layer{mcpServers: []mcp.ServerConfig{{Name: "fromenv"}}},
 			flag: layer{mcpServers: []mcp.ServerConfig{{Name: "fromflag"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "model profile is file-only (default zero)",
@@ -97,7 +108,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 				ToolCallFormat: apogee.FormatMarkdownFenced,
 				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, profile: apogee.ModelProfile{
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, profile: apogee.ModelProfile{
 				ToolCallFormat: apogee.FormatMarkdownFenced,
 				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
@@ -106,18 +117,18 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "model profile is NOT settable by env or flag (file-only)",
 			env:  layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatCustomRegex}},
 			flag: layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 		{
 			name: "mechanisms are file-only (default empty)",
 			file: layer{mechanisms: map[string]bool{"validate": true, "syntax": false}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, mechanisms: map[string]bool{"validate": true, "syntax": false}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, mechanisms: map[string]bool{"validate": true, "syntax": false}},
 		},
 		{
 			name: "mechanisms are NOT settable by env or flag (file-only)",
 			env:  layer{mechanisms: map[string]bool{"fromenv": true}},
 			flag: layer{mechanisms: map[string]bool{"fromflag": true}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true},
 		},
 	}
 	for _, tt := range tests {
@@ -186,6 +197,26 @@ func TestApplyConfigDefaults(t *testing.T) {
 	}
 	if opts.mode != string(modeAskBefore) {
 		t.Errorf("mode = %q; want the default %q", opts.mode, modeAskBefore)
+	}
+	if !opts.autoCompact {
+		t.Error("autoCompact = false; want the structural default true (auto-compaction on)")
+	}
+}
+
+// The auto-compact config block parses into opts.autoCompact (item 9): a file-only, default-true
+// key, so an explicit `auto-compact: false` is the only way to turn the structural trigger off.
+func TestApplyConfigAutoCompactOptOut(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("auto-compact: false\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if opts.autoCompact {
+		t.Error("opts.autoCompact = true; want the file's explicit false to opt out")
 	}
 }
 

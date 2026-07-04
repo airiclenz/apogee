@@ -171,6 +171,13 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	start := time.Now()
 	turn := a.turnIndex
 
+	// Automatic Compaction (structural, on by default — item 9): fold the conversation before this
+	// Turn's request is built when the history has outgrown its Budget allocation. It runs BEFORE
+	// consuming pending input so a just-submitted user message survives the fold as its own turn
+	// (folding it in would leave the request ending at an assistant summary); a fresh Agent's empty
+	// history never trips it. Structural, so it runs under Bypass too (D5/D6).
+	a.autoCompact(ctx, turn)
+
 	if a.pendingInput != nil {
 		// exchangeStart marks the boundary this Exchange opens at (before its first user
 		// message), so AbortExchange can roll a cancelled Exchange all the way back to a clean,

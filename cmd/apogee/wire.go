@@ -114,10 +114,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Profile: opts.profile,
 		Skills:  skillProvider,
 		// The discovered runtime context window (0 when the server did not report one). It is the
-		// budget /compact bounds its summary request against so compaction survives high fill
-		// (the summary call would otherwise overflow near n_ctx); the same value drives the TUI's
-		// footer/gauge below.
-		Context: apogee.ContextConfig{MaxContextTokens: opts.contextWindow},
+		// budget /compact and the automatic Compaction trigger bound their summary request against
+		// so compaction survives high fill (the summary call would otherwise overflow near n_ctx);
+		// the same value drives the TUI's footer/gauge below. CompactionEnabled carries the
+		// `auto-compact` key (default on) — the budget-driven automatic trigger (item 9); the
+		// on-demand /compact runs regardless of it.
+		Context: apogee.ContextConfig{MaxContextTokens: opts.contextWindow, CompactionEnabled: opts.autoCompact},
 	}
 
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
