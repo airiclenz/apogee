@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/library"
 )
 
 // fakeMechanism is a minimal catalogued Mechanism for exercising the constructor table while the
@@ -28,7 +29,7 @@ func (f fakeMechanism) PreRequest(context.Context, *domain.Request) error { retu
 func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 	t.Parallel()
 	const id domain.MechanismID = "fake"
-	marker := &struct{}{}
+	marker := library.NewStore(t.TempDir())
 	table := map[domain.MechanismID]constructor{
 		id: func(d Deps) (domain.Mechanism, error) { return fakeMechanism{id: id, deps: d}, nil },
 	}
@@ -87,16 +88,17 @@ func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 // (item 6), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the
 // tool_result_cap pre-request capping Mechanism, Wave 3 added the toolfilter/filehint/grammar
 // request shapers (item 10) and the error_enrichment/read_loop/read_repeat/tool_loop_interceptor/
-// cached_content_intercept history-aware family (item 11), and Wave 4 added the decompose request
-// shaper plus the stall_nudge/list_nudge/tool_use_directive completion nudges (item 12), so each is
-// buildable and KnownIDs reports it, while an ID no wave has ported is still an unknown-ID error.
-// Later waves add rows the same way.
+// cached_content_intercept history-aware family (item 11), Wave 4 added the decompose request
+// shaper plus the stall_nudge/list_nudge/tool_use_directive completion nudges (item 12), and item 14
+// added the library observe/inject Mechanism, so each is buildable and KnownIDs reports it, while a
+// deferred / un-ported ID is still an unknown-ID error. Later waves add rows the same way.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
 	for _, id := range KnownIDs() {
 		known[id] = true
 	}
+	// Every ported Mechanism that builds with no injected Deps.
 	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "grammar", "error_enrichment", "read_loop", "read_repeat", "tool_loop_interceptor", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
@@ -105,9 +107,21 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 			t.Errorf("Build(%q): %v", want, err)
 		}
 	}
-	// library (item 14) is not ported yet, so its ID is still an unknown-ID error.
+	// library (item 14) is ported and known, but it needs the Library store injected (D3): Build with
+	// no store is a loud construction error, Build WITH a store succeeds.
+	if !known["library"] {
+		t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", "library", KnownIDs())
+	}
 	if _, err := Build("library", Deps{}); err == nil {
-		t.Error("Build of an un-ported ID: want an unknown-ID error, got nil")
+		t.Error(`Build("library", Deps{}): want a construction error for the missing Library store, got nil`)
+	}
+	if _, err := Build("library", Deps{Library: library.NewStore(t.TempDir())}); err != nil {
+		t.Errorf(`Build("library", store): %v`, err)
+	}
+	// correct_tool_result is DEFERRED (owner-ratified) — never a catalogue row — so it is still an
+	// unknown-ID error, proving a deferred / un-ported ID does not silently build.
+	if _, err := Build("correct_tool_result", Deps{}); err == nil {
+		t.Error("Build of a deferred/un-ported ID: want an unknown-ID error, got nil")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/library"
 )
 
 // Deps are the construction-injected collaborators a catalogued Mechanism may need at BUILD
@@ -16,11 +17,18 @@ import (
 // internal/mechanisms (not domain) because these are host-supplied collaborators the catalogue
 // wires, not part of the loop's construction surface.
 type Deps struct {
-	// Library is the confidence-tagged observation store the library observe/inject Mechanisms
-	// read and write. It is nil until the Library store lands (Phase-4 item 13) and is narrowed
-	// to that store's type when item 14 wires it; no constructor in the table consumes it yet, so
-	// today it is an inert forward seam that keeps the injection shape stable across waves.
-	Library any
+	// Library is the confidence-tagged observation store the library observe/inject Mechanism reads
+	// and writes (Phase-4 item 14; the store type landed in item 13). It is nil unless the `library`
+	// Mechanism is enabled — cmd/apogee/wire.go constructs and Loads the store under Config.LibraryDir
+	// and injects it here only then, so a config without `library` builds no store. newLibrary refuses
+	// a nil store (errLibraryStoreRequired).
+	Library *library.Store
+
+	// Fingerprint is the resolved model identity the library Mechanism keys its store reads and writes
+	// on (D3 — resolved once at wire time from the configured model id via library.ResolveFingerprint,
+	// so the inject and observe halves share one identity rather than re-resolving per call). The zero
+	// fingerprint (an unidentified model) leaves the Library inert. Only the library Mechanism reads it.
+	Fingerprint domain.ModelFingerprint
 
 	// LookPath resolves an executable name against the host PATH (exec.LookPath's contract). A
 	// Mechanism that shells out probes its external commands ONCE at construction through this

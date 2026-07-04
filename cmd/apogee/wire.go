@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -146,18 +147,18 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 
 	// Build the catalogued Mechanisms enabled in config.yaml and fold them into Config.Mechanisms
 	// (Phase 4). deps is the construction-injected collaborator set (D3): LookPath is the host's
-	// real PATH prober — autofix resolves its formatter table through it once at construction —
-	// and the Library store is nil until item 14 injects it (item 13 landed the store type and the
-	// ModelFingerprint resolver in internal/library; the observe/inject Mechanisms wire it here next).
-	// mechanisms.Build drives the catalogue's
-	// constructor table and mechanisms.KnownIDs is its known-key surface; an unknown ID — enabled
-	// OR disabled — or an incompatible pair is a loud startup error surfaced here (the latter via
-	// New's ValidateIncompatibilities gate). With nothing enabled this is a no-op (nil registry ⇒
-	// New defaults to an empty one), so a config without a mechanisms block behaves exactly as
-	// before.
+	// real PATH prober — autofix resolves its formatter table through it once at construction — and
+	// (item 14) the Library store + resolved model fingerprint the library observe/inject Mechanism
+	// keys on, wired only when `library` is enabled (see libraryDeps). mechanisms.Build drives the
+	// catalogue's constructor table and mechanisms.KnownIDs is its known-key surface; an unknown ID —
+	// enabled OR disabled — or an incompatible pair is a loud startup error surfaced here (the latter
+	// via New's ValidateIncompatibilities gate). With nothing enabled this is a no-op (nil registry ⇒
+	// New defaults to an empty one), so a config without a mechanisms block behaves exactly as before.
+	deps := mechanisms.Deps{LookPath: exec.LookPath}
+	libraryDeps(&deps, opts.mechanisms["library"], roots.library, opts.model)
 	registry, err := buildMechanismRegistry(
 		opts.mechanisms,
-		mechanisms.Deps{LookPath: exec.LookPath},
+		deps,
 		mechanisms.Build,
 		mechanisms.KnownIDs(),
 	)
@@ -281,6 +282,26 @@ func buildMechanismRegistry(
 		}
 	}
 	return registry, nil
+}
+
+// libraryDeps wires the Library store and the resolved model fingerprint into deps when the
+// `library` Mechanism is enabled (item 14, D3). The store is rooted at the injected LibraryDir
+// (never an ambient ~/.apogee — ADR 0001) and Loaded up front so an existing per-model Library is
+// available to inject; a missing store loads empty, and a corrupt / too-new one degrades to
+// empty-with-a-soft-stderr-notice (the skills-catalog posture — a broken Library never blocks
+// startup). The fingerprint is resolved once here from the configured model id, so the inject and
+// observe halves share one identity. When `library` is disabled, deps.Library stays nil and no store
+// file is read — a config without it behaves exactly as before.
+func libraryDeps(deps *mechanisms.Deps, enabled bool, libraryDir, model string) {
+	if !enabled {
+		return
+	}
+	store := library.NewStore(libraryDir)
+	if err := store.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "apogee: library store degraded to empty: %v\n", err)
+	}
+	deps.Library = store
+	deps.Fingerprint = library.ResolveFingerprint(model)
 }
 
 // knownMechanismList renders the known catalogue for the unknown-disabled-key error, matching

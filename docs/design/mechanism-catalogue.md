@@ -131,7 +131,7 @@ consolidate or rename.
 | `stall_nudge` | `stall_nudge` | `internal/cot/cot.go`; desc `descriptor.go:63` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `list_nudge`; 4-nudge cap |
 | `list_nudge` | `list_nudge` | `internal/cot/cot.go`; desc `descriptor.go:70` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `stall_nudge`; 3-nudge cap |
 | `tool_use_directive` | `tool_use_directive` | `internal/cot/cot.go`; desc `descriptor.go:77` | pre-request | proactive-nudge | strikes-3 | none (fires only before first tool use) |
-| `library` | `library_injection` + observer | `internal/library/{transform,observer,store}.go` | pre-request (inject); observer half's hook point decided in item 14 | proactive-nudge | strikes-3⁴ | none — confidence gates injection; fully inert in Bypass (inject **and** observe) |
+| `library` | `library_injection` + observer | `internal/library/{transform,observer,store}.go` | pre-request (inject); **post-response (observe)** — hook point decided 2026-07-04, item 14 | proactive-nudge | strikes-3⁴ | none — confidence gates injection; fully inert in Bypass (inject **and** observe) |
 
 ¹ The sim tracks `validate` indirectly: validation itself is untracked, but its **streaming
 deferred correction** is the exempt `feed_forward_correction` Mechanism. apogee folds that path
@@ -147,6 +147,16 @@ Mechanisms so they self-regulate uniformly. Noted per-row so the divergence is e
 sim). apogee registers it as a catalogued Mechanism (D1 default-off, Bypass-inert); its
 injection gate remains confidence-driven, with `strikes-3` as the uniform self-regulation
 backstop.
+
+**Library observe hook point — decided 2026-07-04 (item 14):** the observer half is a
+**post-response** hook. The sim's observer runs on the completed request-response cycle; apogee's
+post-response hook is that point, giving the observer the response's tool calls, the tool menu, and
+the conversation via `resp.View()`. The single `library` catalogue row is realized as ONE Mechanism
+implementing BOTH hooks (`PreRequest` inject + `PostResponse` observe) — splitting it would need a
+second catalogue ID this map does not list (D7). The observer is a pure reader: it returns the zero
+decision and never mutates the response, so it books no fire (R4) and never short-circuits the
+post-response cascade. Injection is gated on the fingerprint confidence tier (≥ medium — a
+low-confidence metadata label does not inject); observe records on any identified model.
 
 ---
 

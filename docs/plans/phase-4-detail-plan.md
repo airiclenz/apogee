@@ -619,7 +619,7 @@ Commit: `feat(library): confidence-tagged model fingerprint and the file-backed 
 
 ---
 
-## 14. Library Mechanisms: observe + inject
+## 14. Library Mechanisms: observe + inject — ✅ DONE (2026-07-04)
 
 **What:** the Library's two loop-facing halves, per the catalogue and the sim's
 `library` package: an **observe** side recording completed-Turn outcomes into the store,
@@ -641,6 +641,38 @@ cross-contaminate (two agents, two dirs).
 `feat(mechanisms): library observe/inject with confidence-gated injection`.
 
 **Depends on:** item 13.
+
+**NOTES (2026-07-04):** deviations from the item's literal text, all recorded here.
+- *One Mechanism, two hooks.* The item says "Both are catalogued Mechanisms", but the ratified
+  catalogue lists a SINGLE `library` row (Table A). D7 forbids inventing a second catalogue ID, so
+  the observe + inject halves are realized as ONE Mechanism (`library`) implementing both
+  `PreRequestHook` (inject) and `PostResponseHook` (observe). Bypass inertness of both halves is item
+  2's dispatch gate (proactive-nudge ⇒ skipped). Consequence: strikes-3 suppression of the inject
+  half pauses observe too — accepted per catalogue footnote 4 (strikes-3 is the uniform backstop).
+- *Observe hook point = post-response.* Table A delegated this to item 14; decided post-response (the
+  sim's observer runs on the completed cycle; `resp.View()` carries the calls, tool menu, and
+  conversation the observer needs). Catalogue Table A cell filled + dated note added.
+- *Confidence gate = ≥ ConfidenceMedium.* "Low-confidence fingerprints don't inject" ⇒ inject only
+  above `ConfidenceLow`. Since the medium (probe) tier is Phase 5 (D8), only a weights-hash (high)
+  identity injects today; a metadata-label-only setup observes but does not inject. Observe is NOT
+  confidence-gated (the item gates injection only).
+- *`Deps.Library` narrowed + `Deps.Fingerprint` added.* Per item 13's NOTES/Deps comment,
+  `Deps.Library` is narrowed `any → *library.Store` and a resolved `Fingerprint` is injected;
+  `cmd/apogee/wire.go` builds+Loads the store and resolves the fingerprint ONCE (from `opts.model`)
+  only when `library` is enabled, so both halves share one identity and a config without `library`
+  reads no store file. `catalogue_test.go`'s un-ported-ID sentinel rotated `library → correct_tool_result`.
+- *Faithful-port adaptations.* `MarkUsed` is not called on inject (item 13 did not port it; LastUsed
+  updates on Record only — affects eviction order, not correctness). `recordSuccesses` matches entries
+  by EXACT fingerprint label (apogee keys on the full fingerprint, not the sim's substring model-name
+  pattern). `observeToolUseEnforcement` detects the narration condition directly via
+  `shouldEnforceToolUse` rather than a set flag, so it is self-contained (does not require the enforcer
+  Mechanism enabled). The intent-tag filter + 200-token injection-budget cap live here (item 13
+  deferred them to this Mechanism).
+- *Retry double-observe (accepted v1 posture).* apogee re-runs post-response hooks per retry (R1), so
+  when `library` co-runs with a retrying Mechanism (validate/off-ramps) the observer sees both the
+  pre- and post-correction responses; run alone it observes once per Turn. The failure/success guards
+  keep it net-consistent (recordSuccesses early-returns on a response carrying issues). Bench-side
+  longitudinal validation (item 16 handoff) measures the net effect.
 
 ---
 

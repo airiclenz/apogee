@@ -401,6 +401,31 @@ injects until item 14 wires it. (`internal/domain`, new `internal/library`.)
   corrupt, or too-new store to **empty-with-a-soft-error** (the skills-catalog posture — a broken
   Library never bricks a run). A zero fingerprint (unidentified model) is inert: nothing is recorded.
 
+### The Library Mechanism: cross-session observe + confidence-gated inject
+
+Item 14 wires the Library substrate (item 13) into the loop as the catalogued `library`
+Mechanism — default-off (D1), fully inert under `--bypass` (it is `proactive-nudge`, so item 2's
+dispatch gate skips both halves). The single `library` catalogue row is realized as ONE Mechanism
+implementing BOTH hooks. Ported from apogee-sim's `library` observer/transform. (`internal/mechanisms`,
+`cmd/apogee`.)
+
+- **Observe (post-response).** After each response the Mechanism records completed-Turn outcomes into
+  the store, keyed on the model fingerprint: tool-call validation failures (corrections),
+  narration-instead-of-acting and shallow-exploration behavioural patterns, examples of valid complex
+  tool calls, and the success signal that decays a pattern the model has grown out of. It is a pure
+  observer — it never mutates the response and books no fire, so it does not skew self-regulation.
+- **Inject (pre-request).** When the fingerprint clears the confidence gate — "prefer not to inject
+  under uncertainty", so a low-confidence metadata-label identity does **not** inject — the Mechanism
+  appends the highest-scoring qualifying observations to the system prompt (idempotent on a marker),
+  intent-filtered and capped to a 200-token injection budget, and backs off when the window is nearly
+  full.
+- **Store + fingerprint injected at construction (D3).** `cmd/apogee/wire.go` constructs and Loads the
+  store under `Config.LibraryDir` (never an ambient `~/.apogee`, ADR 0001) and resolves the model
+  fingerprint once, wiring both into the constructor `Deps` only when `library` is enabled — so the
+  inject and observe halves share one identity, and a config without `library` reads no store file.
+  Two agents on two `LibraryDir`s stay isolated (decision 11). Longitudinal bench validation
+  (improves-over-sessions AND never-below-baseline) stays **pending**.
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
