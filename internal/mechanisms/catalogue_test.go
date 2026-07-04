@@ -87,15 +87,17 @@ func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 // (item 6), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the
 // tool_result_cap pre-request capping Mechanism, Wave 3 added the toolfilter/filehint/grammar
 // request shapers (item 10) and the error_enrichment/read_loop/read_repeat/tool_loop_interceptor/
-// cached_content_intercept history-aware family (item 11), so each is buildable and KnownIDs reports
-// it, while an ID no wave has ported is still an unknown-ID error. Later waves add rows the same way.
+// cached_content_intercept history-aware family (item 11), and Wave 4 added the decompose request
+// shaper plus the stall_nudge/list_nudge/tool_use_directive completion nudges (item 12), so each is
+// buildable and KnownIDs reports it, while an ID no wave has ported is still an unknown-ID error.
+// Later waves add rows the same way.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
 	for _, id := range KnownIDs() {
 		known[id] = true
 	}
-	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "grammar", "error_enrichment", "read_loop", "read_repeat", "tool_loop_interceptor", "cached_content_intercept"} {
+	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "grammar", "error_enrichment", "read_loop", "read_repeat", "tool_loop_interceptor", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}
@@ -103,7 +105,8 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 			t.Errorf("Build(%q): %v", want, err)
 		}
 	}
-	if _, err := Build("decompose", Deps{}); err == nil {
+	// library (item 14) is not ported yet, so its ID is still an unknown-ID error.
+	if _, err := Build("library", Deps{}); err == nil {
 		t.Error("Build of an un-ported ID: want an unknown-ID error, got nil")
 	}
 }

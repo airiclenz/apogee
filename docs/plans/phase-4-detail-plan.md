@@ -528,7 +528,7 @@ Commit: `feat(mechanisms): port the history-aware error/read-loop hint family`.
 
 ---
 
-## 12. Wave 4 — `decompose` (+ `cot` / `intent` per the catalogue)
+## 12. Wave 4 — `decompose` (+ `cot` / `intent` per the catalogue) — ✅ DONE (2026-07-04)
 
 **What:** the task-decomposition family, last of the request shapers because it carries
 the known cross-mechanism coupling. `decompose`: pre-request focus/step directives via
@@ -548,6 +548,30 @@ read-loop, or the ordering holds).
 
 **Acceptance:** gates green; diff confined to `internal/mechanisms` + docs/CHANGELOG.
 Commit: `feat(mechanisms): port the decompose wave and close the request-shaper catalogue`.
+
+**NOTES (2026-07-04):** deviations from the item's literal text, all recorded here.
+- *Composition per catalogue (D7).* Ported `decompose` + the three `cot` nudges (`stall_nudge`,
+  `list_nudge`, `tool_use_directive`) per catalogue C4's SPLIT; `cot` is NOT a fourth Mechanism (its
+  Transform *is* the three nudges) and `intent` is the folded shared helper (C6 — already landed
+  inline in wave 1, reused here, no new catalogue row). No "completion nudges" remained un-assigned
+  from wave 1; C4 assigns them all to this item.
+- *Directives use `AppendToSystem` only, not `InjectContext`.* The item text names
+  "`AppendToSystem`(marker) + `InjectContext`", but apogee-sim injects **all** decompose directives
+  (focus / step hint / continuation) into the **system prompt** (`injectFocusDirective` /
+  `injectStepHint` / `injectContinuationDirective` @pin). Porting faithfully (D7 behavior
+  ground-truth) uses the idempotent `AppendToSystem`; a `InjectContext` user message would diverge
+  from the sim. `SetMessageContent` is used for the history collapse as specified.
+- *Read-loop coupling is the `Fired` query, not an ordering edge.* Catalogue Table A offers either;
+  chose `req.View().Fired(readLoopID) > 0` (the direct analog of the sim's `FiredCounts` peek, R4
+  acted-fire semantics). decompose's only declared edge is `After toolfilter`.
+- *Wave-4 tool-name sets carry apogee's own spellings.* `wave4WriteTools` extends apogee-sim
+  `toolsets.WriteTools` with `edit_existing_file` / `single_&_multi_find_and_replace`, and the cot
+  read/read-only sets add `open_file` / `terminal`, so the nudges fire on apogee's real menu (the
+  item-10 filehint precedent; read_file/list_dir/grep already carry apogee's names in the sim sets).
+- *`stall_nudge` ⊥ `list_nudge` subsumes the sim's runtime cross-check.* IncompatibleWith is an
+  apogee startup gate (only one enabled per config), so the sim's inject-time `&& !wantListNudge`
+  preference is structurally moot and not ported (the same collapse C2 applies to the read-loop
+  family).
 
 ---
 

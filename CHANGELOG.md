@@ -344,6 +344,40 @@ deciding by scanning the conversation across Turns at its **relocated** hook poi
   `read_repeat → tool_loop_interceptor → validate → autofix → syntax` (the sim's response-side
   priority).
 
+### Wave 4: the `decompose` request shaper + the `stall_nudge` / `list_nudge` / `tool_use_directive` completion nudges
+
+The last of the request shapers, ported from the pinned apogee-sim source (catalogue Table A/B), each
+a pre-request Mechanism shipping default **off** (D1), `proactive-nudge` / `strikes-3` (disabled under
+Bypass, D5; self-regulating), buildable via the `mechanisms:` block. (`internal/mechanisms`.)
+
+- **`decompose`: one-step focus + history collapse.** Ported from apogee-sim `internal/decompose`
+  @pin. For a small model that stalls on long multi-step prompts it (1) collapses the complex
+  multi-step user messages still sitting in conversation history to a short task summary (via
+  `Request.SetMessageContent`) so the model cannot re-read a full step-by-step plan from an earlier
+  turn, and (2) hints the single next actionable step of the current prompt into the system prompt
+  (via the idempotent `Request.AppendToSystem`), leaving the full user message intact. It declares
+  `After toolfilter` (trim the menu before the user-message rewrite — the mirror of toolfilter's
+  `Before decompose`).
+- **The read-loop coupling gates active decomposition (D2).** decompose's `RequestMeta.FiredCounts`
+  peek in the sim becomes a live `LoopView.Fired("read_loop")` query: once the consolidated
+  `read_loop` Mechanism has **acted** this Session (R4), active decomposition — which would override
+  the focus to "step 1: …" and fight the read-loop hint — is muted, while the harmless history
+  collapse still runs.
+- **The completion nudges are the `cot` family, split three ways (catalogue C4).** apogee-sim's `cot`
+  Transform is not itself a tracked Mechanism — it emits three tracked nudges, which apogee ships as
+  three independent pre-request Mechanisms: `tool_use_directive` (an action was asked for but the
+  model has not used a tool yet → "use a tool"), `stall_nudge` (read-only for the stall threshold of
+  turns with a write tool available → "proceed with the modifications"), and `list_nudge` (an analysis
+  request that listed directories but read no files → "read the files you found"). Each injects one
+  system directive through the idempotent `AppendToSystem`; the "nudge cap" is a stateless window on
+  the read-only turn count. `stall_nudge` ⊥ `list_nudge` (contradictory directives) — declared
+  `IncompatibleWith`, so at most one is enabled per config (the apogee startup gate subsuming the
+  sim's runtime `!wantListNudge` preference).
+- **`intent` and `cot` are folded, not ported as Mechanisms (catalogue C4/C6).** The shared intent
+  classifier (`hasActionIntent` / `hasAnalysisIntent`) already landed inline in wave 1 and is reused
+  here; `cot` ships only as its three nudges. This closes the Phase-4 request-shaper catalogue —
+  `library` (item 14) is the only remaining un-ported catalogue Mechanism.
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
