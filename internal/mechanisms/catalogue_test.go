@@ -84,16 +84,17 @@ func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
 // validate/syntax/autofix (item 5) and the empty_response_recovery/tool_use_enforcer off-ramps
-// (item 6), Wave 2 added the truncate_history history-rewrite (item 7), and item 9 added the
-// tool_result_cap pre-request capping Mechanism, so each is buildable and KnownIDs reports it,
-// while an ID no wave has ported is still an unknown-ID error. Later waves add rows the same way.
+// (item 6), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the
+// tool_result_cap pre-request capping Mechanism, and Wave 3 added the toolfilter/filehint/grammar
+// request shapers (item 10), so each is buildable and KnownIDs reports it, while an ID no wave has
+// ported is still an unknown-ID error. Later waves add rows the same way.
 func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 	t.Parallel()
 	known := make(map[domain.MechanismID]bool)
 	for _, id := range KnownIDs() {
 		known[id] = true
 	}
-	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap"} {
+	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "grammar"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}

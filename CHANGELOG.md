@@ -276,6 +276,34 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   (`ContextConfig.CompactionEnabled`). The on-demand `/compact` is unaffected by the gate.
   (`internal/context`, `internal/agent`, `cmd/apogee`.)
 
+### Wave 3: the `toolfilter` / `filehint` / `grammar` request shapers
+
+- **`toolfilter`: relevance-scored tool-menu narrowing.** A pre-request Mechanism that trims the
+  tool menu for small models, ported from apogee-sim `internal/toolfilter` @pin. It activates
+  reactively — only when the menu is large (30+ tools) or the model has hallucinated a tool absent
+  from the menu — and never when the menu is already within the keep limit (10). It scores each tool
+  against the last user message's keywords (exact name > name-part > description match), keeps every
+  recently-used tool whole (plus the read-only exploration tools when the request is analysis-focused),
+  and re-sets the menu to the top-scored subset via `Request.SetTools`. The narrowing is
+  **request-scoped** (the loop rebuilds the full menu each Turn, so it never mutates the menu
+  globally) and deterministic (stable score-tie ordering). It declares `Before decompose` (item 12).
+- **`filehint`: role-safe workspace file hints.** A pre-request Mechanism ported from apogee-sim
+  `internal/filehint` + `file_hint_detector` @pin. After the model lists a directory but before it
+  reads anything, it scores the listed files against the user prompt (a TF-IDF-ish weight plus a
+  language-extension boost) and injects a hint suggesting the most relevant files to read, through
+  the role-safe `Request.InjectContext` (which folds into the system prompt when the conversation
+  ends in a tool result). A stable marker makes the inject **idempotent** (no double-inject), and a
+  greenfield-creation task with no files written yet is suppressed.
+- **`grammar`: a backend-capability-gated json_schema constraint.** A pre-request Mechanism ported
+  from apogee-sim `internal/grammar` + `injectGrammarConstraint` @pin: it derives a `json_schema`
+  from the current tool menu and sets it as the request's `response_format` so a model that cannot
+  emit native tool calls is constrained to a valid tool-call shape. It is **capability-gated** by the
+  new D3-injected `mechanisms.Deps.GrammarConstraint` — false on every current apogee backend (no
+  such probe is wired, and the provider wire does not yet carry request extras), so grammar **no-ops
+  today** (catalogue Table B). An existing `response_format` always wins.
+- All three ship default **off** (D1), `proactive-nudge` / `strikes-3` (disabled under Bypass, D5;
+  self-regulating), buildable via the `mechanisms:` config block. (`internal/mechanisms`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

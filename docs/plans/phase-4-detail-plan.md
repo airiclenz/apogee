@@ -436,7 +436,7 @@ updated in the same commit. Commit:
 
 ---
 
-## 10. Wave 3 — tool-menu & request shapers: `toolfilter`, `filehint`, `grammar`
+## 10. Wave 3 — tool-menu & request shapers: `toolfilter`, `filehint`, `grammar` — ✅ DONE (2026-07-04)
 
 **What:** port per the catalogue (including its port-or-drop verdicts — `grammar` in
 particular may be dropped or gated on backend capability, D3-injected). `toolfilter`:
@@ -453,6 +453,26 @@ support.
 
 **Acceptance:** gates green; diff confined to `internal/mechanisms` + docs/CHANGELOG.
 Commit: `feat(mechanisms): port the toolfilter/filehint request-shaper wave`.
+
+**NOTES (2026-07-04):** all three shippers ported per catalogue Table A/B; deviations recorded here.
+- *`grammar` is registered but no-ops in production, and this touched NO wire.go.* The item's D3
+  backend-capability gate is the new `mechanisms.Deps.GrammarConstraint`, kept inside
+  `internal/mechanisms` to honour the "diff confined to internal/mechanisms + docs/CHANGELOG"
+  acceptance. `cmd/apogee/wire.go` therefore leaves it false, so grammar no-ops on every current
+  backend — which is doubly correct: the provider wire itself drops `SetExtra` fields
+  (`internal/agent/loop.go` toProviderRequest: "response_format is a Phase-4 concern"), so even a
+  true gate would not reach the model yet. This matches catalogue Table B ("may no-op on all current
+  apogee backends"); full activation needs BOTH a future backend probe (to populate the Deps gate)
+  AND a `response_format` wire carrier. The gate's fire path is exercised by tests injecting it true.
+- *sim tool names → apogee names.* apogee has `list_dir`/`read_file`/`grep`/`write_file`/
+  `edit_existing_file`/`single_&_multi_find_and_replace`, not the sim's `list_files`/`readFile`/
+  `write_to_file`; the toolfilter analysis-keep set and filehint list/read/write sets carry apogee's
+  own names (plus the sim spellings, for mixed MCP menus).
+- *`toolfilter` declares `Before decompose`* (catalogue Table A) though `decompose` lands in item 12;
+  `MechanismRegistry.Ordered` ignores an edge naming an absent Mechanism, so it is forward-compatible.
+- *grammar schema `Cache` not ported* — the sim memoized the schema per tool-set hash for perf; the
+  apogee Mechanism is a stateless value like its peers and regenerates the small schema per fire
+  (behaviourally identical; recorded in the code comment).
 
 ---
 

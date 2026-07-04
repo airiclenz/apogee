@@ -28,6 +28,19 @@ type Deps struct {
 	// and a test injects formatter availability without touching the real PATH. nil falls back
 	// to exec.LookPath.
 	LookPath func(string) (string, error)
+
+	// GrammarConstraint is the D3-injected backend-capability gate for the grammar Mechanism
+	// (catalogue Table A/C: grammar is backend-capability gated). It is true only when the
+	// configured backend BOTH accepts a json_schema `response_format` constraint AND needs one
+	// (the model does not emit native tool calls) — the apogee analog of apogee-sim's gate on
+	// llama.cpp WITHOUT native tool-calls (`proxy.go:625-634` @pin). apogee has no such
+	// backend-capability probe wired yet, and the provider wire itself carries no
+	// `response_format` field yet (`internal/agent/loop.go` toProviderRequest drops SetExtra —
+	// "response_format is a Phase-4 concern"), so cmd/apogee/wire.go leaves this false and grammar
+	// no-ops on every current backend (catalogue Table B: "may no-op on all current apogee
+	// backends"). It is an inert forward seam like Library: a future backend probe populates it,
+	// and grammar's fire path is exercised today only by tests that inject it true.
+	GrammarConstraint bool
 }
 
 // constructor builds one catalogued Mechanism from the injected Deps (D3). It returns an error so
