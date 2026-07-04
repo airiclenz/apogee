@@ -386,6 +386,12 @@ deciding by scanning the conversation across Turns at its **relocated** hook poi
   `open_file` joins the family read set (its result places file content in the conversation like
   `read_file`). And `read_repeat` now collects each turn's write paths **before** its reads, so a
   same-turn read-then-write to a path no longer counts that read as a redundant re-read.
+- **`cached_content_intercept` gates its cap on the tool schema (second-review fix).** The read cap
+  is now applied only when the pending tool's argument schema (via `view.Tools()`) declares a
+  `max_lines` property; a read tool lacking it — e.g. a strict MCP server with
+  `additionalProperties:false` — is inspected but never handed an argument it would reject, so the
+  re-read proceeds uncapped and no fire is booked. This makes the mechanism's "benign no-op" fidelity
+  note literally true instead of relying on the third-party tool tolerating an unknown field.
 
 ### Wave 4: the `decompose` request shaper + the `stall_nudge` / `list_nudge` / `tool_use_directive` completion nudges
 

@@ -9,19 +9,34 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// fireCached fires cached_content_intercept once against the pending call over history and returns
-// the (possibly mutated) call.
-func fireCached(t *testing.T, history []domain.Message, call domain.ToolCall) domain.ToolCall {
+// readFileTool mirrors apogee's real read_file schema — its argument schema DECLARES max_lines, so
+// the cap has a field to attach to (the tool menu the hook reads via view.Tools()).
+var readFileTool = domain.ToolDef{
+	Name:   "read_file",
+	Schema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"max_lines":{"type":"integer"}}}`),
+}
+
+// fireCachedWithTools fires cached_content_intercept once against the pending call over history, with
+// tools as the menu the hook sees, and returns the (possibly mutated) call.
+func fireCachedWithTools(t *testing.T, history []domain.Message, call domain.ToolCall, tools []domain.ToolDef) domain.ToolCall {
 	t.Helper()
 	hook, ok := mustBuild(t, cachedContentInterceptID).(domain.PreToolExecHook)
 	if !ok {
 		t.Fatal("cached_content_intercept does not implement PreToolExecHook")
 	}
 	c := call
-	if err := hook.PreToolExec(context.Background(), &c, historyView(history)); err != nil {
+	view := domain.NewRequest("m", history, tools, domain.Budget{}, 0, nil).View()
+	if err := hook.PreToolExec(context.Background(), &c, view); err != nil {
 		t.Fatalf("PreToolExec: %v", err)
 	}
 	return c
+}
+
+// fireCached fires cached_content_intercept over the default menu (apogee's read_file, whose schema
+// declares max_lines).
+func fireCached(t *testing.T, history []domain.Message, call domain.ToolCall) domain.ToolCall {
+	t.Helper()
+	return fireCachedWithTools(t, history, call, []domain.ToolDef{readFileTool})
 }
 
 // hasMaxLines reports whether the read arguments carry a max_lines cap.
@@ -105,5 +120,34 @@ func TestCachedContentLeavesRangedReadUntouched(t *testing.T) {
 	}
 	if !strings.Contains(string(got.Arguments), "50") {
 		t.Error("the model's explicit max_lines was overwritten")
+	}
+}
+
+// An MCP-style read tool whose argument schema does NOT declare max_lines (a strict server with
+// additionalProperties:false) is inspected but never mutated — appending max_lines would hand it an
+// argument it rejects, so the redundant re-read proceeds uncapped (no mutation ⇒ no fire, R4).
+func TestCachedContentSkipsToolWithoutMaxLinesSchema(t *testing.T) {
+	t.Parallel()
+	mcpRead := func(id, path string) domain.ToolCall {
+		args, _ := json.Marshal(map[string]string{"path": path})
+		return domain.ToolCall{ID: id, Tool: "readFile", Arguments: args}
+	}
+	history := []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(mcpRead("r1", "a.go")),
+		toolResult("r1", "package a\nfunc F() {}"),
+		assistantCall(mcpRead("r2", "a.go")),
+	}
+	mcpReadTool := domain.ToolDef{
+		Name:   "readFile",
+		Schema: json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"}}}`),
+	}
+	call := mcpRead("r2", "a.go")
+	got := fireCachedWithTools(t, history, call, []domain.ToolDef{mcpReadTool})
+	if hasMaxLines(got.Arguments) {
+		t.Errorf("a read tool without a max_lines schema was capped; args = %s", got.Arguments)
+	}
+	if string(got.Arguments) != string(call.Arguments) {
+		t.Errorf("arguments mutated: %s vs %s", got.Arguments, call.Arguments)
 	}
 }

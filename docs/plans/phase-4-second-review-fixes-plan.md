@@ -295,7 +295,7 @@ at `truncate_history_test.go`); re-run after real growth → truncates and books
 
 ---
 
-## 6. `cached_content_intercept`: gate the read cap on the tool's schema
+## 6. `cached_content_intercept`: gate the read cap on the tool's schema — ✅ DONE (2026-07-04)
 
 **Finding:** review "`max_lines` cap assumes every read tool tolerates unknown arguments"
 (Medium, uncertain-for-third-party-tools). Ground truth:

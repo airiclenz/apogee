@@ -24,9 +24,12 @@ import (
 // hook; that guidance is delivered instead by read_repeat (post-response, ActionRetry), which is
 // declared IncompatibleWith this Mechanism — the two are alternatives on the same symptom (C2), one
 // a silent exec-time token cap, the other a directive-bearing retry. The cap couples to the
-// read-file argument schema (max_lines); a read tool lacking it ignores the field and the re-read
-// proceeds uncapped (a benign no-op, like grammar on a backend without response_format). Surfaced as
-// a divergence-from-source; default-off and bench-gated (D1), so nothing un-vetted ships.
+// read-file argument schema (max_lines): before mutating, the hook looks the pending tool up in
+// view.Tools() and caps ONLY when its schema declares a max_lines property, so a read tool lacking it
+// (e.g. a strict MCP server with additionalProperties:false) is inspected but never handed an
+// argument it would reject — the re-read proceeds uncapped, a genuine no-op rather than a hoped-for
+// one. Surfaced as a divergence-from-source; default-off and bench-gated (D1), so nothing un-vetted
+// ships.
 func init() { catalogue[cachedContentInterceptID] = newCachedContentIntercept }
 
 const cachedContentInterceptID domain.MechanismID = "cached_content_intercept"
@@ -68,7 +71,8 @@ func (cachedContentMechanism) Ordering() domain.OrderingConstraints {
 // PreToolExec caps a redundant re-read of an unchanged file (apogee-sim detectCachedReread @pin,
 // relocated). It is a no-op — booking no fire (the loop keys the acted fire on the ToolCall
 // changing, R4) — when the pending call is not a read, has no path, targets a file not read
-// successfully before (or written since — the file may have changed), the read already has an
+// successfully before (or written since — the file may have changed), the pending tool's schema
+// does not declare a max_lines property (the cap has nothing to attach to), the read already has an
 // explicit line range/limit (a targeted read is not a redundant full re-dump), or the arguments are
 // not a JSON object.
 func (cachedContentMechanism) PreToolExec(_ context.Context, call *domain.ToolCall, view domain.LoopView) error {
@@ -80,6 +84,9 @@ func (cachedContentMechanism) PreToolExec(_ context.Context, call *domain.ToolCa
 		return nil
 	}
 	if !priorSuccessfulReadUnchanged(view.Conversation(), normalizePath(rawPath), call.ID) {
+		return nil
+	}
+	if !toolDeclaresMaxLines(view.Tools(), call.Tool) {
 		return nil
 	}
 	if capped, ok := capReadArguments(call.Arguments); ok {
@@ -141,4 +148,30 @@ func capReadArguments(args json.RawMessage) (json.RawMessage, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// toolDeclaresMaxLines reports whether the tool named toolName in the hook's tool view (view.Tools())
+// declares a max_lines property in its argument schema. The cap is gated on this: a strict MCP server
+// (additionalProperties:false) rejects an unknown max_lines argument, so a read tool whose schema does
+// not carry the field — or is absent / non-object / unparsable — is inspected but never mutated (no
+// mutation ⇒ no fire, R4), making the "benign no-op" fidelity note literally true rather than reliant
+// on the third-party tool silently tolerating an unknown field.
+func toolDeclaresMaxLines(tools []domain.ToolDef, toolName string) bool {
+	for _, t := range tools {
+		if t.Name != toolName {
+			continue
+		}
+		if len(t.Schema) == 0 {
+			return false
+		}
+		var s struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if json.Unmarshal(t.Schema, &s) != nil {
+			return false
+		}
+		_, ok := s.Properties["max_lines"]
+		return ok
+	}
+	return false
 }
