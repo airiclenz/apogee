@@ -426,6 +426,23 @@ implementing BOTH hooks. Ported from apogee-sim's `library` observer/transform. 
   Two agents on two `LibraryDir`s stay isolated (decision 11). Longitudinal bench validation
   (improves-over-sessions AND never-below-baseline) stays **pending**.
 
+### Bench-readiness proof: the embeddable two-arm contract is now a permanent regression
+
+Item 15 adds `benchreadiness_test.go`, the executable definition of "benchable" (ADR 0001): a
+root-package consumer test that drives the real Agent exactly the way apogee-sim will — the public
+`New` / `Resume` / `Submit` / `Step` / `Snapshot` / `Close` surface over the real provider client
+dialing one scripted OpenAI-compatible httptest model, catalogued Mechanisms enabled via `Config`
+(`toolfilter` / `decompose` / `truncate_history` / `library`), and experimental hooks at all five
+hook points. It constructs a mechanisms-on arm and a **Bypass** arm against isolated temp state
+roots, Steps both to their quiescent boundaries, then Snapshots and Resumes forks. It asserts: the
+enabled shapers ACT in the registry's deterministic dispatch order visible in the
+`MechanismFiredEvent` stream (`toolfilter` before `decompose`, then the experimental hook) while an
+inspect-only Mechanism books no fire (R4); the Bypass arm fires no catalogued Mechanism yet runs all
+five experimental hooks; agent-driven writes stay inside each injected root (the Library store lands
+under the mechanisms-on arm's `LibraryDir`, the Bypass arm's stays empty); and forks resumed from one
+snapshot diverge independently in their own roots. If a future change breaks the bench contract, this
+test breaks first. Test-only — no product change. (root `apogee_test`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

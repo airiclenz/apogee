@@ -676,7 +676,7 @@ cross-contaminate (two agents, two dirs).
 
 ---
 
-## 15. Bench-readiness proof (the ADR 0001 contract, exercised in-repo)
+## 15. Bench-readiness proof (the ADR 0001 contract, exercised in-repo) — ✅ DONE (2026-07-04)
 
 **What:** a permanent regression proving apogee is drivable exactly the way apogee-sim
 will drive it — an integration test (root-package consumer style, like `example_test.go`)
@@ -700,6 +700,36 @@ test, plus `make check`.
 
 **Depends on:** items 2–6 minimum (needs real mechanisms to arm); run it after 14 in
 sequence.
+
+**NOTES (2026-07-04):** deviations from the item's literal text, all recorded here.
+- *Internal imports beyond the "like example_test.go" root-only style.* The test is a root
+  `apogee_test` consumer of the public engine surface (New/Resume/Submit/Step/Snapshot/Close,
+  the scripted provider client over an httptest Upstream, `MechanismRegistry`/`AddExperimental`),
+  but it also imports `internal/mechanisms` (there is no PUBLIC constructor for a catalogued
+  Mechanism — `mechanisms.Build` is the only builder — so the arm's Mechanisms are built through
+  it), plus `internal/library` + `internal/session` + `internal/tools` for the isolation asserts
+  and a real `list_dir`. This mirrors the existing black-box `apogee_test.go` (which imports
+  `internal/platform`) and honours the item's own "exercised in-repo" framing; none is the bare
+  root module path, so the ADR-0010 invariant is untouched (the test is not under `internal/`).
+- *Enabled set + how "actually act" is realized.* Armed `toolfilter`+`decompose`+`truncate_history`
+  +`library` (waves 3/4/2/item-14). `toolfilter` (padded ≥30-tool menu) and `decompose` (complex
+  analysis-AND-action prompt) ACT on every pre-request and witness the deterministic order via
+  `toolfilter`'s declared `Before decompose` edge (assert: fired stream = repeating
+  `[toolfilter decompose experimental]`, and `Ordered(pre-request)` puts toolfilter before
+  decompose). `truncate_history` (short history) and `library` (silent observe + confidence-gated
+  inject) are the inspect-only R4 witnesses (never booked). `library`'s observe writes its store
+  into the mechanisms-on arm's `LibraryDir` (shallow-exploration note) — the concrete
+  "files stay inside each injected root" proof — while the Bypass arm's `LibraryDir` stays empty.
+- *Isolation proof surface.* "nothing written outside them" is asserted as: the Library store lands
+  under the arm's own `LibraryDir` (empty under Bypass), a host-persisted session lands under the
+  arm's own `SessionsDir`, and each fork runs in fresh roots that leave the arms' roots unperturbed
+  — bounded to the injected roots rather than a global filesystem sweep.
+- *Surfaced for item 16 (not a defect here).* An EXTERNAL module (apogee-sim) cannot enable
+  apogee's catalogued Mechanisms today: the `mechanisms:` enable path lives in `cmd/apogee` and
+  `mechanisms.Build`/the constructor table are `internal/`. This test stands in for that enable path
+  in-repo (as the item's "exercised in-repo" allows); the bench-campaign handoff (item 16) should
+  record whether the external bench needs a public library-level enable surface or drives apogee via
+  its own experimental hooks + the `cmd/apogee` config.
 
 ---
 
