@@ -575,7 +575,7 @@ Commit: `feat(mechanisms): port the decompose wave and close the request-shaper 
 
 ---
 
-## 13. `ModelFingerprint` + the Library store
+## 13. `ModelFingerprint` + the Library store — ✅ DONE (2026-07-04)
 
 **What:** the learning substrate (CONTEXT "Library"; no Mechanism yet — that is item 14).
 `ModelFingerprint`: a confidence-tagged identity — **weights-hash (high)** when the GGUF
@@ -596,6 +596,26 @@ assert).
 **Acceptance:** gates green; diff confined to a new `internal/library` (+
 `internal/domain` for the fingerprint type, `cmd/apogee/wire.go`) + docs/CHANGELOG.
 Commit: `feat(library): confidence-tagged model fingerprint and the file-backed store`.
+
+**NOTES (2026-07-04):** deviations from the item's literal text, all recorded here.
+- *wire.go footprint is a comment correction only.* The store is CONSTRUCTED and INJECTED in
+  item 14 (whose confined diff owns `internal/mechanisms` + `cmd/apogee`, and whose observe/inject
+  Mechanisms are the store's only consumers — a store built in item 13's wire.go with no consumer
+  would not compile as an unused local). Item 13 lands the constructible substrate (store type +
+  `ModelFingerprint` resolver) so item 14 only has to wire it; item 13's wire.go touch is limited to
+  fixing the now-stale "nil until item 13" comment left by item 4. No `Config` field / apogee.go
+  re-export was added (item 14 injects the fingerprint + store via `mechanisms.Deps`, D3).
+- *weights-hash is a bounded content signature, not a full-file digest.* The high tier hashes the
+  file size + head + tail (`weightSampleBytes = 1 MiB`) rather than the whole GGUF, so startup is not
+  gated on hashing multi-gigabyte weights; it still distinguishes different weights (header + tensor
+  tail + length diverge). The item says "weights-hash" without mandating a full-file hash.
+- *Single versioned store file, not the sim's per-entry files.* Persisted as one `library.json` with
+  a `Version` envelope (the "versioning like `domain.Session`" the item asks for) instead of apogee-sim's
+  `entries/<id>.json`. A missing/corrupt/too-new store degrades to empty-with-soft-error (skills posture).
+- *Store API is the substrate only.* Ported `Record`/`RecordSuccess`/`Query`/`All`/`Count`/`Load` +
+  Bayesian `Score`, TTL, and max-entries eviction; the sim's intent-tag filter and injection-budget
+  token cap are the inject Mechanism's concern (item 14), and the fingerprint-confidence injection gate
+  is likewise deferred to item 14 — the store's `Query` gates only on Bayesian score + observation count.
 
 ---
 

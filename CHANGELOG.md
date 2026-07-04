@@ -378,6 +378,29 @@ Bypass, D5; self-regulating), buildable via the `mechanisms:` block. (`internal/
   here; `cot` ships only as its three nudges. This closes the Phase-4 request-shaper catalogue —
   `library` (item 14) is the only remaining un-ported catalogue Mechanism.
 
+### The Library learning substrate: a confidence-tagged `ModelFingerprint` and a file-backed store
+
+The substrate the Library Mechanisms (item 14) build on — no Mechanism yet, so nothing observes or
+injects until item 14 wires it. (`internal/domain`, new `internal/library`.)
+
+- **`ModelFingerprint` — a confidence-tagged model identity.** New `domain.ModelFingerprint`
+  (`Label` + `FingerprintConfidence`) and the `FingerprintResolver` seam. `internal/library`'s
+  production resolver returns the best available tier: a **weights-hash (high)** when the model id is
+  a reachable weight file (`.gguf` / `.ggml` / `.bin` / `.safetensors`) — a SHA-256 over the file size
+  plus its head and tail, so two builds sharing a label but differing in weights diverge without
+  hashing multi-gigabyte files at startup — else the **metadata label (low)** (the bare model id). The
+  **behavioral-probe (medium)** tier is the Phase-5 `apogee probe`: the enum slot and the resolver
+  interface exist so it slots in behind the same seam, but no resolver produces it yet (D8).
+- **A file-backed, versioned Library store.** New `library.Store`, rooted at an injected directory
+  (`Config.LibraryDir`) and **never** an ambient `~/.apogee` (ADR 0001) — the bench's isolated root
+  falls out for free (decision 11). It holds per-fingerprint observations (`Entry`) with the sim's
+  Bayesian confidence counts (`Score = (observations − successes + 1) / (observations + 2)`, capped at
+  0.95), so a pattern the model grows out of stops qualifying for injection without being deleted. It
+  persists to a single `library.json` with a schema `Version` (like `domain.Session`), is process-local
+  (a mutex guards intra-process access; no cross-process locking claims in v1), and degrades a missing,
+  corrupt, or too-new store to **empty-with-a-soft-error** (the skills-catalog posture — a broken
+  Library never bricks a run). A zero fingerprint (unidentified model) is inert: nothing is recorded.
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI
