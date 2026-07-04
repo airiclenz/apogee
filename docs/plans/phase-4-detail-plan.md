@@ -303,16 +303,20 @@ the catalogue's off-ramp rows.
 
 ---
 
-## 7. Wave 2 — loop-native: `correct_tool_result`, `truncate_history`
+## 7. Wave 2 — loop-native: `truncate_history` (`correct_tool_result` deferred)
 
-**What:** the two lab-only interventions the proxy could never host
-(`internal/sim/intervention.go` in the sim), now first-class Mechanisms.
-`correct_tool_result` (post-tool-result): port per the catalogue; **the sim used it as a
-lab intervention with an operator-supplied correction — if the source defines no
-production trigger (what detects a correctable result on its own?), STOP and report
-QUESTION with the options you see** rather than inventing gating logic; the signature
-(`PostToolResult(ctx, call, result, view)`) already carries the originating call + view
-it needs. `truncate_history` (history-rewrite): drop-the-middle keeping the last N
+**Design call — RESOLVED (owner-ratified 2026-07-04):** `correct_tool_result` is
+**DEFERRED, not ported.** The pinned sim defines no production trigger — it is a lab-only
+intervention with an operator-supplied correction ("a successful one is a finding that
+motivates a new production surface, not a 1:1 port", `intervention.go:12-15`) — and
+inventing gating logic would ship behavior with no sim evidence (D7 as amended). The loop
+already ships the lab surface the sim's operator had: an experimental post-tool-result
+hook can replace a result via the mutation API, so the bench plays the operator without a
+catalogued Mechanism. A bench-discovered trigger motivates a NEW plan item. The catalogue
+(Table A/B rows, resolved open-question note, ledger) was amended with this ratification
+on 2026-07-04 — no catalogue work remains in this item.
+
+**What:** `truncate_history` (history-rewrite): drop-the-middle keeping the last N
 exchanges, cutting only at `AssistantBoundaries()` (tool results stay adjacent to their
 call), never touching `PrefixEnd()`, inserting the static gap-note message
 (`Conversation.DropRange` + `Insert` — the operations were designed for exactly this,
@@ -320,11 +324,10 @@ hook-mutation-api §6). Off by default like everything (D1) — it is the cheap 
 alternative to Compaction, validated bench-side later.
 
 **Tests:** truncation respects prefix + boundaries (property-style over generated
-histories); gap note inserted once; `correct_tool_result` per whatever production
-semantics were ratified.
+histories); gap note inserted once.
 
 **Acceptance:** gates green; diff confined to `internal/mechanisms` + docs/CHANGELOG.
-Commit: `feat(mechanisms): port the loop-native correct-tool-result and truncate-history wave`.
+Commit: `feat(mechanisms): port the truncate-history rewrite; correct_tool_result deferred`.
 
 ---
 

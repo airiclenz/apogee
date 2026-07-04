@@ -118,7 +118,7 @@ consolidate or rename.
 | `validate` | `feed_forward_correction`¹ | `internal/validate/{validate,bridge}.go`; `internal/proxy/response_validator.go` | post-response | response-repair | strikes-3 | Before `syntax`,`autofix` (short-circuits cascade on fail) |
 | `syntax` | (untracked analyzer) | `internal/syntax/{syntax,go_check,generic_check}.go` | post-response | response-repair | strikes-3 | After `validate`,`autofix` (corrects the post-repair remainder); own per-Session syntax-fail counter |
 | `autofix` | (untracked analyzer) | `internal/autofix/{autofix,formatters}.go` | post-response | response-repair | strikes-3 | After `validate`; Before `syntax` (repair precedes correction — sim `response_analysis.go:72-88`; in-process gofmt always; external formatters LookPath-cached at construction) |
-| `correct_tool_result` | `correct_tool_result` (lab-only) | `internal/sim/intervention.go:22,94` | post-tool-result | response-repair | strikes-3 | none — **production trigger undefined in source (see Table C / item-7 flag)** |
+| `correct_tool_result` | `correct_tool_result` (lab-only) | `internal/sim/intervention.go:22,94` | post-tool-result | response-repair | strikes-3 | none — **DEFERRED (owner-ratified 2026-07-04): not ported — no production trigger in the source; the bench experiments via an experimental post-tool-result hook (see Table B)** |
 | `truncate_history` | `truncate_history` (lab-only) | `internal/sim/intervention.go:23,99` | history-rewrite | proactive-nudge² | strikes-3 | none — cut only at `AssistantBoundaries()`, never `PrefixEnd()` |
 | `tool_result_cap` | `context_compression` (cap half) | `internal/compress/compress.go` (`capToolResults` `:428/431`) | pre-request | proactive-nudge² | strikes-3 | none — protects the most-recent Turn; per-result 40%-budget cap |
 | `toolfilter` | `tool_filtering` | `internal/toolfilter/toolfilter.go:33,70` | pre-request | proactive-nudge | strikes-3³ | Before `decompose` (trim menu before user-msg rewrite) |
@@ -159,7 +159,7 @@ backstop.
 | `validate` | Wave 1 — **item 5** | PORT — tool-call validation; carried most of the measured win | `catalogue.md` response cascade (validate→syntax→autofix short-circuit) | pending |
 | `syntax` | Wave 1 — **item 5** | PORT — write-content syntax check (Go parser + generic) | `catalogue.md` §syntax (per-Session fail counter) | pending |
 | `autofix` | Wave 1 — **item 5** | PORT — formatter write-back; gofmt in-process, others optional (§3a) | `catalogue.md` §autofix (LookPath-cached formatter table) | pending |
-| `correct_tool_result` | Wave 2 — **item 7** | PORT (guarded) — first-class now the loop is owned; **production trigger unresolved** | lab-only intervention, no production counterpart (`intervention.go:12-13`) | pending |
+| `correct_tool_result` | — (deferred from item 7) | **DEFER (owner-ratified 2026-07-04)** — no production trigger exists to port; the shipped post-tool-result hook + mutation API is the lab surface (the bench plays the sim's operator via an experimental hook); a bench-discovered trigger motivates a NEW plan item | lab-only intervention, operator-supplied correction — "a finding that motivates a new production surface, not a 1:1 port" (`intervention.go:12-15`) | deferred (bench discovery precedes any port) |
 | `truncate_history` | Wave 2 — **item 7** | PORT — cheap A/B alternative to Compaction; off by default (D1) | lab-only intervention; drop-the-middle (`intervention.go:99-178`) + static gap-note insertion (`:180-181`) | pending |
 | `tool_result_cap` | Context — **item 9** | PORT — surviving half of `compress`; 40%-budget per-result cap | `catalogue.md` §compress (40% cap, most-recent-turn protected) | pending |
 | `toolfilter` | Wave 3 — **item 10** | PORT — tool-menu narrowing (30+ tools or observed hallucination) | `catalogue.md` §filter (structurally gated) | pending |
@@ -222,15 +222,19 @@ Turns → suppress all non-exempt; productive-Turn clear-path (default `zero`).
 
 ---
 
-## Open question surfaced for a later wave (not blocking item 1)
+## Open question surfaced for a later wave (not blocking item 1) — RESOLVED
 
 - **`correct_tool_result` production trigger (item 7).** In the sim this is a **lab-only**
   intervention (`intervention.go:12-13`: "lab-only kinds with no production counterpart") —
   the operator supplies the correction; nothing detects a correctable tool result on its own.
   The `PostToolResult(ctx, call, result, view)` signature already carries the originating call
-  and view it would need, but the **gating logic does not exist in the source**. Item 7's spec
-  already instructs the implementer to STOP and report QUESTION rather than invent gating.
-  Recorded here so the catalogue does not imply a production trigger exists.
+  and view it would need, but the **gating logic does not exist in the source**.
+  **RESOLVED 2026-07-04 (owner-ratified): DEFER.** Not ported — inventing gating would ship
+  behavior with no sim evidence (D7 as amended, phase-4-detail-plan). The shipped
+  post-tool-result hook + mutation API already gives the bench the lab surface the sim's
+  operator had; a bench-discovered trigger motivates a new plan item and a fresh Table B
+  verdict. Table A/B rows + ledger amended to match; detail-plan item 7 now ships
+  `truncate_history` only.
 
 ---
 
@@ -245,7 +249,8 @@ ledger).
 |---|---|---|
 | `validate`, `syntax`, `autofix` | 5 | pending |
 | `tool_use_enforcer`, `empty_response_recovery` | 6 | pending |
-| `correct_tool_result`, `truncate_history` | 7 | pending |
+| `truncate_history` | 7 | pending |
+| `correct_tool_result` | — (DEFER, owner-ratified 2026-07-04) | n/a until a bench-discovered trigger |
 | `tool_result_cap` | 9 | pending |
 | `toolfilter`, `filehint`, `grammar` | 10 | pending |
 | `error_enrichment`, `read_loop`, `read_repeat`, `tool_loop_interceptor`, `cached_content_intercept` | 11 | pending |
