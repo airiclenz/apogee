@@ -93,6 +93,24 @@ loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
   absence, failure, or timeout leaves the payload untouched (standing requirement #2). Broken syntax
   is left for `syntax` to correct — a formatter cannot repair unparseable input. (`internal/mechanisms`.)
 
+### Wave 1: the `empty_response_recovery` / `tool_use_enforcer` off-ramps
+
+- **The two recovery guarantees are ported (catalogue Table A).** Both are post-response Mechanisms
+  with Capability **off-ramp** and SuppressionPolicy **exempt**, so they run even under Bypass (D5)
+  and are never withdrawn by Adaptive Suppression or the Turn Budget — without them a failed Turn has
+  no way out (CONTEXT "Off-ramp"). They ship in the `internal/mechanisms` catalogue, default **off**
+  (D1). `empty_response_recovery` fires when the model returns nothing — no text and no tool call —
+  mid-task with tools available and recent progress; `tool_use_enforcer` fires when the user asked for
+  an action but the model answered with prose twice running, having never used a tool (the sim's
+  intent classifier, folded in inline per catalogue C6).
+- **Empty replies re-stream; narration is corrected forward.** `empty_response_recovery` returns
+  `ActionRetry` — the loop re-streams the request so the model gets another chance, bounded by the
+  loop's existing `maxPostResponseRetries` cap so an always-empty model still terminates.
+  `tool_use_enforcer` returns `ActionDefer` with the sim's "use a tool" correction, injected
+  role-safely into the next request (the same streaming feed-forward path `validate`/`syntax` use,
+  C5) — the plan sanctions retry/defer for the enforcer, and the narration reply is committed so the
+  correction rides forward. (`internal/mechanisms`.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

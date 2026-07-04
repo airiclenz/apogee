@@ -240,7 +240,7 @@ Commit: `feat(mechanisms): port the validate/syntax/autofix response-robustness 
 
 ---
 
-## 6. Wave 1 — off-ramps: `empty_response_recovery`, `tool_use_enforcer`
+## 6. Wave 1 — off-ramps: `empty_response_recovery`, `tool_use_enforcer` — ✅ DONE (2026-07-04)
 
 **What:** the two recovery guarantees, ported per the catalogue as post-response
 Mechanisms with `Capability: off-ramp`, `SuppressionPolicy: exempt` — they run even in
