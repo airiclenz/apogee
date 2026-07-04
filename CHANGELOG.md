@@ -236,6 +236,13 @@ on the public surface — so this is a **minor** bump, not a major one.
   **proactive-nudge** (a context-shaper — disabled under Bypass, D5, while the structural Budget
   and Compaction stay on, D6), SuppressionPolicy **strikes-3**, default **off** (D1). It ships in
   the `internal/mechanisms` catalogue, buildable via the `mechanisms:` config block.
+- **No phantom acted-fire on an ungrown, already-truncated history (second-review fix).** Re-running
+  `truncate_history` when the conversation has not grown a new assistant boundary since the last cut
+  used to re-drop and re-insert the same gap note — rebuilding the identical shape but bumping
+  `Conversation.Revision`, which the loop reads as an acted fire (R4). The rewrite now detects that the
+  only pending drop is the gap note it inserted last time and returns without mutating, so Revision
+  stays put and no `MechanismFiredEvent` is booked. The truncation content stays sim-faithful and the
+  grown-history path (real middle to shed) still truncates and books normally. (`internal/mechanisms`.)
 - **`correct_tool_result` is deferred, not ported (owner-ratified 2026-07-04).** The pinned sim
   defines no production trigger for it — it is a lab-only intervention with an operator-supplied
   correction — so inventing gating logic would ship behaviour with no evidence. The loop already

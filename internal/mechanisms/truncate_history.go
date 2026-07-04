@@ -75,12 +75,26 @@ func (truncateHistoryMechanism) Ordering() domain.OrderingConstraints {
 // assistant-anchored exchanges, then inserts the gap note at the cut. It is a no-op — no mutation —
 // when fewer than keepLastTurns exchanges exist beyond the prefix, or the tail already begins at
 // the prefix (nothing to drop), matching apogee-sim truncateHistory's guard so a pointless gap
-// note is never inserted.
+// note is never inserted. It is also a no-op when re-run on an already-truncated, ungrown history:
+// re-dropping and re-inserting the same gap note would rebuild the identical shape while bumping
+// Revision, booking a phantom acted-fire (R4).
 func (m truncateHistoryMechanism) RewriteHistory(_ context.Context, conv *domain.Conversation) error {
 	prefixEnd := conv.PrefixEnd()
 	tailStart, ok := m.tailStart(conv, prefixEnd)
 	if !ok {
 		return nil
+	}
+	// Already-truncated, ungrown history: when the only message the pending drop would remove is
+	// the gap note we inserted last time (drop range == the single message at prefixEnd, and that
+	// message IS the gap note), re-dropping and re-inserting an identical note rebuilds the same
+	// shape but bumps Revision twice — the phantom acted-fire the loop keys on (R4). Return
+	// without mutating instead. The truncation CONTENT stays sim-faithful (apogee-sim re-drops
+	// and re-inserts here); only apogee's fire booking is wrong, so the grown-history path
+	// (tailStart > prefixEnd+1, where real middle sits after the old note) is untouched.
+	if m.gapNote != "" && tailStart == prefixEnd+1 {
+		if at := conv.At(prefixEnd); at.Role == domain.RoleUser && at.Content == m.gapNote {
+			return nil
+		}
 	}
 	// DropRange first so the tail slides to prefixEnd; then Insert the note before it, yielding
 	// prefix + gap note + tail — the exact shape apogee-sim truncateHistory builds.

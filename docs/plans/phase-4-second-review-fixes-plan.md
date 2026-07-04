@@ -265,7 +265,14 @@ CHANGELOG. Commit:
 
 ---
 
-## 5. `truncate_history`: no phantom acted-fire on an ungrown history
+## 5. `truncate_history`: no phantom acted-fire on an ungrown history — ✅ DONE (2026-07-04)
+
+**NOTES (2026-07-04):** The "extend the existing no-op test" was done as a NEW dedicated test
+(`TestTruncateHistoryRerunNoPhantomFire`) alongside `TestTruncateHistoryNothingToDrop` rather than
+folding into it: the re-run-after-a-real-truncation case (drop the just-inserted gap note) is
+structurally distinct from that test's "keep >= exchanges, nothing ever dropped" case, and the new
+test also covers the grown-history re-truncation the item calls for. The guard lives in
+`RewriteHistory` (not `tailStart`), keeping `tailStart` the pure sim-faithful computation.
 
 **Finding:** review "`truncate_history` books a phantom acted-fire when re-run on an
 ungrown history" (Medium — R4 violated in effect). Ground truth: R4

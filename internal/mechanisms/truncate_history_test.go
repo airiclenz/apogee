@@ -309,6 +309,61 @@ func TestTruncateHistoryNothingToDrop(t *testing.T) {
 	}
 }
 
+// Re-running the rewrite on an already-truncated, ungrown history is a genuine no-op: the only
+// pending drop is the gap note inserted last time, so re-dropping and re-inserting it would
+// rebuild the identical shape while bumping Revision — the phantom acted-fire the loop keys on
+// (R4). The rewrite must leave both the content and Revision untouched, then truncate and book
+// normally once the history actually grows past the window again.
+func TestTruncateHistoryRerunNoPhantomFire(t *testing.T) {
+	t.Parallel()
+	msgs := []domain.Message{
+		{Role: domain.RoleSystem, Content: "s"},
+		{Role: domain.RoleUser, Content: "u1"},
+		asstCall("c1"), toolResult("c1", "r1"),
+		asstCall("c2"), toolResult("c2", "r2"),
+		asstCall("c3"), toolResult("c3", "r3"),
+	}
+	m := truncateHistoryMechanism{keepLastTurns: 2, gapNote: truncateGapNote}
+	conv := domain.NewConversation(msgs)
+
+	// First run truncates: it drops the oldest exchange and inserts the gap note (a real fire).
+	if err := m.RewriteHistory(context.Background(), conv); err != nil {
+		t.Fatalf("first RewriteHistory: %v", err)
+	}
+	if conv.Revision() == 0 {
+		t.Fatalf("first run booked no mutation, expected a truncation")
+	}
+	afterFirst := conv.Messages()
+	revAfterFirst := conv.Revision()
+
+	// Second run on the ungrown, already-truncated history: no new assistant boundary, so the only
+	// candidate drop is the gap note itself — it must be a byte-for-byte, Revision-stable no-op.
+	if err := m.RewriteHistory(context.Background(), conv); err != nil {
+		t.Fatalf("re-run RewriteHistory: %v", err)
+	}
+	if got := conv.Messages(); !sameMessages(got, afterFirst) {
+		t.Errorf("re-run mutated the history\n got: %+v\nwant: %+v", got, afterFirst)
+	}
+	if conv.Revision() != revAfterFirst {
+		t.Errorf("re-run bumped Revision %d -> %d (would book a phantom acted-fire)", revAfterFirst, conv.Revision())
+	}
+
+	// Grow the history past the window with a new assistant-anchored exchange, then re-run: the
+	// grown-history path is untouched, so it truncates and books normally again.
+	conv.Append(asstCall("c4"))
+	conv.Append(toolResult("c4", "r4"))
+	revBeforeGrowth := conv.Revision()
+	if err := m.RewriteHistory(context.Background(), conv); err != nil {
+		t.Fatalf("post-growth RewriteHistory: %v", err)
+	}
+	if conv.Revision() == revBeforeGrowth {
+		t.Errorf("post-growth re-run did not truncate the grown history (Revision unchanged at %d)", revBeforeGrowth)
+	}
+	if n := countGapNote(conv.Messages()); n != 1 {
+		t.Errorf("post-growth re-run left %d gap notes, want exactly 1", n)
+	}
+}
+
 // A non-positive keep window is a no-op (the sim's KeepLastTurns <= 0 guard).
 func TestTruncateHistoryNonPositiveKeepIsNoOp(t *testing.T) {
 	t.Parallel()
