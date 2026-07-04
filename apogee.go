@@ -404,6 +404,10 @@ var (
 	// constraints form a cycle.
 	ErrOrderingCycle = domain.ErrOrderingCycle
 
+	// ErrIncompatibleMechanisms is returned by New when two registered Mechanisms
+	// declare each other incompatible (IncompatibleWith) — they must never co-fire.
+	ErrIncompatibleMechanisms = domain.ErrIncompatibleMechanisms
+
 	// ErrSessionVersion is returned by Resume / DecodeSession for a snapshot whose
 	// schema version this build does not understand.
 	ErrSessionVersion = domain.ErrSessionVersion

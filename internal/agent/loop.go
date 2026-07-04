@@ -43,8 +43,9 @@ var (
 
 // newAgent validates cfg and constructs a ready-to-Step Agent bound to up. The public
 // New delegates here with the real provider client; white-box tests inject a deterministic
-// fake. Validation order is deliberate: required fields, then the ordering-cycle gate
-// (ADR 0003), then the Auto/Confinement gate (ADR 0012 — FSWrite-only AutoEligible).
+// fake. Validation order is deliberate: required fields, then the ordering-cycle and
+// incompatibility gates (ADR 0003), then the Auto/Confinement gate (ADR 0012 — FSWrite-only
+// AutoEligible).
 func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
@@ -55,6 +56,9 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		registry = domain.NewMechanismRegistry()
 	}
 	if err := registry.ValidateOrdering(); err != nil {
+		return nil, err
+	}
+	if err := registry.ValidateIncompatibilities(); err != nil {
 		return nil, err
 	}
 

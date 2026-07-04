@@ -195,3 +195,29 @@ func (r *MechanismRegistry) Experimental(at HookPoint) []any { return r.experime
 // constraints form a cycle (ADR 0003 — a constraint cycle is a startup error). New
 // calls it once the whole graph is present.
 func (r *MechanismRegistry) ValidateOrdering() error { return detectOrderingCycle(r.mechanisms) }
+
+// ValidateIncompatibilities reports ErrIncompatibleMechanisms if two registered Mechanisms
+// declare each other incompatible (MechanismDescriptor.IncompatibleWith). It is the second
+// construction-time gate alongside ValidateOrdering — a loud startup failure (ADR 0003), so a
+// config enabling two mutually-exclusive Mechanisms is refused rather than silently running
+// both. New calls it once the whole graph is present.
+func (r *MechanismRegistry) ValidateIncompatibilities() error {
+	return detectIncompatibility(r.mechanisms)
+}
+
+// Ordered returns the catalogued Mechanisms that hook at at, in the deterministic total order
+// the loop dispatches them (ADR 0003 / D4): a topological sort of their Before/After constraints
+// with a stable tiebreak by canonical MechanismID, so the order is independent of registration
+// order. Only Mechanisms implementing the interface for at are returned; a constraint naming a
+// Mechanism absent from at is ignored (ordering is relative to the co-located Mechanisms). It is
+// the read seam the engine dispatches catalogued Mechanisms through, the counterpart to
+// Experimental for the descriptor-carrying catalogue.
+func (r *MechanismRegistry) Ordered(at HookPoint) []Mechanism {
+	present := make([]Mechanism, 0, len(r.mechanisms))
+	for _, m := range r.mechanisms {
+		if hookImplements(at, m) {
+			present = append(present, m)
+		}
+	}
+	return topoSort(present)
+}

@@ -26,6 +26,12 @@ var (
 	// constraints form a cycle — it must fail loudly at startup (ADR 0003).
 	ErrOrderingCycle = errors.New("apogee: mechanism ordering constraints contain a cycle")
 
+	// ErrIncompatibleMechanisms is returned by New when two registered Mechanisms declare
+	// each other incompatible (MechanismDescriptor.IncompatibleWith) — they must never
+	// co-fire, so registering both is a configuration error that fails loudly at startup
+	// (ADR 0003), the same posture as ErrOrderingCycle.
+	ErrIncompatibleMechanisms = errors.New("apogee: incompatible mechanisms registered together")
+
 	// ErrSessionVersion is returned by Resume / DecodeSession for a snapshot whose
 	// schema version this build does not understand.
 	ErrSessionVersion = errors.New("apogee: unsupported session schema version")

@@ -1,9 +1,13 @@
 package domain
 
+import (
+	"fmt"
+	"sort"
+)
+
 // This file holds the MechanismRegistry's pure logic the methods in mechanism.go
-// delegate to: hook-interface assertions and the startup ordering-cycle check
-// (ADR 0003). P0.6 built only cycle detection — the deterministic total order beyond
-// it is Phase-4 registry work (plan §6).
+// delegate to: hook-interface assertions, the startup ordering-cycle check, the
+// deterministic per-hook-point total order, and the incompatibility gate (ADR 0003).
 
 // implementsAnyHook reports whether m satisfies at least one of the five hook
 // interfaces. A Mechanism that hooks nowhere is a configuration error (ADR 0002 — a
@@ -101,6 +105,109 @@ func detectOrderingCycle(mechanisms []Mechanism) error {
 	for id := range known {
 		if color[id] == unvisited && hasCycleFrom(id) {
 			return ErrOrderingCycle
+		}
+	}
+	return nil
+}
+
+// topoSort returns mechs in the deterministic total order the loop dispatches them: a
+// topological sort of their Before/After constraints with a stable tiebreak by canonical
+// MechanismID (ADR 0003 / D4), so a shuffled registration order yields identical output. An
+// edge u→v ("u before v") comes from u's Before=[v] or v's After=[u]; a constraint naming an ID
+// not in mechs is ignored (ordering is relative to the co-located Mechanisms only). The graph is
+// validated acyclic at construction (detectOrderingCycle), so Kahn's algorithm below always
+// drains; a defensively-detected leftover cycle appends its members in ID order rather than
+// looping, keeping the result deterministic.
+func topoSort(mechs []Mechanism) []Mechanism {
+	if len(mechs) <= 1 {
+		return mechs
+	}
+
+	byID := make(map[MechanismID]Mechanism, len(mechs))
+	ids := make([]MechanismID, 0, len(mechs))
+	for _, m := range mechs {
+		id := m.Descriptor().ID
+		byID[id] = m
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	present := make(map[MechanismID]bool, len(ids))
+	for _, id := range ids {
+		present[id] = true
+	}
+	indegree := make(map[MechanismID]int, len(ids))
+	successors := make(map[MechanismID][]MechanismID, len(ids))
+	addEdge := func(before, after MechanismID) {
+		successors[before] = append(successors[before], after)
+		indegree[after]++
+	}
+	for _, id := range ids {
+		ord := byID[id].Ordering()
+		for _, b := range ord.Before {
+			if present[b] {
+				addEdge(id, b)
+			}
+		}
+		for _, aft := range ord.After {
+			if present[aft] {
+				addEdge(aft, id)
+			}
+		}
+	}
+
+	// Kahn's algorithm, always taking the lowest-ID ready node (ids is sorted, so the first
+	// non-emitted in-degree-0 id is the smallest available) — the stable tiebreak of D4.
+	out := make([]Mechanism, 0, len(ids))
+	emitted := make(map[MechanismID]bool, len(ids))
+	for len(out) < len(ids) {
+		next, found := MechanismID(""), false
+		for _, id := range ids {
+			if !emitted[id] && indegree[id] == 0 {
+				next, found = id, true
+				break
+			}
+		}
+		if !found {
+			// A cycle slipped past validation (should not happen): emit the remainder in ID
+			// order so the result is deterministic instead of spinning.
+			for _, id := range ids {
+				if !emitted[id] {
+					out = append(out, byID[id])
+					emitted[id] = true
+				}
+			}
+			break
+		}
+		out = append(out, byID[next])
+		emitted[next] = true
+		for _, v := range successors[next] {
+			indegree[v]--
+		}
+	}
+	return out
+}
+
+// detectIncompatibility reports ErrIncompatibleMechanisms if two registered Mechanisms
+// declare each other incompatible (MechanismDescriptor.IncompatibleWith). Incompatibility is
+// GLOBAL, not per-hook-point: two Mechanisms that must never co-fire — e.g. read_loop and
+// cached_content_intercept, which sit at different hook points — cannot both be enabled. A
+// declaration is directional in the data but symmetric in effect (either side naming the other
+// trips it), so it fails loudly at startup the same way an ordering cycle does (ADR 0003).
+func detectIncompatibility(mechanisms []Mechanism) error {
+	if len(mechanisms) < 2 {
+		return nil
+	}
+	present := make(map[MechanismID]bool, len(mechanisms))
+	for _, m := range mechanisms {
+		present[m.Descriptor().ID] = true
+	}
+	for _, m := range mechanisms {
+		desc := m.Descriptor()
+		for _, other := range desc.IncompatibleWith {
+			if present[other] {
+				return fmt.Errorf("apogee: mechanisms %q and %q: %w", desc.ID, other, ErrIncompatibleMechanisms)
+			}
 		}
 	}
 	return nil

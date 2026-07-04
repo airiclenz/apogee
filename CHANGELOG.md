@@ -6,6 +6,35 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [Unreleased]
+
+Post-`v1.1.0`, **additive** (minor) — Phase 4 merges the apogee-sim Mechanisms into the
+loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
+`docs/design/mechanism-catalogue.md`).
+
+### Catalogued Mechanisms now dispatch in a deterministic order behind the Bypass gate
+
+- **Registered Mechanisms finally run.** A Mechanism added to the `MechanismRegistry` via
+  `Add` used to be validated but never dispatched — only the bench's experimental hooks
+  fired. Now, at each of the five hook points, the loop dispatches the catalogued
+  Mechanisms **first**, in a deterministic total order (`MechanismRegistry.Ordered` — a
+  topological sort of each Mechanism's `Before`/`After` `OrderingConstraints` with a stable
+  tiebreak by canonical `MechanismID`, so a shuffled registration order yields identical
+  output, ADR 0003), then the experimental hooks in registration order (unchanged). Each
+  fires under the same recover boundary and emits a `MechanismFiredEvent` under its **real**
+  `MechanismID` (experimental hooks keep the synthetic `experimental` attribution).
+- **`Config.Bypass` now gates dispatch (ADR 0006).** Under Bypass, every catalogued
+  non-`off-ramp` Mechanism is skipped — proactive-nudge and response-repair go silent —
+  while `off-ramp` recovery guarantees still run; experimental hooks are never Bypass-gated
+  (they are the bench's own instruments), and the structural context machinery (Budget,
+  Compaction) is unaffected.
+- **Incompatible Mechanisms fail loudly at construction.** `New` now also runs
+  `MechanismRegistry.ValidateIncompatibilities`, returning the new
+  `ErrIncompatibleMechanisms` sentinel when two registered Mechanisms declare each other via
+  `MechanismDescriptor.IncompatibleWith` — the same startup-gate posture as
+  `ErrOrderingCycle`, so a config that enables two mutually-exclusive Mechanisms is refused
+  rather than silently running both. (`internal/domain`, `internal/agent`, root re-exports.)
+
 ## [1.1.0] — 2026-07-03
 
 Post-`v1.0.0`, **additive** (minor) — the start of the apogee-code TUI

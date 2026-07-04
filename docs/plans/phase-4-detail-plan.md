@@ -142,7 +142,7 @@ Commit: `docs(design): ratify the Phase-4 mechanism catalogue against the pinned
 
 ---
 
-## 2. Dispatch catalogued Mechanisms: deterministic order + the Bypass gate
+## 2. Dispatch catalogued Mechanisms: deterministic order + the Bypass gate — ✅ DONE (2026-07-04)
 
 **What:** make `MechanismRegistry.Add` mean something. Registry side: an
 `Ordered(at HookPoint) []Mechanism` accessor — topo-sort of `OrderingConstraints` with
