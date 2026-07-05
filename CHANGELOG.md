@@ -9,7 +9,7 @@ point is a **minor** bump, not a breaking change.
 ## [1.2.0] — 2026-07-04
 
 Post-`v1.1.0`, **additive** (minor) — Phase 4 merges the apogee-sim Mechanisms into the
-loop (`docs/plans/phase-4-detail-plan.md`; ratified catalogue at
+loop (`docs/plans/archived/phase-4-detail-plan.md`; ratified catalogue at
 `docs/design/mechanism-catalogue.md`). **No breaking change** (sanity-checked against the
 `v1.1.0..HEAD` diff): the public facade (`apogee.go`) only *gains* symbols — the sole new
 top-level export is `ErrIncompatibleMechanisms`; nothing exported is removed or re-typed. Every
@@ -230,7 +230,7 @@ on the public surface — so this is a **minor** bump, not a major one.
   ladder refinements and per-mechanism throttle counters — bench-pending) are recorded in
   the catalogue, and the Phase-4 detail plan carries the review's NOTES trail under items
   3, 5, and 6. (Docs: `docs/design/mechanism-catalogue.md`,
-  `docs/plans/phase-4-detail-plan.md`.)
+  `docs/plans/archived/phase-4-detail-plan.md`.)
 
 ### Wave 2: the `truncate_history` drop-the-middle history rewrite (`correct_tool_result` deferred)
 
