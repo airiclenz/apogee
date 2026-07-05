@@ -2,6 +2,7 @@ package mechanisms
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -64,10 +65,19 @@ type constructor func(Deps) (domain.Mechanism, error)
 // row (catalogue_test.go), so the seam is proven before the first real Mechanism lands.
 var catalogue = map[domain.MechanismID]constructor{}
 
+// descriptors is the static descriptor table: canonical MechanismID → its MechanismDescriptor, the
+// harvestable twin of catalogue. Each mechanism file registers its row in the SAME init() that
+// registers its constructor, from the SAME package-level descriptor value its instance's
+// Descriptor() returns — so a row and the Mechanism it describes can never drift (equality by
+// construction, ADR 0015 §3). Descriptors() reads it, and the public CataloguedMechanisms query is
+// backed by it, so a Mechanism's metadata is available without building the Mechanism.
+var descriptors = map[domain.MechanismID]domain.MechanismDescriptor{}
+
 // Build constructs the catalogued Mechanism identified by id, injecting deps (D3). It is the seam
 // cmd/apogee/wire.go drives for each enabled `mechanisms:` ID. An id absent from the catalogue is
-// a loud error naming the known IDs, so a typo'd config key fails startup rather than silently
-// disabling a Mechanism.
+// a loud error naming the known IDs and wrapping domain.ErrUnknownMechanism (so callers can match
+// it with errors.Is), so a typo'd config key fails startup rather than silently disabling a
+// Mechanism.
 func Build(id domain.MechanismID, deps Deps) (domain.Mechanism, error) {
 	return buildFrom(catalogue, id, deps)
 }
@@ -76,12 +86,33 @@ func Build(id domain.MechanismID, deps Deps) (domain.Mechanism, error) {
 // config surface (and its unknown-ID error) reports as the valid `mechanisms:` keys.
 func KnownIDs() []domain.MechanismID { return knownIDs(catalogue) }
 
+// Descriptors returns every catalogued Mechanism's static descriptor, sorted by canonical ID and
+// duplicate-free — the metadata the public surface (CataloguedMechanisms, ADR 0015 §3) exposes
+// without building a Mechanism. Each returned descriptor is a copy with its slice fields cloned, so
+// a caller cannot mutate the catalogue's rows.
+func Descriptors() []domain.MechanismDescriptor {
+	out := make([]domain.MechanismDescriptor, 0, len(descriptors))
+	for _, d := range descriptors {
+		out = append(out, cloneDescriptor(d))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// cloneDescriptor returns a copy of d whose slice fields are independent of the source row, so a
+// caller mutating a returned descriptor cannot reach back into the static catalogue.
+func cloneDescriptor(d domain.MechanismDescriptor) domain.MechanismDescriptor {
+	d.IncompatibleWith = slices.Clone(d.IncompatibleWith)
+	d.Requires = slices.Clone(d.Requires)
+	return d
+}
+
 // buildFrom is Build over an explicit table, so a test can exercise the lookup / unknown-id /
 // inject path against a fake row while the production catalogue is still empty.
 func buildFrom(table map[domain.MechanismID]constructor, id domain.MechanismID, deps Deps) (domain.Mechanism, error) {
 	build, ok := table[id]
 	if !ok {
-		return nil, fmt.Errorf("apogee: unknown mechanism %q; known: %s", id, knownList(table))
+		return nil, fmt.Errorf("%w %q; known: %s", domain.ErrUnknownMechanism, id, knownList(table))
 	}
 	return build(deps)
 }

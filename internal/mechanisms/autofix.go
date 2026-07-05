@@ -13,7 +13,10 @@ import (
 
 // autofix registers the formatter-repair Mechanism in the catalogue constructor table (Phase-4
 // item 5). Default-off (D1).
-func init() { catalogue[autofixID] = newAutofix }
+func init() {
+	catalogue[autofixID] = newAutofix
+	descriptors[autofixID] = autofixDescriptor
+}
 
 // formatterTimeout bounds an external formatter subprocess so a hung tool cannot stall the Turn.
 // It is a var (not a const) purely so the tests that exercise the real subprocess path can raise
@@ -103,14 +106,15 @@ func newAutofix(deps Deps) (domain.Mechanism, error) {
 	return autofixMechanism{repairs: repairs}, nil
 }
 
-// Descriptor identifies autofix as a strikes-3 response-repair Mechanism (catalogue Table A).
-func (autofixMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          autofixID,
-		Capability:  domain.CapResponseRepair,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// autofixDescriptor identifies autofix as a strikes-3 response-repair Mechanism (catalogue Table A).
+var autofixDescriptor = domain.MechanismDescriptor{
+	ID:          autofixID,
+	Capability:  domain.CapResponseRepair,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns autofix's static catalogue descriptor.
+func (autofixMechanism) Descriptor() domain.MechanismDescriptor { return autofixDescriptor }
 
 // Ordering runs autofix after validate and before syntax (catalogue Table A): the sim repairs
 // before it corrects (response_analysis.go:72-88 @pin — detect → tryAutoFix →

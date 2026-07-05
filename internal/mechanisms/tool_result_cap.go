@@ -13,7 +13,10 @@ import (
 // (catalogue C3 SPLIT — the generative Compaction and history-truncation halves live elsewhere,
 // D6): a per-tool-result truncation of any single result that has outgrown its fraction of the
 // Budget, the most recent Turn always protected.
-func init() { catalogue[toolResultCapID] = newToolResultCap }
+func init() {
+	catalogue[toolResultCapID] = newToolResultCap
+	descriptors[toolResultCapID] = toolResultCapDescriptor
+}
 
 const toolResultCapID domain.MechanismID = "tool_result_cap"
 
@@ -55,17 +58,18 @@ func newToolResultCap(Deps) (domain.Mechanism, error) {
 	return toolResultCapMechanism{}, nil
 }
 
-// Descriptor identifies tool_result_cap as a strikes-3 proactive-nudge Mechanism (catalogue
-// Table A, footnote 2: a context-shaper is neither off-ramp nor response-repair; proactive-nudge
-// carries the Bypass semantics — disabled under Bypass, D5 — while the structural Budget and
-// Compaction stay on, D6). It is withdrawn by self-regulation after repeated non-help.
-func (toolResultCapMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          toolResultCapID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// toolResultCapDescriptor identifies tool_result_cap as a strikes-3 proactive-nudge Mechanism
+// (catalogue Table A, footnote 2: a context-shaper is neither off-ramp nor response-repair;
+// proactive-nudge carries the Bypass semantics — disabled under Bypass, D5 — while the structural
+// Budget and Compaction stay on, D6). It is withdrawn by self-regulation after repeated non-help.
+var toolResultCapDescriptor = domain.MechanismDescriptor{
+	ID:          toolResultCapID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns tool_result_cap's static catalogue descriptor.
+func (toolResultCapMechanism) Descriptor() domain.MechanismDescriptor { return toolResultCapDescriptor }
 
 // Ordering declares tool_result_cap After decompose (§Ordering seed, ratified into Table A
 // 2026-07-04, review-fixes item 11 / option A): it trims tool results after the other pre-request

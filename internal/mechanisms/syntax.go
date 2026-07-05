@@ -9,7 +9,10 @@ import (
 
 // syntax registers the write-content syntax-check Mechanism in the catalogue constructor table
 // (Phase-4 item 5). Default-off (D1).
-func init() { catalogue[syntaxID] = newSyntax }
+func init() {
+	catalogue[syntaxID] = newSyntax
+	descriptors[syntaxID] = syntaxDescriptor
+}
 
 // syntaxMechanism is the post-response write-content syntax checker (catalogue Table A `syntax`;
 // ported from apogee-sim internal/syntax + internal/proxy/response_analysis.go's
@@ -29,14 +32,15 @@ type syntaxMechanism struct{}
 // and read only the response.
 func newSyntax(Deps) (domain.Mechanism, error) { return syntaxMechanism{}, nil }
 
-// Descriptor identifies syntax as a strikes-3 response-repair Mechanism (catalogue Table A).
-func (syntaxMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          syntaxID,
-		Capability:  domain.CapResponseRepair,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// syntaxDescriptor identifies syntax as a strikes-3 response-repair Mechanism (catalogue Table A).
+var syntaxDescriptor = domain.MechanismDescriptor{
+	ID:          syntaxID,
+	Capability:  domain.CapResponseRepair,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns syntax's static catalogue descriptor.
+func (syntaxMechanism) Descriptor() domain.MechanismDescriptor { return syntaxDescriptor }
 
 // Ordering runs syntax after validate and after autofix (catalogue Table A): repair precedes
 // correction, so the correction covers only the post-repair remainder.

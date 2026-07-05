@@ -35,6 +35,9 @@ func init() {
 	catalogue[toolUseDirectiveID] = newToolUseDirective
 	catalogue[stallNudgeID] = newStallNudge
 	catalogue[listNudgeID] = newListNudge
+	descriptors[toolUseDirectiveID] = toolUseDirectiveDescriptor
+	descriptors[stallNudgeID] = stallNudgeDescriptor
+	descriptors[listNudgeID] = listNudgeDescriptor
 }
 
 // cot directives + their idempotency markers, ported verbatim from apogee-sim internal/cot/cot.go
@@ -92,12 +95,17 @@ type toolUseDirectiveMechanism struct{}
 
 func newToolUseDirective(Deps) (domain.Mechanism, error) { return toolUseDirectiveMechanism{}, nil }
 
+// toolUseDirectiveDescriptor identifies tool_use_directive as a strikes-3 proactive-nudge Mechanism
+// (catalogue Table A).
+var toolUseDirectiveDescriptor = domain.MechanismDescriptor{
+	ID:          toolUseDirectiveID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
+}
+
+// Descriptor returns tool_use_directive's static catalogue descriptor.
 func (toolUseDirectiveMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          toolUseDirectiveID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+	return toolUseDirectiveDescriptor
 }
 
 // Ordering declares tool_use_directive Before toolfilter (§Ordering seed, ratified into Table A
@@ -131,14 +139,17 @@ type stallNudgeMechanism struct{}
 
 func newStallNudge(Deps) (domain.Mechanism, error) { return stallNudgeMechanism{}, nil }
 
-func (stallNudgeMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:               stallNudgeID,
-		Capability:       domain.CapProactiveNudge,
-		Suppression:      domain.SuppressStrikesThree,
-		IncompatibleWith: []domain.MechanismID{listNudgeID},
-	}
+// stallNudgeDescriptor identifies stall_nudge as a strikes-3 proactive-nudge Mechanism (catalogue
+// Table A), incompatible with list_nudge (the two never co-fire — a startup gate).
+var stallNudgeDescriptor = domain.MechanismDescriptor{
+	ID:               stallNudgeID,
+	Capability:       domain.CapProactiveNudge,
+	Suppression:      domain.SuppressStrikesThree,
+	IncompatibleWith: []domain.MechanismID{listNudgeID},
 }
+
+// Descriptor returns stall_nudge's static catalogue descriptor.
+func (stallNudgeMechanism) Descriptor() domain.MechanismDescriptor { return stallNudgeDescriptor }
 
 // Ordering declares stall_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
 // review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows
@@ -171,14 +182,17 @@ type listNudgeMechanism struct{}
 
 func newListNudge(Deps) (domain.Mechanism, error) { return listNudgeMechanism{}, nil }
 
-func (listNudgeMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:               listNudgeID,
-		Capability:       domain.CapProactiveNudge,
-		Suppression:      domain.SuppressStrikesThree,
-		IncompatibleWith: []domain.MechanismID{stallNudgeID},
-	}
+// listNudgeDescriptor identifies list_nudge as a strikes-3 proactive-nudge Mechanism (catalogue
+// Table A), incompatible with stall_nudge (the two never co-fire — a startup gate).
+var listNudgeDescriptor = domain.MechanismDescriptor{
+	ID:               listNudgeID,
+	Capability:       domain.CapProactiveNudge,
+	Suppression:      domain.SuppressStrikesThree,
+	IncompatibleWith: []domain.MechanismID{stallNudgeID},
 }
+
+// Descriptor returns list_nudge's static catalogue descriptor.
+func (listNudgeMechanism) Descriptor() domain.MechanismDescriptor { return listNudgeDescriptor }
 
 // Ordering declares list_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
 // review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows

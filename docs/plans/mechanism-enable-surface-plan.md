@@ -84,7 +84,7 @@ here.
 
 ---
 
-## 1. Mechanisms: descriptors become static catalogue data + the unknown-ID sentinel
+## 1. Mechanisms: descriptors become static catalogue data + the unknown-ID sentinel — ✅ DONE (2026-07-05)
 
 **What:** make every catalogued Mechanism's descriptor available without building.
 Restructure each mechanism file so its descriptor is a single package-level

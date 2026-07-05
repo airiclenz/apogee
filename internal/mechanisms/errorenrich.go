@@ -13,7 +13,10 @@ import (
 // from apogee-sim internal/proxy/error_enrichment.go @pin and RELOCATED to post-tool-result
 // (catalogue Table A / hook-mutation-api §5): the sim injected its guidance into the next request,
 // but apogee owns the loop and can enrich the failing tool result before the model ever sees it.
-func init() { catalogue[errorEnrichmentID] = newErrorEnrichment }
+func init() {
+	catalogue[errorEnrichmentID] = newErrorEnrichment
+	descriptors[errorEnrichmentID] = errorEnrichmentDescriptor
+}
 
 const errorEnrichmentID domain.MechanismID = "error_enrichment"
 
@@ -87,14 +90,17 @@ type errorEnrichmentMechanism struct{}
 // only the failing result, its originating call, and the conversation on the LoopView it is handed.
 func newErrorEnrichment(Deps) (domain.Mechanism, error) { return errorEnrichmentMechanism{}, nil }
 
-// Descriptor identifies error_enrichment as a strikes-3 response-repair Mechanism (catalogue
-// Table A, C1) — disabled under Bypass (ADR 0006 / D5), withdrawn after repeated non-help.
+// errorEnrichmentDescriptor identifies error_enrichment as a strikes-3 response-repair Mechanism
+// (catalogue Table A, C1) — disabled under Bypass (ADR 0006 / D5), withdrawn after repeated non-help.
+var errorEnrichmentDescriptor = domain.MechanismDescriptor{
+	ID:          errorEnrichmentID,
+	Capability:  domain.CapResponseRepair,
+	Suppression: domain.SuppressStrikesThree,
+}
+
+// Descriptor returns error_enrichment's static catalogue descriptor.
 func (errorEnrichmentMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          errorEnrichmentID,
-		Capability:  domain.CapResponseRepair,
-		Suppression: domain.SuppressStrikesThree,
-	}
+	return errorEnrichmentDescriptor
 }
 
 // Ordering declares no constraints (catalogue Table A: "none"): error_enrichment classifies read-

@@ -12,7 +12,10 @@ import (
 // validate registers the tool-call validation Mechanism in the catalogue constructor table
 // (Phase-4 item 5). It is default-off (D1) — the config surface builds it only when the
 // `mechanisms:` block enables it.
-func init() { catalogue[validateID] = newValidate }
+func init() {
+	catalogue[validateID] = newValidate
+	descriptors[validateID] = validateDescriptor
+}
 
 // validateMechanism is the post-response tool-call validator (catalogue Table A `validate`;
 // ported from apogee-sim internal/validate + internal/proxy/response_validator.go @pin). It
@@ -32,15 +35,17 @@ type validateMechanism struct{}
 // only the response and the tool menu already on its LoopView.
 func newValidate(Deps) (domain.Mechanism, error) { return validateMechanism{}, nil }
 
-// Descriptor identifies validate as a strikes-3 response-repair Mechanism (catalogue Table A) —
-// disabled under Bypass (ADR 0006) and withdrawn by self-regulation after repeated non-help.
-func (validateMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          validateID,
-		Capability:  domain.CapResponseRepair,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// validateDescriptor identifies validate as a strikes-3 response-repair Mechanism (catalogue
+// Table A) — disabled under Bypass (ADR 0006) and withdrawn by self-regulation after repeated
+// non-help.
+var validateDescriptor = domain.MechanismDescriptor{
+	ID:          validateID,
+	Capability:  domain.CapResponseRepair,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns validate's static catalogue descriptor.
+func (validateMechanism) Descriptor() domain.MechanismDescriptor { return validateDescriptor }
 
 // Ordering runs validate before syntax and autofix (catalogue Table A): validation is the
 // coarsest check, so a malformed call is corrected before the finer content passes look at it.

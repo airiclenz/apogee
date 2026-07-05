@@ -3,6 +3,7 @@ package mechanisms
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -198,6 +199,78 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	// emit early, so nothing sorts after tool_result_cap.
 	if last := ordered[len(ordered)-1].Descriptor().ID; last != "tool_result_cap" {
 		t.Errorf("last pre-request Mechanism = %q, want tool_result_cap (runs last among shapers)", last)
+	}
+}
+
+// Every catalogued Mechanism has a static descriptor row keyed by its own ID, Descriptors() is
+// sorted and duplicate-free, and each built instance's Descriptor() equals its static row — so the
+// harvestable metadata (ADR 0015 §3) can never drift from the Mechanism it describes. The row is the
+// SINGLE source: the same package-level value the init() registered and the instance's Descriptor()
+// returns.
+func TestDescriptorsMatchCatalogue(t *testing.T) {
+	t.Parallel()
+
+	rows := Descriptors()
+
+	// Descriptors() is sorted by canonical ID and duplicate-free.
+	seen := make(map[domain.MechanismID]bool, len(rows))
+	for i, d := range rows {
+		if seen[d.ID] {
+			t.Errorf("Descriptors() lists %q more than once", d.ID)
+		}
+		seen[d.ID] = true
+		if i > 0 && rows[i-1].ID >= d.ID {
+			t.Errorf("Descriptors() not sorted: %q appears before %q", rows[i-1].ID, d.ID)
+		}
+	}
+
+	// Exactly one row per KnownIDs() entry, each keyed by its own ID.
+	byID := make(map[domain.MechanismID]domain.MechanismDescriptor, len(rows))
+	for _, d := range rows {
+		byID[d.ID] = d
+	}
+	known := KnownIDs()
+	if len(rows) != len(known) {
+		t.Errorf("Descriptors() has %d rows; KnownIDs() has %d", len(rows), len(known))
+	}
+	for _, id := range known {
+		row, ok := byID[id]
+		if !ok {
+			t.Errorf("KnownIDs() entry %q has no descriptor row", id)
+			continue
+		}
+		if row.ID != id {
+			t.Errorf("descriptor row for catalogue key %q has ID %q", id, row.ID)
+		}
+		// The built instance's descriptor equals its static row (equality by construction). library
+		// needs its store injected (D3, catalogue_test fake-Deps pattern); every other Mechanism
+		// builds with benign zero Deps.
+		deps := Deps{}
+		if id == libraryID {
+			deps = Deps{Library: library.NewStore(t.TempDir())}
+		}
+		m, err := Build(id, deps)
+		if err != nil {
+			t.Errorf("Build(%q): %v", id, err)
+			continue
+		}
+		if got := m.Descriptor(); !reflect.DeepEqual(got, row) {
+			t.Errorf("Build(%q).Descriptor() = %+v; want its static row %+v", id, got, row)
+		}
+	}
+}
+
+// A bogus Build ID wraps domain.ErrUnknownMechanism (matchable with errors.Is) while its message
+// still names the known catalogue IDs — a typo'd config key fails loudly AND programmatically.
+func TestBuildUnknownIDWrapsSentinel(t *testing.T) {
+	t.Parallel()
+	_, err := Build("definitely_not_a_mechanism", Deps{})
+	if !errors.Is(err, domain.ErrUnknownMechanism) {
+		t.Fatalf("Build(bogus) err = %v; want it to wrap domain.ErrUnknownMechanism", err)
+	}
+	// validate is always catalogued, so the error still names the known IDs.
+	if got := err.Error(); !strings.Contains(got, "validate") {
+		t.Errorf("error %q; want it to name the known IDs", got)
 	}
 }
 

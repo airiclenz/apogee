@@ -14,7 +14,10 @@ import (
 // only when the `mechanisms:` block enables it. It is ported from apogee-sim
 // internal/toolfilter/toolfilter.go @pin: a relevance-scored reduction of the tool menu for small
 // models, activating only when the menu is large (30+ tools) or the model has hallucinated a tool.
-func init() { catalogue[toolFilterID] = newToolFilter }
+func init() {
+	catalogue[toolFilterID] = newToolFilter
+	descriptors[toolFilterID] = toolFilterDescriptor
+}
 
 const toolFilterID domain.MechanismID = "toolfilter"
 
@@ -63,15 +66,16 @@ type toolFilterMechanism struct{}
 // the tool menu and conversation off the Request it is handed.
 func newToolFilter(Deps) (domain.Mechanism, error) { return toolFilterMechanism{}, nil }
 
-// Descriptor identifies toolfilter as a strikes-3 proactive-nudge Mechanism (catalogue Table A):
-// disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
-func (toolFilterMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          toolFilterID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// toolFilterDescriptor identifies toolfilter as a strikes-3 proactive-nudge Mechanism (catalogue
+// Table A): disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
+var toolFilterDescriptor = domain.MechanismDescriptor{
+	ID:          toolFilterID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns toolfilter's static catalogue descriptor.
+func (toolFilterMechanism) Descriptor() domain.MechanismDescriptor { return toolFilterDescriptor }
 
 // Ordering declares toolfilter Before decompose (catalogue Table A: "trim the menu before the
 // user-message rewrite"). decompose lands in item 12; until then the edge names an absent

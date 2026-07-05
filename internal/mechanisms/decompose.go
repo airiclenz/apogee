@@ -16,7 +16,10 @@ import (
 // it (1) collapses complex prompts sitting in conversation history so the model cannot re-read a
 // full step-by-step plan from an earlier turn, and (2) hints the single next actionable step of the
 // current prompt into the system prompt, keeping the full user message intact.
-func init() { catalogue[decomposeID] = newDecompose }
+func init() {
+	catalogue[decomposeID] = newDecompose
+	descriptors[decomposeID] = decomposeDescriptor
+}
 
 const decomposeID domain.MechanismID = "decompose"
 
@@ -145,15 +148,16 @@ type decomposeMechanism struct{}
 // the conversation and tool menu off the Request it is handed.
 func newDecompose(Deps) (domain.Mechanism, error) { return decomposeMechanism{}, nil }
 
-// Descriptor identifies decompose as a strikes-3 proactive-nudge Mechanism (catalogue Table A):
-// disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
-func (decomposeMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          decomposeID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// decomposeDescriptor identifies decompose as a strikes-3 proactive-nudge Mechanism (catalogue
+// Table A): disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
+var decomposeDescriptor = domain.MechanismDescriptor{
+	ID:          decomposeID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns decompose's static catalogue descriptor.
+func (decomposeMechanism) Descriptor() domain.MechanismDescriptor { return decomposeDescriptor }
 
 // Ordering declares decompose After toolfilter (catalogue Table A: "trim the menu before the
 // user-message rewrite" — toolfilter already declares the mirror Before edge). The read-loop

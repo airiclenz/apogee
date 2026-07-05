@@ -16,7 +16,10 @@ import (
 // backend-capability gated (catalogue Table A/C): the gate is the D3-injected Deps.GrammarConstraint
 // (see its doc) — false on every current apogee backend, so grammar no-ops (catalogue Table B: "may
 // no-op on all current apogee backends").
-func init() { catalogue[grammarID] = newGrammar }
+func init() {
+	catalogue[grammarID] = newGrammar
+	descriptors[grammarID] = grammarDescriptor
+}
 
 const grammarID domain.MechanismID = "grammar"
 
@@ -43,15 +46,16 @@ func newGrammar(deps Deps) (domain.Mechanism, error) {
 	return grammarMechanism{constrain: deps.GrammarConstraint}, nil
 }
 
-// Descriptor identifies grammar as a strikes-3 proactive-nudge Mechanism (catalogue Table A):
+// grammarDescriptor identifies grammar as a strikes-3 proactive-nudge Mechanism (catalogue Table A):
 // disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
-func (grammarMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          grammarID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+var grammarDescriptor = domain.MechanismDescriptor{
+	ID:          grammarID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns grammar's static catalogue descriptor.
+func (grammarMechanism) Descriptor() domain.MechanismDescriptor { return grammarDescriptor }
 
 // Ordering declares no constraints (catalogue Table A: "none — backend-capability gated"): the
 // grammar constraint is derived from the tool menu independently of any other shaper.

@@ -18,7 +18,10 @@ import (
 // enumerate the work as a numbered list of self-contained subtasks, then serializes the fan-out one
 // sub_agent delegation per Turn. Two halves on one struct: the pre-request gate + enumeration steer,
 // and the PostResponse intercept + serialized follow-through (both below).
-func init() { catalogue[guidedDecompositionID] = newGuidedDecomposition }
+func init() {
+	catalogue[guidedDecompositionID] = newGuidedDecomposition
+	descriptors[guidedDecompositionID] = guidedDecompositionDescriptor
+}
 
 const guidedDecompositionID domain.MechanismID = "guided_decomposition"
 
@@ -86,20 +89,23 @@ func newGuidedDecomposition(Deps) (domain.Mechanism, error) {
 	return guidedDecompositionMechanism{}, nil
 }
 
-// Descriptor identifies guided_decomposition as a strikes-3 proactive-nudge Mechanism (ADR 0014 §1):
-// disabled under Bypass (D5) and withdrawn by self-regulation after repeated non-help. It is
-// IncompatibleWith decompose — the two steer the same "task too big" symptom through different means
-// (delegation vs prompt wording) and must not stack (locked decision 2) — and Requires
-// tool_result_cap, the peer it is benched as a stack with; enabling it without tool_result_cap is a
-// startup error (ValidateRequirements, locked decision 3 / ADR 0014 §4).
+// guidedDecompositionDescriptor identifies guided_decomposition as a strikes-3 proactive-nudge
+// Mechanism (ADR 0014 §1): disabled under Bypass (D5) and withdrawn by self-regulation after
+// repeated non-help. It is IncompatibleWith decompose — the two steer the same "task too big"
+// symptom through different means (delegation vs prompt wording) and must not stack (locked decision
+// 2) — and Requires tool_result_cap, the peer it is benched as a stack with; enabling it without
+// tool_result_cap is a startup error (ValidateRequirements, locked decision 3 / ADR 0014 §4).
+var guidedDecompositionDescriptor = domain.MechanismDescriptor{
+	ID:               guidedDecompositionID,
+	Capability:       domain.CapProactiveNudge,
+	Suppression:      domain.SuppressStrikesThree,
+	IncompatibleWith: []domain.MechanismID{decomposeID},
+	Requires:         []domain.MechanismID{toolResultCapID},
+}
+
+// Descriptor returns guided_decomposition's static catalogue descriptor.
 func (guidedDecompositionMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:               guidedDecompositionID,
-		Capability:       domain.CapProactiveNudge,
-		Suppression:      domain.SuppressStrikesThree,
-		IncompatibleWith: []domain.MechanismID{decomposeID},
-		Requires:         []domain.MechanismID{toolResultCapID},
-	}
+	return guidedDecompositionDescriptor
 }
 
 // Ordering declares guided_decomposition After toolfilter: the sub_agent-presence gate must read the

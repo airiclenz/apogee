@@ -12,7 +12,10 @@ import (
 // validated bench-side later; correct_tool_result, the other lab-only intervention, is DEFERRED
 // (owner-ratified 2026-07-04 — no production trigger to port; the bench plays the sim's operator
 // via an experimental post-tool-result hook — see docs/design/mechanism-catalogue.md Table B).
-func init() { catalogue[truncateHistoryID] = newTruncateHistory }
+func init() {
+	catalogue[truncateHistoryID] = newTruncateHistory
+	descriptors[truncateHistoryID] = truncateHistoryDescriptor
+}
 
 const truncateHistoryID domain.MechanismID = "truncate_history"
 
@@ -53,16 +56,19 @@ func newTruncateHistory(Deps) (domain.Mechanism, error) {
 	return truncateHistoryMechanism{keepLastTurns: defaultKeepLastTurns, gapNote: truncateGapNote}, nil
 }
 
-// Descriptor identifies truncate_history as a strikes-3 proactive-nudge Mechanism (catalogue
-// Table A, footnote 2: a context-shaper is neither off-ramp nor response-repair; proactive-nudge
-// carries the Bypass semantics — disabled under Bypass, D5 — while the structural Budget and
-// Compaction stay on, D6). It is withdrawn by self-regulation after repeated non-help.
+// truncateHistoryDescriptor identifies truncate_history as a strikes-3 proactive-nudge Mechanism
+// (catalogue Table A, footnote 2: a context-shaper is neither off-ramp nor response-repair;
+// proactive-nudge carries the Bypass semantics — disabled under Bypass, D5 — while the structural
+// Budget and Compaction stay on, D6). It is withdrawn by self-regulation after repeated non-help.
+var truncateHistoryDescriptor = domain.MechanismDescriptor{
+	ID:          truncateHistoryID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
+}
+
+// Descriptor returns truncate_history's static catalogue descriptor.
 func (truncateHistoryMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          truncateHistoryID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+	return truncateHistoryDescriptor
 }
 
 // Ordering declares no constraints (catalogue Table A: "none — cut only at AssistantBoundaries(),

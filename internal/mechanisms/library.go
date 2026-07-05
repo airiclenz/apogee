@@ -29,7 +29,10 @@ var errLibraryStoreRequired = errors.New("apogee: library mechanism requires a L
 // the ratified map does not list (D7 forbids inventing one), so the single `library` Mechanism
 // carries both halves. Both are proactive-nudge (not off-ramp), so item 2's dispatch gate skips
 // BOTH under Bypass — the Library is fully inert (no inject AND no observe/write, decision 13).
-func init() { catalogue[libraryID] = newLibrary }
+func init() {
+	catalogue[libraryID] = newLibrary
+	descriptors[libraryID] = libraryDescriptor
+}
 
 const libraryID domain.MechanismID = "library"
 
@@ -109,16 +112,17 @@ func newLibrary(deps Deps) (domain.Mechanism, error) {
 	return &libraryMechanism{store: deps.Library, fingerprint: deps.Fingerprint}, nil
 }
 
-// Descriptor identifies library as a strikes-3 proactive-nudge Mechanism (catalogue Table A footnote
-// 4): disabled under Bypass (D5), with strikes-3 as the uniform self-regulation backstop over its
-// confidence-driven injection gate.
-func (*libraryMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          libraryID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// libraryDescriptor identifies library as a strikes-3 proactive-nudge Mechanism (catalogue Table A
+// footnote 4): disabled under Bypass (D5), with strikes-3 as the uniform self-regulation backstop
+// over its confidence-driven injection gate.
+var libraryDescriptor = domain.MechanismDescriptor{
+	ID:          libraryID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns library's static catalogue descriptor.
+func (*libraryMechanism) Descriptor() domain.MechanismDescriptor { return libraryDescriptor }
 
 // Ordering declares library Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
 // review-fixes item 11 / option A): the inject side shapes the system prompt before toolfilter

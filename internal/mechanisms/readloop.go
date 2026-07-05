@@ -18,7 +18,10 @@ import (
 // by readLoopCandidate on the greenfield signal. apogee folds that split into internal branch
 // selection — the failed-read branch (greenfield or normal) first, else the successful-read branch,
 // reproducing the sim proxy's priority chain (proxy.go:476-516 @pin).
-func init() { catalogue[readLoopID] = newReadLoop }
+func init() {
+	catalogue[readLoopID] = newReadLoop
+	descriptors[readLoopID] = readLoopDescriptor
+}
 
 const readLoopID domain.MechanismID = "read_loop"
 
@@ -35,19 +38,20 @@ type readLoopMechanism struct{}
 // entirely from the conversation on the Request it is handed.
 func newReadLoop(Deps) (domain.Mechanism, error) { return readLoopMechanism{}, nil }
 
-// Descriptor identifies read_loop as a strikes-3 proactive-nudge Mechanism (catalogue Table A) —
-// disabled under Bypass (D5), withdrawn after repeated non-help.
-func (readLoopMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          readLoopID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-		// The re-read family is pairwise-exclusive on the same wasted-read symptom (catalogue
-		// Table A / C2): in apogee IncompatibleWith is a startup gate, so at most one of the three
-		// may be enabled at a time (the sim's per-request exclusivity becomes per-config).
-		IncompatibleWith: []domain.MechanismID{cachedContentInterceptID, readRepeatID},
-	}
+// readLoopDescriptor identifies read_loop as a strikes-3 proactive-nudge Mechanism (catalogue
+// Table A) — disabled under Bypass (D5), withdrawn after repeated non-help.
+var readLoopDescriptor = domain.MechanismDescriptor{
+	ID:          readLoopID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
+	// The re-read family is pairwise-exclusive on the same wasted-read symptom (catalogue
+	// Table A / C2): in apogee IncompatibleWith is a startup gate, so at most one of the three
+	// may be enabled at a time (the sim's per-request exclusivity becomes per-config).
+	IncompatibleWith: []domain.MechanismID{cachedContentInterceptID, readRepeatID},
 }
+
+// Descriptor returns read_loop's static catalogue descriptor.
+func (readLoopMechanism) Descriptor() domain.MechanismDescriptor { return readLoopDescriptor }
 
 // Ordering declares no positive edge (catalogue Table A: the incompatibility edges above are the
 // only constraint); read_loop is a request-prep injector with no hard order against the other

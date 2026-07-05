@@ -10,7 +10,10 @@ import (
 
 // tool_use_enforcer registers the narration off-ramp in the catalogue constructor table (Phase-4
 // item 6). Default-off (D1).
-func init() { catalogue[toolUseEnforcerID] = newToolUseEnforcer }
+func init() {
+	catalogue[toolUseEnforcerID] = newToolUseEnforcer
+	descriptors[toolUseEnforcerID] = toolUseEnforcerDescriptor
+}
 
 // toolUseEnforcerMechanism is the post-response narration off-ramp (catalogue Table A
 // `tool_use_enforcer`; ported from apogee-sim internal/proxy/tooluse_enforcer.go @pin). When the
@@ -30,14 +33,17 @@ type toolUseEnforcerMechanism struct{}
 // trigger reads only the response, the tool menu, and the conversation already on its LoopView.
 func newToolUseEnforcer(Deps) (domain.Mechanism, error) { return toolUseEnforcerMechanism{}, nil }
 
-// Descriptor identifies tool_use_enforcer as an off-ramp exempt from suppression (catalogue Table
-// A) — it survives Bypass (ADR 0006 / D5) and is never withdrawn by self-regulation.
+// toolUseEnforcerDescriptor identifies tool_use_enforcer as an off-ramp exempt from suppression
+// (catalogue Table A) — it survives Bypass (ADR 0006 / D5) and is never withdrawn by self-regulation.
+var toolUseEnforcerDescriptor = domain.MechanismDescriptor{
+	ID:          toolUseEnforcerID,
+	Capability:  domain.CapOffRamp,
+	Suppression: domain.SuppressExempt,
+}
+
+// Descriptor returns tool_use_enforcer's static catalogue descriptor.
 func (toolUseEnforcerMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          toolUseEnforcerID,
-		Capability:  domain.CapOffRamp,
-		Suppression: domain.SuppressExempt,
-	}
+	return toolUseEnforcerDescriptor
 }
 
 // Ordering declares no constraints (catalogue Table A: "none — 3-retry cap is its throttle"): the

@@ -72,6 +72,18 @@ on, not this work).
   registry-level `Requires` validation, verbatim enumeration text, and the 7/12 subtask bounds — plus
   the authorized per-item deviations. (Docs: `CONTEXT.md`, `docs/adr/0014`.)
 
+### The public Mechanism enable surface (`Config.EnableMechanisms`, ADR 0015)
+
+- **Catalogued descriptors become static, queryable data + a matchable unknown-ID sentinel.** Each
+  catalogued Mechanism's `MechanismDescriptor` is now a single package-level value that both the
+  built instance's `Descriptor()` returns and the catalogue registers beside the constructor
+  (equality by construction), and a new `mechanisms.Descriptors()` returns every row — sorted by ID,
+  duplicate-free, slice fields cloned — so a Mechanism's metadata is available without building one
+  (the backing for the forthcoming public `CataloguedMechanisms()` query, ADR 0015 §3). A new
+  `domain.ErrUnknownMechanism` sentinel is wrapped by `mechanisms.Build`'s unknown-ID error (which
+  still names the known IDs), so a typo'd or deferred ID fails loudly AND matchably via `errors.Is`
+  (ADR 0015 §4). (`internal/mechanisms`, `internal/domain`.)
+
 ## [1.2.0] — 2026-07-04
 
 Post-`v1.1.0`, **additive** (minor) — Phase 4 merges the apogee-sim Mechanisms into the

@@ -9,7 +9,10 @@ import (
 
 // empty_response_recovery registers the empty-reply off-ramp in the catalogue constructor table
 // (Phase-4 item 6). Default-off (D1).
-func init() { catalogue[emptyResponseRecoveryID] = newEmptyResponseRecovery }
+func init() {
+	catalogue[emptyResponseRecoveryID] = newEmptyResponseRecovery
+	descriptors[emptyResponseRecoveryID] = emptyResponseRecoveryDescriptor
+}
 
 // emptyResponseRecoveryMechanism is the post-response empty-reply off-ramp (catalogue Table A
 // `empty_response_recovery`; ported from apogee-sim internal/proxy/empty_recovery.go @pin). When
@@ -29,14 +32,18 @@ func newEmptyResponseRecovery(Deps) (domain.Mechanism, error) {
 	return emptyResponseRecoveryMechanism{}, nil
 }
 
-// Descriptor identifies empty_response_recovery as an off-ramp exempt from suppression (catalogue
-// Table A) — it survives Bypass (ADR 0006 / D5) and is never withdrawn by self-regulation.
+// emptyResponseRecoveryDescriptor identifies empty_response_recovery as an off-ramp exempt from
+// suppression (catalogue Table A) — it survives Bypass (ADR 0006 / D5) and is never withdrawn by
+// self-regulation.
+var emptyResponseRecoveryDescriptor = domain.MechanismDescriptor{
+	ID:          emptyResponseRecoveryID,
+	Capability:  domain.CapOffRamp,
+	Suppression: domain.SuppressExempt,
+}
+
+// Descriptor returns empty_response_recovery's static catalogue descriptor.
 func (emptyResponseRecoveryMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          emptyResponseRecoveryID,
-		Capability:  domain.CapOffRamp,
-		Suppression: domain.SuppressExempt,
-	}
+	return emptyResponseRecoveryDescriptor
 }
 
 // Ordering declares no constraints (catalogue Table A: "none — 2-retry cap, per-Turn cooldown"):

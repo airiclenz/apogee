@@ -16,7 +16,10 @@ import (
 // composition). It is ported from apogee-sim internal/proxy/tool_loop_interceptor.go @pin: when the
 // model's response repeats its previous Turn's exact tool calls, it retries in place with a "you
 // are in a loop" directive.
-func init() { catalogue[toolLoopInterceptorID] = newToolLoopInterceptor }
+func init() {
+	catalogue[toolLoopInterceptorID] = newToolLoopInterceptor
+	descriptors[toolLoopInterceptorID] = toolLoopDescriptor
+}
 
 const toolLoopInterceptorID domain.MechanismID = "tool_loop_interceptor"
 
@@ -29,15 +32,16 @@ type toolLoopMechanism struct{}
 // (D3): the loop is detected from the response's tool calls and the conversation on its LoopView.
 func newToolLoopInterceptor(Deps) (domain.Mechanism, error) { return toolLoopMechanism{}, nil }
 
-// Descriptor identifies tool_loop_interceptor as a strikes-3 response-repair Mechanism (catalogue
-// Table A) — disabled under Bypass (D5), withdrawn after repeated non-help.
-func (toolLoopMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          toolLoopInterceptorID,
-		Capability:  domain.CapResponseRepair,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// toolLoopDescriptor identifies tool_loop_interceptor as a strikes-3 response-repair Mechanism
+// (catalogue Table A) — disabled under Bypass (D5), withdrawn after repeated non-help.
+var toolLoopDescriptor = domain.MechanismDescriptor{
+	ID:          toolLoopInterceptorID,
+	Capability:  domain.CapResponseRepair,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns tool_loop_interceptor's static catalogue descriptor.
+func (toolLoopMechanism) Descriptor() domain.MechanismDescriptor { return toolLoopDescriptor }
 
 // Ordering runs tool_loop_interceptor before validate (catalogue Table A / apogee-sim
 // response_analysis.go:60-94 @pin: the sim checks the tool loop before validation). read_repeat

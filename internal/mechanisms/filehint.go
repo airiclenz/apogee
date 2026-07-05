@@ -19,7 +19,10 @@ import (
 // internal/filehint/filehint.go + internal/proxy/file_hint_detector.go @pin: after the model lists
 // a directory but before it reads anything, it scores the listed files against the user's prompt
 // and injects a role-safe hint suggesting the most relevant files to read first.
-func init() { catalogue[fileHintID] = newFileHint }
+func init() {
+	catalogue[fileHintID] = newFileHint
+	descriptors[fileHintID] = fileHintDescriptor
+}
 
 const fileHintID domain.MechanismID = "filehint"
 
@@ -66,15 +69,16 @@ type fileHintMechanism struct{}
 // entirely from the conversation on the Request it is handed.
 func newFileHint(Deps) (domain.Mechanism, error) { return fileHintMechanism{}, nil }
 
-// Descriptor identifies filehint as a strikes-3 proactive-nudge Mechanism (catalogue Table A):
-// disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
-func (fileHintMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:          fileHintID,
-		Capability:  domain.CapProactiveNudge,
-		Suppression: domain.SuppressStrikesThree,
-	}
+// fileHintDescriptor identifies filehint as a strikes-3 proactive-nudge Mechanism (catalogue
+// Table A): disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
+var fileHintDescriptor = domain.MechanismDescriptor{
+	ID:          fileHintID,
+	Capability:  domain.CapProactiveNudge,
+	Suppression: domain.SuppressStrikesThree,
 }
+
+// Descriptor returns filehint's static catalogue descriptor.
+func (fileHintMechanism) Descriptor() domain.MechanismDescriptor { return fileHintDescriptor }
 
 // Ordering declares no constraints (catalogue Table A: "none (greenfield-suppressed internally)"):
 // the hint injector is a request-prep step with no hard order against the other shapers.

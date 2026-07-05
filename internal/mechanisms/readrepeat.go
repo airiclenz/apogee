@@ -14,7 +14,10 @@ import (
 // internal/proxy/read_repeat_interceptor.go @pin: when the model's whole response is reads of files
 // it already read successfully in a recent Turn, the contents are already in context, so it retries
 // in place with a "stop re-reading, proceed" hint.
-func init() { catalogue[readRepeatID] = newReadRepeat }
+func init() {
+	catalogue[readRepeatID] = newReadRepeat
+	descriptors[readRepeatID] = readRepeatDescriptor
+}
 
 const readRepeatID domain.MechanismID = "read_repeat"
 
@@ -27,17 +30,18 @@ type readRepeatMechanism struct{}
 // detected from the response's tool calls and the conversation on its LoopView.
 func newReadRepeat(Deps) (domain.Mechanism, error) { return readRepeatMechanism{}, nil }
 
-// Descriptor identifies read_repeat as a strikes-3 response-repair Mechanism (catalogue Table A),
-// incompatible with cached_content_intercept (the re-read family is pairwise-exclusive, C2) —
-// disabled under Bypass (D5), withdrawn after repeated non-help.
-func (readRepeatMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:               readRepeatID,
-		Capability:       domain.CapResponseRepair,
-		Suppression:      domain.SuppressStrikesThree,
-		IncompatibleWith: []domain.MechanismID{cachedContentInterceptID},
-	}
+// readRepeatDescriptor identifies read_repeat as a strikes-3 response-repair Mechanism (catalogue
+// Table A), incompatible with cached_content_intercept (the re-read family is pairwise-exclusive,
+// C2) — disabled under Bypass (D5), withdrawn after repeated non-help.
+var readRepeatDescriptor = domain.MechanismDescriptor{
+	ID:               readRepeatID,
+	Capability:       domain.CapResponseRepair,
+	Suppression:      domain.SuppressStrikesThree,
+	IncompatibleWith: []domain.MechanismID{cachedContentInterceptID},
 }
+
+// Descriptor returns read_repeat's static catalogue descriptor.
+func (readRepeatMechanism) Descriptor() domain.MechanismDescriptor { return readRepeatDescriptor }
 
 // Ordering runs read_repeat BEFORE tool_loop_interceptor and validate in the post-response cascade
 // (apogee-sim response_analysis.go:54-94 @pin: the sim checks repeat-reads first, then the

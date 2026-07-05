@@ -30,7 +30,10 @@ import (
 // argument it would reject — the re-read proceeds uncapped, a genuine no-op rather than a hoped-for
 // one. Surfaced as a divergence-from-source; default-off and bench-gated (D1), so nothing un-vetted
 // ships.
-func init() { catalogue[cachedContentInterceptID] = newCachedContentIntercept }
+func init() {
+	catalogue[cachedContentInterceptID] = newCachedContentIntercept
+	descriptors[cachedContentInterceptID] = cachedContentDescriptor
+}
 
 const cachedContentInterceptID domain.MechanismID = "cached_content_intercept"
 
@@ -49,18 +52,19 @@ type cachedContentMechanism struct{}
 // handed.
 func newCachedContentIntercept(Deps) (domain.Mechanism, error) { return cachedContentMechanism{}, nil }
 
-// Descriptor identifies cached_content_intercept as a strikes-3 proactive-nudge Mechanism (catalogue
-// Table A), incompatible with read_loop and read_repeat (the re-read family is pairwise-exclusive,
-// C2 — in apogee a startup gate, so at most one of the three is enabled at a time). Disabled under
-// Bypass (D5), withdrawn after repeated non-help.
-func (cachedContentMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{
-		ID:               cachedContentInterceptID,
-		Capability:       domain.CapProactiveNudge,
-		Suppression:      domain.SuppressStrikesThree,
-		IncompatibleWith: []domain.MechanismID{readLoopID, readRepeatID},
-	}
+// cachedContentDescriptor identifies cached_content_intercept as a strikes-3 proactive-nudge
+// Mechanism (catalogue Table A), incompatible with read_loop and read_repeat (the re-read family is
+// pairwise-exclusive, C2 — in apogee a startup gate, so at most one of the three is enabled at a
+// time). Disabled under Bypass (D5), withdrawn after repeated non-help.
+var cachedContentDescriptor = domain.MechanismDescriptor{
+	ID:               cachedContentInterceptID,
+	Capability:       domain.CapProactiveNudge,
+	Suppression:      domain.SuppressStrikesThree,
+	IncompatibleWith: []domain.MechanismID{readLoopID, readRepeatID},
 }
+
+// Descriptor returns cached_content_intercept's static catalogue descriptor.
+func (cachedContentMechanism) Descriptor() domain.MechanismDescriptor { return cachedContentDescriptor }
 
 // Ordering declares no positive edge (the incompatibility edges above are the only constraint):
 // cached_content_intercept is the sole pre-tool-exec Mechanism in this wave.
