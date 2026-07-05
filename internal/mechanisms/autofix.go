@@ -16,7 +16,9 @@ import (
 func init() { catalogue[autofixID] = newAutofix }
 
 // formatterTimeout bounds an external formatter subprocess so a hung tool cannot stall the Turn.
-const formatterTimeout = 3 * time.Second
+// It is a var (not a const) purely so the tests that exercise the real subprocess path can raise
+// it to load-independent headroom under the concurrent suite; production keeps the 3s bound.
+var formatterTimeout = 3 * time.Second
 
 // autofixMechanism is the post-response formatter repair (catalogue Table A `autofix`; ported
 // from apogee-sim internal/autofix @pin). For each file-writing tool call whose content is

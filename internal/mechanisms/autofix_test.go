@@ -7,9 +7,20 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
+
+// The external-formatter tests (repairs / discards / rejects-control-char) each spawn the
+// fakeFormatter subprocess through runExternalFormatter's real formatterTimeout bound. That 3s
+// production bound is load-sensitive: under the concurrent `make check` suite (all packages in
+// parallel, -race slowdown, three t.Parallel() autofix tests each forking /bin/sh + cat) the
+// fork/exec can miss the deadline, and a missed deadline reads as "the formatter produced
+// nothing" — silently turning TestAutofixRepairsBrokenContentWhenFormatterImproves' expected
+// repair into a no-op. Raise the bound to load-independent headroom for the test binary only
+// (production keeps 3s); set once at init, before any parallel test runs, so it needs no lock.
+func init() { formatterTimeout = 60 * time.Second }
 
 // The shared broken-Python fixtures: brokenPy carries exactly one syntax issue (an unclosed
 // parenthesis), fixedPy is its zero-issue repair, and stillBrokenPy is a "formatted" output that
