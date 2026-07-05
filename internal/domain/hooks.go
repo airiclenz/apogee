@@ -226,6 +226,12 @@ type LoopView interface {
 	Tools() []ToolDef
 	Budget() Budget
 	Turn() int
+	// Depth reports the sub-agent nesting level the hook is firing at: 0 for a top-level
+	// Agent, parent+1 for a sub-agent (ADR 0013). It is the seam a gate keyed on "only at
+	// the top level" needs — guided decomposition steers only the primary call, never a
+	// nested delegation it itself set up (ADR 0014 §5). A view built without a depth (a test
+	// fake, the degraded no-view Response) reports 0, the top-level default.
+	Depth() int
 	// Fired reports how many times a Mechanism has ACTED this Session (R4): an
 	// invocation is booked only when it mutated its working value or returned a
 	// non-zero post-response Action — an inspect-and-do-nothing invocation is not a
@@ -271,6 +277,7 @@ type Request struct {
 	sampling SamplingParams
 	extras   map[string]json.RawMessage
 	revision int // bumped by each mutator — the acted-fire probe (R4), read via Revision
+	depth    int // sub-agent nesting level surfaced through View().Depth() (0 = top-level; ADR 0013/0014)
 
 	// committedLen bounds the history View() exposes to the post-response scanners: it is
 	// frozen at the first retry-in-place append (AppendSupersededAssistant), so the
@@ -343,7 +350,7 @@ func (r *Request) View() LoopView {
 	if r.committedLen >= 0 && r.committedLen <= len(r.messages) {
 		messages = r.messages[:r.committedLen]
 	}
-	return loopView{messages: messages, tools: r.tools, budget: r.budget, turn: r.turn, fired: r.fired}
+	return loopView{messages: messages, tools: r.tools, budget: r.budget, turn: r.turn, fired: r.fired, depth: r.depth}
 }
 
 // Model is the target model id (the Library keys its lookup on this).
@@ -353,6 +360,13 @@ func (r *Request) Model() string { return r.model }
 // acted-fire probe (R4, engine seam): hookrun snapshots it around each catalogued fire
 // and books the fire only when the counter moved. A hook never needs it.
 func (r *Request) Revision() int { return r.revision }
+
+// SetDepth records the sub-agent nesting level this request runs at (engine seam, ADR
+// 0013/0014): the loop stamps it from Agent.depth so a pre-request hook reading
+// req.View().Depth() can tell a top-level (0) from a nested request. It is loop setup, not a
+// hook mutation — it carries no acted-fire meaning and so does NOT bump the revision. A
+// Request built without it reports Depth 0, the top-level default.
+func (r *Request) SetDepth(depth int) { r.depth = depth }
 
 // Extra reports a preserved unknown request field (e.g. a grammar Mechanism checks
 // for an existing response_format before setting one).
@@ -566,6 +580,21 @@ func (r *Response) SetToolCallArguments(index int, args json.RawMessage) {
 		return
 	}
 	r.toolCalls[index].Arguments = args
+	r.revision++
+}
+
+// AppendToolCall appends a synthesized tool call to the response and bumps the revision —
+// the intercept seam a post-response Mechanism uses to add a delegation the model did not
+// itself emit (guided decomposition synthesizing the first sub_agent call from the model's
+// enumeration, ADR 0014 §2). The appended call is indistinguishable from a model-emitted one
+// downstream: the loop reads it back through ToolCalls(), records it on the committed
+// assistant message, and dispatches it through the full per-call Resolution — the ADR 0013
+// recursion point for a sub_agent call. The caller owns the call's ID (the loop's
+// synthesized-call style) and arguments; combined with a returned ActionDefer the appended
+// call and the deferred correction both take effect (hookrun applies the in-place mutation,
+// then routes the defer).
+func (r *Response) AppendToolCall(call ToolCall) {
+	r.toolCalls = append(r.toolCalls, call)
 	r.revision++
 }
 

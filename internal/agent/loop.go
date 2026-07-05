@@ -567,6 +567,7 @@ func (a *Agent) restoreDeferred(deferred []string) {
 // a hook can read them through req.View().
 func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
+	req.SetDepth(a.depth) // surface this Agent's nesting level through req.View().Depth() (ADR 0013/0014)
 	deferred, ok := a.conv.TakeDeferred()
 	if ok {
 		for _, inject := range deferred {
@@ -725,7 +726,9 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // and the Turn index. It is rebuilt per call from current state so a hook counting prior
 // failures across Turns sees up-to-date history.
 func (a *Agent) loopView(turn int) domain.LoopView {
-	return domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts).View()
+	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
+	req.SetDepth(a.depth) // the tool-stage view reports the same nesting level as the request view
+	return req.View()
 }
 
 // toProviderRequest drains the post-hook req onto the provider seam's wire shape — the

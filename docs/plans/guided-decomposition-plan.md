@@ -106,7 +106,19 @@ docs/CHANGELOG. Commit:
 
 ---
 
-## 2. Domain: hook-visible seams — `LoopView.Depth()` and `Response.AppendToolCall`
+## 2. Domain: hook-visible seams — `LoopView.Depth()` and `Response.AppendToolCall` — ✅ DONE (2026-07-05)
+
+NOTES (2026-07-05): Depth is threaded via a new engine-seam `Request.SetDepth(int)` (called
+from `buildRequest` and the `loopView` helper) rather than as a new `NewRequest` parameter —
+adding a parameter would have forced edits to ~18 `domain.NewRequest` callers in
+`internal/mechanisms`/`internal/domain` tests, blowing the item's "diff confined to
+internal/domain, internal/agent" boundary. `SetDepth` is loop setup, so it does NOT bump the
+revision. hookrun already composes an in-place mutation with a returned `ActionDefer` correctly
+(`applyPostResponse` applies the mutation then routes the defer) — no hookrun change was needed.
+NOTES (2026-07-05): adding `Depth()` to the `LoopView` interface required the mandatory
+compile fix of one test fake outside the confined-diff set — `fakeView` in
+`internal/mechanisms/robustness_test.go` gained `Depth() int` (per the item body's "update
+every test fake implementing LoopView").
 
 **What:** the two seams ADR 0014's gate and intercept need that hooks cannot reach today.
 (a) **`Depth() int` on `LoopView`** (`internal/domain/hooks.go:224-237`), implemented by the

@@ -494,6 +494,71 @@ func TestConversationDeferSurvivesRoundTrip(t *testing.T) {
 	}
 }
 
+// TestResponseAppendToolCall proves the post-response tool-call synthesis seam (ADR 0014
+// item 2): a synthesized call appended to a response with none becomes visible through
+// ToolCalls() (so the loop dispatches it like a model-emitted call), and the mutation bumps
+// the revision so hookrun books it as an acted fire (R4).
+func TestResponseAppendToolCall(t *testing.T) {
+	resp := NewResponse("here is the plan", "", nil, FinishStop, nil)
+	if len(resp.ToolCalls()) != 0 {
+		t.Fatalf("precondition: response should start with no tool calls, got %d", len(resp.ToolCalls()))
+	}
+	before := resp.Revision()
+
+	call := ToolCall{ID: "text_call_0", Tool: "sub_agent", Arguments: json.RawMessage(`{"task":"do the first subtask"}`)}
+	resp.AppendToolCall(call)
+
+	if resp.Revision() == before {
+		t.Error("AppendToolCall did not bump the revision; the acted-fire probe would miss it")
+	}
+	got := resp.ToolCalls()
+	if len(got) != 1 || got[0].Tool != "sub_agent" || string(got[0].Arguments) != `{"task":"do the first subtask"}` {
+		t.Fatalf("appended call not visible via ToolCalls(): %+v", got)
+	}
+
+	// A second append accumulates rather than replacing — the loop dispatches each.
+	resp.AppendToolCall(ToolCall{ID: "text_call_1", Tool: "sub_agent", Arguments: json.RawMessage(`{"task":"second"}`)})
+	if got := resp.ToolCalls(); len(got) != 2 {
+		t.Errorf("second AppendToolCall did not accumulate: %+v", got)
+	}
+
+	// The returned slice is a copy — a caller mutating it cannot reach the response's storage.
+	got = resp.ToolCalls()
+	got[0].Tool = "evil"
+	if resp.ToolCalls()[0].Tool != "sub_agent" {
+		t.Error("AppendToolCall exposed aliased backing storage through ToolCalls()")
+	}
+}
+
+// TestLoopViewDepth proves the Depth() seam ADR 0014's gate reads: a Request stamped with a
+// nesting level surfaces it through View().Depth() (and the Response produced against that
+// view), while an unstamped Request and the degraded no-view Response report the top-level 0.
+func TestLoopViewDepth(t *testing.T) {
+	req := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0, nil)
+	if got := req.View().Depth(); got != 0 {
+		t.Errorf("a Request built without SetDepth reports Depth %d, want 0 (top-level default)", got)
+	}
+
+	req.SetDepth(1)
+	if got := req.View().Depth(); got != 1 {
+		t.Errorf("after SetDepth(1), View().Depth() = %d, want 1", got)
+	}
+	// SetDepth is loop setup, not a hook mutation — it must not read as an acted fire.
+	if req.Revision() != 0 {
+		t.Errorf("SetDepth bumped the revision to %d; it must not book an acted fire", req.Revision())
+	}
+
+	// A Response produced against the request's view inherits its depth.
+	resp := NewResponse("answer", "", nil, FinishStop, req.View())
+	if got := resp.View().Depth(); got != 1 {
+		t.Errorf("Response.View().Depth() = %d, want 1 (inherited from the request view)", got)
+	}
+	// The degraded nil-view Response reports the top-level default rather than panicking.
+	if got := NewResponse("x", "", nil, FinishStop, nil).View().Depth(); got != 0 {
+		t.Errorf("nil-view Response reports Depth %d, want 0", got)
+	}
+}
+
 func equalRoles(a, b []Role) bool {
 	if len(a) != len(b) {
 		return false

@@ -22,6 +22,15 @@ on, not this work).
   they are benched as a stack"), the same startup-gate posture as `ErrOrderingCycle`. It is
   enable-time only (ADR 0014 §4): live suppression of a required peer mid-Session is not
   re-checked. (`internal/domain`, `internal/agent`.)
+- **Hook-visible loop depth and post-response tool-call synthesis.** `LoopView` gains a
+  `Depth()` method — 0 for a top-level Agent, parent+1 for a sub-agent (ADR 0013) — so a gate
+  can steer only the primary call, never a nested delegation (ADR 0014 §5); the loop stamps it
+  from the Agent's nesting level through the new engine-seam `Request.SetDepth`. `Response`
+  gains `AppendToolCall`, letting a post-response Mechanism add a `sub_agent` delegation the
+  model never emitted: the loop reads it back through `ToolCalls()`, commits it on the assistant
+  message, and dispatches it through the full per-call Resolution (the ADR 0013 recursion point,
+  driving a real nested child) exactly like a model-emitted call. An in-place response mutation
+  combined with a returned `ActionDefer` both take effect. (`internal/domain`, `internal/agent`.)
 
 ## [1.2.0] — 2026-07-04
 

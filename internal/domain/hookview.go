@@ -14,6 +14,7 @@ type loopView struct {
 	budget   Budget
 	turn     int
 	fired    map[MechanismID]int
+	depth    int
 }
 
 func (v loopView) Conversation() ConversationView { return conversationView{messages: v.messages} }
@@ -23,6 +24,8 @@ func (v loopView) Tools() []ToolDef { return append([]ToolDef(nil), v.tools...) 
 func (v loopView) Budget() Budget { return v.budget }
 
 func (v loopView) Turn() int { return v.turn }
+
+func (v loopView) Depth() int { return v.depth }
 
 func (v loopView) Fired(id MechanismID) int { return v.fired[id] }
 

@@ -16,6 +16,7 @@ func (v fakeView) Conversation() domain.ConversationView { return nil }
 func (v fakeView) Tools() []domain.ToolDef               { return v.tools }
 func (v fakeView) Budget() domain.Budget                 { return domain.Budget{} }
 func (v fakeView) Turn() int                             { return 0 }
+func (fakeView) Depth() int                              { return 0 }
 func (fakeView) Fired(domain.MechanismID) int            { return 0 }
 
 // responseWith builds a post-response working value carrying calls, produced against the tool menu
