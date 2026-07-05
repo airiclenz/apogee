@@ -2,6 +2,9 @@ package mechanisms
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -64,10 +67,10 @@ func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 	if _, ok := m.(domain.PreRequestHook); !ok {
 		t.Error("guided_decomposition does not implement PreRequestHook")
 	}
-	// The post-response half lands in item 4; until then the struct must NOT satisfy
-	// PostResponseHook (item 4 adjusts this assertion when it adds PostResponse).
-	if _, ok := m.(domain.PostResponseHook); ok {
-		t.Error("guided_decomposition implements PostResponseHook already (item 4's half)")
+	// Both halves live on the one struct: the pre-request gate/steer and the post-response
+	// intercept + serialized follow-through. Suppressing the Mechanism disarms both as a unit.
+	if _, ok := m.(domain.PostResponseHook); !ok {
+		t.Error("guided_decomposition does not implement PostResponseHook (the intercept half)")
 	}
 }
 
@@ -198,4 +201,293 @@ func guidedRequestHasSteer(req *domain.Request) bool {
 		return true
 	})
 	return found
+}
+
+// ----------------------------------------------------------------------------
+// PostResponse — the intercept + serialized follow-through half (ADR 0014 §2/§3)
+// ----------------------------------------------------------------------------
+
+// guidedResponse builds a post-response working value over history — a real domain.Request view so
+// Conversation()/Turn() behave as in the loop (the intercept reads the markers and the enumeration
+// off it). finish follows whether the model itself emitted tool calls.
+func guidedResponse(history []domain.Message, text string, calls ...domain.ToolCall) *domain.Response {
+	view := domain.NewRequest("m", history, guidedMenu, guidedBudget, 0, nil).View()
+	finish := domain.FinishStop
+	if len(calls) > 0 {
+		finish = domain.FinishToolCalls
+	}
+	return domain.NewResponse(text, "", calls, finish, view)
+}
+
+// guidedSubAgentCall is a sub_agent tool call carrying task — the delegation the model emits itself
+// on a follow-through Turn (and the shape the intercept synthesizes).
+func guidedSubAgentCall(id, task string) domain.ToolCall {
+	args, _ := json.Marshal(tools.SubAgentArgs{Task: task})
+	return domain.ToolCall{ID: id, Tool: tools.SubAgentToolName, Arguments: args}
+}
+
+// fireGuidedPostResponse fires the intercept once against resp.
+func fireGuidedPostResponse(t *testing.T, resp *domain.Response) domain.PostResponseDecision {
+	t.Helper()
+	decision, err := (guidedDecompositionMechanism{}).PostResponse(context.Background(), resp)
+	if err != nil {
+		t.Fatalf("PostResponse: %v", err)
+	}
+	return decision
+}
+
+// The list parser is deliberately lenient (ADR 0014 §2): numbered, bulleted, and plain-line variants
+// all yield the ordered subtask texts with markers stripped; blank lines and code fences are dropped.
+func TestGuidedDecompositionParseList(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+		want []string
+	}{
+		{"numbered dot", "1. alpha\n2. beta\n3. gamma", []string{"alpha", "beta", "gamma"}},
+		{"numbered paren", "1) alpha\n2) beta", []string{"alpha", "beta"}},
+		{"numbered space-dash", "1 - alpha\n2 - beta", []string{"alpha", "beta"}},
+		{"bulleted mix", "- alpha\n* beta\n• gamma", []string{"alpha", "beta", "gamma"}},
+		{"plain lines", "alpha\nbeta\ngamma", []string{"alpha", "beta", "gamma"}},
+		{"fenced noise", "```\n1. alpha\n2. beta\n```", []string{"alpha", "beta"}},
+		{"blank lines dropped", "1. alpha\n\n2. beta\n", []string{"alpha", "beta"}},
+		{"single item", "1. only", []string{"only"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := guidedDecompositionParseList(tc.text); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("parseList(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+// An out-of-bounds enumeration (fewer than 2 or more than 12 items) is declined WHOLE — a benign
+// no-op that synthesizes nothing and never truncates the list (locked decision 5 / ADR 0014 §5).
+func TestGuidedDecompositionInterceptDeclinesOutOfBounds(t *testing.T) {
+	t.Parallel()
+	steer := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionSteer}
+	for _, tc := range []struct {
+		name  string
+		items int
+	}{
+		{"one item declines", 1},
+		{"thirteen items decline whole", 13},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			lines := make([]string, 0, tc.items)
+			for i := 1; i <= tc.items; i++ {
+				lines = append(lines, fmt.Sprintf("%d. subtask %d", i, i))
+			}
+			resp := guidedResponse([]domain.Message{steer}, strings.Join(lines, "\n"))
+			before := resp.Revision()
+			decision := fireGuidedPostResponse(t, resp)
+			if decision.Action != "" {
+				t.Fatalf("Action = %q, want empty (declined whole)", decision.Action)
+			}
+			if resp.Revision() != before {
+				t.Fatalf("revision changed (%d → %d); a declined list must not synthesize a call", before, resp.Revision())
+			}
+			if len(resp.ToolCalls()) != 0 {
+				t.Fatalf("declined list appended %d calls, want 0", len(resp.ToolCalls()))
+			}
+		})
+	}
+}
+
+// On the enumeration Turn (steer outstanding, no tool calls, a bounded list) the intercept appends
+// exactly ONE valid sub_agent call for the first subtask, leaves the enumeration text verbatim, and
+// defers the remaining subtasks under the directive marker.
+func TestGuidedDecompositionEnumerationIntercept(t *testing.T) {
+	t.Parallel()
+	steer := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionSteer}
+	list := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
+	resp := guidedResponse([]domain.Message{{Role: domain.RoleUser, Content: "big task"}, steer}, list)
+	before := resp.Revision()
+	decision := fireGuidedPostResponse(t, resp)
+
+	calls := resp.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("appended %d calls, want exactly 1", len(calls))
+	}
+	if calls[0].Tool != tools.SubAgentToolName {
+		t.Fatalf("synthesized call tool = %q, want %q", calls[0].Tool, tools.SubAgentToolName)
+	}
+	var args tools.SubAgentArgs
+	if err := json.Unmarshal(calls[0].Arguments, &args); err != nil {
+		t.Fatalf("synthesized args do not unmarshal to SubAgentArgs: %v", err)
+	}
+	if !strings.HasPrefix(args.Task, "Refactor the parser") {
+		t.Errorf("task = %q, want it to start with the first subtask", args.Task)
+	}
+	if !strings.Contains(args.Task, guidedDecompositionReportHygiene) {
+		t.Errorf("task = %q, want the compact-report hygiene ask appended (ADR 0014 §4)", args.Task)
+	}
+	if resp.Revision() == before {
+		t.Error("AppendToolCall did not bump the revision (the acted-fire probe, R4)")
+	}
+	if resp.Text() != list {
+		t.Errorf("response text mutated to %q; the enumeration must stay verbatim (locked decision 4)", resp.Text())
+	}
+	if decision.Action != domain.ActionDefer {
+		t.Fatalf("Action = %q, want defer", decision.Action)
+	}
+	if !strings.Contains(decision.Inject, guidedDecompositionDirectiveMarker) {
+		t.Error("deferred directive is missing its marker (the no-double-steer contract with the gate)")
+	}
+	for _, want := range []string{"Add unit tests", "Update the changelog"} {
+		if !strings.Contains(decision.Inject, want) {
+			t.Errorf("deferred directive missing remaining subtask %q", want)
+		}
+	}
+	if strings.Contains(decision.Inject, "Refactor the parser") {
+		t.Error("deferred directive still lists the already-dispatched first subtask")
+	}
+}
+
+// On a follow-through Turn (directive steering, the model delegated the next subtask itself) the
+// intercept re-derives the remainder from honest history MINUS this Turn's call and re-defers the
+// shrunken directive — no response mutation, just carried work.
+func TestGuidedDecompositionFollowThroughShrinksRemainder(t *testing.T) {
+	t.Parallel()
+	resp := guidedResponse(
+		guidedFanOutHistory(),
+		"",
+		guidedSubAgentCall("c2", "Add unit tests "+guidedDecompositionReportHygiene),
+	)
+	before := resp.Revision()
+	decision := fireGuidedPostResponse(t, resp)
+	if decision.Action != domain.ActionDefer {
+		t.Fatalf("Action = %q, want defer", decision.Action)
+	}
+	if resp.Revision() != before {
+		t.Errorf("follow-through mutated the response (revision %d → %d); it only re-defers", before, resp.Revision())
+	}
+	if !strings.Contains(decision.Inject, "Update the changelog") {
+		t.Error("shrunken directive dropped the still-outstanding subtask")
+	}
+	if strings.Contains(decision.Inject, "Add unit tests") {
+		t.Error("shrunken directive still lists the just-delegated subtask")
+	}
+	if strings.Contains(decision.Inject, "Refactor the parser") {
+		t.Error("shrunken directive still lists the first (already-dispatched) subtask")
+	}
+}
+
+// A model-authored delegation that matches no enumeration item consumes nothing — the remainder is
+// left intact (the model went off-script; tolerated, judged by self-regulation, ADR 0014 §5).
+func TestGuidedDecompositionOffScriptTaskLeavesRemainderIntact(t *testing.T) {
+	t.Parallel()
+	resp := guidedResponse(
+		guidedFanOutHistory(),
+		"",
+		guidedSubAgentCall("c9", "Investigate an unrelated flaky integration test"),
+	)
+	decision := fireGuidedPostResponse(t, resp)
+	if decision.Action != domain.ActionDefer {
+		t.Fatalf("Action = %q, want defer (the remainder is still non-empty)", decision.Action)
+	}
+	for _, want := range []string{"Add unit tests", "Update the changelog"} {
+		if !strings.Contains(decision.Inject, want) {
+			t.Errorf("off-script delegation wrongly dropped %q from the remainder", want)
+		}
+	}
+}
+
+// The remainder is a cursor over the sub_agent CALLS, not their results: an older child report
+// capped to empty by tool_result_cap (the Required peer) leaves the derivation exact.
+func TestGuidedDecompositionDerivesFromCallsNotCappedResults(t *testing.T) {
+	t.Parallel()
+	enumeration := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
+	call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
+	directive := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionDirective([]string{"Add unit tests", "Update the changelog"})}
+	history := []domain.Message{
+		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
+		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: ""}, // capped away by tool_result_cap
+		directive,
+	}
+	resp := guidedResponse(history, "", guidedSubAgentCall("c2", "Add unit tests "+guidedDecompositionReportHygiene))
+	decision := fireGuidedPostResponse(t, resp)
+	if decision.Action != domain.ActionDefer {
+		t.Fatalf("Action = %q, want defer", decision.Action)
+	}
+	if !strings.Contains(decision.Inject, "Update the changelog") {
+		t.Error("derivation lost the outstanding subtask")
+	}
+	if strings.Contains(decision.Inject, "Add unit tests") {
+		t.Error("derivation did not shrink by the just-delegated subtask despite the capped result")
+	}
+}
+
+// The inspect-only no-ops: an exhausted remainder, no marker at all, and a steered response that also
+// carries a model tool call all leave the response untouched with no decision (ADR 0014 §5 fail-soft).
+func TestGuidedDecompositionInterceptNoOps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("exhausted remainder ends the fan-out", func(t *testing.T) {
+		t.Parallel()
+		enumeration := "1. Refactor the parser\n2. Add unit tests"
+		call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
+		directive := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionDirective([]string{"Add unit tests"})}
+		history := []domain.Message{
+			{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
+			{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
+			directive,
+		}
+		// The model delegates the LAST subtask, so the remainder drains to empty.
+		resp := guidedResponse(history, "", guidedSubAgentCall("c2", "Add unit tests "+guidedDecompositionReportHygiene))
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != "" {
+			t.Fatalf("Action = %q, want empty (no directive once the queue is drained)", decision.Action)
+		}
+		if resp.Revision() != before {
+			t.Fatalf("revision changed (%d → %d); an exhausted remainder is a pure no-op", before, resp.Revision())
+		}
+	})
+
+	t.Run("no marker is a no-op", func(t *testing.T) {
+		t.Parallel()
+		// A bare subtask list with no steer/directive marker in history — an unrelated response.
+		resp := guidedResponse([]domain.Message{{Role: domain.RoleUser, Content: "hi"}}, "1. do a\n2. do b")
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != "" || resp.Revision() != before {
+			t.Fatalf("no-marker list acted (Action %q, revision %d → %d); want a pure no-op", decision.Action, before, resp.Revision())
+		}
+		if len(resp.ToolCalls()) != 0 {
+			t.Fatalf("no-marker list synthesized %d calls, want 0", len(resp.ToolCalls()))
+		}
+	})
+
+	t.Run("steered response with a model tool call is a no-op", func(t *testing.T) {
+		t.Parallel()
+		// Steer present but the model also emitted a tool call — case 1 needs no tool calls and no
+		// directive is in flight yet, so the intercept stays out (§5).
+		steer := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionSteer}
+		other := domain.ToolCall{ID: "r1", Tool: "read_file", Arguments: []byte(`{"path":"x"}`)}
+		resp := guidedResponse([]domain.Message{steer}, "1. do a\n2. do b", other)
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != "" || resp.Revision() != before {
+			t.Fatalf("intercepted despite a model tool call (Action %q, revision %d → %d)", decision.Action, before, resp.Revision())
+		}
+	})
+}
+
+// guidedFanOutHistory is a mid-fan-out conversation: the enumeration (its verbatim list + the
+// synthesized first delegation), the first child's report, and the drained directive steering the
+// next Turn — the shape a follow-through Turn's intercept reads.
+func guidedFanOutHistory() []domain.Message {
+	enumeration := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
+	call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
+	return []domain.Message{
+		{Role: domain.RoleUser, Content: "big task"},
+		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
+		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
+		{Role: domain.RoleUser, Content: guidedDecompositionDirective([]string{"Add unit tests", "Update the changelog"})},
+	}
 }

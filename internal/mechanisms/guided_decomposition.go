@@ -2,8 +2,10 @@ package mechanisms
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -13,18 +15,34 @@ import (
 // table (ADR 0014). Default-off (D1) — the config surface builds it only when the `mechanisms:`
 // block enables it, and it is benched as a stack with tool_result_cap (Requires, below) so the
 // bench measures the two together. It steers the PRIMARY call, on an oversized task, to first
-// enumerate the work as a numbered list of self-contained subtasks, then (item 4's post-response
-// half) serializes the fan-out one sub_agent delegation per Turn. This file is the pre-request
-// half: the gate and the enumeration steer. The PostResponse intercept + serialized follow-through
-// lands in item 4 on the same struct.
+// enumerate the work as a numbered list of self-contained subtasks, then serializes the fan-out one
+// sub_agent delegation per Turn. Two halves on one struct: the pre-request gate + enumeration steer,
+// and the PostResponse intercept + serialized follow-through (both below).
 func init() { catalogue[guidedDecompositionID] = newGuidedDecomposition }
 
 const guidedDecompositionID domain.MechanismID = "guided_decomposition"
 
 // guidedDecompositionMaxSubtasks bounds the enumeration the steer asks for (ADR 0014 locked
 // decision 5: at most 7 subtasks). Tuning is the bench's job, not code-review taste. The intercept's
-// accept window (item 4's 2..12 bound) is a separate, wider tolerance and is declared there.
+// accept window (the 2..12 bound below) is a separate, wider tolerance.
 const guidedDecompositionMaxSubtasks = 7
+
+// guidedDecompositionMinSubtasks / guidedDecompositionMaxAcceptedSubtasks bound the intercept's
+// accept window (ADR 0014 locked decision 5): the post-response half declines the WHOLE enumeration
+// — a benign no-op, never a truncation — when the parsed list holds fewer than 2 or more than 12
+// items. The upper bound is deliberately wider than the steer's 7-item ask so a model that overshoots
+// the ask by a little still fans out; a runaway or degenerate list is declined. Tuning is the bench's.
+const (
+	guidedDecompositionMinSubtasks         = 2
+	guidedDecompositionMaxAcceptedSubtasks = 12
+)
+
+// guidedDecompositionReportHygiene is the compact-report ask (ADR 0014 §4) appended to every
+// delegated task and named in the follow-through directive. Serialized child reports accumulate in
+// one Exchange that no generative reducer can fold mid-Exchange, so each child is asked to report
+// tersely to keep the accumulation small — tool_result_cap (the Required peer) caps whatever is left.
+const guidedDecompositionReportHygiene = "When done, report back a single compact result — the key " +
+	"findings, decisions, and file paths only, not a step-by-step narration of what you did."
 
 // Idempotency / no-double-steer markers. Both are guided_decomposition's own vocabulary, embedded
 // verbatim in the messages it (and item 4) inject so a single history scan tells the gate to stay
@@ -222,4 +240,264 @@ func guidedDecompositionEstimateTokens(chars int, charsPerToken float64) int {
 		return 0
 	}
 	return int(float64(chars) / charsPerToken)
+}
+
+// PostResponse is the intercept + serialized follow-through half (ADR 0014 §2/§3). Like the gate it
+// carries no per-Mechanism state: the remaining-items queue is re-DERIVED from honest history each
+// Turn (locked decision 1) — the enumeration is the model's own visible list message and the
+// dispatched tasks are the sub_agent calls in the conversation — so it is snapshot/resume-safe and
+// abandons cleanly on suppression. Three cases, evaluated in order against resp.View().Conversation():
+//
+//   - Enumeration response: the pre-request steer is outstanding in the request (its marker is in the
+//     conversation), the model replied with ONLY a bounded (2..12) subtask list and no tool calls.
+//     Synthesize the FIRST sub_agent delegation onto the response — text left verbatim (locked
+//     decision 4) — and Defer a directive carrying the remaining subtasks for the next Turn.
+//   - Fan-out follow-through: a directive is steering (its marker is in the request) and the model
+//     emitted its own sub_agent call. Re-derive the remainder from history MINUS every dispatched
+//     task (this Turn's calls included) and Defer the shrunken directive; an empty remainder ends the
+//     fan-out with no decision.
+//   - Anything else: inspect-only no-op — no marker, an out-of-bounds list (declined whole), a
+//     response already carrying other tool calls, or an exhausted remainder (ADR 0014 §5 fail-soft;
+//     zero revision, zero Action, so the loop books no fire, R4).
+//
+// Suppression needs no code (locked decision 1): once self-regulation withdraws the Mechanism the
+// hook stops being dispatched, the un-consumed directive is never re-derived, and at most one
+// already-queued directive still drains via the loop's shared deferred-correction plumbing — that
+// trailing inject is loop plumbing every Defer user shares, not a Mechanism fire.
+func (guidedDecompositionMechanism) PostResponse(_ context.Context, resp *domain.Response) (domain.PostResponseDecision, error) {
+	conv := resp.View().Conversation()
+	calls := resp.ToolCalls()
+
+	// Enumeration response: the steer is outstanding and the model answered with a bare subtask
+	// list. Synthesize the first delegation and defer the remainder.
+	if len(calls) == 0 && guidedDecompositionMarkerPresent(conv, guidedDecompositionSteerMarker) {
+		items := guidedDecompositionParseList(resp.Text())
+		if !guidedDecompositionListInBounds(items) {
+			return domain.PostResponseDecision{}, nil // out of bounds — decline the whole list (§5)
+		}
+		resp.AppendToolCall(domain.ToolCall{
+			ID:        fmt.Sprintf("text_call_%d", resp.View().Turn()), // the loop's synthesized-call style
+			Tool:      tools.SubAgentToolName,
+			Arguments: guidedDecompositionTaskArgs(items[0]),
+		})
+		return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: guidedDecompositionDirective(items[1:])}, nil
+	}
+
+	// Fan-out follow-through: a directive is steering and the model delegated on its own. Re-derive
+	// the remainder (history + this Turn's calls) and defer the shrunken directive.
+	if guidedDecompositionMarkerPresent(conv, guidedDecompositionDirectiveMarker) && guidedDecompositionHasSubAgentCall(calls) {
+		if remainder := guidedDecompositionRemainder(conv, calls); len(remainder) > 0 {
+			return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: guidedDecompositionDirective(remainder)}, nil
+		}
+	}
+
+	// Anything else: benign inspect-only no-op (§5 fail-soft).
+	return domain.PostResponseDecision{}, nil
+}
+
+// guidedDecompositionMarkerPresent reports whether any message content carries marker — the
+// history scan the intercept keys its two active cases on (the request-scoped steer for the
+// enumeration case, the drained directive for the follow-through case). A nil view (the degraded
+// no-view Response) carries no marker.
+func guidedDecompositionMarkerPresent(conv domain.ConversationView, marker string) bool {
+	if conv == nil {
+		return false
+	}
+	found := false
+	conv.Range(func(_ int, m domain.Message) bool {
+		if strings.Contains(m.Content, marker) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// guidedDecompositionHasSubAgentCall reports whether the response carries at least one sub_agent
+// delegation the model emitted itself — the follow-through trigger (the model followed the directive).
+func guidedDecompositionHasSubAgentCall(calls []domain.ToolCall) bool {
+	for _, c := range calls {
+		if c.Tool == tools.SubAgentToolName {
+			return true
+		}
+	}
+	return false
+}
+
+// guidedDecompositionListInBounds reports whether a parsed enumeration is within the intercept's
+// accept window (locked decision 5). Out of bounds → the caller declines the whole list, never trims.
+func guidedDecompositionListInBounds(items []string) bool {
+	return len(items) >= guidedDecompositionMinSubtasks && len(items) <= guidedDecompositionMaxAcceptedSubtasks
+}
+
+// guidedDecompositionTaskArgs renders the sub_agent argument shape for one subtask, appending the
+// compact-report hygiene ask (ADR 0014 §4). It marshals through tools.SubAgentArgs so the wire shape
+// is the exact schema dispatch parses — the args are indistinguishable from a model-emitted call.
+func guidedDecompositionTaskArgs(item string) json.RawMessage {
+	args, _ := json.Marshal(tools.SubAgentArgs{Task: item + " " + guidedDecompositionReportHygiene})
+	return args
+}
+
+// guidedDecompositionDirective renders the remaining-items directive deferred into the next request
+// (ADR 0014 §3). It embeds guidedDecompositionDirectiveMarker verbatim (so the pre-request gate reads
+// a fan-out as in flight and stays quiet, and the follow-through case recognises it), lists the
+// remaining subtasks verbatim, asks for exactly ONE delegation this Turn carrying the same hygiene
+// ask, and asks the model to synthesize from all reports once none remain.
+func guidedDecompositionDirective(remaining []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b,
+		"%s (%d left): the primary task is being fanned out one delegation per turn. Delegate EXACTLY "+
+			"the next subtask now via a single %s call — do not do the work yourself, and do not delegate "+
+			"more than one at a time. Give the sub-agent this instruction too: %q. The remaining subtasks, "+
+			"in order:\n",
+		guidedDecompositionDirectiveMarker, len(remaining), tools.SubAgentToolName, guidedDecompositionReportHygiene)
+	for i, item := range remaining {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, item)
+	}
+	b.WriteString("Once no subtasks remain, stop delegating and synthesize a single final answer from all the sub-agent reports.")
+	return b.String()
+}
+
+// guidedDecompositionRemainder re-derives the outstanding subtasks from honest history (locked
+// decision 1): the enumeration is the model's own visible list message, and the dispatched tasks are
+// the sub_agent calls recorded across the conversation plus this Turn's own calls. It reads the CALLS,
+// never the child results, so a report capped by tool_result_cap (the Required peer) leaves the
+// cursor's ground truth intact. An enumeration item is consumed when it is a text prefix of any
+// dispatched task (the task is the item plus the appended hygiene ask); a model-authored task that
+// matches no item simply does not shrink the remainder (off-script, tolerated — §5).
+func guidedDecompositionRemainder(conv domain.ConversationView, respCalls []domain.ToolCall) []string {
+	items := guidedDecompositionEnumeration(conv)
+	if len(items) == 0 {
+		return nil
+	}
+	dispatched := append(guidedDecompositionDispatchedTasks(conv), guidedDecompositionCallTasks(respCalls)...)
+	var remainder []string
+	for _, item := range items {
+		if !guidedDecompositionTaskDispatched(item, dispatched) {
+			remainder = append(remainder, item)
+		}
+	}
+	return remainder
+}
+
+// guidedDecompositionEnumeration returns the enumeration list from honest history — the FIRST
+// assistant message whose content parses as an in-bounds (2..12) subtask list. The steered
+// enumeration is the earliest such message; later follow-through replies are one-line delegations
+// (out of bounds), so scanning first-match reliably anchors on the original list.
+func guidedDecompositionEnumeration(conv domain.ConversationView) []string {
+	if conv == nil {
+		return nil
+	}
+	var items []string
+	conv.Range(func(_ int, m domain.Message) bool {
+		if m.Role != domain.RoleAssistant {
+			return true
+		}
+		if parsed := guidedDecompositionParseList(m.Content); guidedDecompositionListInBounds(parsed) {
+			items = parsed
+			return false
+		}
+		return true
+	})
+	return items
+}
+
+// guidedDecompositionDispatchedTasks collects the task text of every sub_agent call recorded on the
+// conversation's assistant messages — the dispatched half of the honest-history cursor.
+func guidedDecompositionDispatchedTasks(conv domain.ConversationView) []string {
+	if conv == nil {
+		return nil
+	}
+	var tasks []string
+	conv.Range(func(_ int, m domain.Message) bool {
+		if m.Role == domain.RoleAssistant {
+			tasks = append(tasks, guidedDecompositionCallTasks(m.ToolCalls)...)
+		}
+		return true
+	})
+	return tasks
+}
+
+// guidedDecompositionCallTasks extracts the task string from each sub_agent call in calls, parsing
+// the arguments through tools.SubAgentArgs. A non-sub_agent call, unparseable arguments, or an empty
+// task contributes nothing.
+func guidedDecompositionCallTasks(calls []domain.ToolCall) []string {
+	var tasks []string
+	for _, c := range calls {
+		if c.Tool != tools.SubAgentToolName {
+			continue
+		}
+		var args tools.SubAgentArgs
+		if err := json.Unmarshal(c.Arguments, &args); err != nil {
+			continue
+		}
+		if args.Task != "" {
+			tasks = append(tasks, args.Task)
+		}
+	}
+	return tasks
+}
+
+// guidedDecompositionTaskDispatched reports whether enumeration item has already been delegated —
+// true when it is a text prefix of any dispatched task (the synthesized/model task is the item plus
+// the hygiene ask). Prefix matching is the ADR 0014 §5 tolerance: an off-script model task that
+// matches no item leaves the remainder intact.
+func guidedDecompositionTaskDispatched(item string, dispatched []string) bool {
+	for _, task := range dispatched {
+		if strings.HasPrefix(task, item) {
+			return true
+		}
+	}
+	return false
+}
+
+// guidedDecompositionParseList parses the model's enumeration into ordered subtask strings. It is
+// deliberately lenient (ADR 0014 §2 — the steer asks for a numbered list, but small models emit
+// bulleted, plain, or fence-wrapped variants): each non-blank line becomes one item with any leading
+// list marker stripped; blank lines and Markdown code-fence delimiters are dropped. Bounds are NOT
+// enforced here — the caller declines an out-of-bounds count as a whole (locked decision 5).
+func guidedDecompositionParseList(text string) []string {
+	var items []string
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "```") {
+			continue // blank line or a code-fence delimiter — noise, not a subtask
+		}
+		if item := guidedDecompositionStripMarker(line); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// guidedDecompositionStripMarker removes a leading ordered- or unordered-list marker from a line and
+// returns the bare subtask text. A bullet is a single "-", "*", "•", or "+" rune followed by
+// whitespace; an ordered marker is one or more digits followed (optionally after spaces) by a ".",
+// ")", "-", or ":" delimiter. A line with no recognised marker is returned verbatim, so a plain-line
+// list is accepted too.
+func guidedDecompositionStripMarker(line string) string {
+	r := []rune(line)
+	if len(r) >= 2 && strings.ContainsRune("-*•+", r[0]) && unicode.IsSpace(r[1]) {
+		return strings.TrimSpace(string(r[1:]))
+	}
+	i := 0
+	for i < len(r) && unicode.IsDigit(r[i]) {
+		i++
+	}
+	if i == 0 {
+		return line // no leading number — a plain-line item, kept verbatim
+	}
+	j := i
+	for j < len(r) && r[j] == ' ' {
+		j++
+	}
+	if j < len(r) && strings.ContainsRune(".)-:", r[j]) {
+		j++
+		for j < len(r) && r[j] == ' ' {
+			j++
+		}
+		return strings.TrimSpace(string(r[j:]))
+	}
+	return line // digits that are not a list marker — keep the line verbatim
 }

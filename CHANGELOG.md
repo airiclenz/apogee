@@ -41,6 +41,17 @@ on, not this work).
   self-contained subtasks. The steer is marker-idempotent and stays quiet once a fan-out directive is
   already steering (no double-steer); the post-response intercept and serialized follow-through land
   next. (`internal/mechanisms`.)
+- **The intercept and serialized follow-through (post-response half).** `guided_decomposition` gains
+  its `PostResponse` half on the same struct. On the enumeration Turn — the steer outstanding, the
+  model's reply a bounded (2..12) subtask list with no tool calls — it parses the list, synthesizes
+  the FIRST `sub_agent` delegation onto the response (the enumeration text left verbatim), and defers
+  a remaining-items directive carrying the rest plus a compact-report hygiene ask (ADR 0014 §4). Each
+  following Turn re-derives the remainder from honest history — the model's own list message and the
+  `sub_agent` CALLS in the conversation (never the child results, so a report capped by
+  `tool_result_cap` leaves the cursor exact) — minus the just-delegated task, and re-defers the
+  shrunken directive until none remain. It carries no per-Mechanism state (snapshot/resume-safe and
+  suppression-clean), declines an out-of-bounds list whole, and no-ops on anything else.
+  (`internal/mechanisms`.)
 
 ## [1.2.0] — 2026-07-04
 

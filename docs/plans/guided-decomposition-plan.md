@@ -204,7 +204,17 @@ Commit: `feat(mechanisms): guided_decomposition gate and enumeration steer`.
 
 ---
 
-## 4. Mechanism: the intercept + serialized follow-through (post-response half)
+## 4. Mechanism: the intercept + serialized follow-through (post-response half) — ✅ DONE (2026-07-05)
+
+NOTES (2026-07-05): the follow-through case is additionally guarded on the `guidedDecompositionDirectiveMarker`
+being present in the conversation (alongside "response carries a `sub_agent` call") before it re-derives —
+a refinement of the literal case-2 text consistent with locked decision 1 ("a deferred directive is doing
+the steering"). It is provably non-rejecting for a live fan-out (a non-empty remainder implies the prior
+Turn deferred, so `buildRequest` injects the directive into this Turn's request), and it makes a spurious
+model `sub_agent` call when no fan-out is in flight an explicit no-op rather than relying on the empty-
+remainder derivation. Case 1 keys the list on `resp.Text()` (the enumeration is not yet committed at that
+post-response point) per the item's own "text parses as a list" wording; case 2 reads the enumeration from
+committed history.
 
 **What:** `PostResponse` on the same struct. Three cases, evaluated against honest history
 (the enumeration message and prior `sub_agent` calls read from
