@@ -75,7 +75,7 @@ the implement-plan preflight stops on a dirty tree.
 
 ---
 
-## 1. Auto-compaction: gate the saturation latch on a fold that ran
+## 1. Auto-compaction: gate the saturation latch on a fold that ran — ✅ DONE (2026-07-05)
 
 **Finding:** review "A skipped fold latches the S2 saturation latch, permanently disabling
 auto-compaction" (High, found independently twice). Ground truth: S2

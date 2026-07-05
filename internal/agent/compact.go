@@ -62,34 +62,46 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 // the Turn proceeds with the full conversation. A cancellation is not a fault: the Turn's own stream
 // carries the cancel to a clean boundary. Two S2 refinements govern WHEN it folds: the trigger is
 // Exchange-boundary-only (shouldAutoCompact's inExchange guard — a mid-Exchange over-budget Turn
-// defers to the next opening), and a successful fold that STILL leaves the history over its
-// allocation saturates the trigger (one ErrorEvent, then it stands down until the estimate drops).
+// defers to the next opening), and a fold that RAN and STILL leaves the history over its allocation
+// saturates the trigger (one ErrorEvent, then it stands down until the estimate drops). A skip
+// (Result.Skipped — too few messages past the protected prefix to be worth folding) folds nothing,
+// so it proves nothing and never saturates: the trigger simply re-checks at the next opening, when a
+// longer tail may have accumulated.
 func (a *Agent) autoCompact(ctx context.Context, turn int) {
 	if a.compacting || !a.shouldAutoCompact() {
 		return
 	}
 	a.compacting = true
 	defer func() { a.compacting = false }()
-	if _, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars()); err != nil {
+	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
+	if err != nil {
 		if ctx.Err() != nil {
 			return // a cancel masquerades as a stream error; the Turn's main stream handles it
 		}
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "compaction", Err: err.Error()})
 		return
 	}
-	// S2 saturation: a successful fold that still leaves the history over its allocation cannot
-	// help — the protected prefix (leading system messages + the first user message) alone exceeds
-	// the History allocation. Latch the trigger off (compactSat) so the still-oversized history is
-	// not re-folded at every Exchange opening, and emit exactly one ErrorEvent naming the cause.
-	// shouldAutoCompact clears the latch once the estimate drops back under the allocation.
+	// A skipped fold folded nothing (Compact found too few messages past the protected prefix), so it
+	// proves nothing about whether folding can help — gate the saturation latch on a fold that
+	// actually RAN. Returning here (no latch, no ErrorEvent) costs nothing: the trigger re-checks at
+	// the next Exchange opening for free, where an accumulated tail may make the fold worthwhile.
+	if res.Skipped {
+		return
+	}
+	// S2 saturation: a fold that RAN and still leaves the history over its allocation cannot help —
+	// the folded shape is the protected prefix (leading system messages + the first user message) plus
+	// the single compaction summary, and together they still exceed the History allocation. Latch the
+	// trigger off (compactSat) so the still-oversized history is not re-folded at every Exchange
+	// opening, and emit exactly one ErrorEvent naming the cause. shouldAutoCompact clears the latch
+	// once the estimate drops back under the allocation.
 	if a.historyExceedsAllocation() {
 		a.compactSat = true
 		a.cfg.Events.Emit(domain.ErrorEvent{
 			EventBase: a.base(turn),
 			Source:    "compaction",
 			Err: "compaction could not bring the history under its allocation: the protected prefix " +
-				"(system prompt + first user message) alone exceeds it; automatic folding is paused " +
-				"until the history estimate drops below the allocation",
+				"(system prompt + first user message) and the compaction summary together exceed it; " +
+				"automatic folding is paused until the history estimate drops below the allocation",
 		})
 	}
 }

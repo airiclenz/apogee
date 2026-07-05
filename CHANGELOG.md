@@ -310,6 +310,14 @@ on the public surface — so this is a **minor** bump, not a major one.
   rewrite (`truncate_history`) now **repairs `exchangeStart`** by the drop delta, floored just past
   the prefix + gap note, so `AbortExchange` (Esc) rolls back to exactly the Exchange boundary with no
   orphaned tool results. (`internal/agent`.)
+- **The saturation latch is now gated on a fold that ran (third-review fix).** A `Compact` that
+  **skips** (too few messages past the protected prefix to be worth folding) folds nothing, so it
+  proves nothing about whether folding can help — yet the auto-trigger used to run its post-fold
+  saturation check on the skip too, latching off (one `ErrorEvent`) and permanently disabling
+  auto-compaction whenever the history was over its allocation but too short to fold. `autoCompact`
+  now returns on `Result.Skipped` before the saturation check, so only a fold that **ran** and still
+  left the history (protected prefix + summary) over its allocation can saturate; a skipped boundary
+  re-checks for free at the next opening. (`internal/agent`.)
 - **Context-window discovery for pinned models + a `context-window:` key (second-review fix).** A
   configured `model:` no longer silently disables the Budget and automatic Compaction. Window
   discovery is split out of `resolveModel` and now runs for a pinned model too — keeping the pinned

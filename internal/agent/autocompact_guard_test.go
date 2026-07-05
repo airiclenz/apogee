@@ -187,6 +187,54 @@ func TestAutoCompactSaturatesWhenPrefixExceedsAllocation(t *testing.T) {
 	}
 }
 
+// TestAutoCompactSkippedFoldDoesNotSaturate drives F1 (phase-4-third-review-fixes item 1): an
+// over-budget history with only one message past the protected prefix makes Compact SKIP (nothing
+// worth folding), and a skip must NOT latch the saturation trigger — folding nothing proves nothing.
+// Proof: no ErrorEvent, no summarizer call, and the latch stays clear; then, once a foldable
+// multi-message tail has accumulated at a later opening, the fold RUNS (summarizer called) — which it
+// could not if the earlier skip had wrongly saturated (a latched trigger stands down entirely).
+func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
+	sink := &recordingSink{}
+	up := &compactSpyResponder{reply: "SUMMARY"}
+	a, err := newAgent(autoCompactConfig(sink), up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// Protected prefix (the first user message) + one oversized assistant answer: the ~25k-char answer
+	// (~6.2k tokens) pushes the ~2-message history well past the ~3.9k-token allocation, yet only ONE
+	// message sits past the prefix, so Compact skips (minCompactTail = 2).
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the overarching goal"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: strings.Repeat("x", 25000)})
+	if !a.historyExceedsAllocation() {
+		t.Fatal("setup: history is not over budget; the skip-vs-latch distinction would be untested")
+	}
+
+	// Exchange 1: over budget at the opening, but the fold skips (too short a tail) → no latch, no
+	// ErrorEvent, no summarizer call. The just-submitted user message and its reply then accumulate a
+	// foldable tail for the next opening.
+	runExchange(t, a, "q1")
+	if up.summaryCalls != 0 {
+		t.Fatalf("a skipped fold still called the summarizer: %d, want 0", up.summaryCalls)
+	}
+	if n := countCompactionErrors(sink.events); n != 0 {
+		t.Fatalf("a skipped fold emitted %d compaction ErrorEvents, want 0 (nothing folded ⇒ nothing proved)", n)
+	}
+	if a.compactSat {
+		t.Fatal("a skipped fold latched the saturation trigger; the skip must not saturate")
+	}
+
+	// Exchange 2: the history now has a foldable multi-message tail (prefix + prior answer + q1 + its
+	// reply), so the fold RUNS. If the earlier skip had saturated, shouldAutoCompact would stand the
+	// trigger down and this fold would never fire — so the summarizer call proves the latch stayed clear.
+	runExchange(t, a, "q2")
+	if up.summaryCalls != 1 {
+		t.Fatalf("the fold did not run once a foldable tail existed: summarizer calls = %d, want 1", up.summaryCalls)
+	}
+	if a.historyExceedsAllocation() {
+		t.Error("the fold ran but did not bring the history under its allocation; the setup drifted")
+	}
+}
+
 // TestExchangeStartRepairedAfterMidExchangeTruncation drives the exchangeStart repair (S2c): a
 // mid-Exchange truncate_history fold drops the middle of the conversation — including this Exchange's
 // initiating user message — so the stale exchangeStart would leave AbortExchange dropping the wrong
