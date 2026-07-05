@@ -343,6 +343,12 @@ on the public surface — so this is a **minor** bump, not a major one.
   root skips `resolveContextWindow` when model discovery already ran — one probe for the whole
   no-model startup, regardless of the advertised window. The pinned-model path is unchanged (still
   probes for its window; a failed probe stays non-fatal). (`cmd/apogee`.)
+- **`context-window` precedence and the `ContextConfig` threading are now pinned by tests
+  (third-review fix, Tests).** A test proves a `context-window:` key wins over the server-advertised
+  window on the no-model path (`resolveModel` keeps the discovered id but not the advertised window),
+  and a `runRoot` test proves `opts.contextWindow` reaches `Config.Context.MaxContextTokens` (via the
+  loud-zero notice) — closing the mutation gap the pinned-model-only coverage left open. (`cmd/apogee`
+  tests.)
 
 ### Wave 3: the `toolfilter` / `filehint` / `grammar` request shapers
 

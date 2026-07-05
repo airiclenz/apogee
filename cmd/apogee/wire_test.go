@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -87,6 +89,81 @@ func TestContextWindowNotice(t *testing.T) {
 			}
 			if tt.wantNotice && !strings.Contains(got, "context-window") {
 				t.Errorf("notice %q does not name the context-window key", got)
+			}
+		})
+	}
+}
+
+// captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
+// stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only
+// race-free during the sequential test phase (parallel tests are paused until it finishes).
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	captured := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		captured <- buf.String()
+	}()
+
+	f()
+
+	_ = w.Close()
+	os.Stderr = orig
+	return <-captured
+}
+
+// runRoot threads opts.contextWindow into apogee.Config.Context.MaxContextTokens (wire.go), which
+// the Budget and automatic Compaction bind against. The constructed Agent exposes no accessor for
+// that field, so the threading is observed through its sole runtime consumer in the composition
+// root: the loud-zero startup notice, which fires only when MaxContextTokens == 0 while Compaction
+// is on. A positive window therefore reaches MaxContextTokens (no notice) and a zero window reaches
+// it too (notice fires) — proving opts.contextWindow lands in ContextConfig, not just in opts (the
+// gap TestApplyConfigContextWindow leaves open). The same value also lands in the TUI footer's
+// ContextWindow, asserted here for the exact-value pin (item 5).
+func TestRunRootThreadsContextWindow(t *testing.T) {
+	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
+	tests := []struct {
+		name          string
+		contextWindow int
+		wantNotice    bool
+	}{
+		{name: "positive window reaches MaxContextTokens (no loud-zero notice)", contextWindow: 16384, wantNotice: false},
+		{name: "zero window reaches MaxContextTokens (loud-zero notice fires)", contextWindow: 0, wantNotice: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &recordingLauncher{}
+			opts := options{
+				endpoint:      "http://127.0.0.1:1111",
+				model:         "fake",
+				mode:          "ask-before",
+				workspace:     t.TempDir(),
+				contextWindow: tt.contextWindow,
+				autoCompact:   true, // the loud-zero notice fires only while Compaction is on
+			}
+
+			var runErr error
+			stderr := captureStderr(t, func() {
+				runErr = runRoot(context.Background(), opts, rec.launch)
+			})
+
+			if runErr != nil {
+				t.Fatalf("runRoot: %v", runErr)
+			}
+			gotNotice := strings.Contains(stderr, "context window unknown")
+			if gotNotice != tt.wantNotice {
+				t.Errorf("loud-zero notice present = %v (stderr = %q); want %v — Config.Context.MaxContextTokens must carry opts.contextWindow = %d",
+					gotNotice, stderr, tt.wantNotice, tt.contextWindow)
+			}
+			if rec.opts.ContextWindow != tt.contextWindow {
+				t.Errorf("tui.Options.ContextWindow = %d; want the threaded %d", rec.opts.ContextWindow, tt.contextWindow)
 			}
 		})
 	}

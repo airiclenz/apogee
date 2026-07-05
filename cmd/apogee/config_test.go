@@ -234,8 +234,9 @@ func TestApplyConfigAutoCompactOptOut(t *testing.T) {
 }
 
 // The context-window config block parses into opts.contextWindow (item 3): a file-only key (no
-// flag/env) whose value is threaded through to ContextConfig.MaxContextTokens, overriding
-// discovery. This proves the config surface lands end-to-end.
+// flag/env). This proves the config-file surface lands in opts; the downstream opts →
+// ContextConfig.MaxContextTokens threading (which the Budget and Compaction bind against) is
+// pinned separately by TestRunRootThreadsContextWindow in wire_test.go.
 func TestApplyConfigContextWindow(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -536,6 +537,35 @@ func TestResolveModelDiscoveryErrorPropagates(t *testing.T) {
 	}
 	if opts.model != "" {
 		t.Errorf("opts.model = %q; want it left empty on failure", opts.model)
+	}
+}
+
+// On the no-model path a context-window: key (opts.contextWindow already set) WINS over the window
+// the server advertises: resolveModel still discovers and adopts the model id, but the pre-set
+// window is kept — the key is the Budget/auto-compaction escape hatch, so discovery must not
+// clobber it (the `if opts.contextWindow == 0` guard in resolveModel's no-model path; item 5).
+// Without this case, mutating that branch to unconditionally take the advertised window survives.
+func TestResolveModelContextWindowKeyWinsOverDiscovery(t *testing.T) {
+	t.Parallel()
+	discover := func(_ context.Context, endpoint string) (discoveredUpstream, error) {
+		if endpoint != "http://server" {
+			t.Errorf("discover called with endpoint %q; want the resolved endpoint", endpoint)
+		}
+		return discoveredUpstream{model: "discovered-model", contextWindow: 131072}, nil
+	}
+	opts := options{endpoint: "http://server", contextWindow: 16384} // the context-window: key, no model set
+	got, probed, err := resolveModel(context.Background(), &opts, discover)
+	if err != nil {
+		t.Fatalf("resolveModel: %v", err)
+	}
+	if !probed {
+		t.Error("probed = false; want true (discovery still runs on the no-model path)")
+	}
+	if got != "discovered-model" || opts.model != "discovered-model" {
+		t.Errorf("resolveModel = %q, opts.model = %q; want both %q (the discovered id is kept)", got, opts.model, "discovered-model")
+	}
+	if opts.contextWindow != 16384 {
+		t.Errorf("opts.contextWindow = %d; want the context-window: key 16384 kept (it wins over the advertised 131072)", opts.contextWindow)
 	}
 }
 

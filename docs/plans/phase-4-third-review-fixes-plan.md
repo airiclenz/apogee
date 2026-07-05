@@ -228,7 +228,21 @@ CHANGELOG. Commit:
 
 ---
 
-## 5. Test: `context-window` key precedence and `ContextConfig` threading
+## 5. Test: `context-window` key precedence and `ContextConfig` threading — ✅ DONE (2026-07-05)
+
+**NOTES (2026-07-05):** The threading assertion ("the config constructed from `opts` carries
+`MaxContextTokens == opts.contextWindow`") is done INDIRECTLY: the constructed `apogee.Agent`
+exposes no accessor for `cfg.Context.MaxContextTokens`, and the item confines the diff to test
+files (no production accessor may be added). `TestRunRootThreadsContextWindow` (in `wire_test.go`,
+as the item directs — that is where `runRoot`'s opts→config construction lives) drives `runRoot`
+and observes the field through its sole runtime consumer in the composition root — the loud-zero
+notice (`wire.go:150`, `contextWindowNotice(cfg.Context.MaxContextTokens, …)`): a positive window
+⇒ no notice, a zero window ⇒ notice, so the notice's presence toggles with the threaded value. The
+test must swap the process-global `os.Stderr` to capture the notice, so it is NON-parallel (safe:
+parallel tests are paused during the sequential phase). It also asserts the exact value reaches the
+TUI footer's `ContextWindow` (`rec.opts.ContextWindow`) for a direct value pin. The no-model
+precedence case (`TestResolveModelContextWindowKeyWinsOverDiscovery`) is a plain, parallel unit
+test as the item's literal text reads.
 
 **Finding:** review "`context-window` key precedence on the no-model path is
 mutation-proven unguarded" (Medium, Tests). Ground truth: the item-3 Tests mandate
