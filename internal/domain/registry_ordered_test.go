@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -18,10 +19,11 @@ type preReqMech struct {
 	before   []MechanismID
 	after    []MechanismID
 	incompat []MechanismID
+	requires []MechanismID
 }
 
 func (m preReqMech) Descriptor() MechanismDescriptor {
-	return MechanismDescriptor{ID: m.id, IncompatibleWith: m.incompat}
+	return MechanismDescriptor{ID: m.id, IncompatibleWith: m.incompat, Requires: m.requires}
 }
 func (m preReqMech) Ordering() OrderingConstraints {
 	return OrderingConstraints{Before: m.before, After: m.after}
@@ -162,6 +164,69 @@ func TestValidateIncompatibilities(t *testing.T) {
 		)
 		if err := r.ValidateIncompatibilities(); err != nil {
 			t.Errorf("ValidateIncompatibilities = %v, want nil", err)
+		}
+	})
+}
+
+func TestValidateRequirements(t *testing.T) {
+	t.Run("required peer absent ⇒ error naming both IDs", func(t *testing.T) {
+		r := registerAll(t,
+			preReqMech{id: "guided_decomposition", requires: []MechanismID{"tool_result_cap"}},
+		)
+		err := r.ValidateRequirements()
+		if !errors.Is(err, ErrMissingRequirement) {
+			t.Fatalf("ValidateRequirements = %v, want ErrMissingRequirement", err)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "guided_decomposition") || !strings.Contains(msg, "tool_result_cap") {
+			t.Errorf("error %q does not name both the requiring and required IDs", msg)
+		}
+	})
+
+	t.Run("required peer present ⇒ ok", func(t *testing.T) {
+		r := registerAll(t,
+			preReqMech{id: "guided_decomposition", requires: []MechanismID{"tool_result_cap"}},
+			preReqMech{id: "tool_result_cap"},
+		)
+		if err := r.ValidateRequirements(); err != nil {
+			t.Errorf("ValidateRequirements = %v, want nil (the required peer is registered)", err)
+		}
+	})
+
+	t.Run("empty Requires ⇒ ok", func(t *testing.T) {
+		r := registerAll(t,
+			preReqMech{id: "a"},
+			preReqMech{id: "b"},
+		)
+		if err := r.ValidateRequirements(); err != nil {
+			t.Errorf("ValidateRequirements = %v, want nil (no requirements declared)", err)
+		}
+	})
+
+	t.Run("requirement chain A→B→C all present ⇒ ok (transitive by iteration)", func(t *testing.T) {
+		r := registerAll(t,
+			preReqMech{id: "a", requires: []MechanismID{"b"}},
+			preReqMech{id: "b", requires: []MechanismID{"c"}},
+			preReqMech{id: "c"},
+		)
+		if err := r.ValidateRequirements(); err != nil {
+			t.Errorf("ValidateRequirements = %v, want nil (whole chain registered)", err)
+		}
+	})
+
+	t.Run("requirement chain with a missing link ⇒ error (the broken link, not the head)", func(t *testing.T) {
+		// A→B→C but C is absent: iterating every Mechanism's direct requirements catches the
+		// B→C break independently of A, so no recursion is needed.
+		r := registerAll(t,
+			preReqMech{id: "a", requires: []MechanismID{"b"}},
+			preReqMech{id: "b", requires: []MechanismID{"c"}},
+		)
+		err := r.ValidateRequirements()
+		if !errors.Is(err, ErrMissingRequirement) {
+			t.Fatalf("ValidateRequirements = %v, want ErrMissingRequirement", err)
+		}
+		if msg := err.Error(); !strings.Contains(msg, "\"b\"") || !strings.Contains(msg, "\"c\"") {
+			t.Errorf("error %q should name the broken B→C link", msg)
 		}
 	})
 }

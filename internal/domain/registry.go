@@ -212,3 +212,26 @@ func detectIncompatibility(mechanisms []Mechanism) error {
 	}
 	return nil
 }
+
+// detectRequirements reports ErrMissingRequirement if any registered Mechanism declares a required
+// peer (MechanismDescriptor.Requires) absent from the registry — the dual of detectIncompatibility.
+// A requirement chain (A requires B, B requires C) is validated transitively by iteration, not
+// recursion: every Mechanism's direct requirements are checked against the present set, so a broken
+// link anywhere in the chain trips (checking B catches an absent C independently of A). The error
+// names both IDs and the reason so the config author sees which stack to complete. It fails loudly
+// at startup the same way an ordering cycle or an incompatibility does (ADR 0003; ADR 0014 §4).
+func detectRequirements(mechanisms []Mechanism) error {
+	present := make(map[MechanismID]bool, len(mechanisms))
+	for _, m := range mechanisms {
+		present[m.Descriptor().ID] = true
+	}
+	for _, m := range mechanisms {
+		desc := m.Descriptor()
+		for _, req := range desc.Requires {
+			if !present[req] {
+				return fmt.Errorf("apogee: mechanism %q requires %q — enable both or neither; they are benched as a stack: %w", desc.ID, req, ErrMissingRequirement)
+			}
+		}
+	}
+	return nil
+}

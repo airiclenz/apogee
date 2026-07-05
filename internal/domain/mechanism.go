@@ -121,6 +121,13 @@ type MechanismDescriptor struct {
 	Suppression SuppressionPolicy
 	// IncompatibleWith constrains stacking — Mechanisms that must not co-fire.
 	IncompatibleWith []MechanismID
+	// Requires constrains stacking the other way — Mechanisms that must all be
+	// registered for this one to be enabled (the dual of IncompatibleWith). It is the
+	// enable-time declaration that this Mechanism is benched as a stack with its named
+	// peers: enabling it without them is a startup error (ValidateRequirements, ADR 0014
+	// §4). Enable-time only — live suppression of a required peer mid-Session is not
+	// re-checked.
+	Requires []MechanismID
 }
 
 // Capability is what a Mechanism does — and what Bypass switches on (ADR 0006:
@@ -228,6 +235,18 @@ func (r *MechanismRegistry) ValidateOrdering() error { return detectOrderingCycl
 // both. New calls it once the whole graph is present.
 func (r *MechanismRegistry) ValidateIncompatibilities() error {
 	return detectIncompatibility(r.mechanisms)
+}
+
+// ValidateRequirements reports ErrMissingRequirement if any registered Mechanism declares a
+// required peer (MechanismDescriptor.Requires) that is not itself registered. It is the third
+// construction-time gate alongside ValidateOrdering and ValidateIncompatibilities — the dual of
+// the incompatibility check: where incompatibility refuses two Mechanisms that must never
+// co-fire, this refuses a Mechanism enabled without a peer it is benched as a stack with, a loud
+// startup failure (ADR 0003 posture, ADR 0014 §4). Enable-time only: live suppression of a
+// required peer mid-Session is accepted and not re-checked. New calls it once the whole graph is
+// present.
+func (r *MechanismRegistry) ValidateRequirements() error {
+	return detectRequirements(r.mechanisms)
 }
 
 // Ordered returns the catalogued Mechanisms that hook at at, in the deterministic total order

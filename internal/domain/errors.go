@@ -32,6 +32,12 @@ var (
 	// (ADR 0003), the same posture as ErrOrderingCycle.
 	ErrIncompatibleMechanisms = errors.New("apogee: incompatible mechanisms registered together")
 
+	// ErrMissingRequirement is returned by New when a registered Mechanism declares a required
+	// peer (MechanismDescriptor.Requires) that is not itself registered — the two are benched as
+	// a stack, so enabling one without the other is a configuration error that fails loudly at
+	// startup (ADR 0003 posture, ADR 0014 §4), the dual of ErrIncompatibleMechanisms.
+	ErrMissingRequirement = errors.New("apogee: a required mechanism is not registered")
+
 	// ErrSessionVersion is returned by Resume / DecodeSession for a snapshot whose
 	// schema version this build does not understand.
 	ErrSessionVersion = errors.New("apogee: unsupported session schema version")

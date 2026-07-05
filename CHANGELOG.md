@@ -6,6 +6,23 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [Unreleased]
+
+Post-`v1.2.0`, **additive** (minor) — the `guided_decomposition` Mechanism (ADR 0014), built
+up item-by-item behind the Mechanism catalogue and shipped **default-off** (the bench flips it
+on, not this work).
+
+### Guided decomposition (`guided_decomposition`, default-off)
+
+- **The `Requires` stacking relation.** `MechanismDescriptor` gains a `Requires []MechanismID`
+  field — the dual of `IncompatibleWith` — and `New` now runs the new
+  `MechanismRegistry.ValidateRequirements` gate alongside the ordering and incompatibility
+  checks: every registered Mechanism's required peers must also be registered, else the new
+  `ErrMissingRequirement` sentinel refuses construction ("X requires Y — enable both or neither;
+  they are benched as a stack"), the same startup-gate posture as `ErrOrderingCycle`. It is
+  enable-time only (ADR 0014 §4): live suppression of a required peer mid-Session is not
+  re-checked. (`internal/domain`, `internal/agent`.)
+
 ## [1.2.0] — 2026-07-04
 
 Post-`v1.1.0`, **additive** (minor) — Phase 4 merges the apogee-sim Mechanisms into the
