@@ -141,6 +141,34 @@ the bench finds a specific win.
 
 ---
 
+## Read-tool-name set consolidation (three hand-maintained sets drift)
+
+**Status:** parked 2026-07-05 (Phase-4 third-review close-out). Post-v1, a structural
+refactor that is **behaviour-neutral** (one shared set, identical membership) — a
+`/improve-codebase-architecture` candidate. Deliberately **not** fixed in the
+phase-4-third-review-fixes plan: that plan hardens behaviour and test coverage, not structure.
+
+**The drift:** three byte-identical read-tool-name sets are hand-maintained side by side in
+`internal/mechanisms` — `readToolNames` (`offramps.go:47`), `fileHintReadTools`
+(`filehint.go:46`), and `libraryReadTools` (`library.go:75`) — each currently
+`{read_file, readFile, open_file}`. Because they are edited independently, adding a new
+read-tool spelling (or a new read tool) means editing three places; missing one silently
+changes just one Mechanism's read detection with no compile error. This drift class has
+already shipped defects across consecutive review rounds — e.g. the second-review fixes that
+added the sim's camelCase `readFile` spelling to the read/analysis sets and that later folded
+`open_file` into the history-family read set — so the risk is demonstrated, not hypothetical.
+
+**The shape when we pick it up:** collapse the three onto a single canonical source of
+read-tool names (one package-level set, or a shared `isReadTool`-style predicate —
+`offramps.go` already exposes `isReadTool`), keeping membership identical so the change is
+provably behaviour-neutral. Guard the deliberate divergences that must **not** be folded in:
+the content-repair Mechanisms (`syntax`, `autofix`) key on the narrower sim-only
+`isWriteTool` set, and the list-tool sets (`fileHintListTools`, `libraryListTools`) are a
+separate concern. The sibling list-tool sets and the `isFileMutatingTool` predicate are worth
+auditing for the same drift in the same pass.
+
+---
+
 ## General system-prompt / template story
 
 **Status:** parked 2026-07-02 (prompt-seam grill — `docs/plans/prompt-seam-wiring-plan.md`,

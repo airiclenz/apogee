@@ -332,7 +332,7 @@ suggestion.
 
 ---
 
-## 8. Docs close-out (owning item for the residue)
+## 8. Docs close-out (owning item for the residue) — ✅ DONE (2026-07-05)
 
 **What:** the cross-cutting residue with exactly one owner (items above carry their own
 code-adjacent CHANGELOG lines and archived-plan amendments in their commits).
