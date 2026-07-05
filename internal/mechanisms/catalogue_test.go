@@ -3,6 +3,7 @@ package mechanisms
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -145,11 +146,13 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 		"filehint", "grammar", "read_loop",
 	}
 	reg := domain.NewMechanismRegistry()
+	built := make(map[domain.MechanismID]domain.Mechanism, len(ids))
 	for _, id := range ids {
 		m, err := Build(id, deps)
 		if err != nil {
 			t.Fatalf("Build(%q): %v", id, err)
 		}
+		built[id] = m
 		if err := reg.Add(m); err != nil {
 			t.Fatalf("Add(%q): %v", id, err)
 		}
@@ -164,10 +167,14 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 		pos[m.Descriptor().ID] = i
 	}
 
-	// Every cot nudge and library injects before toolfilter narrows the menu.
+	// Every cot nudge and library injects before toolfilter narrows the menu — assert each one
+	// DECLARES its Before-toolfilter edge, not merely that it sorts ahead of toolfilter. Under the
+	// D4 stable-ID tiebreak these four canonical IDs already sort before "toolfilter" even with the
+	// edge dropped, so an emergent-position check passes vacuously and would not catch an
+	// accidentally-deleted edge; inspecting the declared Ordering guards each edge independently.
 	for _, before := range []domain.MechanismID{"stall_nudge", "list_nudge", "tool_use_directive", "library"} {
-		if pos[before] >= pos["toolfilter"] {
-			t.Errorf("%s@%d is not before toolfilter@%d", before, pos[before], pos["toolfilter"])
+		if !slices.Contains(built[before].Ordering().Before, "toolfilter") {
+			t.Errorf("%s does not declare Before toolfilter (Ordering = %+v)", before, built[before].Ordering())
 		}
 	}
 	// The transform chain: toolfilter before decompose before tool_result_cap.
