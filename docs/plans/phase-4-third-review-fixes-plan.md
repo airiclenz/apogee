@@ -107,7 +107,7 @@ on drop below allocation) keep passing.
 
 ---
 
-## 2. `committedLen` boundary maintenance for the empty-superseded retry
+## 2. `committedLen` boundary maintenance for the empty-superseded retry — ✅ DONE (2026-07-05)
 
 **Finding:** review "`committedLen` retry-view bound is defeated when the superseded
 response is empty" (High, empirically reproduced in both shapes). Ground truth: item 10's

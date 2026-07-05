@@ -141,6 +141,16 @@ on the public surface — so this is a **minor** bump, not a major one.
   attempt. The appendage still reaches the model through `Request.State()` — only the
   mechanism view changes — matching apogee-sim, whose retry builders ran their detectors
   against the unmutated request. (`internal/domain`, `internal/agent`.)
+- **The retry-view boundary now survives an empty superseded response (third-review fix).**
+  When a retried response is wholly empty, nothing is appended, so the correction lands
+  *below* the frozen `committedLen` rather than after it — and the boundary was static, so
+  `Request.View()` evicted the real user ask (the insert-before-last-user shape) or the newest
+  tool result (the system-prepend shape) from the post-response scanners. `committedLen` is now
+  MAINTAINED, not just frozen: a below-boundary `InjectContext` insert and an
+  `appendOrCreateSystem` prepend each advance it, so `View()` stays pinned to the same committed
+  history. `Request.State()` (the model-facing projection) is byte-identical — the correction
+  still reaches the model unchanged; only the mechanism view is corrected. (`internal/domain`;
+  tests in `internal/agent`.)
 
 ### Wave 1 rides the retry seam: corrections deliver in the same Turn
 

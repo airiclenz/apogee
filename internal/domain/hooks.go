@@ -279,6 +279,13 @@ type Request struct {
 	// left the detector's request unmutated). -1 means no retry appendage has been recorded,
 	// so View() exposes the whole request. State() (the model-facing projection) is never
 	// bounded — the appendage still reaches the Upstream.
+	//
+	// Once frozen it is MAINTAINED, not static (F2): a below-boundary structural mutation
+	// (InjectContext inserting before the last user message, or appendOrCreateSystem
+	// prepending a system message) shifts committed indices, so committedLen advances to keep
+	// View() pinned to the same logical committed history. This matters for the
+	// empty-superseded retry, where nothing is appended so the correction lands below the
+	// boundary rather than after it.
 	committedLen int
 }
 
@@ -390,6 +397,14 @@ func (r *Request) InjectContext(text string) {
 		return
 	}
 	r.messages = insertMessage(r.messages, idx, msg)
+	// Boundary maintenance (F2): committedLen tracks the same logical message across
+	// request-scoped structural mutations. An insert BELOW the frozen boundary shifts every
+	// committed message right by one, so the boundary advances to keep View() pinned to the
+	// same committed history — without it an empty-superseded retry's correction lands below
+	// the boundary and evicts the real user ask from the post-response scanners' View().
+	if r.committedLen >= 0 && idx < r.committedLen {
+		r.committedLen++
+	}
 }
 
 // AppendSupersededAssistant appends a superseded assistant message (text + tool calls)
@@ -467,6 +482,17 @@ func (r *Request) appendOrCreateSystem(text string) {
 		return
 	}
 	r.messages = append([]Message{{Role: RoleSystem, Content: text}}, r.messages...)
+	// Boundary maintenance (F2): committedLen tracks the same logical message across
+	// request-scoped structural mutations. A prepended system message shifts every committed
+	// message right by one, so the boundary advances to keep View() pinned to the same
+	// committed history — without it an empty-superseded retry that prepends its correction
+	// (the ends-in-tool-result shape) shifts every index while the frozen boundary evicts the
+	// newest tool result from the post-response scanners' View(). The append-to-existing-system
+	// branch above changes no indices, so it needs no adjustment (its content-visibility
+	// residual is the accepted F2 residual).
+	if r.committedLen >= 0 {
+		r.committedLen++
+	}
 }
 
 // SamplingParams are the optional sampling overrides a pre-request hook may set; a
