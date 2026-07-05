@@ -1,37 +1,36 @@
 package apogee_test
 
-// Bench-readiness proof (Phase-4 item 15 — the ADR 0001 embedding contract, exercised
-// in-repo). This is the executable definition of "benchable": it drives the real Agent
-// exactly the way apogee-sim will — the public New / Resume / Submit / Step / Snapshot /
-// Close surface over the real provider client dialing a scripted OpenAI-compatible httptest
-// model, catalogued Mechanisms enabled via Config, experimental hooks at all five hook
-// points, isolated temp state roots — and asserts the contract holds. If a future change
-// breaks the way the bench drives apogee, this test breaks first.
+// Bench-readiness proof (the ADR 0001 embedding contract, exercised in-repo). This is the
+// executable definition of "benchable": it drives the real Agent exactly the way apogee-sim
+// will — the public New / Resume / Submit / Step / Snapshot / Close surface over the real
+// provider client dialing a scripted OpenAI-compatible httptest model, catalogued Mechanisms
+// armed by ID through Config.EnableMechanisms, experimental hooks at all five hook points via
+// AddExperimental, isolated temp state roots — and asserts the contract holds. If a future
+// change breaks the way the bench drives apogee, this test breaks first.
 //
-// It is a root-package consumer (package apogee_test) using the public surface for the
-// engine contract. It additionally imports three internal packages the way the black-box
-// apogee_test.go already imports internal/platform: internal/mechanisms builds the real
-// catalogue (mechanisms.Build is the in-repo stand-in for the enable path — apogee-sim, a
-// separate module, cannot import internal/*, so an in-repo test is the faithful driver the
-// item asks for), and internal/library + internal/session assert that agent-driven writes
-// land inside the injected roots. None of these is the bare root module path, so the
-// ADR-0010 "internal never imports root" invariant is untouched.
+// It arms every Mechanism through the PUBLIC enable surface (Config.EnableMechanisms +
+// AddExperimental, ADR 0015): it no longer builds the catalogue by hand and imports neither
+// internal/mechanisms nor internal/library, so a separate module (apogee-sim, which cannot
+// import internal/*) can now do everything this test does. The two internal imports that
+// remain — internal/session and internal/tools — are a separate concern: they inspect the
+// on-disk session schema and stock the tool menu, not the enable path, and neither is the
+// bare root module path, so ADR-0010's "internal never imports root" invariant is untouched.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
-	"github.com/airiclenz/apogee/internal/library"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -231,27 +230,15 @@ func (p *fivePointProbe) PostToolResult(context.Context, apogee.ToolCall, *apoge
 // Builders
 // ----------------------------------------------------------------------------
 
-// armRegistry builds a MechanismRegistry with the multi-wave catalogue set (its library store
-// rooted at the arm's injected libDir) plus the five-point experimental probe. Each arm gets a
-// fresh registry so its probe counters and library store never bleed into the other's.
-func armRegistry(t *testing.T, libDir string) (*apogee.MechanismRegistry, *fivePointProbe) {
+// armProbe returns a fresh MechanismRegistry carrying only the five-point experimental probe (via the
+// public AddExperimental) plus the probe itself. The catalogued Mechanisms are NOT built here — each
+// arm enables them by ID through Config.EnableMechanisms, and the engine builds them INTO this same
+// registry (its library store rooted at the arm's injected LibraryDir), so a catalogued+experimental
+// combined arm co-fires from one registry. Each arm gets a fresh registry so its probe counters and
+// library store never bleed into the other's.
+func armProbe(t *testing.T) (*apogee.MechanismRegistry, *fivePointProbe) {
 	t.Helper()
-	store := library.NewStore(libDir)
-	if err := store.Load(); err != nil {
-		t.Fatalf("library store load: %v", err)
-	}
-	deps := mechanisms.Deps{Library: store, Fingerprint: library.ResolveFingerprint(benchModelName)}
-
 	reg := apogee.NewMechanismRegistry()
-	for _, id := range enabledMechanisms {
-		m, err := mechanisms.Build(id, deps)
-		if err != nil {
-			t.Fatalf("build mechanism %q: %v", id, err)
-		}
-		if err := reg.Add(m); err != nil {
-			t.Fatalf("add mechanism %q: %v", id, err)
-		}
-	}
 	probe := &fivePointProbe{seen: map[apogee.HookPoint]int{}}
 	for _, at := range allHooks {
 		if err := reg.AddExperimental(at, probe); err != nil {
@@ -367,18 +354,19 @@ func TestBenchReadinessContract(t *testing.T) {
 	// --- Arm A: mechanisms on --------------------------------------------------
 	mechRoots := newRoots(t)
 	mechSink := &recSink{}
-	mechReg, mechProbe := armRegistry(t, mechRoots.library)
+	mechReg, mechProbe := armProbe(t)
 	mechArm, err := apogee.New(apogee.Config{
-		Endpoint:     srv.URL,
-		Model:        benchModelName,
-		Mode:         apogee.ModeAskBefore,
-		Approver:     allowAll{},
-		Events:       mechSink,
-		Mechanisms:   mechReg,
-		Tools:        paddedRegistry(t, mechRoots.workspace),
-		WorkspaceDir: mechRoots.workspace,
-		LibraryDir:   mechRoots.library,
-		SessionsDir:  mechRoots.sessions,
+		Endpoint:         srv.URL,
+		Model:            benchModelName,
+		Mode:             apogee.ModeAskBefore,
+		Approver:         allowAll{},
+		Events:           mechSink,
+		Mechanisms:       mechReg,
+		EnableMechanisms: enabledMechanisms,
+		Tools:            paddedRegistry(t, mechRoots.workspace),
+		WorkspaceDir:     mechRoots.workspace,
+		LibraryDir:       mechRoots.library,
+		SessionsDir:      mechRoots.sessions,
 	})
 	if err != nil {
 		t.Fatalf("New (mechanisms-on arm): %v", err)
@@ -388,19 +376,20 @@ func TestBenchReadinessContract(t *testing.T) {
 	// --- Arm B: Bypass ---------------------------------------------------------
 	bypassRoots := newRoots(t)
 	bypassSink := &recSink{}
-	bypassReg, bypassProbe := armRegistry(t, bypassRoots.library)
+	bypassReg, bypassProbe := armProbe(t)
 	bypassArm, err := apogee.New(apogee.Config{
-		Endpoint:     srv.URL,
-		Model:        benchModelName,
-		Mode:         apogee.ModeAskBefore,
-		Bypass:       true,
-		Approver:     allowAll{},
-		Events:       bypassSink,
-		Mechanisms:   bypassReg,
-		Tools:        paddedRegistry(t, bypassRoots.workspace),
-		WorkspaceDir: bypassRoots.workspace,
-		LibraryDir:   bypassRoots.library,
-		SessionsDir:  bypassRoots.sessions,
+		Endpoint:         srv.URL,
+		Model:            benchModelName,
+		Mode:             apogee.ModeAskBefore,
+		Bypass:           true,
+		Approver:         allowAll{},
+		Events:           bypassSink,
+		Mechanisms:       bypassReg,
+		EnableMechanisms: enabledMechanisms,
+		Tools:            paddedRegistry(t, bypassRoots.workspace),
+		WorkspaceDir:     bypassRoots.workspace,
+		LibraryDir:       bypassRoots.library,
+		SessionsDir:      bypassRoots.sessions,
 	})
 	if err != nil {
 		t.Fatalf("New (Bypass arm): %v", err)
@@ -538,4 +527,169 @@ func resumeFork(t *testing.T, endpoint string, snap apogee.Session, token string
 		t.Errorf("fork %q LibraryDir = %d entries (err %v), want 0", token, len(entries), err)
 	}
 	return messageText(sink.events)
+}
+
+// ----------------------------------------------------------------------------
+// Construction acceptance through the public enable surface (no live model)
+// ----------------------------------------------------------------------------
+
+// hermeticArm constructs an Agent for a construction-only assertion, arming Mechanisms by ID through
+// the public Config.EnableMechanisms into isolated temp roots with a discarding sink. New builds and
+// validates the named Mechanisms WITHOUT dialing the Endpoint, so the returned error (or nil) reports
+// exactly whether the arm is admissible — the fail-loud gate apogee-sim hits when it mis-plans an arm.
+func hermeticArm(t *testing.T, enable []apogee.MechanismID) (*apogee.Agent, error) {
+	t.Helper()
+	return apogee.New(apogee.Config{
+		Endpoint:         "http://localhost:11434",
+		Model:            benchModelName,
+		Mode:             apogee.ModeAskBefore,
+		Approver:         allowAll{},
+		Events:           &recSink{},
+		EnableMechanisms: enable,
+		WorkspaceDir:     t.TempDir(),
+		LibraryDir:       t.TempDir(),
+		SessionsDir:      t.TempDir(),
+	})
+}
+
+// TestBenchReadinessConstructionRefusals proves the campaign's fail-loud arms refuse construction
+// through the PUBLIC surface with a matchable sentinel: a half-armed Requires stack
+// (guided_decomposition without its required tool_result_cap peer, ADR 0014) fails
+// apogee.ErrMissingRequirement, and a bogus catalogue ID fails apogee.ErrUnknownMechanism — the same
+// startup gate the bench hits when it mis-plans an arm, asserted only through errors.Is on the root
+// sentinels.
+func TestBenchReadinessConstructionRefusals(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		enable  []apogee.MechanismID
+		wantErr error
+	}{
+		{
+			name:    "half-armed Requires stack",
+			enable:  []apogee.MechanismID{"guided_decomposition"},
+			wantErr: apogee.ErrMissingRequirement,
+		},
+		{
+			name:    "unknown catalogue ID",
+			enable:  []apogee.MechanismID{"no_such_mechanism"},
+			wantErr: apogee.ErrUnknownMechanism,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ag, err := hermeticArm(t, tc.enable)
+			if ag != nil {
+				ag.Close()
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("New(EnableMechanisms=%v) error = %v, want errors.Is(err, %v)", tc.enable, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// compatibleBaseStack computes a maximal enable set from the PUBLIC catalogue query the way the bench
+// plans a full-stack arm: walk apogee.CataloguedMechanisms() (already sorted) and greedily include
+// each ID unless it is IncompatibleWith one already chosen, then drop any whose Requires peers did not
+// survive — so the returned set carries no incompatible pair and no half-armed Requires stack, and New
+// accepts it. It is the base the leave-one-out arms subtract from, computed with nothing but the
+// public descriptor metadata.
+func compatibleBaseStack() []apogee.MechanismID {
+	catalogue := apogee.CataloguedMechanisms()
+	descByID := make(map[apogee.MechanismID]apogee.MechanismDescriptor, len(catalogue))
+	for _, d := range catalogue {
+		descByID[d.ID] = d
+	}
+
+	var base []apogee.MechanismID
+	for _, d := range catalogue {
+		conflict := false
+		for _, sel := range base {
+			if slices.Contains(d.IncompatibleWith, sel) || slices.Contains(descByID[sel].IncompatibleWith, d.ID) {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			base = append(base, d.ID)
+		}
+	}
+
+	// Drop any Mechanism whose required peers were excluded above, to a fixpoint (one drop can orphan
+	// another). Nothing here re-adds, so the loop terminates.
+	for {
+		kept := make([]apogee.MechanismID, 0, len(base))
+		for _, id := range base {
+			ok := true
+			for _, req := range descByID[id].Requires {
+				if !slices.Contains(base, req) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				kept = append(kept, id)
+			}
+		}
+		if len(kept) == len(base) {
+			return kept
+		}
+		base = kept
+	}
+}
+
+// TestBenchReadinessLeaveOneOutArms proves the bench's leave-one-out planning idiom works entirely
+// over the public surface: a full-stack arm computed from apogee.CataloguedMechanisms() constructs,
+// and so does every arm that leaves one member out (dropping any stack that Requires it — the Requires
+// traversal, so no half-armed stack ever reaches New). These are the arms the campaign compares to
+// measure each Mechanism's marginal contribution; that every one is admissible is the contract.
+func TestBenchReadinessLeaveOneOutArms(t *testing.T) {
+	t.Parallel()
+	base := compatibleBaseStack()
+	if len(base) == 0 {
+		t.Fatal("compatibleBaseStack() is empty; the public catalogue query returned nothing")
+	}
+
+	construct := func(t *testing.T, enable []apogee.MechanismID) {
+		t.Helper()
+		ag, err := hermeticArm(t, enable)
+		if err != nil {
+			t.Fatalf("New(EnableMechanisms=%v): %v", enable, err)
+		}
+		ag.Close()
+	}
+
+	t.Run("full stack", func(t *testing.T) {
+		t.Parallel()
+		construct(t, base)
+	})
+
+	for _, leaveOut := range base {
+		leaveOut := leaveOut
+		t.Run("without "+string(leaveOut), func(t *testing.T) {
+			t.Parallel()
+			arm := make([]apogee.MechanismID, 0, len(base))
+			for _, id := range base {
+				if id == leaveOut || slices.Contains(descriptorFor(id).Requires, leaveOut) {
+					continue // the left-out Mechanism, and any stack that Requires it
+				}
+				arm = append(arm, id)
+			}
+			construct(t, arm)
+		})
+	}
+}
+
+// descriptorFor returns the public descriptor of a catalogued Mechanism ID, or a zero descriptor if
+// the ID is not catalogued (the leave-one-out arms only ever pass IDs drawn from the catalogue query).
+func descriptorFor(id apogee.MechanismID) apogee.MechanismDescriptor {
+	for _, d := range apogee.CataloguedMechanisms() {
+		if d.ID == id {
+			return d
+		}
+	}
+	return apogee.MechanismDescriptor{}
 }

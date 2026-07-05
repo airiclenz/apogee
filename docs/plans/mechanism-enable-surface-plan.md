@@ -247,7 +247,7 @@ test file if needed) + CHANGELOG. Commit:
 
 ---
 
-## 5. benchreadiness: the executable contract stops cheating
+## 5. benchreadiness: the executable contract stops cheating — ✅ DONE (2026-07-05)
 
 **What:** migrate `benchreadiness_test.go` to the public surface: arm every arm via
 `Config.EnableMechanisms` (+ `AddExperimental` for the hook arms, unchanged), drop the

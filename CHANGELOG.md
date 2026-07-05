@@ -121,6 +121,16 @@ on, not this work).
   `EnableMechanisms` for catalogued enablement (the field keeps its name under v1 semver — no
   rename). Runnable godoc Examples arm the `guided_decomposition + tool_result_cap` stack and compute
   a leave-one-out arm from the catalogue query. (`apogee.go`, `internal/domain`.)
+- **The bench-readiness contract becomes a true external-surface consumer.** `benchreadiness_test.go`
+  now arms every arm through the PUBLIC enable surface — catalogued Mechanisms by ID via
+  `Config.EnableMechanisms`, experimental hooks via `AddExperimental` — and no longer imports
+  `internal/mechanisms` or `internal/library` or builds the catalogue by hand, so a separate module
+  (apogee-sim) can now do everything this test does (ADR 0015 Consequences). It adds the acceptance the
+  bench campaign needs, all through the root API: a half-armed `Requires` stack refuses construction
+  (`apogee.ErrMissingRequirement`), a bogus ID refuses (`apogee.ErrUnknownMechanism`), the
+  catalogued+experimental combined arm still co-fires both in deterministic order, and a leave-one-out
+  arm set computed from `apogee.CataloguedMechanisms()` — the full compatible stack and every
+  member-omitted arm — constructs successfully. (`benchreadiness_test.go`.)
 
 ## [1.2.0] — 2026-07-04
 
