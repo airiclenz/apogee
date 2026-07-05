@@ -451,6 +451,17 @@ deciding by scanning the conversation across Turns at its **relocated** hook poi
   `additionalProperties:false` — is inspected but never handed an argument it would reject, so the
   re-read proceeds uncapped and no fire is booked. This makes the mechanism's "benign no-op" fidelity
   note literally true instead of relying on the third-party tool tolerating an unknown field.
+- **The `isFileMutatingTool` history-family sites now have edit-tool coverage (third-review fix, Tests).**
+  Tests exercise `edit_existing_file` / `single_find_and_replace` at the three sites the earlier
+  suite left untested and that can carry regression-detecting coverage: `empty_response_recovery`
+  treats a recent edit as progress worth recovering (`hasRecentProgress`), the `tool_loop_interceptor`
+  directive credits an edit as work already done (`extractConversationContext`), and the `read_loop`
+  hint excludes an edit-written path from its "create X" suggestion (`writtenPaths`) — each test fails
+  when its site is mutated to exclude the edit tools. The fourth site (`wroteRecently` in the
+  `tool_use_enforcer`) cannot be pinned: `shouldEnforceToolUse`'s `!hasEverUsedTools` gate stands the
+  enforcer down whenever any edit call is present, so the `wroteRecently` edit branch is never the
+  deciding factor — documented in place rather than covered by a vacuous test. (`internal/mechanisms`
+  tests.)
 
 ### Wave 4: the `decompose` request shaper + the `stall_nudge` / `list_nudge` / `tool_use_directive` completion nudges
 

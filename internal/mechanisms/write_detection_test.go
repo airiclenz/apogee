@@ -2,18 +2,27 @@ package mechanisms
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
+// mutatingCall builds a file-mutating tool call for one of apogee's own edit tools (tool) over path.
+// isFileMutatingTool — semantic (b), "did this call mutate a file / was it a write action" — counts
+// these even though the sim-only isWriteTool (semantic (a), content repair) does not; only the path
+// is load-bearing for the history family's write-since / progress detection. Canonical names come
+// from internal/tools Name() methods (edit_existing_file, single_find_and_replace,
+// multi_find_and_replace), per the S1 precedent.
+func mutatingCall(id, tool, path string) domain.ToolCall {
+	args, _ := json.Marshal(map[string]string{"path": path})
+	return domain.ToolCall{ID: id, Tool: tool, Arguments: args}
+}
+
 // editCall is an edit_existing_file tool call over path — one of apogee's own edit tools, which
 // semantic (b) (isFileMutatingTool) counts as a file write even though the sim-only isWriteTool
 // does not. Only the path is load-bearing for the history family's write-since detection.
-func editCall(id, path string) domain.ToolCall {
-	args, _ := json.Marshal(map[string]string{"path": path})
-	return domain.ToolCall{ID: id, Tool: "edit_existing_file", Arguments: args}
-}
+func editCall(id, path string) domain.ToolCall { return mutatingCall(id, "edit_existing_file", path) }
 
 // openCall is an open_file tool call over path — apogee's own read tool, whose result places file
 // content into the conversation exactly like read_file, so the family's read set counts it.
@@ -154,5 +163,115 @@ func TestAutofixIgnoresEditToolCall(t *testing.T) {
 	hook := buildAutofix(t, notFound)
 	if d := fireAutofix(t, hook, responseWith(nil, call)); d.Action != "" {
 		t.Errorf("Action = %q, want the no-op zero decision: autofix must ignore edit-tool calls", d.Action)
+	}
+}
+
+// NOTE — offramps.go:98 (wroteRecently, the tool_use_enforcer stand-down) carries NO edit-tool test
+// here because the site cannot carry regression-detecting coverage. shouldEnforceToolUse ends with
+// `return !hasEverUsedTools(conv)`, and hasEverUsedTools reads the same signal wroteRecently does — an
+// assistant message with tool calls. The only history in which wroteRecently's edit branch could
+// matter is one that contains an edit call, but that same edit makes hasEverUsedTools true, which
+// forces the enforcer to stand down regardless of whether wroteRecently counts the edit. So mutating
+// the isFileMutatingTool branch at :98 (e.g. to isWriteTool, dropping the edit tools) cannot flip any
+// enforcer decision — a test claiming to pin it would pass under that mutation and be vacuous. See the
+// plan's item-7 dated NOTES for the full rationale. The three sites below (offramps.go:149,
+// toolloop.go:170, historyhints.go:106) DO discriminate the edit tools and are pinned genuinely.
+
+// hasRecentProgress (offramps.go, the empty_response_recovery gate at offramps.go:149) counts an
+// apogee edit tool as a file write, so an empty reply AFTER an edit is progress worth recovering even
+// past the early-turn grace and with fewer than two distinct reads — the same branch a write_file
+// would take. Without the edit the identical spinning-reads history has no progress and the off-ramp
+// is inert; the edit is the only difference, so it is what drives the isFileMutatingTool write branch.
+func TestEmptyResponseRecoveryTreatsRecentEditAsProgress(t *testing.T) {
+	t.Parallel()
+	// >3 assistant turns (past the grace) re-reading one file (fewer than two distinct paths): no
+	// progress on its own, so the off-ramp is inert — the control the edit is measured against.
+	spinning := []domain.Message{
+		userMsg("do it"),
+		assistantCall(readCall("c1", "a.go")),
+		assistantCall(readCall("c2", "a.go")),
+		assistantCall(readCall("c3", "a.go")),
+		assistantCall(readCall("c4", "a.go")),
+	}
+	if d := postResponse(t, emptyResponseRecoveryID, offrampResponse(spinning, toolMenu(), "")); d.Action != "" {
+		t.Fatalf("control decision = %+v, want inert: spinning reads of one file are not progress", d)
+	}
+
+	for _, tool := range []string{"edit_existing_file", "single_find_and_replace"} {
+		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
+			withEdit := append(spinning[:len(spinning):len(spinning)],
+				assistantCall(mutatingCall("e1", tool, "a.go")),
+			)
+			d := postResponse(t, emptyResponseRecoveryID, offrampResponse(withEdit, toolMenu(), ""))
+			if d.Action != domain.ActionRetry || d.Inject != completionCheckNudge {
+				t.Errorf("decision = %+v, want ActionRetry with the nudge: a recent %s is progress worth recovering", d, tool)
+			}
+		})
+	}
+}
+
+// extractConversationContext (toolloop.go:170's write branch) counts an apogee edit tool into
+// filesWritten, so the loop-breaking directive credits an edit_existing_file / single_find_and_replace
+// as work already done ("You have already written: …") and steers toward the remaining work rather
+// than restarting from write_file. Holds only because isFileMutatingTool counts apogee's own edit
+// tools; the identical read-repeat of b.go is what trips the interceptor.
+func TestToolLoopDirectiveCreditsEditToolWrite(t *testing.T) {
+	t.Parallel()
+	for _, tool := range []string{"edit_existing_file", "single_find_and_replace"} {
+		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
+			history := []domain.Message{
+				userMsg("update a.go"),
+				assistantCall(mutatingCall("e1", tool, "a.go")),
+				toolResult("e1", "wrote a.go"),
+				assistantCall(readCall("r1", "b.go")),
+				toolResult("r1", "package b"),
+			}
+			resp := offrampResponse(history, nil, "", readCall("r2", "b.go")) // repeats the previous turn's exact call
+			d := postResponse(t, toolLoopInterceptorID, resp)
+			if d.Action != domain.ActionRetry {
+				t.Fatalf("Action = %q, want ActionRetry on the identical repeat", d.Action)
+			}
+			if !strings.Contains(d.Inject, "already written: a.go") {
+				t.Errorf("directive = %q, want it to credit the %s write of a.go", d.Inject, tool)
+			}
+		})
+	}
+}
+
+// writtenPaths (historyhints.go:106) counts an apogee edit tool as a successful write, so
+// deriveWriteTarget excludes an edit_existing_file / single_find_and_replace-written path from the
+// read-loop hint's "create X" suggestion — the suggestion always points at REMAINING work. Holds only
+// because isFileMutatingTool counts apogee's own edit tools.
+func TestReadLoopHintExcludesEditWrittenTarget(t *testing.T) {
+	t.Parallel()
+	// spec.go re-read three times without acting → the successful-read-loop hint fires and derives the
+	// prompt's backtick-named target.go as the next write target.
+	base := []domain.Message{
+		userMsg("implement `target.go`"),
+		assistantCall(readCall("r1", "spec.go")), toolResult("r1", "package spec"),
+		assistantCall(readCall("r2", "spec.go")), toolResult("r2", "package spec"),
+		assistantCall(readCall("r3", "spec.go")), toolResult("r3", "package spec"),
+	}
+	// Control: with target.go unwritten, the hint names it as the derived write target.
+	if fired, hint := fireReadLoop(t, base); !fired || !strings.Contains(hint, "target.go") {
+		t.Fatalf("control: fired=%v hint=%q, want the hint to derive target.go as the write target", fired, hint)
+	}
+
+	for _, tool := range []string{"edit_existing_file", "single_find_and_replace"} {
+		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
+			edited := append(base[:len(base):len(base)],
+				assistantCall(mutatingCall("e1", tool, "target.go")), toolResult("e1", "wrote target.go"),
+			)
+			fired, hint := fireReadLoop(t, edited)
+			if !fired {
+				t.Fatalf("the read loop on spec.go still fires alongside an unrelated %s", tool)
+			}
+			if strings.Contains(hint, "target.go") {
+				t.Errorf("hint = %q, want target.go excluded: writtenPaths counts the %s, so it is not remaining work", hint, tool)
+			}
+		})
 	}
 }

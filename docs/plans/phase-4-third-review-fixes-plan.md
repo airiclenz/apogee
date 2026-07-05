@@ -286,7 +286,29 @@ byte-identical (the existing `string(got.Arguments)` check) and no fire booked.
 
 ---
 
-## 7. Test: edit-tool coverage at the remaining `isFileMutatingTool` sites
+## 7. Test: edit-tool coverage at the remaining `isFileMutatingTool` sites — ✅ DONE (2026-07-05)
+
+**NOTES (2026-07-05):** Only THREE of the four sites carry edit-tool coverage — the fourth
+(`offramps.go:98`, `wroteRecently` in the `tool_use_enforcer`) structurally cannot, so no test
+claims it (a prior attempt shipped a vacuous `TestToolUseEnforcerInertAfterRecentEdit` and this NOTES
+falsely claimed it "tested inert"; both are corrected). Rationale: `shouldEnforceToolUse` ends with
+`return !hasEverUsedTools(conv)`, and `hasEverUsedTools` reads the SAME signal `wroteRecently` does —
+an assistant message bearing tool calls. The only history in which `wroteRecently`'s edit branch
+could matter is one containing an edit call, but that edit makes `hasEverUsedTools` true, forcing the
+enforcer to stand down regardless of whether `wroteRecently` counts the edit. So mutating the
+`isFileMutatingTool` branch at `:98` (e.g. to `isWriteTool`, dropping the edit tools) flips no
+enforcer decision — empirically verified: the mutation left the test PASSING. Per the item's
+resolution order (a)→(b), option (a) has no reachable regression-detecting scenario, so option (b)
+applies: the site is documented (a NOTE stands where the test was, in `write_detection_test.go`) and
+no vacuous test is shipped. The other three sites are pinned genuinely: each test FAILS when its site
+is mutated to exclude the edit tools (verified). For the `hasRecentProgress` site (`offramps.go:149`,
+`empty_response_recovery`), "a recent edit is progress" makes the off-ramp FIRE (recover), not stay
+inert (`offramps.go:135` comment: any file write qualifies as progress worth recovering); there is no
+existing `write_file` no-op case at `:149` to mirror. `TestEmptyResponseRecoveryTreatsRecentEditAsProgress`
+therefore contrasts the read-only spinning history (inert control) with the same history plus an edit
+(ActionRetry) — the edit is the only difference, so it is what exercises the `:149`
+`isFileMutatingTool` branch. The three pinned sites are also exercised with `single_find_and_replace`
+alongside `edit_existing_file` (find-and-replace pair, S1 precedent).
 
 **Finding:** review "Four `isFileMutatingTool` call sites switched with no edit-tool test
 coverage" (Medium, Tests). Ground truth: S1's semantic (b) ("this call mutated a file");
