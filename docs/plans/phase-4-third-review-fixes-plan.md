@@ -267,7 +267,7 @@ line). Commit:
 
 ---
 
-## 6. Test: cached-content schema-gate conservative fallbacks
+## 6. Test: cached-content schema-gate conservative fallbacks — ✅ DONE (2026-07-05)
 
 **Finding:** review "`toolDeclaresMaxLines` conservative fallbacks are unpinned" (Medium,
 Tests — mutation-proven silent). Ground truth: the item-6 invariant (never hand a strict

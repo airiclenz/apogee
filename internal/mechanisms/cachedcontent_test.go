@@ -151,3 +151,48 @@ func TestCachedContentSkipsToolWithoutMaxLinesSchema(t *testing.T) {
 		t.Errorf("arguments mutated: %s vs %s", got.Arguments, call.Arguments)
 	}
 }
+
+// toolDeclaresMaxLines has three conservative fallbacks that all withhold the cap: the pending read
+// tool is (a) absent from the tool menu (the realistic case — toolfilter narrowing removed it from
+// view.Tools()), (b) present with an empty schema, or (c) present with a schema that does not parse.
+// In each, max_lines cannot be confirmed as a declared property, and appending it might hand a strict
+// tool an argument it rejects — so a genuine redundant re-read is left byte-identical (no mutation ⇒
+// no fire, R4). This pins the fallbacks the review found mutation-proven silent.
+func TestCachedContentSchemaGateConservativeFallbacks(t *testing.T) {
+	t.Parallel()
+	// a.go was read successfully earlier and not written since, so the read below is genuinely
+	// redundant: only the schema gate stands between it and a cap.
+	history := []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(readCall("r1", "a.go")),
+		toolResult("r1", "package a\nfunc F() {}"),
+		assistantCall(readCall("r2", "a.go")),
+	}
+	// otherTool stands in for a toolfilter-narrowed menu that no longer carries the pending read tool.
+	otherTool := domain.ToolDef{
+		Name:   "list_dir",
+		Schema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`),
+	}
+	cases := []struct {
+		name  string
+		tools []domain.ToolDef
+	}{
+		{"absent from the menu", []domain.ToolDef{otherTool}},
+		{"present with an empty schema", []domain.ToolDef{{Name: "read_file"}}},
+		{"present with malformed schema JSON", []domain.ToolDef{{Name: "read_file", Schema: json.RawMessage(`{"type":"object","properties":`)}}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call := readCall("r2", "a.go")
+			got := fireCachedWithTools(t, history, call, tc.tools)
+			if hasMaxLines(got.Arguments) {
+				t.Errorf("redundant re-read capped despite an unconfirmed schema; args = %s", got.Arguments)
+			}
+			if string(got.Arguments) != string(call.Arguments) {
+				t.Errorf("arguments mutated (a fire was booked): %s vs %s", got.Arguments, call.Arguments)
+			}
+		})
+	}
+}

@@ -349,6 +349,11 @@ on the public surface — so this is a **minor** bump, not a major one.
   and a `runRoot` test proves `opts.contextWindow` reaches `Config.Context.MaxContextTokens` (via the
   loud-zero notice) — closing the mutation gap the pinned-model-only coverage left open. (`cmd/apogee`
   tests.)
+- **`cached_content_intercept`'s schema-gate conservative fallbacks are now pinned by tests
+  (third-review fix, Tests).** A redundant re-read that would otherwise be capped is proven left
+  byte-identical (no fire, R4) when the pending read tool is absent from the (toolfilter-narrowed)
+  menu, carries an empty schema, or carries a schema that does not parse — closing the mutation gap
+  the earlier coverage left silent. (`internal/mechanisms` tests.)
 
 ### Wave 3: the `toolfilter` / `filehint` / `grammar` request shapers
 

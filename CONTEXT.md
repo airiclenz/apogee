@@ -285,7 +285,9 @@ _Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase".
 The action a post-response Mechanism chooses: **retry** (re-call the Upstream now, **in
 place** — the correction rides `ActionRetry`'s `Inject` onto the in-flight request and
 re-streams **within the same Turn**, R1), **intercept** (alter the response before the loop
-acts on it), or **defer** (schedule a correction into the *next* request). Corrections deliver
+acts on it), or **defer** (schedule a decision into the *next* request — a correction, or
+carried work a Mechanism consumes across coming Turns, such as a queue of
+decided-but-not-yet-delegated steps). Corrections deliver
 by **retry-in-place**: the loop owns the stream and can reset it (`StreamResetEvent`), so —
 unlike the proxy-era predecessor, which had already streamed the response downstream and could
 only defer — a streaming response is **not** forced to defer. `defer` remains available but the
