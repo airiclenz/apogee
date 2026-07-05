@@ -64,6 +64,13 @@ on, not this work).
   without `tool_result_cap` is the `ErrMissingRequirement` startup error, the stack boots, and adding
   `decompose` is the incompatibility error. The commented `mechanisms:` example in the config template
   gains the stack. (`internal/agent`, `cmd/apogee`.)
+- **Docs close-out.** The feature's cross-cutting doc edits are reconciled under this one heading:
+  CONTEXT.md's Guided decomposition entry now disambiguates it from the shipped `decompose` Mechanism
+  (a prompt-shaping nudge — steers wording, not delegation; the two are declared incompatible), and
+  ADR 0014 gains a dated Realisation note recording the decisions locked at implementation — queue
+  delivery as one re-derived deferred directive per Turn, `IncompatibleWith: [decompose]`,
+  registry-level `Requires` validation, verbatim enumeration text, and the 7/12 subtask bounds — plus
+  the authorized per-item deviations. (Docs: `CONTEXT.md`, `docs/adr/0014`.)
 
 ## [1.2.0] — 2026-07-04
 

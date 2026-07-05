@@ -140,3 +140,58 @@ full enumeration and every completed report.
 - **Parked separately** (TODO.md, 2026-07-05): mid-Exchange auto-compaction at quiescent Turn
   boundaries under pressure — a structural-reducer contract change with its own blast radius;
   if it ever lands, it would loosen (not remove) this Mechanism's `Requires` coupling.
+
+## Realisation (2026-07-05) — the decisions locked at implementation, and where the letter was refined
+
+`guided_decomposition` shipped item-by-item behind the Mechanism catalogue (default-off, D1) on
+the same day this ADR was ratified. The build refined the Decision's letter in a handful of
+places without touching its semantics; recorded here so the ADR stays the ground truth.
+
+- **Queue delivery is one re-derived deferred directive per Turn** — §3's "cursor over honest
+  history" made literal. The remaining-items state carries **no** mechanism-struct field: each
+  post-response Turn re-derives the remainder from honest history — the model's own enumeration
+  message and the `sub_agent` **calls** in the conversation (never the child *results*, so a
+  report capped by `tool_result_cap` leaves the cursor exact) — and re-defers a single directive
+  string over the existing deferred FIFO (`conversationJSON.Deferred`). Snapshot/resume-safety and
+  suppression-clean abandonment both fall out for free; on suppression at most one already-queued
+  directive still drains via the loop's shared defer plumbing (loop plumbing, not a Mechanism fire
+  — documented, not fought).
+- **The stacking relations landed as declared:** `IncompatibleWith: [decompose]` (two Mechanisms
+  steering the same symptom through different means must not co-fire) and `Requires:
+  [tool_result_cap]` validated at the **registry** level (`MechanismRegistry.ValidateRequirements`
+  → `ErrMissingRequirement`), so a library embedder gets the same enable-time gate as the CLI, not
+  a cmd-only check. Validation order is incompatibilities-before-requirements.
+- **The enumeration text is never trimmed** (§2/§3 honesty): the intercept only *appends* the
+  synthesized `sub_agent` call via `Response.AppendToolCall`; `SetText` is not used, so the list
+  stays verbatim in history.
+- **Bounds (tuning surface, the bench's to move):** the steer asks for at most **7** subtasks
+  (`guidedDecompositionMaxSubtasks`); the intercept declines the WHOLE enumeration — a benign
+  no-op, never a truncation — on a parsed list of fewer than **2** or more than **12** items
+  (`guidedDecompositionMinSubtasks` / `guidedDecompositionMaxAcceptedSubtasks`, the accept window
+  deliberately wider than the steer's ask so a slight overshoot still fans out).
+
+Authorized implementation deviations (each recorded in the plan's per-item NOTES, mirrored here):
+
+- **Depth reaches hooks through a `Request.SetDepth` engine seam,** not a new `NewRequest`
+  parameter — a parameter would have forced ~18 test-caller edits outside the item's confined
+  diff. `SetDepth` is loop setup and does **not** bump the revision. `hookrun` already composed an
+  in-place response mutation with a returned `ActionDefer` correctly, so §2's mutate-and-defer
+  needed no hookrun change.
+- **The no-double-steer gate uses TWO markers, not one:** `guidedDecompositionSteerMarker` on the
+  enumeration steer this half injects, and `guidedDecompositionDirectiveMarker` on the
+  remaining-items directive (a forward contract — `buildRequest` drains and injects the directive
+  *before* the pre-request hooks run, so an in-flight fan-out is visible to the gate, which stays
+  quiet). Signal-B history-token estimation counts message content only, not tool-call arguments
+  (the existing chars→token idiom).
+- **The follow-through is additionally guarded on the directive marker** being present before it
+  re-derives — a refinement of §2's case-2 text, consistent with the cursor-over-honest-history
+  model: a spurious model `sub_agent` call with no fan-out in flight is an explicit no-op rather
+  than relying on an empty-remainder derivation.
+- **The config template's commented `mechanisms:` example carries the STACK** (both
+  `guided_decomposition: true` AND `tool_result_cap: true`), never the lone key — a lone
+  `guided_decomposition` would be an erroring half-stack if uncommented (`ErrMissingRequirement`),
+  so the two-line example is valid-if-uncommented.
+
+These refine the letter; the Decision is unchanged. The Mechanism ships default-off — the
+ADR 0009 non-inferiority gate for the `guided_decomposition + tool_result_cap` stack, and any
+constant tuning, remain the bench's call.

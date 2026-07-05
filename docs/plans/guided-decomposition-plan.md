@@ -300,7 +300,15 @@ confined to `cmd/apogee`, `internal/agent` (tests) + docs/CHANGELOG. Commit:
 
 ---
 
-## 6. Docs close-out (the one owning item for every cross-cutting doc edit)
+## 6. Docs close-out (the one owning item for every cross-cutting doc edit) — ✅ DONE (2026-07-05)
+
+NOTES (2026-07-05): items 1–5 had already placed their five bullets under one shared
+`### Guided decomposition (guided_decomposition, default-off)` heading, so the CHANGELOG (a) was
+reconciled by ADDING a sixth "Docs close-out" bullet under that same heading (mirroring the
+Phase-4 "closed out" CHANGELOG precedent) rather than rewriting the existing five — the single
+coherent entry is preserved. (b)/(c)/(d) landed as written. The item-2 NOTES about the mandatory
+`fakeView` compile-fix were treated as a mechanical test change, not an architectural deviation,
+so they were NOT mirrored into the ADR Realisation note (which records design refinements only).
 
 **What:** (a) CHANGELOG roll-up for the feature (items 1–5 each added their line; this item
 reconciles them under one heading). (b) CONTEXT.md: extend the Guided decomposition entry's

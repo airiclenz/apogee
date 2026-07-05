@@ -421,7 +421,9 @@ suppression in honest history. See
 [ADR 0014](docs/adr/0014-guided-decomposition-steers-the-primary-call-and-serializes-delegation.md).
 _Avoid_: "planner" (Plan is an autonomy mode), "orchestrator" (that is the sub-agent spawn
 machinery, ADR 0013), "auto-decomposition" (the model performs the semantic split; the
-Mechanism only decides when to ask and serializes the follow-through).
+Mechanism only decides when to ask and serializes the follow-through). Not to be conflated with
+the **`decompose`** Mechanism (a prompt-shaping nudge; steers wording, not delegation — the two
+are declared incompatible).
 
 ### Validation and the bench
 
