@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -165,27 +163,20 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpTools)
 	}
 
-	// Build the catalogued Mechanisms enabled in config.yaml and fold them into Config.Mechanisms
-	// (Phase 4). deps is the construction-injected collaborator set (D3): LookPath is the host's
-	// real PATH prober — autofix resolves its formatter table through it once at construction — and
-	// (item 14) the Library store + resolved model fingerprint the library observe/inject Mechanism
-	// keys on, wired only when `library` is enabled (see libraryDeps). mechanisms.Build drives the
-	// catalogue's constructor table and mechanisms.KnownIDs is its known-key surface; an unknown ID —
-	// enabled OR disabled — or an incompatible pair is a loud startup error surfaced here (the latter
-	// via New's ValidateIncompatibilities gate). With nothing enabled this is a no-op (nil registry ⇒
-	// New defaults to an empty one), so a config without a mechanisms block behaves exactly as before.
-	deps := mechanisms.Deps{LookPath: exec.LookPath}
-	libraryDeps(&deps, opts.mechanisms["library"], roots.library, opts.model)
-	registry, err := buildMechanismRegistry(
-		opts.mechanisms,
-		deps,
-		mechanisms.Build,
-		mechanisms.KnownIDs(),
-	)
+	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms
+	// (ADR 0015 §1: wire.go collapses to a YAML→ID-list producer). runRoot validates EVERY
+	// `mechanisms:` key here — enabled AND disabled — and hands only the enabled IDs to
+	// Config.EnableMechanisms; apogee.New/Resume then build them, derive their Deps (the Library store
+	// under LibraryDir, the resolved model fingerprint, the inert grammar seam), merge them into
+	// Config.Mechanisms, and run the ordering / incompatibility / requirements gates. The disabled-key
+	// validation must stay here because the engine only ever sees the enabled IDs, so a typo'd DISABLED
+	// key — never constructed — must still fail loudly at this startup boundary. With nothing enabled
+	// the list is empty and the engine arms nothing, so a config without a mechanisms block behaves
+	// exactly as before.
+	cfg.EnableMechanisms, err = mechanismIDs(opts.mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return err
 	}
-	cfg.Mechanisms = registry
 
 	agent, err := buildAgent(cfg, opts.resume)
 	if err != nil {
@@ -243,29 +234,18 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 	return registry
 }
 
-// mechanismBuilder constructs one catalogued Mechanism by canonical ID from the injected Deps
-// (D3). internal/mechanisms.Build fills it in production (driving the catalogue's constructor
-// table); a test injects a fake row so buildMechanismRegistry is table-testable while the real
-// catalogue is still empty (waves 5–14 fill it). apogee.MechanismID / apogee.Mechanism are the
-// public aliases for the domain types Build returns, so the assignment is a no-op.
-type mechanismBuilder func(apogee.MechanismID, mechanisms.Deps) (apogee.Mechanism, error)
-
-// buildMechanismRegistry builds a MechanismRegistry from the enabled-mechanism config (Phase 4),
-// validating EVERY `mechanisms:` key against the known catalogue and driving build for each ID
-// whose value is true, Add-ing the result. Keys are walked in sorted canonical spelling so
-// registration (and any error) is deterministic; the dispatch order is the registry's own
-// topo-sort (ADR 0003), independent of registration order. An unknown ID is a loud startup
-// failure whether its value is true (build's error) or false (checked by name against known —
-// phase-4-review-fixes item 5; disabled Mechanisms are never constructed), as is a Mechanism
-// implementing no hook interface (Add's error) — a typo'd or half-built Mechanism never silently
-// vanishes. With nothing enabled (and every key valid) it returns a nil registry so New falls
-// back to its default empty one (today's behaviour unchanged).
-func buildMechanismRegistry(
-	enabled map[string]bool,
-	deps mechanisms.Deps,
-	build mechanismBuilder,
-	known []apogee.MechanismID,
-) (*apogee.MechanismRegistry, error) {
+// mechanismIDs validates every `mechanisms:` config key against the known catalogue and returns the
+// enabled IDs in sorted canonical order for Config.EnableMechanisms — the engine (apogee.New/Resume)
+// builds them, derives their Deps, and runs the stacking gates (ADR 0015 §1: wire.go collapses to a
+// YAML→ID-list producer). EVERY key is validated here, enabled AND disabled: the engine only ever
+// sees the enabled IDs, so a typo'd DISABLED key — never constructed — must still fail loudly at this
+// startup boundary (phase-4-review-fixes item 5). An unknown key, whether true or false, is a loud
+// error naming the known catalogue. Keys are walked in sorted spelling so the returned list (and any
+// engine-side build error over it) is deterministic; the dispatch order is the registry's own
+// topo-sort (ADR 0003), independent of this order. With nothing enabled it returns nil, so
+// Config.EnableMechanisms stays empty and the engine arms nothing (today's behaviour for a config
+// without a mechanisms block).
+func mechanismIDs(enabled map[string]bool, known []apogee.MechanismID) ([]apogee.MechanismID, error) {
 	knownSet := make(map[string]bool, len(known))
 	for _, id := range known {
 		knownSet[string(id)] = true
@@ -277,55 +257,23 @@ func buildMechanismRegistry(
 	}
 	sort.Strings(keys)
 
-	ids := make([]string, 0, len(keys))
+	ids := make([]apogee.MechanismID, 0, len(keys))
 	for _, id := range keys {
-		if enabled[id] {
-			ids = append(ids, id) // an unknown enabled ID errors through build below, as today
-			continue
-		}
 		if !knownSet[id] {
 			return nil, fmt.Errorf("apogee: unknown mechanism %q; known: %s", id, knownMechanismList(known))
+		}
+		if enabled[id] {
+			ids = append(ids, apogee.MechanismID(id))
 		}
 	}
 	if len(ids) == 0 {
 		return nil, nil
 	}
-
-	registry := apogee.NewMechanismRegistry()
-	for _, id := range ids {
-		m, err := build(apogee.MechanismID(id), deps)
-		if err != nil {
-			return nil, err
-		}
-		if err := registry.Add(m); err != nil {
-			return nil, fmt.Errorf("apogee: register mechanism %q: %w", id, err)
-		}
-	}
-	return registry, nil
+	return ids, nil
 }
 
-// libraryDeps wires the Library store and the resolved model fingerprint into deps when the
-// `library` Mechanism is enabled (item 14, D3). The store is rooted at the injected LibraryDir
-// (never an ambient ~/.apogee — ADR 0001) and Loaded up front so an existing per-model Library is
-// available to inject; a missing store loads empty, and a corrupt / too-new one degrades to
-// empty-with-a-soft-stderr-notice (the skills-catalog posture — a broken Library never blocks
-// startup). The fingerprint is resolved once here from the configured model id, so the inject and
-// observe halves share one identity. When `library` is disabled, deps.Library stays nil and no store
-// file is read — a config without it behaves exactly as before.
-func libraryDeps(deps *mechanisms.Deps, enabled bool, libraryDir, model string) {
-	if !enabled {
-		return
-	}
-	store := library.NewStore(libraryDir)
-	if err := store.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "apogee: library store degraded to empty: %v\n", err)
-	}
-	deps.Library = store
-	deps.Fingerprint = library.ResolveFingerprint(model)
-}
-
-// knownMechanismList renders the known catalogue for the unknown-disabled-key error, matching
-// the build path's own error tail (an empty catalogue renders "(none)").
+// knownMechanismList renders the known catalogue for the unknown-key error, matching the engine's
+// own unknown-ID error tail (an empty catalogue renders "(none)").
 func knownMechanismList(known []apogee.MechanismID) string {
 	if len(known) == 0 {
 		return "(none)"

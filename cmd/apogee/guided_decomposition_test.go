@@ -1,9 +1,9 @@
 package main
 
 // Config-surface acceptance for the guided_decomposition stack (ADR 0014, plan item 5): the
-// `mechanisms:` block wires guided_decomposition through the production catalogue (mechanisms.Build)
-// and construction (apogee.New) enforces the ADR 0014 §4 stacking gates — Requires tool_result_cap,
-// IncompatibleWith decompose — as loud startup errors, not silent misconfiguration.
+// `mechanisms:` block resolves to Config.EnableMechanisms (mechanismIDs over the production
+// catalogue) and construction (apogee.New) enforces the ADR 0014 §4 stacking gates — Requires
+// tool_result_cap, IncompatibleWith decompose — as loud startup errors, not silent misconfiguration.
 
 import (
 	"errors"
@@ -14,15 +14,16 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
-// guidedRegistry builds a MechanismRegistry from the real catalogue for the enabled IDs (the same
-// seam the config surface drives). Building only registers; the stacking gates fire at apogee.New.
-func guidedRegistry(t *testing.T, enabled map[string]bool) *apogee.MechanismRegistry {
+// guidedEnable resolves the enabled IDs the config surface would hand the engine (mechanismIDs over
+// the real catalogue) onto cfg.EnableMechanisms — the same seam runRoot drives. Building and the ADR
+// 0014 §4 stacking gates fire at apogee.New, exactly as they do from a real `mechanisms:` block.
+func guidedEnable(t *testing.T, cfg *apogee.Config, enabled map[string]bool) {
 	t.Helper()
-	reg, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, mechanisms.Build, mechanisms.KnownIDs())
+	ids, err := mechanismIDs(enabled, mechanisms.KnownIDs())
 	if err != nil {
-		t.Fatalf("buildMechanismRegistry(%v): %v", enabled, err)
+		t.Fatalf("mechanismIDs(%v): %v", enabled, err)
 	}
-	return reg
+	cfg.EnableMechanisms = ids
 }
 
 // Enabling guided_decomposition without its Required peer tool_result_cap is a loud startup error
@@ -30,7 +31,7 @@ func guidedRegistry(t *testing.T, enabled map[string]bool) *apogee.MechanismRegi
 func TestGuidedDecomposition_RequiresToolResultCapToBoot(t *testing.T) {
 	t.Parallel()
 	cfg := validCfg(t)
-	cfg.Mechanisms = guidedRegistry(t, map[string]bool{"guided_decomposition": true})
+	guidedEnable(t, &cfg, map[string]bool{"guided_decomposition": true})
 
 	_, err := apogee.New(cfg)
 	if err == nil {
@@ -46,7 +47,7 @@ func TestGuidedDecomposition_RequiresToolResultCapToBoot(t *testing.T) {
 func TestGuidedDecomposition_BootsWithToolResultCap(t *testing.T) {
 	t.Parallel()
 	cfg := validCfg(t)
-	cfg.Mechanisms = guidedRegistry(t, map[string]bool{"guided_decomposition": true, "tool_result_cap": true})
+	guidedEnable(t, &cfg, map[string]bool{"guided_decomposition": true, "tool_result_cap": true})
 
 	agent, err := apogee.New(cfg)
 	if err != nil {
@@ -61,7 +62,7 @@ func TestGuidedDecomposition_BootsWithToolResultCap(t *testing.T) {
 func TestGuidedDecomposition_IncompatibleWithDecompose(t *testing.T) {
 	t.Parallel()
 	cfg := validCfg(t)
-	cfg.Mechanisms = guidedRegistry(t, map[string]bool{
+	guidedEnable(t, &cfg, map[string]bool{
 		"guided_decomposition": true,
 		"tool_result_cap":      true, // satisfies Requires, so ONLY the decompose incompatibility surfaces
 		"decompose":            true,

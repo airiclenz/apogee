@@ -98,6 +98,16 @@ on, not this work).
   A spawned sub-agent inherits the parent's already-built registry, so it fires the same Mechanisms
   without re-building them. `cmd/apogee`'s own YAML→registry path is unchanged for now (it collapses
   onto this engine path in a follow-up). (`internal/domain`, `internal/agent`.)
+- **`cmd/apogee` collapses to a YAML→ID-list producer.** `cmd/apogee/wire.go` no longer builds a
+  registry: `buildMechanismRegistry` and the cmd-side `Deps` derivation (the Library store /
+  fingerprint / `LookPath` wiring, now dead) are deleted. The composition root still validates EVERY
+  `mechanisms:` key — enabled AND disabled — against the known catalogue at the startup boundary (a
+  typo'd DISABLED key, which the engine never sees, must still fail loudly there), then hands the
+  sorted enabled IDs to `Config.EnableMechanisms` and lets `New`/`Resume` build them (ADR 0015 §1).
+  The YAML `mechanisms:` surface, the config template, and every user-visible behaviour are unchanged
+  — the same loud errors refuse to boot at the same startup boundary (unknown key, half-stack,
+  incompatibility), only the `%w` chain behind some of them moved from the cmd path onto the engine
+  path. (`cmd/apogee`.)
 
 ## [1.2.0] — 2026-07-04
 

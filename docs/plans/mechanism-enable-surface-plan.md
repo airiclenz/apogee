@@ -167,7 +167,18 @@ policy); a non-`library` list never touches `LibraryDir`.
 
 ---
 
-## 3. cmd/apogee: wire.go collapses to a YAML→ID-list producer
+## 3. cmd/apogee: wire.go collapses to a YAML→ID-list producer — ✅ DONE (2026-07-05)
+
+**NOTES (2026-07-05):** the Tests line asks to "update error-text/chain assertions only", but the
+What line's own directive DELETES `buildMechanismRegistry` + the cmd Deps derivation, so the tests
+that called them could not stay assertion-only. Migrated in-scope (`cmd/apogee`): `wire.go`'s
+producer is now `mechanismIDs(map→[]MechanismID)`; the five `TestBuildMechanismRegistry*` tests
+became `TestMechanismIDs*` (same semantic coverage — enable-only-true, default-none, unknown
+enabled/disabled key), the fake-builder helpers (`buildFake`, `fakePreRequestMechanism`) are removed
+as dead, and the construct-under-Bypass test + `guided_decomposition_test.go` now drive the real
+engine via `Config.EnableMechanisms` (the Bypass test uses the real `validate` ID, since no fake
+builder survives). `config_test.go` was untouched (it only exercises `applyConfig`→`opts.mechanisms`,
+unchanged). Every user-visible startup error/boot case is preserved.
 
 **What:** replace `buildMechanismRegistry` (`cmd/apogee/wire.go:253-305`) and the cmd-side
 Deps derivation (:308-324) with: validate the YAML map's keys (enabled AND disabled,

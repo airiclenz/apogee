@@ -365,84 +365,59 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 	}
 }
 
-// fakePreRequestMechanism is a minimal catalogued Mechanism (a pre-request hook) for exercising
-// the mechanism wire-up while the real catalogue is empty. buildFake is the injected builder that
-// mints it, standing in for internal/mechanisms.Build.
-type fakePreRequestMechanism struct {
-	id apogee.MechanismID
-}
-
-func (f fakePreRequestMechanism) Descriptor() apogee.MechanismDescriptor {
-	return apogee.MechanismDescriptor{ID: f.id, Capability: apogee.CapProactiveNudge, Suppression: apogee.SuppressStrikesThree}
-}
-func (f fakePreRequestMechanism) Ordering() apogee.OrderingConstraints {
-	return apogee.OrderingConstraints{}
-}
-func (f fakePreRequestMechanism) PreRequest(context.Context, *apogee.Request) error { return nil }
-
-func buildFake(id apogee.MechanismID, _ mechanisms.Deps) (apogee.Mechanism, error) {
-	return fakePreRequestMechanism{id: id}, nil
-}
-
-// fakeKnown is the known-catalogue surface matching buildFake — the IDs the config-key
-// validation accepts while the builder is the injected fake.
+// fakeKnown is a stand-in catalogue for the pure key-validation tests: mechanismIDs only checks a
+// `mechanisms:` key against the known set and selects the enabled ones (the engine builds, so no
+// constructor is needed here — the unknown-ID and construct-under-Bypass paths below drive the REAL
+// catalogue via mechanisms.KnownIDs / apogee.New).
 var fakeKnown = []apogee.MechanismID{"alpha", "beta", "off"}
 
-// An enabled ID is built and registered; a `false` entry is not. The registered Mechanism is
-// visible in the registry's deterministic dispatch order (Ordered).
-func TestBuildMechanismRegistryEnablesOnlyTrue(t *testing.T) {
+// An enabled ID is selected; a `false` entry is not. mechanismIDs returns the enabled IDs in sorted
+// canonical order for Config.EnableMechanisms — the engine builds them (ADR 0015 §1).
+func TestMechanismIDsEnablesOnlyTrue(t *testing.T) {
 	t.Parallel()
-	enabled := map[string]bool{"alpha": true, "beta": false}
-	registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake, fakeKnown)
+	ids, err := mechanismIDs(map[string]bool{"alpha": true, "beta": false}, fakeKnown)
 	if err != nil {
-		t.Fatalf("buildMechanismRegistry: %v", err)
+		t.Fatalf("mechanismIDs: %v", err)
 	}
-	if registry == nil {
-		t.Fatal("registry is nil; want the enabled Mechanism registered")
-	}
-	ordered := registry.Ordered(apogee.HookPreRequest)
-	if len(ordered) != 1 {
-		t.Fatalf("Ordered = %d Mechanisms; want exactly the one enabled (the `false` entry is skipped)", len(ordered))
-	}
-	if got := ordered[0].Descriptor().ID; got != "alpha" {
-		t.Errorf("registered ID = %q; want the enabled %q", got, "alpha")
+	if len(ids) != 1 || ids[0] != "alpha" {
+		t.Errorf("mechanismIDs = %v; want exactly [alpha] (the `false` entry is skipped)", ids)
 	}
 }
 
-// Nothing enabled ⇒ a nil registry, so New falls back to its default empty one (today's
-// behaviour unchanged for a config with no mechanisms block). A KNOWN key mapped to false
-// builds nothing — disabled Mechanisms are validated by name, never constructed.
-func TestBuildMechanismRegistryDefaultNone(t *testing.T) {
+// Nothing enabled ⇒ a nil ID list, so Config.EnableMechanisms stays empty and New arms nothing
+// (today's behaviour unchanged for a config with no mechanisms block). A KNOWN key mapped to false
+// selects nothing — disabled Mechanisms are validated by name, never enabled.
+func TestMechanismIDsDefaultNone(t *testing.T) {
 	t.Parallel()
 	for _, enabled := range []map[string]bool{nil, {}, {"off": false}} {
-		registry, err := buildMechanismRegistry(enabled, mechanisms.Deps{}, buildFake, fakeKnown)
+		ids, err := mechanismIDs(enabled, fakeKnown)
 		if err != nil {
-			t.Fatalf("buildMechanismRegistry(%+v): %v", enabled, err)
+			t.Fatalf("mechanismIDs(%+v): %v", enabled, err)
 		}
-		if registry != nil {
-			t.Errorf("buildMechanismRegistry(%+v) = non-nil; want nil (nothing enabled)", enabled)
+		if ids != nil {
+			t.Errorf("mechanismIDs(%+v) = %v; want nil (nothing enabled)", enabled, ids)
 		}
 	}
 }
 
-// An unknown ID is a loud startup error — proven end-to-end against the real catalogue via
-// mechanisms.Build, so a typo'd `mechanisms:` key fails startup rather than silently vanishing.
-func TestBuildMechanismRegistryUnknownIDErrors(t *testing.T) {
+// An unknown ENABLED ID is a loud startup error — proven against the real catalogue via
+// mechanisms.KnownIDs, so a typo'd `mechanisms:` key fails startup rather than silently vanishing.
+func TestMechanismIDsUnknownIDErrors(t *testing.T) {
 	t.Parallel()
-	_, err := buildMechanismRegistry(map[string]bool{"nope": true}, mechanisms.Deps{}, mechanisms.Build, mechanisms.KnownIDs())
+	_, err := mechanismIDs(map[string]bool{"nope": true}, mechanisms.KnownIDs())
 	if err == nil {
 		t.Fatal("enabling an unknown mechanism: want an error, got nil")
 	}
 }
 
-// A typo'd key mapped to FALSE is a startup error too (phase-4-review-fixes item 5): it used to
-// be silently accepted, contradicting README/config.yaml's promised loud error. The error lists
-// the real catalogue's known IDs; a valid disabled key still builds nothing — end-to-end against
-// mechanisms.Build / mechanisms.KnownIDs.
-func TestBuildMechanismRegistryUnknownDisabledKeyErrors(t *testing.T) {
+// A typo'd key mapped to FALSE is a startup error too (phase-4-review-fixes item 5): the disabled-key
+// validation stays cmd-side because the engine only ever sees the ENABLED IDs. The error lists the
+// real catalogue's known IDs; a valid disabled key still selects nothing — validated against
+// mechanisms.KnownIDs.
+func TestMechanismIDsUnknownDisabledKeyErrors(t *testing.T) {
 	t.Parallel()
 
-	_, err := buildMechanismRegistry(map[string]bool{"typo": false}, mechanisms.Deps{}, mechanisms.Build, mechanisms.KnownIDs())
+	_, err := mechanismIDs(map[string]bool{"typo": false}, mechanisms.KnownIDs())
 	if err == nil {
 		t.Fatal(`{"typo": false}: want a startup error, got nil`)
 	}
@@ -453,28 +428,29 @@ func TestBuildMechanismRegistryUnknownDisabledKeyErrors(t *testing.T) {
 		t.Errorf("error = %q, want it to list the known catalogue (e.g. %q)", err, "validate")
 	}
 
-	// The same key spelled correctly and disabled is fine: validated by name, never built.
-	registry, err := buildMechanismRegistry(map[string]bool{"validate": false}, mechanisms.Deps{}, mechanisms.Build, mechanisms.KnownIDs())
+	// The same key spelled correctly and disabled is fine: validated by name, never enabled.
+	ids, err := mechanismIDs(map[string]bool{"validate": false}, mechanisms.KnownIDs())
 	if err != nil {
 		t.Fatalf(`{"validate": false}: %v`, err)
 	}
-	if registry != nil {
-		t.Error(`{"validate": false} = non-nil registry; want nil (a disabled Mechanism is never constructed)`)
+	if ids != nil {
+		t.Errorf(`{"validate": false} = %v; want nil (a disabled Mechanism is never enabled)`, ids)
 	}
 }
 
-// A built registry threads through New even under Bypass: enabling a Mechanism and running Bypass
-// construct cleanly together (the dispatch gate that skips it under Bypass is item 2's, exercised
-// in internal/agent). This proves the config → registry → Config.Mechanisms path is coherent.
-func TestBuildMechanismRegistryConstructsUnderBypass(t *testing.T) {
+// The enabled IDs thread through New as Config.EnableMechanisms and the engine arms them — even under
+// Bypass, enabling a real catalogued Mechanism (validate) constructs cleanly (the dispatch gate that
+// skips it under Bypass is the engine's, exercised in internal/agent). This proves the config →
+// EnableMechanisms → engine-build path is coherent end-to-end.
+func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
 	t.Parallel()
-	registry, err := buildMechanismRegistry(map[string]bool{"alpha": true}, mechanisms.Deps{}, buildFake, fakeKnown)
+	ids, err := mechanismIDs(map[string]bool{"validate": true}, mechanisms.KnownIDs())
 	if err != nil {
-		t.Fatalf("buildMechanismRegistry: %v", err)
+		t.Fatalf("mechanismIDs: %v", err)
 	}
 	cfg := validCfg(t)
 	cfg.Bypass = true
-	cfg.Mechanisms = registry
+	cfg.EnableMechanisms = ids
 
 	agent, err := apogee.New(cfg)
 	if err != nil {
