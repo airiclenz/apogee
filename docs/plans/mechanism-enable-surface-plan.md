@@ -206,7 +206,16 @@ booting-stack case still boots.
 
 ---
 
-## 4. Root facade: the public surface
+## 4. Root facade: the public surface — ✅ DONE (2026-07-05)
+
+**NOTES (2026-07-05):** the What line's `Config.Mechanisms` doc-comment reposition lives in
+`internal/domain/config.go`, so the diff necessarily also touches that file — the Acceptance's
+"diff confined to `apogee.go`, `example_test.go` … + CHANGELOG" list omits it (followed the What,
+which explicitly names `internal/domain/config.go:48`). The `MechanismDescriptor` / `Capability` /
+`SuppressionPolicy` aliases and their consts were ALREADY present in `apogee.go` (pre-item, lines
+284-302), so this item only ADDED `CataloguedMechanisms()` and the two error re-exports rather than
+the aliases. The "root test file if needed" was folded into the existing black-box `apogee_test.go`
+(package `apogee_test`) instead of a new file.
 
 **What:** in `apogee.go` (the thin facade, ADR 0010 — root may import internal, never the
 reverse): alias `MechanismDescriptor`, `Capability`, `SuppressionPolicy` and re-export

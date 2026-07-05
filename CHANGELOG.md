@@ -108,6 +108,19 @@ on, not this work).
   — the same loud errors refuse to boot at the same startup boundary (unknown key, half-stack,
   incompatibility), only the `%w` chain behind some of them moved from the cmd path onto the engine
   path. (`cmd/apogee`.)
+- **The public Mechanism surface: descriptors, catalogue query, and matchable enable errors.** The
+  root facade now exposes the enable surface an embedder needs: `MechanismDescriptor`, `Capability`,
+  and `SuppressionPolicy` (with their constant values) are re-exported, and a new
+  `apogee.CataloguedMechanisms()` returns every catalogued Mechanism's descriptor — sorted by ID,
+  duplicate-free, slice fields cloned — so a host can read each Mechanism's Capability, suppression
+  policy, and `IncompatibleWith` / `Requires` stacking relations and plan an `EnableMechanisms` arm
+  (e.g. a leave-one-out arm by `Requires` traversal) WITHOUT building any Mechanism (ADR 0015 §3). The
+  enable-time sentinels `ErrMissingRequirement` (the dual of `ErrIncompatibleMechanisms`) and
+  `ErrUnknownMechanism` are re-exported so `errors.Is` matches them through the root (ADR 0015 §4).
+  `Config.Mechanisms`' doc comment is reframed as the experimental-hook carrier that points at
+  `EnableMechanisms` for catalogued enablement (the field keeps its name under v1 semver — no
+  rename). Runnable godoc Examples arm the `guided_decomposition + tool_result_cap` stack and compute
+  a leave-one-out arm from the catalogue query. (`apogee.go`, `internal/domain`.)
 
 ## [1.2.0] — 2026-07-04
 

@@ -192,3 +192,52 @@ func mustAdd(t *testing.T, registry *apogee.MechanismRegistry, m apogee.Mechanis
 		t.Fatalf("Add(%s): %v", m.Descriptor().ID, err)
 	}
 }
+
+// TestCataloguedMechanisms asserts the public catalogue query is non-empty, sorted by ID, and
+// exposes the ADR 0014 guided_decomposition ↔ tool_result_cap Requires relation — all through the
+// public surface only (no internal import), so it also guards that the descriptor metadata is
+// reachable without building any Mechanism (ADR 0015 §3).
+func TestCataloguedMechanisms(t *testing.T) {
+	got := apogee.CataloguedMechanisms()
+	if len(got) == 0 {
+		t.Fatal("CataloguedMechanisms() = empty, want the built-in catalogue")
+	}
+
+	for i := 1; i < len(got); i++ {
+		if got[i-1].ID >= got[i].ID {
+			t.Errorf("CataloguedMechanisms() not strictly sorted/duplicate-free at %d: %q then %q",
+				i, got[i-1].ID, got[i].ID)
+		}
+	}
+
+	var gd *apogee.MechanismDescriptor
+	for i := range got {
+		if got[i].ID == "guided_decomposition" {
+			gd = &got[i]
+			break
+		}
+	}
+	if gd == nil {
+		t.Fatal("CataloguedMechanisms() missing guided_decomposition")
+	}
+	if len(gd.Requires) != 1 || gd.Requires[0] != "tool_result_cap" {
+		t.Errorf("guided_decomposition Requires = %v, want [tool_result_cap]", gd.Requires)
+	}
+}
+
+// TestEnableErrors_MatchableThroughRoot proves the enable-time sentinels are matchable through the
+// root re-exports: a half-armed Requires stack fails New with apogee.ErrMissingRequirement and a
+// bogus ID fails with apogee.ErrUnknownMechanism (ADR 0015 §4, locked decision 5).
+func TestEnableErrors_MatchableThroughRoot(t *testing.T) {
+	half := validConfig()
+	half.EnableMechanisms = []apogee.MechanismID{"guided_decomposition"} // Requires tool_result_cap
+	if _, err := apogee.New(half); !errors.Is(err, apogee.ErrMissingRequirement) {
+		t.Errorf("New(half-stack) err = %v, want ErrMissingRequirement", err)
+	}
+
+	bogus := validConfig()
+	bogus.EnableMechanisms = []apogee.MechanismID{"no_such_mechanism"}
+	if _, err := apogee.New(bogus); !errors.Is(err, apogee.ErrUnknownMechanism) {
+		t.Errorf("New(bogus-id) err = %v, want ErrUnknownMechanism", err)
+	}
+}

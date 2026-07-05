@@ -44,8 +44,15 @@ type Config struct {
 	Events   EventSink // where typed Events are pushed; required
 
 	// Extension points. nil ⇒ the built-in defaults.
-	Tools      *ToolRegistry      // open extension point (ADR 0002)
-	Mechanisms *MechanismRegistry // curated catalogue + bench experimental hooks (ADR 0002/0003)
+	Tools *ToolRegistry // open extension point (ADR 0002)
+
+	// Mechanisms is the experimental-hook carrier: the bench registers candidate hooks on it via
+	// AddExperimental, and a host may pre-build catalogued Mechanisms into it directly. Catalogued
+	// Mechanisms are normally armed by ID through EnableMechanisms (ADR 0015), which builds each
+	// named Mechanism and merges it INTO this registry (a fresh one when nil), so the two coexist in
+	// one arm. The field keeps its name under v1 semver (no rename); EnableMechanisms is the
+	// enable-by-ID surface (ADR 0002/0003, ADR 0015).
+	Mechanisms *MechanismRegistry
 
 	// EnableMechanisms names catalogued Mechanisms to arm by ID (ADR 0015 §1). New and Resume build
 	// each named Mechanism at construction and merge it INTO Mechanisms (creating a fresh registry

@@ -39,6 +39,7 @@ package apogee
 import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
 // ----------------------------------------------------------------------------
@@ -301,6 +302,16 @@ const (
 	SuppressExempt       = domain.SuppressExempt
 )
 
+// CataloguedMechanisms returns a descriptor for every catalogued Mechanism, sorted by ID and
+// duplicate-free — the metadata needed to plan a Config.EnableMechanisms arm (each Mechanism's
+// Capability, SuppressionPolicy, and its IncompatibleWith / Requires stacking relations) WITHOUT
+// building any Mechanism. Each descriptor is a copy with its slice fields cloned, so a caller may
+// traverse and mutate the result freely (e.g. compute a leave-one-out arm by dropping an ID and
+// everything that Requires it). The catalogue's CONTENTS are data, not v1 contract — an ID may
+// change in a minor with a CHANGELOG notice — while this query and the descriptor shape are the
+// stable surface (ADR 0015 §3, locked decision 4).
+func CataloguedMechanisms() []MechanismDescriptor { return mechanisms.Descriptors() }
+
 // OrderingConstraints declares a Mechanism's position relative to others.
 type OrderingConstraints = domain.OrderingConstraints
 
@@ -407,6 +418,18 @@ var (
 	// ErrIncompatibleMechanisms is returned by New when two registered Mechanisms
 	// declare each other incompatible (IncompatibleWith) — they must never co-fire.
 	ErrIncompatibleMechanisms = domain.ErrIncompatibleMechanisms
+
+	// ErrMissingRequirement is returned by New / Resume when a registered Mechanism declares a
+	// required peer (MechanismDescriptor.Requires) that is not itself registered — the dual of
+	// ErrIncompatibleMechanisms: where that refuses two Mechanisms that must never co-fire, this
+	// refuses one half of a benched stack (enable both or neither, ADR 0014 §4). Match with errors.Is.
+	ErrMissingRequirement = domain.ErrMissingRequirement
+
+	// ErrUnknownMechanism is returned by New / Resume when Config.EnableMechanisms names an ID that
+	// is not in the catalogue — a typo'd or deferred ID fails construction loudly rather than
+	// silently disabling a Mechanism (ADR 0015 §4). The wrapping error still names the known IDs;
+	// match the sentinel with errors.Is.
+	ErrUnknownMechanism = domain.ErrUnknownMechanism
 
 	// ErrSessionVersion is returned by Resume / DecodeSession for a snapshot whose
 	// schema version this build does not understand.

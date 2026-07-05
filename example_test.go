@@ -5,11 +5,20 @@ package apogee_test
 // dropped when the facade is regenerated — a missing type alias, const, sentinel, or
 // forwarder — the build fails here rather than silently shrinking the public API.
 //
-// It is compile-time only by construction: every reference is a type declaration, a
-// constant reference, or a function *value* — no method on a panic-stub working value
-// (Request / Response / Conversation / ToolRegistry) is ever called.
+// The completeness-guard declarations below are compile-time only by construction: every
+// reference is a type declaration, a constant reference, or a function *value* — no method on
+// a panic-stub working value (Request / Response / Conversation / ToolRegistry) is ever called.
+//
+// The file also carries runnable godoc Examples for the public Mechanism enable surface (ADR
+// 0015). They are hermetic: construction builds and validates Mechanisms without dialing the
+// Endpoint, and the catalogue query is a pure read.
 
-import "github.com/airiclenz/apogee"
+import (
+	"fmt"
+	"slices"
+
+	"github.com/airiclenz/apogee"
+)
 
 // Type aliases — one zero-valued declaration per exported type. A dropped alias makes
 // the type name undefined and fails compilation.
@@ -87,6 +96,7 @@ var (
 	_ = apogee.IsReadOnly
 	_ = apogee.NewToolRegistry
 	_ = apogee.NewMechanismRegistry
+	_ = apogee.CataloguedMechanisms
 	_ = apogee.DecodeSession
 )
 
@@ -143,8 +153,60 @@ var (
 
 	_ = apogee.ErrAutoUnavailable
 	_ = apogee.ErrOrderingCycle
+	_ = apogee.ErrMissingRequirement
+	_ = apogee.ErrUnknownMechanism
 	_ = apogee.ErrSessionVersion
 	_ = apogee.ErrInputPending
 	_ = apogee.ErrDuplicateTool
 	_ = apogee.ErrInvalidTool
 )
+
+// discardSink is a no-op EventSink so the Examples construct an Agent hermetically — construction
+// emits nothing and never dials the Endpoint.
+type discardSink struct{}
+
+func (discardSink) Emit(apogee.Event) {}
+
+// Example_enableMechanismStack arms the guided_decomposition + tool_result_cap stack by ID through
+// Config.EnableMechanisms. guided_decomposition Requires tool_result_cap (ADR 0014), so both must be
+// enabled together — enabling one alone fails New with ErrMissingRequirement.
+func Example_enableMechanismStack() {
+	cfg := apogee.Config{
+		Endpoint:         "http://localhost:11434",
+		Model:            "local-model",
+		Events:           discardSink{},
+		EnableMechanisms: []apogee.MechanismID{"guided_decomposition", "tool_result_cap"},
+	}
+	ag, err := apogee.New(cfg)
+	if err != nil {
+		fmt.Println("construct:", err)
+		return
+	}
+	defer ag.Close()
+
+	fmt.Println("armed:", cfg.EnableMechanisms)
+	// Output:
+	// armed: [guided_decomposition tool_result_cap]
+}
+
+// Example_cataloguedMechanisms plans a leave-one-out arm from CataloguedMechanisms() — the bench's
+// idiom: to leave a Mechanism out, also drop every Mechanism that Requires it, so no half-armed stack
+// reaches New (which would refuse with ErrMissingRequirement). Dropping tool_result_cap therefore also
+// drops guided_decomposition, which Requires it.
+func Example_cataloguedMechanisms() {
+	const leaveOut = apogee.MechanismID("tool_result_cap")
+
+	var arm []apogee.MechanismID
+	for _, d := range apogee.CataloguedMechanisms() {
+		if d.ID == leaveOut || slices.Contains(d.Requires, leaveOut) {
+			continue // the left-out Mechanism, and any stack that Requires it
+		}
+		arm = append(arm, d.ID)
+	}
+
+	fmt.Println("left out:", leaveOut)
+	fmt.Println("guided_decomposition still armed:", slices.Contains(arm, "guided_decomposition"))
+	// Output:
+	// left out: tool_result_cap
+	// guided_decomposition still armed: false
+}
