@@ -259,7 +259,17 @@ Commit:
 
 ---
 
-## 5. Wire-up proof + loop-level acceptance (fan-out end-to-end)
+## 5. Wire-up proof + loop-level acceptance (fan-out end-to-end) — ✅ DONE (2026-07-05)
+
+NOTES (2026-07-05): the config template DOES carry a commented `mechanisms:` example block, so the
+commented key was added — but as the STACK (both `guided_decomposition: true` AND its Required peer
+`tool_result_cap: true`) rather than the lone key: a commented `guided_decomposition` on its own would
+be an erroring half-stack if uncommented (item-1 `ErrMissingRequirement`), so the two-line example is
+valid-if-uncommented. The decompose-incompatibility config test enables `tool_result_cap` alongside so
+that ONLY the incompatibility can surface (validation order is incompatibilities-before-requirements),
+matching the item's "with `decompose` also enabled" as an addition to the booting stack. No production
+code changes were needed — item 2's mutate-and-defer composition and the injected-steer visibility
+through `req.View()` carried the wire-up as-is; this item is tests + the template comment only.
 
 **What:** prove the whole stack through the real loop, no mechanism internals mocked.
 Config: enabling `guided_decomposition` without `tool_result_cap` → the item-1 startup error

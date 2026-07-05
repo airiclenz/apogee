@@ -107,7 +107,9 @@
 # errors. Example (uncomment once the named Mechanisms have shipped):
 #
 # mechanisms:
-#   validate: true          # tool-call validation + auto-retry
-#   syntax: true            # write-content syntax check
-#   autofix: true           # formatter pass on tool-call payloads
-#   truncate_history: false # explicitly off (the default) — shown for reference
+#   validate: true              # tool-call validation + auto-retry
+#   syntax: true                # write-content syntax check
+#   autofix: true               # formatter pass on tool-call payloads
+#   truncate_history: false     # explicitly off (the default) — shown for reference
+#   tool_result_cap: true       # cap any single oversized tool result to its Budget share
+#   guided_decomposition: true  # oversized task → serialized sub_agent fan-out (needs tool_result_cap)

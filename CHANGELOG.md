@@ -52,6 +52,18 @@ on, not this work).
   shrunken directive until none remain. It carries no per-Mechanism state (snapshot/resume-safe and
   suppression-clean), declines an out-of-bounds list whole, and no-ops on anything else.
   (`internal/mechanisms`.)
+- **Wire-up proof and end-to-end fan-out acceptance.** Loop-level tests drive the whole stack through
+  the REAL loop with nothing of the Mechanism mocked: an oversized primary call gets the enumeration
+  steer, the model's list is intercepted into a REAL nested `sub_agent` fan-out serialized one
+  delegation per Turn (child events nesting at `Depth == 1`), the remaining-items directive rides each
+  following request and shrinks, and the Exchange ends on a no-tool synthesis with the enumeration
+  verbatim and all three child reports in honest history. A snapshot taken mid-fan-out round-trips the
+  pending directive (`conversationJSON.Deferred`) and a resumed Agent completes the fan-out; Bypass is
+  the silent control arm (ADR 0014 §1); and a cancel during a child rolls back only that parent Turn
+  (ADR 0013 §5). Config-surface tests pin the ADR 0014 §4 stacking gates: enabling `guided_decomposition`
+  without `tool_result_cap` is the `ErrMissingRequirement` startup error, the stack boots, and adding
+  `decompose` is the incompatibility error. The commented `mechanisms:` example in the config template
+  gains the stack. (`internal/agent`, `cmd/apogee`.)
 
 ## [1.2.0] — 2026-07-04
 
