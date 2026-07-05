@@ -198,7 +198,7 @@ the archived-plan amendment + CHANGELOG. Commit:
 
 ---
 
-## 4. `resolveContextWindow`: no redundant probe on the no-model path
+## 4. `resolveContextWindow`: no redundant probe on the no-model path — ✅ DONE (2026-07-05)
 
 **Finding:** review "Falsified NOTES claim: `resolveContextWindow` also probes on the
 no-model path" (Medium — behaviourally benign, but the deviation trail's honesty is the

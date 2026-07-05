@@ -336,6 +336,13 @@ on the public surface — so this is a **minor** bump, not a major one.
   path keeps its existing fatal semantics). A new file-only `context-window:` key (tokens) overrides
   discovery and skips the probe. When the window is still unknown while Compaction is on, startup
   prints one notice naming the consequence and the key. (`cmd/apogee`, `internal/domain` comment.)
+- **No redundant context-window probe on the no-model path (third-review fix).** When the server
+  advertised no window on a zero-config (no-model) startup, `resolveModel`'s discovery probe left the
+  window at 0, so the separate `resolveContextWindow` self-guard (`opts.contextWindow > 0`) did not
+  fire and it probed the server a second time. `resolveModel` now reports whether it probed and the
+  root skips `resolveContextWindow` when model discovery already ran — one probe for the whole
+  no-model startup, regardless of the advertised window. The pinned-model path is unchanged (still
+  probes for its window; a failed probe stays non-fatal). (`cmd/apogee`.)
 
 ### Wave 3: the `toolfilter` / `filehint` / `grammar` request shapers
 

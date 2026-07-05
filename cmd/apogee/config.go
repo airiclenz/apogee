@@ -536,19 +536,22 @@ type modelDiscoverer func(ctx context.Context, endpoint string) (discoveredUpstr
 // when no model was configured by any layer (flag, env, and file all empty) but an endpoint is
 // known — so a single-model server (e.g. llama.cpp's llama-server, which serves whatever model was
 // loaded) runs with no model set at all. It returns the discovered id ("" when discovery did not
-// run) so the caller can surface a one-line notice. A discovery failure is returned rather than
+// run) so the caller can surface a one-line notice, and a `probed` flag reporting whether it issued
+// a discovery probe this startup — the caller uses it to skip the separate resolveContextWindow
+// probe when this one already resolved the window (item 4: no redundant probe on the no-model path,
+// even when the server advertised no window). A discovery failure is returned rather than
 // swallowed: the user learns the server is unreachable or advertises no model, instead of
 // silently sending a model-less request. With no endpoint there is nothing to ask, so it is
 // a no-op — construction then surfaces the missing-endpoint error, the real problem. A PINNED
-// model early-returns here; its context window is resolved separately by resolveContextWindow
-// (item 3 / S3), so a configured model no longer disables the Budget.
-func resolveModel(ctx context.Context, opts *options, discover modelDiscoverer) (string, error) {
+// model early-returns here (probed == false); its context window is resolved separately by
+// resolveContextWindow (item 3 / S3), so a configured model no longer disables the Budget.
+func resolveModel(ctx context.Context, opts *options, discover modelDiscoverer) (string, bool, error) {
 	if opts.model != "" || opts.endpoint == "" {
-		return "", nil
+		return "", false, nil
 	}
 	got, err := discover(ctx, opts.endpoint)
 	if err != nil {
-		return "", fmt.Errorf(
+		return "", true, fmt.Errorf(
 			"apogee: no model configured and discovery from %s failed: %w; "+
 				"set one with --model, APOGEE_MODEL, or model: in config.yaml", opts.endpoint, err)
 	}
@@ -556,15 +559,17 @@ func resolveModel(ctx context.Context, opts *options, discover modelDiscoverer) 
 	if opts.contextWindow == 0 { // a context-window: key wins over what the server advertises
 		opts.contextWindow = got.contextWindow
 	}
-	return got.model, nil
+	return got.model, true, nil
 }
 
 // resolveContextWindow discovers the model context window when it is still unknown — including for
 // a PINNED model, whose configured id makes resolveModel early-return before it can probe (item 3 /
-// S3: a configured model must not silently disable the Budget and automatic Compaction). It is a
-// no-op when a context-window: key already supplied the window or model discovery already learned
-// it (opts.contextWindow > 0 — the key/probe wins and this probe is skipped), and when no endpoint
-// is known (nothing to ask). The pinned model id is kept regardless of what the probe reports; only
+// S3: a configured model must not silently disable the Budget and automatic Compaction). The caller
+// only reaches it when model discovery did NOT run this startup (item 4): a no-model probe already
+// resolved the window in the same call, so re-probing here would be redundant even when the server
+// advertised no window. It is additionally a no-op when a context-window: key already supplied the
+// window (opts.contextWindow > 0 — the key wins and this probe is skipped) and when no endpoint is
+// known (nothing to ask). The pinned model id is kept regardless of what the probe reports; only
 // the window is adopted. Unlike model discovery this is NEVER fatal: a pinned-model user can start
 // offline, so a failed probe leaves the window unknown (0) and emits a one-line notice via notify —
 // the Budget then stays inactive, which runRoot surfaces once at startup.

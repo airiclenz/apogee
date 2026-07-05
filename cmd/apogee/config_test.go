@@ -460,9 +460,12 @@ func TestResolveModelDiscoversWhenUnset(t *testing.T) {
 		return discoveredUpstream{model: "discovered-model", contextWindow: 32768}, nil
 	}
 	opts := options{endpoint: "http://server"}
-	got, err := resolveModel(context.Background(), &opts, discover)
+	got, probed, err := resolveModel(context.Background(), &opts, discover)
 	if err != nil {
 		t.Fatalf("resolveModel: %v", err)
+	}
+	if !probed {
+		t.Error("probed = false; want true (discovery ran on the no-model path)")
 	}
 	if got != "discovered-model" || opts.model != "discovered-model" {
 		t.Errorf("resolveModel = %q, opts.model = %q; want both %q", got, opts.model, "discovered-model")
@@ -481,9 +484,12 @@ func TestResolveModelSkipsWhenAlreadySet(t *testing.T) {
 		return discoveredUpstream{}, nil
 	}
 	opts := options{endpoint: "http://server", model: "m-configured"}
-	got, err := resolveModel(context.Background(), &opts, discover)
+	got, probed, err := resolveModel(context.Background(), &opts, discover)
 	if err != nil {
 		t.Fatalf("resolveModel: %v", err)
+	}
+	if probed {
+		t.Error("probed = true; want false (no discovery ran for a configured model)")
 	}
 	if got != "" {
 		t.Errorf("resolveModel = %q; want \"\" (no discovery ran)", got)
@@ -502,9 +508,12 @@ func TestResolveModelNoEndpointIsNoOp(t *testing.T) {
 		return discoveredUpstream{}, nil
 	}
 	opts := options{}
-	got, err := resolveModel(context.Background(), &opts, discover)
+	got, probed, err := resolveModel(context.Background(), &opts, discover)
 	if err != nil {
 		t.Fatalf("resolveModel: %v", err)
+	}
+	if probed {
+		t.Error("probed = true; want false (no discovery ran with no endpoint)")
 	}
 	if got != "" || opts.model != "" {
 		t.Errorf("resolveModel = %q, opts.model = %q; want both empty", got, opts.model)
@@ -518,7 +527,7 @@ func TestResolveModelDiscoveryErrorPropagates(t *testing.T) {
 	boom := errors.New("connection refused")
 	discover := func(context.Context, string) (discoveredUpstream, error) { return discoveredUpstream{}, boom }
 	opts := options{endpoint: "http://server"}
-	_, err := resolveModel(context.Background(), &opts, discover)
+	_, _, err := resolveModel(context.Background(), &opts, discover)
 	if err == nil {
 		t.Fatal("discovery failure: want an error, got nil")
 	}
@@ -527,6 +536,41 @@ func TestResolveModelDiscoveryErrorPropagates(t *testing.T) {
 	}
 	if opts.model != "" {
 		t.Errorf("opts.model = %q; want it left empty on failure", opts.model)
+	}
+}
+
+// The no-model startup sequence probes the server exactly once even when it advertises no window
+// (contextWindow: 0): resolveModel discovers the model and the window in one probe, and root.go
+// skips resolveContextWindow because that discovery already ran — so no redundant window probe
+// fires on the no-model path (item 4). The loud-zero notice still surfaces once, because the window
+// stayed unknown.
+func TestNoModelPathProbesOnce(t *testing.T) {
+	t.Parallel()
+	var probes int
+	discover := func(_ context.Context, _ string) (discoveredUpstream, error) {
+		probes++
+		return discoveredUpstream{model: "discovered-model", contextWindow: 0}, nil
+	}
+	opts := options{endpoint: "http://server"}
+	// Mirror root.go's startup sequence: resolveModel first, then resolveContextWindow only when
+	// model discovery did NOT run this startup (the item-4 gate).
+	_, probed, err := resolveModel(context.Background(), &opts, discover)
+	if err != nil {
+		t.Fatalf("resolveModel: %v", err)
+	}
+	if !probed {
+		resolveContextWindow(context.Background(), &opts, discover, func(string) {
+			t.Error("notify must not fire: resolveContextWindow must be skipped when discovery already ran")
+		})
+	}
+	if probes != 1 {
+		t.Errorf("discover called %d times; want exactly one probe for the whole no-model startup", probes)
+	}
+	if opts.contextWindow != 0 {
+		t.Errorf("opts.contextWindow = %d; want 0 (server advertised no window)", opts.contextWindow)
+	}
+	if contextWindowNotice(opts.contextWindow, true) == "" {
+		t.Error("loud-zero notice should still appear once when the window stayed unknown")
 	}
 }
 

@@ -194,6 +194,13 @@ self-guards on `opts.contextWindow > 0 || endpoint == ""`, so it fires the singl
 for a pinned model with no key — no redundant probe on the common no-model path. Both the discovery
 notice and the loud-zero notice name the `context-window` key.
 
+**CORRECTION (2026-07-05):** the "no redundant probe on the common no-model path" claim above was
+FALSE for a server that advertises no window until 2026-07-05: `resolveModel`'s no-model probe left
+`opts.contextWindow == 0`, so `resolveContextWindow`'s `opts.contextWindow > 0` self-guard did not
+fire and it probed the server a second time. Fixed by phase-4-third-review-fixes item 4 —
+`resolveModel` now reports whether it probed and `root.go` skips `resolveContextWindow` when model
+discovery already ran, regardless of the advertised window.
+
 **Finding:** review "Pinning `model:` silently disables the entire Budget machinery" (High,
 independently verified). Ground truth: `cmd/apogee/config.go:518-531` (`resolveModel` early
 return), `cmd/apogee/wire.go:123` (`MaxContextTokens: opts.contextWindow`),

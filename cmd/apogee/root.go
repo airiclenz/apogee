@@ -116,17 +116,24 @@ func newRootCommand(launch launcher) *cobra.Command {
 			}
 			// With no model configured by any layer, ask the server for its active model
 			// (the lowest-priority layer) so a single-model server runs with no --model set.
-			// The notice prints before the alt-screen, on stderr.
-			if model, err := resolveModel(cmd.Context(), &opts, discoverUpstreamModel); err != nil {
+			// The notice prints before the alt-screen, on stderr. `probed` reports whether that
+			// discovery probe ran, so the context-window probe below can be skipped when it did.
+			model, probed, err := resolveModel(cmd.Context(), &opts, discoverUpstreamModel)
+			if err != nil {
 				return err
-			} else if model != "" {
+			}
+			if model != "" {
 				cmd.PrintErrln("apogee: discovered model", model, "at", opts.endpoint)
 			}
-			// Discover the context window even for a PINNED model (item 3): a configured model
-			// makes resolveModel early-return, but the Budget and automatic Compaction still need
-			// the window. A context-window: key (or a window learned during model discovery) skips
-			// the probe; a failure here is non-fatal, so an offline pinned-model start still works.
-			resolveContextWindow(cmd.Context(), &opts, discoverUpstreamModel, func(msg string) { cmd.PrintErrln(msg) })
+			// Discover the context window for a PINNED model (item 3): a configured model makes
+			// resolveModel early-return without probing, but the Budget and automatic Compaction
+			// still need the window. Skip it when model discovery already ran this startup (item 4):
+			// that one probe resolved the window in the same call, so re-probing here would be
+			// redundant even when the server advertised no window. A failure here is non-fatal, so
+			// an offline pinned-model start still works.
+			if !probed {
+				resolveContextWindow(cmd.Context(), &opts, discoverUpstreamModel, func(msg string) { cmd.PrintErrln(msg) })
+			}
 			return runRoot(cmd.Context(), opts, launch)
 		},
 	}
