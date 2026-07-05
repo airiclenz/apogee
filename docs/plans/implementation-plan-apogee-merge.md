@@ -351,6 +351,10 @@ Port apogee-code's loop as an embeddable vertical slice (TS as oracle):
   terminal, watch tools run, and approve writes.
 
 ### Phase 3 — Full subsystems
+*Status: ✅ **Complete** (2026-06-25) — detail & acceptance in
+[`phase-3-detail-plan.md`](./archived/phase-3-detail-plan.md); `v1.0.0` of the public Go API
+cut as planned (semver guarantees began there; post-cut findings closed in
+[`post-v1.0.0-review-remediation-plan.md`](./archived/post-v1.0.0-review-remediation-plan.md)).*
 - Complete the **30-tool suite** (git, terminal, web-fetch/search, python-exec,
   sub-agent, ask-user, diagnostics, find-replace family) behind the **public `Tool`
   interface** (tools are an open extension point — ADR 0002). Apply §3a per tool:
@@ -380,6 +384,13 @@ Port apogee-code's loop as an embeddable vertical slice (TS as oracle):
   (Events/hook-points kept additively extensible — minor bumps for new variants).
 
 ### Phase 4 — Merge apogee-sim mechanisms into the loop
+*Status: ✅ **Complete** (2026-07-04, `v1.2.0`) — detail & acceptance in
+[`phase-4-detail-plan.md`](./archived/phase-4-detail-plan.md) (+ the three review-fixes
+plans); the ratified catalogue lives at
+[`mechanism-catalogue.md`](../design/mechanism-catalogue.md), merged config-gated and
+**default-off**. The "backed by an A/B" half of the deliverable is deliberately
+outstanding: it is the bench campaign (see the current handoff in `docs/handoffs/`), whose
+evidence — not this plan — flips defaults on.*
 **Prerequisite (dedicated session):** map the apogee-sim catalogue onto the five hook
 points **driven by real sim traces** — including the relocation hypotheses
 (`cached_content_intercept`→pre-tool-exec, `error_enrichment`→post-tool-result) and the
