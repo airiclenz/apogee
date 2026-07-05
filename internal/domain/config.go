@@ -47,6 +47,17 @@ type Config struct {
 	Tools      *ToolRegistry      // open extension point (ADR 0002)
 	Mechanisms *MechanismRegistry // curated catalogue + bench experimental hooks (ADR 0002/0003)
 
+	// EnableMechanisms names catalogued Mechanisms to arm by ID (ADR 0015 §1). New and Resume build
+	// each named Mechanism at construction and merge it INTO Mechanisms (creating a fresh registry
+	// when that is nil), so a catalogued Mechanism and a bench experimental hook coexist in one arm.
+	// An unknown ID (ErrUnknownMechanism), an ID listed twice or already pre-built into Mechanisms
+	// (the registry's already-registered rejection), a hook-less Mechanism, or a half-armed Requires
+	// stack fails construction — a typo or a half-built stack never silently disables a Mechanism.
+	// Empty/nil arms nothing (the default-off posture). The catalogue's CONTENTS are data, not v1
+	// contract — an ID may change in a minor with a CHANGELOG notice; the field and its build
+	// semantics are the stable surface (locked decisions 1–2, 6).
+	EnableMechanisms []MechanismID
+
 	// Skills resolves the user's attached skill IDs (UserInput.SkillIDs) to their injectable
 	// bodies; nil ⇒ no skills are wired and any attached ID is reported and dropped. It is an
 	// interface defined here (not the concrete internal/skills catalog) so the loop fulfils the

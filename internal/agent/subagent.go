@@ -109,8 +109,14 @@ func (a *Agent) newChildAgent() (*Agent, error) {
 	childCfg.Mode = a.Mode() // inherit the parent's LIVE mode at spawn (Shift+Tab may have changed it),
 	//                          read under the lock since this runs on the worker goroutine during dispatch
 	childCfg.Tools = a.defaultSubAgentTools()
-	// The sub-agent shares the parent's Mechanisms by default; an explicit per-sub-agent
-	// catalogue is a later refinement (ADR 0013 leaves the default = the parent's).
+	// The sub-agent shares the parent's ALREADY-BUILT registry (a.registry — the parent's
+	// Config.Mechanisms merged with whatever Config.EnableMechanisms armed), so it fires the same
+	// catalogued + experimental Mechanisms; an explicit per-sub-agent catalogue is a later refinement
+	// (ADR 0013 leaves the default = the parent's). EnableMechanisms is cleared because those IDs are
+	// already built into a.registry — re-building them into the shared registry would trip the
+	// already-registered rejection and fail every sub-agent spawn.
+	childCfg.Mechanisms = a.registry
+	childCfg.EnableMechanisms = nil
 
 	child, err := newAgent(childCfg, a.upstream)
 	if err != nil {

@@ -115,7 +115,17 @@ still names known IDs. Existing catalogue/descriptor tests stay green.
 
 ---
 
-## 2. Engine: `Config.EnableMechanisms` + the internal build path in agent construction
+## 2. Engine: `Config.EnableMechanisms` + the internal build path in agent construction — ✅ DONE (2026-07-05)
+
+**NOTES (2026-07-05):** the item text names only `New`/`Resume`, but `newAgent` — the shared
+construction path the build was placed in — is ALSO the sub-agent construction path
+(`subagent.go` `newChildAgent`, which copies the parent `Config`). A child inheriting the
+parent's `EnableMechanisms` plus its shared `Mechanisms` registry would re-Add the
+already-built Mechanisms and trip the duplicate rejection on every sub-agent spawn. Fixed in
+`newChildAgent` (in-scope, `internal/agent`): the child now inherits the parent's
+already-built `a.registry` and clears `EnableMechanisms`, so it fires the same Mechanisms
+without re-building. The library-store `Load` error is degraded to an empty store with
+wire.go's exact `os.Stderr` notice (faithful to "the way wire.go does today").
 
 **What:** add `EnableMechanisms []MechanismID` to `Config`
 (`internal/domain/config.go`, beside `Mechanisms` :48, doc comment per ADR 0015 §1: named

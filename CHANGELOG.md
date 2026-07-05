@@ -83,6 +83,21 @@ on, not this work).
   `domain.ErrUnknownMechanism` sentinel is wrapped by `mechanisms.Build`'s unknown-ID error (which
   still names the known IDs), so a typo'd or deferred ID fails loudly AND matchably via `errors.Is`
   (ADR 0015 §4). (`internal/mechanisms`, `internal/domain`.)
+- **`Config.EnableMechanisms` arms catalogued Mechanisms by ID at construction.** `Config` gains an
+  `EnableMechanisms []MechanismID` field: `New` and `Resume` build each named catalogued Mechanism
+  and merge it INTO `Config.Mechanisms` (a fresh registry when nil), so catalogued Mechanisms and
+  bench experimental hooks coexist in one arm (ADR 0015 §1–2). The engine derives the build `Deps`
+  the way `cmd/apogee/wire.go` does — a Library store rooted at `Config.LibraryDir` and Loaded only
+  when `library` is enabled (never an ambient root; a corrupt/absent store degrades to empty and
+  never blocks construction), the model fingerprint resolved once, and the grammar seam left inert —
+  entirely internal (no `Deps` type on the public surface). IDs build in sorted order for a
+  deterministic error surface, then the existing ordering/incompatibility/requirements gates run over
+  the merged registry unchanged: an unknown ID (`ErrUnknownMechanism`), an ID listed twice or already
+  pre-built (the already-registered rejection), and a half-armed `Requires` stack
+  (`ErrMissingRequirement`) each fail `New`/`Resume`; an empty/nil list arms nothing (default-off).
+  A spawned sub-agent inherits the parent's already-built registry, so it fires the same Mechanisms
+  without re-building them. `cmd/apogee`'s own YAML→registry path is unchanged for now (it collapses
+  onto this engine path in a follow-up). (`internal/domain`, `internal/agent`.)
 
 ## [1.2.0] — 2026-07-04
 
