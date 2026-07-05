@@ -104,26 +104,26 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 }
 
 // libraryMechanismID is the one catalogued ID whose presence in Config.EnableMechanisms makes the
-// engine build and Load a Library store into Deps — the engine-side mirror of cmd/apogee/wire.go's
-// libraryDeps gate (only `library` reads Deps.Library; every other Mechanism ignores it). The
-// catalogue owns the canonical constant (unexported there); this is the loop's copy of the same
-// literal, guarded by the tests asserting a non-`library` arm never wires a store.
+// engine build and Load a Library store into Deps (only `library` reads Deps.Library; every other
+// Mechanism ignores it). The catalogue owns the canonical constant (unexported there); this is the
+// loop's copy of the same literal, guarded by the tests asserting a non-`library` arm never wires a
+// store.
 const libraryMechanismID domain.MechanismID = "library"
 
 // buildEnabledMechanisms builds each Mechanism named on cfg.EnableMechanisms and Adds it into
 // registry — the merge target: the caller's Config.Mechanisms, or the fresh registry newAgent made
 // when that was nil — so catalogued Mechanisms and any pre-registered experimental hooks coexist in
-// one arm (ADR 0015 §2, locked decision 2). It is the engine-side twin of the path
-// cmd/apogee/wire.go drives today (this path is added here; wire.go's own path stays until item 3
-// collapses it onto this one — transient duplication across items is expected). IDs are built in
-// sorted canonical order so a build/register error is deterministic (the wire.go precedent), and
-// Deps are derived exactly as wire.go derives them: a Library store rooted at Config.LibraryDir and
-// Loaded ONLY when `library` is enabled (never an ambient ~/.apogee — ADR 0001; a corrupt/absent
-// store degrades to empty and never blocks construction, the wire.go / store-persist posture that
-// already surfaces soft store failures to stderr), the model Fingerprint resolved once, LookPath
-// defaulted to exec.LookPath (nil), and the GrammarConstraint seam left inert. An unknown ID (Build
-// wraps domain.ErrUnknownMechanism), an ID listed twice or already pre-built into the registry (the
-// already-registered rejection), and a hook-less Mechanism all propagate as construction failures.
+// one arm (ADR 0015 §2, locked decision 2). This is the single build path from Config to the live
+// registry: cmd/apogee/wire.go now only turns config.yaml into the Config.EnableMechanisms ID list
+// and leaves construction to here (ADR 0015 §1). IDs are built in sorted canonical order so a
+// build/register error is deterministic, and Deps are derived here: a Library store rooted at
+// Config.LibraryDir and Loaded ONLY when `library` is enabled (never an ambient ~/.apogee — ADR
+// 0001; a corrupt/absent store degrades to empty and never blocks construction, the store-persist
+// posture that already surfaces soft store failures to stderr), the model Fingerprint resolved
+// once, LookPath defaulted to exec.LookPath (nil), and the GrammarConstraint seam left inert. An
+// unknown ID (Build wraps domain.ErrUnknownMechanism), an ID listed twice or already pre-built into
+// the registry (the already-registered rejection), and a hook-less Mechanism all propagate as
+// construction failures.
 // An empty list builds nothing (the default-off posture untouched); the ordering, incompatibility,
 // and requirements gates then run over the merged registry unchanged.
 func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) error {
@@ -139,8 +139,8 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 		store := library.NewStore(cfg.LibraryDir)
 		if err := store.Load(); err != nil {
 			// A broken/absent Library never blocks startup: Load leaves the store empty-and-usable on
-			// any soft error, so the run degrades to that empty store and proceeds (wire.go's posture,
-			// which — like the store's own persist path — surfaces the degrade to stderr).
+			// any soft error, so the run degrades to that empty store and proceeds (like the store's
+			// own persist path, the degrade is surfaced to stderr).
 			fmt.Fprintf(os.Stderr, "apogee: library store degraded to empty: %v\n", err)
 		}
 		deps.Library = store
