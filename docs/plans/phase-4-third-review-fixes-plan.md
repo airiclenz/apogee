@@ -146,7 +146,19 @@ CHANGELOG. Commit:
 
 ---
 
-## 3. Library S4 hardening: format-character strip + schema-filtered param names
+## 3. Library S4 hardening: format-character strip + schema-filtered param names — ✅ DONE (2026-07-05)
+
+**NOTES (2026-07-05):** Verification per item (b)'s "state in NOTES whether the existing gate
+already sits after the filter point": it does NOT — and does not need to. The 5+-param
+complexity gate reads the tool SCHEMA's declared property count (`librarySchemaPropertyNames`,
+renamed from `libraryCountSchemaParams`), never the model-controlled argument keys, so junk keys
+never could promote a simple call to "complex". Rather than relocate the gate onto the filtered
+(arg∩schema) set as the item's literal text reads, the gate stays on the schema count: that is
+the pinned-sim behaviour (a call using fewer than 5 of a complex tool's declared params is still
+recorded) and it already closes the junk-key-promotion hole, so a filtered-set gate would only
+drop legitimate examples with no security gain. The F4 intersection is applied to the RECORDED
+names (`libraryArgParamNames` now takes the schema's allowed set); a tool whose schema yields no
+properties fails the gate and records no example, satisfying "skip under uncertainty".
 
 **Finding:** review "SanitizeContent lets Unicode format characters through" (Medium,
 Security) + "Recorded 'parameter names' are free-form model-chosen JSON keys" (Medium,

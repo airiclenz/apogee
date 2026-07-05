@@ -67,6 +67,18 @@ implement-plan preflight stops on a dirty tree.
   injected block opens with an explicit data-not-instructions frame. Accepted and recorded:
   observe still runs at post-response, before the approval gate — sanitisation, not
   relocation, is the defence.
+  - **Amendment (2026-07-05, phase-4-third-review-fixes item 3, findings F3/F4):** the
+    2026-07-04 sanitizer stripped only Cc via `unicode.IsControl`, so Cf/Co/Cs — bidi
+    overrides (U+202A–202E, U+2066–2069), zero-width characters (U+200B/C/D), the BOM
+    (U+FEFF) and soft hyphen (U+00AD) — survived; `SanitizeContent`'s strip now also covers
+    `unicode.In(r, unicode.Cf, unicode.Co, unicode.Cs)` (F3). The "parameter NAMES" mitigation
+    recorded the raw keys of the model's arguments object — free-form model-controlled strings
+    (`validateArguments` only checks that required params are present, so junk keys ride along
+    on a clean call); the recorded names are now the intersection of the argument keys with the
+    tool schema's declared `properties`, and a call whose tool schema yields no derivable
+    properties records no example at all (F4). The 5+-param complexity gate already reads the
+    schema property count (never the argument keys), so junk keys never could promote a simple
+    call to "complex" — that half of the mitigation held.
 - **S5 — Sim-parity rule for the two `(uncertain)` findings** (items 9 and 10): read the
   pinned sim first; if the sim behaves identically, the finding is a *ported quirk* — record
   it (code comment + dated NOTES here), change no behaviour; if the sim differs, implement

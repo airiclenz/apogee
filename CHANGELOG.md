@@ -525,6 +525,16 @@ implementing BOTH hooks. Ported from apogee-sim's `library` observer/transform. 
   name and its sorted parameter **names** — never argument **values**. The injected block's header now
   opens with an explicit data-not-instructions frame so entries cannot read as directives. No store
   schema bump (entries stay compatible). (`internal/library`, `internal/mechanisms`.)
+- **The sanitizer now strips Unicode format characters, and example param names are schema-filtered
+  (third-review fix, Security).** `SanitizeContent` stripped only Cc controls (`unicode.IsControl`), so
+  bidi overrides, zero-width characters, the BOM and soft hyphens rode through into the store and the
+  injected block; the strip now also covers Cf/Co/Cs. And the complex-call "example" recorded the raw
+  keys of the model's arguments object — free-form, model-controlled strings — so a junk key bearing
+  directive text could land on a clean observation. The recorded names are now the **intersection** of
+  the call's argument keys with the tool schema's declared `properties`, and a call whose schema yields
+  no properties records no example at all (prefer not to record under uncertainty); the 5+-param
+  complexity gate reads the schema, never the argument keys, so junk keys can never promote a simple
+  call. (`internal/library`, `internal/mechanisms`.)
 - **Bypass leaves a pre-seeded Library store byte-for-byte untouched (second-review fix, test-only).**
   A loop-level test seeds a populated `library.json`, wires a registry-backed agent with `library`
   enabled and `Config.Bypass` on, drives an observe-triggering Exchange, and asserts the store file's

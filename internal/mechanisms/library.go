@@ -288,32 +288,42 @@ func (m *libraryMechanism) observeShallowExploration(resp *domain.Response, call
 // its sorted parameter NAMES — never the argument VALUES (item S4): a hostile repo's file contents can
 // flow into a tool call's arguments, so persisting the values would turn this observation into a
 // store → future-system-prompt payload channel, while the parameter names alone carry the
-// shape-teaching value the sim's A/B measured.
+// shape-teaching value the sim's A/B measured. The recorded names are the intersection of the call's
+// argument keys with the tool schema's declared properties (third-review F4): a model-chosen key not
+// in the schema is free-form model-controlled text and is dropped. The complexity gate reads the
+// declared SCHEMA property count, never the argument keys, so junk keys can never promote a simple
+// call to "complex"; a tool whose schema yields no properties fails that gate, so a call to it records
+// no example ("prefer not to record under uncertainty").
 func (m *libraryMechanism) observeSuccessfulComplexToolCalls(calls []domain.ToolCall, tools []domain.ToolDef, issues []robustnessIssue) {
 	if hasIssues(issues) || len(calls) == 0 {
 		return
 	}
-	complexTools := make(map[string]bool)
+	complexProps := make(map[string]map[string]bool)
 	for _, t := range tools {
-		if libraryCountSchemaParams(t.Schema) >= 5 {
-			complexTools[t.Name] = true
+		props := librarySchemaPropertyNames(t.Schema)
+		if len(props) >= 5 {
+			complexProps[t.Name] = props
 		}
 	}
 	for _, tc := range calls {
-		if !complexTools[tc.Tool] {
+		props, ok := complexProps[tc.Tool]
+		if !ok {
 			continue
 		}
-		params := libraryArgParamNames(tc.Arguments)
+		params := libraryArgParamNames(tc.Arguments, props)
 		content := "Example valid call for " + tc.Tool + " uses params: " + strings.Join(params, ", ")
 		m.store.Record(m.fingerprint, library.CategoryExample, []string{"example", tc.Tool}, content)
 	}
 }
 
 // libraryArgParamNames returns the sorted parameter NAMES an example tool call's arguments object
-// declares — never their values (item S4). A missing, empty, or non-object arguments blob yields no
-// names. The names are still model/tool-derived text, so the content they land in is sanitized at
-// Store.Record time like every other observation.
-func libraryArgParamNames(args json.RawMessage) []string {
+// declares that the tool schema ALSO declares — never their values (item S4). It is the intersection
+// of the model-chosen argument keys with allowed, the schema's declared property names (third-review
+// F4): validateArguments only checks that required params are present, so a model can ride arbitrary
+// junk keys along on a clean call; a key absent from the schema is free-form model-controlled text and
+// is dropped here. A missing, empty, or non-object arguments blob yields no names. The surviving names
+// are still model/tool-derived text, so the content they land in is sanitized at Store.Record time.
+func libraryArgParamNames(args json.RawMessage, allowed map[string]bool) []string {
 	if len(args) == 0 {
 		return nil
 	}
@@ -323,7 +333,9 @@ func libraryArgParamNames(args json.RawMessage) []string {
 	}
 	names := make([]string, 0, len(obj))
 	for k := range obj {
-		names = append(names, k)
+		if allowed[k] {
+			names = append(names, k)
+		}
 	}
 	sort.Strings(names)
 	return names
@@ -518,17 +530,24 @@ func libraryCommonPrefixLen(a, b string) int {
 	return n
 }
 
-// libraryCountSchemaParams counts the properties a tool's argument schema declares (apogee-sim
-// countParams @pin). A tool with no schema, or a non-object schema, has zero.
-func libraryCountSchemaParams(schema json.RawMessage) int {
+// librarySchemaPropertyNames returns the set of property names a tool's argument schema declares
+// (apogee-sim countParams @pin, extended to the names themselves for the third-review F4 argument-key
+// intersection). A tool with no schema, a non-object schema, or no declared `properties` yields an
+// empty set — the caller's complexity gate then never treats it as complex, so a call to it records no
+// example (F4's skip-under-uncertainty), and its len is the property count the gate reads.
+func librarySchemaPropertyNames(schema json.RawMessage) map[string]bool {
 	if len(schema) == 0 {
-		return 0
+		return nil
 	}
 	var s struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
 	if json.Unmarshal(schema, &s) != nil {
-		return 0
+		return nil
 	}
-	return len(s.Properties)
+	names := make(map[string]bool, len(s.Properties))
+	for k := range s.Properties {
+		names[k] = true
+	}
+	return names
 }

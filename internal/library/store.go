@@ -323,8 +323,9 @@ func (s *Store) evictExcess() {
 // SanitizeContent scrubs untrusted observation text into a single-line, directive-inert form
 // (item S4). Library entries persist model- and tool-result-derived strings and later re-inject
 // them into a system prompt, so an unsanitized entry is a hostile-repo → store → future-system-prompt
-// payload channel. It (1) strips control characters — so a stored note carries no ANSI/escape
-// sequences or embedded NULs; (2) folds every CR/LF (and any other whitespace) into a single
+// payload channel. It (1) strips control (Cc), format (Cf), private-use (Co) and surrogate (Cs)
+// characters — so a stored note carries no ANSI/escape sequences, embedded NULs, bidi overrides,
+// zero-width characters, BOM or soft hyphens; (2) folds every CR/LF (and any other whitespace) into a single
 // space — so a note can never open a fresh system-prompt line and masquerade as an instruction;
 // and (3) collapses whitespace runs, trimming the result. It applies no length cap: Store.Record
 // never capped content length (the only length cap lived in the mechanism's example-call observer,
@@ -343,8 +344,10 @@ func SanitizeContent(s string) string {
 				b.WriteByte(' ')
 				prevSpace = true
 			}
-		case unicode.IsControl(r):
-			// Drop other control characters entirely — they carry no display value.
+		case unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Co, unicode.Cs):
+			// Drop control (Cc), format (Cf — bidi overrides, zero-width chars, BOM, soft hyphen),
+			// private-use (Co) and surrogate (Cs) runes entirely: they carry no display value, and a
+			// format character can smuggle a directive past a newline-only defence (third-review F3).
 			continue
 		default:
 			b.WriteRune(r)
