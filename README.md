@@ -95,7 +95,10 @@ mechanisms:
 ```
 
 An unknown ID is a startup error that lists the IDs this build knows; `--bypass`
-still wins (an enabled non-off-ramp mechanism does not fire under bypass). The
+still wins (an enabled non-off-ramp mechanism does not fire under bypass). The same
+catalogued mechanisms are enabled by ID from the Go API through
+`Config.EnableMechanisms` (with `apogee.CataloguedMechanisms()` to enumerate them), so
+a library embedder arms the identical stack without the config file. The
 catalogue fills in as the port waves land — see
 [`docs/design/mechanism-catalogue.md`](docs/design/mechanism-catalogue.md).
 

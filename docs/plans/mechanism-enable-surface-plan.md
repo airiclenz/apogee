@@ -279,7 +279,7 @@ Commit: `test(bench): benchreadiness arms mechanisms through the public enable s
 
 ---
 
-## 6. Docs close-out (the one owning item for every cross-cutting doc edit)
+## 6. Docs close-out (the one owning item for every cross-cutting doc edit) — ✅ DONE (2026-07-05)
 
 **What:** (a) CHANGELOG: reconcile items 1–5's lines under one `[Unreleased]` heading for
 the enable surface (the guided-decomposition rollup precedent — one coherent entry, the

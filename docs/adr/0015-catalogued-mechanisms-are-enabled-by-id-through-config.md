@@ -123,3 +123,24 @@ surface).
   (ADR 0009).
 - **No CONTEXT.md change**: the grill crystallised no new term — "enable" was already the
   canonical enable-time verb in the Mechanism-descriptor entry.
+
+## Realisation (2026-07-05) — authorized implementation deviations
+
+`Config.EnableMechanisms`, the public descriptors, and the matchable enable errors shipped
+item-by-item on the day this ADR was ratified, purely additive under v1 (§5). The build held to
+the Decision's letter; the design-level refinements recorded during implementation — each
+already in the plan's per-item NOTES, mirrored here so the ADR stays the ground truth — are:
+
+- **A spawned sub-agent inherits the parent's already-built registry, not its
+  `EnableMechanisms` list.** §1 places the build in the shared construction path, which is also
+  the sub-agent construction path (`internal/agent` `newChildAgent`, which copies the parent
+  `Config`). A child re-running the build over its inherited `Config.Mechanisms` would re-`Add`
+  the same catalogued Mechanisms and trip the registry's duplicate-ID rejection on every spawn.
+  The child therefore inherits the parent's already-built registry and clears `EnableMechanisms`,
+  so it fires the identical Mechanisms without rebuilding — a construction detail §1 did not
+  spell out, consistent with "built … at construction".
+- **A degraded Library store never blocks construction.** §2's "the library store is loaded from
+  `Config.LibraryDir` … the way `cmd/apogee/wire.go` derives them today" is made literal: a
+  corrupt or absent store degrades to an empty store with wire.go's exact `os.Stderr` notice, so
+  an unreadable Library disables learning rather than failing `New`/`Resume` — the posture the
+  cmd path it replaces already had.

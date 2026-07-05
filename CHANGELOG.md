@@ -131,6 +131,14 @@ on, not this work).
   catalogued+experimental combined arm still co-fires both in deterministic order, and a leave-one-out
   arm set computed from `apogee.CataloguedMechanisms()` — the full compatible stack and every
   member-omitted arm — constructs successfully. (`benchreadiness_test.go`.)
+- **Docs close-out.** The enable surface's cross-cutting doc edits are reconciled under this one
+  heading: ADR 0015 gains a dated Realisation note recording the authorized implementation
+  deviation — a spawned sub-agent inherits the parent's already-built registry (clearing
+  `EnableMechanisms`) rather than rebuilding, and a degraded Library store degrades to empty
+  rather than failing construction — and the README's Configuration section now names the public
+  library enable surface (`Config.EnableMechanisms` / `apogee.CataloguedMechanisms()`) alongside
+  the unchanged `mechanisms:` YAML path. CONTEXT.md is unchanged — the grill crystallised no new
+  term (ADR 0015 Consequences / locked decision 7). (Docs: `docs/adr/0015`, `README.md`.)
 
 ## [1.2.0] — 2026-07-04
 
