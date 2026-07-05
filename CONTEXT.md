@@ -305,8 +305,11 @@ the pre-request hook and are tracked uniformly as Mechanisms.
 **Mechanism descriptor**:
 Per-Mechanism metadata orthogonal to its hook point: `Capability` (off-ramp /
 proactive-nudge / response-repair), `SuppressionPolicy` (exempt or strikes-3), and the
-set of Mechanisms it is declared incompatible with (constrains stacking). The single
-source of truth for which Mechanisms are exempt and which can co-fire.
+stacking relations — the set of Mechanisms it is declared incompatible with, and the set
+it **requires** enabled (an enable-time constraint: switching a Mechanism on without its
+requirements is a config error, so dependent Mechanisms are benched and shipped as a
+stack). The single source of truth for which Mechanisms are exempt, which can co-fire,
+and which only make sense together.
 
 ### Self-regulation
 
@@ -357,8 +360,8 @@ is now the fingerprint).
 
 ### Context and history
 
-These four are distinct operations — "compress", "compact", and "truncate" must **not**
-be used interchangeably.
+These five are distinct operations — "compress", "compact", "truncate", and "decompose"
+must **not** be used interchangeably.
 
 **Budget**:
 The allocation of the model's context window across the parts of a request — system
@@ -402,6 +405,23 @@ The **cheap alternative** to Compaction: *mechanically* dropping the middle of t
 conversation, keeping the last N exchanges. Config-gated, **off by default**; a
 history-rewrite Mechanism, validated against Compaction via the bench.
 _Avoid_: "compaction" (truncation is mechanical and lossy, not generative).
+
+**Guided decomposition**:
+The Mechanism (`guided_decomposition`) that **avoids** context growth rather than reducing
+it: when measured Budget signals show the task cannot fit — resolved file context exceeding
+its allocation at the first Turn, or history exceeding its allocation mid-Exchange — it
+steers the model's **own primary call** to enumerate the remaining subtasks, then converts
+that enumeration into `sub_agent` delegations, **one per Turn**, carrying the
+not-yet-delegated items as a Deferred Response Action. The work happens in child Sessions;
+only their bounded reports come home. It is a proactive-nudge (off under Bypass), requires
+`tool_result_cap` (the only reducer able to act mid-Exchange), fires at top level only
+(`Depth == 0`), and no-ops benignly when `sub_agent` is not offered or the model ignores the
+steer. Because the enumeration is the model's own visible response, the queue survives
+suppression in honest history. See
+[ADR 0014](docs/adr/0014-guided-decomposition-steers-the-primary-call-and-serializes-delegation.md).
+_Avoid_: "planner" (Plan is an autonomy mode), "orchestrator" (that is the sub-agent spawn
+machinery, ADR 0013), "auto-decomposition" (the model performs the semantic split; the
+Mechanism only decides when to ask and serializes the follow-through).
 
 ### Validation and the bench
 

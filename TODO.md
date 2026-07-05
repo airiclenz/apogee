@@ -293,3 +293,17 @@ acceptance or a future-task re-verification, NOT a live hole.
 (L2 — the dangerous-action guard normalising only whitespace+case, trivially evadable — needs no
 entry: it is ADR-0012 by-design, and `internal/security/doc.go` already states the guard is "NOT
 a security boundary." No doc/UI describes it as one, which is exactly what L2 asks for.)
+
+---
+
+## Mid-Exchange auto-compaction (fire at Turn boundaries under budget pressure)
+
+**Status:** parked 2026-07-05 (guided-decomposition grill). Auto-compaction fires only at
+Exchange boundaries (`internal/agent/compact.go`), so a long multi-Turn Exchange — e.g. a
+serialized sub-agent fan-out, where every child report lands inside *one* Exchange — has no
+generative reducer available for its entire life; only `tool_result_cap` (default-off) can
+reduce mid-Exchange. Guided decomposition covers this with a descriptor `Requires` on
+`tool_result_cap`; the structural alternative is letting auto-compaction also fire at
+quiescent *Turn* boundaries under pressure. That changes a structural reducer's contract
+(interacts with the saturation logic, the protected prefix, and bench comparability), so it
+needs its own grill and bench evidence — deliberately not a rider on the decomposition work.
