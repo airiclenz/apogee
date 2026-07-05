@@ -141,7 +141,7 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	// that does not gate on incompatibility, so registering both here only exercises their shared
 	// Before edge.
 	ids := []domain.MechanismID{
-		"toolfilter", "decompose", "tool_result_cap",
+		"toolfilter", "decompose", "tool_result_cap", "guided_decomposition",
 		"stall_nudge", "list_nudge", "tool_use_directive", "library",
 		"filehint", "grammar", "read_loop",
 	}
@@ -181,6 +181,17 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	if !(pos["toolfilter"] < pos["decompose"] && pos["decompose"] < pos["tool_result_cap"]) {
 		t.Errorf("want toolfilter@%d < decompose@%d < tool_result_cap@%d",
 			pos["toolfilter"], pos["decompose"], pos["tool_result_cap"])
+	}
+	// guided_decomposition declares After toolfilter (its sub_agent-presence gate must read the final,
+	// post-toolfilter menu) — assert the DECLARED edge, not merely that it sorts after toolfilter, and
+	// that it lands after the narrowing yet before the trailing tool_result_cap.
+	if !slices.Contains(built["guided_decomposition"].Ordering().After, "toolfilter") {
+		t.Errorf("guided_decomposition does not declare After toolfilter (Ordering = %+v)",
+			built["guided_decomposition"].Ordering())
+	}
+	if !(pos["toolfilter"] < pos["guided_decomposition"] && pos["guided_decomposition"] < pos["tool_result_cap"]) {
+		t.Errorf("want toolfilter@%d < guided_decomposition@%d < tool_result_cap@%d",
+			pos["toolfilter"], pos["guided_decomposition"], pos["tool_result_cap"])
 	}
 	// tool_result_cap runs last among the pre-request shapers (§Ordering: it trims after context is
 	// assembled), which here means the final position overall — the injectors are in-degree-0 and

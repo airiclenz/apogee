@@ -31,6 +31,16 @@ on, not this work).
   message, and dispatches it through the full per-call Resolution (the ADR 0013 recursion point,
   driving a real nested child) exactly like a model-emitted call. An in-place response mutation
   combined with a returned `ActionDefer` both take effect. (`internal/domain`, `internal/agent`.)
+- **The `guided_decomposition` gate and enumeration steer (pre-request half).** The new
+  `guided_decomposition` Mechanism (`internal/mechanisms`, catalogue-registered, ordered `After
+  toolfilter`) lands its pre-request half: a strikes-3 proactive-nudge, `IncompatibleWith`
+  `decompose` and `Requires` `tool_result_cap`. On an oversized PRIMARY call — a known window,
+  top-level depth, a `sub_agent` on the final menu, and a measured size signal (a fresh user message
+  over the `FileContext` budget, or mid-Exchange history over the `History` budget with the model
+  still calling tools) — it injects an enumeration steer asking for ONLY a numbered list of at most 7
+  self-contained subtasks. The steer is marker-idempotent and stays quiet once a fan-out directive is
+  already steering (no double-steer); the post-response intercept and serialized follow-through land
+  next. (`internal/mechanisms`.)
 
 ## [1.2.0] — 2026-07-04
 

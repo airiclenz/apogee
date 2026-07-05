@@ -149,7 +149,17 @@ docs/CHANGELOG. Commit:
 
 ---
 
-## 3. Mechanism: skeleton, gate, and the enumeration steer (pre-request half)
+## 3. Mechanism: skeleton, gate, and the enumeration steer (pre-request half) — ✅ DONE (2026-07-05)
+
+NOTES (2026-07-05): the "no double-steer while a fan-out is in flight" gate (item-3 requirement)
+is implemented with TWO fixed markers, not one: `guidedDecompositionSteerMarker` (in the
+enumeration steer this half injects) and `guidedDecompositionDirectiveMarker` (a forward
+contract — item 4 MUST embed this constant in its remaining-items deferred directive so the gate
+recognises an in-flight fan-out and stays quiet). Both constants live in
+`guided_decomposition.go`; the gate scans the conversation for either. Signal-B history-token
+estimation counts `msg.Content` only (the existing `library.go` chars→token idiom), not ToolCall
+arguments. The steer text is a package `var` built via `fmt.Sprintf` from
+`guidedDecompositionMaxSubtasks` (7) so the bound is single-sourced (locked decision 5).
 
 **What:** new `internal/mechanisms/guided_decomposition.go` (+ `_test.go`), registered via
 `init()` in the catalogue. Descriptor: `{ID: guided_decomposition, Capability:
