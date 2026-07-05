@@ -6,11 +6,18 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
-## [Unreleased]
+## [1.3.0] — 2026-07-05
 
-Post-`v1.2.0`, **additive** (minor) — the `guided_decomposition` Mechanism (ADR 0014), built
-up item-by-item behind the Mechanism catalogue and shipped **default-off** (the bench flips it
-on, not this work).
+Post-`v1.2.0`, **additive** (minor) — two features. The `guided_decomposition` Mechanism
+(ADR 0014), built up item-by-item behind the Mechanism catalogue and shipped **default-off**
+(the bench flips it on, not this work). And the public Mechanism enable surface (ADR 0015) —
+the 2026-07-05 handoff's path (b): an external module (apogee-sim, the ADR 0001 consumer) can
+now arm any catalogued Mechanism stack in-process by ID. **No breaking change**
+(sanity-checked against the `v1.2.0..HEAD` diff): the public facade (`apogee.go`) only
+*gains* symbols — `Config.EnableMechanisms`, `CataloguedMechanisms()`, the
+`MechanismDescriptor` / `Capability` / `SuppressionPolicy` aliases with their constant
+values, and the `ErrMissingRequirement` / `ErrUnknownMechanism` re-exports; nothing exported
+is removed or re-typed.
 
 ### Guided decomposition (`guided_decomposition`, default-off)
 
