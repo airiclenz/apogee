@@ -246,7 +246,14 @@ CHANGELOG. Commit:
 
 ---
 
-## 5. Once-per-Exchange gate on committed fan-out evidence
+## 5. Once-per-Exchange gate on committed fan-out evidence — ✅ DONE (2026-07-06)
+
+**NOTES (2026-07-06):** the committed-evidence check landed as a single subsuming predicate
+(`guidedDecompositionFanOutBegun`: any current-Exchange assistant message carries a `sub_agent`
+call) rather than a literal "`sub_agent` call OR item-2 anchor" disjunction. The item-2 anchor
+(`guidedDecompositionEnumeration`) requires a `sub_agent` call, so it is a strict subset of the
+first clause — the single predicate silences exactly the same set of Exchanges, with no redundant
+anchor re-parse. Behaviour is identical to F1's literal text.
 
 **Finding:** review "The gate re-steers once the fan-out's markers vanish, looping the
 decomposition" (High, Intent + Correctness, found independently twice — the top finding). Ground

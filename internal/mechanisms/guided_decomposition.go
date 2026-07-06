@@ -123,7 +123,12 @@ func (guidedDecompositionMechanism) Ordering() domain.OrderingConstraints {
 //   - only at the top level (Depth == 0) — guided decomposition steers the primary call, never a
 //     nested delegation it itself set up (§5);
 //   - sub_agent must be on the (final, post-toolfilter) menu — nothing to delegate toward otherwise;
-//   - no steer or fan-out directive may already be outstanding in the conversation — no double-steer;
+//   - no steer or fan-out directive may already be outstanding in this REQUEST — the same-request
+//     double-steer guard (guidedDecompositionOutstanding, keyed on the request-scoped markers);
+//   - no fan-out may have begun yet in the current Exchange — the once-per-Exchange guard on COMMITTED
+//     evidence (guidedDecompositionFanOutBegun, F1): once any assistant message after the last user ask
+//     carries a sub_agent call the gate stays quiet for the rest of the Exchange, so it cannot re-steer
+//     on the synthesis Turn after the request-scoped markers have drained;
 //   - the task must be oversized by signal A or B (guidedDecompositionOversized).
 //
 // It books no fire (the loop keys acted fires on Request.Revision, R4) whenever any precondition
@@ -143,7 +148,10 @@ func (guidedDecompositionMechanism) PreRequest(_ context.Context, req *domain.Re
 	}
 	conv := view.Conversation()
 	if guidedDecompositionOutstanding(conv) {
-		return nil // a steer or a fan-out directive is already steering — no double-steer
+		return nil // a steer or a fan-out directive is already steering this request — no double-steer
+	}
+	if guidedDecompositionFanOutBegun(conv) {
+		return nil // a fan-out has already begun this Exchange (committed sub_agent call) — steer at most once per Exchange (F1)
 	}
 	if !guidedDecompositionOversized(conv, budget) {
 		return nil // neither signal A nor B — the task is not large enough to warrant delegation
@@ -180,6 +188,33 @@ func guidedDecompositionOutstanding(conv domain.ConversationView) bool {
 		return true
 	})
 	return found
+}
+
+// guidedDecompositionFanOutBegun reports whether a fan-out has already begun in the current Exchange,
+// judged from COMMITTED history alone (F1 — the once-per-Exchange rule): true when any assistant
+// message after the last RoleUser message carries a sub_agent tool call. That single predicate
+// subsumes both of §5's silence conditions — the item-2 enumeration anchor commits as its verbatim
+// list PLUS the synthesized first sub_agent call, and a model that delegated unprompted this Exchange
+// likewise carries one — so once it holds a steer adds nothing (the model is already delegating) and
+// the gate stays quiet for the remainder of the Exchange.
+//
+// Unlike guidedDecompositionOutstanding this reads committed evidence, not the request-scoped markers:
+// the steer rides an InjectContext copy and the directive rides the deferred drain, so both vanish
+// from the next request the moment nothing is re-deferred (the synthesis Turn). Committed sub_agent
+// calls do not vanish — the child reports grew honest history and mid-Exchange auto-compaction cannot
+// run — so this is what stops the gate re-steering on the synthesis Turn once the markers are gone and
+// signal B still reads oversized. A new Exchange (a new last RoleUser message) moves the window
+// forward and re-arms the gate.
+func guidedDecompositionFanOutBegun(conv domain.ConversationView) bool {
+	if conv == nil {
+		return false
+	}
+	for i := guidedDecompositionCurrentExchangeStart(conv); i < conv.Len(); i++ {
+		if m := conv.At(i); m.Role == domain.RoleAssistant && guidedDecompositionHasSubAgentCall(m.ToolCalls) {
+			return true
+		}
+	}
+	return false
 }
 
 // guidedDecompositionOversized reports whether the task is large enough to warrant delegation, on the

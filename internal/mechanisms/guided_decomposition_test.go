@@ -189,6 +189,57 @@ func TestGuidedDecompositionNoDoubleSteer(t *testing.T) {
 	}
 }
 
+// A committed sub_agent fan-out in the CURRENT Exchange silences the gate for the rest of that
+// Exchange (F1 — once-per-Exchange on committed evidence): even with signal B live and NO
+// steer/directive marker outstanding (the request-scoped markers have drained by the synthesis Turn),
+// the gate does not re-steer. A fan-out in a PRIOR Exchange (before the last user ask) does not
+// silence it — a new Exchange re-arms the gate.
+func TestGuidedDecompositionOncePerExchange(t *testing.T) {
+	t.Parallel()
+	// A mid-Exchange assistant message that IS a committed fan-out (a bounded list plus a sub_agent
+	// call). No steer/directive marker rides it — the committed-evidence scan, not a marker, is what
+	// must keep the gate quiet.
+	bigList := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
+	subCall := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
+
+	t.Run("committed sub_agent call in the current Exchange keeps the gate quiet under a live signal B", func(t *testing.T) {
+		t.Parallel()
+		// Signal B is live: the last assistant carried tool calls and the total is >2000 tokens.
+		msgs := []domain.Message{
+			{Role: domain.RoleUser, Content: "big task"}, // the current Exchange begins here
+			{Role: domain.RoleAssistant, Content: bigList, ToolCalls: []domain.ToolCall{subCall}},
+			{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: strings.Repeat("z", 9000)},
+		}
+		req := guidedRequest(msgs, guidedMenu, guidedBudget, 0)
+		before := req.Revision()
+		if err := (guidedDecompositionMechanism{}).PreRequest(context.Background(), req); err != nil {
+			t.Fatalf("PreRequest: %v", err)
+		}
+		if req.Revision() != before {
+			t.Fatal("gate re-steered despite a committed sub_agent fan-out in the current Exchange (F1 once-per-Exchange)")
+		}
+	})
+
+	t.Run("a prior-Exchange fan-out re-arms the gate for a new oversized ask", func(t *testing.T) {
+		t.Parallel()
+		// The fan-out is in the PRIOR Exchange; the fresh oversized user ask (signal A) opens a new one.
+		msgs := []domain.Message{
+			{Role: domain.RoleUser, Content: "an earlier ask"},
+			{Role: domain.RoleAssistant, Content: bigList, ToolCalls: []domain.ToolCall{subCall}},
+			{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report"},
+			{Role: domain.RoleUser, Content: oversizedUser}, // the NEW Exchange — trips signal A
+		}
+		req := guidedRequest(msgs, guidedMenu, guidedBudget, 0)
+		before := req.Revision()
+		if err := (guidedDecompositionMechanism{}).PreRequest(context.Background(), req); err != nil {
+			t.Fatalf("PreRequest: %v", err)
+		}
+		if req.Revision() == before {
+			t.Fatal("gate stayed quiet in a new Exchange despite the fan-out being in the PRIOR one (F1 must re-arm)")
+		}
+	})
+}
+
 // guidedRequestHasSteer reports whether the request now carries the enumeration steer marker in one
 // of its messages (the InjectContext landing point).
 func guidedRequestHasSteer(req *domain.Request) bool {

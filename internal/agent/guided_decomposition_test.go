@@ -44,13 +44,16 @@ const (
 
 // gdWindow is the discovered context window the tests run under. At 4 chars/token (uncalibrated) it
 // allocates ~400 tokens to FileContext and ~960 to History, so a ~2.2k-char opening ask trips signal A
-// (fresh user message over FileContext) while the whole fan-out stays under History — signal B never
-// re-steers mid-Exchange.
+// (fresh user message over FileContext) on Turn 1. Whether the accumulating fan-out later trips signal
+// B is no longer load-bearing: the once-per-Exchange gate (F1) keeps the steer to a single injection
+// per Exchange on committed fan-out evidence, so the suite no longer sizes the window to dodge a
+// re-steer — TestGuidedDecomposition_SteersAtMostOncePerExchange drives the signal-B-live case directly.
 const gdWindow = 2000
 
 // gdOversizedInput is ~2.2k chars: comfortably over the FileContext allocation (~1600 chars) so the
-// gate's signal A fires on Turn 1, yet under the History allocation (~3840 chars) even after the
-// fan-out accumulates the child reports, so signal B stays quiet and no second steer is injected.
+// gate's signal A fires on Turn 1. It sits under the History allocation (~3840 chars) at that point, so
+// the OPENING steer is signal A's; the once-per-Exchange gate — not this sizing — is what stops a later
+// signal-B overrun from injecting a second steer.
 func gdOversizedInput() string { return strings.Repeat("decompose this large task into parts ", 60) }
 
 // gdConfig wires the sub_agent recursion point, the discovered window, and the production-catalogue
@@ -448,6 +451,154 @@ func TestGuidedDecomposition_BypassIsSilentControlArm(t *testing.T) {
 	// The Exchange ended on the model's own enumeration reply — no interception happened.
 	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != gdEnumerationText() {
 		t.Errorf("final message = %+v (ok=%v), want the un-intercepted enumeration reply", me, ok)
+	}
+}
+
+// TestGuidedDecomposition_SteersAtMostOncePerExchange proves F1 end-to-end: even when signal B goes
+// live mid-fan-out (the accumulating child reports push the history over its allocation), the gate
+// steers exactly ONCE for the whole Exchange. The discriminator is the steer count — without the
+// committed-evidence gate the synthesis Turn (no marker outstanding, signal B still oversized) would
+// re-steer, looping the decomposition. The fan-out completes serially and the model's own synthesis is
+// NOT re-intercepted into a second enumeration.
+func TestGuidedDecomposition_SteersAtMostOncePerExchange(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := gdConfig(t, sink)
+	// Large child reports (~1.5k chars each) so the accumulating history overruns the ~960-token
+	// History allocation by the synthesis Turn — signal B is live where the re-steer used to fire.
+	bigReport := func(tag string) string { return tag + ": " + strings.Repeat("finding detail ", 100) }
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		contentScript(gdEnumerationText()),                           // parent T0: enumeration → synthesized delegation of subtask 1
+		contentScript(bigReport("report A")),                         // child A
+		subAgentCallScript("m2", gdSubtasks[1]),                      // parent T1: delegate subtask 2
+		contentScript(bigReport("report B")),                         // child B
+		subAgentCallScript("m3", gdSubtasks[2]),                      // parent T2: delegate subtask 3
+		contentScript(bigReport("report C")),                         // child C
+		contentScript("Synthesis: all three subtasks are complete."), // parent T3: no-tool final answer (signal B live here)
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: gdOversizedInput()}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("final status = %q, want the Exchange to complete", res.Status)
+	}
+
+	// Exactly ONE steer for the whole Exchange despite signal B going live mid-fan-out — the
+	// committed fan-out evidence keeps the gate quiet on the synthesis Turn (F1).
+	if got := gdRequestsContaining(responder.got, gdSteerMarker); len(got) != 1 {
+		t.Fatalf("the enumeration steer was injected in %d requests, want exactly 1 for the whole Exchange (F1 once-per-Exchange)", len(got))
+	}
+
+	// The fan-out completed serially with exactly three delegations — the synthesis was NOT
+	// re-intercepted into a fourth.
+	subCalls := 0
+	for _, c := range dispatchedCalls(sink.events) {
+		if c.Tool == "sub_agent" {
+			subCalls++
+		}
+	}
+	if subCalls != 3 {
+		t.Errorf("dispatched %d sub_agent calls, want 3 (the synthesis was not re-steered into a new fan-out)", subCalls)
+	}
+
+	// The Exchange ended on the model's own synthesis reply — no second enumeration was interposed.
+	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "Synthesis: all three subtasks are complete." {
+		t.Errorf("final message = %+v (ok=%v), want the un-intercepted synthesis answer", me, ok)
+	}
+}
+
+// TestGuidedDecomposition_UnpromptedDelegationSilencesGate proves F1's "already delegating" branch: a
+// model that calls sub_agent on its own — before any steer — silences the gate for the rest of the
+// Exchange. The opening ask is modest (no signal A), but the large child report pushes signal B live on
+// the Turn after the delegation; without the committed-evidence gate that Turn (no marker outstanding)
+// would steer a model that is already delegating.
+func TestGuidedDecomposition_UnpromptedDelegationSilencesGate(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := gdConfig(t, sink)
+	// A large child report so signal B (history over its allocation, last assistant carried tool
+	// calls) goes live on the Turn after the unprompted delegation.
+	bigReport := "child report: " + strings.Repeat("investigated detail ", 250)
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("u1", "Investigate the login module and report back"), // parent T0: UNPROMPTED delegation
+		contentScript(bigReport), // child: a large report that overruns the History allocation
+		contentScript("Final answer synthesized from the delegated work."), // parent T1: signal B live, but the gate stays quiet
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// A modest opening ask — well under the FileContext allocation, so signal A never fires; only the
+	// model's own delegation and the later signal-B growth are in play.
+	if err := a.Submit(domain.UserInput{Text: "Please look into the login module for me."}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("final status = %q, want the Exchange to complete", res.Status)
+	}
+
+	// The gate never steered: the model was already delegating, so a nudge adds nothing (F1).
+	if got := gdRequestsContaining(responder.got, gdSteerMarker); len(got) != 0 {
+		t.Errorf("the gate injected %d enumeration steers, want 0 (an unprompted delegation silences it for the Exchange)", len(got))
+	}
+	// And it booked no fire — no steer, no synthesized fan-out from guided_decomposition.
+	if n := fireCountFor(sink.events, "guided_decomposition"); n != 0 {
+		t.Errorf("guided_decomposition fired %d times, want 0 (the gate stayed quiet all Exchange)", n)
+	}
+}
+
+// TestGuidedDecomposition_NewExchangeReArmsGate proves the once-per-Exchange gate re-arms: after a
+// full fan-out completes (one steer), a fresh oversized ask opens a NEW Exchange whose current-Exchange
+// window carries no committed delegation yet, so signal A steers it again. The prior Exchange's
+// sub_agent calls, now behind the new user ask, do not keep the gate quiet.
+func TestGuidedDecomposition_NewExchangeReArmsGate(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := gdConfig(t, sink)
+	// The full first-Exchange fan-out, then one more script: the second Exchange's enumeration reply to
+	// the re-steer (we Step once — enough to observe the re-arm without running a second full fan-out).
+	responder := &captureAllResponder{scripts: append(gdFanOutScripts(), contentScript(gdEnumerationText()))}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	// Exchange 1: a full fan-out, steered exactly once.
+	if err := a.Submit(domain.UserInput{Text: gdOversizedInput()}); err != nil {
+		t.Fatalf("Submit (Exchange 1): %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run (Exchange 1): %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("Exchange 1 status = %q, want the Exchange to complete", res.Status)
+	}
+	if got := gdRequestsContaining(responder.got, gdSteerMarker); len(got) != 1 {
+		t.Fatalf("Exchange 1 steered %d times, want exactly 1", len(got))
+	}
+
+	// Exchange 2: a fresh oversized ask re-arms the gate — its first request carries a second steer.
+	if err := a.Submit(domain.UserInput{Text: gdOversizedInput()}); err != nil {
+		t.Fatalf("Submit (Exchange 2): %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step (Exchange 2): %v", err)
+	}
+	if got := gdRequestsContaining(responder.got, gdSteerMarker); len(got) != 2 {
+		t.Errorf("after a new oversized ask the gate steered %d requests total, want 2 (re-armed for the new Exchange)", len(got))
 	}
 }
 

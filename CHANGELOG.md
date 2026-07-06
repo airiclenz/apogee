@@ -36,6 +36,13 @@ point is a **minor** bump, not a breaking change.
   instead of letting it drain away — one off-script tool call no longer silently drops the fan-out
   queue (F2). A no-tool final answer still ends the Exchange and is never re-deferred.
   (`internal/mechanisms`.)
+- **Guided decomposition steers at most once per Exchange.** The pre-request gate now stays quiet for
+  the rest of an Exchange once a fan-out has begun in it, judged from committed history — any
+  assistant message after the last user ask that carries a `sub_agent` call (F1). This stops the gate
+  re-steering on the synthesis Turn (where the request-scoped steer/directive markers have drained but
+  signal B still reads oversized), which had looped the decomposition; a model that delegated
+  unprompted this Exchange is likewise left alone. A new user ask re-arms the gate. The marker-based
+  check remains as the same-request double-steer guard. (`internal/mechanisms`.)
 
 ## [1.3.0] — 2026-07-05
 
