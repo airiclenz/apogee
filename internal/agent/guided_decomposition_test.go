@@ -57,7 +57,14 @@ func gdOversizedInput() string { return strings.Repeat("decompose this large tas
 // guided_decomposition + tool_result_cap stack (the Required peer) onto a fresh Config.
 func gdConfig(t *testing.T, sink domain.EventSink) domain.Config {
 	t.Helper()
-	cfg := subAgentConfig(sink, domain.ModeAskBefore) // registers sub_agent so the fan-out has a target
+	return gdConfigWithTools(t, sink)
+}
+
+// gdConfigWithTools is gdConfig plus any extra tools the scripted model may call one level up (e.g. an
+// off-script read_file mid-fan-out) — registered read-only so Ask-Before auto-runs them.
+func gdConfigWithTools(t *testing.T, sink domain.EventSink, extra ...domain.Tool) domain.Config {
+	t.Helper()
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, extra...) // registers sub_agent so the fan-out has a target
 	cfg.Context.MaxContextTokens = gdWindow
 	cfg.Mechanisms = wave1Registry(t, "guided_decomposition", "tool_result_cap")
 	return cfg
@@ -216,6 +223,124 @@ func TestGuidedDecomposition_EndToEndFanOut(t *testing.T) {
 		if !found {
 			t.Errorf("child report %q is missing from honest history; results = %v", want, results)
 		}
+	}
+}
+
+// TestGuidedDecomposition_OffScriptToolTurnKeepsFanOutAlive proves item 4 / F2 end-to-end: when the
+// model answers a mid-fan-out Turn with an off-script tool call (a read_file instead of the next
+// delegation), the drained directive is RE-DEFERRED rather than dropped, so the next request still
+// carries the remaining-items directive and the fan-out runs to completion. The (1 left) directive is
+// the discriminator — without the re-defer the queue empties at the read_file Turn, the follow-through
+// never re-fires, and the directive never shrinks to (1 left).
+func TestGuidedDecomposition_OffScriptToolTurnKeepsFanOutAlive(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	readFile := fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "package auth\nfunc Login() {}"}
+	cfg := gdConfigWithTools(t, sink, readFile)
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		contentScript(gdEnumerationText()),                           // parent T0: the bare enumeration → synthesized delegation of subtask 1
+		contentScript("report A: entry points catalogued"),           // child A (delegated subtask 1)
+		toolCallScript("r1", "read_file", `{"path":"auth.go"}`),      // parent T1: OFF-SCRIPT read instead of delegating
+		subAgentCallScript("m2", gdSubtasks[1]),                      // parent T2: delegate subtask 2 per the re-deferred directive
+		contentScript("report B: endpoint spec drafted"),             // child B
+		subAgentCallScript("m3", gdSubtasks[2]),                      // parent T3: delegate subtask 3
+		contentScript("report C: tests written"),                     // child C
+		contentScript("Synthesis: all three subtasks are complete."), // parent T4: final no-tool answer
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: gdOversizedInput()}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("final status = %q, want the Exchange to complete despite the off-script Turn", res.Status)
+	}
+
+	// The off-script tool ran exactly once — the read_file Turn really happened mid-fan-out.
+	if ran != 1 {
+		t.Errorf("read_file ran %d times, want 1 (the off-script Turn)", ran)
+	}
+
+	// The directive survived the off-script Turn: a request after it still carried the (2 left)
+	// directive listing both outstanding subtasks verbatim (the remainder is intact).
+	if got := gdRequestsContaining(responder.got, gdDirectiveMarker+" (2 left)"); len(got) == 0 {
+		t.Error("no request carried the remaining-items directive (2 left) across the off-script Turn")
+	} else if !gdRequestContains(got[len(got)-1], gdSubtasks[1]) || !gdRequestContains(got[len(got)-1], gdSubtasks[2]) {
+		t.Error("the (2 left) directive did not still list both outstanding subtasks after the off-script Turn")
+	}
+
+	// The discriminator: the directive continued to shrink to (1 left) after subtask 2 was delegated.
+	// Without the off-script re-defer the queue would have emptied at the read_file Turn and this
+	// directive would never exist.
+	if got := gdRequestsContaining(responder.got, gdDirectiveMarker+" (1 left)"); len(got) == 0 {
+		t.Error("the directive did not shrink to (1 left); the off-script Turn dropped the queue")
+	}
+
+	// The fan-out still dispatched all three subtasks (one synthesized + two model-driven).
+	subCalls := 0
+	for _, c := range dispatchedCalls(sink.events) {
+		if c.Tool == "sub_agent" {
+			subCalls++
+		}
+	}
+	if subCalls != 3 {
+		t.Errorf("dispatched %d sub_agent calls, want 3 (the fan-out completed across the off-script Turn)", subCalls)
+	}
+}
+
+// TestGuidedDecomposition_NoToolFinalAnswerDoesNotReDefer proves F2's second half: when the model ends
+// a fan-out early with a NO-TOOL final answer, the directive is NOT re-deferred — a no-tool response
+// closes the Exchange, and re-deferring there would cross into the next Exchange. The Exchange
+// completes on the model's own answer with no further fan-out.
+func TestGuidedDecomposition_NoToolFinalAnswerDoesNotReDefer(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := gdConfig(t, sink)
+	responder := &captureAllResponder{scripts: [][]provider.Delta{
+		contentScript(gdEnumerationText()),                 // parent T0: enumeration → synthesized delegation of subtask 1
+		contentScript("report A: entry points catalogued"), // child A (delegated subtask 1)
+		contentScript("Early synthesis: stopping here."),   // parent T1: no-tool final answer ends the Exchange early
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: gdOversizedInput()}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("final status = %q, want the Exchange to complete on the early answer", res.Status)
+	}
+
+	// The Exchange ended on the model's own no-tool answer (Depth 0), not on a forced continuation.
+	if d := gdMessageEventDepth(sink.events, "Early synthesis: stopping here."); d != 0 {
+		t.Errorf("final answer event Depth = %d, want 0 (the model closed the Exchange itself)", d)
+	}
+
+	// Only the synthesized first delegation dispatched — the no-tool answer was NOT re-deferred into a
+	// continued fan-out, so the directive never shrank to (1 left).
+	subCalls := 0
+	for _, c := range dispatchedCalls(sink.events) {
+		if c.Tool == "sub_agent" {
+			subCalls++
+		}
+	}
+	if subCalls != 1 {
+		t.Errorf("dispatched %d sub_agent calls, want 1 (only the synthesized first delegation)", subCalls)
+	}
+	if got := gdRequestsContaining(responder.got, gdDirectiveMarker+" (1 left)"); len(got) != 0 {
+		t.Error("a (1 left) directive appeared; the no-tool final answer was wrongly re-deferred into a continued fan-out")
 	}
 }
 

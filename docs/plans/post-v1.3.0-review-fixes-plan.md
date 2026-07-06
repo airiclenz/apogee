@@ -207,7 +207,15 @@ nothing → remainder unchanged; the existing shrink tests keep passing.
 
 ---
 
-## 4. Re-defer the directive on off-script tool Turns
+## 4. Re-defer the directive on off-script tool Turns — ✅ DONE (2026-07-06)
+
+**NOTES (2026-07-06):** rather than adding a literally separate off-script `if`, the existing
+follow-through branch's guard was widened from `guidedDecompositionHasSubAgentCall(calls)` to
+`len(calls) > 0`. Behaviour is identical to F2's four-condition off-script branch (a sub_agent call
+was already `len(calls) > 0`; an off-script call contributes no dispatched task so it re-defers the
+remainder intact; a no-tool response still fails the guard and stays the accepted no-op), with no
+duplicated remainder-derivation. `guidedDecompositionHasSubAgentCall` remains in use by
+`guidedDecompositionEnumeration`.
 
 **Finding:** review "One off-script tool call mid-fan-out silently drops the queue" (High,
 Intent + Correctness). Ground truth: ADR 0014 Realisation ("re-derives the remainder … and

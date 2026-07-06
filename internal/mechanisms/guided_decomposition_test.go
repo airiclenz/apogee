@@ -475,6 +475,85 @@ func TestGuidedDecompositionFollowThroughShrinksRemainder(t *testing.T) {
 	}
 }
 
+// An off-script tool Turn mid-fan-out (a directive is steering and the model called a tool OTHER than
+// sub_agent) re-defers the remainder intact rather than letting the drained directive drop the queue
+// (F2 / item 4). The branch fires only when all four conditions hold: drop the directive marker, the
+// tool calls, or the remainder and the intercept books nothing.
+func TestGuidedDecompositionOffScriptToolTurnReDefers(t *testing.T) {
+	t.Parallel()
+	hygiene := " " + guidedDecompositionReportHygiene
+	offScriptCall := domain.ToolCall{ID: "r1", Tool: "read_file", Arguments: []byte(`{"path":"parser.go"}`)}
+
+	t.Run("re-defers the remainder intact on an off-script tool call", func(t *testing.T) {
+		t.Parallel()
+		resp := guidedResponse(guidedFanOutHistory(), "", offScriptCall)
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != domain.ActionDefer {
+			t.Fatalf("Action = %q, want defer (an off-script tool call must keep the directive alive)", decision.Action)
+		}
+		if resp.Revision() != before {
+			t.Errorf("off-script re-defer mutated the response (revision %d → %d); it only re-defers", before, resp.Revision())
+		}
+		for _, want := range []string{"Add unit tests", "Update the changelog"} {
+			if !strings.Contains(decision.Inject, want) {
+				t.Errorf("re-deferred directive dropped the still-outstanding subtask %q", want)
+			}
+		}
+		if strings.Contains(decision.Inject, "Refactor the parser") {
+			t.Error("re-deferred directive re-listed the already-dispatched first subtask")
+		}
+	})
+
+	t.Run("no directive marker is a no-op", func(t *testing.T) {
+		t.Parallel()
+		// guidedEnumHistory carries the enumeration but no drained directive — nothing is steering, so
+		// an off-script tool call is just an ordinary Turn the intercept ignores.
+		history := guidedEnumHistory("1. Refactor the parser\n2. Add unit tests\n3. Update the changelog", "Refactor the parser"+hygiene)
+		resp := guidedResponse(history, "", offScriptCall)
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != "" || resp.Revision() != before {
+			t.Fatalf("off-script call acted with no directive steering (Action %q, revision %d → %d)", decision.Action, before, resp.Revision())
+		}
+	})
+
+	t.Run("no tool call is a no-op (the no-tool final-answer path)", func(t *testing.T) {
+		t.Parallel()
+		// A directive is steering but the model closed the fan-out with a bare answer — F2 never
+		// re-defers there (a no-tool response ends the Exchange; item 7 clears any residue).
+		resp := guidedResponse(guidedFanOutHistory(), "All subtasks handled; here is the synthesis.")
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != "" || resp.Revision() != before {
+			t.Fatalf("no-tool final answer re-deferred the directive (Action %q, revision %d → %d)", decision.Action, before, resp.Revision())
+		}
+	})
+
+	t.Run("an exhausted remainder is a no-op", func(t *testing.T) {
+		t.Parallel()
+		enumeration := "1. Refactor the parser\n2. Add unit tests"
+		call1 := guidedSubAgentCall("text_call_0", "Refactor the parser"+hygiene)
+		call2 := guidedSubAgentCall("c2", "Add unit tests"+hygiene)
+		history := []domain.Message{
+			{Role: domain.RoleSystem, Content: guidedDecompositionDirective([]string{"Add unit tests"})},
+			{Role: domain.RoleUser, Content: "big task"},
+			{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
+			{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
+			{Role: domain.RoleAssistant, Content: "", ToolCalls: []domain.ToolCall{call2}},
+			{Role: domain.RoleTool, ToolCallID: "c2", Content: "report 2"},
+		}
+		// Both enumeration items are already dispatched, so the off-script call re-derives an empty
+		// remainder — nothing left to re-defer.
+		resp := guidedResponse(history, "", offScriptCall)
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != "" || resp.Revision() != before {
+			t.Fatalf("exhausted remainder re-deferred on an off-script call (Action %q, revision %d → %d)", decision.Action, before, resp.Revision())
+		}
+	})
+}
+
 // A model-authored delegation that matches no enumeration item consumes nothing — the remainder is
 // left intact (the model went off-script; tolerated, judged by self-regulation, ADR 0014 §5).
 func TestGuidedDecompositionOffScriptTaskLeavesRemainderIntact(t *testing.T) {

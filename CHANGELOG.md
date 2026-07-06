@@ -30,6 +30,12 @@ point is a **minor** bump, not a breaking change.
   one item occurrence. Duplicate items each need their own dispatch, and dispatching a longer
   prefix-nested item ("Add tests for the CLI") no longer also drops a shorter one ("Add tests"). An
   off-script task matching no item still leaves the remainder intact (§5). (`internal/mechanisms`.)
+- **Guided decomposition re-defers the directive across off-script tool Turns.** When a directive is
+  steering and the model answers a mid-fan-out Turn with a tool call other than `sub_agent`, the
+  post-response intercept now re-defers the remaining-items directive (with the remainder intact)
+  instead of letting it drain away — one off-script tool call no longer silently drops the fan-out
+  queue (F2). A no-tool final answer still ends the Exchange and is never re-deferred.
+  (`internal/mechanisms`.)
 
 ## [1.3.0] — 2026-07-05
 

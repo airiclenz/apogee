@@ -261,14 +261,18 @@ func guidedDecompositionEstimateTokens(chars int, charsPerToken float64) int {
 //     (F4 — a compliant numbered reply passes; prose, a clarifying question, or a refusal does not).
 //     Synthesize the FIRST sub_agent delegation onto the response — text left verbatim (locked
 //     decision 4) — and Defer a directive carrying the remaining subtasks for the next Turn.
-//   - Fan-out follow-through: a directive is steering (its marker is in the request) and the model
-//     emitted its own sub_agent call. Re-derive the remainder from history MINUS every dispatched
-//     task (this Turn's calls included) and Defer the shrunken directive; an empty remainder ends the
-//     fan-out with no decision.
+//   - Fan-out follow-through or off-script tool Turn: a directive is steering (its marker is in the
+//     request) and the model called at least one tool this Turn — the requested sub_agent delegation
+//     OR some other, off-script tool (F2). Re-derive the remainder from history MINUS every dispatched
+//     task (this Turn's calls included) and Defer the shrunken directive. An off-script call carries
+//     no dispatched task, so it re-defers the remainder intact — the directive would otherwise drain
+//     away this Turn and drop the whole fan-out (the High "one off-script tool call mid-fan-out
+//     silently drops the queue"). An empty remainder ends the fan-out with no decision.
 //   - Anything else: inspect-only no-op — no marker, an out-of-bounds or minority-marked reply
-//     (declined whole — prose is not an enumeration, F4), a response already carrying other tool
-//     calls, or an exhausted remainder (ADR 0014 §5 fail-soft; zero revision, zero Action, so the
-//     loop books no fire, R4).
+//     (declined whole — prose is not an enumeration, F4), a directive-steered no-tool final answer
+//     (the model closed the fan-out with its own answer — never re-deferred, the accepted §5
+//     fail-soft; item 7 expires any queue residue at the Exchange boundary), or an exhausted
+//     remainder (ADR 0014 §5 fail-soft; zero revision, zero Action, so the loop books no fire, R4).
 //
 // Suppression needs no code (locked decision 1): once self-regulation withdraws the Mechanism the
 // hook stops being dispatched, the un-consumed directive is never re-derived, and at most one
@@ -295,9 +299,14 @@ func (guidedDecompositionMechanism) PostResponse(_ context.Context, resp *domain
 		return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: guidedDecompositionDirective(items[1:])}, nil
 	}
 
-	// Fan-out follow-through: a directive is steering and the model delegated on its own. Re-derive
-	// the remainder (history + this Turn's calls) and defer the shrunken directive.
-	if guidedDecompositionMarkerPresent(conv, guidedDecompositionDirectiveMarker) && guidedDecompositionHasSubAgentCall(calls) {
+	// Fan-out follow-through or off-script tool Turn: a directive is steering and the model called at
+	// least one tool this Turn — the requested sub_agent delegation OR some other, off-script tool
+	// (F2). Either way the drained directive would vanish this Turn, so re-derive the remainder
+	// (history + this Turn's calls; an off-script call contributes no task and shrinks nothing) and
+	// re-defer the shrunken directive. This keeps the fan-out alive across a single off-script tool
+	// call instead of silently dropping the queue. An empty remainder ends the fan-out with no
+	// decision; a no-tool final answer never reaches here (F2 — that closes the Exchange).
+	if guidedDecompositionMarkerPresent(conv, guidedDecompositionDirectiveMarker) && len(calls) > 0 {
 		if remainder := guidedDecompositionRemainder(conv, calls); len(remainder) > 0 {
 			return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: guidedDecompositionDirective(remainder)}, nil
 		}
