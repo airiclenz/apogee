@@ -181,7 +181,7 @@ returns nil (no cross-Exchange resumption); the existing follow-through/shrink t
 
 ---
 
-## 3. Consume-once, exact-match dispatched-task accounting
+## 3. Consume-once, exact-match dispatched-task accounting — ✅ DONE (2026-07-06)
 
 **Finding:** review "Prefix matching marks duplicate or prefix-nested items as dispatched"
 (Medium, Correctness). Ground truth: ADR 0014 §3 (every enumerated item gets its serialized

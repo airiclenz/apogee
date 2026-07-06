@@ -375,21 +375,26 @@ func guidedDecompositionDirective(remaining []string) string {
 // decision 1): the enumeration is the model's own list+delegation message in the current Exchange,
 // and the dispatched tasks are the sub_agent calls recorded in that same Exchange plus this Turn's
 // own calls. It reads the CALLS, never the child results, so a report capped by tool_result_cap (the
-// Required peer) leaves the cursor's ground truth intact. An enumeration item is consumed when it is
-// a text prefix of any dispatched task (the task is the item plus the appended hygiene ask); a
-// model-authored task that matches no item simply does not shrink the remainder (off-script,
-// tolerated — §5).
+// Required peer) leaves the cursor's ground truth intact. Consumption is EXACT-MATCH and CONSUME-ONCE
+// (item 3): an enumeration item is removed only by a dispatched task equal to the item itself or to
+// the item plus the appended hygiene ask, and each dispatched task consumes at most one item
+// occurrence — so two identical items need two dispatches, and a longer prefix-nested item never
+// absorbs a shorter one's dispatch. A model-authored task that matches no item consumes nothing and
+// leaves the remainder intact (off-script, tolerated — §5).
 func guidedDecompositionRemainder(conv domain.ConversationView, respCalls []domain.ToolCall) []string {
 	items := guidedDecompositionEnumeration(conv)
 	if len(items) == 0 {
 		return nil
 	}
 	dispatched := append(guidedDecompositionDispatchedTasks(conv), guidedDecompositionCallTasks(respCalls)...)
+	consumed := make([]bool, len(dispatched))
 	var remainder []string
 	for _, item := range items {
-		if !guidedDecompositionTaskDispatched(item, dispatched) {
-			remainder = append(remainder, item)
+		if idx := guidedDecompositionMatchingDispatch(item, dispatched, consumed); idx >= 0 {
+			consumed[idx] = true
+			continue
 		}
+		remainder = append(remainder, item)
 	}
 	return remainder
 }
@@ -468,17 +473,24 @@ func guidedDecompositionCallTasks(calls []domain.ToolCall) []string {
 	return tasks
 }
 
-// guidedDecompositionTaskDispatched reports whether enumeration item has already been delegated —
-// true when it is a text prefix of any dispatched task (the synthesized/model task is the item plus
-// the hygiene ask). Prefix matching is the ADR 0014 §5 tolerance: an off-script model task that
-// matches no item leaves the remainder intact.
-func guidedDecompositionTaskDispatched(item string, dispatched []string) bool {
-	for _, task := range dispatched {
-		if strings.HasPrefix(task, item) {
-			return true
+// guidedDecompositionMatchingDispatch returns the index of the first not-yet-consumed dispatched task
+// that EXACTLY matches enumeration item — the task equals the item itself or the item plus the
+// appended report-hygiene ask (the two legitimate shapes a dispatched task takes) — or -1 when none
+// matches (item 3). Exactness stops a longer prefix-nested item's dispatch from also absorbing a
+// shorter item, and the consumed marks make the accounting consume-once: the caller flags the
+// returned dispatch so no second item can claim it, so duplicate items each need their own dispatch.
+// An off-script model task that matches no item returns -1, leaving the remainder intact (the
+// ADR 0014 §5 tolerance).
+func guidedDecompositionMatchingDispatch(item string, dispatched []string, consumed []bool) int {
+	for i, task := range dispatched {
+		if consumed[i] {
+			continue
+		}
+		if task == item || task == item+" "+guidedDecompositionReportHygiene {
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // guidedDecompositionParseMarkedList parses the model's enumeration into ordered subtask strings and

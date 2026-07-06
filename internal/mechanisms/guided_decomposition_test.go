@@ -568,6 +568,65 @@ func TestGuidedDecompositionNoCrossExchangeResumption(t *testing.T) {
 	}
 }
 
+// guidedEnumHistory is a current-Exchange conversation whose sole assistant message IS the enumeration
+// (its verbatim list + the synthesized first delegation call1Task), followed by that child's report —
+// the minimal shape the remainder cursor anchors on. It keeps the original ask as the last RoleUser
+// message so the whole enumeration sits inside the current Exchange.
+func guidedEnumHistory(enumeration, call1Task string) []domain.Message {
+	call1 := guidedSubAgentCall("text_call_0", call1Task)
+	return []domain.Message{
+		{Role: domain.RoleUser, Content: "big task"},
+		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
+		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
+	}
+}
+
+// Consumption is exact-match and consume-once (item 3): a dispatched task removes an enumeration item
+// only when it equals the item or the item-plus-hygiene ask, and each dispatch consumes at most one
+// occurrence. So a single dispatch of a duplicated item leaves the other copy outstanding, dispatching
+// a longer prefix-nested item never absorbs the shorter one, and an off-script task consumes nothing.
+func TestGuidedDecompositionConsumeOnceExactMatch(t *testing.T) {
+	t.Parallel()
+	hygiene := " " + guidedDecompositionReportHygiene
+	tests := []struct {
+		name        string
+		enumeration string
+		call1Task   string
+		respCalls   []domain.ToolCall
+		want        []string
+	}{
+		{
+			name:        "duplicate item: one dispatch removes exactly one occurrence",
+			enumeration: "1. Add tests\n2. Add tests",
+			call1Task:   "Add tests" + hygiene,
+			want:        []string{"Add tests"},
+		},
+		{
+			name:        "prefix-nested: dispatching the longer leaves the shorter",
+			enumeration: "1. Add tests for the CLI\n2. Add tests",
+			call1Task:   "Add tests for the CLI" + hygiene,
+			want:        []string{"Add tests"},
+		},
+		{
+			name:        "off-script task matching nothing leaves the remainder intact",
+			enumeration: "1. Add tests\n2. Update the changelog",
+			call1Task:   "Add tests" + hygiene,
+			respCalls:   []domain.ToolCall{guidedSubAgentCall("c9", "Investigate an unrelated flaky test")},
+			want:        []string{"Update the changelog"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			history := guidedEnumHistory(tc.enumeration, tc.call1Task)
+			got := guidedDecompositionRemainder(guidedConv(history), tc.respCalls)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("remainder = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // The inspect-only no-ops: an exhausted remainder, no marker at all, and a steered response that also
 // carries a model tool call all leave the response untouched with no decision (ADR 0014 §5 fail-soft).
 func TestGuidedDecompositionInterceptNoOps(t *testing.T) {

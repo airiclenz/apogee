@@ -24,6 +24,12 @@ point is a **minor** bump, not a breaking change.
   answer, mid-Exchange narration, or a compaction summary can no longer shadow it, and a previous
   Exchange's fan-out cannot consume the current one's items or resume across the boundary.
   (`internal/mechanisms`.)
+- **Guided decomposition consumes dispatched subtasks by exact match, once each.** The remainder
+  cursor now removes an enumeration item only when a dispatched `sub_agent` task equals the item
+  itself or the item plus the appended report-hygiene ask, and each dispatched task consumes at most
+  one item occurrence. Duplicate items each need their own dispatch, and dispatching a longer
+  prefix-nested item ("Add tests for the CLI") no longer also drops a shorter one ("Add tests"). An
+  off-script task matching no item still leaves the remainder intact (§5). (`internal/mechanisms`.)
 
 ## [1.3.0] — 2026-07-05
 
