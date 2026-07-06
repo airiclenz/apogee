@@ -287,7 +287,16 @@ CHANGELOG. Commit:
 
 ---
 
-## 6. Line-anchored, role-scoped marker detection — and the owning ADR 0014 addendum
+## 6. Line-anchored, role-scoped marker detection — and the owning ADR 0014 addendum — ✅ DONE (2026-07-06)
+
+**NOTES (2026-07-06):** `appendOrCreateSystem` (`internal/domain/hooks.go`) already newline-separates
+appended injections (`Content += "\n\n" + text`) and a freshly created system message places the text
+at the start, so the line-start invariant holds without a change — no fix to `internal/domain` was
+needed (diff stayed in `internal/mechanisms`, `docs/adr`, CHANGELOG). Separately, the existing
+`TestGuidedDecompositionNoDoubleSteer` fixture placed its marker MID-LINE in a user message
+("earlier: <marker> ..."), which F5 now (correctly) no longer treats as outstanding; it was adapted to
+carry the marker at a LINE START (production-faithful to a real injection), assertions unchanged — the
+mid-line non-match is covered by the new `TestGuidedDecompositionMarkersLineAnchoredRoleScoped`.
 
 **Finding:** review "Marker detection is a bare substring scan over every message and role"
 (Medium, Intent + Correctness, found independently twice; the security audit confirmed

@@ -173,21 +173,52 @@ func guidedDecompositionCanDelegate(menu []domain.ToolDef) bool {
 }
 
 // guidedDecompositionOutstanding reports whether the conversation already carries this Mechanism's
-// steer or item 4's fan-out directive (by their fixed markers). Either means guided decomposition is
-// already steering this Exchange, so the gate stays quiet rather than double-steer. The directive is
-// injected by buildRequest ahead of the pre-request hooks (the deferred-correction drain), so a
-// mid-fan-out Turn sees it here.
+// steer or item 4's fan-out directive, matched line-anchored and role-scoped (F5): only in a RoleUser
+// or RoleSystem message and only where a marker starts a line — the only shape the loop's
+// InjectContext writes an injection in. Either marker means guided decomposition is already steering
+// this request, so the gate stays quiet rather than double-steer. The directive is injected by
+// buildRequest ahead of the pre-request hooks (the deferred-correction drain), so a mid-fan-out Turn
+// sees it here. An assistant echo of the phrase, a tool result, or an @file-style user line carrying
+// it mid-line never counts.
 func guidedDecompositionOutstanding(conv domain.ConversationView) bool {
 	found := false
 	conv.Range(func(_ int, m domain.Message) bool {
-		if strings.Contains(m.Content, guidedDecompositionSteerMarker) ||
-			strings.Contains(m.Content, guidedDecompositionDirectiveMarker) {
+		if !guidedDecompositionMarkerRole(m.Role) {
+			return true
+		}
+		if guidedDecompositionMarkerAtLineStart(m.Content, guidedDecompositionSteerMarker) ||
+			guidedDecompositionMarkerAtLineStart(m.Content, guidedDecompositionDirectiveMarker) {
 			found = true
 			return false
 		}
 		return true
 	})
 	return found
+}
+
+// guidedDecompositionMarkerRole reports whether role is one the loop's InjectContext writes an
+// injection into — RoleUser or RoleSystem (F5's role scope). The steer rides a user message (inserted
+// before the last user ask or appended after an assistant message) and the drained directive rides a
+// user message or, when history ends in a tool result, the system prompt. A marker in a RoleAssistant
+// echo or a RoleTool result is never the Mechanism's own injection, so the marker scanners skip it.
+func guidedDecompositionMarkerRole(role domain.Role) bool {
+	return role == domain.RoleUser || role == domain.RoleSystem
+}
+
+// guidedDecompositionMarkerAtLineStart reports whether marker begins a line of content — the
+// line-anchored half of F5's match. Both injected texts begin with their marker phrase, and the loop
+// places an injection either as a whole message (marker at content start) or appended to the system
+// prompt after appendOrCreateSystem's "\n\n" separator (marker right after a newline), so a genuine
+// injection always starts a line. An @file-style line carrying the phrase mid-line does not match; the
+// residual collision — the phrase happening to start a line inside a user message — is a benign no-op
+// or one self-regulated misfire under F1's committed-evidence idempotency.
+func guidedDecompositionMarkerAtLineStart(content, marker string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // guidedDecompositionFanOutBegun reports whether a fan-out has already begun in the current Exchange,
@@ -351,17 +382,23 @@ func (guidedDecompositionMechanism) PostResponse(_ context.Context, resp *domain
 	return domain.PostResponseDecision{}, nil
 }
 
-// guidedDecompositionMarkerPresent reports whether any message content carries marker — the
-// history scan the intercept keys its two active cases on (the request-scoped steer for the
-// enumeration case, the drained directive for the follow-through case). A nil view (the degraded
-// no-view Response) carries no marker.
+// guidedDecompositionMarkerPresent reports whether marker is present line-anchored and role-scoped
+// (F5): only in a RoleUser or RoleSystem message and only where it starts a line — the shape the
+// loop's InjectContext writes the request-scoped steer and the drained directive in. It is the
+// history scan the intercept keys its two active cases on (the steer for the enumeration case, the
+// directive for the follow-through case). An assistant echo of the phrase or a tool result carrying it
+// never matches, so a model that merely quotes the directive cannot trigger a bogus follow-through. A
+// nil view (the degraded no-view Response) carries no marker.
 func guidedDecompositionMarkerPresent(conv domain.ConversationView, marker string) bool {
 	if conv == nil {
 		return false
 	}
 	found := false
 	conv.Range(func(_ int, m domain.Message) bool {
-		if strings.Contains(m.Content, marker) {
+		if !guidedDecompositionMarkerRole(m.Role) {
+			return true
+		}
+		if guidedDecompositionMarkerAtLineStart(m.Content, marker) {
 			found = true
 			return false
 		}

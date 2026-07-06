@@ -167,14 +167,16 @@ func TestGuidedDecompositionGate(t *testing.T) {
 
 // An outstanding steer or fan-out directive in the conversation stops the gate from steering again —
 // no double-steer (locked decision 1). Both markers are exercised, over an otherwise-firing signal-A
-// request.
+// request. The marker rides a user message at a LINE START — the shape the loop's InjectContext writes
+// a genuine injection in (F5); a mid-line echo would no longer count (see the role-scoped/line-anchored
+// tests below).
 func TestGuidedDecompositionNoDoubleSteer(t *testing.T) {
 	t.Parallel()
 	for _, marker := range []string{guidedDecompositionSteerMarker, guidedDecompositionDirectiveMarker} {
 		t.Run(marker, func(t *testing.T) {
 			t.Parallel()
 			msgs := []domain.Message{
-				{Role: domain.RoleUser, Content: "earlier: " + marker + " ..."},
+				{Role: domain.RoleUser, Content: marker + " is already steering this request ..."},
 				{Role: domain.RoleUser, Content: oversizedUser}, // would trip signal A on its own
 			}
 			req := guidedRequest(msgs, guidedMenu, guidedBudget, 0)
@@ -187,6 +189,122 @@ func TestGuidedDecompositionNoDoubleSteer(t *testing.T) {
 			}
 		})
 	}
+}
+
+// F5 — marker detection is line-anchored and role-scoped: a marker counts only where it starts a line
+// of a RoleUser or RoleSystem message (the only places the loop's InjectContext writes an injection).
+// An assistant echo, a tool result, or @file-style user content carrying the phrase mid-line never
+// counts; the real injected steer and drained directive (marker at a line start in a user or system
+// message) still do. Exercised through both marker scanners — the gate's guidedDecompositionOutstanding
+// and the intercept's guidedDecompositionMarkerPresent.
+func TestGuidedDecompositionMarkersLineAnchoredRoleScoped(t *testing.T) {
+	t.Parallel()
+
+	// A drained directive as production writes it when history ends in a tool result: appended to the
+	// system prompt after appendOrCreateSystem's "\n\n", so its marker starts a line mid-message.
+	directiveInSystem := "You are a helpful assistant.\n\n" + guidedDecompositionDirective([]string{"do a", "do b"})
+
+	t.Run("guidedDecompositionOutstanding", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			name string
+			msgs []domain.Message
+			want bool
+		}{
+			{
+				name: "steer at a user-message line start matches",
+				msgs: []domain.Message{{Role: domain.RoleUser, Content: guidedDecompositionSteer}},
+				want: true,
+			},
+			{
+				name: "drained directive at a system-message line start matches",
+				msgs: []domain.Message{{Role: domain.RoleSystem, Content: directiveInSystem}},
+				want: true,
+			},
+			{
+				name: "phrase mid-line in a user @file-style message does not match",
+				msgs: []domain.Message{{Role: domain.RoleUser, Content: "see notes.md: " + guidedDecompositionSteerMarker + " is discussed here"}},
+				want: false,
+			},
+			{
+				name: "assistant echo of the directive phrase at a line start does not match — wrong role",
+				msgs: []domain.Message{{Role: domain.RoleAssistant, Content: guidedDecompositionDirectiveMarker + " — as you asked, here they are"}},
+				want: false,
+			},
+			{
+				name: "tool result carrying the phrase does not match — wrong role",
+				msgs: []domain.Message{{Role: domain.RoleTool, ToolCallID: "c1", Content: guidedDecompositionSteerMarker + " logged"}},
+				want: false,
+			},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if got := guidedDecompositionOutstanding(guidedConv(tc.msgs)); got != tc.want {
+					t.Fatalf("guidedDecompositionOutstanding = %v, want %v", got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("guidedDecompositionMarkerPresent", func(t *testing.T) {
+		t.Parallel()
+		tests := []struct {
+			name   string
+			msgs   []domain.Message
+			marker string
+			want   bool
+		}{
+			{
+				name:   "injected steer at a user-message line start matches",
+				msgs:   []domain.Message{{Role: domain.RoleUser, Content: guidedDecompositionSteer}},
+				marker: guidedDecompositionSteerMarker,
+				want:   true,
+			},
+			{
+				name:   "drained directive at a system-message line start matches",
+				msgs:   []domain.Message{{Role: domain.RoleSystem, Content: directiveInSystem}},
+				marker: guidedDecompositionDirectiveMarker,
+				want:   true,
+			},
+			{
+				name:   "assistant echo of the directive phrase mid-reply does not match — no bogus follow-through",
+				msgs:   []domain.Message{{Role: domain.RoleAssistant, Content: "I will address the " + guidedDecompositionDirectiveMarker + " you mentioned."}},
+				marker: guidedDecompositionDirectiveMarker,
+				want:   false,
+			},
+			{
+				name:   "tool result echoing the steer phrase does not match — wrong role",
+				msgs:   []domain.Message{{Role: domain.RoleTool, ToolCallID: "c1", Content: guidedDecompositionSteerMarker + " noted"}},
+				marker: guidedDecompositionSteerMarker,
+				want:   false,
+			},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				if got := guidedDecompositionMarkerPresent(guidedConv(tc.msgs), tc.marker); got != tc.want {
+					t.Fatalf("guidedDecompositionMarkerPresent(%q) = %v, want %v", tc.marker, got, tc.want)
+				}
+			})
+		}
+	})
+
+	// The follow-through case keys on guidedDecompositionMarkerPresent, so an assistant message merely
+	// echoing the directive phrase does not steer it: a mid-fan-out-shaped tool Turn stays a pure no-op.
+	t.Run("assistant echo does not trigger the follow-through case", func(t *testing.T) {
+		t.Parallel()
+		history := []domain.Message{
+			{Role: domain.RoleUser, Content: "big task"},
+			{Role: domain.RoleAssistant, Content: "Here are the " + guidedDecompositionDirectiveMarker + ": step one, step two."},
+		}
+		resp := guidedResponse(history, "", domain.ToolCall{ID: "r1", Tool: "read_file", Arguments: []byte(`{"path":"x"}`)})
+		before := resp.Revision()
+		decision := fireGuidedPostResponse(t, resp)
+		if decision.Action != "" || resp.Revision() != before {
+			t.Fatalf("assistant echo triggered the follow-through (Action %q, revision %d → %d)", decision.Action, before, resp.Revision())
+		}
+	})
 }
 
 // A committed sub_agent fan-out in the CURRENT Exchange silences the gate for the rest of that

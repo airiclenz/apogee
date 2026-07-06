@@ -43,6 +43,12 @@ point is a **minor** bump, not a breaking change.
   signal B still reads oversized), which had looped the decomposition; a model that delegated
   unprompted this Exchange is likewise left alone. A new user ask re-arms the gate. The marker-based
   check remains as the same-request double-steer guard. (`internal/mechanisms`.)
+- **Guided decomposition markers are line-anchored and role-scoped.** The steer/directive marker scan
+  now matches only in `RoleUser` and `RoleSystem` messages (the only places the loop injects) and only
+  where the marker starts a line (F5). An assistant echo of the phrase, a tool result, or `@file`-style
+  user content carrying it mid-line no longer counts as an outstanding steer or a fan-out directive; the
+  real injected steer and drained directive (marker at a line start) still do. The marker strings are
+  unchanged (the loop-level tests' wire contract). (`internal/mechanisms`; ADR 0014 Realisation addendum.)
 
 ## [1.3.0] — 2026-07-05
 
