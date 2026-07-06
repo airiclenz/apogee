@@ -141,31 +141,34 @@ the bench finds a specific win.
 
 ---
 
-## Read-tool-name set consolidation (three hand-maintained sets drift)
+## Read/list tool-name detection — the shared-scan re-shaping (spelling families landed)
 
-**Status:** parked 2026-07-05 (Phase-4 third-review close-out). Post-v1, a structural
-refactor that is **behaviour-neutral** (one shared set, identical membership) — a
-`/improve-codebase-architecture` candidate. Deliberately **not** fixed in the
-phase-4-third-review-fixes plan: that plan hardens behaviour and test coverage, not structure.
+**Status:** narrowed 2026-07-06 (post-v1.3.0 review-fixes close-out,
+`docs/plans/post-v1.3.0-review-fixes-plan.md` item 11 / F8). The **drift half is fixed**:
+the read trio (`read_file`/`readFile`/`open_file`) and the five list spellings
+(`list_files`/`listFiles`/`list_dir`/`listDir`/`list_directory`) are now single-sourced as two
+spelling families hoisted beside `wave4WriteTools`, every read/list set composes from them
+instead of hand-copying, and the four sets that had diverged were corrected in that pass
+(`cotReadOnlyTools` + `list_directory`; `libraryListTools` + `listFiles`/`listDir`;
+`fileHintListTools` + `listDir`; `toolFilterAnalysisKeep` + `listFiles`/`listDir`). What
+remains parked is the **structural re-shaping** item 11 deliberately stopped short of — a
+`/improve-codebase-architecture` candidate.
 
-**The drift:** three byte-identical read-tool-name sets are hand-maintained side by side in
-`internal/mechanisms` — `readToolNames` (`offramps.go:47`), `fileHintReadTools`
-(`filehint.go:46`), and `libraryReadTools` (`library.go:75`) — each currently
-`{read_file, readFile, open_file}`. Because they are edited independently, adding a new
-read-tool spelling (or a new read tool) means editing three places; missing one silently
-changes just one Mechanism's read detection with no compile error. This drift class has
-already shipped defects across consecutive review rounds — e.g. the second-review fixes that
-added the sim's camelCase `readFile` spelling to the read/analysis sets and that later folded
-`open_file` into the history-family read set — so the risk is demonstrated, not hypothetical.
+**What still remains (the re-shaping):** the history-inspecting Mechanisms still hand-roll the
+same `conv.Range(...)` scan idioms (readloop's greenfield/read-loop path counting, readrepeat's
+recent-successful-reads, filehint's equivalents), differing subtly in role/window/success
+handling. The goal is one copy of each *shared scan shape* — package-level helpers in
+`internal/mechanisms` beside the spelling families they compose with (the *scan* is shared;
+per-Mechanism *membership and thresholds* stay local, same F8 spirit) — plus the broader
+shared-detection-module idea (unifying the marker machinery into a framework) the review flagged.
+**This is now planned as `docs/plans/architecture-deepening-plan.md` (items 6–7 / D5),** which
+is **BLOCKED on the post-v1.3.0 review-fixes plan completing first** and treats that plan's tests
+as its behaviour contract; the arch-deepening plan's own docs close-out (its item 9(b)) will
+close or re-narrow this entry once the re-shaping lands.
 
-**The shape when we pick it up:** collapse the three onto a single canonical source of
-read-tool names (one package-level set, or a shared `isReadTool`-style predicate —
-`offramps.go` already exposes `isReadTool`), keeping membership identical so the change is
-provably behaviour-neutral. Guard the deliberate divergences that must **not** be folded in:
-the content-repair Mechanisms (`syntax`, `autofix`) key on the narrower sim-only
-`isWriteTool` set, and the list-tool sets (`fileHintListTools`, `libraryListTools`) are a
-separate concern. The sibling list-tool sets and the `isFileMutatingTool` predicate are worth
-auditing for the same drift in the same pass.
+**Divergences that must NOT be folded in (still hold):** the content-repair Mechanisms
+(`syntax`, `autofix`) key on the narrower sim-only `isWriteTool` set, and search/exec tool
+spellings stay out of scope.
 
 ---
 

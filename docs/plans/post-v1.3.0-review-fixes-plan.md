@@ -526,7 +526,7 @@ state so in NOTES only if a site proves structurally untestable, the offramps `:
 
 ---
 
-## 12. Docs close-out (owning item for the residue)
+## 12. Docs close-out (owning item for the residue) — ✅ DONE (2026-07-06)
 
 **What:** the cross-cutting residue with exactly one owner (items above carry their own
 code-adjacent CHANGELOG lines and doc amendments in their commits).

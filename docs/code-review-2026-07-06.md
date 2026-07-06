@@ -1,5 +1,15 @@
 # Code Review — v1.2.0 → HEAD (guided decomposition + mechanism enable surface) — 2026-07-06
 
+> **Fixed (2026-07-06):** the findings below were addressed by
+> `docs/plans/post-v1.3.0-review-fixes-plan.md` (items 1–11 implemented and committed; item 12
+> is this close-out). The 5 High / 10 Medium findings landed as the guided-decomposition
+> substrate hardening (majority-marked enumerations, delegation-anchored cursor, consume-once
+> matching, off-script re-defer, once-per-Exchange gate, line-anchored role-scoped markers,
+> Exchange-scoped deferred actions, `truncate_history` incompatibility) plus the enable-surface
+> tests and the read/list spelling-family consolidation. The residual structural re-shaping the
+> findings flagged for `/improve-codebase-architecture` is carried by
+> `docs/plans/architecture-deepening-plan.md`.
+
 **Scope:** `git diff v1.2.0...HEAD` — the guided-decomposition Mechanism (ADR 0014), the public mechanism enable surface (ADR 0015), and the phase-4 third-review-fixes wave. 65 changed Go files, ~5,500 insertions, plus docs.
 **Mission:** Apogee is a terminal coding agent for small local LLMs whose gated, self-regulating Mechanisms must never make the model perform worse than Bypass mode.
 **Files reviewed:** 65 Go files (source + tests), read against the current working tree; ADRs 0014/0015 (incl. Realisation sections) and CONTEXT.md as ground truth.
