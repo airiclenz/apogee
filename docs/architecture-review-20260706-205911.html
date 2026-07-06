@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — Apogee — 2026-07-06</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mono-snippet { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <!-- ============ HEADER ============ -->
+      <header class="space-y-4">
+        <h1 class="text-3xl font-serif font-semibold">Architecture review — Apogee</h1>
+        <p class="text-sm text-slate-500">2026-07-06 · five candidates · deepening opportunities, not a correctness audit</p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600">
+          <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-3 border border-slate-400 bg-white"></span> module</span>
+          <span class="flex items-center gap-1.5"><svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="#475569" stroke-width="1.5" class="seam"/></svg> seam</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-3 border-2 border-red-500 bg-red-50"></span> leakage / duplication</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-3 deep rounded-sm"></span> deep module</span>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700 space-y-1">
+          <p><strong>Since the 06-29 review:</strong> both actioned candidates landed — the Resolution collapse (<code class="text-xs">8760ee7</code>) and the promptEditor lift (<code class="text-xs">8b0e072</code>). Fresh candidates below.</p>
+          <p><strong>Defects:</strong> exploration crossed the guided-decomposition marker/cursor defects already recorded in <code class="text-xs">docs/code-review-2026-07-06.md</code> and covered by the in-flight <code class="text-xs">docs/plans/post-v1.3.0-review-fixes-plan.md</code>. Nothing new to add; this report designs structure only. Candidate 1 is the structural root of that defect cluster.</p>
+          <p><strong>Clean bill:</strong> the Confiner seam (two adapters: landlock + seatbelt), the TUI worker seam (ADR 0011), config locality in <code class="text-xs">cmd/apogee</code> (3 touches per key), and MCP's reuse of the tool registry all checked out deep. No cards for them.</p>
+        </div>
+      </header>
+
+      <!-- ============ CANDIDATES ============ -->
+      <section id="candidates" class="space-y-10">
+
+        <!-- ============ CANDIDATE 1 ============ -->
+        <article id="c1" class="rounded-xl border border-slate-200 bg-white p-8 space-y-6">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif font-semibold">Give the Exchange a home</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-600 leading-relaxed">
+            internal/domain/hooks.go:408 · internal/domain/hookview.go:50 · internal/agent/loop.go:255,281,623–644 ·
+            internal/agent/agent.go:167 · internal/agent/compact.go:126 · internal/mechanisms/guided_decomposition.go:308–410
+          </div>
+
+          <!-- before / after -->
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — one concept, seven implementations</p>
+              <div class="grid grid-cols-2 gap-2" style="min-height: 280px;">
+                <div class="border-2 border-red-400 bg-red-50 rounded p-2">
+                  <p class="text-xs uppercase tracking-wider text-slate-500">loop.go:255</p>
+                  <p class="mono-snippet text-[11px] text-red-800 mt-1">exchangeStart = conv.Len()</p>
+                </div>
+                <div class="border-2 border-red-400 bg-red-50 rounded p-2">
+                  <p class="text-xs uppercase tracking-wider text-slate-500">loop.go:281</p>
+                  <p class="mono-snippet text-[11px] text-red-800 mt-1">min(max(exchangeStart−dropped,…))</p>
+                </div>
+                <div class="border-2 border-red-400 bg-red-50 rounded p-2">
+                  <p class="text-xs uppercase tracking-wider text-slate-500">compact.go:126</p>
+                  <p class="mono-snippet text-[11px] text-red-800 mt-1">if a.inExchange { return }</p>
+                </div>
+                <div class="border-2 border-red-400 bg-red-50 rounded p-2">
+                  <p class="text-xs uppercase tracking-wider text-slate-500">agent.go:167</p>
+                  <p class="mono-snippet text-[11px] text-red-800 mt-1">DropRange(exchangeStart, Len())</p>
+                </div>
+                <div class="border-2 border-red-400 bg-red-50 rounded p-2">
+                  <p class="text-xs uppercase tracking-wider text-slate-500">domain/hooks.go:408</p>
+                  <p class="mono-snippet text-[11px] text-red-800 mt-1">lastIndex(msgs, RoleUser)</p>
+                </div>
+                <div class="border-2 border-red-400 bg-red-50 rounded p-2">
+                  <p class="text-xs uppercase tracking-wider text-slate-500">domain/hookview.go:50</p>
+                  <p class="mono-snippet text-[11px] text-red-800 mt-1">lastIndex(v.messages, RoleUser)</p>
+                </div>
+                <div class="border-2 border-red-400 bg-red-50 rounded p-2 col-span-2">
+                  <p class="text-xs uppercase tracking-wider text-slate-500">guided_decomposition.go:308–410</p>
+                  <p class="mono-snippet text-[11px] text-red-800 mt-1">strings.Contains(marker) over every role — request-scoped state standing in for Exchange-scoped state</p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">Plus <span class="mono-snippet">conv.deferred</span> — Exchange-lifetime state stored at Session scope; the in-flight plan adds <em>four</em> separate clearing points to compensate.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one deep module</p>
+              <div class="flex flex-col gap-3" style="min-height: 280px;">
+                <div class="flex justify-around text-xs uppercase tracking-wider text-slate-500">
+                  <span class="border border-slate-300 bg-white rounded px-2 py-1">loop</span>
+                  <span class="border border-slate-300 bg-white rounded px-2 py-1">Compaction gate</span>
+                  <span class="border border-slate-300 bg-white rounded px-2 py-1">AbortExchange</span>
+                  <span class="border border-slate-300 bg-white rounded px-2 py-1">Mechanisms</span>
+                </div>
+                <svg class="w-full" height="28">
+                  <line x1="14%" y1="0" x2="47%" y2="28" stroke="#475569" stroke-width="1.5"/>
+                  <line x1="38%" y1="0" x2="49%" y2="28" stroke="#475569" stroke-width="1.5"/>
+                  <line x1="62%" y1="0" x2="51%" y2="28" stroke="#475569" stroke-width="1.5"/>
+                  <line x1="86%" y1="0" x2="53%" y2="28" stroke="#475569" stroke-width="1.5"/>
+                </svg>
+                <div class="deep rounded-lg p-4 text-slate-100 flex-1">
+                  <p class="text-xs uppercase tracking-wider text-slate-400">Exchange — internal/domain</p>
+                  <div class="flex flex-wrap gap-2 mt-2">
+                    <span class="mono-snippet text-[11px] bg-slate-700/60 rounded px-2 py-0.5">Start()</span>
+                    <span class="mono-snippet text-[11px] bg-slate-700/60 rounded px-2 py-0.5">Messages()</span>
+                    <span class="mono-snippet text-[11px] bg-slate-700/60 rounded px-2 py-0.5">Deferrals</span>
+                    <span class="mono-snippet text-[11px] bg-slate-700/60 rounded px-2 py-0.5">FiredMarker(id)</span>
+                  </div>
+                  <div class="mt-3 text-[11px] text-slate-400/80 space-y-0.5">
+                    <p>· boundary derivation (last RoleUser, stable across injections)</p>
+                    <p>· boundary repair after mid-Exchange truncation</p>
+                    <p>· deferral lifecycle: created in, consumed in, dies with the Exchange</p>
+                    <p>· Mechanism fired-state scoped to the Exchange, not the request</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><strong>Problem</strong> — the Exchange is a first-class CONTEXT.md term with no module: its boundary is re-derived ad-hoc in seven places across three packages, and Exchange-lifetime state (Deferred Response Actions, Mechanism fired-markers) is faked with request-scoped English strings and a Session-scoped queue — the root of all three High findings in the 07-06 review.</p>
+            <p><strong>Solution</strong> — a domain <span class="mono-snippet">Exchange</span> working value (like <span class="mono-snippet">LoopView</span>): the conversation owns it, the loop and Mechanisms consume it; deferral scope and fired-marker scope live inside it.</p>
+          </div>
+
+          <ul class="text-sm text-slate-700 grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+            <li>Locality: boundary bugs concentrate in one module</li>
+            <li>Leverage: one interface, seven call sites</li>
+            <li>Four deferral-clearing points collapse to one lifecycle</li>
+            <li>Exchange semantics testable directly, not via loop runs</li>
+          </ul>
+
+          <div class="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+            <strong>Sequencing + ADR 0014:</strong> the in-flight fixes plan (F1–F8) patches each site tactically — run it first; this candidate then gives those patches one home. No ADR conflict: ADR 0014 §3's "re-derive from honest history each Turn" is preserved — the Exchange module <em>is</em> that re-derivation, implemented once.
+          </div>
+        </article>
+
+        <!-- ============ CANDIDATE 2 ============ -->
+        <article id="c2" class="rounded-xl border border-slate-200 bg-white p-8 space-y-6">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif font-semibold">Deepen the Mechanism author's interface</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-600 leading-relaxed">
+            internal/domain/hooks.go:201–243 · internal/context/budget.go:175 · internal/mechanisms/readloop.go:66–205 ·
+            readrepeat.go:118–155 · guided_decomposition.go:189–249 · tool_result_cap.go:117–123 · library.go:145–181
+          </div>
+
+          <!-- mass diagram -->
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — interface nearly as wide as the implementation</p>
+              <div class="flex gap-3 items-end" style="height: 280px;">
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="border-2 border-red-400 bg-red-50 rounded-t p-2" style="height: 230px;">
+                    <p class="text-xs uppercase tracking-wider text-red-700">what an author must know</p>
+                    <ul class="mono-snippet text-[11px] text-red-800 mt-2 space-y-1">
+                      <li>raw []Message + roles</li>
+                      <li>tool-call JSON shapes</li>
+                      <li>conv.Range() scan idioms</li>
+                      <li>chars ÷ CharsPerToken arithmetic</li>
+                      <li>Budget field semantics ×7</li>
+                      <li>marker-string conventions</li>
+                      <li>"did I already fire?" protocol</li>
+                    </ul>
+                  </div>
+                  <p class="text-center text-xs text-slate-500 py-1 border-x border-b border-slate-300 rounded-b bg-white">interface</p>
+                </div>
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="border border-slate-400 bg-white rounded-t p-2" style="height: 250px;">
+                    <p class="text-xs uppercase tracking-wider text-slate-500">each mechanism re-implements</p>
+                    <ul class="mono-snippet text-[11px] text-slate-600 mt-2 space-y-1">
+                      <li>readloop: 3 scan helpers</li>
+                      <li>readrepeat: 1 scan helper</li>
+                      <li>guided_decomp: 2 budget checks + estimator</li>
+                      <li>tool_result_cap: capMaxChars()</li>
+                      <li>library: libraryCapToBudget()</li>
+                    </ul>
+                    <p class="text-[11px] text-red-700 mt-2">HistoryExceedsAllocation() exists in context/ — unreachable from a hook</p>
+                  </div>
+                  <p class="text-center text-xs text-slate-500 py-1 border-x border-b border-slate-300 rounded-b bg-white">implementation ×N</p>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — short interface, absorbed scans</p>
+              <div class="flex gap-3 items-end" style="height: 280px;">
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="deep rounded-t p-2 text-slate-100" style="height: 90px;">
+                    <p class="text-xs uppercase tracking-wider text-slate-400">LoopView queries</p>
+                    <ul class="mono-snippet text-[11px] mt-2 space-y-1">
+                      <li>EstimateTokens(chars)</li>
+                      <li>HistoryExceedsAllocation()</li>
+                      <li>ReadPaths() / WrittenPaths()</li>
+                    </ul>
+                  </div>
+                  <p class="text-center text-xs text-slate-500 py-1 border-x border-b border-slate-300 rounded-b bg-white">interface</p>
+                </div>
+                <div class="flex-1 flex flex-col justify-end">
+                  <div class="border border-slate-400 bg-white rounded-t p-2" style="height: 250px;">
+                    <p class="text-xs uppercase tracking-wider text-slate-500">one implementation</p>
+                    <ul class="mono-snippet text-[11px] text-slate-600 mt-2 space-y-1">
+                      <li>token estimation (calibrated, one place)</li>
+                      <li>allocation checks (the context/ ground truth)</li>
+                      <li>history scans (roles, tool calls, paths)</li>
+                    </ul>
+                    <p class="text-[11px] text-slate-500 mt-2">mechanisms shrink to gate + decision</p>
+                  </div>
+                  <p class="text-center text-xs text-slate-500 py-1 border-x border-b border-slate-300 rounded-b bg-white">implementation ×1</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><strong>Problem</strong> — the hook interface hands Mechanism authors raw message lists and a dumb Budget value; five Mechanisms hand-roll the same history scans and token arithmetic, each copy subtly different, while the canonical <span class="mono-snippet">HistoryExceedsAllocation</span> check sits unreachable in <span class="mono-snippet">context/</span>.</p>
+            <p><strong>Solution</strong> — extend the hook-facing view with shared queries (token estimation, allocation checks, read/written-path scans); Mechanisms delegate instead of re-deriving.</p>
+          </div>
+
+          <ul class="text-sm text-slate-700 grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+            <li>Leverage: every future Mechanism inherits the queries</li>
+            <li>Locality: estimation bugs concentrate in one place</li>
+            <li>Tests assert decisions, not scan mechanics</li>
+            <li>Bench campaign about to breed more Mechanisms</li>
+          </ul>
+
+          <div class="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+            <strong>Public surface note:</strong> the hook interfaces are public via root aliases — additive methods are a minor bump (ADR 0001/0010); adding to an <em>interface</em> type is breaking for external implementers, so the queries belong on <span class="mono-snippet">LoopView</span> (a struct-backed working value), not on the hook interfaces themselves.
+          </div>
+        </article>
+
+        <!-- ============ CANDIDATE 3 ============ -->
+        <article id="c3" class="rounded-xl border border-slate-200 bg-white p-8 space-y-6">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif font-semibold">A tool-definition module for the built-in suite</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-600 leading-relaxed">
+            internal/tools/*.go (~19 tools) · internal/tools/tools.go:37–42 · e.g. read_file.go:13–22 · write_file.go:11–22
+          </div>
+
+          <!-- cross-section -->
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — the same ritual, nineteen times</p>
+              <div class="space-y-1.5" style="min-height: 240px;">
+                <div class="h-10 border-l-4 border-red-400 bg-red-50 rounded-r flex items-center px-3 mono-snippet text-[11px] text-red-800">read_file: schema JSON string · args struct · decodeArgs · error shaping</div>
+                <div class="h-10 border-l-4 border-red-400 bg-red-50 rounded-r flex items-center px-3 mono-snippet text-[11px] text-red-800">write_file: schema JSON string · args struct · decodeArgs · error shaping</div>
+                <div class="h-10 border-l-4 border-red-400 bg-red-50 rounded-r flex items-center px-3 mono-snippet text-[11px] text-red-800">git: schema JSON string · args struct · decodeArgs · error shaping</div>
+                <div class="h-10 border-l-4 border-red-300 bg-red-50/60 rounded-r flex items-center px-3 mono-snippet text-[11px] text-red-700/70">… ×16 more</div>
+                <p class="text-xs text-slate-500 pt-2">Path-safety and url-safety threading is already clean — the repetition is the schema/decode/result idiom itself.</p>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one thick band, nineteen declarations</p>
+              <div class="space-y-1.5" style="min-height: 240px;">
+                <div class="deep rounded p-3 text-slate-100" style="height: 110px;">
+                  <p class="text-xs uppercase tracking-wider text-slate-400">tool-definition module</p>
+                  <p class="mono-snippet text-[11px] mt-2 text-slate-300">schema builder · typed arg decoder · result / error helpers · registration</p>
+                  <p class="text-[11px] text-slate-400/80 mt-2">per-tool variation (git's env scrubbing) stays in the tool</p>
+                </div>
+                <div class="h-9 border-l-4 border-slate-400 bg-white rounded-r flex items-center px-3 mono-snippet text-[11px] text-slate-600">read_file = declaration + behaviour</div>
+                <div class="h-9 border-l-4 border-slate-400 bg-white rounded-r flex items-center px-3 mono-snippet text-[11px] text-slate-600">write_file = declaration + behaviour</div>
+                <div class="h-9 border-l-4 border-slate-300 bg-white rounded-r flex items-center px-3 mono-snippet text-[11px] text-slate-500">… ×17 more</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><strong>Problem</strong> — each built-in tool hand-rolls a JSON-schema string, an args struct, decoding, and error-result shaping; the idiom repeats ~19 times with subtle variation, and ADR 0002 makes tools an open extension point, so third-party authors copy the ritual too.</p>
+            <p><strong>Solution</strong> — a deeper tool-definition module (schema builder, decoder factory, result helpers); built-ins collapse into declarations plus behaviour.</p>
+          </div>
+
+          <ul class="text-sm text-slate-700 grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+            <li>Leverage: paved path for tool authors (ADR 0002)</li>
+            <li>Locality: schema/decoding conventions in one place</li>
+            <li>Interface shrinks; implementation absorbs the ritual</li>
+            <li>Less per-tool test boilerplate</li>
+          </ul>
+        </article>
+
+        <!-- ============ CANDIDATE 4 ============ -->
+        <article id="c4" class="rounded-xl border border-slate-200 bg-white p-8 space-y-6">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif font-semibold">A test-surface adapter for Mechanisms</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">mock</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-600 leading-relaxed">
+            internal/mechanisms/*_test.go · e.g. offramps_test.go:24–39 (file-local helpers reused package-wide)
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <pre class="mermaid">
+flowchart TB
+  T1[readloop_test] --> H1[hand-built fixtures]
+  T2[offramps_test] --> H2["readCall() / userMsg() / assistantCall()"]
+  T3[new mechanism test] --> H3[grep for helpers, re-invent]
+  H1 --> D[domain.NewRequest / raw messages]
+  H2 --> D
+  H3 --> D
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class H1,H2,H3 leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <pre class="mermaid">
+flowchart TB
+  T1[readloop_test] --> B
+  T2[offramps_test] --> B
+  T3[new mechanism test] --> B
+  B["ConversationBuilder + FakeLoopView<br/>(one test adapter at the hook seam)"] --> I[hook interface]
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a;
+  class B deep
+              </pre>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><strong>Problem</strong> — the hook interface is the test surface, but its test adapter doesn't exist: every Mechanism test hand-builds conversations from raw messages, helpers are file-local, and a new Mechanism's author greps for <span class="mono-snippet">readCall()</span> before writing test one.</p>
+            <p><strong>Solution</strong> — one shared fixture module: a fluent <span class="mono-snippet">ConversationBuilder</span> and a <span class="mono-snippet">FakeLoopView</span> — the second adapter that makes the hook seam real.</p>
+          </div>
+
+          <ul class="text-sm text-slate-700 grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+            <li>Tests hit one interface</li>
+            <li>Two adapters: the loop in prod, the fake in tests</li>
+            <li>Fixture bugs concentrate in one module</li>
+            <li>Natural companion to candidate 2</li>
+          </ul>
+        </article>
+
+        <!-- ============ CANDIDATE 5 ============ -->
+        <article id="c5" class="rounded-xl border border-slate-200 bg-white p-8 space-y-6">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif font-semibold">Slice user-input resolution out of the loop</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">Speculative</span>
+              <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-600 leading-relaxed">
+            internal/agent/loop.go:645–743 (resolveFileRefs, resolveSkillRefs — ~100 LOC inside a 919-line file)
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <pre class="mermaid">
+flowchart LR
+  L["loop.go (919 LOC)<br/>Turn sequencing · streaming ·<br/>@file + /skill resolution"]
+  L --- HR[hookrun.go]
+  L --- DI[dispatch.go]
+  L --- CO[compact.go]
+  L --- SR[selfreg.go]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class L leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <pre class="mermaid">
+flowchart LR
+  L["loop.go (~800 LOC)<br/>Turn sequencing · streaming"]
+  L --- HR[hookrun.go]
+  L --- DI[dispatch.go]
+  L --- CO[compact.go]
+  L --- SR[selfreg.go]
+  L --- UR["input resolver<br/>(@file + /skill)"]
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a;
+  class UR deep
+              </pre>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><strong>Problem</strong> — File-reference and Skill resolution (~100 LOC of per-Turn work, coupled to Config and emitting events inline) ride in the Turn-sequencing file; the loop's other responsibilities already have their own modules.</p>
+            <p><strong>Solution</strong> — an input-resolver module behind a small interface, testable against a fake workspace.</p>
+          </div>
+
+          <ul class="text-sm text-slate-700 grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+            <li>Resolver testable without a live loop</li>
+            <li>loop.go keeps only Turn sequencing + streaming</li>
+            <li>Deletion test is mixed — one caller, one adapter</li>
+          </ul>
+
+          <div class="rounded-lg bg-slate-100 border border-slate-200 p-3 text-sm text-slate-700">
+            <strong>Why only Speculative:</strong> one adapter = hypothetical seam. loop.go's remaining size is mostly genuine Turn-sequencing depth, and its natural seams (hookrun, dispatch, compact, selfreg, resolution) already exist. Do this only if the resolver grows (e.g. richer skill layering).
+          </div>
+        </article>
+      </section>
+
+      <!-- ============ TOP RECOMMENDATION ============ -->
+      <section id="top-recommendation">
+        <div class="rounded-xl deep text-slate-100 p-8 space-y-3">
+          <p class="text-xs uppercase tracking-wider text-slate-400">Top recommendation</p>
+          <h2 class="text-2xl font-serif font-semibold"><a href="#c1" class="underline decoration-slate-500 underline-offset-4">Give the Exchange a home</a></h2>
+          <p class="text-sm text-slate-300 max-w-3xl">
+            Three independent signals converge on it: the engine explorer found seven ad-hoc boundary computations, the mechanisms explorer found Exchange-scoped state faked with request-scoped markers, and the 07-06 code review traced all three of its High findings to exactly this gap — and nominated the scoping for this review by name. Sequence it right after the in-flight tactical fixes plan lands: the plan patches the call sites, the Exchange module then concentrates them, and candidate 2 (which needs an Exchange-aware view anyway) follows naturally.
+          </p>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-4">
+        Apogee · architecture review · 2026-07-06 · vocabulary: CONTEXT.md (domain) + improve-codebase-architecture LANGUAGE.md (structure)
+      </footer>
+    </main>
+  </body>
+</html>
