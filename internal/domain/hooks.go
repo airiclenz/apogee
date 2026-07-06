@@ -765,6 +765,38 @@ func (c *Conversation) TakeDeferred() (injects []string, ok bool) {
 	return out, true
 }
 
+// DeferredLen reports how many deferred corrections are currently queued — the loop reads it
+// after draining a request to capture the floor a cancelled Turn's own deferrals are truncated
+// back to (TruncateDeferred), so a re-attempt restores only the drained injections (F6).
+func (c *Conversation) DeferredLen() int { return len(c.deferred) }
+
+// TruncateDeferred drops every deferred correction past the first n, keeping the queue's first n
+// entries. n is clamped to [0, len]. The loop calls it when rolling a cancelled Turn back: the
+// deferrals the cancelled Turn's own post-response hooks queued die with the Turn, so restoreDeferred
+// re-queues the drained injections exactly once rather than atop a contradictory re-derivation (F6).
+func (c *Conversation) TruncateDeferred(n int) {
+	if n < 0 {
+		n = 0
+	}
+	if n >= len(c.deferred) {
+		return
+	}
+	c.deferred = c.deferred[:n:n]
+	c.revision++
+}
+
+// ClearDeferred discards all pending deferred corrections. A Deferred Response Action is a decision
+// about the NEXT request of the SAME conversation flow, so the loop clears the queue whenever an
+// Exchange ends (completeTurn's Exchange-complete branch, abandonTurn, AbortExchange): a stale
+// fan-out directive must never survive a fault or abort into the next Exchange (F6).
+func (c *Conversation) ClearDeferred() {
+	if len(c.deferred) == 0 {
+		return
+	}
+	c.deferred = nil
+	c.revision++
+}
+
 // conversationJSON is the on-disk shape of a Conversation. Per-message Extra fields
 // round-trip through Message's own MarshalJSON/UnmarshalJSON (the unknown wire siblings
 // are flattened alongside the known fields), so reasoning_content and the like survive.

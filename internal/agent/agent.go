@@ -165,6 +165,9 @@ func (a *Agent) AbortExchange() {
 		return
 	}
 	a.conv.DropRange(a.exchangeStart, a.conv.Len())
+	// The Exchange is scrapped, so any deferred Response Action expires with it (F6): a mid-fan-out
+	// abort must not leave a stale remaining-items directive queued for the next Exchange's request.
+	a.conv.ClearDeferred()
 	a.inExchange = false
 	a.pendingInput = nil
 }

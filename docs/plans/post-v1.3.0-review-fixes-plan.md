@@ -334,7 +334,17 @@ the newline verification requires a fix), `docs/adr/0014-...md` + CHANGELOG. Com
 
 ---
 
-## 7. Deferred Response Actions are Exchange-scoped
+## 7. Deferred Response Actions are Exchange-scoped — ✅ DONE (2026-07-06)
+
+**NOTES (2026-07-06):** clearing the queue at `completeTurn`'s `StatusExchangeComplete` branch (item
+7(a), literal) reverses the pre-F6 behaviour a pre-existing loop test asserted — a post-response
+`ActionDefer` on a no-tool FINAL answer used to ride into the NEXT Exchange's request. That is exactly
+the cross-Exchange leakage F2 names as "the exact defect F6 closes", so
+`TestStep_DeferredCorrectionSurvivesSnapshot` was repurposed to
+`TestStep_DeferredCorrectionExpiresAtExchangeEnd` (asserting the correction is cleared at the Exchange
+boundary and never rides the next Exchange). Within-Exchange defer delivery across snapshot/resume is
+still covered by `TestGuidedDecomposition_SnapshotMidFanOutRoundTripsDirective`. Diff stays within the
+item's `internal/agent` scope.
 
 **Finding:** review "A stale fan-out directive survives into the next Exchange after a fault or
 abort" (High, Correctness — verified directly in the main review pass) plus "cancelTurn restores

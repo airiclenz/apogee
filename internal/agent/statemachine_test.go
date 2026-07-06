@@ -6,7 +6,8 @@ package agent
 // assert: a multi-Turn tool Exchange completes; Approval is consulted in Ask-Before and
 // bypassed in Plan; cancellation mid-tool yields StatusCancelled + a resumable snapshot; a
 // panicking tool yields an ErrorEvent and the loop survives; and the ActionDefer
-// feed-forward survives a snapshot and injects on the next request.
+// feed-forward is Exchange-scoped — expired at the Exchange boundary, never crossing into the
+// next Exchange (item 7 / F6).
 
 import (
 	"context"
@@ -705,10 +706,14 @@ func (h deferOnceHook) PostResponse(_ context.Context, _ *domain.Response) (doma
 	return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: h.inject}, nil
 }
 
-// TestStep_DeferredCorrectionSurvivesSnapshot proves a post-response ActionDefer survives a
-// snapshot/resume boundary and is injected, role-safe, into the next Exchange's request —
-// the loop-level delivery of the P1.5 acceptance clause proven there only at the primitive level.
-func TestStep_DeferredCorrectionSurvivesSnapshot(t *testing.T) {
+// TestStep_DeferredCorrectionExpiresAtExchangeEnd proves the Exchange-scoped lifetime of a Deferred
+// Response Action (item 7 / F6): a post-response ActionDefer made on a no-tool FINAL answer — the
+// Turn that ends the Exchange — is cleared at the Exchange boundary rather than carried into the next
+// Exchange. So neither the snapshot taken after the Exchange nor the resumed next-Exchange request
+// carries the correction. This reverses the pre-F6 cross-Exchange delivery (a stale directive leaking
+// past an Exchange was the reviewed High defect); within-Exchange defer delivery across a
+// snapshot/resume is still proven by TestGuidedDecomposition_SnapshotMidFanOutRoundTripsDirective.
+func TestStep_DeferredCorrectionExpiresAtExchangeEnd(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	done := false
@@ -732,9 +737,14 @@ func TestStep_DeferredCorrectionSurvivesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
+	// The Exchange ended on a no-tool final answer, so the deferred correction expired with it (F6):
+	// the snapshot state does not carry it.
+	if strings.Contains(string(snap.State), "remember the constraint") {
+		t.Error("the deferred correction survived the Exchange boundary in the snapshot; F6 should have cleared it at Exchange end")
+	}
 
-	// Resume into a fresh Agent with a capturing responder; the next request must carry the
-	// deferred correction, injected before the new user input.
+	// Resume into a fresh Agent with a capturing responder; the next Exchange's request must NOT carry
+	// the expired correction — a directive never crosses an Exchange boundary.
 	sink2 := &recordingSink{}
 	cfg2 := baseConfig(sink2)
 	cfg2.Mechanisms = cfg.Mechanisms
@@ -750,8 +760,8 @@ func TestStep_DeferredCorrectionSurvivesSnapshot(t *testing.T) {
 		t.Fatalf("Run (exchange 2): %v", err)
 	}
 
-	if !containsContent(capt.got.Messages, "remember the constraint") {
-		t.Errorf("the resumed request did not carry the deferred correction: %+v", capt.got.Messages)
+	if containsContent(capt.got.Messages, "remember the constraint") {
+		t.Errorf("the resumed next-Exchange request carried an expired deferred correction: %+v", capt.got.Messages)
 	}
 }
 

@@ -289,6 +289,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	rollback := a.conv.Len()
 
 	req, deferred := a.buildRequest(turn)
+	// deferredFloor is the deferred queue's length after this Turn's request drained it and BEFORE
+	// any post-response hook re-defers — the boundary cancelTurn truncates back to, so a cancelled
+	// Turn's own deferrals die with the Turn and only the drained injections are restored (F6).
+	deferredFloor := a.conv.DeferredLen()
 	if err := a.runPreRequestHooks(ctx, turn, req); err != nil {
 		// The request was never sent: re-queue the drained corrections so they ride the
 		// next request, and degrade the Turn with no assistant message.
@@ -299,7 +303,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	resp, outcome := a.respondAndReview(ctx, turn, req)
 	switch outcome {
 	case turnCancelled:
-		return a.cancelTurn(turn, rollback, deferred, start), nil
+		return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
 	case turnFailed:
 		a.restoreDeferred(deferred)
 		return a.abandonTurn(turn, start), nil
@@ -322,7 +326,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// each call through Approval. A cancellation mid-tool rolls the whole Turn back.
 	a.conv.Append(assistantMessage(resp, calls))
 	if a.dispatchTools(ctx, turn, calls) == dispatchCancelled {
-		return a.cancelTurn(turn, rollback, deferred, start), nil
+		return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
 	}
 	return a.completeTurn(turn, start, domain.StatusTurnComplete), nil
 }
@@ -572,6 +576,10 @@ func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus
 	a.tracker.endTurn()
 	if status == domain.StatusExchangeComplete {
 		a.inExchange = false
+		// The Exchange closed: expire any deferred Response Action so a directive never crosses into
+		// the next Exchange (F6). In practice the queue is empty here — a no-tool final answer ends
+		// the Exchange and F2 never re-defers there — so this is the invariant's backstop.
+		a.conv.ClearDeferred()
 	}
 	a.turnIndex++
 	return domain.StepResult{Status: status, TurnIndex: turn, Elapsed: time.Since(start)}
@@ -589,6 +597,10 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 	// judge (R3).
 	a.tracker.discardTurn()
 	a.inExchange = false
+	// A faulted Turn ends the Exchange, so any deferred directive expires with it (F6): the fault
+	// path re-queued the drained corrections just above, but they are a decision about the SAME
+	// flow's next request — a new Exchange must not inherit a stale fan-out directive.
+	a.conv.ClearDeferred()
 	a.turnIndex++
 	return domain.StepResult{Status: domain.StatusExchangeComplete, TurnIndex: turn, Elapsed: time.Since(start)}
 }
@@ -605,7 +617,7 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 // the open Exchange (two consecutive user messages, or a user message wedged after a tool
 // result — both of which a strict chat template rejects). Clearing it here contradicted the
 // un-advanced turnIndex (which says "re-attempt"), opening that exact hole.
-func (a *Agent) cancelTurn(turn, rollback int, deferred []string, start time.Time) domain.StepResult {
+func (a *Agent) cancelTurn(turn, rollback int, deferred []string, deferredFloor int, start time.Time) domain.StepResult {
 	// The Turn is rolled back and re-attempted on resume, so self-regulation discards it WITHOUT
 	// judging — the re-attempt repopulates the fired-this-Turn set and the proxy signals from
 	// scratch. The discard also rolls this Turn's novel-read keys back out of seenReads, so the
@@ -613,6 +625,11 @@ func (a *Agent) cancelTurn(turn, rollback int, deferred []string, start time.Tim
 	// stays in place for the re-attempt's outcome to judge (R3).
 	a.tracker.discardTurn()
 	a.conv.DropRange(rollback, a.conv.Len())
+	// Truncate the queue back to its pre-hooks floor before restoring: the cancelled Turn's own
+	// post-response deferrals (e.g. a shrunken directive built from a delegation that is now rolled
+	// back) die with the Turn, so restoreDeferred re-queues the drained injections exactly once and a
+	// re-attempt or snapshot never carries two contradictory directives (F6).
+	a.conv.TruncateDeferred(deferredFloor)
 	a.restoreDeferred(deferred)
 	return domain.StepResult{Status: domain.StatusCancelled, TurnIndex: turn, Elapsed: time.Since(start)}
 }

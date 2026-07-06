@@ -49,6 +49,14 @@ point is a **minor** bump, not a breaking change.
   user content carrying it mid-line no longer counts as an outstanding steer or a fan-out directive; the
   real injected steer and drained directive (marker at a line start) still do. The marker strings are
   unchanged (the loop-level tests' wire contract). (`internal/mechanisms`; ADR 0014 Realisation addendum.)
+- **Deferred Response Actions expire at the Exchange boundary.** A deferred correction (an
+  `ActionDefer` decision, e.g. a guided-decomposition remaining-items directive) is now cleared
+  whenever an Exchange ends — a completed final answer, a terminal fault (`abandonTurn`), or an
+  `AbortExchange` — so a stale fan-out directive can no longer survive a fault or abort into the next
+  Exchange (F6). A cancelled Turn now truncates the queue back to its pre-hooks floor before restoring
+  the drained injections, so a re-attempt or snapshot carries exactly the one restored directive
+  rather than two contradictory copies. `domain.Conversation` gains `ClearDeferred`, `TruncateDeferred`,
+  and `DeferredLen`. (`internal/agent`, `internal/domain`; CONTEXT.md.)
 
 ## [1.3.0] — 2026-07-05
 

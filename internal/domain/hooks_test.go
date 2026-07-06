@@ -494,6 +494,54 @@ func TestConversationDeferSurvivesRoundTrip(t *testing.T) {
 	}
 }
 
+// TestConversationDeferredQueueLifetime pins the Exchange-scoped queue operations the loop uses to
+// keep a Deferred Response Action from crossing an Exchange boundary (item 7 / F6): DeferredLen
+// reports the current depth, TruncateDeferred drops back to a floor (dropping a cancelled Turn's own
+// deferrals), and ClearDeferred empties the queue at an Exchange end.
+func TestConversationDeferredQueueLifetime(t *testing.T) {
+	conv := NewConversation([]Message{{Role: RoleUser, Content: "go"}})
+	if conv.DeferredLen() != 0 {
+		t.Fatalf("fresh DeferredLen = %d, want 0", conv.DeferredLen())
+	}
+
+	conv.Defer("drained directive")
+	floor := conv.DeferredLen() // the pre-hooks floor a cancel truncates back to
+	conv.Defer("cancelled turn's re-derivation")
+	if conv.DeferredLen() != 2 {
+		t.Fatalf("DeferredLen after two Defers = %d, want 2", conv.DeferredLen())
+	}
+
+	// TruncateDeferred drops the cancelled Turn's own deferral, keeping only the floor.
+	conv.TruncateDeferred(floor)
+	injects, ok := conv.TakeDeferred()
+	if !ok || len(injects) != 1 || injects[0] != "drained directive" {
+		t.Fatalf("after TruncateDeferred(%d) the queue = %v (ok=%v), want just the drained directive", floor, injects, ok)
+	}
+
+	// TruncateDeferred is clamped and idempotent past the length; a negative floor empties it.
+	conv.Defer("a")
+	conv.Defer("b")
+	conv.TruncateDeferred(5) // >= len: no-op
+	if conv.DeferredLen() != 2 {
+		t.Errorf("TruncateDeferred past len changed the queue: DeferredLen = %d, want 2", conv.DeferredLen())
+	}
+	conv.TruncateDeferred(-1) // clamped to 0: empties
+	if conv.DeferredLen() != 0 {
+		t.Errorf("TruncateDeferred(-1) did not empty the queue: DeferredLen = %d, want 0", conv.DeferredLen())
+	}
+
+	// ClearDeferred empties a populated queue and is a no-op on an empty one.
+	conv.Defer("stale directive")
+	conv.ClearDeferred()
+	if conv.DeferredLen() != 0 {
+		t.Errorf("ClearDeferred left %d directives queued, want 0", conv.DeferredLen())
+	}
+	if _, ok := conv.TakeDeferred(); ok {
+		t.Error("TakeDeferred returned corrections after ClearDeferred; the queue was not emptied")
+	}
+	conv.ClearDeferred() // no-op, no panic
+}
+
 // TestResponseAppendToolCall proves the post-response tool-call synthesis seam (ADR 0014
 // item 2): a synthesized call appended to a response with none becomes visible through
 // ToolCalls() (so the loop dispatches it like a model-emitted call), and the mutation bumps

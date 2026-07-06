@@ -300,7 +300,11 @@ differently. A **Deferred Response Action** is a *defer* decision made by a
 post-response Mechanism on the *previous* turn, consumed from session state this turn
 (look in **session state**). A **Request-prep Hint** is derived fresh from conversation
 history at the start of *this* request (look in **conversation history**). Both fire at
-the pre-request hook and are tracked uniformly as Mechanisms.
+the pre-request hook and are tracked uniformly as Mechanisms. A Deferred Response Action is
+**Exchange-scoped**: it is a decision about the *next request of the same conversation flow*, so
+the queue is cleared whenever an Exchange ends (a completed final answer, a fault, or an abort) and
+is truncated-then-restored when a cancelled Turn is rolled back — a stale directive never crosses
+an Exchange boundary or survives as two contradictory copies.
 
 **Mechanism descriptor**:
 Per-Mechanism metadata orthogonal to its hook point: `Capability` (off-ramp /
