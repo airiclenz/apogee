@@ -64,6 +64,16 @@ point is a **minor** bump, not a breaking change.
   startup with `ErrIncompatibleMechanisms`; the valid `guided_decomposition + tool_result_cap` stack is
   unaffected. (`internal/mechanisms`; `docs/design/mechanism-catalogue.md`, ADR 0014 Realisation.)
 
+### Tested
+
+- **Sub-agent spawn under the production `EnableMechanisms` arm.** New loop-level tests arm the
+  `guided_decomposition + tool_result_cap` stack by ID with `Config.Mechanisms` left nil (the engine
+  builds it), drive one real delegation, and prove a spawned sub-agent inherits the parent's
+  already-built registry (ADR 0015): the spawn succeeds, the child nests at `Depth == 1`, and the
+  child fires a catalogued Mechanism (`tool_result_cap`) from the inherited stack — through both `New`
+  and `Resume`. Reverting subagent.go's `EnableMechanisms` clear makes them fail with the
+  already-registered rejection. (`internal/agent`.)
+
 ## [1.3.0] — 2026-07-05
 
 Post-`v1.2.0`, **additive** (minor) — two features. The `guided_decomposition` Mechanism

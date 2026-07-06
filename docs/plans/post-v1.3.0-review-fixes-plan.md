@@ -422,7 +422,17 @@ catch a mismatch; extend it if it does not).
 
 ---
 
-## 9. Test: sub-agent spawn under the production `EnableMechanisms` arm
+## 9. Test: sub-agent spawn under the production `EnableMechanisms` arm — ✅ DONE (2026-07-06)
+
+**NOTES (2026-07-06):** the child-side "catalogued Mechanism fires from the shared registry" assertion
+uses `tool_result_cap`, not `guided_decomposition`: the latter's PreRequest gate is `Depth == 0`-only
+(`guided_decomposition.go:146-148` — it steers the primary call, never a nested delegation, ADR 0014
+§5), so it can never fire inside a child. `tool_result_cap` is the OTHER armed member of the same
+`EnableMechanisms` stack and has no depth gate; the child makes two `read_file` Turns so the first
+oversized result leaves its protected most-recent-Turn window and is capped on the child's third
+request, booking a Depth-1 fire. The item's "e.g." left the mechanism open, so this is within its text.
+Both `New` and `Resume` arms are covered. The failure mode (revert `subagent.go:119`) was verified
+once while writing: it fails with the `guided_decomposition ... already registered` rejection.
 
 **Finding:** review "No test exercises sub-agent spawn under the production `EnableMechanisms`
 arm" (High, Tests). Ground truth: ADR 0015 Realisation ("a spawned sub-agent inherits the
