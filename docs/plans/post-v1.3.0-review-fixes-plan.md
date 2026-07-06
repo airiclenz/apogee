@@ -484,7 +484,7 @@ runs over an empty store (no injection fires from the corrupt content).
 
 ---
 
-## 11. Read/list spelling families — consolidate, fix the diverged gaps, repoint stale wiring comments
+## 11. Read/list spelling families — consolidate, fix the diverged gaps, repoint stale wiring comments — ✅ DONE (2026-07-06)
 
 **Finding:** review "Read/list tool-name sets: five hand-maintained copies, already diverged"
 (Medium, Structure — this drift class shipped defects in the two previous review rounds) plus

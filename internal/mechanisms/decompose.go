@@ -118,6 +118,40 @@ var wave4WriteTools = map[string]bool{
 	"edit_existing_file": true, "single_find_and_replace": true, "multi_find_and_replace": true,
 }
 
+// readSpellings and listSpellings are the read- and list-tool SPELLING families: each lists one tool
+// concept written every way apogee's real menu can present it, so a newly-supported spelling is added
+// in ONE place and every set composed from it inherits the addition (F8, post-v1.3.0 review). They are
+// the read/list counterparts of wave4WriteTools above — the write side's single source. The families
+// carry SPELLINGS only: WHICH concepts a given set treats as a read or a list stays that set's own
+// documented membership (the sets serve different purposes and several carry @pin rationales), so each
+// set below composes from a family via toolSet and adds its own local spellings rather than
+// hand-copying the family's — the drift class this consolidation closes.
+var (
+	// readSpellings is apogee-sim's read-tool set (toolsets.ReadTools @pin: read_file / readFile) plus
+	// apogee's own open_file spelling — open_file.go renderOpenFile is read-only and returns the file
+	// body, so it counts as a file read wherever a read set is consulted.
+	readSpellings = []string{"read_file", "readFile", "open_file"}
+
+	// listSpellings is apogee-sim's list-tool set (toolsets.ListTools @pin: list_files / listFiles /
+	// list_dir / listDir) plus apogee's own list_directory spelling, so a directory listing counts
+	// however the menu spells it. The four gap fixes (F8) are exactly the sets below that had been
+	// hand-maintained short of this complete family.
+	listSpellings = []string{"list_files", "listFiles", "list_dir", "listDir", "list_directory"}
+)
+
+// toolSet unions one or more spelling groups — the families above and/or a set's own local spellings —
+// into a name→true membership set. It is the composition seam F8 introduces: a set names the families
+// it draws from instead of copying their spellings, so a family addition reaches every set at once.
+func toolSet(groups ...[]string) map[string]bool {
+	set := make(map[string]bool)
+	for _, g := range groups {
+		for _, name := range g {
+			set[name] = true
+		}
+	}
+	return set
+}
+
 // hasWrittenFiles reports whether any assistant message issued a write-tool call — the "model has
 // already started writing" signal decompose and cot both gate on (apogee-sim toolsets.HasWrittenFiles
 // @pin, over wave4WriteTools so apogee's own write tools count).

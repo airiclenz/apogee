@@ -41,12 +41,13 @@ const (
 const fileHintMarker = "Based on the directory listing, these files are likely most relevant"
 
 // fileHintListTools / fileHintReadTools name the directory-listing and file-reading tools whose
-// interplay opens and closes a hint opportunity. apogee's own tools are list_dir / read_file; the
-// sim's list_files/listFiles/list_directory listing and readFile reading spellings are kept so a
-// mixed MCP menu still triggers.
+// interplay opens and closes a hint opportunity. They compose from the shared spelling families
+// (listSpellings / readSpellings, decompose.go) so a mixed MCP menu still triggers: the list set now
+// carries the full family — the F8 gap fix adds listDir to the list_dir / list_files / listFiles /
+// list_directory it had — and the read set carries apogee's open_file alongside the sim's spellings.
 var (
-	fileHintListTools = map[string]bool{"list_dir": true, "list_files": true, "listFiles": true, "list_directory": true}
-	fileHintReadTools = map[string]bool{"read_file": true, "readFile": true, "open_file": true}
+	fileHintListTools = toolSet(listSpellings)
+	fileHintReadTools = toolSet(readSpellings)
 )
 
 // fileHintWriteTools mark that the model has already shared written files, which suppresses the

@@ -64,6 +64,21 @@ point is a **minor** bump, not a breaking change.
   startup with `ErrIncompatibleMechanisms`; the valid `guided_decomposition + tool_result_cap` stack is
   unaffected. (`internal/mechanisms`; `docs/design/mechanism-catalogue.md`, ADR 0014 Realisation.)
 
+### Changed
+
+- **Single-sourced read/list tool-name spelling families.** The read trio
+  (`read_file`/`readFile`/`open_file`) and the five list spellings
+  (`list_files`/`listFiles`/`list_dir`/`listDir`/`list_directory`) are now hoisted as two spelling
+  families beside the write side's `wave4WriteTools`, and every read/list set composes from them
+  instead of hand-copying (F8) — closing the drift class that had shipped defects in two prior review
+  rounds. Each set keeps its own documented membership; search/exec spellings stay out of scope. Four
+  diverged sets are corrected as part of the composition (each a behaviour change with a mutation-pinned
+  test): `cotReadOnlyTools` now counts `list_directory`, `libraryListTools` and `toolFilterAnalysisKeep`
+  now carry `listFiles`/`listDir`, and `fileHintListTools` now carries `listDir`. Three stale wiring
+  comments that still pointed at `cmd/apogee/wire.go` are repointed at the engine's single build path
+  (`buildEnabledMechanisms`, `internal/agent/loop.go`) after the ADR 0015 wire.go collapse.
+  (`internal/mechanisms`.)
+
 ### Tested
 
 - **Sub-agent spawn under the production `EnableMechanisms` arm.** New loop-level tests arm the

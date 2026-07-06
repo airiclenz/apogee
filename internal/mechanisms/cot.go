@@ -71,22 +71,25 @@ const (
 )
 
 // cotReadOnlyTools names the tools whose exclusive use marks a read-only turn (apogee-sim
-// readOnlyTools @pin), extended with apogee's own read/exec spellings (open_file, terminal) so the
-// stall/list windows advance on apogee's real menu. A turn using only these tools is exploration;
-// the first non-read-only tool call ends the read-only streak.
-var cotReadOnlyTools = map[string]bool{
-	"read_file": true, "readFile": true, "open_file": true,
-	"list_files": true, "listFiles": true, "list_dir": true, "listDir": true, "find_files": true,
-	"search_files": true, "searchFiles": true, "grep": true, "search": true,
-	"execute_command": true, "executeCommand": true, "run_command": true,
-	"runCommand": true, "run_terminal_command": true, "terminal": true,
-}
+// readOnlyTools @pin). It composes from the shared read and list spelling families (readSpellings /
+// listSpellings, decompose.go) plus cot's own local search/exec spellings — so it carries apogee's own
+// read/exec extensions (open_file, terminal) and the full list family, which closes the F8 gap that had
+// left list_directory out of the read-only streak. A turn using only these tools is exploration; the
+// first non-read-only tool call ends the read-only streak. (Search/exec spellings stay local — out of
+// the consolidation's read/list scope.)
+var cotReadOnlyTools = toolSet(
+	readSpellings,
+	listSpellings,
+	[]string{
+		"find_files", "search_files", "searchFiles", "grep", "search",
+		"execute_command", "executeCommand", "run_command", "runCommand",
+		"run_terminal_command", "terminal",
+	},
+)
 
-// cotReadTools names the file-reading tools countFilesRead and hasFileReadTool count (apogee-sim
-// toolsets.ReadTools @pin + apogee's open_file).
-var cotReadTools = map[string]bool{
-	"read_file": true, "readFile": true, "open_file": true,
-}
+// cotReadTools names the file-reading tools countFilesRead and hasFileReadTool count — the read
+// spelling family (readSpellings, decompose.go: apogee-sim toolsets.ReadTools @pin + apogee's open_file).
+var cotReadTools = toolSet(readSpellings)
 
 // toolUseDirectiveMechanism nudges a model that answered an action request with prose to actually
 // call a tool — but only before it has ever used one (catalogue Table A: "fires only before first

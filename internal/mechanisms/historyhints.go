@@ -26,13 +26,11 @@ import (
 // superset that also carries apogee's own edit tools; only the content-repair Mechanisms (syntax,
 // autofix) use the narrower sim-only isWriteTool.
 
-// listToolNames is apogee-sim's list-tool set (internal/toolsets/toolsets.go ListTools @pin),
-// carrying apogee's own list_dir spelling alongside the sim's — the directory-listing calls
-// greenfield detection inspects for an empty workspace.
-var listToolNames = map[string]bool{
-	"list_files": true, "listFiles": true,
-	"list_dir": true, "listDir": true, "list_directory": true,
-}
+// listToolNames are the directory-listing calls greenfield detection inspects for an empty workspace.
+// It composes from the list spelling family (listSpellings, decompose.go) — apogee-sim's ListTools
+// @pin plus apogee's own list_directory — the complete five-spelling family the other list sets now
+// consolidate onto.
+var listToolNames = toolSet(listSpellings)
 
 // isListTool reports whether name is one of the directory-listing tools greenfield detection reads.
 func isListTool(name string) bool { return listToolNames[name] }

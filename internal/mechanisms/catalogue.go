@@ -20,9 +20,10 @@ import (
 type Deps struct {
 	// Library is the confidence-tagged observation store the library observe/inject Mechanism reads
 	// and writes (Phase-4 item 14; the store type landed in item 13). It is nil unless the `library`
-	// Mechanism is enabled — cmd/apogee/wire.go constructs and Loads the store under Config.LibraryDir
-	// and injects it here only then, so a config without `library` builds no store. newLibrary refuses
-	// a nil store (errLibraryStoreRequired).
+	// Mechanism is enabled — the engine's buildEnabledMechanisms (internal/agent/loop.go, the single
+	// Deps-deriving build path since the ADR 0015 wire.go collapse) constructs and Loads the store under
+	// Config.LibraryDir and injects it here only then, so a config without `library` builds no store.
+	// newLibrary refuses a nil store (errLibraryStoreRequired).
 	Library *library.Store
 
 	// Fingerprint is the resolved model identity the library Mechanism keys its store reads and writes
@@ -45,8 +46,9 @@ type Deps struct {
 	// llama.cpp WITHOUT native tool-calls (`proxy.go:625-634` @pin). apogee has no such
 	// backend-capability probe wired yet, and the provider wire itself carries no
 	// `response_format` field yet (`internal/agent/loop.go` toProviderRequest drops SetExtra —
-	// "response_format is a Phase-4 concern"), so cmd/apogee/wire.go leaves this false and grammar
-	// no-ops on every current backend (catalogue Table B: "may no-op on all current apogee
+	// "response_format is a Phase-4 concern"), so buildEnabledMechanisms (internal/agent/loop.go — the
+	// single Deps-deriving build path since the ADR 0015 wire.go collapse) never populates this and
+	// grammar no-ops on every current backend (catalogue Table B: "may no-op on all current apogee
 	// backends"). It is an inert forward seam like Library: a future backend probe populates it,
 	// and grammar's fire path is exercised today only by tests that inject it true.
 	GrammarConstraint bool

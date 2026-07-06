@@ -19,7 +19,8 @@ var errLibraryStoreRequired = errors.New("apogee: library mechanism requires a L
 // library registers the cross-session learning Mechanism in the catalogue constructor table
 // (Phase-4 item 14, the Library's two loop-facing halves). Default-off (D1) — the config surface
 // builds it only when the `mechanisms:` block enables it, and it needs the Library store +
-// resolved fingerprint injected at construction (D3, cmd/apogee/wire.go). It is ported from
+// resolved fingerprint injected at construction (D3, derived by buildEnabledMechanisms in
+// internal/agent/loop.go — the single build path since the ADR 0015 wire.go collapse). It is ported from
 // apogee-sim internal/library/{observer,transform}.go @pin.
 //
 // The catalogue lists a SINGLE `library` row (Table A) whose hook point is "pre-request (inject);
@@ -68,16 +69,13 @@ const libraryContextFullFraction = 0.85
 var libraryAnalysisOnlyTags = map[string]bool{"shallow_exploration": true}
 
 // libraryListTools / libraryReadTools are the list- and read-tool name sets the shallow-exploration
-// observation keys on (apogee-sim observer.go @pin, extended with apogee's own spellings — list_dir /
-// open_file — the wave-10/12 precedent, so the observation fires on apogee's real menu, not just the
-// sim's).
-var libraryListTools = map[string]bool{
-	"list_files": true, "list_directory": true, "list_dir": true,
-}
+// observation keys on (apogee-sim observer.go @pin). They compose from the shared spelling families
+// (listSpellings / readSpellings, decompose.go), so the observation fires on apogee's real menu, not
+// just the sim's: the list set now carries the full family — the F8 gap fix adds listFiles / listDir
+// to the list_files / list_directory / list_dir it had — and the read set carries apogee's open_file.
+var libraryListTools = toolSet(listSpellings)
 
-var libraryReadTools = map[string]bool{
-	"read_file": true, "readFile": true, "open_file": true,
-}
+var libraryReadTools = toolSet(readSpellings)
 
 // libraryToolUseContent / libraryShallowContent are the behavioural notes the observer records,
 // ported verbatim from apogee-sim observer.go @pin so the wording the sim's A/B measured is what a

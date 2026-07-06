@@ -37,18 +37,12 @@ const (
 	toolUseEnforcerID       domain.MechanismID = "tool_use_enforcer"
 )
 
-// readToolNames is apogee-sim's read-tool set (internal/toolsets/toolsets.go ReadTools @pin),
-// carrying apogee's own open_file spelling alongside the sim's: open_file's result places file
-// content into the conversation exactly like read_file (open_file.go renderOpenFile is read-only and
-// returns the file body), so it counts as a file read for the whole history family — matching the
-// cot/filehint/library read sets that already carry open_file (item-10 precedent). These are the
-// tools whose calls count as a file read when the off-ramps and the history family measure recent
-// progress / recent successful reads.
-var readToolNames = map[string]bool{
-	"read_file": true,
-	"readFile":  true,
-	"open_file": true,
-}
+// readToolNames are the tools whose calls count as a file read when the off-ramps and the history
+// family measure recent progress / recent successful reads. It composes from the read spelling family
+// (readSpellings, decompose.go) — apogee-sim's ReadTools @pin plus apogee's own open_file, whose result
+// places file content into the conversation exactly like read_file — so the cot/filehint/library read
+// sets that share the family stay identical by construction rather than by hand-maintained copies.
+var readToolNames = toolSet(readSpellings)
 
 // isReadTool reports whether name is one of the file-reading tools progress detection counts.
 func isReadTool(name string) bool { return readToolNames[name] }

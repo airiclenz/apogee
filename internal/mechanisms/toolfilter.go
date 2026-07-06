@@ -44,14 +44,15 @@ var toolFilterStopWords = map[string]bool{
 }
 
 // toolFilterAnalysisKeep are the read-only exploration tools kept regardless of keyword score when
-// the user's request is analysis-focused (apogee-sim toolfilter.go:57-62 @pin). It carries apogee's
-// own tool names (list_dir/read_file/grep/open_file) alongside the sim's spellings
-// (list_files/list_directory/readFile/search_files) so a mixed MCP menu still triggers.
-var toolFilterAnalysisKeep = map[string]bool{
-	"list_dir": true, "list_files": true, "list_directory": true,
-	"read_file": true, "readFile": true, "open_file": true,
-	"grep": true, "search_files": true,
-}
+// the user's request is analysis-focused (apogee-sim toolfilter.go:57-62 @pin). It composes from the
+// shared read and list spelling families (readSpellings / listSpellings, decompose.go) plus toolfilter's
+// own local search spellings (grep / search_files), so a mixed MCP menu still triggers: the list family
+// now completes the F8 gap that had left listFiles / listDir out of the analysis-keep set.
+var toolFilterAnalysisKeep = toolSet(
+	readSpellings,
+	listSpellings,
+	[]string{"grep", "search_files"},
+)
 
 // toolFilterMechanism is the pre-request Mechanism that narrows the tool menu (catalogue Table A
 // `toolfilter`; ported from apogee-sim ToolFilter.Transform @pin). It scores the request's tools
