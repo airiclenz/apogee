@@ -298,6 +298,98 @@ func TestGuidedDecompositionInterceptDeclinesOutOfBounds(t *testing.T) {
 	}
 }
 
+// F4 — a reply is an enumeration only when it is in-bounds AND a strict majority of its lines carried
+// an explicit ordered/bullet marker. A compliant numbered list (including the accept-window edges of
+// exactly 2 and exactly 12) is intercepted; an empty reply, multi-line prose, and an exactly-half
+// marked reply are declined WHOLE — no synthesized call, zero decision (ADR 0014 §5 fail-soft).
+func TestGuidedDecompositionInterceptMajorityMarked(t *testing.T) {
+	t.Parallel()
+
+	numbered := func(n int) string {
+		lines := make([]string, 0, n)
+		for i := 1; i <= n; i++ {
+			lines = append(lines, fmt.Sprintf("%d. subtask %d", i, i))
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	tests := []struct {
+		name      string
+		text      string
+		intercept bool
+	}{
+		{"exactly two fully numbered intercepts", numbered(2), true},
+		{"exactly twelve fully numbered intercepts", numbered(12), true},
+		{"majority marked, minority plain intercepts", "1. alpha\n2. beta\nplain gamma", true},
+		{"empty reply declines", "", false},
+		{"whitespace-only reply declines", "   \n\t\n  ", false},
+		{"three-line unmarked prose declines", "Could you clarify which module you mean?\nI want to scope this correctly.\nLet me know before I start.", false},
+		{"exactly half marked declines (strict majority)", "1. do a\n2. do b\nplain c\nplain d", false},
+	}
+	steer := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionSteer}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resp := guidedResponse([]domain.Message{steer}, tc.text)
+			before := resp.Revision()
+			decision := fireGuidedPostResponse(t, resp)
+			if tc.intercept {
+				if decision.Action != domain.ActionDefer {
+					t.Fatalf("Action = %q, want defer (a compliant enumeration is intercepted)", decision.Action)
+				}
+				if len(resp.ToolCalls()) != 1 {
+					t.Fatalf("intercept appended %d calls, want exactly 1", len(resp.ToolCalls()))
+				}
+				if resp.Revision() == before {
+					t.Error("intercept did not bump the revision (the acted-fire probe, R4)")
+				}
+				return
+			}
+			if decision.Action != "" {
+				t.Fatalf("Action = %q, want empty (declined whole — prose is not an enumeration)", decision.Action)
+			}
+			if resp.Revision() != before {
+				t.Fatalf("revision changed (%d → %d); a declined reply must not synthesize a call", before, resp.Revision())
+			}
+			if len(resp.ToolCalls()) != 0 {
+				t.Fatalf("declined reply appended %d calls, want 0", len(resp.ToolCalls()))
+			}
+		})
+	}
+}
+
+// A mixed list where the marked lines are a strict majority is intercepted with EVERY line kept as a
+// subtask (unmarked lines included, small-model tolerance): the first becomes the synthesized
+// delegation, the rest ride the deferred directive.
+func TestGuidedDecompositionInterceptKeepsUnmarkedMinorityItems(t *testing.T) {
+	t.Parallel()
+	steer := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionSteer}
+	// Two marked lines, one plain — 2 of 3 marked is a strict majority, so the list is accepted.
+	resp := guidedResponse([]domain.Message{steer}, "1. Refactor the parser\n2. Add unit tests\nupdate the changelog")
+	decision := fireGuidedPostResponse(t, resp)
+
+	calls := resp.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("appended %d calls, want exactly 1", len(calls))
+	}
+	var args tools.SubAgentArgs
+	if err := json.Unmarshal(calls[0].Arguments, &args); err != nil {
+		t.Fatalf("synthesized args do not unmarshal: %v", err)
+	}
+	if !strings.HasPrefix(args.Task, "Refactor the parser") {
+		t.Errorf("first delegated task = %q, want it to start with the first subtask", args.Task)
+	}
+	if decision.Action != domain.ActionDefer {
+		t.Fatalf("Action = %q, want defer", decision.Action)
+	}
+	// The remaining two — including the unmarked plain line — ride the directive; every line kept.
+	for _, want := range []string{"Add unit tests", "update the changelog"} {
+		if !strings.Contains(decision.Inject, want) {
+			t.Errorf("deferred directive missing kept subtask %q", want)
+		}
+	}
+}
+
 // On the enumeration Turn (steer outstanding, no tool calls, a bounded list) the intercept appends
 // exactly ONE valid sub_agent call for the first subtask, leaves the enumeration text verbatim, and
 // defers the remaining subtasks under the directive marker.

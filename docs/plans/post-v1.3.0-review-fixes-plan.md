@@ -111,7 +111,7 @@ it (e.g. a user-role message that can appear mid-Exchange), STATUS QUESTION.
 
 ---
 
-## 1. Parser strictness: a majority-marked list is an enumeration; prose is not
+## 1. Parser strictness: a majority-marked list is an enumeration; prose is not — ✅ DONE (2026-07-06)
 
 **Finding:** review "The lenient list parser cannot tell prose from an enumeration" (Medium,
 Intent — warrants revisiting ADR 0014 §2) plus "Accept-window boundaries (exactly 2 and exactly

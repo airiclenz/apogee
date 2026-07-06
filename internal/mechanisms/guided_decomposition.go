@@ -255,16 +255,19 @@ func guidedDecompositionEstimateTokens(chars int, charsPerToken float64) int {
 // abandons cleanly on suppression. Three cases, evaluated in order against resp.View().Conversation():
 //
 //   - Enumeration response: the pre-request steer is outstanding in the request (its marker is in the
-//     conversation), the model replied with ONLY a bounded (2..12) subtask list and no tool calls.
+//     conversation), the model replied with ONLY a subtask list and no tool calls, that list is
+//     bounded (2..12), AND a strict majority of its lines carried an explicit ordered/bullet marker
+//     (F4 — a compliant numbered reply passes; prose, a clarifying question, or a refusal does not).
 //     Synthesize the FIRST sub_agent delegation onto the response — text left verbatim (locked
 //     decision 4) — and Defer a directive carrying the remaining subtasks for the next Turn.
 //   - Fan-out follow-through: a directive is steering (its marker is in the request) and the model
 //     emitted its own sub_agent call. Re-derive the remainder from history MINUS every dispatched
 //     task (this Turn's calls included) and Defer the shrunken directive; an empty remainder ends the
 //     fan-out with no decision.
-//   - Anything else: inspect-only no-op — no marker, an out-of-bounds list (declined whole), a
-//     response already carrying other tool calls, or an exhausted remainder (ADR 0014 §5 fail-soft;
-//     zero revision, zero Action, so the loop books no fire, R4).
+//   - Anything else: inspect-only no-op — no marker, an out-of-bounds or minority-marked reply
+//     (declined whole — prose is not an enumeration, F4), a response already carrying other tool
+//     calls, or an exhausted remainder (ADR 0014 §5 fail-soft; zero revision, zero Action, so the
+//     loop books no fire, R4).
 //
 // Suppression needs no code (locked decision 1): once self-regulation withdraws the Mechanism the
 // hook stops being dispatched, the un-consumed directive is never re-derived, and at most one
@@ -277,9 +280,11 @@ func (guidedDecompositionMechanism) PostResponse(_ context.Context, resp *domain
 	// Enumeration response: the steer is outstanding and the model answered with a bare subtask
 	// list. Synthesize the first delegation and defer the remainder.
 	if len(calls) == 0 && guidedDecompositionMarkerPresent(conv, guidedDecompositionSteerMarker) {
-		items := guidedDecompositionParseList(resp.Text())
-		if !guidedDecompositionListInBounds(items) {
-			return domain.PostResponseDecision{}, nil // out of bounds — decline the whole list (§5)
+		items, marked := guidedDecompositionParseMarkedList(resp.Text())
+		if !guidedDecompositionListInBounds(items) || !guidedDecompositionMajorityMarked(items, marked) {
+			// Out of bounds, or a minority of marked lines (prose, a clarifying question, a refusal)
+			// — decline the whole reply, never a partial truncation (F4 / §5).
+			return domain.PostResponseDecision{}, nil
 		}
 		resp.AppendToolCall(domain.ToolCall{
 			ID:        fmt.Sprintf("text_call_%d", resp.View().Turn()), // the loop's synthesized-call style
@@ -458,41 +463,64 @@ func guidedDecompositionTaskDispatched(item string, dispatched []string) bool {
 	return false
 }
 
-// guidedDecompositionParseList parses the model's enumeration into ordered subtask strings. It is
-// deliberately lenient (ADR 0014 §2 — the steer asks for a numbered list, but small models emit
-// bulleted, plain, or fence-wrapped variants): each non-blank line becomes one item with any leading
-// list marker stripped; blank lines and Markdown code-fence delimiters are dropped. Bounds are NOT
-// enforced here — the caller declines an out-of-bounds count as a whole (locked decision 5).
-func guidedDecompositionParseList(text string) []string {
-	var items []string
+// guidedDecompositionParseMarkedList parses the model's enumeration into ordered subtask strings and
+// reports how many kept lines carried an explicit ordered/bullet marker. It stays lenient about the
+// item text (ADR 0014 §2 — the steer asks for a numbered list, but small models emit bulleted, plain,
+// or fence-wrapped variants): each non-blank line becomes one item with any leading list marker
+// stripped; blank lines and Markdown code-fence delimiters are dropped. Neither the count bounds nor
+// the marked-majority test are enforced here — the case-1 intercept applies both (F4 / locked
+// decision 5), declining prose (a minority of marked lines) and out-of-bounds counts as a whole.
+func guidedDecompositionParseMarkedList(text string) (items []string, marked int) {
 	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "```") {
 			continue // blank line or a code-fence delimiter — noise, not a subtask
 		}
-		if item := guidedDecompositionStripMarker(line); item != "" {
-			items = append(items, item)
+		item, hadMarker := guidedDecompositionStripMarker(line)
+		if item == "" {
+			continue
+		}
+		items = append(items, item)
+		if hadMarker {
+			marked++
 		}
 	}
+	return items, marked
+}
+
+// guidedDecompositionParseList returns just the ordered subtask strings of an enumeration, discarding
+// the marked-line count — the items-only view guidedDecompositionEnumeration re-derives the cursor
+// from. The marked count is the case-1 intercept's concern (F4); see guidedDecompositionParseMarkedList.
+func guidedDecompositionParseList(text string) []string {
+	items, _ := guidedDecompositionParseMarkedList(text)
 	return items
 }
 
+// guidedDecompositionMajorityMarked reports whether a strict majority of the parsed items carried an
+// explicit list marker (F4). The steer asks for a numbered list, so a compliant reply passes
+// trivially; a clarifying question, refusal, or multi-line prose answer — where explicit markers are
+// a minority (or absent) — does not. An empty list is not a majority.
+func guidedDecompositionMajorityMarked(items []string, marked int) bool {
+	return marked*2 > len(items)
+}
+
 // guidedDecompositionStripMarker removes a leading ordered- or unordered-list marker from a line and
-// returns the bare subtask text. A bullet is a single "-", "*", "•", or "+" rune followed by
-// whitespace; an ordered marker is one or more digits followed (optionally after spaces) by a ".",
-// ")", "-", or ":" delimiter. A line with no recognised marker is returned verbatim, so a plain-line
-// list is accepted too.
-func guidedDecompositionStripMarker(line string) string {
+// returns the bare subtask text plus whether an explicit list marker was present. A bullet is a
+// single "-", "*", "•", or "+" rune followed by whitespace; an ordered marker is one or more digits
+// followed (optionally after spaces) by a ".", ")", "-", or ":" delimiter. A line with no recognised
+// marker is returned verbatim with marked=false, so a plain-line item is still kept — but the case-1
+// intercept counts the marked lines to tell a compliant enumeration from prose (F4).
+func guidedDecompositionStripMarker(line string) (item string, marked bool) {
 	r := []rune(line)
 	if len(r) >= 2 && strings.ContainsRune("-*•+", r[0]) && unicode.IsSpace(r[1]) {
-		return strings.TrimSpace(string(r[1:]))
+		return strings.TrimSpace(string(r[1:])), true
 	}
 	i := 0
 	for i < len(r) && unicode.IsDigit(r[i]) {
 		i++
 	}
 	if i == 0 {
-		return line // no leading number — a plain-line item, kept verbatim
+		return line, false // no leading number — a plain-line item, kept verbatim, unmarked
 	}
 	j := i
 	for j < len(r) && r[j] == ' ' {
@@ -503,7 +531,7 @@ func guidedDecompositionStripMarker(line string) string {
 		for j < len(r) && r[j] == ' ' {
 			j++
 		}
-		return strings.TrimSpace(string(r[j:]))
+		return strings.TrimSpace(string(r[j:])), true
 	}
-	return line // digits that are not a list marker — keep the line verbatim
+	return line, false // digits that are not a list marker — keep the line verbatim, unmarked
 }

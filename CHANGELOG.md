@@ -6,6 +6,18 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [Unreleased]
+
+### Fixed
+
+- **Guided decomposition accepts only majority-marked enumerations.** The case-1 intercept now
+  treats a steered reply as an enumeration only when the parsed list is in-bounds (2..12) **and** a
+  strict majority of its lines carried an explicit ordered/bullet marker (F4). A compliant numbered
+  list still fans out; multi-line prose, a clarifying question, a refusal, or an empty reply is
+  declined whole. Unmarked lines are still kept as subtasks when the majority test passes
+  (small-model tolerance). `guidedDecompositionStripMarker` now reports whether a marker was present.
+  (`internal/mechanisms`.)
+
 ## [1.3.0] — 2026-07-05
 
 Post-`v1.2.0`, **additive** (minor) — two features. The `guided_decomposition` Mechanism
