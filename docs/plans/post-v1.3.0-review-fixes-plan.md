@@ -458,7 +458,7 @@ Commit: `test(agent): sub-agent spawn inherits the EnableMechanisms-built regist
 
 ---
 
-## 10. Test: enable-surface edges — corrupt-store degrade and the descriptor clone contract
+## 10. Test: enable-surface edges — corrupt-store degrade and the descriptor clone contract — ✅ DONE (2026-07-06)
 
 **Finding:** review "Corrupt-store degrade branch at construction is untested" +
 "`CataloguedMechanisms()`'s documented clone contract is untested" (both Medium, Tests). Ground

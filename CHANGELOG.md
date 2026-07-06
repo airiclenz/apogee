@@ -73,6 +73,14 @@ point is a **minor** bump, not a breaking change.
   child fires a catalogued Mechanism (`tool_result_cap`) from the inherited stack — through both `New`
   and `Resume`. Reverting subagent.go's `EnableMechanisms` clear makes them fail with the
   already-registered rejection. (`internal/agent`.)
+- **Corrupt-store degrade and the descriptor clone contract.** A new loop-level test seeds
+  `LibraryDir/library.json` with garbage bytes and arms `EnableMechanisms=["library"]`: construction
+  still succeeds, the build path emits the degrade notice to `os.Stderr` exactly once, and the armed
+  library Mechanism runs over the resulting empty store — with the model fingerprint forced
+  high-confidence (a reachable weight file) so the empty store, not the confidence gate, is the sole
+  barrier, proving no injection leaks from the corrupt content. A root test mutates a returned
+  `CataloguedMechanisms()` descriptor's `Requires` / `IncompatibleWith` slices and re-queries, pinning
+  the documented per-call clone contract (ADR 0015 §3). (`internal/agent`, root.)
 
 ## [1.3.0] — 2026-07-05
 

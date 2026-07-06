@@ -225,6 +225,60 @@ func TestCataloguedMechanisms(t *testing.T) {
 	}
 }
 
+// TestCataloguedMechanisms_ReturnsClonedDescriptors pins the documented clone contract (ADR 0015 §3):
+// each query returns descriptors whose slice fields are independent of the static catalogue, so a
+// caller may mutate a returned descriptor's Requires / IncompatibleWith freely (e.g. to compute a
+// leave-one-out arm) without corrupting a later query. Mutating an element of the FIRST result's
+// slices must leave a SECOND query pristine — reverting cloneDescriptor's slices.Clone would let the
+// mutation reach back into the shared catalogue row and fail this test.
+func TestCataloguedMechanisms_ReturnsClonedDescriptors(t *testing.T) {
+	first := apogee.CataloguedMechanisms()
+
+	// guided_decomposition carries BOTH a non-empty Requires ([tool_result_cap]) and a non-empty
+	// IncompatibleWith ([decompose, truncate_history]), so it exercises both cloned slice fields.
+	idx := -1
+	for i := range first {
+		if first[i].ID == "guided_decomposition" {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		t.Fatal("CataloguedMechanisms() missing guided_decomposition")
+	}
+	if len(first[idx].Requires) == 0 || len(first[idx].IncompatibleWith) == 0 {
+		t.Fatalf("guided_decomposition Requires=%v IncompatibleWith=%v; the clone test needs both non-empty",
+			first[idx].Requires, first[idx].IncompatibleWith)
+	}
+
+	wantRequires := first[idx].Requires[0]
+	wantIncompatible := first[idx].IncompatibleWith[0]
+
+	// Mutate the returned slice elements in place — reachable only if the caller owns the backing array.
+	first[idx].Requires[0] = "mutated_requirement"
+	first[idx].IncompatibleWith[0] = "mutated_incompatible"
+
+	second := apogee.CataloguedMechanisms()
+	var gd *apogee.MechanismDescriptor
+	for i := range second {
+		if second[i].ID == "guided_decomposition" {
+			gd = &second[i]
+			break
+		}
+	}
+	if gd == nil {
+		t.Fatal("second CataloguedMechanisms() missing guided_decomposition")
+	}
+	if gd.Requires[0] != wantRequires {
+		t.Errorf("Requires[0] = %q after mutating the first result; want the pristine %q — the returned slice aliases the static catalogue",
+			gd.Requires[0], wantRequires)
+	}
+	if gd.IncompatibleWith[0] != wantIncompatible {
+		t.Errorf("IncompatibleWith[0] = %q after mutating the first result; want the pristine %q — the returned slice aliases the static catalogue",
+			gd.IncompatibleWith[0], wantIncompatible)
+	}
+}
+
 // TestEnableErrors_MatchableThroughRoot proves the enable-time sentinels are matchable through the
 // root re-exports: a half-armed Requires stack fails New with apogee.ErrMissingRequirement and a
 // bogus ID fails with apogee.ErrUnknownMechanism (ADR 0015 §4, locked decision 5).
