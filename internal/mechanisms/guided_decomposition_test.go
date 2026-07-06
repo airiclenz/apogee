@@ -226,6 +226,12 @@ func guidedSubAgentCall(id, task string) domain.ToolCall {
 	return domain.ToolCall{ID: id, Tool: tools.SubAgentToolName, Arguments: args}
 }
 
+// guidedConv wraps a message slice as the read-only ConversationView the cursor helpers scan — the
+// view-driven surface for the anchor/remainder derivation tests.
+func guidedConv(history []domain.Message) domain.ConversationView {
+	return domain.NewRequest("m", history, guidedMenu, guidedBudget, 0, nil).View().Conversation()
+}
+
 // fireGuidedPostResponse fires the intercept once against resp.
 func fireGuidedPostResponse(t *testing.T, resp *domain.Response) domain.PostResponseDecision {
 	t.Helper()
@@ -495,11 +501,12 @@ func TestGuidedDecompositionDerivesFromCallsNotCappedResults(t *testing.T) {
 	t.Parallel()
 	enumeration := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
 	call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
-	directive := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionDirective([]string{"Add unit tests", "Update the changelog"})}
+	directive := domain.Message{Role: domain.RoleSystem, Content: guidedDecompositionDirective([]string{"Add unit tests", "Update the changelog"})}
 	history := []domain.Message{
+		directive,
+		{Role: domain.RoleUser, Content: "big task"},
 		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
 		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: ""}, // capped away by tool_result_cap
-		directive,
 	}
 	resp := guidedResponse(history, "", guidedSubAgentCall("c2", "Add unit tests "+guidedDecompositionReportHygiene))
 	decision := fireGuidedPostResponse(t, resp)
@@ -514,6 +521,53 @@ func TestGuidedDecompositionDerivesFromCallsNotCappedResults(t *testing.T) {
 	}
 }
 
+// The cursor anchors on the delegation-bearing enumeration IN THE CURRENT EXCHANGE (F3), never on a
+// prior-Exchange decoy the old lenient first-match anchor would have picked: a 3-line assistant answer
+// that parses in-bounds but carries no delegation, or a compaction-summary-shaped multi-line assistant
+// message. Both precede the current ask and neither carries a sub_agent call, so the anchor skips them.
+func TestGuidedDecompositionAnchorsOnDelegationBearingEnumeration(t *testing.T) {
+	t.Parallel()
+	priorAnswer := "1. use the existing helper\n2. keep the signature\n3. no new deps"
+	compactionSummary := "Summary of the conversation so far:\n\nWe scoped the parser work.\n" +
+		"We agreed to refactor first.\nNext: add tests and update docs."
+	enumeration := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
+	call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
+	history := []domain.Message{
+		{Role: domain.RoleUser, Content: "an earlier, smaller ask"},
+		{Role: domain.RoleAssistant, Content: priorAnswer},       // decoy: in-bounds list, no call
+		{Role: domain.RoleAssistant, Content: compactionSummary}, // decoy: multi-line summary, no call
+		{Role: domain.RoleUser, Content: "big task"},             // the current Exchange begins here
+		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
+		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
+	}
+	// Refactor already dispatched via call1; Add unit tests dispatched this Turn — so the remainder is
+	// the third subtask, derived from the current-Exchange enumeration and neither prior-Exchange decoy.
+	respCall := guidedSubAgentCall("c2", "Add unit tests "+guidedDecompositionReportHygiene)
+	got := guidedDecompositionRemainder(guidedConv(history), []domain.ToolCall{respCall})
+	want := []string{"Update the changelog"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("remainder = %v, want %v (must anchor on the delegation-bearing enumeration, not a prior-Exchange decoy)", got, want)
+	}
+}
+
+// A completed fan-out in the PRIOR Exchange does not resume in a new one (F3): the current Exchange
+// (after the fresh user ask) holds no delegation-bearing enumeration, so the remainder is nil rather
+// than the old Exchange's leftover list.
+func TestGuidedDecompositionNoCrossExchangeResumption(t *testing.T) {
+	t.Parallel()
+	enumeration := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
+	call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
+	history := []domain.Message{
+		{Role: domain.RoleUser, Content: "big task"},
+		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
+		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
+		{Role: domain.RoleUser, Content: "a brand new, unrelated ask"}, // the new Exchange — last RoleUser
+	}
+	if got := guidedDecompositionRemainder(guidedConv(history), nil); got != nil {
+		t.Fatalf("remainder = %v, want nil (a previous Exchange's fan-out must not resume in a new Exchange)", got)
+	}
+}
+
 // The inspect-only no-ops: an exhausted remainder, no marker at all, and a steered response that also
 // carries a model tool call all leave the response untouched with no decision (ADR 0014 §5 fail-soft).
 func TestGuidedDecompositionInterceptNoOps(t *testing.T) {
@@ -523,11 +577,12 @@ func TestGuidedDecompositionInterceptNoOps(t *testing.T) {
 		t.Parallel()
 		enumeration := "1. Refactor the parser\n2. Add unit tests"
 		call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
-		directive := domain.Message{Role: domain.RoleUser, Content: guidedDecompositionDirective([]string{"Add unit tests"})}
+		directive := domain.Message{Role: domain.RoleSystem, Content: guidedDecompositionDirective([]string{"Add unit tests"})}
 		history := []domain.Message{
+			directive,
+			{Role: domain.RoleUser, Content: "big task"},
 			{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
 			{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
-			directive,
 		}
 		// The model delegates the LAST subtask, so the remainder drains to empty.
 		resp := guidedResponse(history, "", guidedSubAgentCall("c2", "Add unit tests "+guidedDecompositionReportHygiene))
@@ -572,14 +627,18 @@ func TestGuidedDecompositionInterceptNoOps(t *testing.T) {
 
 // guidedFanOutHistory is a mid-fan-out conversation: the enumeration (its verbatim list + the
 // synthesized first delegation), the first child's report, and the drained directive steering the
-// next Turn — the shape a follow-through Turn's intercept reads.
+// next Turn — the shape a follow-through Turn's intercept reads. The directive rides the SYSTEM
+// message, faithfully to production: buildRequest drains it and InjectContext appends to the system
+// prompt because the committed history ends in a tool result (loop.go / Request.InjectContext). So
+// the original ask stays the last RoleUser message and the enumeration sits inside the current
+// Exchange the item-2 cursor scans.
 func guidedFanOutHistory() []domain.Message {
 	enumeration := "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog"
 	call1 := guidedSubAgentCall("text_call_0", "Refactor the parser "+guidedDecompositionReportHygiene)
 	return []domain.Message{
+		{Role: domain.RoleSystem, Content: guidedDecompositionDirective([]string{"Add unit tests", "Update the changelog"})},
 		{Role: domain.RoleUser, Content: "big task"},
 		{Role: domain.RoleAssistant, Content: enumeration, ToolCalls: []domain.ToolCall{call1}},
 		{Role: domain.RoleTool, ToolCallID: "text_call_0", Content: "report 1"},
-		{Role: domain.RoleUser, Content: guidedDecompositionDirective([]string{"Add unit tests", "Update the changelog"})},
 	}
 }

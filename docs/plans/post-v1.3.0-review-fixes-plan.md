@@ -143,7 +143,14 @@ half marked → declined (strict majority).
 
 ---
 
-## 2. Anchor the remainder cursor on the delegation-bearing enumeration in the current Exchange
+## 2. Anchor the remainder cursor on the delegation-bearing enumeration in the current Exchange — ✅ DONE (2026-07-06)
+
+**NOTES (2026-07-06):** the existing follow-through/shrink fixtures (`guidedFanOutHistory` and the
+inline histories in `TestGuidedDecompositionDerivesFromCallsNotCappedResults` and the exhausted-remainder
+no-op) modelled the drained directive as a trailing `RoleUser` message — production-unfaithful (per F1,
+`InjectContext` puts it in the system message when history ends in a tool result), and it would fall
+outside the new after-last-user window. They were corrected to the directive-in-system shape (original
+ask stays the last `RoleUser`); the assertions are unchanged, so the tests "keep passing" as required.
 
 **Finding:** review "The remainder cursor anchors on the wrong 'enumeration'" (High, Intent +
 Correctness, found independently twice). Ground truth: ADR 0014 Realisation ("each post-response

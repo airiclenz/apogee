@@ -250,9 +250,10 @@ func guidedDecompositionEstimateTokens(chars int, charsPerToken float64) int {
 
 // PostResponse is the intercept + serialized follow-through half (ADR 0014 §2/§3). Like the gate it
 // carries no per-Mechanism state: the remaining-items queue is re-DERIVED from honest history each
-// Turn (locked decision 1) — the enumeration is the model's own visible list message and the
-// dispatched tasks are the sub_agent calls in the conversation — so it is snapshot/resume-safe and
-// abandons cleanly on suppression. Three cases, evaluated in order against resp.View().Conversation():
+// Turn (locked decision 1) — the enumeration is the model's own list+delegation message in the
+// current Exchange and the dispatched tasks are the sub_agent calls in that Exchange — so it is
+// snapshot/resume-safe and abandons cleanly on suppression. Three cases, evaluated in order against
+// resp.View().Conversation():
 //
 //   - Enumeration response: the pre-request steer is outstanding in the request (its marker is in the
 //     conversation), the model replied with ONLY a subtask list and no tool calls, that list is
@@ -371,12 +372,13 @@ func guidedDecompositionDirective(remaining []string) string {
 }
 
 // guidedDecompositionRemainder re-derives the outstanding subtasks from honest history (locked
-// decision 1): the enumeration is the model's own visible list message, and the dispatched tasks are
-// the sub_agent calls recorded across the conversation plus this Turn's own calls. It reads the CALLS,
-// never the child results, so a report capped by tool_result_cap (the Required peer) leaves the
-// cursor's ground truth intact. An enumeration item is consumed when it is a text prefix of any
-// dispatched task (the task is the item plus the appended hygiene ask); a model-authored task that
-// matches no item simply does not shrink the remainder (off-script, tolerated — §5).
+// decision 1): the enumeration is the model's own list+delegation message in the current Exchange,
+// and the dispatched tasks are the sub_agent calls recorded in that same Exchange plus this Turn's
+// own calls. It reads the CALLS, never the child results, so a report capped by tool_result_cap (the
+// Required peer) leaves the cursor's ground truth intact. An enumeration item is consumed when it is
+// a text prefix of any dispatched task (the task is the item plus the appended hygiene ask); a
+// model-authored task that matches no item simply does not shrink the remainder (off-script,
+// tolerated — §5).
 func guidedDecompositionRemainder(conv domain.ConversationView, respCalls []domain.ToolCall) []string {
 	items := guidedDecompositionEnumeration(conv)
 	if len(items) == 0 {
@@ -392,42 +394,58 @@ func guidedDecompositionRemainder(conv domain.ConversationView, respCalls []doma
 	return remainder
 }
 
-// guidedDecompositionEnumeration returns the enumeration list from honest history — the FIRST
-// assistant message whose content parses as an in-bounds (2..12) subtask list. The steered
-// enumeration is the earliest such message; later follow-through replies are one-line delegations
-// (out of bounds), so scanning first-match reliably anchors on the original list.
+// guidedDecompositionEnumeration returns the enumeration list from honest history: the FIRST
+// assistant message WITHIN THE CURRENT EXCHANGE (the messages after the last RoleUser message — the
+// original ask) that BOTH parses as an in-bounds (2..12) subtask list AND carries at least one
+// sub_agent tool call. That pair uniquely identifies the real enumeration (F3): the case-1 intercept
+// commits it as the verbatim list text PLUS the synthesized first delegation, so no other message
+// shares both traits. A prior-Exchange final answer or mid-Exchange narration may parse as a list but
+// carries no sub_agent call; a compaction summary is a multi-line RoleAssistant message with no call
+// either; and scoping to the current Exchange stops a previous Exchange's fan-out from anchoring this
+// one. Both traits are load-bearing — dropping either lets those decoys shadow the true list.
 func guidedDecompositionEnumeration(conv domain.ConversationView) []string {
 	if conv == nil {
 		return nil
 	}
-	var items []string
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role != domain.RoleAssistant {
-			return true
+	for i := guidedDecompositionCurrentExchangeStart(conv); i < conv.Len(); i++ {
+		m := conv.At(i)
+		if m.Role != domain.RoleAssistant || !guidedDecompositionHasSubAgentCall(m.ToolCalls) {
+			continue
 		}
 		if parsed := guidedDecompositionParseList(m.Content); guidedDecompositionListInBounds(parsed) {
-			items = parsed
-			return false
+			return parsed
 		}
-		return true
-	})
-	return items
+	}
+	return nil
 }
 
 // guidedDecompositionDispatchedTasks collects the task text of every sub_agent call recorded on the
-// conversation's assistant messages — the dispatched half of the honest-history cursor.
+// assistant messages of the CURRENT EXCHANGE (after the last RoleUser message) — the dispatched half
+// of the honest-history cursor, scoped to this Exchange so a previous Exchange's fan-out cannot
+// consume this one's items. It reads the CALLS, never the child results.
 func guidedDecompositionDispatchedTasks(conv domain.ConversationView) []string {
 	if conv == nil {
 		return nil
 	}
 	var tasks []string
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role == domain.RoleAssistant {
+	for i := guidedDecompositionCurrentExchangeStart(conv); i < conv.Len(); i++ {
+		if m := conv.At(i); m.Role == domain.RoleAssistant {
 			tasks = append(tasks, guidedDecompositionCallTasks(m.ToolCalls)...)
 		}
-		return true
-	})
+	}
 	return tasks
+}
+
+// guidedDecompositionCurrentExchangeStart returns the index of the first message of the current
+// Exchange — the message just after the last RoleUser message (the current ask). Injected steers and
+// the drained directive land before that user message or in the system message, never after it
+// (loop.go / Request.InjectContext), so this boundary is stable across injections — the shared-context
+// invariant behind F1/F3. With no user message present the whole conversation is the current Exchange.
+func guidedDecompositionCurrentExchangeStart(conv domain.ConversationView) int {
+	if _, idx, ok := conv.LastUser(); ok {
+		return idx + 1
+	}
+	return 0
 }
 
 // guidedDecompositionCallTasks extracts the task string from each sub_agent call in calls, parsing

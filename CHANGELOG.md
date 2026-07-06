@@ -17,6 +17,13 @@ point is a **minor** bump, not a breaking change.
   declined whole. Unmarked lines are still kept as subtasks when the majority test passes
   (small-model tolerance). `guidedDecompositionStripMarker` now reports whether a marker was present.
   (`internal/mechanisms`.)
+- **Guided decomposition anchors the remainder cursor on the delegation-bearing enumeration.** The
+  cursor now scans only the current Exchange (the messages after the last user message) and anchors on
+  the first assistant message that **both** parses as an in-bounds subtask list **and** carries a
+  `sub_agent` call (F3) — the pair that uniquely identifies the real enumeration. A prior-Exchange
+  answer, mid-Exchange narration, or a compaction summary can no longer shadow it, and a previous
+  Exchange's fan-out cannot consume the current one's items or resume across the boundary.
+  (`internal/mechanisms`.)
 
 ## [1.3.0] — 2026-07-05
 
