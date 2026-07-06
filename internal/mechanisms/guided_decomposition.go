@@ -93,13 +93,16 @@ func newGuidedDecomposition(Deps) (domain.Mechanism, error) {
 // Mechanism (ADR 0014 §1): disabled under Bypass (D5) and withdrawn by self-regulation after
 // repeated non-help. It is IncompatibleWith decompose — the two steer the same "task too big"
 // symptom through different means (delegation vs prompt wording) and must not stack (locked decision
-// 2) — and Requires tool_result_cap, the peer it is benched as a stack with; enabling it without
+// 2) — and IncompatibleWith truncate_history — a mid-Exchange truncation longer than its keep window
+// can drop the enumeration message the cursor re-derives the remainder from, destroying the fan-out
+// mid-flight (F7; one-sided declaration suffices — detectIncompatibility is symmetric in effect). It
+// Requires tool_result_cap, the peer it is benched as a stack with; enabling it without
 // tool_result_cap is a startup error (ValidateRequirements, locked decision 3 / ADR 0014 §4).
 var guidedDecompositionDescriptor = domain.MechanismDescriptor{
 	ID:               guidedDecompositionID,
 	Capability:       domain.CapProactiveNudge,
 	Suppression:      domain.SuppressStrikesThree,
-	IncompatibleWith: []domain.MechanismID{decomposeID},
+	IncompatibleWith: []domain.MechanismID{decomposeID, truncateHistoryID},
 	Requires:         []domain.MechanismID{toolResultCapID},
 }
 

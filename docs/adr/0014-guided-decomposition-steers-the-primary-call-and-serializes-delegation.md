@@ -242,3 +242,10 @@ Decision — they make the substrate honest about which history a decision reads
 
 The Decision (§1–§5) is unchanged; these are Realisation refinements that make the honest-history
 reading the Decision already assumed actually hold across a full Exchange.
+
+- **2026-07-06 (post-v1.3.0 review-fixes item 8, F7):** `guided_decomposition` is additionally
+  declared `IncompatibleWith: [truncate_history]` — a mid-Exchange truncation longer than its keep
+  window can drop the enumeration message the cursor re-derives the remainder from, destroying the
+  fan-out mid-flight. The one-sided declaration on the `guided_decomposition` descriptor suffices
+  (`detectIncompatibility` is symmetric in effect), so co-enabling the two is refused at startup with
+  `ErrIncompatibleMechanisms`.

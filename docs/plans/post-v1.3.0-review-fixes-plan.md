@@ -385,7 +385,14 @@ CHANGELOG. Commit:
 
 ---
 
-## 8. Declare `guided_decomposition` incompatible with `truncate_history`
+## 8. Declare `guided_decomposition` incompatible with `truncate_history` — ✅ DONE (2026-07-06)
+
+**NOTES (2026-07-06):** `guided_decomposition` has NO row in `docs/design/mechanism-catalogue.md`
+Table A (Tables A/B/C catalogue the sim-*ported* Mechanisms; guided_decomposition is a new ADR 0014
+Mechanism, never sim-ported), so 8(b)'s "matching Table A cell" was applied to the counterpart that
+IS in Table A — the `truncate_history` row's Ordering/incompatibility cell now records
+`IncompatibleWith guided_decomposition`. The relation is thereby reflected in Table A as intended;
+no new guided_decomposition row was added (out of scope for this item).
 
 **Finding:** review "Co-enabling truncate_history destroys the fan-out cursor mid-flight"
 (Medium, Correctness + Tests). Ground truth: the descriptor at

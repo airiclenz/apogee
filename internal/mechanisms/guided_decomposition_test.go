@@ -3,6 +3,7 @@ package mechanisms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -53,9 +54,11 @@ func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	// IncompatibleWith decompose (locked decision 2) and Requires tool_result_cap (locked decision 3).
-	if len(d.IncompatibleWith) != 1 || d.IncompatibleWith[0] != decomposeID {
-		t.Errorf("IncompatibleWith = %v, want [%q]", d.IncompatibleWith, decomposeID)
+	// IncompatibleWith decompose (locked decision 2) and truncate_history (F7 — a mid-Exchange
+	// truncation can drop the enumeration message the cursor re-derives from), and Requires
+	// tool_result_cap (locked decision 3).
+	if len(d.IncompatibleWith) != 2 || d.IncompatibleWith[0] != decomposeID || d.IncompatibleWith[1] != truncateHistoryID {
+		t.Errorf("IncompatibleWith = %v, want [%q %q]", d.IncompatibleWith, decomposeID, truncateHistoryID)
 	}
 	if len(d.Requires) != 1 || d.Requires[0] != toolResultCapID {
 		t.Errorf("Requires = %v, want [%q]", d.Requires, toolResultCapID)
@@ -71,6 +74,46 @@ func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 	// intercept + serialized follow-through. Suppressing the Mechanism disarms both as a unit.
 	if _, ok := m.(domain.PostResponseHook); !ok {
 		t.Error("guided_decomposition does not implement PostResponseHook (the intercept half)")
+	}
+}
+
+// guided_decomposition is IncompatibleWith truncate_history (F7): a mid-Exchange truncation longer
+// than its keep window can drop the enumeration message the cursor re-derives the remainder from,
+// destroying the fan-out mid-flight. One-sided declaration on guided_decomposition suffices —
+// detectIncompatibility is symmetric in effect — so co-registering the two fails
+// ValidateIncompatibilities and names the pair, while the valid stack (guided_decomposition +
+// tool_result_cap, its Required peer) validates cleanly.
+func TestGuidedDecompositionIncompatibleWithTruncateHistory(t *testing.T) {
+	t.Parallel()
+
+	// The full stack the bench arms plus truncate_history is refused, naming both offenders.
+	reg := domain.NewMechanismRegistry()
+	for _, id := range []domain.MechanismID{guidedDecompositionID, toolResultCapID, truncateHistoryID} {
+		if err := reg.Add(mustBuild(t, id)); err != nil {
+			t.Fatalf("Add(%q): %v", id, err)
+		}
+	}
+	err := reg.ValidateIncompatibilities()
+	if !errors.Is(err, domain.ErrIncompatibleMechanisms) {
+		t.Fatalf("ValidateIncompatibilities with truncate_history co-enabled = %v, want ErrIncompatibleMechanisms", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, string(guidedDecompositionID)) || !strings.Contains(msg, string(truncateHistoryID)) {
+		t.Errorf("error %q does not name the incompatible pair %q/%q", msg, guidedDecompositionID, truncateHistoryID)
+	}
+
+	// The valid stack (guided_decomposition + its Required tool_result_cap, no truncate_history) still
+	// validates on every gate — the new relation refuses only the truncate_history combination.
+	valid := domain.NewMechanismRegistry()
+	for _, id := range []domain.MechanismID{guidedDecompositionID, toolResultCapID} {
+		if err := valid.Add(mustBuild(t, id)); err != nil {
+			t.Fatalf("Add(%q): %v", id, err)
+		}
+	}
+	if err := valid.ValidateIncompatibilities(); err != nil {
+		t.Errorf("ValidateIncompatibilities on guided_decomposition + tool_result_cap = %v, want nil", err)
+	}
+	if err := valid.ValidateRequirements(); err != nil {
+		t.Errorf("ValidateRequirements on guided_decomposition + tool_result_cap = %v, want nil", err)
 	}
 }
 

@@ -57,6 +57,12 @@ point is a **minor** bump, not a breaking change.
   the drained injections, so a re-attempt or snapshot carries exactly the one restored directive
   rather than two contradictory copies. `domain.Conversation` gains `ClearDeferred`, `TruncateDeferred`,
   and `DeferredLen`. (`internal/agent`, `internal/domain`; CONTEXT.md.)
+- **Guided decomposition is incompatible with `truncate_history`.** The `guided_decomposition`
+  descriptor now declares `IncompatibleWith: [decompose, truncate_history]` (F7): a mid-Exchange
+  truncation longer than its keep window can drop the enumeration message the fan-out cursor
+  re-derives the remainder from, destroying the fan-out mid-flight. Co-enabling the two is refused at
+  startup with `ErrIncompatibleMechanisms`; the valid `guided_decomposition + tool_result_cap` stack is
+  unaffected. (`internal/mechanisms`; `docs/design/mechanism-catalogue.md`, ADR 0014 Realisation.)
 
 ## [1.3.0] — 2026-07-05
 
