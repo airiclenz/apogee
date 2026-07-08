@@ -281,3 +281,64 @@ DROP / FOLD / SPLIT / DEFER row carries its verdict. Nothing remains porting-und
 | `feed_forward_correction` | — (FOLD into `validate`, C5) | n/a |
 | `compress` | — (SPLIT, C3) | n/a |
 | `cot` | — (SPLIT → `stall_nudge`/`list_nudge`/`tool_use_directive`, C4) | n/a |
+
+### Bench campaign evidence (L9 — keyed by campaign ID + model)
+
+The porting ledger above closed 2026-07-04 (item 16); this subsection is the **append-only
+evidence stream** it awaits. Per L9 (apogee-sim
+`docs/plans/leave-one-out-campaign-plan.md`), completed bench campaigns land here as
+**ledger entries only** — no default flips, no catalogue deletions; curation decisions wait
+for the Screen + Confirmation pair. Bundles (manifest, `runs.jsonl`, traces, `report.md`,
+`analysis.json`) live in `~/.apogee-sim/campaigns/<campaign ID>/`.
+
+#### `gemma-4-e4b-it-qat-20260706` · gemma-4-e4b-it-qat — **inferior** (aggregate A/B)
+
+- **Design:** full-stack aggregate — candidate (17 mechanisms) vs Bypass floor (ADR 0006);
+  14 tasks × 2 arms × 5 reps = 140/140 recorded, 0 infra_failed (2026-07-06).
+- **Gate (ADR 0009):** candidate **not** non-inferior to Bypass within δ = 0.4048
+  (split-half AA-null 95th percentile); one-sided Wilcoxon signed-rank W+ = 66.0,
+  p = 0.2087, N = 14 paired tasks.
+- **Secondaries — every one favors Bypass:** mean grade 2.400 vs 2.757; gate pass 33/70 vs
+  45/70; compile 70% vs 87%; tests 147P/53F vs 188P/22F; lint-clean 8/70 vs 21/70.
+- **Reading:** the full stack **hurts** this small model. The campaign is aggregate-only —
+  it attributes nothing to individual mechanisms, so every Table B `pending` stands.
+  Attribution is the job of the leave-one-out Screen `gemma-4-e4b-it-qat-20260708`
+  (1,190 runs, launched 2026-07-08, in flight as of this entry), then a Confirmation
+  campaign on the pruned set.
+
+#### `qwen25-coder-14b-20260707` · qwen25-coder-14b — **no-evidence** (aggregate A/B)
+
+- **Design:** same aggregate design; 140/140 recorded, 0 infra_failed, 3 h 30 m
+  (2026-07-07).
+- **Gate (ADR 0009):** **no-evidence** — every task produced the same letter grade in all
+  10 of its runs (both arms, all reps) ⇒ zero non-zero paired diffs ⇒ min attainable
+  one-sided p = 1.0000 (δ = 0.0000 AA null). No-evidence still **fails** the gate
+  (inconclusive ≠ pass). Secondary aggregates byte-identical between arms (mean 1.786,
+  gate 15/70, compile 71%, tests 95P/65F, lint 10/70).
+- **Not a rig bug — wiring verified before believing it:** manifest arms differ only by
+  `Bypass: false/true` (correct bypass-floor design); candidate-vs-bypass trace files
+  differ for every pair hashed — different transcripts converging on the same outcome
+  buckets.
+- **Zero-variance caveat (binds any future capable-model claim):** the letter-grade
+  instrument shows **zero within-task variance** on this model despite temp 0.7 —
+  confirmed twice (this aggregate, then the 34-run Screen smoke
+  `qwen25-coder-14b-20260707-smoke`: all 17 arms identical grades per task). The
+  instrument cannot measure "helps" on capable models; any such claim first needs a finer
+  instrument or harder corpus.
+- **Efficiency observation (recorded, unmined — no graded claim):** many candidate-arm
+  runs finished in 6–25 s vs minutes for Bypass with identical grades (walls in
+  `~/campaign-run.log`; traces preserved). Plausibly `cached_content_intercept`. If mined
+  and confirmed, this is same-outcome-less-compute "helps where it can" evidence — for
+  now it is an observation, not a verdict.
+- **Reading:** the stack is **outcome-neutral** on this capable coder. No per-mechanism
+  attribution; every Table B `pending` stands.
+
+Not entered: `qwythos-9b-20260707` (16/140, model abandoned mid-campaign — think-block
+death spirals; L9 admits completed campaigns only, so its record stays in the bundle and
+the 2026-07-08 handoff) and `qwen25-coder-14b-20260707-smoke` (rig-acceptance smoke for
+plan item 7, cited above only as the zero-variance replication — not mechanism evidence).
+
+Working hypothesis these two entries jointly support (hypothesis, not a verdict): the
+stack is outcome-neutral on capable models and harmful on weak ones — "gets out of the
+way" is the binding constraint, and the gemma Screen + Confirmation pair is the critical
+path to naming the harm.

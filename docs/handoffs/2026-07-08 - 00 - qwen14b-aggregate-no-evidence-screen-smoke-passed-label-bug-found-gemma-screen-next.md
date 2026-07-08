@@ -8,6 +8,13 @@ pickup items 1 (smoke) and 2 (second-model aggregate) are DONE — the aggregate
 the **14B**, not the 7B (operator's call; the 7B never ran and doesn't need to).
 Work from this directory; apogee-sim is the sibling repo at `../apogee-sim`.
 
+**Update 2026-07-08 (same day, later session): steps 2 and 3 are DONE.** The gemma
+Screen `gemma-4-e4b-it-qat-20260708` is **in flight** (1,190 runs, launched ~09:13 UTC,
+binary `48cd48f`; gemma is the loaded profile — don't switch). The L9 ledger entries for
+both completed aggregates are written (new "Bench campaign evidence" subsection in
+`docs/design/mechanism-catalogue.md`). **Next actionable: step 4** (mine the 14B
+efficiency signal) while the Screen runs; step 5 when it completes.
+
 ## The goal (decision frame for everything below)
 
 **Curate a sensible mechanism set for apogee: keep what helps where it can, remove or
@@ -78,23 +85,21 @@ and the gemma Screen (attribution of the harm) is the critical path.
    print 15 misleading "inferior" labels right where the harm-attribution will be read —
    the whole ADR 0009 discipline is about not over-claiming. Fixing BEFORE launch also
    avoided the "never kill-and-resume onto a freshly rebuilt binary" trap.
-   **→ Next actionable: step 2 (launch the gemma Screen).**
-2. **Reload gemma and launch the gemma Screen (the critical path — start it the same
-   session, it's ~85 h wall).** `llama-launcher load gemma-4-e4b-it-qat`, verify with
-   `llama-launcher status --json` (fingerprint hard-refusal protects against a silent
-   mismatch — `qwen25-coder-14b` is what's loaded as of this handoff), then detached
-   from `../apogee-sim`:
-   `( cd ../apogee-sim && nohup caffeinate -i ./apogee-sim campaign run --arms leave-one-out --model gemma-4-e4b-it-qat --endpoint http://127.0.0.1:1111 --reps 5 >> ~/campaign-run.log 2>&1 & )`
-   — 1,190 runs ≈ 4 overnights, resumable free via `--id`. *Why:* gemma is the model
-   where the stack demonstrably hurts; the Screen is the instrument that names the
-   guilty mechanism(s). Nothing else advances "get out of the way" until it runs.
-3. **While the Screen runs: write the L9 ledger entries for the two COMPLETED
-   campaigns** in `docs/design/mechanism-catalogue.md` (this repo), keyed by campaign ID
-   + model: gemma aggregate → inferior; qwen25-coder-14b aggregate → no-evidence with
-   the zero-variance caveat and the efficiency observation. *Why now:* L9 permits
-   entries from completed campaigns only — both qualify; capturing them before the
-   Screen's flood of data keeps the ledger honest. `analyze`/`list` are safe
-   mid-campaign; ledger edits don't touch the sim.
+2. ✅ **DONE (2026-07-08) — Reload gemma and launch the gemma Screen.** Loaded
+   `gemma-4-e4b-it-qat` (server had been idle; verified via `status --json`), launched
+   detached at binary `48cd48f` → campaign **`gemma-4-e4b-it-qat-20260708`**
+   (14 tasks × 17 arms × 5 reps = 1,190 runs; manifest confirms `protocol:
+   leave-one-out`, `bh_q: 0.05`). Process reparented to launchd (survives sessions);
+   ~85 h wall ≈ 4 overnights; resume free via `--id gemma-4-e4b-it-qat-20260708`;
+   progress in `~/campaign-run.log`.
+3. ✅ **DONE (2026-07-08) — L9 ledger entries written for the two COMPLETED campaigns**
+   in `docs/design/mechanism-catalogue.md` — new "Bench campaign evidence (L9)"
+   subsection under the Ledger: `gemma-4-e4b-it-qat-20260706` → inferior (all
+   secondaries favor Bypass; attribution delegated to the in-flight Screen);
+   `qwen25-coder-14b-20260707` → no-evidence with the zero-variance caveat and the
+   unmined efficiency observation. qwythos partial + the smoke explicitly recorded as
+   not-entered (L9 admits completed campaigns only). No Table B `pending` cell changed.
+   **→ Next actionable: step 4 (mine the 14B efficiency signal).**
 4. **While the Screen runs: mine the 14B efficiency signal** (finding 3). Extract
    per-arm wall/turn stats from the two qwen bundles' `runs.jsonl` + traces; check
    whether the speedup attributes to `cached_content_intercept`; decide whether to add
@@ -149,8 +154,9 @@ and the gemma Screen (attribution of the harm) is the critical path.
   `48cd48f`; descriptive column now reads `no-evidence`), `qwythos-9b-20260707` (16/140, abandoned-model record),
   `gemma-…-smoke` (old harness smoke). All have `report.md`/`analysis.json` except the
   qwythos partial.
-- **LLM server:** `qwen25-coder-14b` loaded on `127.0.0.1:1111` — the gemma Screen
-  needs a profile reload first.
+- **LLM server (updated 2026-07-08):** `gemma-4-e4b-it-qat` loaded on `127.0.0.1:1111`,
+  serving the in-flight Screen `gemma-4-e4b-it-qat-20260708` — **don't switch profiles
+  or rebuild the binary until it completes.**
 
 ## Explicitly NOT next (parked — carried forward)
 
