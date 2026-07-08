@@ -332,6 +332,32 @@ for the Screen + Confirmation pair. Bundles (manifest, `runs.jsonl`, traces, `re
   now it is an observation, not a verdict.
 - **Reading:** the stack is **outcome-neutral** on this capable coder. No per-mechanism
   attribution; every Table B `pending` stands.
+- **Amended 2026-07-08 (step-4 trace mining — the efficiency observation is RESOLVED as
+  an artifact, and the reading above is retracted):** mining all 174 recorded qwen runs
+  (this aggregate + the smoke) found **every run is a single model round-trip with zero
+  tool executions** — exactly one `UsageEvent` per trace, no `ToolCallEvent` /
+  `ToolResultEvent` anywhere. The rig itself is fine: the gemma aggregate on the same rig
+  has 1,930 tool calls and 3–50 turns/run. The failure is protocol-specific: qwen emitted
+  **fenced-JSON pseudo-tool-calls** the backend never parsed as tool calls (64/70
+  candidate, 48/70 bypass responses), the loop read a no-tool-call response as
+  exchange-complete at turn 1, and `tool_use_enforcer` is structurally unreachable there
+  (`shouldEnforceToolUse` requires ≥ 2 prior assistant messages — sim
+  `internal/proxy/tooluse_enforcer.go` — so a first-turn text-only response can never
+  trigger the off-ramp). Quality gates therefore graded the **seeded workspace** in both
+  arms — the mechanistic cause of the zero-variance caveat above.
+  Consequences: **(a)** the efficiency observation is **refuted as "helps" evidence** —
+  the wall gap (candidate 70.6 min vs Bypass 139.6 min; per-pair median ratio 0.44) is
+  response *length*, not work saved: candidate median 161 completion tokens vs Bypass
+  807. Prompt shaping by `tool_use_directive` (fired 65/70 candidate runs) + `decompose`
+  (25/70) compressed a failure shape; `cached_content_intercept` fired **0** times and —
+  being pre-tool-exec in runs with no tool calls — was refuted by construction.
+  **(b)** The no-evidence verdict stands as recorded, but it is **silent on "the stack on
+  capable models"** — the campaign measured a non-engaged loop; the outcome-neutral
+  reading above is unsupported. **(c)** Before any future capable-model campaign: fix the
+  qwen tool-call protocol mismatch (chat-template/parser investigation), and give the
+  analyzer an engagement guard (turns, tool-exec counts, wall time in the secondary
+  table) so a zero-engagement campaign is flagged instead of read as no-evidence — both
+  deferred until the in-flight gemma Screen completes (no rebuild mid-campaign).
 
 Not entered: `qwythos-9b-20260707` (16/140, model abandoned mid-campaign — think-block
 death spirals; L9 admits completed campaigns only, so its record stays in the bundle and
@@ -341,4 +367,7 @@ plan item 7, cited above only as the zero-variance replication — not mechanism
 Working hypothesis these two entries jointly support (hypothesis, not a verdict): the
 stack is outcome-neutral on capable models and harmful on weak ones — "gets out of the
 way" is the binding constraint, and the gemma Screen + Confirmation pair is the critical
-path to naming the harm.
+path to naming the harm. **Amended 2026-07-08:** the capable-model leg is now
+**unsupported** — the qwen campaigns never engaged the tool loop (see the qwen entry's
+amendment), so they say nothing about the stack on capable models. Only "harmful on weak
+ones" retains evidence; the Screen remains the critical path.

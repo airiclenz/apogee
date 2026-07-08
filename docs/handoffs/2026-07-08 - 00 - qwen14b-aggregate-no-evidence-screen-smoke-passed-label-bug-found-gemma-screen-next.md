@@ -8,12 +8,18 @@ pickup items 1 (smoke) and 2 (second-model aggregate) are DONE — the aggregate
 the **14B**, not the 7B (operator's call; the 7B never ran and doesn't need to).
 Work from this directory; apogee-sim is the sibling repo at `../apogee-sim`.
 
-**Update 2026-07-08 (same day, later session): steps 2 and 3 are DONE.** The gemma
+**Update 2026-07-08 (same day, later session): steps 2, 3, and 4 are DONE.** The gemma
 Screen `gemma-4-e4b-it-qat-20260708` is **in flight** (1,190 runs, launched ~09:13 UTC,
-binary `48cd48f`; gemma is the loaded profile — don't switch). The L9 ledger entries for
-both completed aggregates are written (new "Bench campaign evidence" subsection in
-`docs/design/mechanism-catalogue.md`). **Next actionable: step 4** (mine the 14B
-efficiency signal) while the Screen runs; step 5 when it completes.
+binary `48cd48f`; gemma is the loaded profile — don't switch; log ETA ~111–124 h, slower
+than the ~85 h estimate). The L9 ledger entries for both completed aggregates are written
+(new "Bench campaign evidence" subsection in `docs/design/mechanism-catalogue.md`).
+**Step 4's mining REVERSED findings 2–3:** the qwen campaigns never engaged the tool
+loop (zero tool executions in all 174 runs — fenced-JSON pseudo-tool-calls never parsed;
+grades measured the seeded workspace), so the efficiency signal is an artifact and the
+qwen bundles are silent on capable models; `cached_content_intercept` refuted (0 fires).
+Ledger amended same day. **Next actionable: step 5 when the Screen completes** (read per
+discipline, then Confirmation); step 6's grill is reframed by step 4 (engagement, not
+grade granularity).
 
 ## The goal (decision frame for everything below)
 
@@ -46,12 +52,16 @@ and the gemma Screen (attribution of the harm) is the critical path.
    twice (the aggregate, then the smoke: all 17 arms identical grades per task). The
    letter-grade instrument has **zero within-task variance on capable models**, so it
    cannot measure "helps" there. Any future "does it help strong models?" claim needs a
-   finer instrument or harder corpus (ranked step 6).
+   finer instrument or harder corpus (ranked step 6). *(REINTERPRETED 2026-07-08, step 4:
+   the determinism is zero workspace mutation — qwen never executed a tool; grades
+   measured the seeded workspace. See step 4 + the catalogue ledger amendment.)*
 3. **Efficiency signal, unmined:** many candidate-arm runs finished in 6–25 s vs
    minutes for bypass, with identical grades (visible in `~/campaign-run.log` walls;
    traces preserved). Plausibly `cached_content_intercept`. If it holds up, this is the
    "helps where it can" evidence for capable models — same outcome, less time/compute.
-   The analyzer's secondary table does not currently surface wall time.
+   The analyzer's secondary table does not currently surface wall time. *(RESOLVED
+   2026-07-08, step 4: artifact — response length, not work saved; `cached_content_intercept`
+   refuted (0 fires possible in tool-less runs). See step 4.)*
 4. **Screen smoke (plan item 7) PASSED all acceptance criteria** on bundle
    `qwen25-coder-14b-20260707-smoke` (34/34 in ~1 h 10 m, 0 infra_failed): manifest
    `protocol: leave-one-out` / 17 arms / `bh_q: 0.05`; off-ramps
@@ -100,12 +110,25 @@ and the gemma Screen (attribution of the harm) is the critical path.
    unmined efficiency observation. qwythos partial + the smoke explicitly recorded as
    not-entered (L9 admits completed campaigns only). No Table B `pending` cell changed.
    **→ Next actionable: step 4 (mine the 14B efficiency signal).**
-4. **While the Screen runs: mine the 14B efficiency signal** (finding 3). Extract
-   per-arm wall/turn stats from the two qwen bundles' `runs.jsonl` + traces; check
-   whether the speedup attributes to `cached_content_intercept`; decide whether to add
-   wall time to the analyzer's secondary table. *Why:* it's the only "helps" evidence
-   available for capable models given zero grade variance, and it's sitting in already
-   -recorded data — no new runs needed.
+4. ✅ **DONE (2026-07-08) — Mined the 14B efficiency signal; the finding REVERSES it.**
+   Trace mining of all 174 qwen runs (aggregate + smoke) found **every run is a single
+   model round-trip with zero tool executions** (one `UsageEvent` per trace; no
+   `ToolCallEvent`/`ToolResultEvent` anywhere — vs 1,930 each and 3–50 turns/run in the
+   gemma aggregate on the same rig). qwen emitted fenced-JSON pseudo-tool-calls that
+   never parsed (64/70 candidate, 48/70 bypass); the loop read no-tool-calls as
+   exchange-complete at turn 1; `tool_use_enforcer` can't catch it
+   (`shouldEnforceToolUse` needs ≥2 prior assistant messages). Grades measured the
+   **seeded workspace** in both arms — the mechanistic cause of finding 2's zero
+   variance. The wall gap (70.6 vs 139.6 min) is response length (median 161 vs 807
+   completion tokens), driven by `tool_use_directive` (65/70 fires) + `decompose`
+   (25/70); `cached_content_intercept` fired **0 times** — refuted by construction.
+   **Consequences:** the qwen campaigns are silent on "the stack on capable models";
+   the outcome-neutral hypothesis leg is unsupported. Full record + follow-ups in the
+   catalogue ledger amendment (2026-07-08). **Deferred until the Screen completes (no
+   rebuild mid-campaign):** analyzer engagement guard (turns/tool-execs/wall in the
+   secondary table, zero-engagement alarm) + qwen tool-call protocol fix (chat-template/
+   parser) before any future capable-model campaign. This also reframes step 6: the
+   binding problem is engagement, not grade granularity.
 5. **Read the Screen per discipline, then run the Confirmation campaign.** Convicted
    set + replication readout first — if the in-bundle candidate-vs-Bypass direction does
    NOT reproduce the aggregate failure, stop and investigate the rig before trusting
