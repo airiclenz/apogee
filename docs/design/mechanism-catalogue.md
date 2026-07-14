@@ -359,6 +359,41 @@ for the Screen + Confirmation pair. Bundles (manifest, `runs.jsonl`, traces, `re
   table) so a zero-engagement campaign is flagged instead of read as no-evidence — both
   deferred until the in-flight gemma Screen completes (no rebuild mid-campaign).
 
+#### `gemma-4-e4b-it-qat-20260708` · gemma-4-e4b-it-qat — **no-conviction** (leave-one-out Screen)
+
+- **Design:** leave-one-out Screen (apogee-sim ADR 0013; plan L-table): 15 without-X arms
+  + fresh in-bundle candidate and Bypass comparators = 17 arms × 14 tasks × 5 reps =
+  1,190/1,190 recorded, 0 infra_failed, 133 h 24 m wall (completed 2026-07-14). Off-ramps
+  (`tool_use_enforcer`, `empty_response_recovery`) rode every arm and produced no
+  without-X arms (ADR 0013 §3). Pre-registered: BH-FDR q = 0.05 over m = 15, one-sided
+  exact Wilcoxon-Pratt ("removal improves"), fresh δ = 0.4643 (in-bundle split-half AA
+  null, 95th pct).
+- **Replication readout (checked first, ADR 0013 §4):** the aggregate failure
+  **reproduced in-bundle** — candidate not non-inferior to Bypass (W+ = 72.0, p = 0.1225,
+  N = 14); mean grade 2.443 vs 2.829, and every secondary favors Bypass (gate 32/70 vs
+  46/70; compile 73% vs 89%; tests 142P/50F vs 198P/30F; lint 9/70 vs 22/70) — closely
+  tracking the 20260706 aggregate. Rig self-check passes; the attributions are readable.
+- **Attribution (primary): convicted none.** All 15 rows p ≥ 0.1104 pre-BH (the rank-1 BH
+  threshold at q = 0.05, m = 15 is ≈ 0.0033). Verdict, L4 wording verbatim: "no single
+  Mechanism convicted — underpowered for diffuse harm." Terminal for this campaign; no
+  drop set exists, so no Confirmation campaign follows from it.
+- **Descriptive standout (NOT a conviction; recorded per ADR 0013 §1):**
+  `truncate_history` is the only mechanism whose removal trends positive (mean diff
+  +0.429, W+ = 69.5, p = 0.1104), and `without-truncate_history` is the only arm
+  descriptively non-inferior to Bypass (p = 0.0006) — its secondaries essentially mirror
+  Bypass (mean 2.871 vs 2.829; gate 47/70 vs 46/70; compile 87% vs 89%; tests 193P/30F vs
+  198P/30F; lint 21/70 vs 22/70) while all 14 other without-X arms read inferior.
+  Descriptive only: the vs-Bypass contrast confounds the removal with the other 15
+  members, and the hypothesis is data-suggested, not pre-registered.
+- **Reading:** the harm to this small model is real and replicated but not attributable
+  to any single mechanism at this power (N = 14 tasks). The recorded pattern — 14
+  near-zero removal diffs (−0.33 to +0.16) plus one +0.43 standout whose arm converges on
+  Bypass across every secondary — is compatible with both "diffuse harm" and "harm
+  concentrated in `truncate_history` but underpowered"; distinguishing them requires a
+  new pre-registered campaign (any probe of base-minus-`truncate_history` is exploratory,
+  not confirmatory — no convicted set exists). Every Table B `pending` stands; per L9, no
+  flips, no deletions.
+
 Not entered: `qwythos-9b-20260707` (16/140, model abandoned mid-campaign — think-block
 death spirals; L9 admits completed campaigns only, so its record stays in the bundle and
 the 2026-07-08 handoff) and `qwen25-coder-14b-20260707-smoke` (rig-acceptance smoke for
@@ -370,4 +405,9 @@ way" is the binding constraint, and the gemma Screen + Confirmation pair is the 
 path to naming the harm. **Amended 2026-07-08:** the capable-model leg is now
 **unsupported** — the qwen campaigns never engaged the tool loop (see the qwen entry's
 amendment), so they say nothing about the stack on capable models. Only "harmful on weak
-ones" retains evidence; the Screen remains the critical path.
+ones" retains evidence; the Screen remains the critical path. **Amended 2026-07-14:** the
+Screen completed with **no-conviction** (entry above): the harm on gemma is replicated
+in-bundle but attributed to no single mechanism at N = 14 tasks. The Screen →
+Confirmation path the 20260706 entry anticipated is closed (no drop set); the next
+campaign is an open design decision, not a pre-committed step (apogee-sim ADR 0013 §2
+left post-no-conviction moves deliberately open).
