@@ -394,6 +394,37 @@ for the Screen + Confirmation pair. Bundles (manifest, `runs.jsonl`, traces, `re
   not confirmatory — no convicted set exists). Every Table B `pending` stands; per L9, no
   flips, no deletions.
 
+#### `gemma-4-e4b-it-qat-20260714-minus-truncate-history` · gemma-4-e4b-it-qat — **non-inferior** (Probe)
+
+- **Design:** Probe (apogee-sim CONTEXT.md term, commit `777af3f`): aggregate-Protocol
+  campaign over a custom enable set — candidate = base minus `truncate_history` (16
+  mechanisms, the Screen's `without-truncate_history` set verbatim, off-ramps in) vs the
+  same 16 under the Bypass floor; 14 tasks × 2 arms × 5 reps = 140/140 recorded,
+  0 infra_failed, 13 h 54 m wall (pre-registered 2026-07-14, run 2026-07-17→18 after a
+  clean 0/140 kill; model fingerprint re-check passed on resume, D10). **Exploratory by
+  construction** — the hypothesis is data-suggested by the Screen's descriptive standout,
+  so a pass licenses a ledger claim only, never a curation action.
+- **Engagement spot-check (pre-registered; the qwen post-mortem lesson):** both arms
+  fully engaged — zero runs in either arm had 0 tool executions; candidate mean 12.6
+  turns / 11.7 tool executions per run, Bypass 11.4 / 10.6. The analyzer engagement
+  guard is still pending rig work, so this was checked by hand in `runs.jsonl` before
+  believing grades.
+- **Gate (ADR 0009; pre-registered read order δ → NI → closed superiority):** candidate
+  **non-inferior** to Bypass within fresh δ = 0.4643 (computed from this bundle's
+  Bypass-arm reps per D8; same value as the Screen's δ under the shared 5-rep design's
+  grade granularity); one-sided Wilcoxon signed-rank W+ = 102.0, p = 0.0003, N = 14
+  paired tasks. **Not superior** (descriptive: mean grade 2.843 vs 2.829; per-task diffs
+  4 positive / 3 negative / 7 zero).
+- **Secondaries mirror Bypass:** gate pass 48/70 vs 45/70; compile 86% vs 86%; tests
+  183P/27F vs 187P/37F; lint 20/70 vs 20/70 — the same convergence the Screen's
+  `without-truncate_history` arm showed descriptively, now reproduced on fresh
+  pre-registered runs.
+- **Reading (pre-registered disposition, verbatim):** base minus `truncate_history` is
+  non-inferior to Bypass on gemma; localization of the aggregate harm to
+  `truncate_history` is **supported — exploratory**. No curation action follows: no
+  convicted set exists, this is not a Confirmation, and no follow-up is pre-committed.
+  Every Table B `pending` stands; per L9, no flips, no deletions.
+
 Not entered: `qwythos-9b-20260707` (16/140, model abandoned mid-campaign — think-block
 death spirals; L9 admits completed campaigns only, so its record stays in the bundle and
 the 2026-07-08 handoff) and `qwen25-coder-14b-20260707-smoke` (rig-acceptance smoke for
@@ -410,4 +441,9 @@ Screen completed with **no-conviction** (entry above): the harm on gemma is repl
 in-bundle but attributed to no single mechanism at N = 14 tasks. The Screen →
 Confirmation path the 20260706 entry anticipated is closed (no drop set); the next
 campaign is an open design decision, not a pre-committed step (apogee-sim ADR 0013 §2
-left post-no-conviction moves deliberately open).
+left post-no-conviction moves deliberately open). **Amended 2026-07-18:** that open
+decision was resolved as the Probe `gemma-4-e4b-it-qat-20260714-minus-truncate-history`
+(entry above), which passed its NI gate — the first pre-registered support for the
+localization reading ("harm concentrated in `truncate_history`") over "diffuse harm" on
+gemma. Exploratory: it licenses its ledger claim only; the next move is again an open
+design decision (no convicted set, no pre-committed follow-up).
