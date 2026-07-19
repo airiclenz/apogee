@@ -480,7 +480,21 @@ it is the lowest-risk, most mechanical).
 
 ---
 
-## 9. Docs close-out (owning item for the residue)
+## 9. Docs close-out (owning item for the residue) — ✅ DONE (2026-07-19)
+
+NOTES (2026-07-19): the review report actually lives at
+`docs/reviews/architecture-review-20260706-205911.html` — the intro's and 9(c)'s
+`docs/architecture-review-…` citations predate the `docs/reviews/` filing; the (c) banner landed
+at the real path (banner div matching the header's info-box style, with a one-clause record of
+the item-4 ADR 0017 fallback qualifying "candidate 1 implemented"). (a) needed no edits — items
+1–8 all carry their `## [Unreleased]` lines, the `Budget` line says additive → minor, no version
+heading — and the close-out itself adds no CHANGELOG line, 9(a) scoping item 9's CHANGELOG work
+to the sanity check (the fixes plan's item-12 close-out precedent). (b) CLOSED the TODO entry
+(items 6–7 are the re-shaping; the marker-framework idea recorded as declined-speculative per
+"Explicitly NOT in this plan"), and it now cross-references the Library's continuous usage
+fraction (`libraryContextTooFull`, `internal/mechanisms/library.go`) as deliberately outside
+`Budget.EstimateTokens` — the item-6 verifier's follow-up, resolved here as a docs
+cross-reference. (d) ISSUES.md untouched: neither open entry was fixed by this plan.
 
 **What:** the cross-cutting residue with exactly one owner:
 **(a) CHANGELOG:** sanity-check items 1–8 landed their lines under `## [Unreleased]`; the

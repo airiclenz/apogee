@@ -141,30 +141,35 @@ the bench finds a specific win.
 
 ---
 
-## Read/list tool-name detection — the shared-scan re-shaping (spelling families landed)
+## Read/list tool-name detection — CLOSED (spelling families + shared-scan re-shaping both landed)
 
-**Status:** narrowed 2026-07-06 (post-v1.3.0 review-fixes close-out,
-`docs/plans/post-v1.3.0-review-fixes-plan.md` item 11 / F8). The **drift half is fixed**:
-the read trio (`read_file`/`readFile`/`open_file`) and the five list spellings
-(`list_files`/`listFiles`/`list_dir`/`listDir`/`list_directory`) are now single-sourced as two
-spelling families hoisted beside `wave4WriteTools`, every read/list set composes from them
-instead of hand-copying, and the four sets that had diverged were corrected in that pass
-(`cotReadOnlyTools` + `list_directory`; `libraryListTools` + `listFiles`/`listDir`;
-`fileHintListTools` + `listDir`; `toolFilterAnalysisKeep` + `listFiles`/`listDir`). What
-remains parked is the **structural re-shaping** item 11 deliberately stopped short of — a
-`/improve-codebase-architecture` candidate.
+**Status:** CLOSED 2026-07-19 (architecture-deepening close-out,
+`docs/plans/architecture-deepening-plan.md` items 6–7 / D4–D5; previously narrowed 2026-07-06 by
+the post-v1.3.0 review-fixes close-out, `docs/plans/archived/post-v1.3.0-review-fixes-plan.md`
+item 11 / F8). Both halves are done:
 
-**What still remains (the re-shaping):** the history-inspecting Mechanisms still hand-roll the
-same `conv.Range(...)` scan idioms (readloop's greenfield/read-loop path counting, readrepeat's
-recent-successful-reads, filehint's equivalents), differing subtly in role/window/success
-handling. The goal is one copy of each *shared scan shape* — package-level helpers in
-`internal/mechanisms` beside the spelling families they compose with (the *scan* is shared;
-per-Mechanism *membership and thresholds* stay local, same F8 spirit) — plus the broader
-shared-detection-module idea (unifying the marker machinery into a framework) the review flagged.
-**This is now planned as `docs/plans/architecture-deepening-plan.md` (items 6–7 / D5),** which
-is **BLOCKED on the post-v1.3.0 review-fixes plan completing first** and treats that plan's tests
-as its behaviour contract; the arch-deepening plan's own docs close-out (its item 9(b)) will
-close or re-narrow this entry once the re-shaping lands.
+- **The drift half (F8, 2026-07-06):** the read trio (`read_file`/`readFile`/`open_file`) and the
+  five list spellings are single-sourced as two spelling families hoisted beside
+  `wave4WriteTools`; every read/list set composes from them, and the four diverged sets were
+  corrected in that pass.
+- **The structural re-shaping (D5, 2026-07-19):** one copy of each shared `conv.Range(...)` scan
+  shape now lives in `internal/mechanisms/historyscan.go` beside the families (read-attempt path
+  counting with successes/failures separate, successful-read paths over the latest read episode,
+  written paths since an index); readloop, readrepeat, and filehint migrated onto them.
+  Per-Mechanism membership and thresholds stay at the call sites (the F8 spirit); readloop's
+  `isGreenfieldContext` deliberately stays local — a composite write/read/list early-exit scan no
+  shared shape expresses (commented at the symbol). Token arithmetic concentrated alongside (D4):
+  `Budget.EstimateTokens` / `Budget.HistoryExceedsAllocation` are the one chars→token
+  implementation. (One deliberate outlier: the Library's context-fill backoff,
+  `libraryContextTooFull`, keeps its own *continuous* usage fraction rather than calling
+  `Budget.EstimateTokens` — it needs a fraction of the window, not an int estimate.)
+
+**Deliberately NOT built (so the drop stays a verdict, not a silent one):** the broader
+shared-detection-module idea — unifying the Mechanism marker machinery into a framework — was
+declined as speculative by the deepening plan ("Explicitly NOT in this plan"): F1 moved fan-out
+idempotency onto committed evidence, so the residual marker use is one Mechanism's same-request
+guard; a shared marker store concentrates nothing real until a second Mechanism needs one.
+Re-surface it at the next architecture pass if that happens.
 
 **Divergences that must NOT be folded in (still hold):** the content-repair Mechanisms
 (`syntax`, `autofix`) key on the narrower sim-only `isWriteTool` set, and search/exec tool

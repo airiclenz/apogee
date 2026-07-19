@@ -32,6 +32,10 @@
           <p><strong>Defects:</strong> exploration crossed the guided-decomposition marker/cursor defects already recorded in <code class="text-xs">docs/code-review-2026-07-06.md</code> and covered by the in-flight <code class="text-xs">docs/plans/post-v1.3.0-review-fixes-plan.md</code>. Nothing new to add; this report designs structure only. Candidate 1 is the structural root of that defect cluster.</p>
           <p><strong>Clean bill:</strong> the Confiner seam (two adapters: landlock + seatbelt), the TUI worker seam (ADR 0011), config locality in <code class="text-xs">cmd/apogee</code> (3 touches per key), and MCP's reuse of the tool registry all checked out deep. No cards for them.</p>
         </div>
+        <!-- Close-out note appended 2026-07-19 (architecture-deepening plan, item 9c) -->
+        <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900 space-y-1">
+          <p><strong>Close-out (2026-07-19):</strong> planned as <code class="text-xs">docs/plans/architecture-deepening-plan.md</code>; candidates 1&ndash;4 implemented, candidate 5 declined. Candidate 1's engine half landed via ADR 0017's recorded fallback: verification showed a mid-Exchange <code class="text-xs">truncate_history</code> fold can drop the opening user message, so the cached boundary stays behind the one <code class="text-xs">exchangeBoundary()</code> reader seam.</p>
+        </div>
       </header>
 
       <!-- ============ CANDIDATES ============ -->
