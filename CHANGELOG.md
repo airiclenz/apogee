@@ -36,6 +36,14 @@ point is a **minor** bump, not a breaking change.
   `closeExchange` owner of the F6 "a deferral dies with its Exchange" invariant; `ExchangeView`
   stays unexported at the root until an external consumer exists. CONTEXT.md's **Exchange** entry
   now names the code home. (`docs/adr/`, `CONTEXT.md`.)
+- **`internal/domain/domaintest` — the hook seam's second adapter (test support, D6).** A fluent
+  `ConversationBuilder` returning `[]domain.Message`, canned message/tool-call constructors
+  (including the `read_file` call shape the read-counting Mechanisms inspect), and a settable
+  `FakeLoopView` implementing `domain.LoopView` (zero value usable; its conversation view is built
+  through the domain's own engine seam, so the pairing helpers cannot drift from production). The
+  four package-shared `internal/mechanisms` fixture helpers (`readCall`/`userMsg`/`assistantText`/
+  `assistantCall`) are now thin delegates — signatures unchanged, no test rewrites. Internal test
+  support only; no public-surface change. (`internal/domain/domaintest`, `internal/mechanisms`.)
 
 ### Fixed
 

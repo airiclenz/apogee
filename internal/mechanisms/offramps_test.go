@@ -1,10 +1,10 @@
 package mechanisms
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/domain/domaintest"
 )
 
 // offrampResponse builds a post-response working value with a full LoopView — text, tool calls, the
@@ -22,21 +22,19 @@ func offrampResponse(history []domain.Message, tools []domain.ToolDef, text stri
 }
 
 // readCall is a read_file tool call over path — the progress signal empty_response_recovery counts.
-func readCall(id, path string) domain.ToolCall {
-	args, _ := json.Marshal(map[string]string{"path": path})
-	return domain.ToolCall{ID: id, Tool: "read_file", Arguments: args}
-}
+// It and the three message helpers below are thin delegates to the shared hook-seam test adapter
+// (internal/domain/domaintest, D6): the package keeps its terse fixture vocabulary, the shapes are
+// owned in one place, and new tests use domaintest directly.
+func readCall(id, path string) domain.ToolCall { return domaintest.ReadCall(id, path) }
 
 // userMsg / assistantText / assistantCall are terse conversation-history builders for the off-ramp
 // trigger tables.
-func userMsg(content string) domain.Message {
-	return domain.Message{Role: domain.RoleUser, Content: content}
-}
+func userMsg(content string) domain.Message { return domaintest.UserMessage(content) }
 func assistantText(content string) domain.Message {
-	return domain.Message{Role: domain.RoleAssistant, Content: content}
+	return domaintest.AssistantTextMessage(content)
 }
 func assistantCall(calls ...domain.ToolCall) domain.Message {
-	return domain.Message{Role: domain.RoleAssistant, ToolCalls: calls}
+	return domaintest.AssistantCallsMessage(calls...)
 }
 
 // Both off-ramps share the ratified descriptor shape: off-ramp (survives Bypass, ADR 0006 / D5) and

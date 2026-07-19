@@ -164,7 +164,7 @@ plan. Commit: `docs: ratify ADR 0017 — the exchange is a derived domain workin
 
 ---
 
-## 2. `internal/domain/domaintest` — the hook seam's test adapter
+## 2. `internal/domain/domaintest` — the hook seam's test adapter — ✅ DONE (2026-07-19)
 
 **Finding:** review candidate 4 ("A test-surface adapter for Mechanisms", Worth exploring): the
 hook interface is the test surface, but its test adapter does not exist — conversation fixtures
