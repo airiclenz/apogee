@@ -478,10 +478,14 @@ ledger-entries-only per L9). Per
 [ADR 0016](../adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md), a
 **Validated set** is a per-model enable set that passed the aggregate non-inferiority gate
 against Bypass on that model, engagement verified; it is keyed by the confidence-tagged
-`ModelFingerprint` and claims *safe on this model*, not helpful. The runtime surface
-(fingerprint match → auto-enable at ≥ medium confidence + per-session notice + config
-off-switch) is not yet built; until it lands, an entry here is the record plus a config
-recipe.
+`ModelFingerprint` and claims *safe on this model*, not helpful. The runtime surface is
+**built** (2026-07-19, per the ADR's realisation section): shipped entries live in
+`internal/validated/shipped.json` — the machine copy of this table, pinned against the live
+catalogue by `internal/validated/shipped_test.go`, so a row added here must be added there
+too — user-local entries under `~/.apogee/validated/*.json`. At startup a matching set
+auto-applies at ≥ medium fingerprint confidence and is **offered** at low, applied only via
+the explicit `validated-sets: alias:` config; `validated-sets: enable: false` is the
+off-switch, and an explicit `mechanisms:` block or Bypass always wins (whole-set-or-nothing).
 
 | Model (fingerprint key) | Validated set | Evidence | Entered |
 |---|---|---|---|

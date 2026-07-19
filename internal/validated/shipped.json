@@ -1,0 +1,29 @@
+[
+  {
+    "version": 1,
+    "key": "gemma-4-e4b-it-qat",
+    "set": [
+      "autofix",
+      "cached_content_intercept",
+      "decompose",
+      "empty_response_recovery",
+      "error_enrichment",
+      "filehint",
+      "grammar",
+      "library",
+      "list_nudge",
+      "syntax",
+      "tool_loop_interceptor",
+      "tool_result_cap",
+      "tool_use_directive",
+      "tool_use_enforcer",
+      "toolfilter",
+      "validate"
+    ],
+    "evidence": {
+      "campaign": "gemma-4-e4b-it-qat-20260714-minus-truncate-history",
+      "note": "NI within fresh delta=0.4643, W+=102.0, p=0.0003, N=14, engagement hand-verified; Screen gemma-4-e4b-it-qat-20260708 descriptive convergence as supporting context"
+    },
+    "entered": "2026-07-19"
+  }
+]

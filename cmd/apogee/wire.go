@@ -178,6 +178,24 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		return err
 	}
 
+	// The Validated-set runtime surface (ADR 0016): match the resolved model fingerprint
+	// against the shipped + user-local entries and fold an applying set into
+	// EnableMechanisms — HERE at wire time, never in the engine, so ADR 0015's single
+	// enable path stands and bench arms cannot be contaminated. When a set applies,
+	// opts.mechanisms was empty (manual control suppresses the apply), so the assignment
+	// replaces an empty list, never a user's choice. The notices are the ADR's visible
+	// per-session notice, on stderr pre-TUI like the unconfined-Auto warning above.
+	vset, vnotices, err := resolveValidatedSet(opts, roots.validated)
+	if err != nil {
+		return err // a dangling validated-sets alias — the user's own config, loud by design
+	}
+	for _, n := range vnotices {
+		fmt.Fprintln(os.Stderr, n)
+	}
+	if len(vset) > 0 {
+		cfg.EnableMechanisms = vset
+	}
+
 	agent, err := buildAgent(cfg, opts.resume)
 	if err != nil {
 		return friendlyConstructErr(err)
@@ -338,6 +356,7 @@ type stateRoots struct {
 	config    string
 	library   string
 	sessions  string
+	validated string
 	workspace string
 }
 
@@ -384,6 +403,7 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		config:    absHome,
 		library:   filepath.Join(absHome, "library"),
 		sessions:  filepath.Join(absHome, "sessions"),
+		validated: filepath.Join(absHome, "validated"),
 		workspace: absWorkspace,
 	}, nil
 }

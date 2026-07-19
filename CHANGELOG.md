@@ -8,6 +8,25 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **The Validated-set runtime surface (ADR 0016).** A per-model Mechanism set that passed the
+  non-inferiority gate on a model now reaches users at startup: `cmd/apogee` matches the resolved
+  model fingerprint against Validated-set entries — shipped with the binary
+  (`internal/validated/shipped.json`, first entry: the gemma-4-e4b-it-qat pruned 16) and
+  user-local (`~/.apogee/validated/*.json`, one entry per file, user wins a key collision) — and
+  folds an applying set into `Config.EnableMechanisms` at wire time (the engine and bench arms are
+  untouched; ADR 0015's single enable path stands). Semantics per the ADR's 2026-07-19
+  realisation: auto-apply at ≥ medium fingerprint confidence; at low (name-only) confidence the
+  per-session notice **offers** the set, applied only by the explicit `validated-sets: alias:`
+  config (an identity alias is the confirm, a differing one the §3 transfer — consulted at any
+  confidence); whole-set-or-nothing (a non-empty `mechanisms:` block or Bypass suppresses the
+  apply; a defective entry — unknown ID, invalid stacking, malformed file — is skipped with a
+  warning, never partially applied, never a blocked startup); a dangling alias is a loud startup
+  error. New config block `validated-sets:` (`enable` off-switch, default on; `alias` map),
+  file-only. New package `internal/validated`; shipped entries are pinned against the live
+  catalogue by test. (`internal/validated`, `cmd/apogee`.)
+
 ### Fixed
 
 - **Guided decomposition accepts only majority-marked enumerations.** The case-1 intercept now

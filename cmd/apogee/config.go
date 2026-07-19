@@ -82,6 +82,17 @@ type settings struct {
 	// unknown ID is a loud startup error. Bypass still wins (an enabled non-off-ramp Mechanism is
 	// not dispatched under bypass — ADR 0006 / item 2's gate).
 	mechanisms map[string]bool
+
+	// validatedSetsEnable gates the Validated-set runtime surface (ADR 0016 §5's off-switch),
+	// file-only and default TRUE — a matching per-model set applies (or is offered) unless the
+	// config explicitly opts out with `validated-sets: enable: false`.
+	validatedSetsEnable bool
+
+	// validatedSetsAlias is the explicit carry-over map (ADR 0016 §3): runtime fingerprint
+	// label → Validated-set entry key. File-only, default-empty. An identity mapping is the
+	// low-confidence confirm ("my model is what the label says"); a differing mapping is the
+	// explicit transfer to a sibling quant/family member.
+	validatedSetsAlias map[string]string
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -131,6 +142,12 @@ type layer struct {
 	// flag/env — like mcpServers). A nil map means the source does not enable any Mechanism (fall
 	// through to the empty default).
 	mechanisms map[string]bool
+
+	// validatedSetsEnable / validatedSetsAlias are set only by the FILE layer (the Validated-set
+	// surface is config'd, no flag/env — like mechanisms). A nil enable pointer keeps the default
+	// true; a nil alias map means no carry-over is configured.
+	validatedSetsEnable *bool
+	validatedSetsAlias  map[string]string
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -142,7 +159,7 @@ type layer struct {
 // layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
 // repo's invocation environment must not be able to loosen Auto's blast radius.
 func resolveSettings(file, env, flag layer) settings {
-	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true}
+	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true}
 	if file.confineToWorkspace != nil {
 		s.confineToWorkspace = *file.confineToWorkspace
 	}
@@ -158,9 +175,13 @@ func resolveSettings(file, env, flag layer) settings {
 	if file.contextWindow != nil {
 		s.contextWindow = *file.contextWindow
 	}
-	s.mcpServers = file.mcpServers // file-only (P3.15); env/flag never set MCP servers
-	s.mechanisms = file.mechanisms // file-only (Phase 4); env/flag never enable Mechanisms
-	if file.profile != nil {       // file-only; env/flag never carry a model profile
+	s.mcpServers = file.mcpServers       // file-only (P3.15); env/flag never set MCP servers
+	s.mechanisms = file.mechanisms       // file-only (Phase 4); env/flag never enable Mechanisms
+	if file.validatedSetsEnable != nil { // file-only (ADR 0016); env/flag never touch the surface
+		s.validatedSetsEnable = *file.validatedSetsEnable
+	}
+	s.validatedSetsAlias = file.validatedSetsAlias
+	if file.profile != nil { // file-only; env/flag never carry a model profile
 		s.profile = *file.profile
 	}
 	for _, l := range []layer{file, env, flag} {
@@ -235,6 +256,22 @@ type fileConfig struct {
 	// is required to turn one on. An unknown ID is a loud startup error listing the known
 	// catalogue; Bypass still disables enabled non-off-ramp Mechanisms (ADR 0006).
 	Mechanisms map[string]bool `yaml:"mechanisms"`
+	// ValidatedSets configures the Validated-set runtime surface (ADR 0016 and its 2026-07-19
+	// realisation). File-only (no flag/env), like mechanisms. Absent ⇒ the surface is ON with no
+	// aliases: a per-model set matching the resolved fingerprint auto-applies at ≥ medium
+	// confidence and is offered at low. A pointer so an absent block falls through to that
+	// default rather than being an explicit zero setting.
+	ValidatedSets *validatedSetsConfig `yaml:"validated-sets"`
+}
+
+// validatedSetsConfig is the on-disk schema for the Validated-set surface (ADR 0016):
+// `enable` is the §5 off-switch (a pointer so an explicit `enable: false` is
+// distinguishable from an absent key, default true); `alias` is the §3 explicit
+// carry-over map, runtime fingerprint label → entry key. A dangling alias target is a
+// loud startup error (the ADR 0015 removed-ID posture — it is the user's own config).
+type validatedSetsConfig struct {
+	Enable *bool             `yaml:"enable"`
+	Alias  map[string]string `yaml:"alias"`
 }
 
 // mcpServerConfig is the on-disk schema for one MCP server (P3.15). It mirrors mcp.ServerConfig
@@ -341,6 +378,12 @@ func (fc fileConfig) layer() layer {
 	}
 	if len(fc.Mechanisms) > 0 {
 		l.mechanisms = fc.Mechanisms
+	}
+	if fc.ValidatedSets != nil {
+		l.validatedSetsEnable = fc.ValidatedSets.Enable
+		if len(fc.ValidatedSets.Alias) > 0 {
+			l.validatedSetsAlias = fc.ValidatedSets.Alias
+		}
 	}
 	return l
 }
@@ -471,6 +514,8 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.mcpServers = s.mcpServers
 	opts.profile = s.profile
 	opts.mechanisms = s.mechanisms
+	opts.validatedSetsEnable = s.validatedSetsEnable
+	opts.validatedSetsAlias = s.validatedSetsAlias
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

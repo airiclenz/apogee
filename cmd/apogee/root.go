@@ -64,6 +64,15 @@ type options struct {
 	// sets it from settings; runRoot drives the mechanisms catalogue's constructor table for each
 	// enabled ID and folds the built registry into apogee.Config.Mechanisms.
 	mechanisms map[string]bool
+
+	// validatedSetsEnable is the Validated-set surface's off-switch (ADR 0016 §5; default true)
+	// and validatedSetsAlias its explicit carry-over map (§3: runtime fingerprint label → entry
+	// key — an identity mapping is the low-confidence confirm, a differing one the transfer).
+	// Both are loaded from the config file only (`validated-sets:` block, no flag/env, like
+	// mechanisms). applyConfig sets them from settings; runRoot matches and folds an applying
+	// set into apogee.Config.EnableMechanisms.
+	validatedSetsEnable bool
+	validatedSetsAlias  map[string]string
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

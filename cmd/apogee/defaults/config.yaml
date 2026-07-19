@@ -113,3 +113,17 @@
 #   truncate_history: false     # explicitly off (the default) — shown for reference
 #   tool_result_cap: true       # cap any single oversized tool result to its Budget share
 #   guided_decomposition: true  # oversized task → serialized sub_agent fan-out (needs tool_result_cap)
+
+# Validated sets (ADR 0016): per-model Mechanism sets bench-proven SAFE (non-inferior to
+# --bypass) on a specific model. When the model apogee resolves at startup matches an entry —
+# shipped with the binary, or your own under ~/.apogee/validated/ — the set applies
+# automatically at ≥ medium fingerprint confidence, and at low (name-only) confidence apogee
+# prints a one-line offer instead: paste the alias it names to confirm your model IS the one
+# measured. Your explicit mechanisms: block above always wins (a validated set applies whole
+# or not at all), and --bypass suppresses everything. Config-file only (no flag or env).
+#
+# validated-sets:
+#   enable: true                # the off-switch; default true
+#   alias:                      # explicit carry-over: runtime model label -> entry key
+#     # gemma-4-e4b-it-qat: gemma-4-e4b-it-qat     # identity = "my model is what it says"
+#     # my-gemma-quant: gemma-4-e4b-it-qat         # transfer to a sibling quant (your call)
