@@ -1,5 +1,11 @@
 # Apogee — Technical Design Document (TDD)
 
+> **Staleness notice (2026-07-19):** this document is frozen at its Phase-1 vintage
+> (2026-06-23) and was never densified; the project has since shipped Phases 2–4 and
+> v1.0.0–v1.3.0. For current ground truth follow `CONTEXT.md`, the ADRs, and
+> `docs/design/mechanism-catalogue.md`; this scaffold is kept as the densification
+> worklist (§8 — note its checkmarks also lag).
+
 **Status:** 🌱 v0.1 — sparse scaffold, to be densified. This is the consolidated
 technical design (the *as-designed system* in one place). It **synthesizes** the
 authoritative records; it does not replace them. For *why* a decision was made, follow

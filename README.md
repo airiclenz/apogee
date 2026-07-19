@@ -19,7 +19,7 @@ get a full agentic tool-use loop with sensible guardrails.
 Apogee brings together two things most coding agents keep separate:
 
 - **A complete agentic coding assistant** — the *agent loop*, with provider
-  abstraction, a ~30-tool suite (file ops, grep/glob, git, terminal, web,
+  abstraction, a ~20-tool suite (file ops, grep/glob, git, terminal, web,
   sub-agents), an MCP client, sessions, four autonomy modes (Plan / Ask-Before /
   Allow-Edits / Auto), and security guardrails.
 - **Self-regulating mechanisms for small models** — features that make small,
@@ -42,12 +42,12 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v1.0.0` shipped (2026-06-25).** The embeddable agent core is stable — the public
+**`v1.3.0` shipped (2026-07-05).** The embeddable agent core is stable — the public
 Go API follows semver from `v1.0.0` — with the full tool suite, MCP client,
 sub-agents, and OS-confined Auto mode (Linux landlock / macOS seatbelt; Windows
 confinement comes in a later phase, so Auto is not yet available there). Current
-work is the apogee-code feature-parity track: skills, context compaction
-(`/compact`), out-of-the-box web search, and model profiles have landed since.
+work is per-model bench validation of the mechanism catalogue: the full catalogue
+is ported, and the first Validated set (gemma-4-E4B) ships with the binary.
 See [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
 next.
 
@@ -66,9 +66,10 @@ next.
   or custom-regex tool calls are parsed back out of the reply, and inline thinking /
   harmony channels are stripped — all driven by a per-model profile (native models
   stay byte-identical on the wire).
-- **Small-model mechanisms** — context compaction has landed; tool-call
+- **Small-model mechanisms** — context compaction is built in; tool-call
   validation/auto-retry, syntax + autofix, behavioural nudges, and the cross-session
-  Library are the roadmap — each gated so it only fires when the model needs it.
+  Library are all catalogued — each default-off, gated so it only fires when the
+  model needs it, and enabled per model via Validated sets backed by bench evidence.
 - **Validated, not assumed** — every mechanism is A/B-tested against real local models
   via an eval/simulation bench (which imports Apogee as a Go library and drives
   the real loop in-process) before it earns a place in the loop.

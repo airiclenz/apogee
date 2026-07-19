@@ -61,7 +61,7 @@ _Avoid_: "child agent" (says nothing about the privilege bound), "worker".
 Apogee's core control flow: build request → call Upstream → parse response → dispatch
 tools → repeat, emitting typed events at each step. The loop owns tool execution and
 conversation state — which is precisely what lets formerly lab-only Mechanisms (e.g.
-`correct_tool_result`) become first-class. Lives under `internal/agent/loop/`.
+`correct_tool_result`) become first-class. Lives in `internal/agent/loop.go`.
 _Avoid_: "the pipeline" (that was the proxy-era Transform chain — a narrower thing).
 
 **Upstream**:

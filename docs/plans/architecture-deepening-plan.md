@@ -1,9 +1,8 @@
 # Plan — Architecture deepening (the Exchange seam, the Mechanism-author surface, the tool-definition module)
 
 **Date:** 2026-07-06
-**Status:** BLOCKED — do not run until `docs/plans/post-v1.3.0-review-fixes-plan.md` is complete
-(every item checked off in that file; it is its own resume state). That plan's tests are this
-plan's behaviour contract.
+**Status:** READY — the blocking `post-v1.3.0-review-fixes-plan.md` completed and was archived
+(`docs/plans/archived/`, 2026-07-07). That plan's tests are this plan's behaviour contract.
 **How to run:** `implement-plan docs/plans/architecture-deepening-plan.md with skills: coding-standards`
 **Source of direction:** the 2026-07-06 architecture review
 (`docs/architecture-review-20260706-205911.html`) — five candidates from a three-explorer pass;
@@ -129,7 +128,7 @@ file plus the architecture review HTML are committed (suggested:
 
 ---
 
-## 1. ADR 0016 + CONTEXT.md — the Exchange working value and the deferral lifecycle, on the record
+## 1. ADR 0017 + CONTEXT.md — the Exchange working value and the deferral lifecycle, on the record
 
 **Finding:** review candidate 1 ("Give the Exchange a home", Strong): the Exchange is a
 first-class CONTEXT.md term with no module — its boundary is re-derived ad-hoc in seven places
@@ -144,7 +143,8 @@ Response Action vs Request-prep Hint" (the latter already carries F6's Exchange-
 sentence from fixes item 7(c)).
 
 **What (docs only — this item owns every cross-cutting doc amendment of items 2–4):**
-**(a)** Author `docs/adr/0016-the-exchange-is-a-derived-domain-working-value.md` (Status:
+**(a)** Author `docs/adr/0017-the-exchange-is-a-derived-domain-working-value.md` (0016 has
+since been taken by the validated-sets ADR) (Status:
 accepted): Context (the seven derivation sites; the F1/F3/F6 defect cluster whose root cause was
 Exchange-scoped state without an Exchange module; the review's independent triple finding),
 Decision (D1's derived-not-cached boundary and its `internal/domain` home; D2's engine
@@ -160,7 +160,7 @@ state). Do not touch the "Deferred Response Action" entry — F6's sentence from
 already covers the lifetime; if it is missing (fixes item 7(c) deviated), STATUS QUESTION.
 
 **Acceptance:** gates green (docs-only); the ADR cross-links ADR 0007/0010/0014 and the fixes
-plan. Commit: `docs: ratify ADR 0016 — the exchange is a derived domain working value`.
+plan. Commit: `docs: ratify ADR 0017 — the exchange is a derived domain working value`.
 
 ---
 
@@ -200,7 +200,7 @@ values. The full `internal/mechanisms` suite passes unchanged (the delegation is
 four spellings (`lastIndex(r.messages, RoleUser)` in `InjectContext`
 (`internal/domain/hooks.go:408` region), `conversationView.LastUser`
 (`internal/domain/hookview.go:49-54`), the engine's cached `exchangeStart`, and guided
-decomposition's post-F1/F3 current-Exchange scans). Ground truth: D1; ADR 0016 (item 1); the
+decomposition's post-F1/F3 current-Exchange scans). Ground truth: D1; ADR 0017 (item 1); the
 fixes plan's shared F-context (boundary = last `RoleUser` message, stable across injections —
 its "if a message shape violates this, STATUS QUESTION" caveat applies here verbatim).
 
@@ -236,7 +236,7 @@ public-surface line). Commit:
 derivable number, and keeping it correct costs the S2 repair arithmetic
 (`internal/agent/loop.go:281-283`) plus snapshot plumbing (`internal/agent/state.go:41-42,53-54,
 77-78`); Exchange end is three call sites each re-stating the F6 invariant. Ground truth: D2,
-D3; ADR 0016; ADR 0007 (snapshot/resume at the quiescent boundary — resumability must be
+D3; ADR 0017; ADR 0007 (snapshot/resume at the quiescent boundary — resumability must be
 preserved); the engine sites: `step()`'s opening (`loop.go:250-264`), the S2 repair
 (`loop.go:281-283`), `completeTurn` / `abandonTurn` / `cancelTurn` (`loop.go`, re-locate by
 symbol — the fixes plan's item 7 added the deferral clearing/truncation there), `AbortExchange`
