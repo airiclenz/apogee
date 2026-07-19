@@ -859,6 +859,66 @@ func TestGuidedDecompositionNoCrossExchangeResumption(t *testing.T) {
 	}
 }
 
+// The cursor helpers read the current Exchange through the domain seam (ADR 0017 §1): on a
+// two-Exchange history the enumeration anchor, the dispatched-task window, and the F1 fan-out-begun
+// check all agree with domain.CurrentExchange. The expectations are derived from the seam's own
+// output (After()), so the derivations cannot drift apart now that they share an implementation —
+// and then pinned concretely so the seam-derived expectations stay honest.
+func TestGuidedDecompositionAgreesWithDomainCurrentExchange(t *testing.T) {
+	t.Parallel()
+	hygiene := " " + guidedDecompositionReportHygiene
+	history := []domain.Message{
+		// Exchange 1 — a completed fan-out whose enumeration and dispatch must not leak forward.
+		{Role: domain.RoleUser, Content: "first big task"},
+		{Role: domain.RoleAssistant, Content: "1. Old subtask one\n2. Old subtask two",
+			ToolCalls: []domain.ToolCall{guidedSubAgentCall("a1", "Old subtask one"+hygiene)}},
+		{Role: domain.RoleTool, ToolCallID: "a1", Content: "old report"},
+		{Role: domain.RoleAssistant, Content: "the first task is done"},
+		// Exchange 2 — the current one: its own enumeration plus the first dispatch.
+		{Role: domain.RoleUser, Content: "second big task"},
+		{Role: domain.RoleAssistant, Content: "1. Refactor the parser\n2. Add unit tests\n3. Update the changelog",
+			ToolCalls: []domain.ToolCall{guidedSubAgentCall("b1", "Refactor the parser"+hygiene)}},
+		{Role: domain.RoleTool, ToolCallID: "b1", Content: "report 1"},
+	}
+	conv := guidedConv(history)
+
+	// Derive the expected anchor, window, and F1 evidence from the seam's own output.
+	var wantEnumeration, wantDispatched []string
+	wantFanOutBegun := false
+	for _, m := range domain.CurrentExchange(conv).After() {
+		if m.Role != domain.RoleAssistant {
+			continue
+		}
+		wantDispatched = append(wantDispatched, guidedDecompositionCallTasks(m.ToolCalls)...)
+		if guidedDecompositionHasSubAgentCall(m.ToolCalls) {
+			wantFanOutBegun = true
+			if wantEnumeration == nil {
+				if parsed := guidedDecompositionParseList(m.Content); guidedDecompositionListInBounds(parsed) {
+					wantEnumeration = parsed
+				}
+			}
+		}
+	}
+
+	if got := guidedDecompositionEnumeration(conv); !reflect.DeepEqual(got, wantEnumeration) {
+		t.Fatalf("enumeration = %v, want %v (the seam's derivation)", got, wantEnumeration)
+	}
+	if got := guidedDecompositionDispatchedTasks(conv); !reflect.DeepEqual(got, wantDispatched) {
+		t.Fatalf("dispatched tasks = %v, want %v (the seam's derivation)", got, wantDispatched)
+	}
+	if got := guidedDecompositionFanOutBegun(conv); got != wantFanOutBegun {
+		t.Fatalf("fanOutBegun = %v, want %v (the seam's derivation)", got, wantFanOutBegun)
+	}
+
+	// Concrete pins: only Exchange 2's enumeration and dispatch — nothing from Exchange 1.
+	if want := []string{"Refactor the parser", "Add unit tests", "Update the changelog"}; !reflect.DeepEqual(wantEnumeration, want) {
+		t.Fatalf("seam-derived enumeration = %v, want %v", wantEnumeration, want)
+	}
+	if want := []string{"Refactor the parser" + hygiene}; !reflect.DeepEqual(wantDispatched, want) {
+		t.Fatalf("seam-derived dispatched tasks = %v, want %v", wantDispatched, want)
+	}
+}
+
 // guidedEnumHistory is a current-Exchange conversation whose sole assistant message IS the enumeration
 // (its verbatim list + the synthesized first delegation call1Task), followed by that child's report —
 // the minimal shape the remainder cursor anchors on. It keeps the original ask as the last RoleUser

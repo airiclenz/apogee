@@ -295,7 +295,16 @@ resumes with the Exchange open and aborts correctly.
 
 ---
 
-## 5. Guided decomposition reads the Exchange through the seam
+## 5. Guided decomposition reads the Exchange through the seam — ✅ DONE (2026-07-19)
+
+NOTES (2026-07-19): the three sites migrate onto `domain.CurrentExchange` through ONE retained
+one-line accessor (`guidedDecompositionCurrentExchangeStart`, now a pure delegate — the item-4
+`exchangeBoundary()` routing precedent) rather than three direct constructor calls; the
+`conv.LastUser()`-based local derivation is deleted. The no-user-message fallback ("whole
+conversation is the Exchange", `UserIndex()+1 == 0`) is preserved exactly — zero behaviour delta.
+The new drift-pin test also covers the third migrated site (the F1 fan-out-begun check), beyond
+the two the item names. No adapter was needed: `ConversationView`'s `Len()/At(i)` already
+satisfies item 3's read interface.
 
 **Finding:** review candidate 1, the Mechanism half: after the fixes plan, guided
 decomposition's gate and cursor are correct but still privately re-derive the current Exchange

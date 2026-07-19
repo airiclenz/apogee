@@ -136,6 +136,15 @@ point is a **minor** bump, not a breaking change.
   `exchangeBoundary()` helper and the snapshot's `exchangeStart` still round-tripping (newly
   pinned by `TestSnapshot_RoundTripsExchangeBoundaryForAbort`). Behaviour-preserving; internal
   only, no public-surface change. (`internal/agent`; ADR 0017 + CONTEXT.md record the fallback.)
+- **Guided decomposition reads the Exchange through the domain seam (ADR 0017 §1).** The
+  Mechanism's three current-Exchange scans — the F1 fan-out-begun check, the enumeration anchor,
+  and the dispatched-task window — now derive the boundary via `domain.CurrentExchange`, routed
+  through the one `guidedDecompositionCurrentExchangeStart` accessor; the Mechanism-local
+  "last `RoleUser`" derivation (`conv.LastUser()`) is deleted. Marker handling, list parsing, and
+  every threshold are unchanged, and the whole suite passes unchanged; a new drift pin
+  (`TestGuidedDecompositionAgreesWithDomainCurrentExchange`) asserts the cursor helpers agree with
+  the seam's own output on a two-Exchange history. Behaviour-preserving; internal only, no
+  public-surface change. (`internal/mechanisms`.)
 
 ### Tested
 

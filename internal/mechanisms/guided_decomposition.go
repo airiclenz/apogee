@@ -526,15 +526,16 @@ func guidedDecompositionDispatchedTasks(conv domain.ConversationView) []string {
 }
 
 // guidedDecompositionCurrentExchangeStart returns the index of the first message of the current
-// Exchange — the message just after the last RoleUser message (the current ask). Injected steers and
-// the drained directive land before that user message or in the system message, never after it
-// (loop.go / Request.InjectContext), so this boundary is stable across injections — the shared-context
-// invariant behind F1/F3. With no user message present the whole conversation is the current Exchange.
+// Exchange — the message just after the opening user message. The boundary itself is derived by
+// domain.CurrentExchange (THE one derivation, ADR 0017 §1); this accessor only routes the Mechanism's
+// three Exchange scans (the F1 fan-out-begun check, the enumeration anchor, the dispatched-task
+// window) through that seam. Injected steers and the drained directive land before the opening user
+// message or in the system message, never after it (loop.go / Request.InjectContext), so the boundary
+// is stable across injections — the shared-context invariant behind F1/F3. With no user message
+// present UserIndex is -1 and the whole conversation is scanned — the Mechanism's long-standing
+// no-user reading, unchanged.
 func guidedDecompositionCurrentExchangeStart(conv domain.ConversationView) int {
-	if _, idx, ok := conv.LastUser(); ok {
-		return idx + 1
-	}
-	return 0
+	return domain.CurrentExchange(conv).UserIndex() + 1
 }
 
 // guidedDecompositionCallTasks extracts the task string from each sub_agent call in calls, parsing
