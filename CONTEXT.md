@@ -34,8 +34,8 @@ retired predecessor structure).
 The public Go package other applications import to construct and run an Apogee agent
 in-process. Apogee ships as **both** a ready-to-use terminal tool (the `cmd/apogee` TUI +
 CLI — the headline product) **and** this reusable library: the TUI, the optional `apogee
-headless` CLI, and the bench are all consumers of one public package over the same
-engine. The repo is the whole tool, not just the library. The public surface is guarded
+headless` CLI (deferred — no subcommands ship yet), and the bench are all consumers of one
+public package over the same engine. The repo is the whole tool, not just the library. The public surface is guarded
 and versioned; everything else lives in `internal/`. See
 [ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md).
 _Avoid_: "**Apogee Core**" (retired — it named the proxy-era transform engine, a

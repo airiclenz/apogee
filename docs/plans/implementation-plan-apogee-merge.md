@@ -431,7 +431,8 @@ before keeping it on**:
   (AppContainer / Job Objects / restricted tokens) behind `platform/`; test the matrix
   (the real cross-platform risk). The interfaces were designed in Phase 0, so this is
   implementing them — but the Confiner backend is genuine new work (and **Auto mode on
-  Windows is gated on it**, per ADR 0004).
+  Windows is gated on it**, per ADR 0004 — since superseded by ADR 0012, which keeps the
+  fs-confinement gate).
 - Add `apogee probe` (model capability probing → auto profile) and adaptive prompt
   complexity (from `apogee-sim/mission.md`). **`apogee probe` does double duty (new):** the
   same battery yields the **behavioral model fingerprint** (fuzzy feature match, not a
