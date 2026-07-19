@@ -73,7 +73,7 @@ type Agent struct {
 	inExchange    bool                // true between Submit and the Step that completes the Exchange
 	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
 	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
-	exchangeStart int                 // conv length before this Exchange's first user message — the boundary AbortExchange rolls back to
+	exchangeStart int                 // cached rollback boundary of the open Exchange — read via exchangeBoundary (ADR 0017 §2's recorded fallback); maintained by step()'s opening, the S2 repair, and restoreState
 	turnIndex     int                 // 0-based index of the next Turn
 	approved      map[string]bool     // tools the human allowed for the rest of this Session
 	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
@@ -164,13 +164,26 @@ func (a *Agent) AbortExchange() {
 	if !a.inExchange {
 		return
 	}
-	a.conv.DropRange(a.exchangeStart, a.conv.Len())
-	// The Exchange is scrapped, so any deferred Response Action expires with it (F6): a mid-fan-out
-	// abort must not leave a stale remaining-items directive queued for the next Exchange's request.
-	a.conv.ClearDeferred()
-	a.inExchange = false
+	a.conv.DropRange(a.exchangeBoundary(), a.conv.Len())
+	// The Exchange is scrapped: closeExchange expires any deferred Response Action with it (F6) — a
+	// mid-fan-out abort must not leave a stale remaining-items directive queued for the next
+	// Exchange's request.
+	a.closeExchange()
 	a.pendingInput = nil
 }
+
+// exchangeBoundary returns the conversation index the open Exchange began at — the rollback
+// target AbortExchange drops from and the boundary the snapshot round-trips. It is the ONE
+// reader seam over the cached a.exchangeStart (ADR 0017 §2's recorded fallback): the boundary
+// canNOT be re-derived as "the index of the last user message" (domain.CurrentExchange),
+// because a mid-Exchange truncate_history fold drops the open Exchange's opening user message
+// whenever the Exchange already holds keepLastTurns or more assistant messages — the inserted
+// user-role gap note then anchors the derivation, and an abort would wrongly drop the note
+// (pinned by TestExchangeStartRepairedAfterMidExchangeTruncation). So the cache stays —
+// written at step()'s Exchange opening, re-anchored by the S2 repair after a history rewrite
+// (loop.go), and restored by restoreState — and every consumer reads it here, so a future
+// swap to the derivation has exactly one seam.
+func (a *Agent) exchangeBoundary() int { return a.exchangeStart }
 
 // Mode reports the Agent's current autonomy mode. It reads the live mode under the lock, so a
 // concurrent SetMode (Shift+Tab from the UI) is observed safely from the worker goroutine.

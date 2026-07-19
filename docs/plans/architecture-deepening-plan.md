@@ -237,7 +237,22 @@ public-surface line). Commit:
 
 ---
 
-## 4. The engine consumes the derivation: drop the cached boundary, concentrate Exchange end
+## 4. The engine consumes the derivation: drop the cached boundary, concentrate Exchange end — ✅ DONE (2026-07-19)
+
+NOTES (2026-07-19): the 4(a) invariant verification FAILED — `truncate_history` DOES drop the
+open Exchange's opening user message whenever the open Exchange already holds >=
+keepLastTurns(4) assistant messages (the keep-tail cut lands inside the Exchange; the user-role
+gap note then anchors the last-`RoleUser` derivation, which would over-drop the note on abort —
+pinned by `TestExchangeStartRepairedAfterMidExchangeTruncation`,
+`internal/agent/autocompact_guard_test.go`). Per D2's pre-registered fallback (owner decision,
+option (a)): the cached `exchangeStart` field and the S2 repair KEPT; D2 shrunk to routing the
+field's readers (`AbortExchange`, `encodeState`) through the one `exchangeBoundary()` helper;
+4(b) did not proceed (`ExchangeStart` keeps round-tripping — it is load-bearing, and the new
+`TestSnapshot_RoundTripsExchangeBoundaryForAbort` pins the round-trip + post-resume abort);
+4(c) landed as specified. The item's "old repair math" abort test already exists as the pinning
+guard test above, so no duplicate was added. Diff extends beyond `internal/agent` + CHANGELOG:
+ADR 0017 §2 got a dated realisation note recording the taken fallback, and CONTEXT.md's
+Exchange entry no longer claims the engine holds no cached boundary.
 
 **Finding:** review candidate 1, the engine half: `a.exchangeStart` is a cached copy of a
 derivable number, and keeping it correct costs the S2 repair arithmetic

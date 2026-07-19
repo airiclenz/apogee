@@ -7,6 +7,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -148,6 +149,70 @@ func TestSnapshot_PreservesReasoningContent(t *testing.T) {
 		t.Fatalf("resumeAgent: %v", err)
 	}
 	assertReasoning(t, &b.conv)
+}
+
+// TestSnapshot_RoundTripsExchangeBoundaryForAbort pins the ADR 0017 §2 fallback: the snapshot
+// keeps writing exchangeStart — the cached rollback boundary is load-bearing, because a
+// mid-Exchange truncate_history fold can drop the open Exchange's opening user message, so the
+// boundary cannot be re-derived on resume — and a resumed Agent's AbortExchange rolls back to
+// exactly the boundary the snapshotting Agent cached, then accepts a fresh Submit.
+func TestSnapshot_RoundTripsExchangeBoundaryForAbort(t *testing.T) {
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
+	responder := &scriptedResponder{scripts: [][]provider.Delta{toolCallScript("c1", "lookup", "{}")}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// Prior history, so the Exchange boundary sits past index 0 and an over-drop is detectable.
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "prior question"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "prior answer"})
+
+	if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Step(context.Background()) // a tool Turn: the Exchange stays open
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if res.Status != domain.StatusTurnComplete {
+		t.Fatalf("Turn status = %q, want %q (a tool Turn keeps the Exchange open)", res.Status, domain.StatusTurnComplete)
+	}
+	boundary := a.exchangeBoundary() // where "look it up" was appended
+	if boundary != 2 {
+		t.Fatalf("exchangeBoundary() = %d, want 2 (just past the prior history)", boundary)
+	}
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	// The schema still carries the boundary — the deepening plan's 4(b) stop-writing change did
+	// NOT proceed, so its absence here would be a regression, not a cleanup.
+	var st struct {
+		ExchangeStart *int `json:"exchangeStart"`
+	}
+	if err := json.Unmarshal(snap.State, &st); err != nil {
+		t.Fatalf("Unmarshal snapshot state: %v", err)
+	}
+	if st.ExchangeStart == nil || *st.ExchangeStart != boundary {
+		t.Fatalf("snapshot exchangeStart = %v, want %d (the boundary must round-trip)", st.ExchangeStart, boundary)
+	}
+
+	cfg2 := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
+	b, err := resumeAgent(cfg2, snap, echoResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	b.AbortExchange()
+	if b.conv.Len() != boundary {
+		t.Fatalf("after abort conv.Len() = %d, want %d (rolled back to the cached boundary)", b.conv.Len(), boundary)
+	}
+	if got := b.conv.At(boundary - 1); got.Content != "prior answer" {
+		t.Errorf("message before the boundary = %+v, want the prior history intact", got)
+	}
+	if err := b.Submit(domain.UserInput{Text: "next"}); err != nil {
+		t.Errorf("Submit after abort: %v, want accepted (the aborted Exchange closed)", err)
+	}
 }
 
 // TestResume_RejectsFutureVersion proves the engine refuses a snapshot newer than this build

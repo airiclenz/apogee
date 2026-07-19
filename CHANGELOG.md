@@ -124,6 +124,18 @@ point is a **minor** bump, not a breaking change.
   comments that still pointed at `cmd/apogee/wire.go` are repointed at the engine's single build path
   (`buildEnabledMechanisms`, `internal/agent/loop.go`) after the ADR 0015 wire.go collapse.
   (`internal/mechanisms`.)
+- **Exchange end has one engine-side owner; the rollback boundary reads through one seam (ADR
+  0017 §§2–3).** The three Exchange-end sites (`completeTurn`'s exchange-complete branch,
+  `abandonTurn`, `AbortExchange`) now route through one private `closeExchange` owning the F6
+  "a deferral dies with its Exchange" invariant (`cancelTurn` stays distinct by design — the
+  Exchange remains open there). The planned deletion of the cached `exchangeStart` did NOT land:
+  item-4 verification showed a mid-Exchange `truncate_history` fold can drop the open Exchange's
+  opening user message (the gap note would anchor the derivation and be over-dropped on abort —
+  pinned by `TestExchangeStartRepairedAfterMidExchangeTruncation`), so per the ADR's recorded
+  fallback the cache and its S2 repair stay, with all readers routed through the one
+  `exchangeBoundary()` helper and the snapshot's `exchangeStart` still round-tripping (newly
+  pinned by `TestSnapshot_RoundTripsExchangeBoundaryForAbort`). Behaviour-preserving; internal
+  only, no public-surface change. (`internal/agent`; ADR 0017 + CONTEXT.md record the fallback.)
 
 ### Tested
 

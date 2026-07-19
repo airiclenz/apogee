@@ -109,9 +109,12 @@ to a Turn, not a Turn of its own. The unit of self-regulation and of bench measu
 One user input through to the final no-tool response — usually several Turns. The
 user-facing unit of a conversation. In code the Exchange is derived from the conversation —
 the messages strictly after the last user message — as a domain working value
-(`internal/domain`'s `ExchangeView`) consumed by the loop and by Mechanisms. Its boundary is
-never cached state
-([ADR 0017](docs/adr/0017-the-exchange-is-a-derived-domain-working-value.md)).
+(`internal/domain`'s `ExchangeView`) consumed by the loop and by Mechanisms. One engine
+exception: the abort-rollback boundary stays a cached field read through
+`Agent.exchangeBoundary()`, because a mid-Exchange truncation can drop the opening user
+message the derivation would need
+([ADR 0017](docs/adr/0017-the-exchange-is-a-derived-domain-working-value.md) §2's recorded
+fallback).
 
 **Step**:
 The bench/embedder primitive that advances the loop **one Turn** and returns at a

@@ -277,7 +277,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// to Len is current-Exchange tail, so exchangeStart validly sits anywhere in that span. Only a
 	// shrink is repaired — a grow (no registered rewrite does this) would mis-shift, and on an
 	// Exchange-opening Turn a zero-drop clamp could wrongly push exchangeStart past the just-appended
-	// user message.
+	// user message. The cache + this repair are deliberate (ADR 0017 §2's recorded fallback): this
+	// very rewrite can drop the open Exchange's opening user message, so the boundary cannot be
+	// re-derived from the conversation — readers go through exchangeBoundary (agent.go).
 	if dropped := beforeRewrite - a.conv.Len(); dropped > 0 && a.inExchange {
 		a.exchangeStart = min(max(a.exchangeStart-dropped, a.conv.PrefixEnd()+1), a.conv.Len())
 	}
@@ -565,6 +567,19 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 	return msg
 }
 
+// closeExchange ends the open Exchange — the ONE engine-side owner of Exchange end (ADR 0017
+// §3). It flips inExchange (re-opening Submit) and clears the deferred Response-Action queue,
+// owning the F6 invariant: a deferral dies with its Exchange — a directive deferred for this
+// flow's next request must never ride into a different Exchange's. Its callers are the three
+// Exchange ends: completeTurn's StatusExchangeComplete branch (a final no-tool reply),
+// abandonTurn (a faulted Turn), and AbortExchange (the host scrapping the Exchange).
+// cancelTurn is deliberately NOT one — a cancelled Turn leaves the Exchange open for the
+// resume re-attempt and truncates-then-restores the deferred queue instead (F6(b)).
+func (a *Agent) closeExchange() {
+	a.inExchange = false
+	a.conv.ClearDeferred()
+}
+
 // completeTurn closes a Turn at the quiescent boundary and advances the Turn counter. A
 // final no-tool response ends the Exchange (StatusExchangeComplete — awaiting the next
 // Submit); a tool-call Turn leaves the Exchange open (StatusTurnComplete — the next Step
@@ -575,11 +590,9 @@ func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus
 	// Turn's fires shift into the pending set the next Turn's outcome will judge.
 	a.tracker.endTurn()
 	if status == domain.StatusExchangeComplete {
-		a.inExchange = false
-		// The Exchange closed: expire any deferred Response Action so a directive never crosses into
-		// the next Exchange (F6). In practice the queue is empty here — a no-tool final answer ends
-		// the Exchange and F2 never re-defers there — so this is the invariant's backstop.
-		a.conv.ClearDeferred()
+		// In practice the deferred queue is already empty here — a no-tool final answer ends the
+		// Exchange and F2 never re-defers there — so closeExchange's clear is the F6 backstop.
+		a.closeExchange()
 	}
 	a.turnIndex++
 	return domain.StepResult{Status: status, TurnIndex: turn, Elapsed: time.Since(start)}
@@ -596,11 +609,9 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 	// The pending set (the previous Turn's fires) stays in place for the next completed Turn to
 	// judge (R3).
 	a.tracker.discardTurn()
-	a.inExchange = false
-	// A faulted Turn ends the Exchange, so any deferred directive expires with it (F6): the fault
-	// path re-queued the drained corrections just above, but they are a decision about the SAME
-	// flow's next request — a new Exchange must not inherit a stale fan-out directive.
-	a.conv.ClearDeferred()
+	// The fault path re-queued the drained corrections just above, but a deferral is a decision
+	// about the SAME flow's next request — closeExchange expires it with the faulted Exchange (F6).
+	a.closeExchange()
 	a.turnIndex++
 	return domain.StepResult{Status: domain.StatusExchangeComplete, TurnIndex: turn, Elapsed: time.Since(start)}
 }

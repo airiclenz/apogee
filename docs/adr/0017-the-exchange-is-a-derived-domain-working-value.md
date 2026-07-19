@@ -74,6 +74,20 @@ precondition: **no history rewrite may drop the open Exchange's opening user mes
 future rewrite be able to violate it, the fallback is to keep the cached field and shrink
 this decision to routing its readers through one helper.
 
+**Realisation (2026-07-19) — the fallback was taken.** The deepening plan's item-4
+verification found the precondition violated by the EXISTING `truncate_history`: its keep-tail
+cut counts assistant boundaries, so an open Exchange already holding `keepLastTurns` (4) or
+more assistant messages has its opening user message dropped and replaced by the user-role gap
+note — the last-`RoleUser` derivation then anchors at the note, and an abort re-derived from
+it would wrongly drop the note (pinned by
+`TestExchangeStartRepairedAfterMidExchangeTruncation`, `internal/agent`). Per this section's
+own fallback: the cached `exchangeStart` and its S2 repair stay authoritative for the rollback
+boundary, its readers route through the single `Agent.exchangeBoundary()` helper, and the
+snapshot `ExchangeStart` keeps being written and read — it is load-bearing, not legacy. §1
+(the domain derivation for hooks and Mechanisms) and §3 (`closeExchange`) stand unchanged;
+swapping the cache for the derivation would need a rewrite contract that preserves the opening
+user message, which reopens this ADR.
+
 **3. Exchange end has one engine-side owner.** The fixes plan's F6 placed deferral clearing at
 three Exchange-end sites. Those three ends concentrate into one private `closeExchange` on the
 Agent — flip `inExchange`, clear the deferred queue, one docstring owning the "a deferral dies
@@ -99,14 +113,15 @@ exists — not before.
 - The [ADR 0014](0014-guided-decomposition-steers-the-primary-call-and-serializes-delegation.md)
   "re-derive from honest history" posture (its Realisation, as amended by the fixes plan's
   committed-evidence gating) is implemented in one place, not per-Mechanism.
-- The S2 repair arithmetic and the snapshot `ExchangeStart` plumbing disappear from
-  `internal/agent`; resumability
-  ([ADR 0007](0007-step-turn-and-the-quiescent-boundary.md)) is preserved by the
-  ignored-on-read decode, and the layering
-  ([ADR 0010](0010-package-layout-domain-core-and-thin-root-facade.md)) is unchanged — the
+- ~~The S2 repair arithmetic and the snapshot `ExchangeStart` plumbing disappear from
+  `internal/agent`~~ — superseded by the §2 realisation note (2026-07-19): the fallback was
+  taken, so the repair and the round-tripping `ExchangeStart` stay, concentrated behind
+  `Agent.exchangeBoundary()`. Resumability
+  ([ADR 0007](0007-step-turn-and-the-quiescent-boundary.md)) and the layering
+  ([ADR 0010](0010-package-layout-domain-core-and-thin-root-facade.md)) are unchanged — the
   value lives at the lowest layer that can define it.
-- The precondition in §2 becomes a named invariant the engine documents where the repair
-  arithmetic used to live; any future history-rewrite Mechanism must honour it or reopen
-  this ADR.
+- The §2 precondition's failure is a named, test-pinned fact the engine documents at the
+  repair arithmetic and at `exchangeBoundary()`; a rewrite contract that preserves the open
+  Exchange's opening user message would reopen this ADR before the cache could go.
 - Implementation lands via `docs/plans/architecture-deepening-plan.md` items 3–4; the fixes
   plan's tests are the behaviour contract that proves the refactor preserved semantics.

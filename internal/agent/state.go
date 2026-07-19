@@ -25,7 +25,9 @@ import (
 //     a Submit that would corrupt an open Exchange and the next Step continues it.
 //   - exchangeStart: the conversation boundary the open Exchange began at, so a resumed host
 //     that discards a cancelled Exchange (AbortExchange) rolls back to the right boundary
-//     rather than wiping unrelated history.
+//     rather than wiping unrelated history. Load-bearing, not legacy: the boundary cannot be
+//     re-derived from the conversation (ADR 0017 §2's recorded fallback — Agent.exchangeBoundary),
+//     so it keeps round-tripping.
 //   - pendingInput : input Submitted but not yet consumed by a Step, so a Submit→Snapshot→
 //     Resume sequence does not silently drop the queued message.
 //
@@ -51,7 +53,7 @@ func (a *Agent) encodeState() (json.RawMessage, error) {
 		Conversation:  &a.conv,
 		TurnIndex:     a.turnIndex,
 		InExchange:    a.inExchange,
-		ExchangeStart: a.exchangeStart,
+		ExchangeStart: a.exchangeBoundary(),
 		PendingInput:  a.pendingInput,
 	})
 	if err != nil {
