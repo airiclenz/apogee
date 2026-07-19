@@ -44,6 +44,15 @@ point is a **minor** bump, not a breaking change.
   four package-shared `internal/mechanisms` fixture helpers (`readCall`/`userMsg`/`assistantText`/
   `assistantCall`) are now thin delegates — signatures unchanged, no test rewrites. Internal test
   support only; no public-surface change. (`internal/domain/domaintest`, `internal/mechanisms`.)
+- **`domain.ExchangeView` — the Exchange boundary derived in one place (ADR 0017 §1, D1).** A new
+  working value plus `CurrentExchange` constructor over the minimal unexported `Len()/At(i)` read
+  surface (satisfied by both `*Conversation` and the hooks' `conversationView`): `Found`,
+  `UserIndex`, `After` (copies), `RangeAfter` (allocation-free). The derivation — the current
+  Exchange is the messages strictly after the last `RoleUser` message — now has exactly one
+  implementation (`lastRoleIndex`); `InjectContext` and `conversationView.LastUser` route through
+  it via `lastIndex`, public behaviour unchanged. No callers yet (the engine and Mechanisms follow
+  in the deepening plan's items 4–5); not exported at the root. Internal only; no public-surface
+  change. (`internal/domain`.)
 
 ### Fixed
 

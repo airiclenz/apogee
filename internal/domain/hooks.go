@@ -835,14 +835,10 @@ func firstIndex(msgs []Message, role Role) int {
 	return -1
 }
 
-// lastIndex returns the index of the last message with role, or -1.
+// lastIndex returns the index of the last message with role, or -1. It routes
+// through lastRoleIndex, the one boundary-derivation core (exchange.go).
 func lastIndex(msgs []Message, role Role) int {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == role {
-			return i
-		}
-	}
-	return -1
+	return lastRoleIndex(messageSlice(msgs), role)
 }
 
 // insertMessage returns msgs with m inserted at i, clamping i to [0, len(msgs)].

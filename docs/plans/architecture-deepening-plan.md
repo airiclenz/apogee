@@ -194,7 +194,14 @@ values. The full `internal/mechanisms` suite passes unchanged (the delegation is
 
 ---
 
-## 3. `domain.ExchangeView` — one boundary derivation, no callers yet
+## 3. `domain.ExchangeView` — one boundary derivation, no callers yet — ✅ DONE (2026-07-19)
+
+NOTES (2026-07-19): both `*Conversation` and `conversationView` already satisfied the
+`Len()/At(i)` interface, so the "trivial adapter" clause was moot for them; a `messageSlice`
+adapter was added instead so `lastIndex` (and through it `InjectContext`/`LastUser`) routes into
+the one core, `lastRoleIndex`. Tests are package-internal (`package domain`) because the
+property pin needs the unexported `conversationView`; `domaintest` is therefore unused — package
+`domain` importing it would cycle.
 
 **Finding:** review candidate 1, the domain half: the boundary derivation exists in at least
 four spellings (`lastIndex(r.messages, RoleUser)` in `InjectContext`
