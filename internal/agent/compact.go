@@ -110,7 +110,7 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 // compaction is enabled (cfg.Context.CompactionEnabled — the `auto-compact` key, on by default; the
 // on-demand /compact ignores this gate and always folds), at an Exchange boundary (NOT inExchange —
 // S2), and when the history has outgrown its Budget History allocation
-// (internal/context.HistoryExceedsAllocation) AND the trigger is not saturated (compactSat). It
+// (domain.Budget.HistoryExceedsAllocation) AND the trigger is not saturated (compactSat). It
 // clears the saturation latch the moment the estimate falls back under the allocation, so growth
 // alone cannot re-trigger a fold that already proved it cannot help. A zero History allocation (the
 // window is unknown) never trips, so an unbudgeted Agent never auto-folds.
@@ -138,10 +138,12 @@ func (a *Agent) shouldAutoCompact() bool {
 
 // historyExceedsAllocation reports whether the conversation's estimated token size has outgrown the
 // Budget's History allocation — the raw over-budget signal both the auto-fold trigger and the
-// post-fold saturation check read (internal/context.HistoryExceedsAllocation). A zero History
-// allocation (an unknown window) never trips.
+// post-fold saturation check read. It routes through the single domain compare on the SAME Budget
+// view the hooks receive (domain.Budget.HistoryExceedsAllocation), so the compaction trigger and a
+// hook reading the Budget can never disagree. A zero History allocation (an unknown window) never
+// trips.
 func (a *Agent) historyExceedsAllocation() bool {
-	return apogeectx.HistoryExceedsAllocation(a.budget().History, a.tokens, a.conv.Messages())
+	return a.budget().HistoryExceedsAllocation(a.conv.Messages())
 }
 
 // compactTranscriptChars returns the character budget for the rendered transcript the summary

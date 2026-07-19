@@ -19,7 +19,9 @@
 // Both Budget consumers are now wired (Phase-4 item 9). HistoryExceedsAllocation is the automatic
 // Compaction trigger's decision — the loop folds the conversation (the same generative Compact the
 // TUI's /compact drives) when the history has outgrown its Budget allocation at a quiescent
-// boundary. Tool-result capping is the second consumer, but it lives in package mechanisms
+// boundary. The pure token arithmetic behind it (the ceil chars→token conversion and the History
+// compare) lives on domain.Budget (one implementation, ADR 0010's lowest-layer rule); this package
+// keeps the calibration (TokenEstimator) and delegates the math. Tool-result capping is the second consumer, but it lives in package mechanisms
 // (tool_result_cap): it is a config-gated pre-request Mechanism, not structural, so it reads the
 // Budget through the hook surface rather than living here.
 package context

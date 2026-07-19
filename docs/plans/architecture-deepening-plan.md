@@ -332,7 +332,20 @@ drift now that they share an implementation — assert via the helper's outputs,
 
 ---
 
-## 6. One token-arithmetic implementation, on `Budget`
+## 6. One token-arithmetic implementation, on `Budget` — ✅ DONE (2026-07-19)
+
+NOTES (2026-07-19): `PromptChars` — context RE-EXPORTS (thin delegate to `domain.PromptChars`):
+the smaller diff (`loop.go`'s Calibrate caller and the context package tests stay byte-unchanged).
+NOTES (2026-07-19): `capMaxChars` left as its own tokens→chars expression; the inversion against
+`Budget.EstimateTokens` is documented in its comment (no shared shape forced, per the item text).
+NOTES (2026-07-19): `Agent.historyExceedsAllocation` now compares through the hook-visible Budget
+(raw calibrated ratio, no default-ratio fallback) — the item's "can never disagree" shape;
+identical in practice, since the estimator is seeded with the default and clamps calibration
+positive, so the context-side fallback was unreachable.
+NOTES (2026-07-19): authorized truncation→ceil delta needed NO fixture adjustments — no
+guided-decomposition or library fixture was boundary-exact; all suites pass unchanged.
+`libraryCapToBudget`'s estimate also moved truncation→ceil, as (c)'s "uses the shared math"
+instructs (same ≤1-token bound).
 
 **Finding:** review candidate 2 ("Deepen the Mechanism author's interface", Strong), the
 arithmetic half: three divergent chars→token conversions

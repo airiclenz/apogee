@@ -440,11 +440,13 @@ func libraryEntryRequiresAnalysis(e library.Entry) bool {
 
 // libraryCapToBudget keeps the highest-scoring entries (the store already sorts by score desc) whose
 // estimated tokens fit the injection budget, de-duplicated by content (apogee-sim Query budget cap
-// @pin).
+// @pin). The default-ratio substitution is semantics and stays here; the estimate itself is the
+// single domain implementation (Budget.EstimateTokens, ceil).
 func libraryCapToBudget(entries []library.Entry, charsPerToken float64) []library.Entry {
 	if charsPerToken <= 0 {
 		charsPerToken = libraryDefaultCharsPerToken
 	}
+	estimator := domain.Budget{CharsPerToken: charsPerToken}
 	kept := make([]library.Entry, 0, len(entries))
 	used := 0
 	seen := make(map[string]bool, len(entries))
@@ -452,7 +454,7 @@ func libraryCapToBudget(entries []library.Entry, charsPerToken float64) []librar
 		if seen[e.Content] {
 			continue
 		}
-		est := int(float64(len(e.Content)) / charsPerToken)
+		est := estimator.EstimateTokens(len(e.Content))
 		if used+est > libraryInjectionBudgetTokens {
 			continue
 		}

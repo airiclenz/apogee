@@ -233,5 +233,21 @@ func TestHistoryExceedsAllocation(t *testing.T) {
 	}
 }
 
+// TestEstimateTokensMatchesBudget pins the delegation (deepening plan D4): for a grid of
+// (chars, ratio) the calibrating estimator and a domain.Budget carrying the same ratio agree
+// exactly whenever the ratio is positive — the context path and the domain path cannot drift.
+func TestEstimateTokensMatchesBudget(t *testing.T) {
+	for _, ratio := range []float64{0.5, 1, 2.5, 3, 4, 7.9} {
+		for _, chars := range []int{0, 1, 2, 3, 5, 399, 400, 401, 1000, 12345} {
+			e := &TokenEstimator{charsPerToken: ratio}
+			want := domain.Budget{CharsPerToken: ratio}.EstimateTokens(chars)
+			if got := e.EstimateTokens(chars); got != want {
+				t.Errorf("ratio %v, chars %d: TokenEstimator.EstimateTokens = %d, Budget.EstimateTokens = %d",
+					ratio, chars, got, want)
+			}
+		}
+	}
+}
+
 // approx reports whether two ratios are equal within a small epsilon.
 func approx(a, b float64) bool { return math.Abs(a-b) < 1e-9 }

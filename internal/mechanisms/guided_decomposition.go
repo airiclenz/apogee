@@ -252,9 +252,9 @@ func guidedDecompositionFanOutBegun(conv domain.ConversationView) bool {
 }
 
 // guidedDecompositionOversized reports whether the task is large enough to warrant delegation, on the
-// same measured signals ADR 0014 §5 names — never a verb heuristic. Token estimates use the
-// tool_result_cap chars→token idiom (chars / Budget.CharsPerToken); an uncalibrated ratio (<= 0)
-// makes every estimate inert, so the gate never fires on an un-measured guess.
+// same measured signals ADR 0014 §5 names — never a verb heuristic. Token estimates use the single
+// domain implementation (Budget.EstimateTokens); an uncalibrated ratio (<= 0) makes every estimate
+// 0 — inert — so the gate never fires on an un-measured guess.
 func guidedDecompositionOversized(conv domain.ConversationView, budget domain.Budget) bool {
 	if budget.CharsPerToken <= 0 {
 		return false
@@ -276,7 +276,7 @@ func guidedDecompositionFreshUserOversized(conv domain.ConversationView, budget 
 	if last.Role != domain.RoleUser {
 		return false
 	}
-	return guidedDecompositionEstimateTokens(len(last.Content), budget.CharsPerToken) > budget.FileContext
+	return budget.EstimateTokens(len(last.Content)) > budget.FileContext
 }
 
 // guidedDecompositionMidExchangeOversized is signal B (the mid-Exchange fact): the estimated history
@@ -292,7 +292,7 @@ func guidedDecompositionMidExchangeOversized(conv domain.ConversationView, budge
 		totalChars += len(m.Content)
 		return true
 	})
-	return guidedDecompositionEstimateTokens(totalChars, budget.CharsPerToken) > budget.History
+	return budget.EstimateTokens(totalChars) > budget.History
 }
 
 // guidedDecompositionLastAssistantCalledTools reports whether the most recent assistant message
@@ -304,17 +304,6 @@ func guidedDecompositionLastAssistantCalledTools(conv domain.ConversationView) b
 		}
 	}
 	return false
-}
-
-// guidedDecompositionEstimateTokens converts a character count to an estimated token count with the
-// calibrated chars→token ratio (the tool_result_cap idiom, inverted). A non-positive ratio yields 0,
-// so a comparison against any positive threshold is false — the gate is inert until the estimator
-// has calibrated.
-func guidedDecompositionEstimateTokens(chars int, charsPerToken float64) int {
-	if charsPerToken <= 0 {
-		return 0
-	}
-	return int(float64(chars) / charsPerToken)
 }
 
 // PostResponse is the intercept + serialized follow-through half (ADR 0014 §2/§3). Like the gate it

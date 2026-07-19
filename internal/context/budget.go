@@ -1,8 +1,6 @@
 package context
 
 import (
-	"math"
-
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -113,14 +111,20 @@ func (e *TokenEstimator) CharsPerToken() float64 { return e.charsPerToken }
 func (e *TokenEstimator) Used() int { return e.used }
 
 // EstimateTokens converts a character count to a token estimate through the current ratio,
-// rounding up so a part is never estimated to fit when it is one token over. A non-positive ratio
+// delegating the rounding to the single domain implementation (domain.Budget.EstimateTokens —
+// ceil, so a part is never estimated to fit when it is one token over). A non-positive ratio
 // (never produced here, but defensive) falls back to the default.
 func (e *TokenEstimator) EstimateTokens(chars int) int {
-	ratio := e.charsPerToken
-	if ratio <= 0 {
-		ratio = DefaultCharsPerToken
+	return domain.Budget{CharsPerToken: e.ratio()}.EstimateTokens(chars)
+}
+
+// ratio is the calibrated chars→token ratio with the estimator's defensive default-ratio
+// fallback applied — the value its token math hands to the shared domain implementation.
+func (e *TokenEstimator) ratio() float64 {
+	if e.charsPerToken <= 0 {
+		return DefaultCharsPerToken
 	}
-	return int(math.Ceil(float64(chars) / ratio))
+	return e.charsPerToken
 }
 
 // Calibrate folds one server usage report into the estimate: it snaps Used to
@@ -142,24 +146,13 @@ func (e *TokenEstimator) Calibrate(promptChars, reportedPromptTokens int) {
 	e.charsPerToken = e.charsPerToken*(1-calibrationWeight) + sample*calibrationWeight
 }
 
-// PromptChars is a stable character measure of a request's prompt — the message contents and
-// tool-call arguments plus the tool menu's names, descriptions, and schemas — used both as the
-// calibration sample (Calibrate) and as the basis for a token estimate (EstimateTokens). It
-// deliberately omits the chat template's own markup, which the character count cannot see; the same
-// omission on both sides of the chars→token ratio means a systematic offset cancels, so an estimate
-// stays consistent with the calibration that produced the ratio.
+// PromptChars re-exports domain.PromptChars at its original home: the stable character measure
+// of a request's prompt used both as the calibration sample (Calibrate) and as the basis for a
+// token estimate (EstimateTokens). The measure itself moved to internal/domain (ADR 0010's
+// lowest-layer rule — it reads only domain types); this delegate keeps the existing callers and
+// tests unchanged.
 func PromptChars(msgs []domain.Message, tools []domain.ToolDef) int {
-	n := 0
-	for i := range msgs {
-		n += len(msgs[i].Content)
-		for _, tc := range msgs[i].ToolCalls {
-			n += len(tc.Tool) + len(tc.Arguments)
-		}
-	}
-	for i := range tools {
-		n += len(tools[i].Name) + len(tools[i].Description) + len(tools[i].Schema)
-	}
-	return n
+	return domain.PromptChars(msgs, tools)
 }
 
 // HistoryExceedsAllocation reports whether the estimated token size of msgs (the conversation
@@ -172,11 +165,10 @@ func PromptChars(msgs []domain.Message, tools []domain.ToolDef) int {
 // the whole conversation against the History slice trips slightly before the prompt would overflow.
 // A non-positive historyBudget (the window is unknown, so Allocate returned a zero Allocation)
 // never trips — there is no basis to bound, matching /compact's unbounded transcript render.
+// It builds on the single domain compare (domain.Budget.HistoryExceedsAllocation), so it can
+// never disagree with a hook reading the same Budget.
 func HistoryExceedsAllocation(historyBudget int, e *TokenEstimator, msgs []domain.Message) bool {
-	if historyBudget <= 0 {
-		return false
-	}
-	return e.EstimateTokens(PromptChars(msgs, nil)) > historyBudget
+	return domain.Budget{CharsPerToken: e.ratio(), History: historyBudget}.HistoryExceedsAllocation(msgs)
 }
 
 // clampFloat bounds v to [lo, hi].

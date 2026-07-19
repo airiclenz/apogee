@@ -53,6 +53,20 @@ point is a **minor** bump, not a breaking change.
   it via `lastIndex`, public behaviour unchanged. No callers yet (the engine and Mechanisms follow
   in the deepening plan's items 4–5); not exported at the root. Internal only; no public-surface
   change. (`internal/domain`.)
+- **`Budget.EstimateTokens` and `Budget.HistoryExceedsAllocation` — one token arithmetic (D4).**
+  The chars→token conversion now has a single implementation: two methods on the `Budget` struct
+  (root-aliased, so the public surface gains them — **additive → minor**). `EstimateTokens(chars)`
+  rounds up (the estimator's calibrated ground truth) and yields 0 on a non-positive
+  `CharsPerToken`, keeping token-gated behaviour inert until calibration;
+  `HistoryExceedsAllocation(msgs)` is the single compare behind both the engine's auto-Compaction
+  trigger (`Agent.historyExceedsAllocation`) and any hook reading the Budget, so the two can never
+  disagree. The pure character measure `PromptChars` moved to `internal/domain` (ADR 0010's
+  lowest-layer rule; `internal/context` keeps a thin delegate), `context.TokenEstimator` keeps its
+  calibration and default-ratio fallback and delegates the rounding, guided decomposition's signal
+  thresholds and the Library's injection-budget cap estimate through the shared method (the D4
+  authorized delta: truncation → ceil, at most one token per comparison; no fixtures were
+  boundary-exact), and `capMaxChars` stays the documented tokens→chars inverse. (`internal/domain`,
+  `internal/context`, `internal/agent`, `internal/mechanisms`.)
 
 ### Fixed
 
