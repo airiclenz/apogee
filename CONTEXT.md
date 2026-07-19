@@ -450,6 +450,30 @@ in-process heir to the bench's portable-tier Interventions (`system_addendum`,
 _Avoid_: "intervention" (that is the bench's term for its own experiment surface), calling
 it a Mechanism (it is a candidate, not a catalogued one).
 
+**Validated set**:
+A **per-model** enable set of catalogued Mechanisms that has passed the aggregate
+non-inferiority gate against Bypass **on that model** (ADR 0009) — proven *safe* there;
+benefit is deliberately **not** part of the claim (non-inferiority is the bar, superiority is
+not required). Keyed exactly as the [Library](#self-regulation) keys its observations: the
+confidence-tagged `ModelFingerprint`, resolved best-available — the evidence attaches to the
+precise model measured, and any carry-over to a sibling quant or family member is an explicit
+human decision, never automatic. A model with no Validated set runs the catalogue's global
+defaults (the D1 floor). An entry is produced only by a completed, pre-registered aggregate
+Campaign passing the gate on that model — with engagement verified — regardless of who runs it.
+_Avoid_: "recommended set" (promises help; the bar is safety), "default set" (an unknown model's
+default is the floor, not a set), "per-architecture set" (the key is the fingerprint, not the
+family).
+
+**Curation**:
+The operator decision layer above the evidence stream: what the global catalogue contains
+(membership, port verdicts, global defaults) and what each model's
+[Validated set](#validation-and-the-bench) contains. Strictly separate from evidence: a
+completed Campaign appends a **ledger entry only** (the L9 discipline); a curation action is a
+distinct, later decision that cites ledger entries. Scope follows evidence: a single-model
+campaign can license only that model's Validated set; global actions (deleting a catalogue row,
+flipping a global default) need cross-model evidence.
+_Avoid_: treating a ledger entry as a behaviour change (evidence records; curation acts).
+
 ### Retired terms
 
 These were canonical in `apogee-sim/CONTEXT.md` and are **deliberately dropped** because

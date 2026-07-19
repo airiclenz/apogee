@@ -447,3 +447,25 @@ decision was resolved as the Probe `gemma-4-e4b-it-qat-20260714-minus-truncate-h
 localization reading ("harm concentrated in `truncate_history`") over "diffuse harm" on
 gemma. Exploratory: it licenses its ledger claim only; the next move is again an open
 design decision (no convicted set, no pre-committed follow-up).
+
+---
+
+## Validated sets (per-model curation — ADR 0016)
+
+Curation record, distinct from the evidence ledger above (which stays append-only,
+ledger-entries-only per L9). Per
+[ADR 0016](../adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md), a
+**Validated set** is a per-model enable set that passed the aggregate non-inferiority gate
+against Bypass on that model, engagement verified; it is keyed by the confidence-tagged
+`ModelFingerprint` and claims *safe on this model*, not helpful. The runtime surface
+(fingerprint match → auto-enable at ≥ medium confidence + per-session notice + config
+off-switch) is not yet built; until it lands, an entry here is the record plus a config
+recipe.
+
+| Model (fingerprint key) | Validated set | Evidence | Entered |
+|---|---|---|---|
+| `gemma-4-e4b-it-qat` | The pruned 16 — base stack minus `truncate_history`, off-ramps in (the Screen's `without-truncate_history` enable set verbatim): `autofix`, `cached_content_intercept`, `decompose`, `empty_response_recovery`, `error_enrichment`, `filehint`, `grammar`, `library`, `list_nudge`, `syntax`, `tool_loop_interceptor`, `tool_result_cap`, `tool_use_directive`, `tool_use_enforcer`, `toolfilter`, `validate` — recorded verbatim from the Probe manifest 2026-07-19; **not derivable from the catalogue alone** (the base stack's incompatibility picks: `list_nudge` over `stall_nudge`, `cached_content_intercept` over `read_loop`/`read_repeat`) | Probe `gemma-4-e4b-it-qat-20260714-minus-truncate-history`: NI within fresh δ = 0.4643, W+ = 102.0, p = 0.0003, N = 14, engagement hand-verified; Screen `gemma-4-e4b-it-qat-20260708` descriptive convergence as supporting context | 2026-07-19, ADR 0016 first application (retroactive — named openly in the ADR) |
+
+Not a Validated set: the full 17-member base stack on gemma (failed the gate twice);
+anything on `qwen25-coder-14b` (campaigns measured a non-engaged loop — void either way).
+`truncate_history`'s global verdict stays open; it is simply not in gemma's set.
