@@ -358,6 +358,27 @@ for the Screen + Confirmation pair. Bundles (manifest, `runs.jsonl`, traces, `re
   analyzer an engagement guard (turns, tool-exec counts, wall time in the secondary
   table) so a zero-engagement campaign is flagged instead of read as no-evidence — both
   deferred until the in-flight gemma Screen completes (no rebuild mid-campaign).
+- **Amended 2026-07-19 (consequence (c) is closed — both halves):** the engagement guard
+  shipped in apogee-sim (`1153ef0`; report/test hardening `bd4bb81`) — detection side.
+  The chat-template/parser investigation ran against a live server this session and
+  produced a prevention-side fix (apogee-sim `d61bf7f`). Findings: the campaign rig is
+  **native-profile only** (`coreagent.RunConfig` plumbs no `ModelProfile`), so apogee
+  offers the OpenAI `tools` array, expects structured `tool_calls`, and deliberately
+  renders no tool text and parses none from content. The failure was therefore the
+  server's **parse-back half**: the chat template rendered the tools (the model named
+  real tools in both arms), but qwen25-coder-14b emitted fenced JSON instead of its
+  template's native call syntax and the server passed the calls through as visible
+  content. The exact broken combo is **retired and no longer distinguishable**
+  (template-lacked-tools vs parser-missed-emission): the qwen25-coder-14b profile is gone
+  from llama-launcher. On the current stack (llama.cpp `b10068` + qwen3.6-27B-Q4_K_S) the
+  mismatch does **not reproduce**: `chat_template_caps` reports full tool support, a
+  canary tools request returns structured `tool_calls`, and apogee-sim's full-loop live
+  test passes (exchange-complete, 2 turns, `write_file` executed). The fix: apogee-sim's
+  `campaign run` now sends a **tool-call preflight** — one canary tools request right
+  after the fingerprint, refusing to create or resume a campaign unless structured
+  `tool_calls` come back (the fingerprint's `chat_template_caps` pins only the render
+  half). A future qwen campaign targets qwen3.6-27B; this entry's verdict and the
+  zero-variance caveat stand unchanged.
 
 #### `gemma-4-e4b-it-qat-20260708` · gemma-4-e4b-it-qat — **no-conviction** (leave-one-out Screen)
 
