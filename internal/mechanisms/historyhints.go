@@ -93,24 +93,10 @@ func firstUserContent(conv domain.ConversationView) string {
 
 // writtenPaths collects the normalized paths the model has successfully issued a write-tool call for
 // (apogee-sim writtenPaths, next_step.go @pin) — deriveWriteTarget excludes these so its suggestion
-// always points at remaining work.
+// always points at remaining work. A thin delegate to the shared written-paths shape
+// (writtenPathsSince, historyscan.go) over the whole conversation and the write superset.
 func writtenPaths(conv domain.ConversationView) map[string]bool {
-	out := make(map[string]bool)
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role != domain.RoleAssistant {
-			return true
-		}
-		for _, tc := range m.ToolCalls {
-			if !isFileMutatingTool(tc.Tool) {
-				continue
-			}
-			if p := toolCallPath(tc.Arguments); p != "" {
-				out[normalizePath(p)] = true
-			}
-		}
-		return true
-	})
-	return out
+	return writtenPathsSince(conv, wave4WriteTools, 0)
 }
 
 // fileExtRe matches a filename token with a recognised source/doc extension (apogee-sim
@@ -154,10 +140,11 @@ func deriveWriteTarget(conv domain.ConversationView) string {
 }
 
 // requestContains reports whether any message in the request already carries text — the
-// idempotency guard the InjectContext-based hints (read_loop) use so a deterministic hint is never
-// injected twice into the same request. The hint text is its own marker (the filehint pattern):
-// a re-computed hint for unchanged state is byte-identical, so a substring match recognises it
-// without polluting the model-facing wording with a synthetic tag.
+// idempotency guard the InjectContext-based hints (read_loop, filehint) use so a deterministic
+// hint is never injected twice into the same request. The hint text is its own marker: a
+// re-computed hint for unchanged state is byte-identical (filehint anchors on its stable
+// fileHintMarker lead), so a substring match recognises it without polluting the model-facing
+// wording with a synthetic tag.
 func requestContains(conv domain.ConversationView, text string) bool {
 	if text == "" {
 		return false

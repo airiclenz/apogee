@@ -95,7 +95,10 @@ func injectHint(req *domain.Request, conv domain.ConversationView, hint string) 
 // isGreenfieldContext reports whether the conversation shows no evidence of an existing workspace —
 // no successful read, no write, and any listing came back empty (apogee-sim isGreenfieldContext
 // @pin). When true, a repeated read miss is almost certainly the model hunting for a file that has
-// not been created yet, and the blunter greenfield hint (threshold 1) is warranted.
+// not been created yet, and the blunter greenfield hint (threshold 1) is warranted. It stays a
+// Mechanism-local scan, not one of the shared shapes (historyscan.go): it folds three signal kinds
+// — write calls, successful reads, and non-empty listings — into one early-exit walk that no
+// shared shape expresses without contortion (the item-7 named difference).
 func isGreenfieldContext(conv domain.ConversationView) bool {
 	greenfield := true
 	conv.Range(func(_ int, m domain.Message) bool {
@@ -136,27 +139,11 @@ func listResultEmpty(conv domain.ConversationView, callID string) bool {
 // detectReadLoopPaths returns, sorted for deterministic hints, the paths the model has failed to
 // read at least threshold times (apogee-sim detectReadLoopPaths @pin) — threshold 1 in a greenfield
 // workspace (the file plainly does not exist yet), 2 otherwise ("check then create" is legitimate
-// once). The sim returned map-iteration order; apogee sorts for reproducibility (bench).
+// once). The scan is the shared read-attempt shape (readAttemptCounts, historyscan.go) over the
+// read family and the write superset; the thresholds stay here, at the call site (D5). The sim
+// returned map-iteration order; apogee sorts for reproducibility (bench).
 func detectReadLoopPaths(conv domain.ConversationView, greenfield bool) []string {
-	failed := make(map[string]int)
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role != domain.RoleAssistant || len(m.ToolCalls) == 0 {
-			return true
-		}
-		for _, tc := range m.ToolCalls {
-			if !isReadTool(tc.Tool) {
-				continue
-			}
-			p := toolCallPath(tc.Arguments)
-			if p == "" {
-				continue
-			}
-			if resultIsReadError(conv, tc.ID) {
-				failed[p]++
-			}
-		}
-		return true
-	})
+	_, failed := readAttemptCounts(conv, readToolNames, wave4WriteTools)
 
 	threshold := 2
 	if greenfield {
@@ -173,29 +160,12 @@ func detectReadLoopPaths(conv domain.ConversationView, greenfield bool) []string
 }
 
 // detectSuccessfulReadLoopPaths returns, per path, how many times the model has SUCCESSFULLY read a
-// file without ever writing it — decrementing on a write so a read-then-write does not count
-// (apogee-sim detectSuccessfulReadLoopPaths @pin). Only paths at or above the threshold survive.
+// file without ever writing it — the shared scan decrements on a write so a read-then-write does
+// not count (apogee-sim detectSuccessfulReadLoopPaths @pin; readAttemptCounts, historyscan.go).
+// The threshold stays here, at the call site (D5): only paths at or above
+// successfulReadLoopThreshold survive.
 func detectSuccessfulReadLoopPaths(conv domain.ConversationView) map[string]int {
-	counts := make(map[string]int)
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role != domain.RoleAssistant || len(m.ToolCalls) == 0 {
-			return true
-		}
-		for _, tc := range m.ToolCalls {
-			p := toolCallPath(tc.Arguments)
-			if p == "" {
-				continue
-			}
-			np := normalizePath(p)
-			switch {
-			case isReadTool(tc.Tool) && !resultIsReadError(conv, tc.ID):
-				counts[np]++
-			case isFileMutatingTool(tc.Tool) && counts[np] > 0:
-				counts[np]--
-			}
-		}
-		return true
-	})
+	counts, _ := readAttemptCounts(conv, readToolNames, wave4WriteTools)
 	for p, n := range counts {
 		if n < successfulReadLoopThreshold {
 			delete(counts, p)

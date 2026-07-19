@@ -396,7 +396,19 @@ minor). Commit:
 
 ---
 
-## 7. History-scan helpers beside the spelling families
+## 7. History-scan helpers beside the spelling families — ✅ DONE (2026-07-19)
+
+NOTES (2026-07-19): no numeric window exists among the migrated scans — the one windowed shape's
+window is structural (the latest read Turn, `recentSuccessfulReadPaths`), so the helpers
+parameterize by tool-name set only; thresholds and windows stay at call sites per D5.
+NOTES (2026-07-19): readloop's `isGreenfieldContext` stays local (a composite write/read/list
+early-exit scan no shared shape expresses — the item's escape clause; commented at the symbol).
+filehint's copies fold onto helpers that ALREADY existed beside the families rather than new ones
+(`fileHintWriteTools`/`fileHintHasWrittenFiles` → `hasWrittenFiles` over `wave4WriteTools`;
+`fileHintAlreadyInjected` → `requestContains`); `writtenPaths` stays as a thin delegate to
+`writtenPathsSince` (the item-2 delegation precedent — no caller/test-comment churn); the
+"since an index" parameter has no >0 caller yet (the shape's definition names it; start 0 = the
+whole conversation).
 
 **Finding:** review candidate 2, the scan half: each history-inspecting Mechanism hand-rolls
 the same `conv.Range(...)` walks — `internal/mechanisms/readloop.go:99-121`

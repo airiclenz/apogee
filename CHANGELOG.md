@@ -159,6 +159,21 @@ point is a **minor** bump, not a breaking change.
   (`TestGuidedDecompositionAgreesWithDomainCurrentExchange`) asserts the cursor helpers agree with
   the seam's own output on a two-Exchange history. Behaviour-preserving; internal only, no
   public-surface change. (`internal/mechanisms`.)
+- **One copy of each shared history-scan shape, beside the spelling families (D5).** The
+  hand-rolled `conv.Range(...)` walks the history-inspecting Mechanisms each carried now live once
+  in `internal/mechanisms/historyscan.go`, composing with the F8 spelling families: read-attempt
+  path counting with successes and failures separate (`readAttemptCounts` — readloop's two
+  detectors shrink to threshold-plus-sort wrappers), successful-read paths over the latest read
+  episode (`recentSuccessfulReadPaths` — readrepeat's private scan deleted), and written paths
+  since an index (`writtenPathsSince` — `writtenPaths` is now a thin delegate over the whole
+  conversation). filehint's private copies are deleted onto the already-shared helpers: its
+  duplicate write set and write scan (`fileHintWriteTools`/`fileHintHasWrittenFiles`) fold into
+  `hasWrittenFiles` over `wave4WriteTools`, and its marker scan (`fileHintAlreadyInjected`) into
+  `requestContains`. Per-Mechanism membership and thresholds stay at the call sites (D5);
+  readloop's `isGreenfieldContext` stays local as a composite write/read/list early-exit scan no
+  shared shape expresses. The three Mechanisms' suites pass unchanged (the behaviour contract);
+  the helpers gain their own table-driven suite over the family spellings via `domaintest`.
+  Behaviour-preserving; internal only, no public-surface change. (`internal/mechanisms`.)
 
 ### Tested
 

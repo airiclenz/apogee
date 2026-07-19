@@ -50,15 +50,6 @@ var (
 	fileHintReadTools = toolSet(readSpellings)
 )
 
-// fileHintWriteTools mark that the model has already shared written files, which suppresses the
-// greenfield skip (apogee-sim toolsets.WriteTools @pin, extended with apogee's own write-tool
-// names: edit_existing_file / single_find_and_replace / multi_find_and_replace).
-var fileHintWriteTools = map[string]bool{
-	"write_file": true, "writeFile": true, "write_to_file": true,
-	"create_file": true, "edit_file": true, "editFile": true, "replace_in_file": true,
-	"edit_existing_file": true, "single_find_and_replace": true, "multi_find_and_replace": true,
-}
-
 // fileHintMechanism is the pre-request Mechanism that injects workspace file hints (catalogue
 // Table A `filehint`; ported from apogee-sim injectFileHintIfNeeded @pin). It carries no
 // per-Mechanism state: the descriptor's strikes-3 policy routes self-regulation through the loop's
@@ -100,7 +91,10 @@ func (fileHintMechanism) PreRequest(_ context.Context, req *domain.Request) erro
 	if !ok {
 		return nil
 	}
-	if fileHintIsCreationFocused(userPrompt) && !fileHintHasWrittenFiles(conv) {
+	// The "model has already shared written files" signal that suppresses the greenfield skip is
+	// the package-shared write scan over wave4WriteTools (hasWrittenFiles, decompose.go) — the
+	// Mechanism's private copy of the scan and of the write set was folded there (item 7).
+	if fileHintIsCreationFocused(userPrompt) && !hasWrittenFiles(conv) {
 		return nil
 	}
 
@@ -114,25 +108,13 @@ func (fileHintMechanism) PreRequest(_ context.Context, req *domain.Request) erro
 		return nil
 	}
 
-	if fileHintAlreadyInjected(conv) {
+	// Idempotency guard against a double-inject: the marker scan is the package-shared
+	// requestContains (historyhints.go) over the stable fileHintMarker lead.
+	if requestContains(conv, fileHintMarker) {
 		return nil
 	}
 	req.InjectContext(fileHintBuild(relevant, fileHintMaxSuggest))
 	return nil
-}
-
-// fileHintAlreadyInjected reports whether a hint carrying fileHintMarker is already present in the
-// request messages — the idempotency guard against a double-inject.
-func fileHintAlreadyInjected(conv domain.ConversationView) bool {
-	found := false
-	conv.Range(func(_ int, m domain.Message) bool {
-		if strings.Contains(m.Content, fileHintMarker) {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
 }
 
 // fileHintDetectOpportunity finds the most recent directory listing the model has not yet read
@@ -206,25 +188,6 @@ func fileHintIsCreationFocused(prompt string) bool {
 		}
 	}
 	return creationCount >= 2 && len(fileHintBacktickFileRe.FindAllString(prompt, 3)) >= 2
-}
-
-// fileHintHasWrittenFiles reports whether any assistant message issued a write tool call — the
-// signal that suppresses the greenfield skip (apogee-sim toolsets.HasWrittenFiles @pin).
-func fileHintHasWrittenFiles(conv domain.ConversationView) bool {
-	found := false
-	conv.Range(func(_ int, m domain.Message) bool {
-		if m.Role != domain.RoleAssistant {
-			return true
-		}
-		for _, tc := range m.ToolCalls {
-			if fileHintWriteTools[tc.Tool] {
-				found = true
-				return false
-			}
-		}
-		return true
-	})
-	return found
 }
 
 // fileHintParseList extracts filenames from a directory-listing tool result: a JSON string array

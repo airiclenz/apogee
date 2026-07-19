@@ -153,8 +153,9 @@ func toolSet(groups ...[]string) map[string]bool {
 }
 
 // hasWrittenFiles reports whether any assistant message issued a write-tool call — the "model has
-// already started writing" signal decompose and cot both gate on (apogee-sim toolsets.HasWrittenFiles
-// @pin, over wave4WriteTools so apogee's own write tools count).
+// already started writing" signal decompose, cot, and filehint gate on (apogee-sim
+// toolsets.HasWrittenFiles @pin, over wave4WriteTools so apogee's own write tools count; filehint's
+// private copy of the scan and its duplicate write set folded here, item 7).
 func hasWrittenFiles(conv domain.ConversationView) bool {
 	found := false
 	conv.Range(func(_ int, m domain.Message) bool {

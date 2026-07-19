@@ -90,7 +90,7 @@ func detectRepeatReads(conv domain.ConversationView, responseCalls []domain.Tool
 		responsePaths = append(responsePaths, normalizePath(p))
 	}
 
-	recent := recentSuccessfulReads(conv)
+	recent := recentSuccessfulReadPaths(conv, readToolNames, wave4WriteTools)
 	if len(recent) == 0 {
 		return nil
 	}
@@ -102,56 +102,6 @@ func detectRepeatReads(conv domain.ConversationView, responseCalls []domain.Tool
 	}
 	sort.Strings(repeats)
 	return repeats
-}
-
-// recentSuccessfulReads returns the set of paths read successfully in the most recent Turn that
-// issued a read, excluding any path written this Session (apogee-sim recentSuccessfulReads @pin) —
-// a file the model wrote to may legitimately be re-read. Scanning stops at the first read Turn found
-// walking back, so only the latest read episode counts.
-//
-// Per assistant message the write paths are collected in a FIRST pass over its ToolCalls, then the
-// reads are built in a SECOND pass excluding any written path — so a read SUPERSEDED by a same-turn
-// write to the same path (order-independent within the turn) never lands in "recent successful
-// reads" (C-02: a same-turn [read a.go, write a.go] must not make the next read of a.go a redundant
-// re-read). The writes map accumulates across turns walking back, so a write in a LATER turn also
-// shadows an earlier read of that path, unchanged from before.
-func recentSuccessfulReads(conv domain.ConversationView) map[string]bool {
-	reads := make(map[string]bool)
-	writes := make(map[string]bool)
-	for i := conv.Len() - 1; i >= 0; i-- {
-		m := conv.At(i)
-		if m.Role != domain.RoleAssistant || len(m.ToolCalls) == 0 {
-			continue
-		}
-		for _, tc := range m.ToolCalls {
-			if !isFileMutatingTool(tc.Tool) {
-				continue
-			}
-			if p := toolCallPath(tc.Arguments); p != "" {
-				writes[normalizePath(p)] = true
-			}
-		}
-		for _, tc := range m.ToolCalls {
-			if !isReadTool(tc.Tool) {
-				continue
-			}
-			p := toolCallPath(tc.Arguments)
-			if p == "" {
-				continue
-			}
-			np := normalizePath(p)
-			if writes[np] {
-				continue
-			}
-			if !resultIsReadError(conv, tc.ID) {
-				reads[np] = true
-			}
-		}
-		if len(reads) > 0 {
-			break
-		}
-	}
-	return reads
 }
 
 // buildReadRepeatHint renders the "already read, proceed" correction (apogee-sim buildReadRepeatHint
