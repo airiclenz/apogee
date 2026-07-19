@@ -107,7 +107,11 @@ to a Turn, not a Turn of its own. The unit of self-regulation and of bench measu
 
 **Exchange**:
 One user input through to the final no-tool response — usually several Turns. The
-user-facing unit of a conversation.
+user-facing unit of a conversation. In code the Exchange is derived from the conversation —
+the messages strictly after the last user message — as a domain working value
+(`internal/domain`'s `ExchangeView`) consumed by the loop and by Mechanisms. Its boundary is
+never cached state
+([ADR 0017](docs/adr/0017-the-exchange-is-a-derived-domain-working-value.md)).
 
 **Step**:
 The bench/embedder primitive that advances the loop **one Turn** and returns at a

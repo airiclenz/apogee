@@ -128,7 +128,7 @@ file plus the architecture review HTML are committed (suggested:
 
 ---
 
-## 1. ADR 0017 + CONTEXT.md — the Exchange working value and the deferral lifecycle, on the record
+## 1. ADR 0017 + CONTEXT.md — the Exchange working value and the deferral lifecycle, on the record — ✅ DONE (2026-07-19)
 
 **Finding:** review candidate 1 ("Give the Exchange a home", Strong): the Exchange is a
 first-class CONTEXT.md term with no module — its boundary is re-derived ad-hoc in seven places

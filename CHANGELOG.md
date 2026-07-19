@@ -26,6 +26,16 @@ point is a **minor** bump, not a breaking change.
   error. New config block `validated-sets:` (`enable` off-switch, default on; `alias` map),
   file-only. New package `internal/validated`; shipped entries are pinned against the live
   catalogue by test. (`internal/validated`, `cmd/apogee`.)
+- **ADR 0017 — the Exchange is a derived domain working value.** Ratifies the architecture
+  deepening plan's D1–D3 (docs only; the code lands in that plan's items 3–4): the Exchange
+  boundary is derived from the conversation — the messages strictly after the last `RoleUser`
+  message, stable across injections — as an `internal/domain` `ExchangeView` working value shared
+  by the loop and the hooks; the engine's cached `exchangeStart` and its S2 repair arithmetic are
+  to be replaced by that derivation (`inExchange` stays; snapshot `ExchangeStart` becomes
+  ignored-on-read, old snapshots stay resumable); Exchange end concentrates into one engine-side
+  `closeExchange` owner of the F6 "a deferral dies with its Exchange" invariant; `ExchangeView`
+  stays unexported at the root until an external consumer exists. CONTEXT.md's **Exchange** entry
+  now names the code home. (`docs/adr/`, `CONTEXT.md`.)
 
 ### Fixed
 
