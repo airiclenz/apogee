@@ -1,4 +1,4 @@
-# Handoff — doc corrections committed; qwen server up & pins verified (runbook step 3 done); campaign-store location now an open question; next: operator campaign launch
+# Handoff — doc corrections committed; qwen server up & pins verified; devbox campaign launch verified viable; next: launch from the devbox once the owner confirms the Mac won't sleep and says go
 
 **Date:** 2026-07-19 (supersedes `archived/2026-07-19 - 07 - refocus-truth-check-green-doc-corrections-pending-next-is-host-side-campaign-launch.md` — its pending doc corrections landed as `e244ef8` this session; its next-move list carries forward with runbook step 3 now done and one owner correction below). Work from this directory; apogee-sim is the sibling repo at `../apogee-sim`.
 
@@ -18,6 +18,19 @@
    - llama.cpp build `b10068-571d0d540` — exactly the pinned b10068
    - `total_slots: 1`; Q4_K-Small, 27.3B params, n_ctx 32768
    - Server PID 80050 on `0.0.0.0:1111`; model resident and idle awaiting launch.
+3. **Challenged the host-side-launch assumption (owner: "this dependency is not
+   good") and verified a devbox launch is viable.** No technical blocker:
+   `make build` succeeds on the devbox at `6634376` (current `main`, which
+   *includes* the tool-call preflight and engagement guard — runbook step 1
+   satisfied on this machine; fresh binary at `../apogee-sim/apogee-sim`); the
+   devbox config's `upstream.url` is already `http://192.168.64.1:1111`, the
+   default for `campaign run -endpoint`; the store root `~/.apogee-sim/campaigns`
+   is created on demand (`internal/campaign/store.go:174`) — a NEW campaign needs
+   no pre-existing store. The runbook's "host-side" (D6) framing rested on facts
+   now false (stale devbox binary) or inapplicable to a fresh bundle (resume needs
+   the bundle's machine). Launching here is an operational amendment to the
+   runbook, not a change to the frozen design (arms/reps/δ/checkpoint untouched);
+   record the deviation in the bundle's `CHECKPOINT.md`.
 
 ## Owner correction — campaign-store location is OPEN (do not assume the Mac host)
 
@@ -27,25 +40,30 @@ live on the Mac host. Owner, this session: the latest sims may have run on
 store may be there instead. Re-verified this session: the **devbox** has no store
 (`~/.apogee-sim/campaigns` absent — only config/sessions/traces). Implications:
 
-- **First operator action: locate the store** (`ls ~/.apogee-sim/campaigns` on the
-  candidate machines). Runbook steps 1 (rebuild), 2 (qwen25 housekeeping), and
-  4–7 (campaign drive) run on whichever machine holds it — the
-  preflight/engagement-guard rebuild prerequisite binds *that* machine's binary.
-- The inference endpoint must be re-derived from that machine's viewpoint:
-  `192.168.64.1:1111` is the devbox's view of the Mac host; from the Mac itself
-  it is `localhost:1111`; from a third machine it is the Mac's LAN address.
-  The server itself runs on the Mac host regardless (that's where llama-launcher
-  and the model files live).
+- With the devbox-launch finding (item 3 above), the store's location now matters
+  only for *existing* bundles: runbook step 2 (the qwen25 `not-engaged` stamps)
+  must run wherever those bundles actually live — locate them
+  (`ls ~/.apogee-sim/campaigns` on the candidate machines). The new qwen3.6
+  campaign creates its bundle fresh wherever it launches (planned: the devbox).
+- The server itself runs on the Mac host regardless (llama-launcher and the model
+  files live there); `192.168.64.1:1111` is the devbox's view of it, correct for
+  a devbox launch.
 
 ## Next moves
 
-1. **Operator, on the store machine:** runbook steps 1, 2, 4–7
-   (`../apogee-sim/docs/plans/qwen36-27b-first-aggregate-campaign-plan.md`).
-   Step 3 is done, but re-check the endpoint address from the store machine's
-   viewpoint before `campaign run`.
-2. **Devbox, during the run:** observe only, via llama-launcher MCP
-   `tail_log`/`server_status`; ≥10 min llama-log silence = campaign not
-   progressing.
+1. **Launch the campaign from the devbox** — blocked on exactly two things from
+   the owner: confirmation that **the Mac will not sleep** for the run (8–16 h
+   checkpoint slice, day-plus full 140; the server and this VM both live on the
+   Mac — caffeinate or power settings, unreachable from here) and an explicit
+   **go**. Then runbook step 4 with the fresh `../apogee-sim/apogee-sim` binary:
+   create with `-model /Users/airic/LL-Models/Qwen/qwen3.6-27B-Q4_K_S.gguf
+   -reps 5`, interrupt once the id prints, drive to 56/140 with `-id <id>
+   -reps 2` — detached/background and unsandboxed so it survives the session —
+   then apply the checkpoint rule and write `CHECKPOINT.md` (including the
+   launch-machine deviation note). Full runbook:
+   `../apogee-sim/docs/plans/qwen36-27b-first-aggregate-campaign-plan.md`.
+2. **Operator, on whichever machine holds the qwen25 bundles:** runbook step 2
+   (`campaign analyze` `not-engaged` stamps) — independent of the launch.
 3. **After the campaign (devbox):** L9 ledger entry in
    `../apogee-sim/docs/design/mechanism-catalogue.md` whatever the outcome; on an
    NI pass the Validated-set writes per the plan doc's disposition table.
@@ -58,9 +76,12 @@ store may be there instead. Re-verified this session: the **devbox** has no stor
 
 ## Operational state at handoff
 
-- apogee `main` local = `e244ef8` + this handoff commit, clean; 2 ahead / 0 behind
-  `origin/main` (`1f70aeb`). apogee-sim = `6634376`, clean, level with origin
-  (checked this session).
+- apogee `main` local = `a5ef2d3` + this handoff-update commit, clean; 3 ahead /
+  0 behind `origin/main` (`1f70aeb`). apogee-sim = `6634376`, clean, level with
+  origin; fresh `apogee-sim` binary built this session at
+  `../apogee-sim/apogee-sim` (untracked build artifact). Devbox
+  `~/.apogee-sim/campaigns` does not exist yet — it appears on first
+  `campaign run`.
 - **Server UP (started this session):** qwen3.6-27B-Q4_K_S resident on llama.cpp
   `b10068`, single slot, idle. llama-launcher MCP at
   `http://192.168.64.1:7331/mcp` (v1.4.5).
@@ -75,10 +96,12 @@ store may be there instead. Re-verified this session: the **devbox** has no stor
 - All of 06/07's list: no default flips / mechanism deletions from current
   evidence, no new campaign designs, no revisiting the item-4 fallback (deleting
   `exchangeStart`) without a design session.
-- Do not launch or resume the campaign from the devbox (no store here), and do
-  not re-grill the pre-registration — it is settled and frozen.
-- New from this session: do not assume which machine holds the campaign store —
-  locate it first (owner correction above).
+- Do not launch before the owner confirms host-sleep handling and gives an
+  explicit go; do not resume or analyze bundles that live on other machines from
+  here. Do not re-grill the pre-registration — the design freeze is untouched by
+  the launch-machine amendment.
+- New from this session: do not assume which machine holds the qwen25 bundles —
+  locate them before step 2 (owner correction above).
 
 ## Suggested skills
 
