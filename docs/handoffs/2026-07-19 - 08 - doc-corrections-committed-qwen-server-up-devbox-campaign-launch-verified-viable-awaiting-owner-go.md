@@ -67,17 +67,18 @@ store may be there instead. Re-verified this session: the **devbox** has no stor
 3. **After the campaign (devbox):** L9 ledger entry in
    `../apogee-sim/docs/design/mechanism-catalogue.md` whatever the outcome; on an
    NI pass the Validated-set writes per the plan doc's disposition table.
-4. **Owner's-call housekeeping:** push `main` (origin caught up to `1f70aeb`
-   between sessions — 07's "11 ahead" is stale; only this session's two commits
-   are unpushed); cut a release for the `[Unreleased]` CHANGELOG block.
+4. **Owner's-call housekeeping:** cut a release for the `[Unreleased]` CHANGELOG
+   block. (The owner pushed repeatedly mid-session — don't trust any ahead-count
+   written in a doc; check `git status -sb`.)
 5. **Carried deferred follow-ups (04–07, none urgent):** TUI in-transcript banner
    for the validated-set notice; behavioral-probe (medium-confidence) resolver;
    user-run validation tooling writing `~/.apogee/validated/`.
 
 ## Operational state at handoff
 
-- apogee `main` local = `a5ef2d3` + this handoff-update commit, clean; 3 ahead /
-  0 behind `origin/main` (`1f70aeb`). apogee-sim = `6634376`, clean, level with
+- apogee `main` clean and synced with origin at session end (the owner pushed
+  mid-session; verify with `git status -sb`, don't trust counts written here).
+  apogee-sim = `6634376`, clean, level with
   origin; fresh `apogee-sim` binary built this session at
   `../apogee-sim/apogee-sim` (untracked build artifact). Devbox
   `~/.apogee-sim/campaigns` does not exist yet — it appears on first
