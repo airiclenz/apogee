@@ -34,8 +34,9 @@ type parsedInput struct {
 // knownCommands is the recognised /command set for this slice, in display order. The parser
 // intercepts a line only when its first whitespace token is exactly "/<verb>" for a verb in
 // this set; any other slash-prefixed line is treated as an ordinary message (never silently
-// swallowed). The autocomplete overlay offers the same set. /skill and /server are deferred
-// (they need the skills package / a swappable provider seam) and so are absent here.
+// swallowed). The autocomplete overlay offers a superset: it also offers /skill, which attaches
+// via the picker and is deliberately not parsed as a command (see commandMenu in autocomplete.go).
+// /server is deferred (it needs a swappable provider seam) and so is absent here.
 var knownCommands = []string{"clear", "compact", "continue"}
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text

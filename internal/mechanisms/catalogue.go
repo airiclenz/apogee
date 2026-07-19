@@ -61,10 +61,10 @@ type constructor func(Deps) (domain.Mechanism, error)
 
 // catalogue is the constructor table: canonical MechanismID → its builder. It is the single
 // registry of buildable Mechanisms — Build looks an ID up here, and the config surface validates
-// an enabled `mechanisms:` key against its keys by driving Build. It starts EMPTY: waves 5–14 add
-// one row per ported Mechanism (each row a `catalogue[id] = newFoo` line beside the Mechanism's
-// implementation). The wiring is exercised while the table is empty via buildFrom against a fake
-// row (catalogue_test.go), so the seam is proven before the first real Mechanism lands.
+// an enabled `mechanisms:` key against its keys by driving Build. The literal starts empty; each
+// ported Mechanism adds its row (a `catalogue[id] = newFoo` line in its file's init(), beside the
+// Mechanism's implementation). The wiring is also exercised independently of the real rows via
+// buildFrom against a fake row (catalogue_test.go).
 var catalogue = map[domain.MechanismID]constructor{}
 
 // descriptors is the static descriptor table: canonical MechanismID → its MechanismDescriptor, the

@@ -194,7 +194,7 @@ apogee/
 │   │   └── modes/         #   Plan / Ask-Before / Auto (Auto requires Confinement — ADR 0004)
 │   ├── provider/          # openai-compatible client, model discovery, server-process mgr
 │   ├── processing/        # PORT-RISK: harmony channels, fenced/native tool-call parsing
-│   ├── tools/             # the ~30-tool suite + registry/executor (Tool iface is public)
+│   ├── tools/             # the 20-tool suite + registry/executor (Tool iface is public)
 │   ├── context/           # Budget, Context builder, Compaction (generative, default reducer)
 │   ├── session/           # session save/load/resume (= the bench's snapshot/restore)
 │   ├── mcp/               # MCP client (official go-sdk): stdio / SSE / streamable-http
@@ -355,7 +355,7 @@ Port apogee-code's loop as an embeddable vertical slice (TS as oracle):
 [`phase-3-detail-plan.md`](./archived/phase-3-detail-plan.md); `v1.0.0` of the public Go API
 cut as planned (semver guarantees began there; post-cut findings closed in
 [`post-v1.0.0-review-remediation-plan.md`](./archived/post-v1.0.0-review-remediation-plan.md)).*
-- Complete the **30-tool suite** (git, terminal, web-fetch/search, python-exec,
+- Complete the **20-tool suite** (git, terminal, web-fetch/search, python-exec,
   sub-agent, ask-user, diagnostics, find-replace family) behind the **public `Tool`
   interface** (tools are an open extension point — ADR 0002). Apply §3a per tool:
   search/glob pure-Go (ripgrep optional); diagnostics in-process for Go, optional

@@ -4,6 +4,7 @@
 // hook point, descriptor, and ordering constraints; the hook point is data, not
 // package structure (the package-per-hook layout remains provisional — TDD §6.4).
 //
-// Phase-0 scaffold: no implementation yet; the catalogue is ported from
-// apogee-sim and A/B-validated, one Mechanism at a time, in Phase 4.
+// The catalogue was ported from apogee-sim and A/B-validated, one Mechanism at a
+// time, in Phase 4 (completed 2026-07-04); each Mechanism file registers its
+// constructor and descriptor in its own init().
 package mechanisms
