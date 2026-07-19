@@ -460,6 +460,11 @@ precise model measured, and any carry-over to a sibling quant or family member i
 human decision, never automatic. A model with no Validated set runs the catalogue's global
 defaults (the D1 floor). An entry is produced only by a completed, pre-registered aggregate
 Campaign passing the gate on that model — with engagement verified — regardless of who runs it.
+A matching set applies **whole or not at all** — a subset, or a merge with hand-picked
+Mechanisms, is a different, *unvalidated* stack — and applies *automatically* only at ≥ medium
+fingerprint confidence; below that it is **offered**, and applying it (like carrying it over to
+an aliased model) is an explicit config decision. Explicit mechanism config and Bypass take
+precedence over auto-application.
 _Avoid_: "recommended set" (promises help; the bar is safety), "default set" (an unknown model's
 default is the floor, not a set), "per-architecture set" (the key is the fingerprint, not the
 family).
