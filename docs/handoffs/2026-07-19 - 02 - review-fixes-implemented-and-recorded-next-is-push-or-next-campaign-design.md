@@ -2,6 +2,11 @@
 
 **Date:** 2026-07-19 (supersedes `archived/2026-07-19 - 01 - engagement-guard-committed-with-review-fix-plan-next-is-implement-plan.md` — its next move 1 is done: the review-fix plan is implemented, committed, and recorded). Work from this directory; apogee-sim is the sibling repo at `../apogee-sim`.
 
+**Amended later the same session:** next move 1 (the pushes) is done — both repos are
+in sync with origin (apogee `ec91f89`, apogee-sim `5f890b9`), and the ⚠️ `go.sum`
+drift below was committed as `ec91f89` (7 added `/go.mod` hash lines, nothing removed).
+The remaining next moves are 2–5.
+
 ## Where things stand
 
 - **ADR 0016 is accepted** (apogee `141dcb0`, unchanged): per-model **Validated sets**
