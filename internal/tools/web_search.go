@@ -13,13 +13,17 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-var webSearchSchema = json.RawMessage(`{
+var webSearchSpec = toolSpec{
+	name:        "web_search",
+	description: "Search the web for a query and return the top results (title, url, snippet). Works with no configuration (DuckDuckGo by default); a host may point it at a custom search backend or disable it, in which case the tool says so instead of failing the turn.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["query"],
   "properties": {
     "query": {"type": "string", "description": "The search query."}
   }
-}`)
+}`),
+}
 
 type webSearchArgs struct {
 	Query string `json:"query"`
@@ -56,6 +60,7 @@ const (
 // is an ExternalEffectTool of kind network, filtered by the same URLGuard + SSRF floor as
 // the other network tools. Stateless across Turns.
 type WebSearch struct {
+	toolSpec
 	guard    security.URLGuard
 	endpoint string
 	provider searchProvider
@@ -74,9 +79,9 @@ func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
 	endpoint = strings.TrimSpace(endpoint)
 	switch strings.ToLower(endpoint) {
 	case "":
-		return &WebSearch{guard: guard, endpoint: defaultSearchEndpoint, provider: providerDuckDuckGo}
+		return &WebSearch{toolSpec: webSearchSpec, guard: guard, endpoint: defaultSearchEndpoint, provider: providerDuckDuckGo}
 	case "off", "none", "disabled":
-		return &WebSearch{guard: guard, disabled: true}
+		return &WebSearch{toolSpec: webSearchSpec, guard: guard, disabled: true}
 	}
 	if u, err := url.Parse(endpoint); err != nil || u.Host == "" {
 		if healed, herr := url.Parse("https://" + endpoint); herr == nil && healed.Host != "" {
@@ -87,19 +92,8 @@ func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
 	if u, err := url.Parse(endpoint); err == nil && strings.EqualFold(u.Hostname(), defaultSearchHost) {
 		provider = providerDuckDuckGo
 	}
-	return &WebSearch{guard: guard, endpoint: endpoint, provider: provider}
+	return &WebSearch{toolSpec: webSearchSpec, guard: guard, endpoint: endpoint, provider: provider}
 }
-
-// Name returns the stable identifier the model calls.
-func (t *WebSearch) Name() string { return "web_search" }
-
-// Description returns the model-facing summary of the tool.
-func (t *WebSearch) Description() string {
-	return "Search the web for a query and return the top results (title, url, snippet). Works with no configuration (DuckDuckGo by default); a host may point it at a custom search backend or disable it, in which case the tool says so instead of failing the turn."
-}
-
-// Schema returns the JSON schema of the tool's arguments.
-func (t *WebSearch) Schema() json.RawMessage { return webSearchSchema }
 
 // ExternalEffect reports that web_search reaches the network (kind network).
 func (t *WebSearch) ExternalEffect() domain.ExternalEffectKind { return domain.EffectNetwork }
@@ -112,9 +106,9 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return domain.ToolResult{}, err
 	}
 
-	var args webSearchArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[webSearchArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.Query) == "" {
 		return errorResult(call.ID, "query is required"), nil

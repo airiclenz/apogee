@@ -174,6 +174,20 @@ point is a **minor** bump, not a breaking change.
   shared shape expresses. The three Mechanisms' suites pass unchanged (the behaviour contract);
   the helpers gain their own table-driven suite over the family spellings via `domaintest`.
   Behaviour-preserving; internal only, no public-surface change. (`internal/mechanisms`.)
+- **Embedded tool spec and typed arg decoding fold the per-tool ritual (D7).** Each of the 20
+  built-in tools hand-rolled the same shape: a package-var schema string, three metadata methods
+  (`Name`/`Description`/`Schema`), and a decode-and-error preamble in `Execute`. The identity now
+  lives in one embeddable `toolSpec` value per tool (name + description + the raw JSON schema
+  string, still visible and reviewable — no schema generation, D7/ADR 0002) providing the three
+  methods via embedding, and the preamble folds into one generic `decodeToolArgs[A]` helper
+  wrapping `decodeArgs`, so the standard "invalid arguments: …" result is built in exactly one
+  place (all 20 sites already shared that wording verbatim — nothing begged unification).
+  `internal/mcp`'s `serverTool` is untouched: it does not share the ritual (its identity arrives
+  per-server at runtime, its description carries a fallback, and its arguments pass through raw).
+  Tool names, schemas, results, and error strings are unchanged — the whole `internal/tools`
+  suite passes untouched, plus a new test pinning that a tool built from a spec reports exactly
+  the spec's name/description/schema bytes. Behaviour-preserving; internal only, no
+  public-surface change. (`internal/tools`.)
 
 ### Tested
 

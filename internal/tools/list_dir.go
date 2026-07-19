@@ -11,7 +11,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var listDirSchema = json.RawMessage(`{
+var listDirSpec = toolSpec{
+	name:        "list_dir",
+	description: "List the entries of a directory, optionally recursing into subdirectories.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
   "properties": {
@@ -20,7 +23,8 @@ var listDirSchema = json.RawMessage(`{
     "max_depth": {"type": "integer", "description": "Maximum recursion depth (default 3)"},
     "offset": {"type": "integer", "description": "Number of entries to skip for pagination (default 0)"}
   }
-}`)
+}`),
+}
 
 type listDirArgs struct {
 	Path      string `json:"path"`
@@ -31,21 +35,13 @@ type listDirArgs struct {
 
 // ListDir lists the entries of a directory, optionally recursing. It is a read-only
 // tool scoped to a sandbox root.
-type ListDir struct{ root string }
-
-// NewListDir returns a list_dir tool that resolves paths within root.
-func NewListDir(root string) *ListDir { return &ListDir{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *ListDir) Name() string { return "list_dir" }
-
-// Description returns the model-facing summary of the tool.
-func (t *ListDir) Description() string {
-	return "List the entries of a directory, optionally recursing into subdirectories."
+type ListDir struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *ListDir) Schema() json.RawMessage { return listDirSchema }
+// NewListDir returns a list_dir tool that resolves paths within root.
+func NewListDir(root string) *ListDir { return &ListDir{toolSpec: listDirSpec, root: root} }
 
 // ReadOnly reports that list_dir performs no writes (domain.ReadOnlyTool).
 func (t *ListDir) ReadOnly() bool { return true }
@@ -59,9 +55,9 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return domain.ToolResult{}, err
 	}
 
-	var args listDirArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[listDirArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil

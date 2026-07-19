@@ -9,14 +9,18 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var viewDiffSchema = json.RawMessage(`{
+var viewDiffSpec = toolSpec{
+	name:        "view_diff",
+	description: "Show a line-by-line diff between a file's current content and a proposed new content.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "newContent"],
   "properties": {
     "path": {"type": "string", "description": "The file path to diff against, relative to the workspace root or absolute"},
     "newContent": {"type": "string", "description": "The proposed new content to compare with the file's current content"}
   }
-}`)
+}`),
+}
 
 type viewDiffArgs struct {
 	Path       string `json:"path"`
@@ -27,21 +31,13 @@ type viewDiffArgs struct {
 // content — the read-only preview affordance the model uses before committing an edit. It
 // computes the diff with a small in-package Myers LCS (no external program, §3a) so the
 // output is stable and deterministic. It is read-only and carries no writer marker.
-type ViewDiff struct{ root string }
-
-// NewViewDiff returns a view_diff tool that resolves paths within root.
-func NewViewDiff(root string) *ViewDiff { return &ViewDiff{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *ViewDiff) Name() string { return "view_diff" }
-
-// Description returns the model-facing summary of the tool.
-func (t *ViewDiff) Description() string {
-	return "Show a line-by-line diff between a file's current content and a proposed new content."
+type ViewDiff struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *ViewDiff) Schema() json.RawMessage { return viewDiffSchema }
+// NewViewDiff returns a view_diff tool that resolves paths within root.
+func NewViewDiff(root string) *ViewDiff { return &ViewDiff{toolSpec: viewDiffSpec, root: root} }
 
 // ReadOnly reports that view_diff performs no writes (domain.ReadOnlyTool) — it runs in
 // Plan and never gates.
@@ -55,9 +51,9 @@ func (t *ViewDiff) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return domain.ToolResult{}, err
 	}
 
-	var args viewDiffArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[viewDiffArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil

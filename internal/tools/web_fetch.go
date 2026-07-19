@@ -11,13 +11,17 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-var webFetchSchema = json.RawMessage(`{
+var webFetchSpec = toolSpec{
+	name:        "web_fetch",
+	description: "Fetch the contents of an http(s) URL with a GET request and return the response status and body. Use this to read a web page or a raw file by URL. Blocked URLs (loopback, private, or metadata addresses, and disallowed hosts) are refused.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["url"],
   "properties": {
     "url": {"type": "string", "description": "The absolute http(s) URL to fetch with a GET request."}
   }
-}`)
+}`),
+}
 
 type webFetchArgs struct {
 	URL string `json:"url"`
@@ -28,22 +32,16 @@ type webFetchArgs struct {
 // Auto (url-filtered) and routes it through the injected ExternalEffects boundary for the
 // bench. Every URL passes the URLGuard (scheme/host allow-deny + the resolved-IP SSRF floor)
 // before the request and at dial time. Stateless across Turns (ADR 0008).
-type WebFetch struct{ guard security.URLGuard }
+type WebFetch struct {
+	toolSpec
+	guard security.URLGuard
+}
 
 // NewWebFetch returns a web_fetch tool that filters every URL through guard (the host's
 // url-safety policy plus the default-on SSRF floor).
-func NewWebFetch(guard security.URLGuard) *WebFetch { return &WebFetch{guard: guard} }
-
-// Name returns the stable identifier the model calls.
-func (t *WebFetch) Name() string { return "web_fetch" }
-
-// Description returns the model-facing summary of the tool.
-func (t *WebFetch) Description() string {
-	return "Fetch the contents of an http(s) URL with a GET request and return the response status and body. Use this to read a web page or a raw file by URL. Blocked URLs (loopback, private, or metadata addresses, and disallowed hosts) are refused."
+func NewWebFetch(guard security.URLGuard) *WebFetch {
+	return &WebFetch{toolSpec: webFetchSpec, guard: guard}
 }
-
-// Schema returns the JSON schema of the tool's arguments.
-func (t *WebFetch) Schema() json.RawMessage { return webFetchSchema }
 
 // ExternalEffect reports that web_fetch reaches the network — the kind the disposition keys
 // on to auto-run it (url-filtered) in Auto and route it through the ExternalEffects boundary.
@@ -56,9 +54,9 @@ func (t *WebFetch) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return domain.ToolResult{}, err
 	}
 
-	var args webFetchArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[webFetchArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.URL) == "" {
 		return errorResult(call.ID, "url is required"), nil

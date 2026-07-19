@@ -438,7 +438,17 @@ spellings from the families, calls-without-results.
 
 ---
 
-## 8. The tool-definition module: fold the per-tool ritual
+## 8. The tool-definition module: fold the per-tool ritual — ✅ DONE (2026-07-19)
+
+NOTES (2026-07-19): `internal/mcp`'s `serverTool` checked and LEFT unmigrated — it does not share
+the ritual (identity arrives per-server at runtime as struct fields, `Description()` carries an
+empty-description fallback, and arguments pass through raw with no decode preamble), so the diff
+is confined to `internal/tools` + CHANGELOG. All 19 decode sites already shared the exact
+"invalid arguments: …" wording verbatim — no per-tool error strings differed, nothing begs
+unification for a later pass. `WriteFile`/`EditExistingFile`/`SingleFindReplace`/
+`MultiFindReplace` keep raw `decodeArgs` in their `workspaceWriteTarget` methods (a decode
+failure there means "treat as in-bounds", not an arg-error result — a different contract than
+the Execute preamble the helper folds).
 
 **Finding:** review candidate 3 ("A tool-definition module", Worth exploring): ~19 built-in
 tools each hand-roll the same ritual — a package-var schema string, an args struct, three

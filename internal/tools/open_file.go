@@ -10,14 +10,18 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var openFileSchema = json.RawMessage(`{
+var openFileSpec = toolSpec{
+	name:        "open_file",
+	description: "Open a file and read its content, optionally locating the line numbers of a substring.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
   "properties": {
     "path": {"type": "string", "description": "The file path to open, relative to the workspace root or absolute"},
     "locate": {"type": "string", "description": "Optional substring to locate; the result reports the 1-based line numbers where it occurs"}
   }
-}`)
+}`),
+}
 
 type openFileArgs struct {
 	Path   string `json:"path"`
@@ -29,21 +33,13 @@ type openFileArgs struct {
 // has no active editor: the file is named explicitly). It returns the file's content with
 // a header and, when locate is given, the 1-based line numbers where it appears. It is
 // read-only and carries no writer marker.
-type OpenFile struct{ root string }
-
-// NewOpenFile returns an open_file tool that resolves paths within root.
-func NewOpenFile(root string) *OpenFile { return &OpenFile{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *OpenFile) Name() string { return "open_file" }
-
-// Description returns the model-facing summary of the tool.
-func (t *OpenFile) Description() string {
-	return "Open a file and read its content, optionally locating the line numbers of a substring."
+type OpenFile struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *OpenFile) Schema() json.RawMessage { return openFileSchema }
+// NewOpenFile returns an open_file tool that resolves paths within root.
+func NewOpenFile(root string) *OpenFile { return &OpenFile{toolSpec: openFileSpec, root: root} }
 
 // ReadOnly reports that open_file performs no writes (domain.ReadOnlyTool) — it runs in
 // Plan and never gates.
@@ -58,9 +54,9 @@ func (t *OpenFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return domain.ToolResult{}, err
 	}
 
-	var args openFileArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[openFileArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil

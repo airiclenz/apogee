@@ -10,7 +10,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var readFileSchema = json.RawMessage(`{
+var readFileSpec = toolSpec{
+	name:        "read_file",
+	description: "Read the contents of a file by path, optionally restricted to a line range.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
   "properties": {
@@ -19,7 +22,8 @@ var readFileSchema = json.RawMessage(`{
     "end_line": {"type": "integer", "description": "Optional 1-based end line (inclusive)"},
     "max_lines": {"type": "integer", "description": "Maximum number of lines to return"}
   }
-}`)
+}`),
+}
 
 type readFileArgs struct {
 	Path      string `json:"path"`
@@ -30,21 +34,13 @@ type readFileArgs struct {
 
 // ReadFile reads a file's contents, optionally restricted to a line range. It is a
 // read-only tool scoped to a sandbox root.
-type ReadFile struct{ root string }
-
-// NewReadFile returns a read_file tool that resolves paths within root.
-func NewReadFile(root string) *ReadFile { return &ReadFile{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *ReadFile) Name() string { return "read_file" }
-
-// Description returns the model-facing summary of the tool.
-func (t *ReadFile) Description() string {
-	return "Read the contents of a file by path, optionally restricted to a line range."
+type ReadFile struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *ReadFile) Schema() json.RawMessage { return readFileSchema }
+// NewReadFile returns a read_file tool that resolves paths within root.
+func NewReadFile(root string) *ReadFile { return &ReadFile{toolSpec: readFileSpec, root: root} }
 
 // ReadOnly reports that read_file performs no writes (domain.ReadOnlyTool).
 func (t *ReadFile) ReadOnly() bool { return true }
@@ -57,9 +53,9 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return domain.ToolResult{}, err
 	}
 
-	var args readFileArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[readFileArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil

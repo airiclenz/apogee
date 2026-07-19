@@ -10,7 +10,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var pythonExecSchema = json.RawMessage(`{
+var pythonExecSpec = toolSpec{
+	name:        "python_exec",
+	description: "Run a Python script through the system interpreter and capture its output and exit code. One-shot (a fresh interpreter per call); the script is fed on standard input. Reports clearly when no Python interpreter is available.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["code"],
   "properties": {
@@ -18,7 +21,8 @@ var pythonExecSchema = json.RawMessage(`{
     "workdir": {"type": "string", "description": "Optional working directory (relative to the workspace root or absolute)"},
     "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default 120, max 600)"}
   }
-}`)
+}`),
+}
 
 type pythonExecArgs struct {
 	Code           string `json:"code"`
@@ -47,21 +51,13 @@ var lookInterpreter = func(candidates []string) (string, bool) {
 // it when fs-confinement is unavailable. It degrades gracefully when no interpreter is present
 // — a clear "python not available" result, never a hard dependency (§3a). It is stateless
 // across Turns (ADR 0008): a fresh interpreter per call, no persistent REPL.
-type PythonExec struct{ root string }
-
-// NewPythonExec returns a python-exec tool whose working directory resolves within root.
-func NewPythonExec(root string) *PythonExec { return &PythonExec{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *PythonExec) Name() string { return "python_exec" }
-
-// Description returns the model-facing summary of the tool.
-func (t *PythonExec) Description() string {
-	return "Run a Python script through the system interpreter and capture its output and exit code. One-shot (a fresh interpreter per call); the script is fed on standard input. Reports clearly when no Python interpreter is available."
+type PythonExec struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *PythonExec) Schema() json.RawMessage { return pythonExecSchema }
+// NewPythonExec returns a python-exec tool whose working directory resolves within root.
+func NewPythonExec(root string) *PythonExec { return &PythonExec{toolSpec: pythonExecSpec, root: root} }
 
 // ReadOnly reports that python-exec is write-capable (false) — a script can write, so the
 // loop must gate/confine it rather than running it freely.
@@ -80,9 +76,9 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		return domain.ToolResult{}, err
 	}
 
-	var args pythonExecArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[pythonExecArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.Code) == "" {
 		return errorResult(call.ID, "code is required"), nil

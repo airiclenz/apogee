@@ -10,14 +10,18 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var fileEditSchema = json.RawMessage(`{
+var fileEditSpec = toolSpec{
+	name:        "edit_existing_file",
+	description: "Edit an existing file. Accepts either full replacement content or a patch in \"*** Begin Patch\" format.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "content"],
   "properties": {
     "path": {"type": "string", "description": "The file path to edit, relative to the workspace root or absolute"},
     "content": {"type": "string", "description": "The new content for the file, or a patch in \"*** Begin Patch\" format"}
   }
-}`)
+}`),
+}
 
 type fileEditArgs struct {
 	Path    string `json:"path"`
@@ -29,21 +33,15 @@ type fileEditArgs struct {
 // It is a write tool scoped to a sandbox root and carries the workspaceScopedWriter
 // marker (Apogee's own path-safety-bounded write). Ported from the oracle's
 // file-edit-tool, including its hunk parser and indexOf-based applier.
-type EditExistingFile struct{ root string }
-
-// NewEditExistingFile returns an edit_existing_file tool that resolves paths within root.
-func NewEditExistingFile(root string) *EditExistingFile { return &EditExistingFile{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *EditExistingFile) Name() string { return "edit_existing_file" }
-
-// Description returns the model-facing summary of the tool.
-func (t *EditExistingFile) Description() string {
-	return "Edit an existing file. Accepts either full replacement content or a patch in \"*** Begin Patch\" format."
+type EditExistingFile struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *EditExistingFile) Schema() json.RawMessage { return fileEditSchema }
+// NewEditExistingFile returns an edit_existing_file tool that resolves paths within root.
+func NewEditExistingFile(root string) *EditExistingFile {
+	return &EditExistingFile{toolSpec: fileEditSpec, root: root}
+}
 
 // ReadOnly reports that edit_existing_file is write-capable (domain.ReadOnlyTool).
 func (t *EditExistingFile) ReadOnly() bool { return false }
@@ -68,9 +66,9 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		return domain.ToolResult{}, err
 	}
 
-	var args fileEditArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[fileEditArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil

@@ -41,14 +41,18 @@ import (
 // toolchain never wedges a Turn (the §2.4 teardown reaps the process group).
 const vetTimeout = 30 * time.Second
 
-var diagnosticsSchema = json.RawMessage(`{
+var diagnosticsSpec = toolSpec{
+	name:        "diagnostics",
+	description: "Report syntax and lint-level problems in a source file. Go files are checked in-process (syntax) plus 'go vet' when the toolchain is present; other languages use a detected linter if one is available, and report 'no diagnostics available' (not an error) when none is. Read-only.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
   "properties": {
     "path": {"type": "string", "description": "Path to the source file to diagnose (relative to the workspace root or absolute). The language is inferred from the file extension."},
     "vet": {"type": "boolean", "description": "For Go files, also run 'go vet' on the file's package when the toolchain is available (default: true). Syntax checking via go/parser is always performed and needs no toolchain."}
   }
-}`)
+}`),
+}
 
 type diagnosticsArgs struct {
 	Path string `json:"path"`
@@ -62,21 +66,15 @@ type diagnosticsArgs struct {
 // workspace root. Go files are checked in-process (go/parser for syntax) plus an
 // optional go vet; other languages probe for a detected linter and degrade
 // gracefully when none is available. It is read-only.
-type Diagnostics struct{ root string }
-
-// NewDiagnostics returns a diagnostics tool whose target path resolves within root.
-func NewDiagnostics(root string) *Diagnostics { return &Diagnostics{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *Diagnostics) Name() string { return "diagnostics" }
-
-// Description returns the model-facing summary of the tool.
-func (t *Diagnostics) Description() string {
-	return "Report syntax and lint-level problems in a source file. Go files are checked in-process (syntax) plus 'go vet' when the toolchain is present; other languages use a detected linter if one is available, and report 'no diagnostics available' (not an error) when none is. Read-only."
+type Diagnostics struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *Diagnostics) Schema() json.RawMessage { return diagnosticsSchema }
+// NewDiagnostics returns a diagnostics tool whose target path resolves within root.
+func NewDiagnostics(root string) *Diagnostics {
+	return &Diagnostics{toolSpec: diagnosticsSpec, root: root}
+}
 
 // ReadOnly reports that diagnostics performs no writes — it only inspects — so the
 // disposition runs it freely in every mode (including Plan).
@@ -97,9 +95,9 @@ func (t *Diagnostics) Execute(ctx context.Context, call domain.ToolCall) (domain
 		return domain.ToolResult{}, err
 	}
 
-	var args diagnosticsArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[diagnosticsArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.Path) == "" {
 		return errorResult(call.ID, "path is required"), nil

@@ -8,13 +8,17 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var askUserSchema = json.RawMessage(`{
+var askUserSpec = toolSpec{
+	name:        "ask_user",
+	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["question"],
   "properties": {
     "question": {"type": "string", "description": "The question to ask the human. Use this when you need a clarification or a decision only the user can make."}
   }
-}`)
+}`),
+}
 
 type askUserArgs struct {
 	Question string `json:"question"`
@@ -31,22 +35,14 @@ type askUserArgs struct {
 // construction Execute always has a non-nil Asker; the defensive nil-check below keeps a
 // hand-built registry that registers it with a nil Asker from panicking. Stateless across
 // Turns (ADR 0008): a fresh question per call, no held state.
-type AskUser struct{ asker domain.Asker }
+type AskUser struct {
+	toolSpec
+	asker domain.Asker
+}
 
 // NewAskUser returns an ask_user tool routing to asker. A nil asker yields a tool whose
 // Execute reports the delegate is unavailable (the registry omits it in practice).
-func NewAskUser(asker domain.Asker) *AskUser { return &AskUser{asker: asker} }
-
-// Name returns the stable identifier the model calls.
-func (t *AskUser) Name() string { return "ask_user" }
-
-// Description returns the model-facing summary of the tool.
-func (t *AskUser) Description() string {
-	return "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person."
-}
-
-// Schema returns the JSON schema of the tool's arguments.
-func (t *AskUser) Schema() json.RawMessage { return askUserSchema }
+func NewAskUser(asker domain.Asker) *AskUser { return &AskUser{toolSpec: askUserSpec, asker: asker} }
 
 // ReadOnly reports that ask_user performs no writes (asking a question mutates nothing), so
 // the disposition runs it freely in every mode — including Plan.
@@ -61,9 +57,9 @@ func (t *AskUser) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return domain.ToolResult{}, err
 	}
 
-	var args askUserArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[askUserArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.Question) == "" {
 		return errorResult(call.ID, "question is required"), nil

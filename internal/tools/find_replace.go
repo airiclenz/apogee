@@ -24,7 +24,10 @@ func countOccurrences(haystack, needle string) int {
 // single_find_and_replace
 // ----------------------------------------------------------------------------
 
-var singleFindReplaceSchema = json.RawMessage(`{
+var singleFindReplaceSpec = toolSpec{
+	name:        "single_find_and_replace",
+	description: "Find and replace text in a file. The old text must appear exactly once in the file.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "oldText", "newText"],
   "properties": {
@@ -32,7 +35,8 @@ var singleFindReplaceSchema = json.RawMessage(`{
     "oldText": {"type": "string", "description": "The exact text to find (must appear exactly once)"},
     "newText": {"type": "string", "description": "The replacement text"}
   }
-}`)
+}`),
+}
 
 type singleFindReplaceArgs struct {
 	Path    string `json:"path"`
@@ -44,21 +48,15 @@ type singleFindReplaceArgs struct {
 // requiring oldText to appear exactly once. It is a write tool scoped to a sandbox root
 // and carries the workspaceScopedWriter marker (Apogee's own path-safety-bounded write,
 // ADR 0012 D1). Ported from the oracle's find-replace-tool.
-type SingleFindReplace struct{ root string }
-
-// NewSingleFindReplace returns a single_find_and_replace tool that resolves paths within root.
-func NewSingleFindReplace(root string) *SingleFindReplace { return &SingleFindReplace{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *SingleFindReplace) Name() string { return "single_find_and_replace" }
-
-// Description returns the model-facing summary of the tool.
-func (t *SingleFindReplace) Description() string {
-	return "Find and replace text in a file. The old text must appear exactly once in the file."
+type SingleFindReplace struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *SingleFindReplace) Schema() json.RawMessage { return singleFindReplaceSchema }
+// NewSingleFindReplace returns a single_find_and_replace tool that resolves paths within root.
+func NewSingleFindReplace(root string) *SingleFindReplace {
+	return &SingleFindReplace{toolSpec: singleFindReplaceSpec, root: root}
+}
 
 // ReadOnly reports that single_find_and_replace is write-capable (domain.ReadOnlyTool):
 // it returns false, the signal the loop gates it through Approval in Ask-Before.
@@ -84,9 +82,9 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 		return domain.ToolResult{}, err
 	}
 
-	var args singleFindReplaceArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[singleFindReplaceArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil
@@ -126,7 +124,14 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 // multi_find_and_replace
 // ----------------------------------------------------------------------------
 
-var multiFindReplaceSchema = json.RawMessage(`{
+var multiFindReplaceSpec = toolSpec{
+	name: "multi_find_and_replace",
+	description: "Find and replace multiple text occurrences in a single file atomically. " +
+		"Each old text must appear exactly once at the time it is applied. " +
+		"Replacements are applied sequentially in array order. " +
+		"If any replacement fails, the file is not modified. " +
+		"Prefer this over multiple single_find_and_replace calls when making several edits to the same file.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "replacements"],
   "properties": {
@@ -145,7 +150,8 @@ var multiFindReplaceSchema = json.RawMessage(`{
       }
     }
   }
-}`)
+}`),
+}
 
 type replacement struct {
 	OldText string `json:"oldText"`
@@ -162,25 +168,15 @@ type multiFindReplaceArgs struct {
 // replacements are applied sequentially in array order, and the file is written only if
 // every replacement succeeds. It is a write tool scoped to a sandbox root and carries
 // the workspaceScopedWriter marker. Ported from the oracle's multi-find-replace-tool.
-type MultiFindReplace struct{ root string }
-
-// NewMultiFindReplace returns a multi_find_and_replace tool that resolves paths within root.
-func NewMultiFindReplace(root string) *MultiFindReplace { return &MultiFindReplace{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *MultiFindReplace) Name() string { return "multi_find_and_replace" }
-
-// Description returns the model-facing summary of the tool.
-func (t *MultiFindReplace) Description() string {
-	return "Find and replace multiple text occurrences in a single file atomically. " +
-		"Each old text must appear exactly once at the time it is applied. " +
-		"Replacements are applied sequentially in array order. " +
-		"If any replacement fails, the file is not modified. " +
-		"Prefer this over multiple single_find_and_replace calls when making several edits to the same file."
+type MultiFindReplace struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *MultiFindReplace) Schema() json.RawMessage { return multiFindReplaceSchema }
+// NewMultiFindReplace returns a multi_find_and_replace tool that resolves paths within root.
+func NewMultiFindReplace(root string) *MultiFindReplace {
+	return &MultiFindReplace{toolSpec: multiFindReplaceSpec, root: root}
+}
 
 // ReadOnly reports that multi_find_and_replace is write-capable (domain.ReadOnlyTool).
 func (t *MultiFindReplace) ReadOnly() bool { return false }
@@ -203,9 +199,9 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 		return domain.ToolResult{}, err
 	}
 
-	var args multiFindReplaceArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[multiFindReplaceArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil

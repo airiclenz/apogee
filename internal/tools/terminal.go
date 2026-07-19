@@ -12,7 +12,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var terminalSchema = json.RawMessage(`{
+var terminalSpec = toolSpec{
+	name:        "terminal",
+	description: "Run a shell command line and capture its output and exit code. One-shot (a fresh process per call); supports pipes, redirection, and globbing through the platform shell.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["command"],
   "properties": {
@@ -20,7 +23,8 @@ var terminalSchema = json.RawMessage(`{
     "workdir": {"type": "string", "description": "Optional working directory (relative to the workspace root or absolute)"},
     "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default 120, max 600)"}
   }
-}`)
+}`),
+}
 
 type terminalArgs struct {
 	Command        string `json:"command"`
@@ -35,21 +39,13 @@ type terminalArgs struct {
 // unavailable ("confine if you can, gate if you can't"). It is stateless across Turns
 // (ADR 0008) — a fresh process per call, no persistent shell — and is path-scoped to root
 // for its working directory.
-type Terminal struct{ root string }
-
-// NewTerminal returns a terminal tool whose working directory resolves within root.
-func NewTerminal(root string) *Terminal { return &Terminal{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *Terminal) Name() string { return "terminal" }
-
-// Description returns the model-facing summary of the tool.
-func (t *Terminal) Description() string {
-	return "Run a shell command line and capture its output and exit code. One-shot (a fresh process per call); supports pipes, redirection, and globbing through the platform shell."
+type Terminal struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *Terminal) Schema() json.RawMessage { return terminalSchema }
+// NewTerminal returns a terminal tool whose working directory resolves within root.
+func NewTerminal(root string) *Terminal { return &Terminal{toolSpec: terminalSpec, root: root} }
 
 // ReadOnly reports that terminal is write-capable (false) — a shell command can write, so
 // the loop must gate/confine it rather than running it freely.
@@ -68,9 +64,9 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return domain.ToolResult{}, err
 	}
 
-	var args terminalArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[terminalArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.Command) == "" {
 		return errorResult(call.ID, "command is required"), nil

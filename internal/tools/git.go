@@ -101,7 +101,10 @@ func gitResultText(res subprocessResult, successFallback string) string {
 // git_branch — create / switch / list / delete
 // ----------------------------------------------------------------------------
 
-var gitBranchSchema = json.RawMessage(`{
+var gitBranchSpec = toolSpec{
+	name:        "git_branch",
+	description: "Manage git branches: create, switch, list, or delete. Uses safe delete (-d) which refuses to delete unmerged branches. Deletion of main/master/develop is blocked.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["action"],
   "properties": {
@@ -109,7 +112,8 @@ var gitBranchSchema = json.RawMessage(`{
     "name": {"type": "string", "description": "Branch name (required for create, switch, delete)"},
     "start_point": {"type": "string", "description": "Starting point for create (commit, tag, or branch). Default: HEAD"}
   }
-}`)
+}`),
+}
 
 type gitBranchArgs struct {
 	Action     string `json:"action"`
@@ -127,21 +131,13 @@ var protectedBranches = map[string]bool{
 // git, scoped to a workspace root. Deletion uses the safe `-d` (which refuses an
 // unmerged branch) and is blocked outright for the protected mainline branches. It
 // is a SubprocessTool the disposition confines in Auto.
-type GitBranch struct{ root string }
-
-// NewGitBranch returns a git-branch tool operating in root.
-func NewGitBranch(root string) *GitBranch { return &GitBranch{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *GitBranch) Name() string { return "git_branch" }
-
-// Description returns the model-facing summary of the tool.
-func (t *GitBranch) Description() string {
-	return "Manage git branches: create, switch, list, or delete. Uses safe delete (-d) which refuses to delete unmerged branches. Deletion of main/master/develop is blocked."
+type GitBranch struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *GitBranch) Schema() json.RawMessage { return gitBranchSchema }
+// NewGitBranch returns a git-branch tool operating in root.
+func NewGitBranch(root string) *GitBranch { return &GitBranch{toolSpec: gitBranchSpec, root: root} }
 
 // ReadOnly reports that git_branch is write-capable (false): create/switch/delete
 // mutate the repository.
@@ -160,9 +156,9 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return domain.ToolResult{}, err
 	}
 
-	var args gitBranchArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[gitBranchArgs](call)
+	if !ok {
+		return fail, nil
 	}
 
 	gitArgs, errMsg := buildBranchArgs(args)
@@ -255,7 +251,10 @@ func branchSuccessMessage(args gitBranchArgs) string {
 // git_commit — stage and commit
 // ----------------------------------------------------------------------------
 
-var gitCommitSchema = json.RawMessage(`{
+var gitCommitSpec = toolSpec{
+	name:        "git_commit",
+	description: "Stage files and create a git commit. If files are specified they are staged first; otherwise commits whatever is currently staged. Amend is blocked on published commits to prevent divergent history.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["message"],
   "properties": {
@@ -264,7 +263,8 @@ var gitCommitSchema = json.RawMessage(`{
     "amend": {"type": "boolean", "description": "Amend the previous commit (blocked on published commits)"},
     "allow_empty": {"type": "boolean", "description": "Allow creating an empty commit"}
   }
-}`)
+}`),
+}
 
 type gitCommitArgs struct {
 	Message    string   `json:"message"`
@@ -277,21 +277,13 @@ type gitCommitArgs struct {
 // scoped to a workspace root. Amend is blocked on a commit already pushed to a
 // remote, to prevent divergent published history. It is a SubprocessTool the
 // disposition confines in Auto.
-type GitCommit struct{ root string }
-
-// NewGitCommit returns a git-commit tool operating in root.
-func NewGitCommit(root string) *GitCommit { return &GitCommit{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *GitCommit) Name() string { return "git_commit" }
-
-// Description returns the model-facing summary of the tool.
-func (t *GitCommit) Description() string {
-	return "Stage files and create a git commit. If files are specified they are staged first; otherwise commits whatever is currently staged. Amend is blocked on published commits to prevent divergent history."
+type GitCommit struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *GitCommit) Schema() json.RawMessage { return gitCommitSchema }
+// NewGitCommit returns a git-commit tool operating in root.
+func NewGitCommit(root string) *GitCommit { return &GitCommit{toolSpec: gitCommitSpec, root: root} }
 
 // ReadOnly reports that git_commit is write-capable (false): it mutates the
 // repository's index and history.
@@ -311,9 +303,9 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return domain.ToolResult{}, err
 	}
 
-	var args gitCommitArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[gitCommitArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	message := strings.TrimSpace(args.Message)
 	if message == "" {
@@ -403,7 +395,10 @@ func commitIsPublished(refDecoration string) bool {
 // git_diff_range — diff between two refs
 // ----------------------------------------------------------------------------
 
-var gitDiffRangeSchema = json.RawMessage(`{
+var gitDiffRangeSpec = toolSpec{
+	name:        "git_diff_range",
+	description: "Show the diff between two git refs (commits, branches, or tags). Uses three-dot diff to show what changed on the head ref since it diverged from the base ref.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["base", "head"],
   "properties": {
@@ -413,7 +408,8 @@ var gitDiffRangeSchema = json.RawMessage(`{
     "stat": {"type": "boolean", "description": "Show diffstat summary instead of full diff (default: false)"},
     "name_only": {"type": "boolean", "description": "Show only names of changed files (default: false)"}
   }
-}`)
+}`),
+}
 
 type gitDiffRangeArgs struct {
 	Base     string   `json:"base"`
@@ -431,21 +427,15 @@ var validRef = regexp.MustCompile(`^[a-zA-Z0-9._\-/~^@{}]+$`)
 // GitDiffRange shows the three-dot diff between two refs (what changed on head
 // since it diverged from base) over the system git, scoped to a workspace root. It
 // is read-only — it never mutates the repository.
-type GitDiffRange struct{ root string }
-
-// NewGitDiffRange returns a git-diff-range tool operating in root.
-func NewGitDiffRange(root string) *GitDiffRange { return &GitDiffRange{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *GitDiffRange) Name() string { return "git_diff_range" }
-
-// Description returns the model-facing summary of the tool.
-func (t *GitDiffRange) Description() string {
-	return "Show the diff between two git refs (commits, branches, or tags). Uses three-dot diff to show what changed on the head ref since it diverged from the base ref."
+type GitDiffRange struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *GitDiffRange) Schema() json.RawMessage { return gitDiffRangeSchema }
+// NewGitDiffRange returns a git-diff-range tool operating in root.
+func NewGitDiffRange(root string) *GitDiffRange {
+	return &GitDiffRange{toolSpec: gitDiffRangeSpec, root: root}
+}
 
 // ReadOnly reports that git_diff_range performs no writes — it runs in Plan and is
 // never gated/confined as a write (a diff is harmless inspection).
@@ -465,9 +455,9 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 		return domain.ToolResult{}, err
 	}
 
-	var args gitDiffRangeArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[gitDiffRangeArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.Base) == "" {
 		return errorResult(call.ID, "base ref is required"), nil

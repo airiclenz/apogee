@@ -18,13 +18,19 @@ import (
 // without importing an unexported constant.
 const SubAgentToolName = "sub_agent"
 
-var subAgentSchema = json.RawMessage(`{
+var subAgentSpec = toolSpec{
+	name: SubAgentToolName,
+	description: "Delegate a focused sub-task to a nested sub-agent. The sub-agent runs with the " +
+		"same (or stricter) privileges as you, has a subset of your tools, and reports a " +
+		"single result back. Use it to isolate a self-contained piece of work.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["task"],
   "properties": {
     "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."}
   }
-}`)
+}`),
+}
 
 // SubAgentArgs is the sub_agent tool's argument shape: a single self-contained task string.
 // It is exported so the dispatch layer parses the delegated task without re-declaring the
@@ -44,25 +50,12 @@ type SubAgentArgs struct {
 //
 // Execute returns an error result so a misconfigured wiring (the tool reached as a leaf
 // because dispatch did not special-case it) fails loudly rather than silently no-op'ing.
-type SubAgent struct{}
+type SubAgent struct{ toolSpec }
 
 // NewSubAgent returns the sub_agent placeholder tool. The orchestrator (internal/agent)
 // supplies the real nested-agent execution; this value only carries the model-facing menu
 // entry and is the registry handle Subset narrows on.
-func NewSubAgent() *SubAgent { return &SubAgent{} }
-
-// Name returns the stable identifier the model calls and dispatch keys the recursion point on.
-func (t *SubAgent) Name() string { return SubAgentToolName }
-
-// Description returns the model-facing summary of the delegation tool.
-func (t *SubAgent) Description() string {
-	return "Delegate a focused sub-task to a nested sub-agent. The sub-agent runs with the " +
-		"same (or stricter) privileges as you, has a subset of your tools, and reports a " +
-		"single result back. Use it to isolate a self-contained piece of work."
-}
-
-// Schema returns the JSON schema of the tool's arguments.
-func (t *SubAgent) Schema() json.RawMessage { return subAgentSchema }
+func NewSubAgent() *SubAgent { return &SubAgent{toolSpec: subAgentSpec} }
 
 // Execute is never reached on the real path: dispatch recognises SubAgentToolName as the
 // recursion point and drives a nested Agent instead. Reaching it means the recursion point

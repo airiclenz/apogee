@@ -16,7 +16,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-var grepSchema = json.RawMessage(`{
+var grepSpec = toolSpec{
+	name:        "grep",
+	description: "Search workspace files for lines matching a regular expression. Returns file:line:text matches.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["pattern"],
   "properties": {
@@ -26,7 +29,8 @@ var grepSchema = json.RawMessage(`{
     "max_results": {"type": "integer", "description": "Maximum matches to return (default 50)"},
     "offset": {"type": "integer", "description": "Number of matches to skip for pagination (default 0)"}
   }
-}`)
+}`),
+}
 
 type grepArgs struct {
 	Pattern    string `json:"pattern"`
@@ -53,21 +57,13 @@ var errGrepStop = errors.New("grep: match cap reached")
 // Grep searches workspace files for lines matching a regular expression, in pure Go
 // (io/fs walk + regexp — no external grep, §3a). It is a read-only tool scoped to a
 // sandbox root.
-type Grep struct{ root string }
-
-// NewGrep returns a grep tool that resolves paths within root.
-func NewGrep(root string) *Grep { return &Grep{root: root} }
-
-// Name returns the stable identifier the model calls.
-func (t *Grep) Name() string { return "grep" }
-
-// Description returns the model-facing summary of the tool.
-func (t *Grep) Description() string {
-	return "Search workspace files for lines matching a regular expression. Returns file:line:text matches."
+type Grep struct {
+	toolSpec
+	root string
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *Grep) Schema() json.RawMessage { return grepSchema }
+// NewGrep returns a grep tool that resolves paths within root.
+func NewGrep(root string) *Grep { return &Grep{toolSpec: grepSpec, root: root} }
 
 // ReadOnly reports that grep performs no writes (domain.ReadOnlyTool).
 func (t *Grep) ReadOnly() bool { return true }
@@ -80,9 +76,9 @@ func (t *Grep) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolRe
 		return domain.ToolResult{}, err
 	}
 
-	var args grepArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[grepArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if args.Pattern == "" {
 		return errorResult(call.ID, "pattern is required"), nil

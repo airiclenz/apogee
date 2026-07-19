@@ -13,7 +13,10 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-var httpRequestSchema = json.RawMessage(`{
+var httpRequestSpec = toolSpec{
+	name:        "http_request",
+	description: "Make an http(s) request with a chosen method, headers, and body, and return the response status, headers, and body. Use this for API calls (POST/PUT/etc.). Blocked URLs (loopback, private, or metadata addresses, and disallowed hosts) and unsupported methods are refused.",
+	schema: json.RawMessage(`{
   "type": "object",
   "required": ["url"],
   "properties": {
@@ -23,7 +26,8 @@ var httpRequestSchema = json.RawMessage(`{
     "body": {"type": "string", "description": "Optional request body (sent as-is for POST/PUT/PATCH)."},
     "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default 30, max 120)."}
   }
-}`)
+}`),
+}
 
 type httpRequestArgs struct {
 	URL            string            `json:"url"`
@@ -74,21 +78,15 @@ var deniedRequestHeaders = map[string]bool{
 // response status, a stable header subset, and the (capped) body. It is an ExternalEffectTool
 // of kind network, filtered by the same URLGuard (scheme/host + SSRF floor, pre-flight and at
 // dial time) as web_fetch. Stateless across Turns (ADR 0008).
-type HTTPRequest struct{ guard security.URLGuard }
-
-// NewHTTPRequest returns an http_request tool that filters every URL through guard.
-func NewHTTPRequest(guard security.URLGuard) *HTTPRequest { return &HTTPRequest{guard: guard} }
-
-// Name returns the stable identifier the model calls.
-func (t *HTTPRequest) Name() string { return "http_request" }
-
-// Description returns the model-facing summary of the tool.
-func (t *HTTPRequest) Description() string {
-	return "Make an http(s) request with a chosen method, headers, and body, and return the response status, headers, and body. Use this for API calls (POST/PUT/etc.). Blocked URLs (loopback, private, or metadata addresses, and disallowed hosts) and unsupported methods are refused."
+type HTTPRequest struct {
+	toolSpec
+	guard security.URLGuard
 }
 
-// Schema returns the JSON schema of the tool's arguments.
-func (t *HTTPRequest) Schema() json.RawMessage { return httpRequestSchema }
+// NewHTTPRequest returns an http_request tool that filters every URL through guard.
+func NewHTTPRequest(guard security.URLGuard) *HTTPRequest {
+	return &HTTPRequest{toolSpec: httpRequestSpec, guard: guard}
+}
 
 // ExternalEffect reports that http_request reaches the network (kind network).
 func (t *HTTPRequest) ExternalEffect() domain.ExternalEffectKind { return domain.EffectNetwork }
@@ -100,9 +98,9 @@ func (t *HTTPRequest) Execute(ctx context.Context, call domain.ToolCall) (domain
 		return domain.ToolResult{}, err
 	}
 
-	var args httpRequestArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return errorResult(call.ID, "invalid arguments: "+err.Error()), nil
+	args, fail, ok := decodeToolArgs[httpRequestArgs](call)
+	if !ok {
+		return fail, nil
 	}
 	if strings.TrimSpace(args.URL) == "" {
 		return errorResult(call.ID, "url is required"), nil
