@@ -10,6 +10,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`/new` — start a fresh conversation (alias of `/clear`).** The TUI chat mini-language now
+  recognises `/new` as an alias of `/clear`: the parser accepts it as its own verb and `runCommand`
+  routes it through the same synchronous context reset (`Engine.ClearContext`, staying idle, no
+  worker), and the `/` autocomplete menu offers it. Purely additive — `/clear`'s behaviour is
+  unchanged. (`internal/tui`.)
 - **The Validated-set runtime surface (ADR 0016).** A per-model Mechanism set that passed the
   non-inferiority gate on a model now reaches users at startup: `cmd/apogee` matches the resolved
   model fingerprint against Validated-set entries — shipped with the binary

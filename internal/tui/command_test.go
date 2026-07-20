@@ -15,6 +15,7 @@ func TestParseInputCommands(t *testing.T) {
 		verb string
 	}{
 		{"/clear", "clear"},
+		{"/new", "new"}, // alias of /clear — recognised as its own verb, routed to the same logic
 		{"/compact", "compact"},
 		{"/continue", "continue"},
 		{"  /clear  ", "clear"},        // surrounding whitespace is trimmed

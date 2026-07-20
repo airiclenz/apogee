@@ -513,8 +513,8 @@ func (m Model) skillDisplayNames(ids []string) []string {
 
 // runCommand handles a recognised local /command from the idle state. /continue and /compact
 // open a worker: /continue a canned "Please continue" turn, /compact a generative summary
-// call; /clear acts on the engine's context synchronously and stays idle, recording a
-// transcript note. The input box and the autocomplete overlay are cleared either way. Reached
+// call; /clear (and its alias /new) acts on the engine's context synchronously and stays idle,
+// recording a transcript note. The input box and the autocomplete overlay are cleared either way. Reached
 // only from submit (stateIdle), so the engine is quiescent — no worker owns it — and
 // ClearContext/Compact are safe to launch here.
 func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
@@ -536,9 +536,9 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 		m.state = stateRunning
 		return m, tea.Batch(cmd, m.spinner.Tick)
 
-	case "clear":
-		// Clearing the model's memory also drops the staged chips — they belonged to the turn
-		// being abandoned.
+	case "clear", "new":
+		// /new is an alias of /clear: both reset the engine's context here. Clearing the model's
+		// memory also drops the staged chips — they belonged to the turn being abandoned.
 		m.pendingSkills = nil
 		if err := m.eng.ClearContext(); err != nil {
 			m.transcript.addNote("could not clear context: " + err.Error())

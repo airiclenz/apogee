@@ -137,6 +137,7 @@ type commandMenuItem struct {
 // selectSkill. Keeping it out of knownCommands is what keeps an unknown "/skill foo" a message.
 var commandMenu = []commandMenuItem{
 	{name: "clear", summary: "reset the model's memory of this session"},
+	{name: "new", summary: "start a fresh conversation (same as /clear)"},
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "skill", summary: "attach a skill to your next message"},

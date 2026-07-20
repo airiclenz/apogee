@@ -34,10 +34,12 @@ type parsedInput struct {
 // knownCommands is the recognised /command set for this slice, in display order. The parser
 // intercepts a line only when its first whitespace token is exactly "/<verb>" for a verb in
 // this set; any other slash-prefixed line is treated as an ordinary message (never silently
-// swallowed). The autocomplete overlay offers a superset: it also offers /skill, which attaches
-// via the picker and is deliberately not parsed as a command (see commandMenu in autocomplete.go).
-// /server is deferred (it needs a swappable provider seam) and so is absent here.
-var knownCommands = []string{"clear", "compact", "continue"}
+// swallowed). /new is an alias of /clear — both verbs are recognised here and route to the same
+// context-reset logic in runCommand. The autocomplete overlay offers a superset: it also offers
+// /skill, which attaches via the picker and is deliberately not parsed as a command (see
+// commandMenu in autocomplete.go). /server is deferred (it needs a swappable provider seam) and
+// so is absent here.
+var knownCommands = []string{"clear", "new", "compact", "continue"}
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text
 // (the caller ignores it).
@@ -51,7 +53,7 @@ func parseInput(raw string) parsedInput {
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is
-// "/<verb>" for a known verb. Trailing arguments are ignored (the three commands take none).
+// "/<verb>" for a known verb. Trailing arguments are ignored (the recognised commands take none).
 func matchCommand(trimmed string) (string, bool) {
 	if !strings.HasPrefix(trimmed, "/") {
 		return "", false

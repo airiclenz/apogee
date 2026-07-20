@@ -61,6 +61,29 @@ func TestClearCommandClearsEngineKeepsTranscript(t *testing.T) {
 	}
 }
 
+func TestNewCommandAliasesClear(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("/new")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if eng.clearCalls != 1 {
+		t.Errorf("ClearContext calls = %d, want 1 (/new must forward to the same clear logic)", eng.clearCalls)
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want idle (/new must not launch a worker)", m.state)
+	}
+	if cmd != nil {
+		t.Error("/new returned a Cmd; it should not launch a worker")
+	}
+	if v := m.input.Value(); v != "" {
+		t.Errorf("input not cleared: %q", v)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "context cleared") {
+		t.Errorf("transcript missing the cleared note:\n%s", got)
+	}
+}
+
 func TestClearCommandSurfacesEngineError(t *testing.T) {
 	eng := &fakeEngine{clearFn: func() error { return domain.ErrInputPending }}
 	m := newTestModelEng(t, eng, testOpts)
@@ -264,6 +287,16 @@ func TestComputeAutocompleteNarrowsAndExact(t *testing.T) {
 	m.input.SetValue("hello there")
 	if ac := m.computeAutocomplete(); ac.active {
 		t.Error("plain text opened the overlay")
+	}
+}
+
+func TestComputeAutocompleteOffersNewAlias(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("/n") // only "new" begins with "n"
+	ac := m.computeAutocomplete()
+
+	if len(ac.items) != 1 || ac.items[0].value != "new" {
+		t.Fatalf("suggestions = %v, want [new]", ac.items)
 	}
 }
 

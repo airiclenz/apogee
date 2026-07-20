@@ -43,7 +43,7 @@
 // command.go is a pure [parseInput] that classifies a line as a local /command or an agent
 // message and extracts @file references; autocomplete.go is the suggestion overlay (commands on
 // "/", a bounded os.Root workspace-file listing on "@") rendered above the input like the
-// approval-prompt slot. /clear and /compact drive the engine's context seams
+// approval-prompt slot. /clear (aliased by /new) and /compact drive the engine's context seams
 // ([Engine.ClearContext]/[Engine.Compact]); @file *resolution* stays in the agent loop (reusing
 // the workspace fence), so the TUI only parses references — it never reads files itself.
 //
