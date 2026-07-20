@@ -91,3 +91,12 @@ is not the sum of the parts** (Mechanisms interact — tied to the order-sensiti
   [ADR 0008](0008-stateless-tools-and-non-forkable-external-effects.md)) is load-bearing *for
   this ADR*: live external flakiness would widen the A/A noise floor and pollute δ.
 - This rule governs Phase 4 end-to-end; the Mechanism catalogue is whatever survives it.
+
+## Refinements
+
+- 2026-07-20: the frozen-suite clause is refined by apogee-sim ADR 0014 (the suite is a
+  class-wide **Task Pool**; the model-relative discriminating band is a **Band**, measured
+  per model by a contrast-blind pre-registered rule, never hand-picked) and the ordinal
+  endpoint by apogee-sim ADR 0015 (the per-task ordinal is the acceptance-suite pass
+  fraction, replacing the letter-grade numeric). The gate, selection, δ, and
+  multiple-comparison machinery above are unchanged.
