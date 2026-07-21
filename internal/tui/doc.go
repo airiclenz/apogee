@@ -44,7 +44,11 @@
 // message and extracts @file references; autocomplete.go is the suggestion overlay (commands on
 // "/", a bounded os.Root workspace-file listing on "@") rendered above the input like the
 // approval-prompt slot. /clear (aliased by /new) and /compact drive the engine's context seams
-// ([Engine.ClearContext]/[Engine.Compact]); @file *resolution* stays in the agent loop (reusing
+// ([Engine.ClearContext]/[Engine.Compact]); /confine reports and toggles Auto's blast radius
+// through [Engine.SetConfineToWorkspace], the one verb that takes arguments ([parseConfine] owns
+// its "status | off [--save] | on" grammar, and an argument it does not understand is a parse
+// error carrying the usage line — never a silent no-op on the command that widens what Auto may
+// touch); @file *resolution* stays in the agent loop (reusing
 // the workspace fence), so the TUI only parses references — it never reads files itself.
 //
 // The /skill flow (post-v1 apogee-code feature-parity) extends the same overlay without

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +19,7 @@ func TestParseInputCommands(t *testing.T) {
 		{"/new", "new"}, // alias of /clear — recognised as its own verb, routed to the same logic
 		{"/compact", "compact"},
 		{"/continue", "continue"},
+		{"/confine", "confine"},
 		{"  /clear  ", "clear"},        // surrounding whitespace is trimmed
 		{"/clear extra args", "clear"}, // trailing args ignored (these commands take none)
 	}
@@ -75,6 +77,73 @@ func TestExtractFileRefs(t *testing.T) {
 			_, refs := extractFileRefs(c.in)
 			if !reflect.DeepEqual(refs, c.want) {
 				t.Errorf("extractFileRefs(%q) = %v, want %v", c.in, refs, c.want)
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /confine — the one verb with arguments
+// ----------------------------------------------------------------------------
+
+func TestParseInputConfineGrammar(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want confineArgs
+	}{
+		{"bare is status", "/confine", confineArgs{action: confineStatus}},
+		{"explicit status", "/confine status", confineArgs{action: confineStatus}},
+		{"off is session-only", "/confine off", confineArgs{action: confineOff}},
+		{"off saves the host", "/confine off --save", confineArgs{action: confineOff, save: true}},
+		{"on re-confines", "/confine on", confineArgs{action: confineOn}},
+		{"whitespace tolerated", "  /confine   off   --save  ", confineArgs{action: confineOff, save: true}},
+		{"tab separated", "/confine\toff", confineArgs{action: confineOff}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseInput(c.in)
+			if got.kind != kindCommand || got.command != "confine" {
+				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the confine command", c.in, got.kind, got.command)
+			}
+			if got.err != nil {
+				t.Fatalf("parseInput(%q).err = %v, want nil", c.in, got.err)
+			}
+			if got.confine != c.want {
+				t.Errorf("parseInput(%q).confine = %+v, want %+v", c.in, got.confine, c.want)
+			}
+		})
+	}
+}
+
+func TestParseInputConfineArgumentErrors(t *testing.T) {
+	// Every bad-argument form stays a COMMAND carrying an error, so the router can report the
+	// usage line: neither swallowed silently nor forwarded to the agent as a message.
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"unknown subcommand", "/confine sideways"},
+		{"unknown flag", "/confine off --force"},
+		{"save without a subcommand", "/confine --save"},
+		{"save on status", "/confine status --save"},
+		{"save on on", "/confine on --save"},
+		{"stray argument", "/confine off please"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseInput(c.in)
+			if got.kind != kindCommand || got.command != "confine" {
+				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the confine command", c.in, got.kind, got.command)
+			}
+			if got.err == nil {
+				t.Fatalf("parseInput(%q).err = nil, want an argument error", c.in)
+			}
+			if !strings.Contains(got.err.Error(), confineUsage) {
+				t.Errorf("parseInput(%q).err = %q, want it to carry %q", c.in, got.err, confineUsage)
+			}
+			if got.confine != (confineArgs{}) {
+				t.Errorf("parseInput(%q).confine = %+v, want the zero value on an error", c.in, got.confine)
 			}
 		})
 	}

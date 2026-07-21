@@ -69,6 +69,18 @@ point is a **minor** bump, not a breaking change.
   public surface only *gains* methods (additive ⇒ **minor**, the same shape as the `Budget`
   methods in `v1.4.0`); nothing exported is removed or re-typed and no facade edit was needed.
   (`internal/agent`.)
+- **`/confine` — the chat mini-language's blast-radius verb.** The TUI parser now recognises
+  `/confine [status]` (report the backend, its capabilities, and the effective setting),
+  `/confine off` (run Auto unconfined **for this session only** — nothing is written),
+  `/confine off --save` (and remember this host in `~/.apogee/config.yaml`), and `/confine on`
+  (re-enable confinement). It is the first verb that takes arguments, so `matchCommand` now hands
+  them to the parser and `parseConfine` owns the grammar; the `/` autocomplete menu offers
+  `/confine`, and `Engine` gained `SetConfineToWorkspace` beside `SetMode`. An argument the
+  grammar does not understand — an unknown subcommand, an unknown flag, or a `--save` that is not
+  persisting an `off` — is a parse **error carrying the usage line**, never a silent no-op: the
+  one command that can widen what Auto may touch must never leave a user believing a mistyped
+  line took effect. This lands the surface; the routing and the confirmation wording follow.
+  (`internal/tui`.)
 
 ## [1.5.0] — 2026-07-21
 

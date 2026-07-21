@@ -140,6 +140,7 @@ var commandMenu = []commandMenuItem{
 	{name: "new", summary: "start a fresh conversation (same as /clear)"},
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "continue", summary: "ask the model to keep going"},
+	{name: "confine", summary: "report or change auto mode's blast radius"},
 	{name: "skill", summary: "attach a skill to your next message"},
 }
 

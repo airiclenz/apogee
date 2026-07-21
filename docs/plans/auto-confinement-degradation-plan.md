@@ -273,7 +273,22 @@ Commit: `feat(agent): SetConfineToWorkspace — runtime toggle mirroring SetMode
 
 ---
 
-## 6. The `/confine` command — parse, autocomplete, docs
+## 6. The `/confine` command — parse, autocomplete, docs — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): four shaping choices the item's text left open, all inside its `internal/tui`
+diff allowance. (a) The parse result rides on `parsedInput`, which gains `confine confineArgs`
+(the `status|off|on` action plus the `--save` bit) and `err error`; a bad-argument line stays a
+`kindCommand` carrying the error, so item 7 can report the usage line rather than the parser
+demoting it to a message. (b) `matchCommand` now returns the argument tokens
+(`(verb string, args []string, ok bool)`) — `/confine` is the first verb that takes any — and it
+still delimits the verb on space/tab only, never a newline, so a multi-line message whose first
+line is `/clear` keeps parsing as a message exactly as before. Arguments remain ignored for every
+other verb. (c) `/confine off please` (a stray non-flag word) is rejected by the same branch as an
+unknown flag, worded "unrecognised /confine argument", rather than growing a second error shape.
+(d) The `Engine` seam gains **only** `SetConfineToWorkspace`, as the item's text says; the
+`ConfineToWorkspace()` accessor item 5 exported for `/confine status` is left to item 7, which
+owns the status report and shares the `internal/tui` allowance. Consequence of the parse/route
+split: until item 7 lands, a `/confine` line is recognised, clears the input, and does nothing.
 
 Follow commit `5f6209a` (`/new`) as the worked example of adding a verb; it touched exactly
 `command.go`, `autocomplete.go`, `doc.go`, and the three test files.

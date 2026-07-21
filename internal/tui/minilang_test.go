@@ -262,7 +262,7 @@ func drainCmd(t *testing.T, m Model, cmd tea.Cmd) {
 
 func TestComputeAutocompleteCommands(t *testing.T) {
 	m := newTestModel(t)
-	m.input.SetValue("/c") // clear, compact, continue all start with "c"
+	m.input.SetValue("/c") // clear, compact, continue, confine all start with "c"
 	ac := m.computeAutocomplete()
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
@@ -271,8 +271,8 @@ func TestComputeAutocompleteCommands(t *testing.T) {
 	for _, it := range ac.items {
 		got = append(got, it.value)
 	}
-	if !reflect.DeepEqual(got, []string{"clear", "compact", "continue"}) {
-		t.Errorf("suggestions = %v, want all three commands", got)
+	if !reflect.DeepEqual(got, []string{"clear", "compact", "continue", "confine"}) {
+		t.Errorf("suggestions = %v, want every c-command in menu order", got)
 	}
 }
 
@@ -297,6 +297,41 @@ func TestComputeAutocompleteOffersNewAlias(t *testing.T) {
 
 	if len(ac.items) != 1 || ac.items[0].value != "new" {
 		t.Fatalf("suggestions = %v, want [new]", ac.items)
+	}
+}
+
+func TestComputeAutocompleteOffersConfine(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("/conf") // only "confine" begins with "conf"
+	ac := m.computeAutocomplete()
+
+	if len(ac.items) != 1 || ac.items[0].value != "confine" {
+		t.Fatalf("suggestions = %v, want [confine]", ac.items)
+	}
+	if !strings.Contains(ac.items[0].label, "/confine") {
+		t.Errorf("label = %q, want it to show the verb", ac.items[0].label)
+	}
+}
+
+func TestConfineArgumentErrorNeverTouchesTheEngine(t *testing.T) {
+	// A mistyped /confine line is reported, never acted on: the one command that can widen
+	// Auto's blast radius must not toggle anything the user did not spell correctly.
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("/confine sideways")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if got := eng.confinesSet(); len(got) != 0 {
+		t.Errorf("SetConfineToWorkspace calls = %v, want none on a parse error", got)
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want idle (/confine must not launch a worker)", m.state)
+	}
+	if cmd != nil {
+		t.Error("/confine returned a Cmd; it should not launch a worker")
+	}
+	if got := eng.submits(); got != 0 {
+		t.Errorf("Submit calls = %d, want 0 (a bad /confine is not forwarded to the agent)", got)
 	}
 }
 

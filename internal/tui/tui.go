@@ -56,6 +56,14 @@ type Engine interface {
 	// the UI may call it while the worker drives a Step; the change takes effect on the next
 	// tool call.
 	SetMode(domain.Mode)
+	// SetConfineToWorkspace changes Auto's blast radius (the /confine off|on command): true —
+	// the default — fences confinable subprocess writes to the workspace and gates through
+	// Approval what cannot be fenced, while false is the user's explicit "I am the sandbox" and
+	// runs every call unconfined with their full privileges (ADR 0012). Like SetMode it is
+	// goroutine-safe, so the UI may call it while the worker drives a Step; the change takes
+	// effect on the next tool call and affects only this Session — persisting the host
+	// acknowledgement is the binary's job, not the engine's.
+	SetConfineToWorkspace(bool)
 	// Close releases the Agent's resources.
 	Close() error
 }

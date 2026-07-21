@@ -113,6 +113,7 @@ type fakeEngine struct {
 	submitted    []domain.UserInput
 	stepCalls    int
 	modeSet      []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
+	confineSet   []bool        // records SetConfineToWorkspace calls (the /confine command)
 	clearCalls   int           // records ClearContext calls (the /clear command)
 	abortCalls   int           // records AbortExchange calls (discarding a cancelled Exchange)
 	compactCalls int           // records Compact calls (the /compact command)
@@ -194,6 +195,20 @@ func (f *fakeEngine) modesSet() []domain.Mode {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]domain.Mode(nil), f.modeSet...)
+}
+
+func (f *fakeEngine) SetConfineToWorkspace(confine bool) {
+	f.mu.Lock()
+	f.confineSet = append(f.confineSet, confine)
+	f.mu.Unlock()
+}
+
+// confinesSet reports the blast-radius values SetConfineToWorkspace was called with, in order —
+// empty when the UI never drove it (what a parse-only /confine line must leave behind).
+func (f *fakeEngine) confinesSet() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.confineSet...)
 }
 
 // submits reports how many times Submit was called.
