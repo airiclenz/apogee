@@ -226,7 +226,19 @@ Commit: `feat(tui): group consecutive same-label tool calls into one aligned blo
 
 ---
 
-## 5. Closeout — whole-transcript golden pass and doc sweep
+## 5. Closeout — whole-transcript golden pass and doc sweep — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): three deviations. (a) The golden asserts on `renderPlain`'s output rather
+than an `ansi.Strip` call directly — the same stripped surface, via the helper items 3–4 already
+standardised on (`ansiPattern`, `model_test.go:74`), which also trims the user block's full-width
+padding. (b) The sweep found **no** stale look-description in live docs: the only `bracket` hits
+are the plan's own problem statement, an unrelated diagnostics-table row, `code-review-2026-07-04`'s
+"R4 bracket", and `doc.go`'s `[Run]` godoc links (excluded by the item). Archived docs
+(`docs/handoffs/archived/2026-06-24 - 02 - …`) still show the bracketed look and were left alone:
+they are dated records of what shipped then, not descriptions of the current look. (c) The sweep
+target `internal/tui/doc.go` gained a short paragraph describing this pass — the package doc
+records every previous presentation pass (P2.7, P3.14), so leaving the newest one absent would have
+been the gap a closeout exists to close.
 
 - One integration-level test rendering a realistic mixed transcript through `renderLines` — user
   prompt, narration with trailing `\n\n`, a three-read group, a standalone `Run` with multi-line

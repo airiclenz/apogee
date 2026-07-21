@@ -8,8 +8,9 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
-Post-`v1.5.0`, **additive** (minor) — one feature, end to end: **Auto mode no longer degrades in
-silence.** On a host that cannot fence a subprocess, ADR 0012's ladder ("confine if you can, gate
+Post-`v1.5.0`, **additive** (minor) — one feature end to end, plus a presentation pass over how the
+chat reads. First the feature: **Auto mode no longer degrades in silence.** On a host that cannot
+fence a subprocess, ADR 0012's ladder ("confine if you can, gate
 if you can't") sends every terminal command to Approval. That is correct, and it is the *common*
 case rather than an exotic one — `landlock_create_ruleset` returns **`ENOSYS`** in most containers
 whatever the kernel version — but nothing anywhere said so, so Auto simply read as broken
@@ -23,6 +24,17 @@ only the user may take (ADR 0012, amendment 2026-07-21). **No breaking change** 
 (additive ⇒ **minor**, the same shape as the `Budget` methods in `v1.4.0`); nothing exported is
 removed or re-typed. The whole journey is pinned by an acceptance test driven against a Confiner
 that reports no filesystem confinement, so it reproduces identically on a machine that *can* fence.
+
+Alongside it, a **presentation-only pass over the transcript layout** (`layout.md` is the amended
+spec of record): assistant text no longer drags the model's own padding blank lines into the
+scrollback, a tool header trades its `[brackets]` for a bold-orange label, and a batch of
+same-label tool calls folds into one aligned block instead of five stacked ones. The three land as
+separate **Changed** entries below because each is separately visible, but they are one change to
+how a session *reads* — nothing the model sees is touched: no tool result, no event payload, no
+upstream conversation, and nothing exported. `TestTranscriptLayoutGolden` pins the whole rendered
+scrollback of a mixed session — prompt, narration, a grouped batch, a standalone `Run`, an
+approval note, a sub-agent read — blank lines included, so a regression in any one of the three
+shows up as a layout diff rather than a subtly taller chat.
 
 ### Added
 

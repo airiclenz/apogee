@@ -320,6 +320,60 @@ func TestRenderGroupBreakers(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The whole-transcript layout golden (tool-call layout item 5)
+// ----------------------------------------------------------------------------
+
+// TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
+// a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
+// output is too rich to group, an approval note, and a sub-agent read — as an exact line sequence,
+// blank lines included. It is the backstop across the three layout changes rather than a test of
+// any one of them: the blank-line hygiene shows as the single empty row between every block, the
+// bracketless bold-orange label as the header text, and the grouping as the one aligned Read File
+// block. A regression in any of them changes this golden, and the golden doubles as the living
+// example of what layout.md sketches.
+func TestTranscriptLayoutGolden(t *testing.T) {
+	tr := &transcript{}
+	tr.addUser("read the docs, then run the tests", nil)
+	tr.apply(domain.TokenEvent{Text: "Reading the docs first."})
+	tr.apply(domain.TokenEvent{Text: "\n\n"}) // the model's own padding: trimmed at commit
+	readCall(tr, "c1", "README.md", "1", "154", 0)
+	readCall(tr, "c2", "TODO.md", "1", "408", 0)
+	readCall(tr, "c3", "ISSUES.md", "1", "8", 0)
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c4", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID:  "c4",
+		Content: "ok   apogee/internal/tui     0.412s\nok   apogee/internal/agent   1.203s\nPASS\n",
+	}})
+	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
+	readCall(tr, "c5", "main.go", "1", "154", 1)
+
+	want := strings.Join([]string{
+		"❯ read the docs, then run the tests",
+		"",
+		"✦ Reading the docs first.",
+		"",
+		"✦ Read File",
+		"  ┝ README.md 1 - 154",
+		"  ┝ TODO.md   1 - 408",
+		"  ┕ ISSUES.md 1 - 8",
+		"",
+		"✦ Run go test ./...",
+		"  ┝ ok   apogee/internal/tui     0.412s",
+		"  ┕ … +2 more lines",
+		"",
+		"· approval allow: terminal",
+		"",
+		"│ ⤷ sub-agent",
+		"",
+		"│ ✦ Read File main.go",
+		"│   ┕ 1 - 154",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("transcript layout mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // inputContentRows sizes the prompt box to what the textarea actually draws
 // ----------------------------------------------------------------------------
 
