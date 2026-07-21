@@ -218,8 +218,7 @@ func renderToolBlock(th theme, views []toolView, width int) []string {
 // beneath it). Four shapes, and they are the whole grammar:
 //
 //   - one detail — the branch is the target, padded to the block's column, one space, then the
-//     detail ("┕ main.go 1 - 154"); a detail carrying its own sub-content (a diff body under a
-//     "+2 -2" summary) indents that content beneath the branch;
+//     detail ("┕ main.go 1 - 154");
 //   - two or more details — the branch carries the target alone and the details lay out beneath
 //     it at the branch marker's own width, not as ┝/┕ branches of their own (the Run case);
 //   - no detail yet (in flight) — the branch is the bare target; the block repaints whole once
