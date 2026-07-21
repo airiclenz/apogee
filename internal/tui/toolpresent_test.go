@@ -1,15 +1,20 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// detailsText joins a view's detail lines for substring assertions.
+// detailsText joins a view's whole outcome — the branch-riding summary, then the body beneath
+// it — for substring assertions that do not care which half a line landed in.
 func detailsText(tv toolView) string {
-	parts := make([]string, 0, len(tv.Details))
+	parts := make([]string, 0, len(tv.Details)+1)
+	if tv.Summary.Text != "" {
+		parts = append(parts, tv.Summary.Text)
+	}
 	for _, d := range tv.Details {
 		parts = append(parts, d.Text)
 	}
@@ -232,12 +237,97 @@ func TestPresentToolCall(t *testing.T) {
 }
 
 // An error result is summarised as an "error: …" detail rather than the tool's normal
-// summary — a normal in-band outcome the model reacts to.
+// summary — a normal in-band outcome the model reacts to. It is the *summary*, not a body
+// line, which is what keeps an errored call grouping with its neighbours.
 func TestPresentToolCallErrorResult(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "file not found: missing", IsError: true})
-	if got := detailsText(tv); !strings.Contains(got, "error: file not found: missing") {
-		t.Errorf("error result detail = %q; want the error text", got)
+	if got := tv.Summary.Text; got != "error: file not found: missing" {
+		t.Errorf("error summary = %q; want the error text", got)
+	}
+	if len(tv.Details) != 0 {
+		t.Errorf("error body = %+v; want nothing beneath the branch", tv.Details)
+	}
+	if !groupable(tv) {
+		t.Error("an errored call must still group with its neighbours")
+	}
+}
+
+// TestPresentToolCallOutcomeSplit pins which half of the outcome each kind of producer fills —
+// the split the block's shape is read off. A fixed result header is summary-only (it rides the
+// branch beside the target). Free-form command output fills the half its own size dictates:
+// output that compresses to one line (including none at all) rides the branch like any other
+// one-line outcome, while output needing the "… +N more lines" remainder is a body beneath the
+// command (layout.md's Run sketch). view_diff is the one producer filling both, a diffstat on
+// the branch over a coloured body.
+func TestPresentToolCallOutcomeSplit(t *testing.T) {
+	cases := []struct {
+		name        string
+		call        domain.ToolCall
+		result      domain.ToolResult
+		wantSummary string
+		wantBody    []string
+	}{
+		{
+			name:        "read_file is summary-only",
+			call:        domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
+			result:      domain.ToolResult{CallID: "1", Content: "[File: main.go, 154 lines total, showing lines 1-154]\npackage main"},
+			wantSummary: "1 - 154",
+		},
+		{
+			name:        "multi-line terminal output is body-only",
+			call:        domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
+			result:      domain.ToolResult{CallID: "2", Content: "ok   apogee/internal/tui   0.412s\nok   apogee/internal/agent   1.203s\nPASS"},
+			wantSummary: "",
+			wantBody:    []string{"ok   apogee/internal/tui   0.412s", "… +2 more lines"},
+		},
+		{
+			name:        "one-line terminal output is summary-only",
+			call:        domain.ToolCall{ID: "3", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)},
+			result:      domain.ToolResult{CallID: "3", Content: "abc1234\n"},
+			wantSummary: "abc1234",
+		},
+		{
+			name:        "empty terminal output is summary-only",
+			call:        domain.ToolCall{ID: "4", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
+			result:      domain.ToolResult{CallID: "4", Content: "\n"},
+			wantSummary: "(no output)",
+		},
+		{
+			name:        "view_diff is both",
+			call:        domain.ToolCall{ID: "5", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)},
+			result:      domain.ToolResult{CallID: "5", Content: "  ctx\n- old line\n+ new line"},
+			wantSummary: "+1 -1",
+			wantBody:    []string{"  ctx", "- old line", "+ new line"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tv := presentToolCall(tc.call)
+			tv.enrichWithResult(tc.result)
+			if tv.Summary.Text != tc.wantSummary {
+				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
+			}
+			body := make([]string, 0, len(tv.Details))
+			for _, d := range tv.Details {
+				body = append(body, d.Text)
+			}
+			if strings.Join(body, "\n") != strings.Join(tc.wantBody, "\n") {
+				t.Errorf("body = %q, want %q", body, tc.wantBody)
+			}
+		})
+	}
+}
+
+// A call still in flight carries neither half of an outcome, and the zero summary is plain, so
+// it groups with its finished neighbours rather than breaking their block.
+func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)})
+	if tv.Summary.Text != "" || len(tv.Details) != 0 {
+		t.Errorf("in-flight outcome = %+v / %+v; want both halves empty", tv.Summary, tv.Details)
+	}
+	if !groupable(tv) {
+		t.Error("an in-flight call must group with its neighbours")
 	}
 }
 
@@ -245,7 +335,7 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 // detailDiffAdded, "- " lines detailDiffRemoved, context plain — and a diff longer than the
 // cap is truncated with a remainder count instead of flooding the chat.
 func TestDiffDetail(t *testing.T) {
-	details := diffDetail("  ctx\n- old line\n+ new line")
+	details := diffDetail("  ctx\n- old line\n+ new line").Details
 	wantKinds := []detailKind{detailPlain, detailDiffRemoved, detailDiffAdded}
 	if len(details) != len(wantKinds) {
 		t.Fatalf("got %d detail lines, want %d: %+v", len(details), len(wantKinds), details)
@@ -257,7 +347,7 @@ func TestDiffDetail(t *testing.T) {
 	}
 
 	long := strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n")
-	capped := diffDetail(long)
+	capped := diffDetail(long).Details
 	if len(capped) != diffDetailCap+1 {
 		t.Fatalf("capped diff has %d lines, want %d", len(capped), diffDetailCap+1)
 	}
@@ -265,8 +355,57 @@ func TestDiffDetail(t *testing.T) {
 		t.Errorf("cap line = %q, want the remainder count", last)
 	}
 
-	if d := diffDetail("No changes detected"); len(d) != 1 || d[0].Kind != detailPlain {
-		t.Errorf("the no-changes sentinel must be one plain line: %+v", d)
+	sentinel := diffDetail("No changes detected")
+	if sentinel.Summary.Text != "No changes detected" || sentinel.Summary.Kind != detailPlain {
+		t.Errorf("the no-changes sentinel must be one plain summary line: %+v", sentinel.Summary)
+	}
+	if len(sentinel.Details) != 0 {
+		t.Errorf("the no-changes sentinel must hang nothing beneath the branch: %+v", sentinel.Details)
+	}
+}
+
+// TestDiffDetailStat pins the diffstat that rides the branch beside the path: always both
+// counts (the layout.md sketch's "+2 -2"), counted over the WHOLE diff rather than the lines
+// that survive diffDetailCap — a truncated body cannot tell you how big the change was — and
+// only over the diff's own "+"/"- " tags, so a context line is neither.
+func TestDiffDetailStat(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "additions and removals",
+			content: "  ctx\n- old one\n- old two\n+ new one\n+ new two",
+			want:    "+2 -2",
+		},
+		{
+			name:    "additions only still names both counts",
+			content: "  ctx\n+ new one\n+ new two",
+			want:    "+2 -0",
+		},
+		{
+			name:    "removals only still names both counts",
+			content: "  ctx\n- old one\n- old two",
+			want:    "+0 -2",
+		},
+		{
+			name:    "a line whose content starts with a plus is tagged, not counted",
+			content: "  +++ b/main.go\n+ + a real addition",
+			want:    "+1 -0",
+		},
+		{
+			name:    "the count spans the whole diff, not just the uncapped head",
+			content: strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n"),
+			want:    "+" + strconv.Itoa(diffDetailCap+5) + " -0",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := diffDetail(tc.content).Summary.Text; got != tc.want {
+				t.Errorf("diffstat = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

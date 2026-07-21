@@ -28,14 +28,16 @@ that reports no filesystem confinement, so it reproduces identically on a machin
 Alongside it, a **presentation-only pass over the transcript layout** (`layout.md` is the amended
 spec of record): assistant text no longer drags the model's own padding blank lines into the
 scrollback, a tool header trades its `[brackets]` for a bold-orange label carrying nothing but
-that label, and a batch of same-label tool calls folds into one aligned block instead of five
-stacked ones — with a lone call taking the very same shape. The three land as
+that label, a batch of same-label tool calls folds into one aligned block instead of five
+stacked ones — with a lone call taking the very same shape — and a call's outcome is now split
+into the one line that rides its branch and the body beneath it, which is what finally lets a
+`View Diff` show `+2 -2` beside the path *and* the diff underneath. The four land as
 separate **Changed** entries below because each is separately visible, but they are one change to
 how a session *reads* — nothing the model sees is touched: no tool result, no event payload, no
 upstream conversation, and nothing exported. `TestTranscriptLayoutGolden` pins the whole rendered
-scrollback of a mixed session — prompt, narration, a grouped batch, a standalone `Run`, an
-approval note, a sub-agent read — blank lines included, so a regression in any one of the three
-shows up as a layout diff rather than a subtly taller chat.
+scrollback of a mixed session — prompt, narration, a grouped batch, a standalone `Run`, a diff
+under its diffstat, an approval note, a sub-agent read — blank lines included, so a regression in
+any one of the four shows up as a layout diff rather than a subtly taller chat.
 
 ### Added
 
@@ -174,21 +176,41 @@ shows up as a layout diff rather than a subtly taller chat.
   flight and the stray-result `result` header alike — and the target always leads the first
   branch instead (`✦ Read File` / `┕ main.go 1 - 154`). That is what stops a block from visually
   reshaping the moment a second call joins it: a block of one is byte-identical in shape to a
-  block of many, and growing one only ever *adds a line*. What a branch carries follows from how
-  much detail its call has, and nothing else: one detail follows the target on the branch; two or
-  more lay out **beneath** it at the branch marker's width rather than sprouting `┝`/`┕` branches
-  of their own (a `Run` and its `… +N more lines` remainder, a red/green diff body); an in-flight
-  call shows the bare target until its result lands; and a call with no target at all is the one
-  shape with no target line — the header stands alone and the details are the branches, as an
+  block of many, and growing one only ever *adds a line*. What a branch carries follows from which
+  halves of the call's outcome are filled (see the entry below), and nothing else: the one-line
+  summary follows the target on the branch, the body lays out **beneath** it at the branch
+  marker's width rather than sprouting `┝`/`┕` branches of its own (a `Run` and its `… +N more
+  lines` remainder, a red/green diff body under its diffstat); an in-flight call has neither yet
+  and shows the bare target until its result lands; and a call with no target at all is the one
+  shape with no target line — the header stands alone and the lines are the branches, as an
   unregistered tool's pretty-printed arguments and a stray result still render. Two different
   tools sharing a label — a single and a multi find-and-replace are both "Edit File" — do group,
   because the reader groups by what the header says, not by tool id; anything between two calls
-  (narration, a note, an approval, an error) ends the run, and a call with several details, a diff
-  body, or no target keeps its own block. **Grouping is render-time only** — the transcript's
+  (narration, a note, an approval, an error) ends the run, and a call carrying a body or no target
+  keeps its own block. **Grouping is render-time only** — the transcript's
   append-only entry list, its call/result pairing, and the open-call signal the status line reads
   are untouched, so a call arriving mid-stream joins its group on the next repaint for free.
   Nothing is clipped for alignment's sake; an overlong branch soft-wraps as before. Presentation
   only. (`internal/tui`.)
+- **A tool call's outcome is now a summary line plus a body — and `View Diff` finally renders the
+  shape `layout.md` has always sketched.** The presentation model carried one flat list of detail
+  lines, and the renderer picked the block's shape by *counting* it: exactly one line joined the
+  target on the branch, two or more laid out beneath a bare target. That made the sketch's diff
+  block unreachable — a `+2 -2` diffstat plus its diff body was simply a three-line list, so the
+  summary lost its place on the branch and the target lost its. The outcome is now split at the
+  source: a one-line **summary** that rides the branch beside the target (`1 - 154`, `+2 -2`,
+  `error: …`) and a **body** that hangs beneath it (a command's output, a diff's lines). The shape
+  follows from which halves are filled and **never from how many body lines there are** — a body
+  of one lays out exactly like a body of ten. `View Diff` is the one producer filling both, and it
+  reads as the sketch always promised: `┕ main.go +2 -2` with the red/green diff beneath. The
+  diffstat is counted over the **whole** diff, not the lines that survive the 20-line body cap —
+  it is the one number a truncated body cannot tell you — and always names both counts (`+2 -0`
+  for an addition-only change). `No changes detected` is not a diff and stays the single plain
+  line it was. **Every other block renders byte-for-byte as before**, which is the point of the
+  rule that any outcome fitting on one line is a summary: a one-line `Run`, `Git Branch` or
+  `Diagnostics` result still rides its branch beside the command (`┕ pwd /workspace/repos/apogee`)
+  and still folds into a group, while only output needing the `… +N more lines` remainder becomes
+  a body beneath the command, exactly as it already did. Presentation only. (`internal/tui`.)
 
 ## [1.5.0] — 2026-07-21
 

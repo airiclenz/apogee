@@ -29,7 +29,7 @@
 // context-window, mode). The live token gauge (reserved at P2.7) is now wired: the post-v1
 // track folds each top-level UsageEvent's total into the status-line context-fill gauge,
 // measured against the discovered context window ([Model.contextGauge] / [Model.statusRight]). The
-// red/green diff detail is still a reserved renderer awaiting its Phase-3 producer.
+// red/green diff detail reserved there has its producer: the Phase-3 view_diff tool (diffDetail).
 //
 // P3.14 turns the Depth-tolerating renderer into a Depth-rendering one: a sub-agent (Depth > 0)
 // run is framed as a vertical-ruled sub-section — each line carries one "│ " rail gutter per
@@ -119,14 +119,18 @@
 // The shape a tool call takes is uniform, and one renderer draws it: [renderToolBlock] takes a
 // slice of [toolView] — a lone call is a slice of one — and emits a ✦ header carrying the **label
 // alone, never a target**, then one ┝/┕ branch per call led by that call's target
-// ([renderToolBranch]). A lone detail follows the target on its branch; two or more lay out
-// beneath it at the branch marker's width ([renderSubDetails]) rather than sprouting branches of
-// their own; an in-flight call shows the bare target; a call with no target at all is the one
-// shape with no target line, its details rendered as the branches themselves ([renderDetails] —
-// the stray-result and unregistered-tool fallbacks). So a block of one is byte-identical in shape
-// to a block of many and does not reshape when a second call joins it — the reason the standalone
-// and grouped paths were converged rather than kept in sync. TestTranscriptLayoutGolden pins the
-// whole rendered scrollback.
+// ([renderToolBranch]). A call's outcome is split in two, and that split — not any line count —
+// is the grammar: the one-line [toolView] Summary rides the branch beside the target
+// ("┕ main.go 1 - 154", "┕ main.go +2 -2"; an in-flight call has none yet and shows the bare
+// target), while the Details body lays out beneath at the branch marker's width
+// ([renderSubDetails]) rather than sprouting branches of its own — a Run's output, a diff's
+// coloured lines under their diffstat. A call with no target at all is the one shape with no
+// target line: its body, closed by its summary, is rendered as the branches themselves
+// ([renderDetails] — the stray-result and unregistered-tool fallbacks). So a block of one is
+// byte-identical in shape to a block of many and does not reshape when a second call joins it —
+// the reason the standalone and grouped paths were converged rather than kept in sync — and a
+// body of one line lays out exactly like a body of ten. TestTranscriptLayoutGolden pins the whole
+// rendered scrollback.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole

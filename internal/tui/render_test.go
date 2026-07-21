@@ -242,9 +242,9 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	}
 }
 
-// A standalone call with several detail lines keeps the same header and branch: the target owns
-// the branch alone and the details lay out beneath it at the branch marker's width — they are not
-// ┝/┕ branches of their own, because only calls are (layout.md's Run sketch).
+// A body-only call keeps the same header and branch: nothing rides beside the target, and the
+// body lays out beneath it at the branch marker's width — those lines are not ┝/┕ branches of
+// their own, because only calls are (layout.md's Run sketch).
 func TestRenderMultiDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
@@ -264,8 +264,9 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 	}
 }
 
-// A diff-detail call takes the same multi-detail shape — target on the branch, body beneath — and
-// the body keeps its red/green colouring, which is why it can never fold into a group.
+// A diff call is the summary-and-body shape layout.md sketches: the diffstat rides the branch
+// beside the path and the coloured body hangs beneath it. The body keeps its red/green
+// colouring, which — together with having a body at all — is why it can never fold into a group.
 func TestRenderDiffDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
@@ -273,7 +274,7 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ View Diff",
-		"  ┕ main.go",
+		"  ┕ main.go +1 -1",
 		"    - a removed line",
 		"    + an added line",
 	}, "\n")
@@ -288,6 +289,91 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	}
 	if got, want := lines[3], th.diffAdded.Render("    + an added line"); got != want {
 		t.Errorf("added line = %q; want the diffAdded style %q", got, want)
+	}
+}
+
+// The layout.md sketch, rendered: a two-line change shows "+2 -2" on the branch beside the path
+// with the diff body beneath it, and the diffstat line itself stays plain — only the body is
+// coloured, so the branch reads like every other tool's summary.
+func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID:  "c1",
+		Content: "- a code line that has been removed\n- a second removed line\n+ a new code line\n+ a second new line",
+	}})
+
+	want := strings.Join([]string{
+		"✦ View Diff",
+		"  ┕ main.go +2 -2",
+		"    - a code line that has been removed",
+		"    - a second removed line",
+		"    + a new code line",
+		"    + a second new line",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("diff sketch mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	th := newTheme()
+	if got, want := tr.renderLines(th, 80)[1], th.toolDetail.Render("  ┕ main.go +2 -2"); got != want {
+		t.Errorf("diffstat branch = %q; want the plain toolDetail style %q", got, want)
+	}
+}
+
+// A diff whose body is capped still names the whole change on its branch: the diffstat counts
+// every line, the body stops at diffDetailCap with its remainder count.
+func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID:  "c1",
+		Content: strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n"),
+	}})
+
+	lines := strings.Split(renderPlain(tr, 80), "\n")
+	if got, want := lines[1], "  ┕ main.go +25 -0"; got != want {
+		t.Errorf("capped diff branch = %q, want %q (the stat spans the whole diff)", got, want)
+	}
+	if got, want := lines[len(lines)-1], "    … +5 more lines"; got != want {
+		t.Errorf("capped diff body ends %q, want %q", got, want)
+	}
+}
+
+// A command whose output is a single line puts that line where every other one-line outcome goes:
+// on the branch, beside the command. Nothing hangs beneath — a one-line result is a summary, not a
+// body, and only a command with more to say than one line reshapes into the Run block above.
+func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "abc1234\n"}})
+
+	want := strings.Join([]string{
+		"✦ Run",
+		"  ┕ git rev-parse HEAD abc1234",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("one-line Run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// …and because a one-line result leaves the branch line free of a body, consecutive one-line
+// commands still fold into one block with their outputs aligned past the widest command — the
+// grouping a body would (correctly) break.
+func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "abc1234"}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"pwd"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "/workspace/repos/apogee"}})
+
+	want := strings.Join([]string{
+		"✦ Run",
+		"  ┝ git rev-parse HEAD abc1234",
+		"  ┕ pwd                /workspace/repos/apogee",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("one-line Run group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
@@ -321,6 +407,25 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A targetless call has no branch line for its summary to ride, so the outcome closes the branch
+// list instead of vanishing: an unregistered tool's arguments, then the "error: …" it earned.
+func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "no such server", IsError: true}})
+
+	want := strings.Join([]string{
+		"✦ mcp_thing",
+		"  ┝ {",
+		`  ┝   "a": 1`,
+		"  ┝ }",
+		"  ┕ error: no such server",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("targetless error block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
@@ -420,14 +525,15 @@ func TestRenderGroupBreakers(t *testing.T) {
 
 // TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
 // a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
-// output is too rich to group, an approval note, and a sub-agent read — as an exact line sequence,
-// blank lines included. It is the backstop across the layout changes rather than a test of any one
-// of them: the blank-line hygiene shows as the single empty row between every block, the
-// bracketless bold-orange label as the header text, the grouping as the one aligned Read File
-// block, and the uniform shape as the fact that every header here — grouped, standalone, railed —
-// is a label and nothing else, with the target always leading a branch. A regression in any of
-// them changes this golden, and the golden doubles as the living example of what layout.md
-// sketches.
+// output hangs beneath its command, a diff whose "+2 -2" rides its branch over a coloured body, an
+// approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
+// backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
+// shows as the single empty row between every block, the bracketless bold-orange label as the
+// header text, the grouping as the one aligned Read File block, and the uniform shape as the fact
+// that every header here — grouped, standalone, railed — is a label and nothing else, with the
+// target always leading a branch and the outcome split into the summary beside it and the body
+// beneath. A regression in any of them changes this golden, and the golden doubles as the living
+// example of what layout.md sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
 	tr := &transcript{}
 	tr.addUser("read the docs, then run the tests", nil)
@@ -441,8 +547,13 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		CallID:  "c4",
 		Content: "ok   apogee/internal/tui     0.412s\nok   apogee/internal/agent   1.203s\nPASS\n",
 	}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c5", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID:  "c5",
+		Content: "  func main() {\n-     fmt.Println(\"old\")\n-     return\n+     fmt.Println(\"new\")\n+     os.Exit(0)\n  }",
+	}})
 	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
-	readCall(tr, "c5", "main.go", "1", "154", 1)
+	readCall(tr, "c6", "main.go", "1", "154", 1)
 
 	want := strings.Join([]string{
 		"❯ read the docs, then run the tests",
@@ -458,6 +569,15 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"  ┕ go test ./...",
 		"    ok   apogee/internal/tui     0.412s",
 		"    … +2 more lines",
+		"",
+		"✦ View Diff",
+		"  ┕ main.go +2 -2",
+		"      func main() {",
+		"    -     fmt.Println(\"old\")",
+		"    -     return",
+		"    +     fmt.Println(\"new\")",
+		"    +     os.Exit(0)",
+		"      }",
 		"",
 		"· approval allow: terminal",
 		"",

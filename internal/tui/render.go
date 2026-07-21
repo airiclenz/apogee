@@ -215,31 +215,48 @@ func renderToolBlock(th theme, views []toolView, width int) []string {
 }
 
 // renderToolBranch renders one call of a tool block as its branch line (plus whatever hangs
-// beneath it). Four shapes, and they are the whole grammar:
+// beneath it). Two shapes, and they are the whole grammar:
 //
-//   - one detail — the branch is the target, padded to the block's column, one space, then the
-//     detail ("┕ main.go 1 - 154");
-//   - two or more details — the branch carries the target alone and the details lay out beneath
-//     it at the branch marker's own width, not as ┝/┕ branches of their own (the Run case);
-//   - no detail yet (in flight) — the branch is the bare target; the block repaints whole once
-//     the result folds in;
-//   - no target at all — the only shape with no target line: the header stands alone and the
-//     details are themselves the ┝/┕ branches (an unregistered tool's pretty-printed arguments,
-//     a stray result).
+//   - a call WITH a target — the branch is the target, and when the call has a Summary, the
+//     target padded to the block's column, one space, then that summary ("┕ main.go 1 - 154",
+//     "┕ main.go +2 -2"). A call still in flight has no summary yet and shows the bare target;
+//     the block repaints whole once the result folds in. Its Details, if any, lay out beneath
+//     the branch at the branch marker's own width — not as ┝/┕ branches of their own, because
+//     only calls are (a Run's output, a diff body under its diffstat).
+//   - a call with NO target — the only shape with no target line: the header stands alone and
+//     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
+//     line to ride (an unregistered tool's pretty-printed arguments then its "error: …"
+//     outcome, a stray result).
 //
-// Anything overlong soft-wraps under its marker like any other detail line — nothing is clipped
-// for alignment's sake.
+// The shape follows from which halves of the outcome are filled and never from how many Details
+// there are: a body of one line and a body of ten lay out the same way. Anything overlong
+// soft-wraps under its marker like any other detail line — nothing is clipped for alignment's
+// sake.
 func renderToolBranch(th theme, tv toolView, column int, marker string, width int) []string {
 	if tv.Target == "" {
-		return renderDetails(th, tv.Details, width)
+		return renderDetails(th, branchDetails(tv), width)
 	}
-	if len(tv.Details) == 1 {
+	text, style := tv.Target, th.toolDetail
+	if tv.Summary.Text != "" {
 		pad := strings.Repeat(" ", max(0, column-lipgloss.Width(tv.Target)))
-		text := tv.Target + pad + " " + tv.Details[0].Text
-		return hangingWrap(detailStyle(th, tv.Details[0].Kind), marker, text, width)
+		text += pad + " " + tv.Summary.Text
+		style = detailStyle(th, tv.Summary.Kind)
 	}
-	out := hangingWrap(th.toolDetail, marker, tv.Target, width)
+	out := hangingWrap(style, marker, text, width)
 	return append(out, renderSubDetails(th, tv.Details, lipgloss.Width(marker), width)...)
+}
+
+// branchDetails is what a targetless call hangs off its header: the body, plus the summary as
+// its last line. A targetless block has no branch line for a summary to ride, so the outcome
+// simply closes the branch list — which is where an "error: …" on an unregistered tool has
+// always sat, after the arguments that provoked it.
+func branchDetails(tv toolView) []detailLine {
+	if tv.Summary.Text == "" {
+		return tv.Details
+	}
+	out := make([]detailLine, 0, len(tv.Details)+1)
+	out = append(out, tv.Details...)
+	return append(out, tv.Summary)
 }
 
 // branchMarker is the tree marker leading a branch line: ┕ closes a block, ┝ continues it. Its
@@ -288,20 +305,15 @@ func toolCallRun(entries []entry, i int) []toolView {
 }
 
 // groupable reports whether a tool call can be shown as one branch line of a grouped block: it
-// needs a Target to sit in the aligned column and at most one plain detail line to follow it. That
-// admits the common cases — a finished read, an "error: …" outcome, and a call still in flight with
-// no result yet — while a call with several details (a Run and its "… +N more lines" remainder), a
-// diff-coloured detail, or no target at all keeps its own block, where it has the room it needs.
+// needs a Target to sit in the aligned column, an empty body so nothing hangs beneath that line,
+// and a plain-kind Summary to follow the target on it. That admits the common cases — a finished
+// read, an "error: …" outcome, and a call still in flight whose summary has not landed yet (the
+// zero detailLine is plain and empty) — while a call carrying a body (a Run and its output, a
+// diff body under its "+2 -2" diffstat) or no target at all keeps its own block, where it has the
+// room it needs. It never counts detail lines: the block's shape does not depend on how many
+// there are, and neither may this.
 func groupable(tv toolView) bool {
-	if tv.Target == "" || len(tv.Details) > 1 {
-		return false
-	}
-	for _, d := range tv.Details {
-		if d.Kind != detailPlain {
-			return false
-		}
-	}
-	return true
+	return tv.Target != "" && len(tv.Details) == 0 && tv.Summary.Kind == detailPlain
 }
 
 // renderOrphanResult renders a tool result that matched no pending call (a defensive
@@ -330,7 +342,7 @@ func renderDetails(th theme, details []detailLine, width int) []string {
 }
 
 // detailStyle maps a detail kind to its style: plain detail is dim; the diff kinds are
-// red/green (reserved — no extractor emits them until an edit/diff tool exists).
+// red/green (view_diff's body is their producer — diffDetail).
 func detailStyle(th theme, kind detailKind) lipgloss.Style {
 	switch kind {
 	case detailDiffAdded:

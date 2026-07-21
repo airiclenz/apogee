@@ -76,8 +76,8 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	if tool.tool.Label != "Read File" || tool.tool.Target != "main.go" {
 		t.Errorf("tool view = %+v; want a Read File / main.go header", tool.tool)
 	}
-	if len(tool.tool.Details) != 1 || tool.tool.Details[0].Text != "1 - 1" {
-		t.Errorf("tool details = %+v; want a single \"1 - 1\" summary", tool.tool.Details)
+	if tool.tool.Summary.Text != "1 - 1" || len(tool.tool.Details) != 0 {
+		t.Errorf("tool outcome = %+v / %+v; want a \"1 - 1\" summary and no body", tool.tool.Summary, tool.tool.Details)
 	}
 
 	// (b) render snapshot: the grouped block in the new look — ✦-prefixed, one blank line
@@ -565,8 +565,8 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	if !b.done {
 		t.Fatal("call b's result did not fold into it")
 	}
-	if len(b.tool.Details) != 1 || b.tool.Details[0].Text != "1 - 10" {
-		t.Errorf("call b details = %+v; want a single \"1 - 10\" summary", b.tool.Details)
+	if b.tool.Summary.Text != "1 - 10" || len(b.tool.Details) != 0 {
+		t.Errorf("call b outcome = %+v / %+v; want a \"1 - 10\" summary and no body", b.tool.Summary, b.tool.Details)
 	}
 
 	// Call a's result arrives later and folds into a — still two entries, no orphan.
