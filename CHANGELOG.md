@@ -6,6 +6,60 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [1.5.0] — 2026-07-21
+
+Post-`v1.4.0`, **additive** (minor) — one TUI affordance and the one Event variant it needed to
+be honest. The status line's left slot no longer reports the turn index (a number that answered
+nothing the human was asking) but **what the worker is doing right now**, with an elapsed clock:
+`thinking · 12s`, `reading · main.go · 3s`, `running · npm test · 8s`, `sub-agent · searching ·
+6s`. Making `thinking` a fact rather than a guess required the engine to reveal that it is
+reasoning, which is the new `domain.ReasoningEvent` — an observation-only variant on both the
+native reasoning channel and the inline `<think>`/harmony spans that stay held off the visible
+stream. **No breaking change**: per this changelog's own rule (ADR 0001 §consequences), a new
+Event variant is a **minor** bump, and the public facade (`apogee.go`) only *gains* the
+`ReasoningEvent` alias — nothing exported is removed or re-typed. The loop's visible token
+stream, the committed assistant message, and history are byte-identical; ADR 0011's renderer
+contract is untouched (no new `uiState`, no agent logic in the TUI), so no new ADR.
+
+### Added
+
+- **`domain.ReasoningEvent` — the observability seam for the model's reasoning channel.** A new
+  Event variant beside `TokenEvent`, re-exported on the facade as `apogee.ReasoningEvent`,
+  carrying one newly-revealed chunk of reasoning. It is **observation only**: it never changes
+  history (the channel is already preserved as `reasoning_content` on the assistant message) and
+  a consumer may treat its arrival alone as a liveness signal and ignore `Text` entirely, which
+  is what the TUI does. The engine emits it on both paths — natively from
+  `provider.DeltaThinking`, and inline from `emitReasoningDelta`, `emitVisibleDelta`'s mirror
+  that runs *while* the stripper is mid-channel (the same prefix-stability guard: an unclosed
+  span's tail is what the stripper routes into reasoning, and closed spans never change, so the
+  accumulation only ever grows a suffix). `Text` is untrusted model output — any consumer that
+  ever *displays* it must escape-strip exactly as the TUI's token path does. Nothing else moved:
+  the `TokenEvent` sequence, the reply, and the recorded conversation are unchanged.
+  (`internal/domain`, `internal/agent`, root facade.)
+- **A live activity status line with an elapsed clock.** While a worker runs, the status line's
+  left slot renders what is happening instead of `turn N`: `thinking` (a request in flight, or
+  reasoning chunks arriving), `responding` (visible text streaming, keeping its `tok/s` suffix),
+  `<verb> · <target>` for an open tool call, `retrying`, `compacting`, `stopping` — each with an
+  elapsed clock that restarts only when the phrase itself changes, and prefixed with `sub-agent ·`
+  at nesting depth > 0. Idle renders nothing at all. The vocabulary lives in a new pure,
+  table-tested `internal/tui/activity.go`: `foldActivity` derives the phrase from the same Event
+  stream the transcript folds, and the handful of transitions no Event announces (a submit,
+  `/continue`, `/compact`, an Esc stop, the worker's terminal message) set it directly; `stopping`
+  is sticky until the worker actually unwinds. The per-tool active verb (`reading`, `editing`,
+  `running python`, `delegating`, …) is one new column in the existing name-keyed presentation
+  registry rather than a second parallel switch, so an unregistered dynamic MCP tool inherits the
+  same `running <raw name>` fallback the transcript header already uses. No new `uiState` —
+  `compacting` and `stopping` are activities, not lifecycle states (ADR 0011). (`internal/tui`.)
+
+### Removed
+
+- **The `turn N` readout and the transcript turn counter behind it.** The status line's turn index
+  is replaced by the activity phrase, and with its last reader gone the `turn` field on the TUI
+  transcript and the eight assignments that maintained it are deleted — keeping a field alive for
+  a test assertion is dead state, and the resumed turn index is already asserted from its
+  authoritative source (`Resume`'s `TurnIndex`). Internal to `internal/tui`; no public-surface
+  change. (`internal/tui`.)
+
 ## [1.4.0] — 2026-07-21
 
 Post-`v1.3.0`, **additive** (minor) — three strands plus a TUI affordance. The **Validated-set

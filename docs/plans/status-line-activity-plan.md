@@ -356,7 +356,15 @@ field alive for one test is dead state.
 
 ---
 
-## 6. Docs close-out (the one owning item for every doc edit)
+## 6. Docs close-out (the one owning item for every doc edit) — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): two deviations from the item's literal text. (1) `layout.md`'s sketch shows
+`⣻ reading · main.go · 3s` — the form that actually ships (item 4's `actTool` label uses `" · "`
+between verb and target, per its own NOTES) — not the item's separator-less `⣻ reading main.go ·
+3s`; the layout reference is meant to match what ships. (2) `technical-design.md:160`'s variant
+list is completed to all **11** (adding stream-reset, usage and audit alongside reasoning), not
+only "reasoning too": the same staleness the item corrects at `:108` is present on that line, and
+a partial list would contradict the corrected count one section above it.
 
 **What:**
 

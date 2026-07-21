@@ -105,7 +105,7 @@ plan. **All four prior "open items" are resolved** (plan §6 #22–24).
 | `internal/platform` (P0.5) | `Shell`/`Path` interfaces + `Host` aggregate (POSIX impl, Windows stub, `Current()` selector), and `denyConfiner` — the deny-all `Confiner` stub (`AutoEligible()==false`) behind `NewDenyConfiner()`. **First tests in the tree** (white-box table tests). **P3.2 adds `landlock_linux.go`** — the Linux landlock backend (`//go:build linux`, raw CGO-free `x/sys` syscalls): ABI probe, honest caps, `Confine(*exec.Cmd)` re-exec wrapper + `ApplyLandlockAndExec` in-child half; plus the shared `internal/platform/confinetest` escape-probe harness. **P3.3 adds `seatbelt.go`** (`//go:build !windows`, host-agnostic): the macOS seatbelt backend — `seatbeltProfile(box)` pure-fn `sandbox-exec` profile (deny-default file-write, allow under `WorkspaceRoot`/`WritablePaths`, network open by default), honest caps, `Confine(*exec.Cmd)` rewriting to `sandbox-exec -p <profile> …` — with `seatbelt_darwin.go` (`//go:build darwin`) holding only `NewSeatbeltConfiner()` + the `/usr/bin/sandbox-exec` presence probe; reuses `confinetest` (macOS live-probe owner/CI-deferred, self-skips loudly on non-darwin). windows keeps `denyConfiner` (Phase 5). |
 
 The sketch covers: `Agent`/`Config`/lifecycle; `Step`/`Run`/`Submit`/`StepResult`;
-sealed `Event` + 8 variants + `EventSink`; `Approver`; `Tool`/`ExternalEffectTool`/
+sealed `Event` + 11 variants + `EventSink`; `Approver`; `Tool`/`ExternalEffectTool`/
 `ToolRegistry`; the five hook interfaces + `Mechanism`/descriptor/`OrderingConstraints`/
 `MechanismRegistry`/`PostResponseDecision`; `Confiner`/`ConfinementCaps`/`ConfinementBox`;
 `Session` snapshot/resume; sentinel errors. See §4.
@@ -157,7 +157,7 @@ The shape is in [`apogee.go`](../../apogee.go). Summary:
 | Autonomy | `Mode` (Plan/Ask-Before/Allow-Edits/Auto), `Config.Bypass`, global `confine-to-workspace` | 0006, 0012 |
 | Drive the loop | `Submit(UserInput)`, `Step(ctx) → StepResult`, `Run(ctx)`, `StepStatus` | 0007 |
 | Turn-local context | `UserInput.FileRefs` (`@file`) + `UserInput.SkillIDs` (`/skill`) → resolved and prepended to the user message; `Config.Skills SkillResolver` (`ResolvedSkill`) resolves attached skill IDs (disk catalog stays in `internal/skills`) | 0001, 0010 |
-| Observe | `EventSink.Emit(Event)`; sealed `Event` + variants (token, message, tool-call, tool-result, approval, mechanism-fired, error); `Depth` carries sub-agent nesting | 0001, 0005 |
+| Observe | `EventSink.Emit(Event)`; sealed `Event` + 11 variants (token, reasoning, stream-reset, message, tool-call, tool-result, approval, mechanism-fired, error, usage, audit); `Depth` carries sub-agent nesting | 0001, 0005 |
 | Approve | `Approver.Approve(ctx, ApprovalRequest) → ApprovalDecision` | 0004 |
 | Ask | `Asker.Ask(ctx, AskRequest) → AskAnswer` — free-text Q&A host delegate for `ask_user` (P3.11), distinct from Approver; nil ⇒ `ask_user` not registered; struct-typed for freeze-safety | 0001 |
 | Tools | `Tool`, `ExternalEffectTool`, `ReadOnlyTool`/`SubprocessTool`, `ToolCall`/`ToolResult`, `ToolRegistry` (`.Subset` for sub-agents) | 0002, 0005, 0008 |

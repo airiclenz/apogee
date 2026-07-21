@@ -26,7 +26,7 @@
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
 
-  ⣻ turn 5                                                       16k 50% ██████     ]
+  ⣻ reading · main.go · 3s                                       16k 50% ██████     ]
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Send a message… [Shift] + [Enter] creates a line break                              │
 │ This text box can be multiline. The text edit area auto increases height to         │
