@@ -108,13 +108,14 @@
 //
 // The tool-call layout pass (post-v1.5.0) tightens how a session reads without touching what the
 // model sees: committed assistant text is trimmed of its leading and trailing blank lines
-// ([trimBlankLines]) and interior blank runs collapse outside fenced code, so layout.md's "exactly
-// one empty line between blocks" holds; a tool header drops its square brackets for a bold-orange label
-// (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and consecutive
-// same-label calls at the same depth fold into one aligned block ([toolCallRun] / [groupable] /
-// [renderToolGroup]). Grouping is render-time only — the append-only entry list, the call/result
-// pairing, and [transcript.hasOpenToolCall] are untouched, so a call arriving mid-stream joins its
-// group on the next repaint. TestTranscriptLayoutGolden pins the whole rendered scrollback.
+// (trimBlankLines) and interior blank runs collapse outside fenced code, so layout.md's "exactly
+// one empty line between blocks" holds; a tool header drops its square brackets for a bold-orange
+// label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
+// consecutive same-label calls at the same depth fold into one aligned block (toolCallRun /
+// groupable / renderToolGroup). Grouping is render-time only — the append-only entry list, the
+// call/result pairing, and transcript.hasOpenToolCall are untouched, so a call arriving mid-stream
+// joins its group on the next repaint. TestTranscriptLayoutGolden pins the whole rendered
+// scrollback.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole
