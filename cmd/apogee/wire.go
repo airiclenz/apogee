@@ -64,6 +64,48 @@ func contextWindowNotice(maxContextTokens int, compactionEnabled bool) string {
 		"set context-window: in config.yaml or let discovery run"
 }
 
+// confinementDegradedNotice returns the one-line-plus-remedy startup notice to print when Auto
+// is entered with confinement asked for (the default) on a host whose Confiner backend cannot
+// fence the filesystem — caps.FSWrite == false. That is not a malfunction: the ladder is doing
+// exactly what ADR 0012 says ("confine if you can, gate if you can't"), so every terminal command
+// takes the Approval path. Nothing said so, which is why Auto read as broken on containers where
+// landlock_create_ruleset returns ENOSYS (ISSUES.md, 2026-07-21). The notice states the blast
+// radius plainly and names the sanctioned route to the user's OWN decision — it never loosens
+// anything by itself.
+//
+// It returns "" (no notice) in every other cell: the three lower modes make no confinement
+// promise, an already-unconfined Auto has its own louder warning at the call site, and a backend
+// that CAN fence needs no explanation. Pure so the wording is table-testable without capturing
+// os.Stderr (the contextWindowNotice / appliedNotice pattern).
+func confinementDegradedNotice(backendName string, caps apogee.ConfinementCaps, mode apogee.Mode, confineToWorkspace bool) string {
+	if mode != modeAuto || !confineToWorkspace || caps.FSWrite {
+		return ""
+	}
+	return fmt.Sprintf(
+		"apogee: auto mode is gating terminal commands — the %s backend on this host reports no\n"+
+			"  filesystem confinement, so commands cannot be fenced and fall back to approval.\n"+
+			"  To run unconfined instead (safe ONLY on a disposable machine):\n"+
+			"    /confine off          — this session\n"+
+			"    /confine off --save   — and remember this host in ~/.apogee/config.yaml",
+		backendName)
+}
+
+// confinerBackendName renders the human label for a Confiner backend that the degradation
+// notice names ("landlock", "seatbelt", "deny"). domain.Confiner deliberately carries no name —
+// it reports capabilities, not identity — so the label is derived from the concrete type
+// ("*platform.landlockConfiner" → "landlock"). A shape it does not recognise degrades to the
+// bare type name, which still tells the user which backend answered.
+func confinerBackendName(c apogee.Confiner) string {
+	name := strings.TrimPrefix(fmt.Sprintf("%T", c), "*")
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:]
+	}
+	if trimmed := strings.TrimSuffix(name, "Confiner"); trimmed != "" {
+		name = trimmed
+	}
+	return name
+}
+
 // ----------------------------------------------------------------------------
 // Root command body
 // ----------------------------------------------------------------------------
@@ -101,6 +143,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// (apogee.New requires Events; Ask-Before needs the Approver), then bound once the
 	// program exists (phase-2 detail plan §3 C2/C3).
 	bridge := tui.NewBridge()
+
+	// The host's real Confiner backend, hoisted into a local so its Capabilities() can be read
+	// here for the degradation notice below — the backend probes once at construction, so this
+	// is the same value the engine's dispatch disposition will consult.
+	confiner := platform.NewConfiner()
+
 	cfg := apogee.Config{
 		Endpoint:     opts.endpoint,
 		Model:        opts.model,
@@ -113,11 +161,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		LibraryDir:   roots.library,
 		SessionsDir:  roots.sessions,
 		WorkspaceDir: roots.workspace,
-		// Select the host's real Confiner backend for this OS (landlock on Linux, seatbelt
-		// on macOS, denyConfiner elsewhere — confinement-execution-contract §2.6). It is no
-		// longer denyConfiner, so --mode auto WORKS where fs-confinement exists and gates the
+		// The host's real Confiner backend for this OS (landlock on Linux, seatbelt on macOS,
+		// denyConfiner elsewhere — confinement-execution-contract §2.6). It is no longer
+		// denyConfiner, so --mode auto WORKS where fs-confinement exists and gates the
 		// subprocess surface where it does not (rather than refusing Auto).
-		Confiner:           platform.NewConfiner(),
+		Confiner:           confiner,
 		ConfineToWorkspace: opts.confineToWorkspace,
 		WebSearchEndpoint:  opts.webSearchEndpoint,
 		// The model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
@@ -140,6 +188,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		fmt.Fprintln(os.Stderr, "apogee: WARNING — auto mode is running UNCONFINED "+
 			"(confine-to-workspace: false). This is safe only inside a VM/container; "+
 			"the dangerous-action guard is a footgun-net, not a security boundary.")
+	}
+
+	// The mirror branch: Auto WITH confinement asked for, on a host whose backend cannot
+	// enforce it. The ladder gates every terminal command instead — correct, but silent until
+	// now, which is what made Auto look broken (ISSUES.md, 2026-07-21). Say it once, name the
+	// backend, and point at /confine.
+	if notice := confinementDegradedNotice(confinerBackendName(confiner), confiner.Capabilities(), mode, opts.confineToWorkspace); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
 	}
 
 	// When the context window is still unknown (discovery found none and no context-window: key

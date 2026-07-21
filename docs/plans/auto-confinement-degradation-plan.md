@@ -185,7 +185,19 @@ CHANGELOG. Commit: `feat(config): host-scoped unconfined-hosts acknowledgement`.
 
 ---
 
-## 4. The capability-aware startup notice
+## 4. The capability-aware startup notice — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): three departures from the item's literal text, all inside its `cmd/apogee`
+diff allowance. (a) The signature is `confinementDegradedNotice(backendName string, caps
+apogee.ConfinementCaps, mode apogee.Mode, confineToWorkspace bool) string` — `mode` is the real
+`apogee.Mode` rather than the item's `mode ... bool`, so the table test walks all four rungs
+instead of an auto/non-auto boolean, and `caps` uses the public alias (`apogee.ConfinementCaps
+= domain.ConfinementCaps`, the identical type) because `cmd/apogee` does not import
+`internal/domain`. (b) `domain.Confiner` carries no name and this item's diff may not reach
+`internal/platform`, so a second pure helper `confinerBackendName(apogee.Confiner) string`
+derives the label from the concrete type (`*platform.landlockConfiner` → `landlock`), pinned by
+its own test. (c) The suggested text's `(ENOSYS)` is dropped: the errno is not observable at this
+site and is landlock-specific, while the notice is backend-agnostic — semantics unchanged.
 
 In `cmd/apogee/wire.go`: hoist the inline `platform.NewConfiner()` at line 120 into a local so its
 `Capabilities()` can be read, then add the mirror branch beside the existing unconfined warning at

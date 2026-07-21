@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -94,6 +96,66 @@ func TestContextWindowNotice(t *testing.T) {
 	}
 }
 
+// The degradation notice fires in EXACTLY one cell of the {mode} × {FSWrite} × {confine}
+// matrix: Auto, asking for confinement, on a backend that cannot fence the filesystem — the
+// common case in containers, where landlock reports ENOSYS. Every other cell is silent: the
+// three lower modes make no confinement promise (TODO constraint 6), an already-unconfined
+// Auto has its own louder warning, and a capable backend needs no explanation.
+func TestConfinementDegradedNotice(t *testing.T) {
+	t.Parallel()
+	modes := []apogee.Mode{modePlan, modeAskBefore, modeAllowEdits, modeAuto}
+	fired := 0
+	for _, mode := range modes {
+		for _, fsWrite := range []bool{true, false} {
+			for _, confine := range []bool{true, false} {
+				caps := apogee.ConfinementCaps{FSWrite: fsWrite}
+				got := confinementDegradedNotice("landlock", caps, mode, confine)
+				want := mode == modeAuto && confine && !fsWrite
+				if (got != "") != want {
+					t.Errorf("confinementDegradedNotice(landlock, FSWrite=%v, %q, confine=%v) = %q; wantNotice = %v",
+						fsWrite, mode, confine, got, want)
+				}
+				if got == "" {
+					continue
+				}
+				fired++
+				for _, want := range []string{"landlock", "approval", "/confine off", "/confine off --save"} {
+					if !strings.Contains(got, want) {
+						t.Errorf("notice %q does not mention %q", got, want)
+					}
+				}
+			}
+		}
+	}
+	if fired != 1 {
+		t.Errorf("notice fired in %d cells of the matrix; want exactly 1 (auto + confine + no FSWrite)", fired)
+	}
+}
+
+// The notice names the backend that answered, so the user can tell landlock-says-no from
+// no-backend-at-all. domain.Confiner carries no name, so the label is derived from the
+// concrete type — including for the host's real backend, whichever OS the tests run on.
+func TestConfinerBackendName(t *testing.T) {
+	t.Parallel()
+	if got := confinerBackendName(platform.NewDenyConfiner()); got != "deny" {
+		t.Errorf("confinerBackendName(denyConfiner) = %q; want %q", got, "deny")
+	}
+	if got := confinerBackendName(stubConfiner{}); got != "stub" {
+		t.Errorf("confinerBackendName(stubConfiner) = %q; want %q", got, "stub")
+	}
+	if got := confinerBackendName(platform.NewConfiner()); got == "" {
+		t.Error("confinerBackendName(host backend) = \"\"; the notice would name no backend at all")
+	}
+}
+
+// stubConfiner is a named backend that enforces nothing — it exists to pin the label
+// derivation against a type this package owns, independent of the host's real backend.
+type stubConfiner struct{}
+
+func (stubConfiner) Capabilities() apogee.ConfinementCaps { return apogee.ConfinementCaps{} }
+
+func (stubConfiner) Confine(context.Context, apogee.ConfinementBox, *exec.Cmd) error { return nil }
+
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
 // stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only
 // race-free during the sequential test phase (parallel tests are paused until it finishes).
@@ -164,6 +226,60 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 			}
 			if rec.opts.ContextWindow != tt.contextWindow {
 				t.Errorf("tui.Options.ContextWindow = %d; want the threaded %d", rec.opts.ContextWindow, tt.contextWindow)
+			}
+		})
+	}
+}
+
+// The two Auto startup lines are mirror branches at the same site and never both fire:
+// confine=false is the blanket-loosen WARNING, confine=true on an unfenceable backend is the
+// degradation notice. The degraded cell is host-dependent (this machine's real backend decides
+// whether it can fence at all), so it is asserted against that backend's own Capabilities
+// rather than against an assumption about the test runner.
+func TestRunRootConfinementStartupNotices(t *testing.T) {
+	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
+	const (
+		unconfinedWarning = "running UNCONFINED"
+		degradedNotice    = "auto mode is gating terminal commands"
+	)
+	hostCanFence := platform.NewConfiner().Capabilities().FSWrite
+
+	tests := []struct {
+		name         string
+		mode         string
+		confine      bool
+		wantWarning  bool
+		wantDegraded bool
+	}{
+		{name: "auto unconfined → warning only", mode: "auto", confine: false, wantWarning: true},
+		{name: "auto confined → degraded notice iff the host cannot fence", mode: "auto", confine: true, wantDegraded: !hostCanFence},
+		{name: "ask-before makes no confinement promise → silent", mode: "ask-before", confine: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &recordingLauncher{}
+			opts := options{
+				endpoint:           "http://127.0.0.1:1111",
+				model:              "fake",
+				mode:               tt.mode,
+				workspace:          t.TempDir(),
+				confineToWorkspace: tt.confine,
+			}
+
+			var runErr error
+			stderr := captureStderr(t, func() {
+				runErr = runRoot(context.Background(), opts, rec.launch)
+			})
+
+			if runErr != nil {
+				t.Fatalf("runRoot: %v", runErr)
+			}
+			if got := strings.Contains(stderr, unconfinedWarning); got != tt.wantWarning {
+				t.Errorf("unconfined-Auto warning present = %v; want %v (stderr = %q)", got, tt.wantWarning, stderr)
+			}
+			if got := strings.Contains(stderr, degradedNotice); got != tt.wantDegraded {
+				t.Errorf("degradation notice present = %v; want %v (host FSWrite = %v, stderr = %q)",
+					got, tt.wantDegraded, hostCanFence, stderr)
 			}
 		})
 	}

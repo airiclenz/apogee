@@ -40,6 +40,18 @@ point is a **minor** bump, not a breaking change.
   accumulate machines), and an entry with no `id` is skipped with one startup notice rather than
   blocking the run. The template `config.yaml` documents the block beside
   `confine-to-workspace`. (`cmd/apogee`.)
+- **A startup notice when Auto degrades to approval on an unfenceable host.** Entering `--mode
+  auto` with confinement asked for (the default) on a host whose Confiner backend reports
+  `FSWrite == false` now prints one stderr notice naming the backend, saying plainly that commands
+  cannot be fenced here and therefore fall back to Approval, and pointing at `/confine off`
+  (this session) and `/confine off --save` (remember this host). This is the *common* case in
+  containers, where `landlock_create_ruleset` returns `ENOSYS` regardless of kernel version: the
+  ladder was already doing the right thing — ADR 0012's "confine if you can, gate if you can't" —
+  but silently, so Auto read as broken when it asked to approve every terminal command. **Nothing
+  about the ladder changes**; the notice is visibility plus a signposted route to the user's own
+  decision, never the tool loosening anything by itself. It is the mirror of the existing
+  unconfined-Auto warning and the two never both fire; the three lower modes make no confinement
+  promise and stay silent. (`cmd/apogee`.)
 
 ## [1.5.0] — 2026-07-21
 
