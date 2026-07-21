@@ -23,6 +23,10 @@ import (
 // git→"Git", find_replace→"Edit File", …) rather than editing a control-flow statement. An
 // unknown tool falls back to its raw name and pretty-printed arguments, so a tool with no
 // registry entry still renders legibly.
+//
+// The same entry also carries the tool's active verb ("reading", "running"), which the live
+// status line pairs with the target while the call is in flight — the per-tool knowledge
+// stays in this one registry instead of growing a second, parallel switch elsewhere.
 
 // detailKind tags a tool-detail line so the renderer can colour it. The diff kinds are
 // emitted by diffDetail (the view_diff extractor) and rendered red/green in render.go.
@@ -42,12 +46,14 @@ type detailLine struct {
 }
 
 // toolView is the presentation model of a tool call (later enriched by its result): a
-// friendly Label, the Target it acts on (a path, a directory, a pattern), and the detail
-// lines summarising the outcome. name is the raw tool id, kept to pick the result extractor
-// and as the raw-fallback label; bracket reports whether the label is a known friendly one
-// the renderer wraps in [brackets] (a raw fallback is shown bare).
+// friendly Label, the active Verb for the status line, the Target it acts on (a path, a
+// directory, a pattern), and the detail lines summarising the outcome. name is the raw tool
+// id, kept to pick the result extractor and as the raw-fallback label; bracket reports
+// whether the label is a known friendly one the renderer wraps in [brackets] (a raw fallback
+// is shown bare).
 type toolView struct {
 	Label   string
+	Verb    string
 	Target  string
 	Details []detailLine
 
@@ -55,12 +61,17 @@ type toolView struct {
 	bracket bool
 }
 
-// toolPresenter maps a tool name to its friendly label, a header extractor that pulls the
-// Target from the call's arguments, and a detail extractor that parses the tool's fixed
-// result header into summary lines. A nil extractor is valid (the tool has no target or no
-// summarisable result).
+// toolPresenter maps a tool name to its friendly label, the active verb naming what the tool
+// is doing while it runs, a header extractor that pulls the Target from the call's
+// arguments, and a detail extractor that parses the tool's fixed result header into summary
+// lines. A nil extractor is valid (the tool has no target or no summarisable result).
+//
+// label and verb are two views of the same tool for two places: label titles the finished
+// header line ("Read File"), verb is the lowercase present participle the live status line
+// reads as a sentence fragment ("reading main.go") — never a title.
 type toolPresenter struct {
 	label  string
+	verb   string
 	target func(args map[string]any) string
 	detail func(content string) []detailLine
 }
@@ -74,101 +85,121 @@ type toolPresenter struct {
 var toolRegistry = map[string]toolPresenter{
 	"read_file": {
 		label:  "Read File",
+		verb:   "reading",
 		target: stringArg("path"),
 		detail: detailFromPattern(reReadRange, func(m []string) string { return m[1] + " - " + m[2] }),
 	},
 	"write_file": {
 		label:  "Write File",
+		verb:   "writing",
 		target: stringArg("path"),
 		detail: detailFromPattern(reWriteBytes, func(m []string) string { return "+" + m[1] + " bytes" }),
 	},
 	"list_dir": {
 		label:  "List Dir",
+		verb:   "listing",
 		target: stringArg("path"),
 		detail: detailFromPattern(reListEntries, func(m []string) string { return m[1] + " entries" }),
 	},
 	"grep": {
 		label:  "Search",
+		verb:   "searching",
 		target: stringArg("pattern"),
 		detail: grepDetail,
 	},
 	"single_find_and_replace": {
 		label:  "Edit File",
+		verb:   "editing",
 		target: stringArg("path"),
 		detail: firstLineDetail, // "replaced text in <path>"
 	},
 	"multi_find_and_replace": {
 		label:  "Edit File",
+		verb:   "editing",
 		target: stringArg("path"),
 		detail: firstLineDetail, // "applied N replacements to <path>"
 	},
 	"edit_existing_file": {
 		label:  "Edit File",
+		verb:   "editing",
 		target: stringArg("path"),
 		detail: firstLineDetail, // "applied patch to <path> (N hunks)" / "updated <path>"
 	},
 	"view_diff": {
 		label:  "View Diff",
+		verb:   "diffing",
 		target: stringArg("path"),
 		detail: diffDetail,
 	},
 	"open_file": {
 		label:  "Open File",
+		verb:   "opening",
 		target: stringArg("path"),
 		detail: openFileDetail,
 	},
 	"terminal": {
 		label:  "Run",
+		verb:   "running",
 		target: stringArg("command"),
 		detail: outputDetail,
 	},
 	"python_exec": {
 		label:  "Run Python",
+		verb:   "running python",
 		target: firstLineArg("code"),
 		detail: outputDetail,
 	},
 	"git_branch": {
 		label:  "Git Branch",
+		verb:   "branching",
 		target: joinedArgs("action", "name"),
 		detail: outputDetail, // a branch list is multi-line; create/switch is one line
 	},
 	"git_commit": {
 		label:  "Git Commit",
+		verb:   "committing",
 		target: firstLineArg("message"),
 		detail: outputDetail, // "[main abc1234] subject" + the diffstat lines
 	},
 	"git_diff_range": {
 		label:  "Git Diff",
+		verb:   "diffing",
 		target: refRangeTarget,
 		detail: outputDetail,
 	},
 	"diagnostics": {
 		label:  "Diagnostics",
+		verb:   "checking",
 		target: stringArg("path"),
 		detail: outputDetail,
 	},
 	"web_fetch": {
 		label:  "Web Fetch",
+		verb:   "fetching",
 		target: stringArg("url"),
 		detail: firstLineDetail, // "HTTP 200 OK" — the body never floods the chat
 	},
 	"http_request": {
 		label:  "HTTP Request",
+		verb:   "requesting",
 		target: methodURLTarget,
 		detail: firstLineDetail, // "HTTP 200 OK"
 	},
 	"web_search": {
 		label:  "Web Search",
+		verb:   "searching the web",
 		target: stringArg("query"),
 		detail: searchDetail,
 	},
 	"sub_agent": {
 		label:  "Sub-Agent",
+		verb:   "delegating",
 		target: firstLineArg("task"),
 		detail: outputDetail, // the report's gist; the nested run already rendered railed
 	},
 	"ask_user": {
 		label:  "Ask User",
+		verb:   "asking",
 		target: firstLineArg("question"),
 		detail: firstLineDetail, // the user's own answer
 	},
@@ -185,16 +216,23 @@ var (
 )
 
 // presentToolCall builds the header view of a tool call. A known tool gets its friendly
-// label and a target pulled from the arguments; an unknown tool falls back to its raw name
-// (shown bare, not bracketed) with the pretty-printed arguments as plain detail lines, so a
-// not-yet-registered tool still renders and a malformed argument is shown verbatim (the
-// approval flow is a security surface — the model's request is never hidden).
+// label, its active verb, and a target pulled from the arguments; an unknown tool falls back
+// to its raw name (shown bare, not bracketed) with the pretty-printed arguments as plain
+// detail lines, so a not-yet-registered tool still renders and a malformed argument is shown
+// verbatim (the approval flow is a security surface — the model's request is never hidden).
+// The verb mirrors that fallback: an unregistered tool is "running <raw name>", which stays a
+// truthful sentence fragment for a dynamic MCP tool nobody has a verb for.
 func presentToolCall(call domain.ToolCall) toolView {
 	p, ok := toolRegistry[call.Tool]
 	if !ok {
-		return toolView{Label: call.Tool, name: call.Tool, Details: prettyJSONDetails(call.Arguments)}
+		return toolView{
+			Label:   call.Tool,
+			Verb:    "running " + call.Tool,
+			name:    call.Tool,
+			Details: prettyJSONDetails(call.Arguments),
+		}
 	}
-	tv := toolView{Label: p.label, name: call.Tool, bracket: true}
+	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool, bracket: true}
 	if p.target != nil {
 		tv.Target = p.target(parseArgs(call.Arguments))
 	}

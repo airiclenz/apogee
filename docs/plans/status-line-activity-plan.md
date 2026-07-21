@@ -185,7 +185,7 @@ confined to `internal/agent`. Commit:
 
 ---
 
-## 3. TUI: an active verb per tool in the existing registry
+## 3. TUI: an active verb per tool in the existing registry — ✅ DONE (2026-07-21)
 
 **What:** in `internal/tui/toolpresent.go`, add `verb string` to `toolPresenter` (`:59`) and
 `Verb string` to `toolView` (`:45`), set by `presentToolCall` (`:192`). One verb per

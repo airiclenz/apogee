@@ -16,16 +16,18 @@ func detailsText(tv toolView) string {
 	return strings.Join(parts, "\n")
 }
 
-// TestPresentToolCall proves the open registry: each default tool maps to its friendly label
-// and a target pulled from the arguments, its fixed result header summarises to one detail
-// line, and an unknown or malformed call falls back to the raw name with its arguments shown
-// verbatim (the approval surface never hides the model's request).
+// TestPresentToolCall proves the open registry: each default tool maps to its friendly label,
+// its active status-line verb, and a target pulled from the arguments, its fixed result header
+// summarises to one detail line, and an unknown or malformed call falls back to the raw name
+// (verb "running <raw name>") with its arguments shown verbatim (the approval surface never
+// hides the model's request).
 func TestPresentToolCall(t *testing.T) {
 	tests := []struct {
 		name        string
 		call        domain.ToolCall
 		result      domain.ToolResult
 		wantLabel   string
+		wantVerb    string
 		wantTarget  string
 		wantBracket bool
 		wantDetail  string // a substring expected in the view's detail lines
@@ -35,6 +37,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result:     domain.ToolResult{CallID: "1", Content: "[File: main.go, 120 lines total, showing lines 1-100]\npackage main"},
 			wantLabel:  "Read File",
+			wantVerb:   "reading",
 			wantTarget: "main.go", wantBracket: true, wantDetail: "1 - 100",
 		},
 		{
@@ -42,6 +45,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "2", Tool: "write_file", Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)},
 			result:     domain.ToolResult{CallID: "2", Content: "wrote 5 bytes to notes.txt"},
 			wantLabel:  "Write File",
+			wantVerb:   "writing",
 			wantTarget: "notes.txt", wantBracket: true, wantDetail: "+5 bytes",
 		},
 		{
@@ -49,6 +53,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "3", Tool: "list_dir", Arguments: []byte(`{"path":"src"}`)},
 			result:     domain.ToolResult{CallID: "3", Content: "[12 entries total]\nfoo\nbar"},
 			wantLabel:  "List Dir",
+			wantVerb:   "listing",
 			wantTarget: "src", wantBracket: true, wantDetail: "12 entries",
 		},
 		{
@@ -56,6 +61,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "4", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)},
 			result:     domain.ToolResult{CallID: "4", Content: "[3 total matches, showing 1-3]\na\nb\nc"},
 			wantLabel:  "Search",
+			wantVerb:   "searching",
 			wantTarget: "TODO", wantBracket: true, wantDetail: "3 matches",
 		},
 		{
@@ -63,6 +69,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:        domain.ToolCall{ID: "5", Tool: "grep", Arguments: []byte(`{"pattern":"zzz"}`)},
 			result:      domain.ToolResult{CallID: "5", Content: "No matches found"},
 			wantLabel:   "Search",
+			wantVerb:    "searching",
 			wantTarget:  "zzz",
 			wantBracket: true, wantDetail: "0 matches",
 		},
@@ -71,6 +78,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "20", Tool: "web_search", Arguments: []byte(`{"query":"golang testing"}`)},
 			result:     domain.ToolResult{CallID: "20", Content: "1. Go Testing\n   https://go.dev\n   snippet\n\n2. More\n   https://x.dev"},
 			wantLabel:  "Web Search",
+			wantVerb:   "searching the web",
 			wantTarget: "golang testing", wantBracket: true, wantDetail: "2 results",
 		},
 		{
@@ -78,6 +86,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "21", Tool: "web_search", Arguments: []byte(`{"query":"zzz"}`)},
 			result:     domain.ToolResult{CallID: "21", Content: "No results found for: zzz"},
 			wantLabel:  "Web Search",
+			wantVerb:   "searching the web",
 			wantTarget: "zzz", wantBracket: true, wantDetail: "No results found for: zzz",
 		},
 		{
@@ -85,6 +94,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "22", Tool: "web_fetch", Arguments: []byte(`{"url":"https://go.dev"}`)},
 			result:     domain.ToolResult{CallID: "22", Content: "HTTP 200 OK\nContent-Type: text/html\n\n<html>…</html>"},
 			wantLabel:  "Web Fetch",
+			wantVerb:   "fetching",
 			wantTarget: "https://go.dev", wantBracket: true, wantDetail: "HTTP 200 OK",
 		},
 		{
@@ -92,6 +102,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "23", Tool: "http_request", Arguments: []byte(`{"url":"https://api.example.com","method":"post"}`)},
 			result:     domain.ToolResult{CallID: "23", Content: "HTTP 201 Created\nLocation: /things/1\n\n{}"},
 			wantLabel:  "HTTP Request",
+			wantVerb:   "requesting",
 			wantTarget: "POST https://api.example.com", wantBracket: true, wantDetail: "HTTP 201 Created",
 		},
 		{
@@ -99,6 +110,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "24", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
 			result:     domain.ToolResult{CallID: "24", Content: "ok   pkg/a 0.1s\nok   pkg/b 0.2s\nok   pkg/c 0.3s"},
 			wantLabel:  "Run",
+			wantVerb:   "running",
 			wantTarget: "go test ./...", wantBracket: true, wantDetail: "… +2 more lines",
 		},
 		{
@@ -106,6 +118,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "25", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
 			result:     domain.ToolResult{CallID: "25", Content: "\n"},
 			wantLabel:  "Run",
+			wantVerb:   "running",
 			wantTarget: "true", wantBracket: true, wantDetail: "(no output)",
 		},
 		{
@@ -113,6 +126,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "26", Tool: "python_exec", Arguments: []byte(`{"code":"print('hi')\nprint('there')"}`)},
 			result:     domain.ToolResult{CallID: "26", Content: "hi\nthere"},
 			wantLabel:  "Run Python",
+			wantVerb:   "running python",
 			wantTarget: "print('hi')", wantBracket: true, wantDetail: "hi",
 		},
 		{
@@ -120,6 +134,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "27", Tool: "git_branch", Arguments: []byte(`{"action":"create","name":"feature-x"}`)},
 			result:     domain.ToolResult{CallID: "27", Content: "created and switched to branch feature-x"},
 			wantLabel:  "Git Branch",
+			wantVerb:   "branching",
 			wantTarget: "create feature-x", wantBracket: true, wantDetail: "created and switched",
 		},
 		{
@@ -127,6 +142,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "28", Tool: "git_commit", Arguments: []byte(`{"message":"fix: the thing\n\nlong body"}`)},
 			result:     domain.ToolResult{CallID: "28", Content: "[main abc1234] fix: the thing\n 1 file changed"},
 			wantLabel:  "Git Commit",
+			wantVerb:   "committing",
 			wantTarget: "fix: the thing", wantBracket: true, wantDetail: "[main abc1234] fix: the thing",
 		},
 		{
@@ -134,6 +150,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "29", Tool: "git_diff_range", Arguments: []byte(`{"base":"main","head":"feature-x"}`)},
 			result:     domain.ToolResult{CallID: "29", Content: "diff --git a/x b/x\n+added"},
 			wantLabel:  "Git Diff",
+			wantVerb:   "diffing",
 			wantTarget: "main...feature-x", wantBracket: true, wantDetail: "… +1 more line",
 		},
 		{
@@ -141,6 +158,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "30", Tool: "edit_existing_file", Arguments: []byte(`{"path":"main.go","content":"x"}`)},
 			result:     domain.ToolResult{CallID: "30", Content: "applied patch to main.go (2 hunks)"},
 			wantLabel:  "Edit File",
+			wantVerb:   "editing",
 			wantTarget: "main.go", wantBracket: true, wantDetail: "applied patch to main.go (2 hunks)",
 		},
 		{
@@ -148,6 +166,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "31", Tool: "open_file", Arguments: []byte(`{"path":"main.go","locate":"func main"}`)},
 			result:     domain.ToolResult{CallID: "31", Content: "File: main.go\nLocated \"func main\" on lines: 5\n\npackage main\n…"},
 			wantLabel:  "Open File",
+			wantVerb:   "opening",
 			wantTarget: "main.go", wantBracket: true, wantDetail: `Located "func main" on lines: 5`,
 		},
 		{
@@ -155,6 +174,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "32", Tool: "open_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result:     domain.ToolResult{CallID: "32", Content: "File: main.go\n\npackage main\n\nfunc main() {}"},
 			wantLabel:  "Open File",
+			wantVerb:   "opening",
 			wantTarget: "main.go", wantBracket: true, wantDetail: "3 lines",
 		},
 		{
@@ -162,6 +182,7 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "33", Tool: "sub_agent", Arguments: []byte(`{"task":"Survey the tests.\nReport gaps."}`)},
 			result:     domain.ToolResult{CallID: "33", Content: "The suite covers A and B.\nGap: C is untested."},
 			wantLabel:  "Sub-Agent",
+			wantVerb:   "delegating",
 			wantTarget: "Survey the tests.", wantBracket: true, wantDetail: "… +1 more line",
 		},
 		{
@@ -169,12 +190,14 @@ func TestPresentToolCall(t *testing.T) {
 			call:       domain.ToolCall{ID: "34", Tool: "ask_user", Arguments: []byte(`{"question":"Deploy to prod?"}`)},
 			result:     domain.ToolResult{CallID: "34", Content: "yes, after the demo"},
 			wantLabel:  "Ask User",
+			wantVerb:   "asking",
 			wantTarget: "Deploy to prod?", wantBracket: true, wantDetail: "yes, after the demo",
 		},
 		{
 			name:        "unknown tool → raw label, bare, JSON args as detail",
 			call:        domain.ToolCall{ID: "6", Tool: "frobnicate", Arguments: []byte(`{"x":1}`)},
 			wantLabel:   "frobnicate",
+			wantVerb:    "running frobnicate",
 			wantTarget:  "",
 			wantBracket: false, wantDetail: `"x": 1`,
 		},
@@ -182,6 +205,7 @@ func TestPresentToolCall(t *testing.T) {
 			name:        "malformed args → shown verbatim, not dropped",
 			call:        domain.ToolCall{ID: "7", Tool: "weird", Arguments: []byte("{not json")},
 			wantLabel:   "weird",
+			wantVerb:    "running weird",
 			wantTarget:  "",
 			wantBracket: false, wantDetail: "{not json",
 		},
@@ -191,6 +215,9 @@ func TestPresentToolCall(t *testing.T) {
 			tv := presentToolCall(tc.call)
 			if tv.Label != tc.wantLabel {
 				t.Errorf("Label = %q, want %q", tv.Label, tc.wantLabel)
+			}
+			if tv.Verb != tc.wantVerb {
+				t.Errorf("Verb = %q, want %q", tv.Verb, tc.wantVerb)
 			}
 			if tv.Target != tc.wantTarget {
 				t.Errorf("Target = %q, want %q", tv.Target, tc.wantTarget)
