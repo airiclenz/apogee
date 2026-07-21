@@ -45,7 +45,8 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 **`v1.3.0` shipped (2026-07-05).** The embeddable agent core is stable — the public
 Go API follows semver from `v1.0.0` — with the full tool suite, MCP client,
 sub-agents, and OS-confined Auto mode (Linux landlock / macOS seatbelt; Windows
-confinement comes in a later phase, so Auto is not yet available there). Current
+confinement comes in a later phase, so Auto there still runs — it just falls back
+to asking before each shell/subprocess call instead of confining it). Current
 work is per-model bench validation of the mechanism catalogue: the full catalogue
 is ported, and the first Validated set (gemma-4-E4B) ships with the binary.
 See [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
@@ -143,8 +144,9 @@ Makefile just gives the common commands one-word names.
 
 > **Note:** launch the TUI with `apogee --endpoint <openai-compatible-url> --model <name>`
 > to hold a real coding conversation with a local model. All four autonomy modes, the
-> full tool suite, MCP, sub-agents, and skills are live; Auto mode needs OS confinement
-> (Linux and macOS today — Windows lands in a later phase).
+> full tool suite, MCP, sub-agents, and skills are live; Auto mode runs fully unattended
+> where OS confinement exists (Linux and macOS today — Windows lands in a later phase,
+> where Auto instead gates each shell/subprocess call through approval).
 
 ## License
 

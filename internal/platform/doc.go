@@ -3,8 +3,12 @@
 // that gate Auto mode as a capability matrix (ADR 0004). The Confiner interface
 // itself is public (package apogee); only the backends live here.
 //
-// Phase-0 seam (P0.5): the Shell/Path interfaces and a Host accessor exist with
-// a real POSIX implementation and a Windows stub; the only Confiner backend is
-// denyConfiner, a deny-all stub (AutoEligible == false) so New's Auto gate can
-// be tested before the real backends land in Phase 3.
+// The Shell/Path interfaces and a Host accessor exist with a real POSIX
+// implementation and a Windows stub that ships unexercised (Phase 5). The real
+// Confiner backends landed in Phase 3 and are selected per OS at build time:
+// landlock on Linux, seatbelt on macOS, and denyConfiner — a deny-all stub
+// reporting {false, false} — everywhere else (Windows until Phase 5). An
+// incapable backend does not refuse Auto: the dispatch disposition gates the
+// subprocess surface through Approval instead (ADR 0012; §4–5 of
+// docs/design/confinement-execution-contract.md).
 package platform

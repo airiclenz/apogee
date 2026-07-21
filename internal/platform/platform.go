@@ -13,10 +13,12 @@ import (
 // the first real caller; the Phase-0 capstone harness (P0.6) needs none of these
 // methods, so the surface is deliberately minimal.
 //
-// TODO(phase-3): widen to the real surface — environment-scoped execution,
+// TODO(phase-5): widen to the real surface — environment-scoped execution,
 // executable lookup (exec.LookPath semantics differ per OS) and argument
 // quoting. Kept to one method here so the seam exists without pre-designing the
 // full abstraction (plan §P0.5: "do not design the full shell abstraction").
+// Phase 3 shipped the terminal tool without needing the wider surface; it is the
+// Windows backend (Phase 5) that forces it.
 type Shell interface {
 	// Command returns the argv that runs line through the platform shell, e.g.
 	// {"sh", "-c", line} on POSIX. The caller wires the result into os/exec.
@@ -27,7 +29,7 @@ type Shell interface {
 // does not settle on its own (chiefly the executable suffix). Phase 0 needs none
 // of these methods; Phase 3 (tool sandboxing) is the first real caller.
 //
-// TODO(phase-3): widen to the real surface — case-folded containment for
+// TODO(phase-5): widen to the real surface — case-folded containment for
 // ConfinementBox.WritablePaths (case-insensitive on Windows) and PATH lookup.
 type Path interface {
 	// ExecExt returns the filename extension the platform appends to

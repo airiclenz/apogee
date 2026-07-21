@@ -463,7 +463,7 @@ before keeping it on**:
 | Dependency bloat | incidental `go get` grows the binary & supply-chain surface | §3a: stdlib-first; every direct dep is a noted, deliberate choice |
 | **Library cross-session harm** | the Library injects learned content across sessions, where per-Session safety nets reset clean; bad/mismatched observations could persist and hurt the model | confidence-tagged `ModelFingerprint` (prefer-not-to-inject under uncertainty); TTL + Bayesian counter-evidence; **longitudinal bench gate** (never below baseline) |
 | **Non-deterministic Mechanism order** | a partial order + Go's randomized map iteration ⇒ non-reproducible runs & A/B noise | deterministic topo-sort with stable canonical-ID tiebreak; bench flags order-sensitive undeclared pairs |
-| **In-process bench fragility** | the bench drives the loop in-process, so a `panic` in a Mechanism/tool can abort a long counterfactual sweep | *(open — see §8)* decide on a recover-per-Step boundary |
+| **In-process bench fragility** | the bench drives the loop in-process, so a `panic` in a Mechanism/tool can abort a long counterfactual sweep | *(RESOLVED — §8 item 3c)* `Step()` recovers at the extension boundary: a panic becomes a typed error Event and the loop degrades to a clean quiescent boundary |
 
 ---
 

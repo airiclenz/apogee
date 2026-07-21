@@ -7,12 +7,13 @@ import "errors"
 // ----------------------------------------------------------------------------
 
 var (
-	// ErrAutoUnavailable is returned by New when Mode==Auto but the Confiner cannot
-	// satisfy the Auto gate — missing, or no filesystem-write confinement on this host.
-	// Under ADR 0012 the gate is FSWrite-only (the network is open by default), so this
-	// is now CONDITIONAL: a host with fs-confinement (Linux kernel ≥5.13) enters Auto;
-	// only a host without it is refused. The unfenceable subprocess surface then falls
-	// back to Approval rather than refusing Auto outright (confinement-execution-contract §5).
+	// ErrAutoUnavailable is returned by New when Mode==Auto and NO Confiner was injected
+	// at all (cfg.Confiner == nil) — Auto has no facility to enforce its subprocess surface
+	// with, so it is refused. A PRESENT-but-incapable backend (denyConfiner, or landlock on
+	// a kernel <5.13) does NOT refuse Auto: under ADR 0012 the gate is FSWrite-only and the
+	// unfenceable subprocess surface falls back to Approval — "confine if you can, gate if
+	// you can't" (confinement-execution-contract §4–5). The CLI always injects a backend,
+	// so this error is a library-embedder contract, not a CLI-user-facing one.
 	ErrAutoUnavailable = errors.New("apogee: auto mode requires filesystem-write confinement, unavailable on this host")
 
 	// ErrConfinementUnavailable is the runtime "confine if you can, gate if you can't"
