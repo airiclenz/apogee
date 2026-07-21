@@ -146,7 +146,7 @@ Diff confined to `internal/agent`. Commit:
 
 ---
 
-## 2. The emergency fold: mid-Exchange-legal, role-safe
+## 2. The emergency fold: mid-Exchange-legal, role-safe — ✅ DONE (2026-07-21)
 
 **What:** in `internal/agent/compact.go`, a new `emergencyFold(ctx, turn) bool` (true ⇒ the
 conversation was folded and the Turn may retry):
