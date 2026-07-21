@@ -330,7 +330,14 @@ Commit: `feat(tui): a live activity status with an elapsed clock in the status l
 
 ---
 
-## 5. Retire the turn plumbing
+## 5. Retire the turn plumbing — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): the field had a third reader the item's text does not name —
+`transcript_test.go:98-99` (`tr.turn != 1` at the end of `TestTranscriptToolTurnGolden`);
+it is deleted on the same reasoning as the `e2e_test.go` one (the golden already asserts
+the whole rendered scrollback, so the field was kept alive for the assertion alone). The
+`apply` doc comment's "exhaustive over all eight variants" claim is left as found — only
+the "records the Turn index (it drives the status line)" clause is removed, per the item.
 
 **Depends on item 4** (nothing may still read it).
 

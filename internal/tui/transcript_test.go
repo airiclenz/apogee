@@ -95,9 +95,6 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("transcript mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
-	if tr.turn != 1 {
-		t.Errorf("turn = %d, want 1 (the latest Turn seen)", tr.turn)
-	}
 }
 
 // ----------------------------------------------------------------------------

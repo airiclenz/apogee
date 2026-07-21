@@ -26,7 +26,6 @@ type transcript struct {
 	// not a strings.Builder: the Model is a value type copied on every
 	// Update, and a Builder forbids the copy — it panics copyCheck)
 	streaming bool // whether pending holds an un-committed assistant buffer
-	turn      int  // the latest Turn index seen (drives the status line)
 	debug     bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
 }
 
@@ -76,37 +75,29 @@ func (t *transcript) addNote(text string) {
 
 // apply folds one engine Event into the transcript (the C6 rule). The switch is
 // exhaustive over all eight variants so the set stays honest as the engine evolves. Each
-// case records the Turn index (it drives the status line) and then folds the event: tokens
-// grow the in-progress buffer; a StreamReset discards it; a Message commits it (canonical
-// text); the first ToolCall of a Turn finalises the pre-tool narration before recording the
-// call; results, approvals, and recovered faults append their own entries; a
-// MechanismFired is surfaced only in the debug view. It renders only — no agent logic (C5).
+// case folds its event: tokens grow the in-progress buffer; a StreamReset discards it; a
+// Message commits it (canonical text); the first ToolCall of a Turn finalises the pre-tool
+// narration before recording the call; results, approvals, and recovered faults append
+// their own entries; a MechanismFired is surfaced only in the debug view. It renders only —
+// no agent logic (C5).
 func (t *transcript) apply(e domain.Event) {
 	switch e := e.(type) {
 	case domain.TokenEvent:
-		t.turn = e.Turn
 		t.appendToken(e.Text)
 	case domain.StreamResetEvent:
-		t.turn = e.Turn
 		t.discardPending()
 	case domain.MessageEvent:
-		t.turn = e.Turn
 		t.commitAssistant(e.Text, e.Depth)
 	case domain.ToolCallEvent:
-		t.turn = e.Turn
 		t.finalizeNarration(e.Depth)
 		t.addToolCall(e.Call, e.Depth)
 	case domain.ToolResultEvent:
-		t.turn = e.Turn
 		t.addToolResult(e.Result, e.Depth)
 	case domain.ApprovalEvent:
-		t.turn = e.Turn
 		t.addApproval(e.Request, e.Decision, e.Depth)
 	case domain.MechanismFiredEvent:
-		t.turn = e.Turn
 		t.addMechanism(e)
 	case domain.ErrorEvent:
-		t.turn = e.Turn
 		t.addError(e.Source, e.Err, e.Depth)
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively

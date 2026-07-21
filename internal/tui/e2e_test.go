@@ -427,9 +427,6 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	if r2.TurnIndex != 2 {
 		t.Errorf("resumed turn index = %d, want 2 (continues after exchange 1's turns 0 and 1)", r2.TurnIndex)
 	}
-	if m2.transcript.turn != 2 {
-		t.Errorf("status-line turn = %d, want 2 (continued from the snapshot)", m2.transcript.turn)
-	}
 	// The continuation reply rendered, and no second approval was needed (no tool this Turn).
 	if got := plainTranscript(m2); !strings.Contains(got, followUpMessageText) {
 		t.Errorf("resumed transcript missing the continuation reply %q:\n%s", followUpMessageText, got)
