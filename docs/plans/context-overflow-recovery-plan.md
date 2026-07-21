@@ -254,6 +254,23 @@ an explicit `ctx.Err() != nil` check after the fold routes a cancelled fold to `
 `rollback` moves past a successful fold (decision 6). The shared one-fold-per-Turn latch is the
 respond loop entering at `attempt := recoveries` (item 3's NOTES anticipated exactly this).
 
+NOTES (2026-07-21, FOLLOW-UP-A — answers the deviation above): owner-ratified fix landed. The guard
+is NOT gated on calibration (that would leave Turn 1, every sub-agent, and the first Turn after a
+RESUME unprotected — precisely where the estimator is unserialized while the restored history sits
+near the window); it is DAMPED. While the Budget is uncalibrated (`b.Used == 0`, already on
+`domain.Budget` — no new plumbing) `requestExceedsWindow` requires the estimate to exceed
+`uncalibratedRoomMargin` (= 2, one documented named constant in `internal/agent/loop.go` beside the
+guard) times the working room; once `b.Used > 0` the threshold is the unchanged full working room.
+2 is `maxCharsPerToken / DefaultCharsPerToken` (8.0/4.0), so a false positive is impossible anywhere
+inside the estimator's own clamp band while every pathological case still fires (a 10 MiB read is
+~25x over), preserving the unclassifiable-400 cover. Rationale is the asymmetry: an under-estimate
+is free (the wire overflow routes to the reactive path), an over-estimate spends an irreversible
+lossy fold plus a summary call on a request that would have fit. Tests: new
+`TestPredictiveGuardUncalibratedNeedsTwiceTheRoom` (silent at 1x+1 and at exactly 2x, folds at
+2x+1) in `internal/agent/predictiveguard_test.go`; the existing threshold test is now explicitly the
+CALIBRATED arm (unchanged 1x). **Item 6 owns the doc surface for this** — ADR 0018 / CONTEXT.md /
+CHANGELOG were deliberately left untouched here and must cover the uncalibrated margin.
+
 **Depends on items 2–3** (same fold, same one-per-Turn latch).
 
 **What:** in `step()`, after `buildRequest` (`loop.go:293`) and before `runPreRequestHooks`:

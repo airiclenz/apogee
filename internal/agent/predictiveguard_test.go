@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -55,10 +56,11 @@ func seedSizedOpenTurn(t *testing.T, a *Agent, chars int) {
 	}
 }
 
-// TestPredictiveGuardFoldsAtTheWindowThresholdOnly pins the trigger to the exact working room:
-// a request whose estimate lands ON the limit is sent as built (the estimate says it fits), and
-// one token over it folds BEFORE any Upstream call — the fake records only the post-fold request,
-// which is the folded prefix | summary | bridge shape.
+// TestPredictiveGuardFoldsAtTheWindowThresholdOnly pins the CALIBRATED trigger to the exact
+// working room — no uncertainty margin once a UsageEvent has measured the ratio: a request whose
+// estimate lands ON the limit is sent as built (the estimate says it fits), and one token over it
+// folds BEFORE any Upstream call — the fake records only the post-fold request, which is the
+// folded prefix | summary | bridge shape.
 func TestPredictiveGuardFoldsAtTheWindowThresholdOnly(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -125,6 +127,86 @@ func TestPredictiveGuardFoldsAtTheWindowThresholdOnly(t *testing.T) {
 			if a.conv.Len() != 4 {
 				t.Errorf("conv.Len() = %d (roles %s), want 4 (prefix + summary + bridge + reply)", a.conv.Len(), convRoles(a))
 			}
+		})
+	}
+}
+
+// TestPredictiveGuardUncalibratedNeedsTwiceTheRoom pins the uncertainty margin on an estimator that
+// has never seen a UsageEvent (Turn 1, a sub-agent, the first Turn after a resume): there the ratio
+// is only the 4.0 seed, which can overstate the true token count by at most 2x (the clamp band's
+// 8.0 ceiling), so the guard stays silent anywhere between one and two times the working room —
+// where a fold might be spent on a request that would have fit — and still fires past it, keeping
+// the pathological cases and the unclassifiable-400 cover the guard exists for.
+func TestPredictiveGuardUncalibratedNeedsTwiceTheRoom(t *testing.T) {
+	tests := []struct {
+		name     string
+		chars    func(fits int) int // the request's size, from the chars that exactly fill the working room
+		wantFold bool
+	}{
+		{
+			name:     "one char past the working room is not enough while uncalibrated",
+			chars:    func(fits int) int { return fits + 1 },
+			wantFold: false,
+		},
+		{
+			name:     "exactly twice the working room is still not enough",
+			chars:    func(fits int) int { return 2 * fits },
+			wantFold: false,
+		},
+		{
+			name:     "one char past twice the working room folds",
+			chars:    func(fits int) int { return 2*fits + 1 },
+			wantFold: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			up := &recoveryResponder{reply: "the reply", summary: "EMERGENCY-SUMMARY"}
+			a, err := newAgent(autoCompactConfig(sink), up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			// Deliberately NOT calibrated: the estimator still carries the seed ratio and a zero Used.
+			if b := a.budget(); b.Used != 0 || b.CharsPerToken != apogeectx.DefaultCharsPerToken {
+				t.Fatalf("test setup: budget is %+v, want an uncalibrated one (Used 0, the seed ratio)", b)
+			}
+			fits := int(float64(workingRoom(a)) * a.budget().CharsPerToken)
+			seedSizedOpenTurn(t, a, tc.chars(fits))
+
+			res, err := a.Step(context.Background()) // no Submit: the Exchange is already open
+			if err != nil {
+				t.Fatalf("Step: %v", err)
+			}
+
+			if res.Status != domain.StatusExchangeComplete {
+				t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+			}
+			want := 0
+			if tc.wantFold {
+				want = 1
+			}
+			if up.summaries != want {
+				t.Fatalf("summarizer calls = %d, want %d", up.summaries, want)
+			}
+			if len(up.mains) != 1 {
+				t.Fatalf("main requests = %d, want 1", len(up.mains))
+			}
+			sent := up.mains[0]
+			if !tc.wantFold {
+				if len(sent.Messages) != 3 {
+					t.Errorf("request carried %d messages, want the 3 seeded ones unfolded", len(sent.Messages))
+				}
+				return
+			}
+			if len(sent.Messages) != 3 {
+				t.Fatalf("folded request carried %d messages, want 3 (prefix | summary | bridge)", len(sent.Messages))
+			}
+			if got := sent.Messages[1]; got.Role != string(domain.RoleAssistant) || !strings.Contains(got.Content, "EMERGENCY-SUMMARY") {
+				t.Errorf("request message 1 is not the assistant summary: %+v", got)
+			}
+			assertRequestTemplateLegal(t, sent)
 		})
 	}
 }

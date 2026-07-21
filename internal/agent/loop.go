@@ -835,6 +835,21 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	return req, deferred
 }
 
+// uncalibratedRoomMargin is how many times the working room an estimate must exceed before the
+// predictive guard folds on an UNCALIBRATED Budget — one with no server usage reported yet
+// (Budget.Used == 0): Turn 1, every sub-agent, and the first Turn after a resume, where the
+// estimator is deliberately not serialized while the restored history may already sit near the
+// window.
+//
+// There the chars→token ratio is only the seed (internal/context.DefaultCharsPerToken, 4.0), and a
+// calibrated ratio can never leave the estimator's clamp band [2.0, 8.0]. The seed therefore
+// overstates the true token count by at most 8.0/4.0 = 2x, so demanding twice the room makes a
+// false positive impossible anywhere inside that band, while every pathological case the guard
+// exists for still fires with room to spare (a 10 MiB read is ~25x over) — including the
+// unclassifiable-400 cover that earns the guard its place. The guard is damped here, never gated
+// on calibration: waiting for the first UsageEvent would leave exactly those Turns unprotected.
+const uncalibratedRoomMargin = 2
+
 // requestExceedsWindow reports whether req's prompt is ALREADY estimated to be too big for the
 // model's context window — the predictive half of overflow protection, read by step() between
 // building a request and sending it.
@@ -843,21 +858,26 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 // messages and tool menu, through the Budget's calibrated chars→token ratio
 // (domain.Budget.EstimateTokens), so this guard can never disagree with the compaction trigger or
 // a hook reading the same Budget. The threshold is the FULL working room (ContextLimit −
-// ResponseReserve), deliberately not a softer fraction: a fold is a lossy rewrite of the user's
-// history, so it must fire only when the estimate says the request cannot fit at all, never as a
-// comfort margin. The ~60%-of-working-room History allocation stays the boundary trigger's
-// business (Budget.HistoryExceedsAllocation), not this one's.
+// ResponseReserve) — uncalibratedRoomMargin times it while the ratio is still the uncalibrated
+// seed — deliberately not a softer fraction: a fold is a lossy rewrite of the user's history, so
+// it must fire only when the estimate says the request cannot fit at all, never as a comfort
+// margin. The ~60%-of-working-room History allocation stays the boundary trigger's business
+// (Budget.HistoryExceedsAllocation), not this one's.
 //
 // It is inert — always false — when the window is unknown (no discovery, no config: Allocate
 // returns the zero Allocation, leaving no working room), so an unbudgeted Agent never
 // predictively folds and the reactive recovery is its only protection. The estimate is advisory:
 // an over-estimate costs one fold, and an under-estimate costs nothing, because the wire overflow
-// still routes to the reactive path.
+// still routes to the reactive path. That asymmetry is why an UNCALIBRATED Budget gets the
+// uncertaintyMargin below rather than the bare working room.
 func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 	b := a.budget()
 	room := b.ContextLimit - b.ResponseReserve
 	if room <= 0 {
 		return false
+	}
+	if b.Used == 0 {
+		room *= uncalibratedRoomMargin
 	}
 	st := req.State()
 	return b.EstimateTokens(domain.PromptChars(st.Messages, st.Tools)) > room
