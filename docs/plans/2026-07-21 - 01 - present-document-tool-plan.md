@@ -130,7 +130,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   `Config` delegate block (the item said "next to `Asker`"), which regofmts that block's
   comment alignment.
 
-- [ ] **3. `internal/present` — locality + advertise address (`detect.go`).** New package
+- [x] **3. `internal/present` — locality + advertise address (`detect.go`).** New package
   `internal/present` (host-side presentation mechanisms; consumed by the TUI, importable by any
   embedder; depends on stdlib only). `doc.go` explains the package charter and cites ADR 0019.
   `detect.go`: `Locality(env func(string) string) Kind` returning `Local`/`Remote` — Remote iff
@@ -142,6 +142,18 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   `127.0.0.1`. All take env/goos injected for table tests. Acceptance: table tests cover the
   devbox case (`SSH_CONNECTION=192.168.64.1 50072 192.168.64.2 22` → `192.168.64.2`), IPv6
   bracketing, override precedence, empty-env fallback.
+  NOTES (2026-07-21): `AdvertiseHost` consults **`SSH_CONNECTION` before the `override`**, not
+  override-first as this bullet's literal text says — "Settled design" governs (it, ADR 0019 and
+  CONTEXT.md all fix the order `$SSH_CONNECTION` → `present.host` → dial → `127.0.0.1`), and the
+  deviation is called out in the function's doc comment so nobody "fixes" it later. Three
+  additions the bullet did not spell out: the outbound-dial probe is factored behind an
+  unexported `advertiseHost(env, override, dial)` seam so the precedence chain is table-testable
+  off any routing table (the exported signature is exactly as specified); URL bracketing is
+  applied to *every* link of the chain (override and probe result too), not only the
+  `SSH_CONNECTION` field, since all three feed the same URL authority; and a malformed
+  `SSH_CONNECTION` (fewer than 3 fields, or a third field that is not a numeric IP — a zoned
+  link-local included) falls through to the next link rather than advertising garbage. A nil
+  `env` reads as an empty environment in all three exported functions.
 
 - [ ] **4. `internal/present` — the OS opener (`opener.go`).** `Opener` value constructed with an
   injected runner (`func(name string, args ...string) error` — the seam tests fake) plus goos/env;
