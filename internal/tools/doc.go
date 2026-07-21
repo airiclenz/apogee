@@ -42,4 +42,12 @@
 // ReadOnly (runs in Plan, mode-independent) and is registered only when an Asker is supplied
 // (NewDefaultRegistryWithHost threads the URLGuard, search endpoint, and Asker from Config).
 // The MCP tools land in P3.15.
+//
+// present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
+// the model names a deliverable it has written and the HOST picks the mechanism (the
+// presentation ladder — the transcript baseline always, the OS opener on a local desktop, a
+// doc-server URL when remote), so no platform reasoning reaches the model. It is ReadOnly and
+// mode-independent through the host's Presenter delegate, registered only when one is
+// supplied, and its result names the rung actually reached so the model can relay it
+// truthfully; a failed mechanism degrades to the baseline rather than failing the call.
 package tools

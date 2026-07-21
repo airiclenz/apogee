@@ -186,7 +186,8 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // guard the network tools filter through (the zero URLGuard — its default-on SSRF floor always
 // applies in ALL modes, an app-level guard independent of OS confinement), the configured
 // web-search endpoint (empty ⇒ web_search's built-in DuckDuckGo default; "off" disables it),
-// and the Asker delegate (nil ⇒ ask_user is not registered).
+// the Asker delegate (nil ⇒ ask_user is not registered), and the Presenter delegate (nil ⇒
+// present_document is not registered — ADR 0019).
 //
 // The url-safety policy is deliberately the default floor, NOT seeded from ConfineNetworkAllow:
 // that field is the OS confinement box's network allow-list (CIDRs the confined SUBPROCESS may
@@ -198,6 +199,7 @@ func hostTools(cfg domain.Config) tools.HostTools {
 		URLGuard:          security.URLGuard{},
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
+		Presenter:         cfg.Presenter,
 	}
 }
 

@@ -219,7 +219,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   collision path (a port the test itself holds, so only a server that binds `s.Port` can fail on
   it) — binding a just-released ephemeral port races other parallel tests for it.
 
-- [ ] **6. The tool: `internal/tools/present_document.go`.** Mirror `ask_user.go` exactly in
+- [x] **6. The tool: `internal/tools/present_document.go`.** Mirror `ask_user.go` exactly in
   shape (spec var, args struct, delegate-holding tool, nil-delegate defensive error, `ReadOnly()
   → true`, `var _ domain.ReadOnlyTool` assertion). Spec — name `present_document`; description
   written for small models: `"Show a finished document to the user. Call this after writing a
@@ -236,6 +236,24 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   `HostTools`, and update the registry doc comments + any tool-count assertions in
   `registry_test.go`. Acceptance: tests with a fake Presenter cover all three outcomes, nil
   delegate, missing file, directory, path escape, and registry omission-when-nil.
+  NOTES (2026-07-21): six points the bullet did not spell out. (a) "Presenter error → the
+  degraded-but-shown wording" is narrowed by ADR 0007 exactly as `ask_user.go` narrows it —
+  a Presenter error raised because the ctx was CANCELLED is re-raised as a Go error so the
+  loop rolls the Turn back; every other Presenter error degrades to the shown wording as
+  specified. (b) The wording switch treats an unknown `PresentMethod` (the enum is open,
+  ADR 0019) and a `served` outcome with an empty `Location` as the baseline: those are the
+  only claims such an outcome can truthfully carry. (c) `DisplayPath` is measured against the
+  SYMLINK-RESOLVED root (`security.EvalRealPath`), because `resolveInRoot` returns a real path
+  and a plain `filepath.Rel` against the configured root answers with `../..` wherever the root
+  is reached through a symlink (macOS `/tmp`). (d) `present_document` is appended AFTER
+  `ask_user` (the two host-delegate tools close the menu, independently gated), so it is last
+  when both delegates are set — `registry_test.go` asserts both positions. (e)
+  `internal/agent/loop.go`'s `hostTools(cfg)` now threads `cfg.Presenter` into `HostTools`, the
+  one-line counterpart of `Asker: cfg.Asker`: item 8's read list is `cmd/apogee/*` only, so
+  without it `domain.Config.Presenter` would be dead for every embedder that lets the engine
+  build the default registry. (f) `internal/tools/doc.go` gains a present_document paragraph —
+  the package-doc convention the work-items preamble calls load-bearing. CHANGELOG/README are
+  untouched here: item 9 owns the docs sweep.
 
 - [ ] **7. TUI: `uiPresenter`, the presentation transcript entry, and the tool card.** Read
   `internal/tui/asker.go`, `messages.go`, `transcript.go`, `toolpresent.go`, and `doc.go` (ADR

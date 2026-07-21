@@ -27,13 +27,17 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 		}
 	}
 
-	// ask_user is omitted when no Asker is configured (NewDefaultRegistry uses a zero
-	// HostTools), so the default set is 19 (15 base/exec/git/diag + 3 network + sub_agent).
+	// ask_user (no Asker) and present_document (no Presenter) are omitted when NewDefaultRegistry
+	// uses a zero HostTools, so the default set is 19 (15 base/exec/git/diag + 3 network +
+	// sub_agent).
 	if got := len(registry.All()); got != 19 {
 		t.Errorf("default registry holds %d tools, want 19", got)
 	}
 	if _, ok := registry.Lookup("ask_user"); ok {
 		t.Error("ask_user must NOT be registered without an Asker")
+	}
+	if _, ok := registry.Lookup("present_document"); ok {
+		t.Error("present_document must NOT be registered without a Presenter")
 	}
 }
 
@@ -81,6 +85,38 @@ func TestNewDefaultRegistryWithHost_RegistersAskUserOnlyWithAsker(t *testing.T) 
 	}
 }
 
+func TestNewDefaultRegistryWithHost_RegistersPresentDocumentOnlyWithPresenter(t *testing.T) {
+	t.Parallel()
+
+	// No Presenter ⇒ present_document absent (a headless host never offers a document-showing
+	// affordance nobody can honour — ADR 0019).
+	if _, ok := NewDefaultRegistryWithHost(t.TempDir(), HostTools{}).Lookup("present_document"); ok {
+		t.Error("present_document must be absent without a Presenter")
+	}
+
+	// A Presenter alone ⇒ present_document present; ask_user stays absent (the two delegates are
+	// independent).
+	reg := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Presenter: stubPresenter{}})
+	if _, ok := reg.Lookup("present_document"); !ok {
+		t.Fatal("present_document must be present with a Presenter")
+	}
+	if _, ok := reg.Lookup("ask_user"); ok {
+		t.Error("ask_user must stay absent when only a Presenter is configured")
+	}
+	if got := len(reg.All()); got != 20 {
+		t.Errorf("registry with a Presenter holds %d tools, want 20", got)
+	}
+
+	// Both delegates ⇒ both tools, present_document last in the menu.
+	both := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}).All()
+	if got := len(both); got != 21 {
+		t.Errorf("registry with both delegates holds %d tools, want 21", got)
+	}
+	if got := both[len(both)-1].Name(); got != "present_document" {
+		t.Errorf("present_document should be last in the menu, got last = %q", got)
+	}
+}
+
 func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 	t.Parallel()
 
@@ -116,9 +152,12 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		"sub_agent": false,
 		// ask_user (P3.11): asking a question writes nothing — read-only, runs in Plan.
 		"ask_user": true,
+		// present_document (ADR 0019): showing a document writes nothing — read-only, runs in
+		// Plan, mode-independent through the Presenter.
+		"present_document": true,
 	}
 
-	for _, tool := range DefaultToolsWithHost(t.TempDir(), HostTools{Asker: stubAsker{}}) {
+	for _, tool := range DefaultToolsWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}) {
 		if got := domain.IsReadOnly(tool); got != want[tool.Name()] {
 			t.Errorf("IsReadOnly(%q) = %v, want %v", tool.Name(), got, want[tool.Name()])
 		}
@@ -131,4 +170,12 @@ type stubAsker struct{}
 
 func (stubAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, error) {
 	return domain.AskAnswer{}, nil
+}
+
+// stubPresenter is a no-op Presenter for the registry tests (never called — the tests only
+// check registration/ordering). present_document's behaviour lives in present_document_test.go.
+type stubPresenter struct{}
+
+func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.PresentOutcome, error) {
+	return domain.PresentOutcome{}, nil
 }
