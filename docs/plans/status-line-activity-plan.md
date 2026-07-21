@@ -97,7 +97,7 @@ reasoning hard", and `thinking` would be a guess. Items 1–2 make it a fact.
 
 ---
 
-## 1. Domain: the `ReasoningEvent` variant + facade alias
+## 1. Domain: the `ReasoningEvent` variant + facade alias — ✅ DONE (2026-07-21)
 
 **What:** add to `internal/domain/events.go`, beside `TokenEvent`:
 

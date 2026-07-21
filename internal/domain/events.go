@@ -41,6 +41,28 @@ type TokenEvent struct {
 	Text string
 }
 
+// ReasoningEvent is one newly-revealed chunk of the model's reasoning channel — the
+// observability seam for "the model is thinking", which the visible TokenEvent stream by
+// design never shows. It is emitted for BOTH reasoning paths: the provider's native
+// channel (reasoning_content) and an inline <think>/harmony span held off the visible
+// stream. Chunks arrive in order and concatenate to the reasoning the Turn's assistant
+// message preserves; a Turn that reasons without emitting visible text produces
+// ReasoningEvents and no TokenEvents.
+//
+// It is OBSERVATION ONLY: it never changes history or what the model receives. The
+// reasoning channel is already preserved on the committed assistant message
+// (reasoning_content), so an observer that ignores this event loses nothing but liveness.
+// Arrival alone is a usable signal — a UI may render "thinking" from the event and never
+// read Text at all.
+//
+// Text is untrusted model output. Any consumer that DISPLAYS it must escape-strip it
+// exactly as the TUI's token path (transcript.appendToken) does before it reaches a
+// terminal; the raw chunk may carry ESC bytes.
+type ReasoningEvent struct {
+	EventBase
+	Text string
+}
+
 // StreamResetEvent signals that the assistant tokens streamed for the current Turn since the
 // last boundary are superseded and must be discarded — the loop is re-streaming the Turn
 // because an ActionRetry post-response decision re-called the Upstream. A streaming observer
