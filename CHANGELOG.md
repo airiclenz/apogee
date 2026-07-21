@@ -120,6 +120,15 @@ point is a **minor** bump, not a breaking change.
   document apogee would never read) is refused with a "add the entry by hand" message rather than
   quietly mangled, and a failed write surfaces as an error instead of a save that did not happen.
   (`cmd/apogee`.)
+- **The whole loop is pinned end to end on a simulated incapable host.** One acceptance test now
+  walks the journey this release exists for, against a Confiner that reports no filesystem
+  confinement (so it reproduces identically on a machine that *can* fence): a real Auto Agent
+  gates its terminal command through Approval while the degradation notice is produced; the
+  `/confine off` seam makes the very next terminal command run ungated with no restart;
+  `/confine off --save`, driven through the composition root's own wiring, records this machine in
+  `config.yaml`; and a fresh resolution over that file comes back unconfined **here** and confined
+  — notice and all — under any other host id. That last step is the one that would fail if the
+  acknowledgement were ever made global again. (test-only.)
 
 ## [1.5.0] — 2026-07-21
 

@@ -405,7 +405,24 @@ Commit: `feat(cli): comment-preserving config writer for the host acknowledgemen
 
 ---
 
-## 9. End-to-end acceptance — the whole loop on a simulated incapable host
+## 9. End-to-end acceptance — the whole loop on a simulated incapable host — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): four choices the item's text left open, all inside its test-files diff
+allowance. (a) The test lives in `cmd/apogee` (`confinement_e2e_test.go`, package main) because
+that is the only package that can reach items 3/4/8's code (`resolveSettings`,
+`confinementDegradedNotice`, the config writer) — internal/tui cannot import package main.
+(b) Consequently the `/confine off` and `--save` steps are driven through the two seams the
+command actually calls, `tui.Engine.SetConfineToWorkspace` and `tui.Options.SaveHostAcknowledgement`,
+rather than through the TUI Model, which is unexported: the command's parsing and routing are
+already pinned by items 6 and 7's own tests, and this test's Engine handle is the narrow
+`tui.Engine` view, not the concrete Agent, so a reverted interface method fails here too.
+(c) Step 3 drives the real `runRoot` with a recording launcher, so wire.go's wiring of
+`Options.Confinement` and `Options.SaveHostAcknowledgement` is covered as well as the writer —
+verified by mutation (nil-ing the seam, and reverting the live-flag read at `dispatch.go:113`,
+both fail the test). (d) The test is therefore NOT parallel: `runRoot` writes startup notices to
+the process-global `os.Stderr`, so that phase is wrapped in the existing `captureStderr` helper;
+which notice fires there is host-dependent, so it is not asserted (TestRunRootConfinementStartupNotices
+owns that) beyond the host-independent mirror check that the unconfined-Auto warning stays silent.
 
 One test proving the user journey the issue describes, with a fake `Confiner` reporting
 `FSWrite=false` (the `denyConfiner` at `internal/platform/platform.go:57-63` is exactly this, or
