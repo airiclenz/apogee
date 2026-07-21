@@ -155,7 +155,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   link-local included) falls through to the next link rather than advertising garbage. A nil
   `env` reads as an empty environment in all three exported functions.
 
-- [ ] **4. `internal/present` — the OS opener (`opener.go`).** `Opener` value constructed with an
+- [x] **4. `internal/present` — the OS opener (`opener.go`).** `Opener` value constructed with an
   injected runner (`func(name string, args ...string) error` — the seam tests fake) plus goos/env;
   `Open(path string) error` builds: darwin `open <path>`; windows `cmd /c start "" <path>`; linux
   `xdg-open <path>`; anything else or no desktop → a sentinel `ErrNoOpener`. `CommandOverride`
@@ -166,6 +166,23 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   assert the exact argv per OS, the override path (including `{path}` substitution and quoting),
   `ErrNoOpener` on headless linux, and that a runner error surfaces (for fail-visible handling
   upstream).
+  NOTES (2026-07-21): four points the bullet did not spell out. (a) `CommandOverride` is
+  consulted BEFORE any platform detection, so it replaces the OS opener on every OS *and*
+  stands in for the desktop check — otherwise "run that instead on every OS" would be untrue
+  exactly where it matters (an OS with no built-in opener, which is the case the override
+  exists for); the ladder still gates rung 1 on Local + `auto-open` (item 7/8). (b) A template
+  that never mentions `{path}` gets the path APPENDED (git's `core.editor` convention), because
+  an opener that launched but opened nothing is a success the user cannot see. (c) An
+  unparseable or program-less template is a configuration error naming `present.command`, NOT
+  `ErrNoOpener` — the sentinel means "nothing to open into" and must stay distinguishable.
+  (d) The production runner (`launchDetached`, the nil-`Run` default) starts the command with
+  its standard streams on the null device, waits up to a 2s grace for an exit status, and
+  returns nil once the command outlives it: waiting is what makes a failed launch visible
+  (every opener in the table exits in milliseconds), and the bound is what stops a
+  user-configured foreground command from holding the presenting Turn open. The child is
+  reaped either way. A blank path is rejected rather than handed to the opener. Also: item 3's
+  `doc.go` line "imports the standard library only" is now false (this item mandates shlex), so
+  it was corrected in place.
 
 - [ ] **5. `internal/present` — the doc server (`server.go`).** `DocServer` with `Serve(path
   string) (url string, err error)`: lazily starts one `net/http` server on first call

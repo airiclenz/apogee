@@ -14,9 +14,11 @@
 // runner — so the mechanisms are table-testable off the machine the tests run on, which is
 // the only way a ladder whose whole subject is the local platform can be tested at all.
 //
-// The package imports the standard library only. Under ADR 0010 it may depend on
-// internal/domain downward and never on the root facade; today it needs neither, because
-// the domain types cross the seam in the caller, not here.
+// The package imports the standard library, plus shlex for splitting the present.command
+// template — the same POSIX command-line splitter the terminal tool already uses, so the one
+// place a user's command line is parsed behaves identically wherever it appears. Under ADR 0010
+// it may depend on internal/domain downward and never on the root facade; today it needs
+// neither, because the domain types cross the seam in the caller, not here.
 //
 // It runs OUTSIDE tool confinement by design (ADR 0019 §5): an opener is the host's own
 // act on the user's own desktop session, the same category as the TUI drawing on the
