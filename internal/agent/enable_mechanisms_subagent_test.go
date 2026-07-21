@@ -25,13 +25,15 @@ import (
 // built registry, not rebuild it.
 var gdEnableStack = []domain.MechanismID{"guided_decomposition", "tool_result_cap"}
 
-// subAgentCapResult is a big, many-lined read_file result — comfortably over tool_result_cap's
-// per-result ceiling at gdWindow (working budget 1600 tokens × 4 chars/token × 0.4 ≈ 2560 chars) and
-// long enough that the head/tail trim strictly shrinks it. An older copy of it (once it falls out of
-// tool_result_cap's protected most-recent-Turn window) is capped, firing the Mechanism once inside
-// the child.
+// subAgentCapResult is a big, many-lined read_file result sized to sit BETWEEN the two per-result
+// ceilings at gdWindow: over tool_result_cap's (working budget 1600 tokens × 4 chars/token × 0.4 ≈
+// 2560 chars) and under the loop's structural floor (the whole History allocation, ~960 tokens ≈
+// 3840 chars — a result over THAT is clamped on the way into the conversation and would reach the
+// Mechanism already small, firing nothing). It is long enough that the head/tail trim strictly
+// shrinks it, so an older copy — once it falls out of tool_result_cap's protected most-recent-Turn
+// window — is capped, firing the Mechanism once inside the child.
 func subAgentCapResult() string {
-	return strings.Repeat("scanned a source line wide enough to matter for the budget\n", 200)
+	return strings.Repeat("scanned a source line wide enough to matter for the budget\n", 60)
 }
 
 // enableMechanismsSubAgentConfig arms the guided_decomposition stack by ID (Config.Mechanisms left

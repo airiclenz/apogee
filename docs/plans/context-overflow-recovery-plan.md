@@ -283,7 +283,23 @@ uncalibrated/unbudgeted Agent never predictively folds.
 
 ---
 
-## 5. Structural floor on a single oversized tool result — **NEEDS-DESIGN-CALL**
+## 5. Structural floor on a single oversized tool result — **NEEDS-DESIGN-CALL** — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): owner-ratified "implement as written". Beyond the item's literal text: (a) the
+hoisted renderer landed as exported `context.TruncateToolResult` in a new
+`internal/context/toolresult.go` (the marker and the 20/20 head/tail consts moved with it, sim @pins
+intact), so `internal/mechanisms` now imports `internal/context` — a sibling edge, ADR 0010-legal,
+no cycle. (b) The clamp rewrites `result.Content` at the top of `appendToolResult`, so the SAME
+clamped body reaches the conversation and the `ToolResultEvent`: the raw result never lands in a
+snapshot or the rendered transcript, per the ratification's "consequence to accept and document".
+(c) It mirrors the Mechanism's never-grow guard (a pathological single-line body the head/tail form
+cannot shrink passes verbatim). (d) The shared fixture `subAgentCapResult`
+(`enable_mechanisms_subagent_test.go`) shrank 200 → 60 lines: at `gdWindow` its old 11.6k chars is
+now over the FLOOR (History ≈ 3840 chars), so the floor clamped it before `tool_result_cap` could —
+the intended interaction, but it silenced that test's Mechanism-fire probe; the fixture now sits
+between the two ceilings. (e) Doc surface: one clause added to `internal/context/doc.go` naming the
+shared renderer (a new exported symbol in that package); ADR 0018, CONTEXT.md's reducer taxonomy and
+the CHANGELOG stay item 6's, which must now also name this floor.
 
 **Consult the owner before starting this item** (implement-plan: stop and ask). It sharpens the
 ADR 0002/0006 line between curated Mechanisms and structure, and the owner may prefer to rely

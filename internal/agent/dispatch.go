@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -410,10 +411,53 @@ func pathWithin(abs, root string) bool {
 }
 
 // appendToolResult commits a tool result to the conversation as a tool message (linked to
-// its call by ID) and emits the ToolResultEvent observers see.
+// its call by ID) and emits the ToolResultEvent observers see, after clamping a pathologically
+// oversized result to the structural floor (clampToolResult). The clamp lands here, at the ONE
+// seam every tool result crosses on its way into history, so no route — a plain call, a Confine
+// verdict's, an approved gate's, a sub-agent delegation's, an error result — can bypass it.
 func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
+	result.Content = a.clampToolResult(result.Content)
 	a.conv.Append(domain.Message{Role: domain.RoleTool, Content: result.Content, ToolCallID: result.CallID})
 	a.cfg.Events.Emit(domain.ToolResultEvent{EventBase: a.base(turn), Result: result})
+}
+
+// clampToolResult is the STRUCTURAL floor on a single tool result: content whose estimated tokens
+// exceed the ENTIRE History allocation is replaced by the shared head/tail-plus-marker elision
+// (context.TruncateToolResult — the same shape `tool_result_cap` renders) before it is committed.
+// A result bigger than everything History may hold can never survive ANY reducer, so appending it
+// whole buys nothing and can doom the Turn outright: the emergency fold's own summary call keeps
+// the most recent message unconditionally (renderBudgetedTranscript), so a fresh giant result IS
+// that message and overflows the fold that was supposed to rescue the Turn.
+//
+// It is structural, not a Mechanism (ADR 0006's floor): it consults no config, is never disabled
+// under Bypass, and self-regulation cannot withdraw it. The `tool_result_cap` Mechanism stays the
+// A/B-able tuning valve above it and cannot substitute for it — it is default-off, bypass-disabled,
+// withdrawable, and caps only the turns BEFORE the most recent tool call, so the freshly appended
+// result (the one that overflows) is exactly the one it never touches. The two thresholds are
+// deliberately far apart: this floor fires only on the pathological — the whole History allocation
+// (~60% of the working room, ~48% of the window at the default reserve), chosen because it sits
+// BELOW the emergency fold's own transcript budget, which is the property that keeps the fold
+// survivable — while the Mechanism's tighter 40%-of-working-room nudge shapes the ordinary case.
+//
+// Unlike the Mechanism, which edits only the projected request, this clamp edits the conversation
+// itself: the raw result never reaches history, and so never reaches a snapshot or the rendered
+// transcript. That is the price of a floor that must hold for every later reducer — and the model
+// is told, in the marker, to re-read the omitted range.
+//
+// It is inert when the window is unknown (a zero History allocation — Allocate had no basis to
+// allocate), matching every other Budget-gated path, and it never GROWS a result: a pathological
+// few-very-long-lines body the head/tail form cannot shrink is left whole (the same guard
+// tool_result_cap applies).
+func (a *Agent) clampToolResult(content string) string {
+	b := a.budget()
+	if b.History <= 0 || b.EstimateTokens(len(content)) <= b.History {
+		return content
+	}
+	clamped := apogeectx.TruncateToolResult(content, int(float64(b.History)*b.CharsPerToken))
+	if len(clamped) >= len(content) {
+		return content
+	}
+	return clamped
 }
 
 // errorToolResult builds a tool-level failure result surfaced to the model (IsError) rather

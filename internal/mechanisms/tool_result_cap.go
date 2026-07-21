@@ -2,8 +2,8 @@ package mechanisms
 
 import (
 	"context"
-	"strings"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -25,31 +25,17 @@ const toolResultCapID domain.MechanismID = "tool_result_cap"
 // 0.4). A result over this fraction is trimmed head/tail; one at or under it is left whole.
 const toolResultBudgetFraction = 0.4
 
-// capHeadLines and capTailLines are how many leading and trailing lines a capped result keeps —
-// apogee-sim's headLines/tailLines (`compress.go:492-495` @pin, 20/20). The head shows the start
-// of a file/output and the tail its end; the middle is elided with a marker pointing the model at
-// a targeted re-read.
-const (
-	capHeadLines = 20
-	capTailLines = 20
-)
-
-// toolResultCapMarker replaces the elided middle of a capped result. apogee-sim's marker also
-// carried a codeinfo structural summary (`compress.go:521-526` @pin); codeinfo is DROPPED in
-// apogee (catalogue C7), so the marker is the plain elision note plus the same re-read hint —
-// apogee's read_file tool takes start_line/end_line (`internal/tools/read_file.go:18-19`), so the
-// hint is actionable.
-const toolResultCapMarker = "\n[truncated to fit the context budget — re-read with start_line/end_line for the omitted range]\n\n"
-
 // toolResultCapMechanism is the pre-request Mechanism that caps oversized tool results (catalogue
 // Table A `tool_result_cap`; ported from apogee-sim internal/compress/compress.go capToolResults
 // `:428` @pin). It walks the request's messages, trims each RoleTool message whose content exceeds
 // its Budget fraction to a head/tail-plus-marker form via Request.SetMessageContent (an in-place
 // edit — the pre-request hook never wholesale-replaces the message list, hook-mutation-api §1.4),
-// and never touches a result from the most recent tool-call Turn. It carries no per-Mechanism
-// state: the descriptor's strikes-3 policy routes self-regulation through the loop's per-Session
-// tracker (item 3), and the fraction/head/tail are built-in defaults (item 4's `mechanisms:` block
-// is enabled-only, so there is no per-Mechanism config surface).
+// and never touches a result from the most recent tool-call Turn. The head/tail rendering itself is
+// context.TruncateToolResult, shared with the loop's structural floor on a single oversized result
+// so both reducers elide with the same shape and marker. It carries no per-Mechanism state: the
+// descriptor's strikes-3 policy routes self-regulation through the loop's per-Session tracker
+// (item 3), and the fraction/head/tail are built-in defaults (item 4's `mechanisms:` block is
+// enabled-only, so there is no per-Mechanism config surface).
 type toolResultCapMechanism struct{}
 
 // newToolResultCap builds the tool_result_cap Mechanism with the built-in defaults. It needs no
@@ -100,7 +86,7 @@ func (toolResultCapMechanism) PreRequest(_ context.Context, req *domain.Request)
 		if msg.Role != domain.RoleTool || len(msg.Content) <= maxChars {
 			continue
 		}
-		capped := truncateToolResult(msg.Content, maxChars)
+		capped := apogeectx.TruncateToolResult(msg.Content, maxChars)
 		if len(capped) < len(msg.Content) {
 			req.SetMessageContent(i, capped)
 		}
@@ -135,38 +121,4 @@ func mostRecentToolCallTurn(conv domain.ConversationView) int {
 		}
 	}
 	return conv.Len()
-}
-
-// truncateToolResult renders content as its first capHeadLines lines, the elision marker, and its
-// last capTailLines lines — apogee-sim truncateToolResult (`compress.go:499` @pin) minus the
-// dropped codeinfo summary (C7). It is called only for content already known to exceed the ceiling.
-func truncateToolResult(content string, maxChars int) string {
-	lines := strings.Split(content, "\n")
-
-	headN := capHeadLines
-	if headN > len(lines) {
-		headN = len(lines)
-	}
-	tailN := capTailLines
-	if tailN > len(lines)-headN {
-		tailN = len(lines) - headN
-	}
-
-	var b strings.Builder
-	b.Grow(maxChars + len(toolResultCapMarker) + 64)
-	for i := 0; i < headN; i++ {
-		b.WriteString(lines[i])
-		b.WriteByte('\n')
-	}
-	b.WriteString(toolResultCapMarker)
-	if tailN > 0 {
-		start := len(lines) - tailN
-		for i := start; i < len(lines); i++ {
-			b.WriteString(lines[i])
-			if i < len(lines)-1 {
-				b.WriteByte('\n')
-			}
-		}
-	}
-	return b.String()
 }
