@@ -137,6 +137,12 @@ composition root and the only place that speaks the public `apogee.*` surface.
   (typed entries + an in-progress assistant token buffer) with an exhaustive switch over all
   eight Events — P2.2 folds the streaming-text and error paths; the tool/approval/mechanism/
   reset bodies are marked P2.3 stubs on the now-stable structure.
+
+  > **Note (2026-07-21).** "All eight Events" was true at P2.2. The Event set has since grown
+  > additively to **eleven** (`UsageEvent`, `AuditEvent`, `ReasoningEvent`), and the
+  > transcript switch still folds the same eight — the three additions are not transcript
+  > entries (the activity line and the status-line stats read them) and fall to its default
+  > case. The realisation above is left as written; only the count is dated.
 - **`Run` does the one wiring step P2.1 left.** It builds
   `tea.NewProgram(newModel(ctx, eng, opts), tea.WithContext(ctx))`, then calls
   `br.Bind(program)` **before** `program.Run()` — so the late-bound sink/approver reach the

@@ -37,6 +37,7 @@ var (
 	_ apogee.EventSink
 	_ apogee.Event
 	_ apogee.TokenEvent
+	_ apogee.ReasoningEvent
 	_ apogee.StreamResetEvent
 	_ apogee.MessageEvent
 	_ apogee.ToolCallEvent
@@ -44,6 +45,8 @@ var (
 	_ apogee.ApprovalEvent
 	_ apogee.MechanismFiredEvent
 	_ apogee.ErrorEvent
+	_ apogee.UsageEvent
+	_ apogee.AuditEvent
 	_ apogee.Approver
 	_ apogee.ApprovalRequest
 	_ apogee.ApprovalDecision

@@ -1,7 +1,8 @@
 # Plan — Status line: a live activity status instead of the turn number
 
 **Date:** 2026-07-21
-**Status:** ready to implement — not started.
+**Status:** **COMPLETE 2026-07-21** — items 1–6 all implemented, verified, and committed on
+`main` (`27805bf`..`0698d2f`), plus a follow-up doc-truth pass.
 **Track:** post-`v1.4.0` TUI affordance + one **additive** Event variant. No freeze break:
 per the CHANGELOG preamble (ADR 0001 §consequences as amended at the Phase-3 cut), a new
 Event variant is a **minor** bump, not a breaking change.

@@ -47,7 +47,10 @@ type TokenEvent struct {
 // channel (reasoning_content) and an inline <think>/harmony span held off the visible
 // stream. Chunks arrive in order and concatenate to the reasoning the Turn's assistant
 // message preserves; a Turn that reasons without emitting visible text produces
-// ReasoningEvents and no TokenEvents.
+// ReasoningEvents and no TokenEvents. The concatenation is a liveness view, not a
+// byte-exact copy: on the inline path a channel token split across deltas is revealed as
+// span text while it accumulates, so the chunks can carry a partial closer (e.g.
+// "secret</thi") that the completed token later removes from the preserved reasoning.
 //
 // It is OBSERVATION ONLY: it never changes history or what the model receives. The
 // reasoning channel is already preserved on the committed assistant message

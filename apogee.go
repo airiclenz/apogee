@@ -149,6 +149,7 @@ type (
 	MechanismFiredEvent = domain.MechanismFiredEvent
 	ErrorEvent          = domain.ErrorEvent
 	UsageEvent          = domain.UsageEvent
+	AuditEvent          = domain.AuditEvent
 )
 
 // ----------------------------------------------------------------------------

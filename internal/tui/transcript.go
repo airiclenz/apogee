@@ -73,8 +73,11 @@ func (t *transcript) addNote(text string) {
 	t.entries = append(t.entries, entry{kind: entryNote, text: text})
 }
 
-// apply folds one engine Event into the transcript (the C6 rule). The switch is
-// exhaustive over all eight variants so the set stays honest as the engine evolves. Each
+// apply folds one engine Event into the transcript (the C6 rule). The switch covers the
+// eight transcript-rendered variants of the eleven-variant Event set, so the rendered set
+// stays honest as the engine evolves; the other three are not transcript entries
+// (ReasoningEvent feeds the activity line, UsageEvent the status-line stats, AuditEvent
+// nothing in the TUI) and fall to the default case with every future variant. Each
 // case folds its event: tokens grow the in-progress buffer; a StreamReset discards it; a
 // Message commits it (canonical text); the first ToolCall of a Turn finalises the pre-tool
 // narration before recording the call; results, approvals, and recovered faults append
