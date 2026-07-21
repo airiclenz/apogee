@@ -315,3 +315,49 @@ reduce mid-Exchange. Guided decomposition covers this with a descriptor `Require
 quiescent *Turn* boundaries under pressure. That changes a structural reducer's contract
 (interacts with the saturation logic, the protected prefix, and bench comparability), so it
 needs its own grill and bench evidence — deliberately not a rider on the decomposition work.
+
+---
+
+## Auto-mode confinement degradation is silent
+
+**Status:** filed 2026-07-21 (owner hit it in a Linux container). Post-`v1.4.0`, **additive** —
+a startup notice plus, optionally, one new config key. No behaviour change to the resolution
+ladder itself.
+
+**The symptom:** you select Auto, Auto is entered, and then every `terminal` call raises an
+Approval prompt — with nothing anywhere explaining why. It reads as "Auto is broken."
+
+**The mechanism (working as designed):** `resolveLadderAuto` (`internal/agent/resolution.go`)
+sends `classSubprocess` to `Confine` when `fsConfineAvailable`, else to `Gate` — ADR 0012's
+**"confine if you can, gate if you can't"**. On a host whose backend reports
+`Capabilities().FSWrite == false`, that is a gate on every command. This is *correct*: Auto's
+promise is unsupervised-but-**bounded**, and an unfenceable subprocess cannot be bounded, so it
+must fall back to supervision rather than silently running unconfined.
+
+**Why it bites now:** `landlock_create_ruleset` returns **`ENOSYS`** in most containers and many
+VMs — the kernel version is irrelevant (verified 2026-07-21 on kernel 6.18.15, well past the
+5.13 floor: `NewConfiner()` → `*landlockConfiner`, `FSWrite=false`, errno 38). The landlock ABI
+probe is correct; the facility is simply absent. So the "degraded" path is the *common* path for
+containerised users, not an exotic edge case.
+
+**The actual defect — no notice.** `internal/agent/loop.go` refuses Auto only when
+`cfg.Confiner == nil`; a present-but-incapable backend enters Auto with no warning, and
+`cmd/apogee` emits nothing at startup (grepped 2026-07-21: no degrade notice exists). The user
+has no way to learn the backend is inert short of reading ADR 0012.
+
+**What to build:**
+
+1. **A startup notice when Auto is entered with `FSWrite == false`** — name the active backend,
+   what it can and cannot enforce, the concrete consequence ("terminal commands will ask for
+   approval"), and the `confine-to-workspace: false` opt-in. One line, not a wall.
+2. **Surface it in the TUI too**, not just stderr — this is exactly the class of thing the
+   parked validated-set in-transcript banner work (deferred follow-up 04) should carry.
+3. **Consider `apogee probe`** — already scoped for merge-plan Phase 5. Reporting the confinement
+   backend and its capability matrix is a natural first subcommand and makes this diagnosable
+   without running an agent at all.
+
+**Explicitly NOT the fix:** do not loosen the ladder to auto-run unconfined subprocesses when the
+backend is incapable. That reintroduces the "unsupervised *and* unbounded" hole ADR 0004/0012
+forbid. The only sanctioned blanket loosen remains `confine-to-workspace: false`, which is the
+explicit "I am the sandbox" acknowledgement — the right answer for a disposable VM, and precisely
+what the notice should point at.
