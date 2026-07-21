@@ -40,21 +40,39 @@ const (
 	entryToolResult
 	entryError
 	entryNote
+	entryPresented
 )
 
 // entry is one committed line-block in the transcript. text is the body (for the text
 // kinds); depth is the sub-agent nesting level (Phase 3). A tool call carries its
 // presentation view and a callID so the paired result can be folded into the same block:
 // callID matches the result by ToolCall.ID, and done marks the call once its result has
-// arrived (so a re-used tool pairs each result with the right call).
+// arrived (so a re-used tool pairs each result with the right call). A presented document
+// carries no text at all: its facts live in presented, the view render.go composes from.
 type entry struct {
-	kind   entryKind
-	text   string
-	depth  int
-	callID string
-	tool   toolView
-	done   bool
-	skills []string // entryUser only: display names of the skills attached to this send
+	kind      entryKind
+	text      string
+	depth     int
+	callID    string
+	tool      toolView
+	done      bool
+	skills    []string // entryUser only: display names of the skills attached to this send
+	presented presentedView
+}
+
+// presentedView is the presentation model of a shown document (entryPresented only): the
+// deliverable's own name, where it lives, and what the host managed to do with it. It is the
+// [toolView] of a presentation — the entry holds the facts and render.go turns them into lines,
+// so the wording and the shape stay table-testable without a Model (ADR 0019 §2, rung 0).
+//
+// Path and Location are carried VERBATIM and rendered as plain text: terminal linkification is
+// the whole mechanism, so nothing here may clip, wrap or decorate them.
+type presentedView struct {
+	Title    string               // the model's optional label; empty when it named none
+	Path     string               // the workspace-relative path — always present, always its own line
+	Location string               // the served URL (rung 2); empty on every other rung
+	Method   domain.PresentMethod // the rung reached, which the closing status line words
+	Reason   string               // why a tried rung did not deliver; empty when none was
 }
 
 // addUser appends a user message — the text the human submitted to open or continue the
@@ -71,6 +89,41 @@ func (t *transcript) addUser(text string, skills []string) {
 // event that is not itself an engine Event.
 func (t *transcript) addNote(text string) {
 	t.entries = append(t.entries, entry{kind: entryNote, text: text})
+}
+
+// addPresented appends the presentation entry for one shown document — rung 0 of the ladder,
+// and the reason a failed mechanism above it is never an error (ADR 0019 §4). Like addUser it is
+// called from the Update loop rather than the event fold: a presentation is the HOST's act, not
+// an engine Event.
+//
+// The title is untrusted model text, so it is escape-stripped and clipped like any other model
+// string reaching the terminal. The path and the URL are escape-stripped too — a filename is
+// filesystem data, not this program's — but never clipped: a truncated path is a link that no
+// longer opens, which is worse than a long one.
+func (t *transcript) addPresented(msg presentedMsg) {
+	t.entries = append(t.entries, entry{kind: entryPresented, presented: presentedView{
+		Title:    clipDetail(stripEscapes(msg.Title)),
+		Path:     stripEscapes(msg.Path),
+		Location: stripEscapes(msg.Location),
+		Method:   msg.Method,
+		Reason:   clipDetail(stripEscapes(msg.Reason)),
+	}})
+}
+
+// presentedStatus is the short line that closes a presentation entry. A rung that was tried and
+// did not deliver says so and states that the path still stands — the entry is the one thing the
+// ladder can always promise, so the wording never leaves the user wondering whether anything
+// happened. Everything else is a hint about what to do next: an opened document needs none beyond
+// the fact, and a path or a URL is one cmd+click away in every terminal that linkifies (Zed,
+// VS Code, iTerm2, WezTerm, kitty).
+func presentedStatus(v presentedView) string {
+	if v.Reason != "" {
+		return v.Reason + " — path shown"
+	}
+	if v.Method == domain.PresentOpened {
+		return "opened on your machine"
+	}
+	return "cmd+click to open"
 }
 
 // apply folds one engine Event into the transcript (the C6 rule). The switch covers the

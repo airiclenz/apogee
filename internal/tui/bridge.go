@@ -31,12 +31,16 @@ type programSender interface {
 // root builds a Bridge, installs its Sink and Approver into Config, constructs the Agent,
 // then Run binds the live program once it exists (phase-2 detail plan §3 C2/C3).
 //
-// The Sink, Approver, and Asker share one late-bound programRef, so a single Bind wires all.
+// The Sink, Approver, Asker, and Presenter share one late-bound programRef, so a single Bind
+// wires all.
 type Bridge struct {
 	prog     *programRef
 	sink     *teaSink
 	approver *uiApprover
 	asker    *uiAsker
+	// presenter is nil until SetPresentation installs the host's ladder rungs — which is the
+	// "present_document is not registered" contract itself (ADR 0019), not an oversight.
+	presenter *uiPresenter
 }
 
 // NewBridge builds an unbound Bridge whose Sink, Approver, and Asker are usable immediately
@@ -61,6 +65,26 @@ func (b *Bridge) Approver() domain.Approver { return b.approver }
 // Asker returns the Asker the composition root installs in Config.Asker — the free-text
 // ask-user gate (P3.11), late-bound through the same programRef as the Approver.
 func (b *Bridge) Asker() domain.Asker { return b.asker }
+
+// SetPresentation installs the host-side presentation ladder (ADR 0019) and, with it, the
+// Presenter. The composition root calls it before reading Presenter — the rungs come from config
+// (present.auto-open / command / port / host) and from the environment, neither of which the TUI
+// reads itself. A host that presents nothing simply never calls it.
+func (b *Bridge) SetPresentation(p Presentation) {
+	b.presenter = &uiPresenter{prog: b.prog, rungs: p}
+}
+
+// Presenter returns the Presenter the composition root installs in Config.Presenter, or nil when
+// no presentation was installed. Nil is a first-class answer here: it is exactly the contract that
+// leaves present_document UNREGISTERED (domain.Presenter), so a headless host never offers the
+// model an affordance nobody can honour. The nil is returned explicitly rather than as a typed nil
+// pointer, which would satisfy the interface and defeat that check.
+func (b *Bridge) Presenter() domain.Presenter {
+	if b.presenter == nil {
+		return nil
+	}
+	return b.presenter
+}
 
 // Bind connects the live program. Run calls it once, before the program processes any
 // input that could launch a worker, so every later Emit/Approve reaches a bound program.

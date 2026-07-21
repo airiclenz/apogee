@@ -228,6 +228,12 @@ var toolRegistry = map[string]toolPresenter{
 		target: firstLineArg("question"),
 		detail: firstLineDetail, // the user's own answer
 	},
+	"present_document": {
+		label:  "Present",
+		verb:   "presenting",
+		target: stringArg("path"),
+		detail: firstLineDetail, // "Presented <path>: opened on the user's machine."
+	},
 }
 
 // The fixed result headers the default tools emit (internal/tools). The patterns are

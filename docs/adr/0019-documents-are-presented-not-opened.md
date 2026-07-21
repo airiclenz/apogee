@@ -72,7 +72,14 @@ listener.
   the presentation entry, again as plain text on its own line. The user's cmd+click opens it in
   the *host's* browser — the reachability the devbox probe established, with no back-channel.
 - **Rung 3 — config override.** `present.command` (a template containing `{path}`) **replaces**
-  rung 1's OS opener when set, on every OS, for users who want one specific application.
+  rung 1's OS opener when set, on every OS, for users who want one specific application. It
+  replaces rung 1's *mechanism*, not rung 1's gate on **locality** (clarified 2026-07-21): the
+  ladder asks only whether the session is local, because `present.command` says which application
+  shows a document, not which machine the user is sitting at. Whether this machine has anything to
+  open into is the **opener's own** answer (its `ErrNoOpener`), and a configured command **stands
+  in for that desktop test** — an OS with no built-in opener is precisely the case the override
+  exists for. So the desktop check lives in exactly one place, and a set `present.command` opens on
+  a local box with no *detected* desktop but never on a remote one.
 
 **3. The doc server is a capability-token allowlist, not a file server.** It serves **only**
 explicitly presented files, each under a random token at `/d/<32-hex>/<basename>`: no directory

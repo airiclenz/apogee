@@ -72,6 +72,19 @@
 // NOT a parser command (it never submits as a message) — attachment is the only way it acts,
 // mirroring the oracle's selectSkill, which keeps an unknown "/skill foo" an ordinary message.
 //
+// presenter.go supplies the last host delegate, and it is the one that decides rather than asks:
+// [uiPresenter] is the Presenter present_document routes a finished deliverable to, and it walks
+// the presentation ladder itself (ADR 0019). It shares [uiAsker]'s seam — called inside a Step, on
+// the worker goroutine, through the same late-bound programRef — minus the rendezvous: it picks a
+// rung from the [Presentation] the composition root installed ([Bridge.SetPresentation]), attempts
+// it, sends a [presentedMsg] and returns, so a presentation can never park a Turn on the UI. The
+// ladder gates the opener on LOCALITY only and lets internal/present answer whether this machine
+// has anything to open into, so the desktop test lives in exactly one place and a configured
+// present.command — which deliberately stands in for that test — is not second-guessed here. The
+// Update loop folds the message into a transcript entry of its own (entryPresented,
+// renderPresentedBlock): the ▤ block that is deliberately not shaped like a tool card, whose path
+// and URL are emitted as raw plain text because terminal linkification is the whole mechanism.
+//
 // Three files round out the renderer without touching the state machine. markdown.go turns the
 // common markdown subset in assistant text (**bold**, # headings, `inline`/fenced code, bullet/
 // numbered lists) into styled physical lines — a spare, pure, lipgloss-only renderer matching

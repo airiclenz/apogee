@@ -21,6 +21,7 @@ var (
 	_ tea.Msg = eventMsg{}
 	_ tea.Msg = approvalReqMsg{}
 	_ tea.Msg = askReqMsg{}
+	_ tea.Msg = presentedMsg{}
 	_ tea.Msg = exchangeDoneMsg{}
 	_ tea.Msg = cancelledMsg{}
 	_ tea.Msg = errMsg{}
@@ -52,6 +53,27 @@ type approvalReqMsg struct {
 type askReqMsg struct {
 	Request domain.AskRequest
 	Reply   chan domain.AskAnswer
+}
+
+// presentedMsg hands a finished presentation to the Update loop (ADR 0019). The uiPresenter
+// sends it from the worker goroutine once it has walked the ladder and does NOT wait for a
+// reply — unlike the two rendezvous Msgs above, a presentation asks the human nothing. It IS
+// rung 0: the loop appends the transcript entry that carries the document's path to the user,
+// which is the rung that always runs and never depends on a mechanism succeeding.
+type presentedMsg struct {
+	// Title is the model's optional label for the document; empty when it named none.
+	Title string
+	// Path is the document's workspace-relative path — the plain text the terminal linkifies.
+	Path string
+	// Location is the served URL when rung 2 carried the document, and empty for every other
+	// rung: the path line already says where the document is, so only a URL adds a line.
+	Location string
+	// Method is the rung actually reached, which decides the entry's closing status line.
+	Method domain.PresentMethod
+	// Reason is why the ladder stopped where it did, when a rung was tried and did not deliver
+	// ("no opener on this machine"). Empty when nothing failed — a rung the host never wired is
+	// skipped, not failed.
+	Reason string
 }
 
 // exchangeDoneMsg is the worker's terminal Msg when the Exchange reached its final no-tool

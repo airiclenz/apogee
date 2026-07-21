@@ -230,6 +230,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, m.input.Focus()
 
+	case presentedMsg:
+		// The worker's Presenter finished walking the ladder and hands the Update loop rung 0
+		// itself: the transcript entry carrying the document's path (ADR 0019 §2). It asks for
+		// nothing back — unlike the two rendezvous Msgs above, a presentation is a record, not a
+		// gate — so it neither moves the state machine nor interrupts the running Turn.
+		m.transcript.addPresented(msg)
+		m.refreshViewport()
+		return m, nil
+
 	case exchangeDoneMsg:
 		return m, m.finishWorker(stateIdle)
 

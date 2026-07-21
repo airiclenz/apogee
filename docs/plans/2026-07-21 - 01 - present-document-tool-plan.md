@@ -255,7 +255,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   the package-doc convention the work-items preamble calls load-bearing. CHANGELOG/README are
   untouched here: item 9 owns the docs sweep.
 
-- [ ] **7. TUI: `uiPresenter`, the presentation transcript entry, and the tool card.** Read
+- [x] **7. TUI: `uiPresenter`, the presentation transcript entry, and the tool card.** Read
   `internal/tui/asker.go`, `messages.go`, `transcript.go`, `toolpresent.go`, and `doc.go` (ADR
   0011: value-copied Model — no `strings.Builder` by value, no self-pointers) first. New
   `internal/tui/presenter.go`: `uiPresenter` holds the `*programRef` plus the configured
@@ -275,6 +275,40 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   served; remote+md → shown; opener failure → degrades to shown with the failure noted);
   transcript rendering tests (including narrow-width wrap behaviour around the URL);
   `TestModelNoBuilderByValue` still green.
+  NOTES (2026-07-21): eight points, the first of which is the open question this item was asked
+  to settle. (a) **A set `present.command` DOES bypass the desktop gate and does NOT bypass the
+  locality gate.** The ladder consults locality and nothing else; whether this machine has
+  anything to open into is `Opener.Open`'s own answer (`ErrNoOpener`), exactly as item 4 decided
+  — so the desktop test lives in ONE place instead of two that can disagree, and the one
+  configuration the user was most explicit about is not second-guessed. Recorded in ADR 0019's
+  rung-3 bullet (a clarifying sentence, the only edit to a done item's artifact), in
+  `presenter.go`'s type comment, and pinned by `TestPresenterLadderPicksRung`. (b) Consequently
+  `uiPresenter` holds LOCALITY only, not "locality/desktop facts" as the bullet says — a
+  `HasDesktop` field here would be the second gate (a) just removed. (c) The item names only the
+  type; the `Bridge` gains `SetPresentation`/`Presenter()` beside `Asker()`, because a
+  `uiPresenter` no composition root can reach is dead code and item 8's "hand them to the TUI
+  bridge" needs the conduit to exist (the same argument item 2's NOTES made for the facade
+  re-export). `Presenter()` returns an untyped nil until `SetPresentation` runs — that IS the
+  nil-delegate "not registered" contract, and a typed-nil pointer would defeat it. `Presentation`
+  (the rungs the root resolves from config) carries `Opener`/`Docs`/`Local`; a nil `Opener` is
+  how item 8 expresses `auto-open: false`, documented on the field. (d) The status suffix for a
+  successful open is "opened on your machine", not the bullet's "opened in your browser": only
+  rung 2 can promise a browser — rung 1 hands markdown to the OS-associated app — and the entry
+  must not claim more than the rung delivered. A degraded rung reads "<reason> — path shown"
+  (ADR 0019 §4's wording); every other rung closes with "cmd+click to open", which is true of
+  both the path line and the URL line. A rung the host never wired is skipped, not failed, so it
+  carries no reason. (e) The `toolpresent.go` entry also gets `detail: firstLineDetail` (the
+  bullet named only label/verb/target): a nil detail extractor dumps the raw tool result as a
+  BODY, which reshapes the card away from the one-line grammar and un-groups it — `ask_user`, the
+  tool this one mirrors, uses the same extractor. (f) Rendering the entry needed two new
+  look-and-feel values in `theme.go`: `glyphPresented` (▤ — deliberately not ✦, so a deliverable
+  does not read as a tool call) and the `presentTitle` style. The path and URL lines are emitted
+  RAW — unstyled, unwrapped, unclipped, one token per line — because terminal linkification is
+  the whole mechanism; only the title and the status line wrap. (g) A presentation cannot know
+  its sub-agent depth (`domain.PresentRequest` carries none), so the entry is always depth 0 and
+  renders unrailed even when a sub-agent presented it. (h) All of this item's tests live in
+  `presenter_test.go` — delegate, ladder, fold and rendering together (the `confine_test.go`
+  precedent) rather than split across `transcript_test.go`/`render_test.go`.
 
 - [ ] **8. Config + wiring.** Read `cmd/apogee/config.go` (+ `defaults/config.yaml`) and
   `cmd/apogee/wire.go` (the `HostTools` build at ~line 312 and `bridge.Asker()` at ~159) first.

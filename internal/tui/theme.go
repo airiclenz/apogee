@@ -58,6 +58,7 @@ const (
 	glyphSubLabel   = "⤷"
 	glyphBullet     = "•" // a markdown bullet-list item (- / * / +)
 	glyphSkill      = "✦" // leads an attached-skill chip (matches the assistant marker)
+	glyphPresented  = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
 )
 
 // subAgentLabel is the one-line header that opens each contiguous run of sub-agent
@@ -97,17 +98,18 @@ func newBrailleSpinner() spinner.Model {
 // theme bundles the reusable styles. They are intentionally spare — a few colour and weight
 // cues — so the transcript stays legible under any terminal profile.
 type theme struct {
-	userBlock   lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
-	toolHeader  lipgloss.Style // the ✦ Label target header
-	toolLabel   lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
-	toolDetail  lipgloss.Style // the ┝/┕ branch detail lines (dim)
-	subRail     lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
-	skillChip   lipgloss.Style // an attached-skill chip above the input (white on violet)
-	selection   lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
-	diffAdded   lipgloss.Style // a "+" diff detail line (reserved)
-	diffRemoved lipgloss.Style // a "-" diff detail line (reserved)
-	errorText   lipgloss.Style // a recovered-fault notice
-	noteText    lipgloss.Style // a neutral note (cancelled, approval record)
+	userBlock    lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
+	toolHeader   lipgloss.Style // the ✦ Label target header
+	toolLabel    lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
+	toolDetail   lipgloss.Style // the ┝/┕ branch detail lines (dim)
+	subRail      lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
+	skillChip    lipgloss.Style // an attached-skill chip above the input (white on violet)
+	selection    lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
+	diffAdded    lipgloss.Style // a "+" diff detail line (reserved)
+	diffRemoved  lipgloss.Style // a "-" diff detail line (reserved)
+	errorText    lipgloss.Style // a recovered-fault notice
+	noteText     lipgloss.Style // a neutral note (cancelled, approval record) + a presentation's status line
+	presentTitle lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
 	// as bold white, `inline code` and ``` fenced blocks ``` in orange.
@@ -137,21 +139,22 @@ type theme struct {
 // footer's decorative ━/─ rules do — those are composed by hand in render.go.
 func newTheme() theme {
 	return theme{
-		userBlock:   lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
-		toolHeader:  lipgloss.NewStyle(),
-		toolLabel:   lipgloss.NewStyle().Bold(true).Foreground(colCode),
-		toolDetail:  lipgloss.NewStyle().Foreground(colFaint),
-		subRail:     lipgloss.NewStyle().Foreground(colFaint),
-		skillChip:   lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
-		selection:   lipgloss.NewStyle().Foreground(colWhite).Background(colSelection),
-		diffAdded:   lipgloss.NewStyle().Foreground(colDiffAdd),
-		diffRemoved: lipgloss.NewStyle().Foreground(colDiffDel),
-		errorText:   lipgloss.NewStyle().Foreground(colError).Bold(true),
-		noteText:    lipgloss.NewStyle().Foreground(colFaint),
-		mdBold:      lipgloss.NewStyle().Bold(true),
-		mdHeading:   lipgloss.NewStyle().Bold(true).Foreground(colWhite),
-		mdCode:      lipgloss.NewStyle().Foreground(colCode),
-		mdCodeBlock: lipgloss.NewStyle().Foreground(colCode),
+		userBlock:    lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
+		toolHeader:   lipgloss.NewStyle(),
+		toolLabel:    lipgloss.NewStyle().Bold(true).Foreground(colCode),
+		toolDetail:   lipgloss.NewStyle().Foreground(colFaint),
+		subRail:      lipgloss.NewStyle().Foreground(colFaint),
+		skillChip:    lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
+		selection:    lipgloss.NewStyle().Foreground(colWhite).Background(colSelection),
+		diffAdded:    lipgloss.NewStyle().Foreground(colDiffAdd),
+		diffRemoved:  lipgloss.NewStyle().Foreground(colDiffDel),
+		errorText:    lipgloss.NewStyle().Foreground(colError).Bold(true),
+		noteText:     lipgloss.NewStyle().Foreground(colFaint),
+		presentTitle: lipgloss.NewStyle().Bold(true).Foreground(colWhite),
+		mdBold:       lipgloss.NewStyle().Bold(true),
+		mdHeading:    lipgloss.NewStyle().Bold(true).Foreground(colWhite),
+		mdCode:       lipgloss.NewStyle().Foreground(colCode),
+		mdCodeBlock:  lipgloss.NewStyle().Foreground(colCode),
 		inputBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderBottom(false).

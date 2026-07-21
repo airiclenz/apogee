@@ -122,6 +122,8 @@ func renderEntryLines(th theme, e entry, width int) []string {
 		return railLines(th, hangingWrap(th.errorText, glyphAssistant+" ", e.text, inner), e.depth)
 	case entryNote:
 		return railLines(th, hangingWrap(th.noteText, "· ", e.text, inner), e.depth)
+	case entryPresented:
+		return railLines(th, renderPresentedBlock(th, e.presented, inner), e.depth)
 	default:
 		return nil
 	}
@@ -182,6 +184,39 @@ func renderUserChipRow(th theme, marker string, skills []string, width int) stri
 // source of a chip's look, so the two rows never drift.
 func renderSkillChip(th theme, name string) string {
 	return th.skillChip.Render(" " + glyphSkill + " " + name + " ")
+}
+
+// renderPresentedBlock renders a presented document (ADR 0019, rung 0) — the one block that is
+// deliberately NOT shaped like a tool card, because a deliverable is the point of the work and
+// not plumbing. It leads with the ▤ marker and the document's title where the model gave one,
+// then the workspace-relative path, then the served URL if there is one, then a dim status line:
+//
+//	▤ Architecture review
+//	  docs/review.html
+//	  http://192.168.64.2:51234/d/…/review.html
+//	  cmd+click to open
+//
+// The path and the URL are emitted RAW — no style, no wrap, no clip, one token per line — and
+// that is the whole mechanism: the terminal is what turns them into something clickable, so a
+// hanging indent inserted mid-token or an SGR run wrapped around them would break the only rung
+// that always works. width is therefore ignored for those two lines: an overlong path soft-wraps
+// in the viewport (which wrappedOffset already mirrors) rather than being hard-wrapped here.
+// The marker keeps the title's styling even when there is no title, so the block opens the same
+// way either way.
+func renderPresentedBlock(th theme, v presentedView, width int) []string {
+	marker := glyphPresented + " "
+
+	var out []string
+	if v.Title != "" {
+		out = append(out, hangingWrap(th.presentTitle, marker, v.Title, width)...)
+		out = append(out, bodyIndent+v.Path)
+	} else {
+		out = append(out, th.presentTitle.Render(marker)+v.Path)
+	}
+	if v.Location != "" {
+		out = append(out, bodyIndent+v.Location)
+	}
+	return append(out, hangingWrap(th.noteText, bodyIndent, presentedStatus(v), width)...)
 }
 
 // renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the
