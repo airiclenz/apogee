@@ -183,7 +183,16 @@ Commit: `feat(tui): tool labels bold orange, brackets dropped`.
 
 ---
 
-## 4. Grouped same-label tool calls
+## 4. Grouped same-label tool calls — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): two deviations, both mechanical. (a) The forward run scan lives in a third
+small helper, `toolCallRun(entries []entry, i int) []toolView`, rather than inline in
+`renderView`'s loop — the loop reads as one `if run := toolCallRun(…); len(run) > 1` branch and
+the scan's rules (same depth, same label, both ends groupable) are documented in one place;
+`groupable` and `renderToolGroup` keep the signatures the item names. (b) The tests all landed in
+`render_test.go` (the item allows either file) and one case was added beyond the listed set: a
+grouped run at depth 1, which pins that the group branch applies `railedWidth`/`railLines` itself
+— the group path does not go through `renderEntryLines`, so nothing else covered its framing.
 
 Implements decisions 1, 3–5. All `internal/tui`, and only `render.go` plus tests:
 

@@ -107,6 +107,219 @@ func TestToolHeaderLabelStyled(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Grouped same-label tool calls (tool-call layout item 4)
+// ----------------------------------------------------------------------------
+
+// readCall folds a read_file call and its "showing lines from-to" result into tr, so a grouping
+// test reads as the batch of reads it is meant to render.
+func readCall(tr *transcript, id, path, from, to string, depth int) {
+	base := domain.EventBase{Depth: depth}
+	tr.apply(domain.ToolCallEvent{
+		EventBase: base,
+		Call:      domain.ToolCall{ID: id, Tool: "read_file", Arguments: []byte(`{"path":"` + path + `"}`)},
+	})
+	tr.apply(domain.ToolResultEvent{
+		EventBase: base,
+		Result: domain.ToolResult{
+			CallID:  id,
+			Content: "[File: " + path + ", " + to + " lines total, showing lines " + from + "-" + to + "]\n…",
+		},
+	})
+}
+
+// A batch of reads folds into one block: a single ✦ Read File header, ┝ ┝ ┕ rails, and every
+// target padded to the widest one so the detail column lines up — the shape layout.md sketches.
+func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
+	tr := &transcript{}
+	readCall(tr, "c1", "README.md", "1", "154", 0)
+	readCall(tr, "c2", "TODO.md", "1", "408", 0)
+	readCall(tr, "c3", "ISSUES.md", "1", "8", 0)
+
+	want := strings.Join([]string{
+		"✦ Read File",
+		"  ┝ README.md 1 - 154",
+		"  ┝ TODO.md   1 - 408",
+		"  ┕ ISSUES.md 1 - 8",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("grouped block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A grouped run inside a sub-agent is framed like any other block: the ⤷ label opens the run once
+// and every line of the group — header and branches alike — carries the │ rail gutter.
+func TestRenderGroupsInsideSubAgent(t *testing.T) {
+	tr := &transcript{}
+	readCall(tr, "c1", "a.go", "1", "5", 1)
+	readCall(tr, "c2", "bb.go", "1", "9", 1)
+
+	want := strings.Join([]string{
+		"│ ⤷ sub-agent",
+		"",
+		"│ ✦ Read File",
+		"│   ┝ a.go  1 - 5",
+		"│   ┕ bb.go 1 - 9",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("railed group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// Two different tools that share a friendly label group together — the reader groups by what the
+// header says, not by tool id.
+func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "single_find_and_replace", Arguments: []byte(`{"path":"a.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "replaced text in a.go"}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "multi_find_and_replace", Arguments: []byte(`{"path":"bb.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "applied 2 replacements to bb.go"}})
+
+	want := strings.Join([]string{
+		"✦ Edit File",
+		"  ┝ a.go  replaced text in a.go",
+		"  ┕ bb.go applied 2 replacements to bb.go",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("shared-label group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A member whose result has not landed shows its bare padded target and nothing after it; when the
+// result folds in, the whole block repaints with that member's detail in the aligned column.
+func TestRenderGroupWithInFlightMember(t *testing.T) {
+	tr := &transcript{}
+	readCall(tr, "c1", "README.md", "1", "154", 0)
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"TODO.md"}`)}})
+
+	want := strings.Join([]string{
+		"✦ Read File",
+		"  ┝ README.md 1 - 154",
+		"  ┕ TODO.md",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("in-flight member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "[File: TODO.md, 408 lines total, showing lines 1-408]\n…"}})
+	want = strings.Join([]string{
+		"✦ Read File",
+		"  ┝ README.md 1 - 154",
+		"  ┕ TODO.md   1 - 408",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("re-rendered group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A run of one renders exactly as it always has — the target on the header line, its detail on a
+// lone ┕ branch — so a single call is never dressed up as a group of one.
+func TestRenderSingleCallUnchanged(t *testing.T) {
+	tr := &transcript{}
+	readCall(tr, "c1", "main.go", "1", "154", 0)
+
+	th := newTheme()
+	want := renderToolBlock(th, tr.entries[0].tool, 80)
+	got := tr.renderLines(th, 80)
+	if len(got) != len(want) {
+		t.Fatalf("single call rendered %d lines; want %d (the plain single block)", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %q; want %q (byte-identical to the single block)", i, got[i], want[i])
+		}
+	}
+}
+
+// Anything between two same-label calls ends the run, and so does a call that cannot fit one
+// aligned branch line. Each case pins the whole scrollback, so a break shows as the separate
+// blocks it must produce.
+func TestRenderGroupBreakers(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  []string
+	}{
+		{
+			name: "a multi-detail call between two reads",
+			build: func(tr *transcript) {
+				readCall(tr, "c1", "a.go", "1", "5", 0)
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "ok\nPASS\ndone"}})
+				readCall(tr, "c3", "b.go", "1", "9", 0)
+			},
+			want: []string{
+				"✦ Read File a.go",
+				"  ┕ 1 - 5",
+				"",
+				"✦ Run go test",
+				"  ┝ ok",
+				"  ┕ … +2 more lines",
+				"",
+				"✦ Read File b.go",
+				"  ┕ 1 - 9",
+			},
+		},
+		{
+			name: "an approval note between two reads",
+			build: func(tr *transcript) {
+				readCall(tr, "c1", "a.go", "1", "5", 0)
+				tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "read_file"}, Decision: domain.ApprovalAllow})
+				readCall(tr, "c2", "b.go", "1", "9", 0)
+			},
+			want: []string{
+				"✦ Read File a.go",
+				"  ┕ 1 - 5",
+				"",
+				"· approval allow: read_file",
+				"",
+				"✦ Read File b.go",
+				"  ┕ 1 - 9",
+			},
+		},
+		{
+			name: "a deeper sub-agent call",
+			build: func(tr *transcript) {
+				readCall(tr, "c1", "a.go", "1", "5", 0)
+				readCall(tr, "c2", "b.go", "1", "9", 1)
+			},
+			want: []string{
+				"✦ Read File a.go",
+				"  ┕ 1 - 5",
+				"",
+				"│ ⤷ sub-agent",
+				"",
+				"│ ✦ Read File b.go",
+				"│   ┕ 1 - 9",
+			},
+		},
+		{
+			name: "a call with no target",
+			build: func(tr *transcript) {
+				readCall(tr, "c1", "a.go", "1", "5", 0)
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file"}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "[File: ?, 1 lines total, showing lines 1-1]"}})
+			},
+			want: []string{
+				"✦ Read File a.go",
+				"  ┕ 1 - 5",
+				"",
+				"✦ Read File",
+				"  ┕ 1 - 1",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+			if got, want := renderPlain(tr, 80), strings.Join(tc.want, "\n"); got != want {
+				t.Errorf("group not broken:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
 // inputContentRows sizes the prompt box to what the textarea actually draws
 // ----------------------------------------------------------------------------
 

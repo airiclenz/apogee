@@ -63,7 +63,8 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 	}
 
 	prevDepth := 0
-	for _, e := range t.entries {
+	for i := 0; i < len(t.entries); i++ {
+		e := t.entries[i]
 		// Open a ⤷ sub-agent label whenever a run descends to a deeper level than the
 		// previous block — a 0→1 (or 1→2) transition announces the nested section once,
 		// per level, until the stream climbs back out (P3.14).
@@ -72,7 +73,16 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 				appendBlock(false, renderSubAgentLabel(th, d, width))
 			}
 		}
-		appendBlock(e.kind == entryUser, renderEntryLines(th, e, width))
+		// Consecutive same-label tool calls fold into one block at render time, so a batch of
+		// reads is one header plus an aligned branch per file. The entry list is untouched: a
+		// call that arrives mid-stream joins its group on the next repaint for free, and a run
+		// is same-depth by construction, so the label logic above fires exactly as before.
+		if run := toolCallRun(t.entries, i); len(run) > 1 {
+			appendBlock(false, railLines(th, renderToolGroup(th, run, railedWidth(width, e.depth)), e.depth))
+			i += len(run) - 1
+		} else {
+			appendBlock(e.kind == entryUser, renderEntryLines(th, e, width))
+		}
 		prevDepth = e.depth
 	}
 	if t.streaming {
@@ -187,6 +197,73 @@ func renderToolBlock(th theme, tv toolView, width int) []string {
 	}
 	out := hangingWrap(th.toolHeader, glyphAssistant+" ", head, width)
 	out = append(out, renderDetails(th, tv.Details, width)...)
+	return out
+}
+
+// toolCallRun returns the consecutive tool-call entries starting at entries[i] that fold into one
+// grouped block, as their presentation views: same sub-agent depth, same friendly Label, every
+// member groupable. Any other entry between two calls — narration, a note, an approval, an error —
+// ends the run, since the scan only ever walks forward over adjacent entries. Two different tools
+// sharing a label (a single and a multi find-and-replace are both "Edit File") do group: the reader
+// groups by what the header says, not by tool id. It returns nil when entries[i] is not a groupable
+// tool call, and a one-view run when nothing follows it — the caller renders both as single blocks.
+func toolCallRun(entries []entry, i int) []toolView {
+	head := entries[i]
+	if head.kind != entryToolCall || !groupable(head.tool) {
+		return nil
+	}
+	views := []toolView{head.tool}
+	for j := i + 1; j < len(entries); j++ {
+		e := entries[j]
+		if e.kind != entryToolCall || e.depth != head.depth || e.tool.Label != head.tool.Label || !groupable(e.tool) {
+			break
+		}
+		views = append(views, e.tool)
+	}
+	return views
+}
+
+// groupable reports whether a tool call can be shown as one branch line of a grouped block: it
+// needs a Target to sit in the aligned column and at most one plain detail line to follow it. That
+// admits the common cases — a finished read, an "error: …" outcome, and a call still in flight with
+// no result yet — while a call with several details (a Run and its "… +N more lines" remainder), a
+// diff-coloured detail, or no target at all keeps its own block, where it has the room it needs.
+func groupable(tv toolView) bool {
+	if tv.Target == "" || len(tv.Details) > 1 {
+		return false
+	}
+	for _, d := range tv.Details {
+		if d.Kind != detailPlain {
+			return false
+		}
+	}
+	return true
+}
+
+// renderToolGroup renders a run of same-label tool calls as one block (layout.md): a ✦ Label header
+// carrying the label alone, then one ┝/┕ branch per member — its Target padded with spaces to the
+// group's widest target, one space, then its single detail line — so the detail column lines up. A
+// member still in flight shows its bare target and nothing after it; the whole block repaints once
+// the result folds in. Widths are display cells (lipgloss.Width), so a multi-byte path pads
+// correctly, and an overlong branch soft-wraps under its marker like any other detail line. The
+// caller frames the block for depth — width is already the railed inner column.
+func renderToolGroup(th theme, views []toolView, width int) []string {
+	out := hangingWrap(th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width)
+	column := 0
+	for _, tv := range views {
+		column = max(column, lipgloss.Width(tv.Target))
+	}
+	for i, tv := range views {
+		marker := "  " + glyphBranch + " "
+		if i == len(views)-1 {
+			marker = "  " + glyphBranchLast + " "
+		}
+		text := tv.Target
+		if len(tv.Details) > 0 {
+			text += strings.Repeat(" ", max(0, column-lipgloss.Width(tv.Target))) + " " + tv.Details[0].Text
+		}
+		out = append(out, hangingWrap(th.toolDetail, marker, text, width)...)
+	}
 	return out
 }
 

@@ -150,6 +150,23 @@ that reports no filesystem confinement, so it reproduces identically on a machin
   what the model asked for is hidden. The style is baked into the header before it is wrapped
   (the `markdown.go` posture — `ansi.Wrap` is SGR-aware and `lipgloss.Width` strips ANSI), so the
   soft-wrap and sticky-header arithmetic are unperturbed. Presentation only. (`internal/tui`.)
+- **A batch of same-label tool calls is now one block, not five.** Five file reads used to render
+  as five separate headers, each with its own branch line and its own blank separator — a tall,
+  noisy column for what the reader thinks of as one action. Consecutive tool calls at the same
+  sub-agent depth carrying the same label now fold into a single block: one `✦ Read File` header,
+  then one `┝`/`┕` branch per call whose target is **padded to the group's widest** so the detail
+  column lines up (`┝ README.md 1 - 154` / `┝ TODO.md   1 - 408` / `┕ ISSUES.md 1 - 8`). Two
+  different tools sharing a label — a single and a multi find-and-replace are both "Edit File" —
+  do group, because the reader groups by what the header says, not by tool id. Anything between
+  two calls (narration, a note, an approval, an error) ends the run, and a call that cannot fit
+  one aligned branch line keeps its own block: several detail lines (a `Run` and its `… +N more
+  lines` remainder), a red/green diff detail, or no target at all. A member still waiting on its
+  result shows its bare target and nothing after it, and the whole block repaints once the result
+  folds in. A group of one is byte-identical to the single block it always was. **Grouping is
+  render-time only** — the transcript's append-only entry list, its call/result pairing, and the
+  open-call signal the status line reads are untouched, so a call arriving mid-stream joins its
+  group on the next repaint for free. Nothing is clipped for alignment's sake; an overlong branch
+  soft-wraps as before. Presentation only. (`internal/tui`.)
 
 ## [1.5.0] — 2026-07-21
 
