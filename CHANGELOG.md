@@ -8,8 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
-Post-`v1.5.0`, **additive** (minor) — one feature end to end, plus a presentation pass over how the
-chat reads. First the feature: **Auto mode no longer degrades in silence.** On a host that cannot
+Post-`v1.5.0`, **additive** (minor) — two features end to end, plus a presentation pass over how
+the chat reads. First: **Auto mode no longer degrades in silence.** On a host that cannot
 fence a subprocess, ADR 0012's ladder ("confine if you can, gate
 if you can't") sends every terminal command to Approval. That is correct, and it is the *common*
 case rather than an exotic one — `landlock_create_ruleset` returns **`ENOSYS`** in most containers
@@ -39,8 +39,66 @@ scrollback of a mixed session — prompt, narration, a grouped batch, a standalo
 under its diffstat, an approval note, a sub-agent read — blank lines included, so a regression in
 any one of the four shows up as a layout diff rather than a subtly taller chat.
 
+Second: **a session no longer dies when the context window fills mid-task.** A `/refocus` against a
+32k-window model hit `request (57546 tokens) exceeds the available context size (32768 tokens)` and
+lost the whole Exchange — automatic Compaction is Exchange-boundary-only by design, so it could not
+reach a doc-heavy Exchange growing past the window, and the only reducer that could act there was a
+default-off Mechanism. Recovery is now **structural**, sitting with Budget and Compaction rather
+than in the catalogue ([ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md),
+per ADR 0006's rule that the floor stays on in the baseline and must be *functional*): an overflow
+folds the history and re-sends the same Turn once, and a request the estimate already says cannot
+fit is folded before it is sent at all. It runs under `--bypass`; `auto-compact: false` opts out of
+it exactly as it opts out of boundary folding; nothing exported changed and no Event variant was
+added, so this is behaviour-only.
+
 ### Added
 
+- **Structural context-overflow recovery: the emergency fold and one retry.** A request the model's
+  context window rejects is no longer a terminal fault. It is now its own Turn outcome, and the loop
+  answers it by folding the conversation — the same generative Compaction `/compact` runs, keeping
+  the protected prefix and replacing the rest with one summary — then re-sending the *same* Turn
+  once. The fold is the one that may run **mid-Exchange**, deliberately amending the
+  Exchange-boundary-only rule for this path alone (the estimate-driven trigger and the on-demand
+  `/compact` still wait for the boundary: their caller can wait, a dying Turn cannot). It closes
+  with a user-role bridge message — "the conversation above was compacted … continue the task from
+  the summary" — so the retried request ends `…first-user | assistant-summary | user-bridge`: strict
+  role alternation, no dangling tool calls, template-legal for any chat format; the open Exchange's
+  rollback boundary is re-anchored to that bridge. Recovery is **structural** (it consults
+  `auto-compact`, never `--bypass`) and bounded to **one fold per Turn**: a second overflow gives up
+  exactly as before — the same sanitized `ErrorEvent` from source `"loop"`, the same abandoned
+  Exchange — as does `auto-compact: false`, nothing left past the protected prefix to shed, or a
+  failed summary call. Success is **quiet**: no new Event variant, the fold showing up only as the
+  context gauge dropping on the next `UsageEvent`, and a cancel after a fold *keeps* the fold (it is
+  history maintenance, not part of the Turn's attempt). (`internal/agent`; ADR 0018.)
+- **A predictive guard that folds before sending a request that cannot fit.** Between building a
+  request and sending it, the loop estimates it with the measure the whole engine shares
+  (`PromptChars` through the calibrated chars→token ratio) against the full working room
+  (`ContextLimit − ResponseReserve`) — never a softer fraction, because a fold is a lossy rewrite of
+  the user's history. It saves the round-trip on a predictable overflow and covers the one case the
+  reactive path cannot: a server whose 400 body cannot be classified as an overflow, where the
+  stream yields a plain error and no recovery would ever fire. While the Budget is **uncalibrated**
+  (no server usage reported yet — Turn 1, every sub-agent, and the first Turn after a resume, where
+  the estimator is not serialized but the restored history may already sit near the window) the
+  guard is **damped**, not disabled: it demands twice the working room, which is exactly the
+  estimator's clamp band (8.0/4.0), so a false positive is impossible inside it while a pathological
+  case still fires with room to spare. The asymmetry is the reason — an under-estimate costs
+  nothing (the wire overflow routes to the reactive path) while an over-estimate spends an
+  irreversible fold on a request that would have fit. A predictive fold spends the Turn's one fold,
+  and a refused one simply sends the request as before. (`internal/agent`.)
+- **A structural floor on a single oversized tool result.** A tool result whose estimate exceeds the
+  *entire* History allocation is now clamped — head/tail plus an elision marker pointing at a
+  `start_line`/`end_line` re-read — as it enters the conversation, at the one seam every result
+  crosses, so no route (a plain call, a confined run, an approved gate, a sub-agent delegation, an
+  error result) can bypass it. A result that large survives no reducer and can doom the Turn
+  outright: the emergency fold's own summary call keeps the most recent message unconditionally, so
+  a fresh giant result *is* that message and overflows the fold meant to rescue the Turn. It is
+  structural rather than a Mechanism because ADR 0006 requires the baseline's reducers to be on and
+  functional, and because `tool_result_cap` is default-off, Bypass-disabled, withdrawable, and caps
+  only the turns *before* the most recent tool call — never the result that overflows; that
+  Mechanism stays the tighter, A/B-able valve above the floor and, when enabled, fires first. The
+  clamp rewrites the conversation, so the raw result never reaches history, a snapshot, or the
+  transcript, and both reducers now share one rendering (`context.TruncateToolResult`) so the model
+  learns a single elision idiom. (`internal/agent`, `internal/context`.)
 - **A startup notice when Auto degrades to approval on an unfenceable host.** Entering `--mode
   auto` with confinement asked for (the default) on a host whose Confiner backend reports
   `FSWrite == false` now prints one stderr notice naming the backend, saying plainly that commands

@@ -62,7 +62,9 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 // the Turn proceeds with the full conversation. A cancellation is not a fault: the Turn's own stream
 // carries the cancel to a clean boundary. Two S2 refinements govern WHEN it folds: the trigger is
 // Exchange-boundary-only (shouldAutoCompact's inExchange guard — a mid-Exchange over-budget Turn
-// defers to the next opening), and a fold that RAN and STILL leaves the history over its allocation
+// defers to the next opening; the sibling emergencyFold below is the ONE fold that may run
+// mid-Exchange, and it amends that rule for its own overflow-driven trigger alone — ADR 0018, never
+// for this estimate-driven one), and a fold that RAN and STILL leaves the history over its allocation
 // saturates the trigger (one ErrorEvent, then it stands down until the estimate drops). A skip
 // (Result.Skipped — too few messages past the protected prefix to be worth folding) folds nothing,
 // so it proves nothing and never saturates: the trigger simply re-checks at the next opening, when a
@@ -120,9 +122,11 @@ func (a *Agent) shouldAutoCompact() bool {
 	}
 	// S2: auto-compaction is Exchange-boundary-only. At the top-of-step() placement inExchange is
 	// false only at an Exchange opening (before pendingInput is consumed), so a mid-Exchange
-	// over-budget Turn (a tool-continuation) defers the fold to the next opening — tool_result_cap
-	// is the mid-Exchange relief valve (D6). Folding mid-Exchange would leave the request ending in
-	// an assistant summary.
+	// over-budget Turn (a tool-continuation) defers the fold to the next opening — the
+	// tool_result_cap Mechanism and the loop's structural floor on a single oversized result shape
+	// the request mid-Exchange, and emergencyFold rescues it once the window is actually blown
+	// (ADR 0018). Folding on THIS estimate mid-Exchange would leave the request ending in an
+	// assistant summary; the emergency fold pays for the exception with its user bridge.
 	if a.inExchange {
 		return false
 	}

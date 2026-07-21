@@ -111,8 +111,11 @@
 # context window, apogee summarises the older turns into a compact brief (the same fold the
 # /compact command runs) before the next request, so a long session does not overflow the window.
 # It is STRUCTURAL and load-bearing — it stays on even under --bypass — so set this to false only if
-# you want to manage the window yourself with /compact. The on-demand /compact command works either
-# way. Config-file only (no flag or env). Default: true.
+# you want to manage the window yourself with /compact. The same key also powers overflow recovery:
+# when a request does not fit the window, apogee folds the history and retries the turn once instead
+# of losing it, so auto-compact: false opts out of both and an overflowing turn then fails as it
+# would without apogee. The on-demand /compact command works either way. Config-file only (no flag
+# or env). Default: true.
 # auto-compact: true
 
 # The model's context window in tokens. Leave it unset and apogee discovers the window from the
@@ -135,17 +138,18 @@
 # errors.
 #
 # RECOMMENDED on a small context window (~32k): tool_result_cap. The automatic Compaction above
-# folds only BETWEEN Exchanges; tool_result_cap is the one reducer that acts MID-Exchange,
-# capping any single oversized tool result to its Budget share — without it, a doc-heavy task's
-# whole-file reads can overflow the window mid-task and cost you the turn
-# ("context window exceeded").
+# folds only BETWEEN Exchanges — its emergency twin does fold mid-Exchange, but only once a request
+# has already overflowed, which is a rescue rather than a plan (it costs a summary call and rewrites
+# your history into a summary). tool_result_cap is the one reducer that SHAPES a request
+# mid-Exchange, capping any single oversized tool result to its Budget share, so a doc-heavy task's
+# whole-file reads stay affordable instead of leaning on that rescue.
 #
 # CAVEAT (ADR 0016): a non-empty mechanisms: block means manual control — a Validated set
 # matching your model (see below) is then NOT auto-applied; apogee prints a one-line notice
 # naming it instead. Leave this block commented out to let Validated sets apply automatically.
 #
 # mechanisms:
-#   tool_result_cap: true       # cap any single oversized tool result — the mid-Exchange relief valve
+#   tool_result_cap: true       # cap any single oversized tool result — the mid-Exchange tuning valve
 #   validate: true              # tool-call validation + auto-retry
 #   syntax: true                # write-content syntax check
 #   autofix: true               # formatter pass on tool-call payloads

@@ -343,7 +343,29 @@ tighter cap is what the request carries.
 
 ---
 
-## 6. Docs close-out (the one owning item for every doc edit)
+## 6. Docs close-out (the one owning item for every doc edit) — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): ADR 0018 documents what LANDED, not the plan's prose — in particular the
+predictive guard as DAMPED while uncalibrated (`uncalibratedRoomMargin` = 2, follow-up commit
+37e5004), not "inert until first calibration", and item 5's floor as living in the loop
+(`appendToolResult`) per ADR 0006 rather than in the Mechanism, with the line-based (20/20) clamp's
+bound-by-lines caveat named as prescribed rendering discipline. Four ratified follow-ups closed
+here: `agent.go`'s `exchangeStart` comment now lists `emergencyFold` as a fourth maintainer;
+`requestExceedsWindow`'s doc no longer refers to a non-existent "uncertaintyMargin below";
+`autoCompact`/`shouldAutoCompact`'s S2 paragraphs name the emergency path and stop implying
+`tool_result_cap` is the sole mid-Exchange reducer.
+
+Beyond the item's file list, three additions — all stale-claim corrections the acceptance criterion
+implies: (a) `README.md`'s Compaction paragraph (auto-compact's blast radius grew, and the
+user-facing "your session dies on overflow" story changed); (b) the config template's `mechanisms:`
+RECOMMENDED block, which claimed `tool_result_cap` is "the one reducer that acts MID-Exchange" and
+that an overflow "costs you the turn" (both now false) — the template stays fully commented and
+`TestEmbeddedDefaultConfigIsNeutral` is green; (c) the TDD's Context row and §8 item 8, which still
+read ∅/not-started for reducers landed in P4 item 9 — raised to P and marked done-with-remainder
+(token-aware `@file`/skill trimming stays the open piece) rather than only "gaining the recovery",
+since leaving ∅ beside the new text would be self-contradicting. The CHANGELOG's `[Unreleased]`
+preamble also went from "one feature" to "two features" with a second-feature paragraph, alongside
+the three `Added` bullets.
 
 **Depends on items 1–4 (and 5 if ratified).**
 

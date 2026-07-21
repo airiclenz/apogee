@@ -83,7 +83,7 @@ type Agent struct {
 	inExchange    bool                // true between Submit and the Step that completes the Exchange
 	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
 	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
-	exchangeStart int                 // cached rollback boundary of the open Exchange — read via exchangeBoundary (ADR 0017 §2's recorded fallback); maintained by step()'s opening, the S2 repair, and restoreState
+	exchangeStart int                 // cached rollback boundary of the open Exchange — read via exchangeBoundary (ADR 0017 §2's recorded fallback); maintained by step()'s opening, the S2 repair, emergencyFold's mid-Exchange re-anchor, and restoreState
 	turnIndex     int                 // 0-based index of the next Turn
 	approved      map[string]bool     // tools the human allowed for the rest of this Session
 	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)

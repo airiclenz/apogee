@@ -19,9 +19,14 @@
 // Both Budget consumers are now wired (Phase-4 item 9). HistoryExceedsAllocation is the automatic
 // Compaction trigger's decision — the loop folds the conversation (the same generative Compact the
 // TUI's /compact drives) when the history has outgrown its Budget allocation at a quiescent
-// boundary. The pure token arithmetic behind it (the ceil chars→token conversion and the History
-// compare) lives on domain.Budget (one implementation, ADR 0010's lowest-layer rule); this package
-// keeps the calibration (TokenEstimator) and delegates the math. Tool-result capping is the second consumer, but it lives in package mechanisms
+// boundary. That estimate-driven trigger has a reactive twin in the loop: the EMERGENCY FOLD runs
+// the same Compact when a request overflows the model's context window (or is already estimated
+// not to fit), and it is the one fold allowed to run MID-EXCHANGE, appending a user-role bridge so
+// the retried request stays template-legal (ADR 0018, internal/agent). One reducer, two triggers —
+// nothing in this package changes for it. The pure token arithmetic behind both triggers (the ceil
+// chars→token conversion and the History compare) lives on domain.Budget (one implementation,
+// ADR 0010's lowest-layer rule); this package keeps the calibration (TokenEstimator) and delegates
+// the math. Tool-result capping is the second consumer, but it lives in package mechanisms
 // (tool_result_cap): it is a config-gated pre-request Mechanism, not structural, so it reads the
 // Budget through the hook surface rather than living here. Its head/tail elision RENDERING does
 // live here (TruncateToolResult), shared with the loop's structural floor on a single oversized

@@ -125,9 +125,13 @@ catalogue fills in as the port waves land — see
 Automatic context **Compaction** keeps a long session from overflowing the model's
 window: when the conversation history outgrows its budgeted share, apogee folds the
 older turns into a summary (the same reducer as the `/compact` command) before the
-next request. It is structural and load-bearing — it stays on even under `--bypass`
-— so it is on by default; set `auto-compact: false` (a file-only key) to manage the
-window yourself with `/compact` instead.
+next request. The same fold is also apogee's **overflow recovery**: when a request
+does not fit the window after all — or the estimate already says it cannot — the
+history is folded mid-task and the turn is re-sent once, so a long task survives
+instead of dying on "context window exceeded". It is structural and load-bearing —
+it stays on even under `--bypass` — so it is on by default; set `auto-compact: false`
+(a file-only key) to manage the window yourself with `/compact` instead, which opts
+out of the recovery too.
 
 The context **window** these budgets are measured against is discovered from the
 server at startup — for a pinned `model:` too. Set `context-window:` (a file-only

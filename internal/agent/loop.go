@@ -868,8 +868,9 @@ const uncalibratedRoomMargin = 2
 // returns the zero Allocation, leaving no working room), so an unbudgeted Agent never
 // predictively folds and the reactive recovery is its only protection. The estimate is advisory:
 // an over-estimate costs one fold, and an under-estimate costs nothing, because the wire overflow
-// still routes to the reactive path. That asymmetry is why an UNCALIBRATED Budget gets the
-// uncertaintyMargin below rather than the bare working room.
+// still routes to the reactive path. That asymmetry is why an UNCALIBRATED Budget is measured
+// against uncalibratedRoomMargin (documented above) times the working room rather than the bare
+// working room.
 func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 	b := a.budget()
 	room := b.ContextLimit - b.ResponseReserve

@@ -420,13 +420,25 @@ steers the model). Distinct from a **Mechanism** (a catalogued, self-regulating 
 **Tool-result capping**:
 Per-tool-result truncation of any single result that exceeds its fraction of the Budget,
 with head/tail preservation, protecting the most recent Turn. A **pre-request Mechanism**;
-implemented **once** (the surviving half of the predecessor's `compress`).
+implemented **once** (the surviving half of the predecessor's `compress`). Beneath it sits a
+**structural floor** — not a Mechanism, so never off and never withdrawn: a single result
+whose estimate exceeds the *entire* History allocation is clamped as it enters the
+conversation, because a result that large survives no reducer and would overflow even the
+emergency fold that exists to rescue the Turn. Both render the same head/tail-plus-marker
+elision (`context.TruncateToolResult`), so the model reads one idiom; the Mechanism's tighter
+cap fires first when it is enabled.
 _Avoid_: "compression", "compaction" (capping is per-result and non-generative).
 
 **Compaction**:
 The **default** conversation-level reducer: *generatively* summarising older Turns into a
 summary via the model, when the conversation exceeds a threshold. Meaning-preserving but
-costs an extra model call.
+costs an extra model call. One fold, **two automatic triggers**: the *estimate-driven* one
+fires at an Exchange boundary when the history outgrows its Budget allocation, and the
+*overflow-driven* **emergency fold** fires when a request will not fit the window — the only
+fold allowed to run **mid-Exchange**, closing with a user-role bridge so the retried request
+stays template-legal. `auto-compact: false` opts out of both; the on-demand `/compact` stays
+boundary-only. See
+[ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
 _Avoid_: "compression", "truncation" (Compaction is generative and summarises).
 
 **History truncation**:
@@ -443,7 +455,8 @@ steers the model's **own primary call** to enumerate the remaining subtasks, the
 that enumeration into `sub_agent` delegations, **one per Turn**, carrying the
 not-yet-delegated items as a Deferred Response Action. The work happens in child Sessions;
 only their bounded reports come home. It is a proactive-nudge (off under Bypass), requires
-`tool_result_cap` (the only reducer able to act mid-Exchange), fires at top level only
+`tool_result_cap` (the only reducer that *shapes* a request mid-Exchange — the emergency fold
+also acts there, but reactively, lossily, and once per Turn), fires at top level only
 (`Depth == 0`), and no-ops benignly when `sub_agent` is not offered or the model ignores the
 steer. Because the enumeration is the model's own visible response, the queue survives
 suppression in honest history. See
