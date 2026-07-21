@@ -19,9 +19,10 @@ get a full agentic tool-use loop with sensible guardrails.
 Apogee brings together two things most coding agents keep separate:
 
 - **A complete agentic coding assistant** — the *agent loop*, with provider
-  abstraction, a ~20-tool suite (file ops, grep/glob, git, terminal, web,
-  sub-agents), an MCP client, sessions, four autonomy modes (Plan / Ask-Before /
-  Allow-Edits / Auto), and security guardrails.
+  abstraction, a ~21-tool suite (file ops, grep/glob, git, terminal, web,
+  sub-agents, showing you a finished document), an MCP client, sessions, four
+  autonomy modes (Plan / Ask-Before / Allow-Edits / Auto), and security
+  guardrails.
 - **Self-regulating mechanisms for small models** — features that make small,
   locally-run models measurably better at sustained agentic coding: context
   compression, tool-call validation + auto-retry, behavioural nudges, and a
@@ -62,6 +63,10 @@ next.
   your machine with a local model.
 - **Agentic tool use** — multi-step loop with file edits, shell, search, git, web,
   and sub-agents.
+- **Deliverables you actually see** — `present_document` ends a report-producing task
+  by showing the file: opened on your desktop when apogee runs locally, served over a
+  one-off link when it runs on a remote box, and always printed as a clickable path
+  in the transcript. See [Showing a finished document](#showing-a-finished-document).
 - **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
   Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
   at the OS level via Linux landlock / macOS seatbelt; where the OS cannot fence a
@@ -138,6 +143,41 @@ server at startup — for a pinned `model:` too. Set `context-window:` (a file-o
 key, in tokens) only when your server does not advertise a window, or to start a
 pinned model offline; with no window known, the Budget and automatic compaction stay
 inactive and apogee says so once at startup.
+
+### Showing a finished document
+
+When the model finishes a deliverable — a report, a review, an HTML summary — it calls
+`present_document` and hands apogee nothing but the path. **Apogee decides how to show
+it; the model never reasons about your platform.** Whatever it decides, the document's
+workspace-relative path is always printed in the transcript, which most terminals (Zed,
+VS Code, iTerm2, WezTerm, kitty) make cmd/ctrl+clickable. Above that baseline: on your
+own desktop the file is opened in its associated application (HTML in your default
+browser); over SSH — a devbox, a VM, a container — browser-renderable documents
+(`.html`, `.htm`, `.svg`, `.pdf`) are served from a small built-in server and the URL is
+printed beside the path, so one cmd+click opens the document in the browser on *your*
+machine. Apogee never auto-opens on the remote box: there is no display there to open
+into. If a rung fails, the transcript says so and falls back to the path.
+
+The built-in server hands out one random-token URL per presented document — no directory
+listing, no other file reachable — re-reads the file per request, starts only when a
+document is actually served, and stops when apogee exits. Four **file-only** keys tune
+all of this:
+
+```yaml
+# ~/.apogee/config.yaml
+present:
+  auto-open: true        # open documents on a LOCAL desktop run; false = only print the path
+  command: "zed {path}"  # open with THIS application instead of the OS default
+  port: 0                # the built-in server's port; 0 (default) picks a free one per session
+  host: ""               # address the printed URL advertises; empty = detected
+```
+
+`host` is a fallback, not an override: over SSH the address you connected to this box on
+is used, because it is known-routable. If a printed URL is unreachable on **macOS
+Sequoia or later**, the first browser connection to a local-network address needs Local
+Network permission — Chrome fails with a generic "this site can't be reached" until you
+allow it in System Settings → Privacy & Security → Local Network, while Safari tends to
+work straight away. The path line works regardless.
 
 ### Auto mode's blast radius
 

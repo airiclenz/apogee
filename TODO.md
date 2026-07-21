@@ -71,6 +71,11 @@ resolves skill bodies + file contents into context.
   is skipped with a soft error. `Catalog` satisfies `domain.SkillResolver` (loop) and the TUI's
   `SkillCatalog` (picker); `wire.go` loads it once and injects both. No builtin/embedded skills and
   no auto-created `~/.apogee/skills` in v1 (additive future hooks).
+  - **Authoring guidance (2026-07-21):** a report-producing skill should end by calling
+    `present_document` on the file it wrote — that is what surfaces the deliverable instead of
+    leaving it behind a one-line `write_file` card ([ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md)).
+    Guidance only: skills stay **user-authored** (ADR 0002), apogee ships none, and nothing in the
+    `present_document` work edits a builtin skill.
 
 - **[P1] Session management UI** — in-TUI *new session* (reset without relaunch) and a *history
   browser* overlay. Today only `--resume <path>` exists; reuse `internal/session/Store`.

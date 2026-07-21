@@ -50,6 +50,13 @@ var (
 	_ apogee.Approver
 	_ apogee.ApprovalRequest
 	_ apogee.ApprovalDecision
+	_ apogee.Asker
+	_ apogee.AskRequest
+	_ apogee.AskAnswer
+	_ apogee.Presenter
+	_ apogee.PresentRequest
+	_ apogee.PresentOutcome
+	_ apogee.PresentMethod
 	_ apogee.SkillResolver
 	_ apogee.ResolvedSkill
 	_ apogee.Tool
@@ -115,6 +122,7 @@ var (
 
 	_ = apogee.ModePlan
 	_ = apogee.ModeAskBefore
+	_ = apogee.ModeAllowEdits
 	_ = apogee.ModeAuto
 
 	_ = apogee.StatusTurnComplete
@@ -124,6 +132,10 @@ var (
 	_ = apogee.ApprovalAllow
 	_ = apogee.ApprovalDeny
 	_ = apogee.ApprovalAllowForSession
+
+	_ = apogee.PresentOpened
+	_ = apogee.PresentServed
+	_ = apogee.PresentShown
 
 	_ = apogee.EffectNetwork
 	_ = apogee.EffectMCP
@@ -155,7 +167,9 @@ var (
 	_ = apogee.FinishToolCalls
 
 	_ = apogee.ErrAutoUnavailable
+	_ = apogee.ErrConfinementUnavailable
 	_ = apogee.ErrOrderingCycle
+	_ = apogee.ErrIncompatibleMechanisms
 	_ = apogee.ErrMissingRequirement
 	_ = apogee.ErrUnknownMechanism
 	_ = apogee.ErrSessionVersion

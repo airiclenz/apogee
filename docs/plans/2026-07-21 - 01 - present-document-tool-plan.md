@@ -343,7 +343,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   a hand-assembled `HostTools` is the one path on which a missing `Presenter:` line would
   silently drop the tool.
 
-- [ ] **9. Docs sweep.** CHANGELOG `[Unreleased]`: the new tool, the `present:` config block, the
+- [x] **9. Docs sweep.** CHANGELOG `[Unreleased]`: the new tool, the `present:` config block, the
   Presenter seam (additive API surface → minor bump note, per the CHANGELOG header convention).
   README: add `present_document` wherever the tool suite is tabulated/counted (the 2026-07-21
   refocus counted 20 tools — recount). `TODO.md`: under the skills/feature-parity notes, add one
@@ -351,6 +351,32 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   ADR 0002 — no builtin skill changes). Verify ADR 0019's number is still free and its index/link
   conventions match the other ADRs. Acceptance: `grep -ri present_document` over `docs/ README.md
   CHANGELOG.md` shows a consistent story; no doc claims auto-open works remotely.
+  NOTES (2026-07-21): the recount is **21** (the 19 unconditional tools + `ask_user` +
+  `present_document`, both host-delegate-gated), so README's `~20-tool suite` reads `~21` — the
+  tilde stays because the count depends on which delegates the host supplies. Four additions
+  beyond the bullet's literal doc list. (a) README gains a `### Showing a finished document`
+  subsection under **Configuration**: the `present:` block is user-facing file-only config and
+  README documents every other such key (`auto-compact`, `context-window`, `unconfined-hosts`),
+  so tabulating the tool while leaving its four keys undocumented would be the inconsistency the
+  acceptance grep is meant to catch. (b) `docs/design/technical-design.md` §4 gains a `Present`
+  row beside `Ask` — `Presenter` is new *public API surface* and that table is where the surface
+  is enumerated; ADR 0018's docs commit set the precedent of touching this file. (c) Follow-up
+  (a) from the verifiers is fixed by naming `Asker`/`AskRequest`/`AskAnswer` and the four
+  `Present*` types plus the three method constants in `example_test.go` — and, in the same pass,
+  `ModeAllowEdits`, `ErrConfinementUnavailable` and `ErrIncompatibleMechanisms`, three further
+  pre-existing omissions found by diffing `go doc -all .` against the guard: a guard whose stated
+  job is naming the FULL surface is defective while any name is missing, and the fix is
+  compile-time only. (d) Follow-ups (b) and (c) are fixed in place — ADR 0019's `internal/present`
+  consequence now says stdlib **plus shlex** (matching `internal/present/doc.go`, and noting it
+  adds no new dependency), and `resolveTools`'s doc comment names the Presenter beside the Asker.
+  NOTES (2026-07-21, correction pass): the CHANGELOG's doc-server sentence claimed a bare 404 for
+  "non-GET methods", which the shipped handler does not do — `internal/present/server.go:222`
+  answers **GET and HEAD** and 404s every *other* method precisely so a 405 cannot confirm a real
+  token (item 5's decision). Corrected, and with it "re-read from disk per GET" → "per request"
+  (HEAD re-reads too, and the config template already said "per request"). Also "the `present.host`
+  override" → "fallback", matching `AdvertiseHost`'s own NOTE, the config template and this
+  entry's own `present:` bullet. ADR 0019 §3 is left untouched: it claims nothing about methods.
+  Everything else in the sweep re-checked against the code and left as written.
 
 - [ ] **10. Full verification.** `make` targets the README documents (build, vet, full test
   suite) — all green, zero new skips. Then a manual smoke on this devbox: run apogee, have the

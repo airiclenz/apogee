@@ -6,6 +6,84 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [Unreleased]
+
+### Added
+
+- **`present_document` — the tool that shows a finished document to the user.** A Skill that
+  produces a report — an architecture review, a research summary, a migration plan — used to end
+  with a file on disk the user never saw: `write_file` renders as a one-line
+  `Write File <path> +N bytes` card and nothing else, so the deliverable an Exchange spent its
+  whole Budget producing was, from the user's seat, invisible. The model now closes that work with
+  one dumb, explicitly named affordance — `present_document {path[, title]}` — and supplies
+  nothing but a path and an optional title: the **host** picks the mechanism, so a ~4B–35B model
+  never reasons about platforms, which is the thing it is worst at. The tool is the exact shape of
+  `ask_user`: mode-**independent** (it never routes through the Approval gate), `ReadOnly()` so it
+  runs in **every** mode including Plan (presenting writes nothing), **not** a safety gate, and
+  **not** an `ExternalEffectTool` — the user's own display is not a non-forkable remote the bench
+  must stub, any more than the human answering `ask_user` is. It is registered **only** when the
+  host supplies a `Presenter`, so a headless embedder is unaffected by construction. The path is
+  resolved inside the workspace root and must be an existing regular file; that, and a Turn
+  cancelled mid-presentation, are the only ways the call fails.
+  (`internal/tools`; [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md).)
+- **The presentation ladder — the host decides how, and the baseline is never skipped.** The new
+  `internal/present` package carries the host-side mechanisms and the TUI walks them per call, the
+  highest applicable rung running *in addition to* rung 0, never instead of it. **Rung 0
+  (always)** is the transcript entry carrying the workspace-relative path; it is the rung that is
+  never wrong. **Rung 1** auto-opens the document when the session is **local** (no
+  `SSH_CONNECTION` / `SSH_TTY` / `SSH_CLIENT`) and a desktop is detected (darwin/windows always;
+  linux `DISPLAY` or `WAYLAND_DISPLAY`) — `open`, `cmd /c start "" <path>`, `xdg-open` — launched
+  detached with its streams on the null device so an opener can never scribble on the Bubble Tea
+  screen. **Rung 2** covers the remote case, which for this project is normal rather than exotic:
+  a browser-renderable deliverable (`.html`, `.htm`, `.svg`, `.pdf`) is registered with an
+  embedded **doc server** and its URL joins the entry, so one cmd+click opens it in the browser on
+  the user's *own* machine, with **no host back-channel** anywhere in the path (rejected on
+  security grounds). The server is a **capability-token allowlist, not a file server**: only
+  explicitly presented files, each under a random 32-hex token at `/d/<token>/<basename>`, no
+  directory listing, the only 200 a **GET or HEAD** whose path matches a grant exactly, and the
+  same bare 404 for everything else — prefix walks, `..`, and every other method, refused as
+  not-found rather than not-allowed because a 405 would confirm a real token — content-type from
+  the extension and never sniffed, the file **re-read from disk per request** (so re-presenting
+  after an edit shows fresh content), started lazily on the first served presentation, request
+  logging discarded (net/http would log the token), and closed on app shutdown. Its advertised
+  address is the server IP from `$SSH_CONNECTION` (known-routable, so it outranks the config key),
+  else the `present.host` fallback, else an outbound-dial probe (no packets need to arrive), else
+  `127.0.0.1`. **Rung 3** swaps rung 1's OS opener for the application named in
+  `present.command`. Everything above rung 0 **fails visible**: an opener that errors, a server
+  that cannot bind, a machine with nothing to open into — none of them fail the call, the outcome
+  degrades to the baseline, the transcript says what happened, and the tool result names the rung
+  (`opened` / `served` / `shown`) so the model tells the user the truth instead of asserting a
+  success it cannot observe. The opener runs host-side, **outside** tool confinement, deliberately
+  and for the reason ADR 0012 gives: it is the host's own act on the user's own desktop session,
+  not a model-chosen subprocess. (`internal/present`, `internal/tui`.)
+- **A first-class presentation entry in the transcript.** A deliverable is not plumbing, so it
+  does not render as a tool card: the entry carries its own glyph (`▤`, deliberately not the tool
+  `✦`), the optional title, and then the path — and, when served, the URL — as **plain text on
+  their own lines**, unstyled, unwrapped and unclipped, one token per line. That is not a
+  cosmetic choice: terminal linkification *is* the mechanism (Zed, VS Code, iTerm2, WezTerm and
+  kitty all detect plain paths and URLs; Zed's cmd+click even opens the file through its remote
+  server), and markup or a mid-token wrap is what breaks it. The line closes with what actually
+  happened — "opened on your machine", "cmd+click to open", or a degraded "<reason> — path shown".
+  The `Present` tool card keeps the one-line grammar the rest of the suite uses. (`internal/tui`.)
+- **A file-only `present:` config block** — `auto-open` (default true; false disables rung 1 and
+  **never** rung 0), `command` (a `{path}` template; the path is appended when the template does
+  not mention it), `port` (default 0 — ephemeral, because the URL is printed fresh per
+  presentation, so a stable port buys nothing) and `host` (the advertised address; a *fallback*
+  for topologies `$SSH_CONNECTION` cannot describe, not an override). No flag and no environment
+  variable, matching the newer keys' posture. The shipped `config.yaml` template documents all
+  four, states plainly that apogee never auto-opens on a remote box (there is no display there to
+  open into), and carries the macOS **Local Network permission** gotcha as the first thing to
+  check when a served URL is unreachable — Chrome fails it with a generic "this site can't be
+  reached" while Safari tends to work straight away. (`cmd/apogee`.)
+- **`Presenter` — a new host delegate on `Config`, and additive public API surface.** `Presenter`
+  joins `Approver` / `Asker` / `Confiner` on `domain.Config` and is re-exported from the facade
+  with `PresentRequest` / `PresentOutcome` / `PresentMethod` and the three method constants
+  (`PresentOpened`, `PresentServed`, `PresentShown`), so an out-of-module embedder can implement
+  the interface and supply its own presentation mechanisms. Structs rather than bare strings, for
+  the same freeze-safety reason `AskRequest` documents. Nothing exported is removed or re-typed
+  and a nil `Presenter` leaves the tool unregistered, so the bench and every headless embedder are
+  unaffected by construction: **additive ⇒ minor**. (`internal/domain`, `apogee.go`.)
+
 ## [1.6.0] — 2026-07-21
 
 Post-`v1.5.0`, **additive** (minor) — two features end to end, plus a presentation pass over how

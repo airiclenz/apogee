@@ -171,7 +171,8 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;
 // otherwise, when Config.WorkspaceDir is set, the built-in file tools scoped to it (with the
 // network/host tools configured from Config — the url-safety policy, the web-search endpoint,
-// and the Asker); else no tools (the host gave neither, so the Agent runs tool-less).
+// and the Asker and Presenter delegates); else no tools (the host gave neither, so the Agent
+// runs tool-less).
 func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 	if cfg.Tools != nil {
 		return cfg.Tools

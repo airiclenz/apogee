@@ -160,6 +160,7 @@ The shape is in [`apogee.go`](../../apogee.go). Summary:
 | Observe | `EventSink.Emit(Event)`; sealed `Event` + 11 variants (token, reasoning, stream-reset, message, tool-call, tool-result, approval, mechanism-fired, error, usage, audit); `Depth` carries sub-agent nesting | 0001, 0005 |
 | Approve | `Approver.Approve(ctx, ApprovalRequest) → ApprovalDecision` | 0004 |
 | Ask | `Asker.Ask(ctx, AskRequest) → AskAnswer` — free-text Q&A host delegate for `ask_user` (P3.11), distinct from Approver; nil ⇒ `ask_user` not registered; struct-typed for freeze-safety | 0001 |
+| Present | `Presenter.Present(ctx, PresentRequest) → PresentOutcome` — host delegate for `present_document` (2026-07-21), the Asker's sibling: mode-independent, not a safety gate, nil ⇒ the tool is not registered; the host walks the presentation ladder (transcript baseline → OS opener → doc-server URL → `present.command`) and `PresentMethod` names the rung that ran | 0019 |
 | Tools | `Tool`, `ExternalEffectTool`, `ReadOnlyTool`/`SubprocessTool`, `ToolCall`/`ToolResult`, `ToolRegistry` (`.Subset` for sub-agents) | 0002, 0005, 0008 |
 | Mechanisms | 5 hook interfaces; `Mechanism` + `MechanismDescriptor` (`Capability`, `SuppressionPolicy`, incompatibilities) + `OrderingConstraints`; `MechanismRegistry` (`Add` / `AddExperimental`); `PostResponseDecision` | 0002, 0003, 0006 |
 | Confinement | `Confiner` (interface **public**), `ConfinementCaps.AutoEligible()` (fs-write only), `ConfinementBox` | 0012 |

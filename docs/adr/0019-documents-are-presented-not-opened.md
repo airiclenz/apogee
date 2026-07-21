@@ -142,9 +142,12 @@ All of these were rejected; the ladder above is what survived.
   additive public surface (nil ⇒ the tool is unregistered), so the bench and any headless
   embedder are unaffected by construction, and the change is a **minor** bump.
 - **A new `internal/present` package** carries the host-side mechanisms (locality/desktop
-  detection, the OS opener, the doc server) as stdlib-only, injectable-seam code the TUI wires and
-  any embedder may reuse. Under [ADR 0010](0010-package-layout-domain-core-and-thin-root-facade.md)
-  it depends on `internal/domain` downward only, never the root facade.
+  detection, the OS opener, the doc server) as injectable-seam code the TUI wires and any embedder
+  may reuse. It imports the standard library plus `shlex` — the POSIX splitter the `terminal` tool
+  already uses — so the one place a user's command line is parsed (`present.command`) behaves
+  identically wherever it appears; it adds **no new dependency**. Under
+  [ADR 0010](0010-package-layout-domain-core-and-thin-root-facade.md) it depends on
+  `internal/domain` downward only, never the root facade.
 - **The transcript grows a first-class presentation entry**, visually distinct from tool cards —
   a deliverable is not plumbing. Path and URL are rendered as **plain text on their own lines**,
   never wrapped in markup and not split mid-token if avoidable, because terminal linkification is
