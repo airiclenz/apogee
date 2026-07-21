@@ -184,7 +184,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   `doc.go` line "imports the standard library only" is now false (this item mandates shlex), so
   it was corrected in place.
 
-- [ ] **5. `internal/present` — the doc server (`server.go`).** `DocServer` with `Serve(path
+- [x] **5. `internal/present` — the doc server (`server.go`).** `DocServer` with `Serve(path
   string) (url string, err error)`: lazily starts one `net/http` server on first call
   (`net.Listen("tcp", ":<port>")`, port 0 default), registers the file under a fresh
   `crypto/rand` 16-byte hex token, returns
@@ -196,6 +196,28 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   style tests over a real listener — 200 + correct content-type for a registered file, fresh
   content after the file is rewritten, 404 for wrong token/other paths/traversal attempts, two
   Serve calls share one listener, Close idempotent.
+  NOTES (2026-07-21): five points the bullet did not spell out. (a) The advertised address is a
+  caller-supplied `Host` field (what `AdvertiseHost` returned, already URL-authority form) rather
+  than computed inside the server: detection lives in `detect.go`, the server's bind address
+  cannot answer "where can the USER reach this box", and item 8's wire already computes it. Empty
+  advertises `127.0.0.1`; `hostForURL` is re-applied (it is idempotent) so a raw IPv6 literal
+  still composes a legal URL. `Port` is the matching field. (b) `Serve` stats the path and
+  refuses a blank / missing / non-regular one instead of printing a URL that would 404 in front
+  of the user — the fail-visible rule (ADR 0019 §4) wants that failure at Serve, where the
+  caller can still degrade to rung 0. (c) After `Close`, `Serve` returns an error rather than
+  starting a second listener: the server's lifetime is the app's (ADR 0019 §1), so a late
+  presentation degrades instead of resurrecting a port past shutdown. (d) The handler answers
+  only GET/HEAD (any other method gets the same bare 404, since a 405 would confirm the token is
+  real), serves through `http.ServeContent` with the Content-Type set from the extension first
+  (so range and conditional requests work for PDFs while the type stays a function of the
+  extension alone, never sniffing), and the `http.Server`'s `ErrorLog` is discarded — net/http
+  logs request paths, which here contain tokens, and stderr is the Bubble Tea screen. A bare
+  `HandlerFunc` is used rather than `ServeMux` precisely because the mux would clean paths and
+  301 the tidy form, echoing a token in a `Location` header. (e) `Serve`'s results are unnamed
+  (`(string, error)`) — the bullet's `url string` would shadow the `net/url` package the URL is
+  composed with. Test note: the successful configured-port bind is asserted through the
+  collision path (a port the test itself holds, so only a server that binds `s.Port` can fail on
+  it) — binding a just-released ephemeral port races other parallel tests for it.
 
 - [ ] **6. The tool: `internal/tools/present_document.go`.** Mirror `ask_user.go` exactly in
   shape (spec var, args struct, delegate-holding tool, nil-delegate defensive error, `ReadOnly()
