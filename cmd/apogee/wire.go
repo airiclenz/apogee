@@ -280,6 +280,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			Caps:    confiner.Capabilities(),
 			HostID:  platform.HostID(),
 		},
+		// The `--save` half of `/confine off --save`: record THIS host in the same config.yaml
+		// applyConfig read at startup, so the next run resolves unconfined here without the claim
+		// following the file onto any other machine. The renderer learns only the path written —
+		// the on-disk format is the binary's business, like the session Save seam below.
+		SaveHostAcknowledgement: hostAcknowledgementSaver(
+			filepath.Join(roots.config, "config.yaml"), platform.HostID()),
 		Skills: skillProvider,
 		// Re-scan the skill source dirs when the /skill picker opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added

@@ -98,6 +98,28 @@ point is a **minor** bump, not a breaking change.
   says plainly that nothing was written while the session toggle still stands. (`internal/tui`,
   plus the composition root handing the TUI the backend/capability/host-id facts it must not
   derive itself.)
+- **`/confine off --save` now writes — a comment-preserving config writer.** The `--save` half is
+  wired: it appends this host's `unconfined-hosts:` entry (id, today's date, and a note saying
+  what put the line there and that deleting it re-confines the machine) to
+  `~/.apogee/config.yaml`, and reports the file back so the confirmation can name it. Your config
+  survives intact. The file is edited as **text**, guided by the parsed node positions, never
+  round-tripped through unmarshal→marshal: `yaml.v3` hangs comments off nodes, and the seeded
+  template is *entirely* comments — it parses to no nodes at all — so a re-marshal would have
+  handed you back a file with one setting in it and every word of documentation deleted. Comments,
+  key order, indentation, and your own edits come back byte-identical. Because the key ships
+  commented out, the writer **inserts** rather than substitutes: it appends to an existing list
+  (matching that list's own indentation), starts one under a bare `unconfined-hosts:` key, or adds
+  a documented block at the end of the file — so it stays correct against a config you have since
+  reordered or rewritten by hand. Saving the same host twice records it once (the second call
+  reports the entry already on disk and writes nothing). An absent config is seeded from the
+  embedded template first, so `--save` never leaves a bare fragment where a documented file
+  belongs. The write is atomic (temp + rename in the same directory) and preserves the file's
+  mode, since a config may hold endpoint details. Every splice is re-parsed and compared against
+  the original *before* anything is written — the result must be the old list plus exactly this
+  entry, with no other setting touched — so an exotic file shape (a flow-style list, a second YAML
+  document apogee would never read) is refused with a "add the entry by hand" message rather than
+  quietly mangled, and a failed write surfaces as an error instead of a save that did not happen.
+  (`cmd/apogee`.)
 
 ## [1.5.0] — 2026-07-21
 

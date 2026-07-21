@@ -358,7 +358,23 @@ Commit: `feat(tui): route /confine — session toggle and status report`.
 
 ---
 
-## 8. The comment-preserving config writer (`--save`)
+## 8. The comment-preserving config writer (`--save`) — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): three departures from the item's literal text, all inside its `cmd/apogee`
+diff allowance. (a) **The `internal/tui` seam is NOT widened.** `saveHostAcknowledgement` returns
+`(path string, entry unconfinedHost, err error)` — "the file path and the added entry" as the item
+asks — but `Options.SaveHostAcknowledgement` keeps item 7's `func() (path string, err error)`:
+widening it would put this item's diff in `internal/tui`, which its Acceptance forbids, and item
+7's confirmation already names the acknowledged host from `Options.Confinement.HostID` rather than
+from the writer. A one-line adapter (`hostAcknowledgementSaver`) drops the entry at the boundary.
+(b) The item's text names only the new file, but item 7's NOTES left the seam "nil until item 8
+wires its writer" and no later item owns that wiring, so this item also fills
+`Options.SaveHostAcknowledgement` in `cmd/apogee/wire.go` (+6 lines) — without it `--save` would
+still report that nothing was written. (c) Two file shapes are **refused** with a "add the entry by
+hand" error rather than spliced: a flow-style `unconfined-hosts: [...]` (no line to append to) and
+a multi-document config (`yaml.Unmarshal` reads only the first document, so an appended entry could
+be written and never read). Every splice is additionally re-parsed and compared against the
+original before the write, so any other mis-read shape fails loudly instead of corrupting a config.
 
 New `cmd/apogee/configwrite.go` (+ test). Appends an `unconfined-hosts` entry for the current host
 to `~/.apogee/config.yaml`.
