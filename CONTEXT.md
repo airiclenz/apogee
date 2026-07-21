@@ -467,6 +467,60 @@ Mechanism only decides when to ask and serializes the follow-through). Not to be
 the **`decompose`** Mechanism (a prompt-shaping nudge; steers wording, not delegation — the two
 are declared incompatible).
 
+### Deliverables and presentation
+
+**Present / Presentation**:
+The act of **surfacing a finished document to the user** — a deliverable file (a report, a
+review, a plan) shown at the end of the work that produced it, instead of left on disk where a
+one-line `write_file` card is the only trace of it. The model reaches it through the
+**`present_document`** tool and supplies nothing but a path (and an optional title): the **host**
+decides the mechanism (see [presentation ladder](#deliverables-and-presentation)), so the model
+never reasons about platforms. Like [Ask-user](#safety-and-autonomy) the tool is
+**mode-independent**, `ReadOnly` (it runs even in Plan), and **not** a safety gate. A
+presentation never fails the call — the baseline rung already happened — so the tool result names
+the outcome (`opened` / `served` / `shown`) for the model to relay truthfully. See
+[ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md).
+_Avoid_: "open the document" (opening is *one rung* of the ladder and always the host's act — a
+remote session never opens anything), "export", "publish", "render" (nothing is converted).
+
+**Presenter**:
+The **host-supplied delegate** a presentation routes through (`domain.Presenter`, on `Config`
+beside `Approver`/`Asker`/`Confiner`) — the sibling of the **Asker**: the same host-decides shape,
+for showing a document rather than asking a question, and carrying no allow/deny semantics. A
+`nil` Presenter means `present_document` is simply **not registered** (a headless host supplies
+none, so the model is never offered an affordance nobody can honour). It is **not** an
+`ExternalEffectTool` — the user's own display is not a non-forkable remote to stub — and it holds
+**no live state across a Turn**: the tool keeps a delegate reference, the host owns the
+mechanisms (ADR 0008).
+_Avoid_: "opener" (that is one mechanism *inside* the ladder, not the delegate), "viewer",
+"renderer".
+
+**Presentation ladder**:
+The **host-side mechanism ladder** the Presenter walks per call; the highest applicable rung
+runs *in addition to* rung 0, never instead of it. **Rung 0 (baseline, always)** — a prominent
+transcript entry carrying the workspace-relative path as **plain text on its own line**
+(cmd+clickable in Zed/VS Code/iTerm2/WezTerm/kitty, copyable everywhere else); it is the rung
+that is never wrong. **Rung 1 (local desktop)** — the OS opener auto-opens the file when the
+session is local (no `SSH_CONNECTION`/`SSH_TTY`/`SSH_CLIENT`) *and* a desktop is detected.
+**Rung 2 (remote + browser-renderable)** — the [doc server](#deliverables-and-presentation)
+serves the file and the URL joins the entry, also as plain text. **Rung 3** — the
+`present.command` config template replaces rung 1's opener. It **fails visible**: any rung above
+0 that fails degrades to rung 0 and the entry says what happened.
+_Avoid_: "fallback chain" (rung 0 is not a fallback — it always runs), "auto-open" for the whole
+thing (that is rung 1 only).
+
+**Doc server**:
+The embedded, **lazily started** HTTP server that makes a presented file reachable from the
+user's machine when Apogee runs remotely (rung 2). A **capability-token allowlist, not a file
+server**: only explicitly presented files, each under a random token at `/d/<32-hex>/<basename>`,
+no directory listing, 404 for everything else (including prefix walks and `..`), the file
+**re-read from disk per GET**, and closed on app shutdown. Its advertised address is the server
+IP from `$SSH_CONNECTION` → the `present.host` override → an outbound-dial probe → `127.0.0.1`;
+its port is `present.port`, default **0** (ephemeral), because the URL is printed fresh per
+presentation. There is deliberately **no host back-channel** anywhere in this path (ADR 0019).
+_Avoid_: "web server" / "file server" (both suggest a served tree; this serves an allowlist of
+individually granted files), "preview server".
+
 ### Validation and the bench
 
 **The bench** (apogee-sim):
