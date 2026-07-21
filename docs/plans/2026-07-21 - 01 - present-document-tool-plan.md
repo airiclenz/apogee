@@ -378,7 +378,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   entry's own `present:` bullet. ADR 0019 §3 is left untouched: it claims nothing about methods.
   Everything else in the sweep re-checked against the code and left as written.
 
-- [ ] **10. Full verification.** `make` targets the README documents (build, vet, full test
+- [x] **10. Full verification.** `make` targets the README documents (build, vet, full test
   suite) — all green, zero new skips. Then a manual smoke on this devbox: run apogee, have the
   model `write_file` a small HTML report and call `present_document`; confirm the transcript
   entry shows path + `http://192.168.64.2:<port>/d/…` URL, the URL serves from another devbox
@@ -388,6 +388,38 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   works; Chrome needs Local Network permission — expected), (b) a local macOS run auto-opens an
   HTML deliverable in the default browser, (c) a local run with `present.command: "zed {path}"`
   opens the file in Zed.
+  NOTES (2026-07-21): both halves ran on the devbox; both green.
+  **Verification.** `make check` — the README's gate and a superset of this bullet's list (gofmt,
+  `go vet ./...`, `go build ./...`, `go test -race -count=1 ./...`, the ADR-0010 import invariant,
+  all six cross-builds, `apogee --help`) — passed in one run: 19 packages `ok`, no failures, "all
+  Phase-2 gates passed"; `make build` green separately. The suite's skip set is unchanged at six,
+  every one pre-existing and environment-gated (`TestE2ELiveModel`, `TestSmokeLiveProfileSeam`,
+  `TestLandlockProbe{,Network}`, `TestSeatbeltProbe{,Network}`) — zero new skips.
+  **Smoke** (this Zed-remoted devbox, `SSH_CONNECTION=192.168.64.1 … 192.168.64.2 22`): the real
+  binary driven in a pty, `--mode allow-edits`, a workspace and `--config` home outside the repo.
+  Run A used the live model on `192.168.64.1:1111` (`gemma-4-12b-it-qat-q4_0`): it wrote
+  `report.html`, called `present_document{path,title}` on it, and the transcript showed the ▤
+  block exactly as designed — `▤ Smoke Report` / `report.html` /
+  `http://192.168.64.2:37963/d/cb5770855b6f83632ca997126f74567a/report.html` / `cmd+click to
+  open` — above it the one-line `✦ Present ┕ report.html` card. `curl` from a SECOND devbox shell,
+  while that session was still alive, returned `200`, `Content-Type: text/html; charset=utf-8` and
+  the file's bytes; a wrong token, `/`, and the token's own directory each returned `404`; after
+  the session exited the port refused connections (the doc server's lifetime is the app's). Run B
+  repeated it against a scripted OpenAI-compatible server in place of the model — same ladder,
+  same block, same 404s, plus a `..` traversal that 404s — so the result does not rest on one
+  model's tool-calling luck. Checked in the RAW capture, not just the de-ANSI'd text: the path and
+  URL lines carry no SGR and no wrap, which is the linkification invariant rung 0 depends on. The
+  cmd+click itself stays on the owner-run checklist below (a click is not a devbox act).
+  **The two cosmetic observations from item 7's verifier, judged.** (i) An untitled presentation
+  putting the path beside the ▤ marker is RIGHT and stays: the alternative is a bare marker line
+  above the path, and the shipped shape matches the `· note` grammar; it is pinned by
+  `TestPresentedEntryRendering`. What was wrong was `presentedView.Path`'s comment ("always its own
+  line"), which contradicted the code it documents — corrected here, comment only, no behaviour.
+  (ii) A depth-0 presentation re-opening the ⤷ label mid-sub-agent-run is a true consequence of
+  item 7's NOTES (g), but it is NOT presentation-specific: renderView re-announces a run after ANY
+  depth-0 entry between two nested blocks (a `· cancelled` note does the same). Left as is — the
+  real fix is carrying sub-agent depth on `domain.PresentRequest`, a domain change well outside a
+  verification item; recorded in TODO.md instead.
 
 ## Non-goals / deferred (record, don't build)
 

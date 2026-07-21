@@ -69,7 +69,7 @@ type entry struct {
 // the whole mechanism, so nothing here may clip, wrap or decorate them.
 type presentedView struct {
 	Title    string               // the model's optional label; empty when it named none
-	Path     string               // the workspace-relative path — always present, always its own line
+	Path     string               // the workspace-relative path — always present; its own line under a title, else beside the ▤ marker
 	Location string               // the served URL (rung 2); empty on every other rung
 	Method   domain.PresentMethod // the rung reached, which the closing status line words
 	Reason   string               // why a tried rung did not deliver; empty when none was

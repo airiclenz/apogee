@@ -371,3 +371,19 @@ deciding.
   diagnosable without running an agent. Already scoped as merge-plan **Phase 5** work; it needs the
   Phase-5 CLI structure that does not exist yet. `/confine status` covers the need from inside the
   TUI in the meantime.
+
+---
+
+## A presented document carries no sub-agent depth (the ⤷ label re-opens around it)
+
+**Status:** parked 2026-07-21 (noticed while verifying the `present_document` plan,
+`docs/plans/2026-07-21 - 01 - present-document-tool-plan.md`). Cosmetic, no wrong output.
+
+`domain.PresentRequest` carries no sub-agent depth, so `internal/tui`'s presentation entry is
+always rendered at depth 0 — unrailed even when a sub-agent presented the document. Because
+`renderView` opens the `⤷` label whenever a block descends deeper than the previous one, a
+depth-0 presentation inside a sub-agent run splits that run and the label is announced again
+after it. Not presentation-specific: any depth-0 entry between two nested blocks does the same
+(a `· cancelled` note already can). The fix is to carry the Step's depth on `PresentRequest` and
+render the entry at it, which is a domain-seam change and wants its own decision — the loop's
+depth is not currently exposed to a host delegate at all (`domain.AskRequest` has the same gap).
