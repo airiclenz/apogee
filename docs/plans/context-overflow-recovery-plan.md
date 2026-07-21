@@ -238,7 +238,21 @@ and reliability tests are the regression net). Commit:
 
 ---
 
-## 4. Predictive pre-request guard: fold before a request that cannot fit
+## 4. Predictive pre-request guard: fold before a request that cannot fit — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): the item's parenthetical "only possible when the window is known AND the
+estimator is calibrated — `EstimateTokens` returns 0 otherwise" does not hold for the Agent: its
+`TokenEstimator` seeds at `DefaultCharsPerToken = 4.0` (`internal/context/budget.go:11,101`), so
+`CharsPerToken` is never 0 there and only a ZERO Allocation (unknown window) makes the guard inert.
+`requestExceedsWindow` therefore checks `ContextLimit - ResponseReserve <= 0` explicitly and no
+calibration gate was added (none was specified) — the guard also protects Turn 1 at the default
+ratio, and the reactive path remains the backstop. Beyond the item's literal sequence: the rebuild
+after the fold runs whether or not the fold succeeded — a REFUSED fold (opted out / nothing to shed
+/ summary faulted) must send the request exactly as today rather than abandon the Turn, and with the
+conversation untouched the re-derivation reproduces the same request bit-for-bit; and, as in item 3,
+an explicit `ctx.Err() != nil` check after the fold routes a cancelled fold to `cancelTurn` and
+`rollback` moves past a successful fold (decision 6). The shared one-fold-per-Turn latch is the
+respond loop entering at `attempt := recoveries` (item 3's NOTES anticipated exactly this).
 
 **Depends on items 2–3** (same fold, same one-per-Turn latch).
 

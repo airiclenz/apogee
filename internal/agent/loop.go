@@ -247,7 +247,9 @@ func validateConfig(cfg domain.Config) error {
 // Upstream fault degrades the Turn to a clean boundary without unwinding the host. The one
 // Upstream fault that does NOT end the Turn on the spot is a context-window overflow: the
 // respond phase folds the history (emergencyFold) and re-sends the same Turn once before
-// falling back to that same clean boundary.
+// falling back to that same clean boundary. The same fold also runs PREDICTIVELY — before the
+// request is sent, when the estimate already says it cannot fit — and the two share one fold
+// per Turn.
 func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	start := time.Now()
 	turn := a.turnIndex
@@ -307,6 +309,42 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// any post-response hook re-defers — the boundary cancelTurn truncates back to, so a cancelled
 	// Turn's own deferrals die with the Turn and only the drained injections are restored (F6).
 	deferredFloor := a.conv.DeferredLen()
+
+	// The PREDICTIVE half of overflow protection: when the calibrated estimate already says this
+	// request cannot fit, fold BEFORE spending the round-trip that would be rejected — and cover
+	// the one case the reactive path cannot, a server whose 400 body the provider cannot classify
+	// as an overflow (there the stream yields a plain DeltaError and no recovery ever fires). It
+	// spends the SAME one fold per Turn: a predictive fold enters the respond phase with the
+	// recovery counter already at its cap, so a wire overflow after it gives up rather than
+	// folding twice. When the fold refuses (opted out, nothing left to shed, or the summary call
+	// itself faulted) the request goes out exactly as it always did and the reactive path stays
+	// the backstop — the estimate is advisory, never a reason to abandon a Turn on its own.
+	recoveries := 0
+	if a.requestExceedsWindow(req) {
+		// Same sequence the reactive recovery runs: re-queue the drained corrections first so the
+		// rebuilt request carries them, fold, then re-derive every local the fold invalidated.
+		a.restoreDeferred(deferred)
+		folded := a.emergencyFold(ctx, turn)
+		if ctx.Err() != nil {
+			// A cancel mid-summary masquerades as a stream error, so only ctx can tell them apart
+			// (the check emergencyFold delegates to its caller). Nothing was folded and no request
+			// was sent, so rollback still marks this Turn's pre-request boundary, and cancelTurn's
+			// truncate-then-restore leaves the corrections re-queued above exactly once.
+			return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+		}
+		if folded {
+			recoveries = maxOverflowRecoveries // the Turn's one fold is spent before the wire
+		}
+		// rollback moves PAST the fold (decision 6: the fold is history maintenance, not part of
+		// the Turn's attempt, so a later cancel keeps it), and the request, its freshly drained
+		// corrections, and the deferred floor are re-derived from the folded history. When nothing
+		// was folded the conversation is untouched, so all three re-derive to what they already
+		// were — the unfolded Turn proceeds bit-for-bit as before.
+		rollback = a.conv.Len()
+		req, deferred = a.buildRequest(turn)
+		deferredFloor = a.conv.DeferredLen()
+	}
+
 	if err := a.runPreRequestHooks(ctx, turn, req); err != nil {
 		// The request was never sent: re-queue the drained corrections so they ride the
 		// next request, and degrade the Turn with no assistant message.
@@ -320,8 +358,11 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// rewrites history, so the retry re-derives every local it invalidated (rollback, req,
 	// deferred, deferredFloor) before the second attempt. Every other way out of this loop —
 	// a plain fault, a second overflow, a cancel — is exactly the behaviour it always had.
+	//
+	// attempt starts at the folds the Turn has ALREADY spent, so the predictive guard above and
+	// this reactive path share the one-fold-per-Turn budget rather than each holding their own.
 	var resp *domain.Response
-	for attempt := 0; ; attempt++ {
+	for attempt := recoveries; ; attempt++ {
 		reviewed, outcome, overflowMsg := a.respondAndReview(ctx, turn, req)
 		if outcome == turnOK {
 			resp = reviewed
@@ -792,6 +833,34 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 		}
 	}
 	return req, deferred
+}
+
+// requestExceedsWindow reports whether req's prompt is ALREADY estimated to be too big for the
+// model's context window — the predictive half of overflow protection, read by step() between
+// building a request and sending it.
+//
+// The measure is the one the whole engine shares: domain.PromptChars over the request's projected
+// messages and tool menu, through the Budget's calibrated chars→token ratio
+// (domain.Budget.EstimateTokens), so this guard can never disagree with the compaction trigger or
+// a hook reading the same Budget. The threshold is the FULL working room (ContextLimit −
+// ResponseReserve), deliberately not a softer fraction: a fold is a lossy rewrite of the user's
+// history, so it must fire only when the estimate says the request cannot fit at all, never as a
+// comfort margin. The ~60%-of-working-room History allocation stays the boundary trigger's
+// business (Budget.HistoryExceedsAllocation), not this one's.
+//
+// It is inert — always false — when the window is unknown (no discovery, no config: Allocate
+// returns the zero Allocation, leaving no working room), so an unbudgeted Agent never
+// predictively folds and the reactive recovery is its only protection. The estimate is advisory:
+// an over-estimate costs one fold, and an under-estimate costs nothing, because the wire overflow
+// still routes to the reactive path.
+func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
+	b := a.budget()
+	room := b.ContextLimit - b.ResponseReserve
+	if room <= 0 {
+		return false
+	}
+	st := req.State()
+	return b.EstimateTokens(domain.PromptChars(st.Messages, st.Tools)) > room
 }
 
 // maxRefFileBytes caps a single @file reference, mirroring the read_file tool's ceiling
