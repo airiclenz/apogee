@@ -367,6 +367,16 @@ since leaving ∅ beside the new text would be self-contradicting. The CHANGELOG
 preamble also went from "one feature" to "two features" with a second-feature paragraph, alongside
 the three `Added` bullets.
 
+NOTES (2026-07-21, FOLLOW-UP-B): ADR 0018 §8 and the matching `clampToolResult` comment stated
+"the floor sits BELOW the fold's transcript budget" unconditionally; it is arithmetic between two
+independent constants, not an invariant. History is ~60% of the working room (~48% of the window at
+the default 20% reserve, `internal/context.Allocate`) while the fold's transcript budget is
+`window - compactMaxTokens - compactPromptOverheadTokens` = `window - 4608`
+(`internal/agent/compact.go`), so the floor is the lower of the two only while
+`0.6 x (window - reserve) < window - 4608` — windows above ~8.9k tokens at the default reserve
+(≥ 8865 with the integer truncation in `Allocate`; verified by evaluating the landed constants).
+Both places now carry that condition. Docs/comments only — no behaviour change.
+
 **Depends on items 1–4 (and 5 if ratified).**
 
 **What:**

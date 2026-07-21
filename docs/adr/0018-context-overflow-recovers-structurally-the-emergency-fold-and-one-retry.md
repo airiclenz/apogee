@@ -111,7 +111,15 @@ seam every result crosses, so no route bypasses it). A result bigger than everyt
 hold can never survive any reducer, and it can doom the Turn outright: the emergency fold's own
 summary call keeps the most recent message unconditionally, so a fresh giant result IS that
 message and overflows the fold that was supposed to rescue the Turn. The floor therefore sits
-BELOW the fold's transcript budget, which is the property that keeps the fold survivable. Placing
+BELOW the fold's transcript budget at every window an agent can realistically run in, which is the
+property that keeps the fold survivable. That ordering is arithmetic between two independent
+constants, not an invariant: History is ~60% of the working room (~48% of the window at the default
+20% reserve) while the fold budgets its transcript at `window - compactMaxTokens -
+compactPromptOverheadTokens` (= `window - 4608`), so the floor sits below it only while
+`0.6 x (window - reserve) < window - 4608` — windows above ~8.9k tokens at the default reserve
+(≥ 8865 with the integer arithmetic). Below that crossover the floor is the looser of the two and
+the survivability property lapses; that band sits far under the ~32k target window and is too small
+to run a coding Turn in, so it is stated here rather than defended in code. Placing
 it in the loop rather than in `tool_result_cap` is ADR 0006's requirement, not a convenience: a
 structural reducer must stay on in the baseline and the baseline must be functional, whereas the
 Mechanism is default-off, Bypass-disabled, withdrawable by self-regulation, and caps only the

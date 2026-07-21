@@ -436,8 +436,14 @@ func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
 // result (the one that overflows) is exactly the one it never touches. The two thresholds are
 // deliberately far apart: this floor fires only on the pathological — the whole History allocation
 // (~60% of the working room, ~48% of the window at the default reserve), chosen because it sits
-// BELOW the emergency fold's own transcript budget, which is the property that keeps the fold
-// survivable — while the Mechanism's tighter 40%-of-working-room nudge shapes the ordinary case.
+// BELOW the emergency fold's own transcript budget at every window an agent can realistically run
+// in, which is the property that keeps the fold survivable — while the Mechanism's tighter
+// 40%-of-working-room nudge shapes the ordinary case. That ordering is arithmetic, not an
+// invariant: the fold budgets its transcript at window - compactMaxTokens -
+// compactPromptOverheadTokens (= window - 4608), so the floor stays under it only while
+// 0.6*(window - reserve) < window - 4608 — windows above ~8.9k tokens at the default reserve.
+// Smaller windows invert the two and lose the property; they sit far under the ~32k target window
+// and are too small to run a coding Turn in (ADR 0018 §8 states the same condition).
 //
 // Unlike the Mechanism, which edits only the projected request, this clamp edits the conversation
 // itself: the raw result never reaches history, and so never reaches a snapshot or the rendered
