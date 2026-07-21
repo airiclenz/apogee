@@ -23,10 +23,13 @@
     ok      github.com/airiclenz/apogee/internal/tui   0.412s
     … +2 more lines
 
-✦ Update File
+✦ View Diff
   ┕ main.go +2 -2
-    098 - a code line that has been removed
-    100 + a new code line
+      a context line
+    - a code line that has been removed
+    - another code line that has been removed
+    + a new code line
+    + another new code line
 
 ✦ Sub Agent
   ┕ 3 Sub Agents
@@ -78,7 +81,7 @@ becomes a body.
 **What stays standalone.** A call is groupable when it has a target, an empty body, and a plain
 (non-diff) summary — which includes an `error: …` line, and an in-flight call whose result has not
 landed yet. A call carrying a body (the `Run` above, with its `… +N more lines` remainder; the
-`Update File` above, with its diff beneath the `+2 -2`) or no target at all breaks the run and
+`View Diff` above, with its diff beneath the `+2 -2`) or no target at all breaks the run and
 renders as its own block. It renders in the *same shape* it would have had inside a group, though:
 a block of one is byte-identical in shape to a block of many, which is the whole point of the
 header carrying no target.
