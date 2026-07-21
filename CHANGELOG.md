@@ -6,7 +6,23 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
-## [Unreleased]
+## [1.4.0] — 2026-07-21
+
+Post-`v1.3.0`, **additive** (minor) — three strands plus a TUI affordance. The **Validated-set
+runtime surface** (ADR 0016): a per-model Mechanism set that passed the non-inferiority gate now
+reaches users at startup, shipped with the binary (`internal/validated/shipped.json`) and
+user-local (`~/.apogee/validated/`), whole-set-or-nothing and off under an explicit
+`mechanisms:` block or Bypass. The **guided-decomposition hardening** (F1–F7): the fan-out's
+Exchange scoping, marker handling, and remainder cursor are corrected, a deferred correction now
+dies with its Exchange (F6), and `guided_decomposition + truncate_history` is refused at startup
+as incompatible (F7). And the **architecture-deepening consolidations** (D1–D7, ADR 0017): the
+Exchange boundary, the chars→token arithmetic, the history-scan shapes, the read/list tool-name
+spelling families (F8), and the per-tool spec ritual each fold to one implementation. Plus `/new`
+in the TUI, an alias of `/clear`. **No breaking change** (sanity-checked against the
+`v1.3.0..HEAD` diff): the public facade (`apogee.go`) is untouched, and the types it aliases only
+*gain* methods — `Budget.EstimateTokens` / `Budget.HistoryExceedsAllocation` (D4) and
+`Conversation.ClearDeferred` / `TruncateDeferred` / `DeferredLen` (F6); nothing exported is
+removed or re-typed. `domain.ExchangeView` (D1) stays internal per ADR 0017 §1.
 
 ### Added
 
@@ -1515,5 +1531,8 @@ where the OS cannot enforce:
   Fixed by resolving each writable root through symlinks in `seatbeltProfile`; see
   the `[1.1.0]` Fixes entry.
 
+[1.4.0]: https://github.com/airiclenz/apogee/releases/tag/v1.4.0
+[1.3.0]: https://github.com/airiclenz/apogee/releases/tag/v1.3.0
+[1.2.0]: https://github.com/airiclenz/apogee/releases/tag/v1.2.0
 [1.1.0]: https://github.com/airiclenz/apogee/releases/tag/v1.1.0
 [1.0.0]: https://github.com/airiclenz/apogee/releases/tag/v1.0.0
