@@ -203,9 +203,25 @@ a subprocess escape is **OS-blocked**, an Apogee in-process out-of-workspace wri
 unconfined, safe **only inside a VM** (the user's responsibility); it is **global-only** (a project
 config cannot loosen it — the hostile-repo footgun is closed) and prints a per-session warning. The
 **only blanket *loosen*** in the system — every other knob (the dangerous-action guard, the deferred
-tool×mode matrix) is tighten-only.
+tool×mode matrix) is tighten-only — and the **Host acknowledgement** (below) is that same loosen
+scoped to one machine, not a second kind of it.
 _Avoid_: "YOLO mode" (informal; it is a flag on Auto, not a fifth mode),
 "`--dangerously-skip-permissions`" (names Claude Code's analogue, not this flag).
+
+**Host acknowledgement** (`unconfined-hosts:`):
+The user's recorded claim that **one named machine** is disposable, so Auto may run unconfined
+*there* — the same loosen as `confine-to-workspace: false` at the grain the claim is actually true
+at (ADR 0012, amendment 2026-07-21). A global-config-only list of entries (`id`, `acknowledged`,
+`note`) matched against the current **host id**; resolution is: explicit
+`confine-to-workspace: false` → unconfined everywhere; else a host-id match → unconfined here; else
+confined. It exists because the flag is **global** while the claim is **host-specific**, so a
+throwaway container's acknowledgement must not follow `~/.apogee/config.yaml` onto a laptop. The
+host id is a **safety interlock, not authentication** — it stops an acknowledgement travelling
+unnoticed, it does not resist forgery (anyone who can edit the config can write any id) — and it
+fails **closed**: an unmatched host is simply confined again. Written only by an explicit user act
+(`/confine off --save`); an unknown id is "not this host", never an error.
+_Avoid_: "trusted host" (it is not a trust store, and nothing is verified), "whitelist",
+"per-host confine-to-workspace" (the key is global; only the acknowledgement is host-scoped).
 
 **Safety guardrails**:
 Apogee's production safety set: Agent modes, Approval, path-safety (TOCTOU-safe at use time via a

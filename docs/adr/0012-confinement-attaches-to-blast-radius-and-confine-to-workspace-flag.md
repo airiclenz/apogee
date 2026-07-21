@@ -122,3 +122,75 @@ project config may only *add* (tighten). Lives in `internal/security` (P3.6).
   `workspaceScopedWriter` marker, the per-call disposition table, the capability-honesty rule, and the
   shared escape-probe harness P3.2/P3.3 build to. **Where that contract and this ADR's prose differ on a
   mechanism, that contract is authoritative on the *how*; this ADR remains authoritative on the *policy*.**
+
+## Amendment (2026-07-21) — the host-scoped acknowledgement, and the tool may offer the loosen
+
+**Why now.** "Confine-if-you-can, gate-if-you-can't" is not the exotic branch it was assumed to be:
+`landlock_create_ruleset` returns **`ENOSYS`** in most containers and many VMs *regardless of kernel
+version* (verified on kernel 6.18.15, well past this ADR's 5.13 floor — `NewConfiner()` yields a
+landlock backend reporting `FSWrite=false`). The probe is right and the facility is genuinely absent,
+so for containerised users the degraded path is the **common** path: Auto is entered, every terminal
+call raises Approval, and nothing says why. This amendment changes **how the acknowledgement is
+scoped** and **how the user reaches it** — not what Auto is allowed to do on its own.
+
+**(a) `confine-to-workspace` is unchanged, and is not deprecated.** It remains a
+global-config-only key (`~/.apogee/config.yaml`), default **`true`**, meaningful only in Auto, and
+`false` still means the blanket "I am the sandbox" loosen on **every** host the config travels to,
+with its per-session unconfined-Auto warning. A project config still cannot set it.
+
+**(b) A host-scoped acknowledgement, because the flag is global but the claim is not.** The claim a
+user makes when they loosen is *"**this machine** is disposable"* — a host fact. Carried by a global
+key, that claim follows `~/.apogee/config.yaml` from a throwaway container onto a laptop, where it is
+false and dangerous, and it does so **silently**. A new file-only list records the claim at the
+grain it is actually true at:
+
+```yaml
+confine-to-workspace: true      # global default, unchanged
+
+unconfined-hosts:               # explicit per-host acknowledgement
+  - id: "devbox-a1b2c3"
+    acknowledged: "2026-07-21"
+    note: "disposable container, landlock unavailable"
+```
+
+Resolution order: an explicit global `confine-to-workspace: false` wins (unchanged meaning); else a
+current-host match in `unconfined-hosts[].id` yields an effective `false`; else `true`. The list is
+**global-config-only** on the same reasoning as the flag — a hostile repo must not be able to
+name your host — and an unknown id is simply "not this host", never an error, because the list is
+expected to accumulate machines.
+
+The host id is a **safety interlock, not an authentication mechanism**: its whole job is to stop an
+acknowledgement travelling between machines unnoticed, not to resist forgery — anyone who can edit
+the config can write any id, exactly as the dangerous-action guard "is NOT a security boundary". It
+fails in the safe direction: a container with a fresh machine identifier per run does not match its
+stored acknowledgement and is confined again, which is an annoyance with a one-command answer
+(below), not a hole.
+
+**(c) The tool may now *offer* the loosen — `/confine off`.** When Auto is selected on a backend
+reporting `FSWrite == false` while confinement is effectively on, Apogee prints a notice naming the
+active backend, saying plainly that commands cannot be fenced on this host and will therefore ask
+for approval, and pointing at `/confine off` (this session, writes nothing) and `/confine off
+--save` (and record this host in `unconfined-hosts`). This does **not** weaken this ADR's
+"editing your own global config *is* the deliberate acknowledgement" posture, because what the offer
+removes is the *search cost*, not the *deliberateness*:
+
+- the accept is a **distinct affirmative act** the user types afterwards — there is no default-yes,
+  no enter-to-accept, and no remembered "always";
+- it is deliberately **not** a startup y/N prompt and **not** an extra choice on the Approval popup:
+  both would put the acknowledgement at the moment of peak frustration, which is the
+  click-through-consent trap;
+- **session scope is offered ahead of persistence**, so the lower-blast-radius answer is the easy
+  one and persisting reads as the heavier choice;
+- the wording states the blast radius (Auto will run **every** command unfenced with the user's full
+  privileges) and must never be phrased as repairing a malfunction — **nothing is broken**; the user
+  is choosing to drop a guarantee because their environment is disposable. A persisting write names
+  the file it changed and the entry it added.
+
+**(d) The ladder is untouched; auto-loosening stays forbidden.** `resolveLadderAuto` still confines
+what it can and gates what it cannot, and no code may run an unconfined subprocess in Auto on its
+own initiative when the backend is incapable — that is the "unsupervised *and* unbounded" hole this
+ADR and ADR 0004 exist to close. The only thing that ever loosens is a user act; this amendment adds
+a smaller-scoped way to express one and a shorter route to making it, and nothing else.
+
+Implementation lives in [`docs/plans/auto-confinement-degradation-plan.md`](../plans/auto-confinement-degradation-plan.md);
+CONTEXT.md carries the term **Host acknowledgement**.

@@ -80,7 +80,12 @@ Any authorized deviation from an item's text lands as a dated `NOTES:` line unde
 
 ---
 
-## 1. ADR 0012 amendment — the host-scoped acknowledgement and the offer
+## 1. ADR 0012 amendment — the host-scoped acknowledgement and the offer — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): CONTEXT.md gained the **Host acknowledgement** term; the neighbouring
+`confine-to-workspace` entry also gained one clause so its "the only blanket *loosen*" claim stays
+true beside the new term (the host acknowledgement is that same loosen, host-scoped) — an edit
+inside this item's CONTEXT.md allowance, recorded here because it touches an existing entry.
 
 **This is the design of record; every later item cites it.** It lands first so no implementation
 item is written against a document that contradicts it.
