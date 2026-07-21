@@ -6,7 +6,7 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
-## [Unreleased]
+## [1.7.0] — 2026-07-21
 
 ### Added
 
@@ -1955,6 +1955,7 @@ where the OS cannot enforce:
   Fixed by resolving each writable root through symlinks in `seatbeltProfile`; see
   the `[1.1.0]` Fixes entry.
 
+[1.7.0]: https://github.com/airiclenz/apogee/releases/tag/v1.7.0
 [1.6.0]: https://github.com/airiclenz/apogee/releases/tag/v1.6.0
 [1.5.0]: https://github.com/airiclenz/apogee/releases/tag/v1.5.0
 [1.4.0]: https://github.com/airiclenz/apogee/releases/tag/v1.4.0
