@@ -14,7 +14,7 @@ import (
 // ----------------------------------------------------------------------------
 //
 // This file turns a tool call+result into a compact, human-facing view: a friendly label
-// and a target on the header line (✦ [Read File] main.go), and a one-line summary hanging
+// and a target on the header line (✦ Read File main.go), and a one-line summary hanging
 // off a tree branch (┕ 1 - 100). It is pure — no lipgloss, no I/O — so it is trivially
 // table-testable (TestPresentToolCall); render.go owns the styling.
 //
@@ -48,17 +48,15 @@ type detailLine struct {
 // toolView is the presentation model of a tool call (later enriched by its result): a
 // friendly Label, the active Verb for the status line, the Target it acts on (a path, a
 // directory, a pattern), and the detail lines summarising the outcome. name is the raw tool
-// id, kept to pick the result extractor and as the raw-fallback label; bracket reports
-// whether the label is a known friendly one the renderer wraps in [brackets] (a raw fallback
-// is shown bare).
+// id, kept to pick the result extractor and as the raw-fallback label. Every Label renders
+// the same way — bold orange (render.go) — so a raw fallback is not visually singled out.
 type toolView struct {
 	Label   string
 	Verb    string
 	Target  string
 	Details []detailLine
 
-	name    string
-	bracket bool
+	name string
 }
 
 // toolPresenter maps a tool name to its friendly label, the active verb naming what the tool
@@ -217,7 +215,7 @@ var (
 
 // presentToolCall builds the header view of a tool call. A known tool gets its friendly
 // label, its active verb, and a target pulled from the arguments; an unknown tool falls back
-// to its raw name (shown bare, not bracketed) with the pretty-printed arguments as plain
+// to its raw name (styled like any other label) with the pretty-printed arguments as plain
 // detail lines, so a not-yet-registered tool still renders and a malformed argument is shown
 // verbatim (the approval flow is a security surface — the model's request is never hidden).
 // The verb mirrors that fallback: an unregistered tool is "running <raw name>", which stays a
@@ -232,7 +230,7 @@ func presentToolCall(call domain.ToolCall) toolView {
 			Details: prettyJSONDetails(call.Arguments),
 		}
 	}
-	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool, bracket: true}
+	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool}
 	if p.target != nil {
 		tv.Target = p.target(parseArgs(call.Arguments))
 	}

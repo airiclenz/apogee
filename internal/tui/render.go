@@ -173,11 +173,15 @@ func renderSkillChip(th theme, name string) string {
 	return th.skillChip.Render(" " + glyphSkill + " " + name + " ")
 }
 
-// renderToolBlock renders a tool call: the ✦ [Label] target header, then each summary detail
+// renderToolBlock renders a tool call: the ✦ Label target header, then each summary detail
 // hanging off a ┝/┕ branch (the last line gets ┕). The caller frames the block for depth
 // (renderEntryLines applies the rail) — width is already the railed inner column.
+//
+// The label is styled (bold orange) before the header is wrapped — the markdown.go posture:
+// ansi.Wrap is SGR-aware and lipgloss.Width strips ANSI, so baking the style into the text
+// leaves the soft-wrap and sticky-offset arithmetic untouched. The target stays plain.
 func renderToolBlock(th theme, tv toolView, width int) []string {
-	head := bracketLabel(tv)
+	head := th.toolLabel.Render(tv.Label)
 	if tv.Target != "" {
 		head += " " + tv.Target
 	}
@@ -188,10 +192,10 @@ func renderToolBlock(th theme, tv toolView, width int) []string {
 
 // renderOrphanResult renders a tool result that matched no pending call (a defensive
 // fallback — normally a result folds into its call by CallID). It reads as a result block:
-// a ✦ [result] header with the raw content hanging off branches. The caller frames it for
-// depth — width is already the railed inner column.
+// a ✦ result header — the bare word styled like any tool label — with the raw content hanging
+// off branches. The caller frames it for depth — width is already the railed inner column.
 func renderOrphanResult(th theme, text string, width int) []string {
-	out := hangingWrap(th.toolHeader, glyphAssistant+" ", "[result]", width)
+	out := hangingWrap(th.toolHeader, glyphAssistant+" ", th.toolLabel.Render("result"), width)
 	details := make([]detailLine, 0)
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
@@ -225,15 +229,6 @@ func detailStyle(th theme, kind detailKind) lipgloss.Style {
 	default:
 		return th.toolDetail
 	}
-}
-
-// bracketLabel wraps a known tool's friendly label in [brackets]; an unknown tool's raw name
-// is shown bare, signalling it has no presentation entry yet.
-func bracketLabel(tv toolView) string {
-	if tv.bracket {
-		return "[" + tv.Label + "]"
-	}
-	return tv.Label
 }
 
 // ----------------------------------------------------------------------------

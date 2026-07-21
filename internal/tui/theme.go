@@ -98,7 +98,8 @@ func newBrailleSpinner() spinner.Model {
 // cues — so the transcript stays legible under any terminal profile.
 type theme struct {
 	userBlock   lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
-	toolHeader  lipgloss.Style // the ✦ [Label] target header
+	toolHeader  lipgloss.Style // the ✦ Label target header
+	toolLabel   lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
 	toolDetail  lipgloss.Style // the ┝/┕ branch detail lines (dim)
 	subRail     lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
 	skillChip   lipgloss.Style // an attached-skill chip above the input (white on violet)
@@ -138,6 +139,7 @@ func newTheme() theme {
 	return theme{
 		userBlock:   lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
 		toolHeader:  lipgloss.NewStyle(),
+		toolLabel:   lipgloss.NewStyle().Bold(true).Foreground(colCode),
 		toolDetail:  lipgloss.NewStyle().Foreground(colFaint),
 		subRail:     lipgloss.NewStyle().Foreground(colFaint),
 		skillChip:   lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),

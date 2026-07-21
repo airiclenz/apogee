@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -77,6 +78,31 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 		if len(lines) == 0 {
 			t.Errorf("width %d produced no lines", width)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The tool header's label styling
+// ----------------------------------------------------------------------------
+
+// A tool header shows "Label target" with no brackets, and the label alone carries the
+// bold-orange style — baked in before the wrap, so the visible text is unaffected. The style
+// assertion is a loose contains against the theme's own render rather than a byte-exact
+// golden, so a lipgloss change cannot false-fail it; the guard above it catches the opposite
+// failure, a toolLabel role that paints nothing at all.
+func TestToolHeaderLabelStyled(t *testing.T) {
+	th := newTheme()
+	head := renderToolBlock(th, toolView{Label: "Read File", Target: "main.go"}, 80)[0]
+
+	if got, want := ansi.Strip(head), "✦ Read File main.go"; got != want {
+		t.Errorf("header text = %q; want %q (no brackets)", got, want)
+	}
+	styled := th.toolLabel.Render("Read File")
+	if styled == "Read File" {
+		t.Fatal("the toolLabel role renders no escape sequence; the header would be unstyled")
+	}
+	if !strings.Contains(head, styled) {
+		t.Errorf("header %q does not carry the styled label %q", head, styled)
 	}
 }
 

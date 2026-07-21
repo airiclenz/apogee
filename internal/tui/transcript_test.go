@@ -73,8 +73,8 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	if !tool.done {
 		t.Error("tool call not marked done after its result folded in")
 	}
-	if tool.tool.Label != "Read File" || tool.tool.Target != "main.go" || !tool.tool.bracket {
-		t.Errorf("tool view = %+v; want a bracketed Read File / main.go header", tool.tool)
+	if tool.tool.Label != "Read File" || tool.tool.Target != "main.go" {
+		t.Errorf("tool view = %+v; want a Read File / main.go header", tool.tool)
 	}
 	if len(tool.tool.Details) != 1 || tool.tool.Details[0].Text != "1 - 1" {
 		t.Errorf("tool details = %+v; want a single \"1 - 1\" summary", tool.tool.Details)
@@ -87,7 +87,7 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 		"",
 		"✦ Let me read it.",
 		"",
-		"✦ [Read File] main.go",
+		"✦ Read File main.go",
 		"  ┕ 1 - 1",
 		"",
 		"✦ It is a Go file.",
@@ -116,7 +116,7 @@ func TestTranscriptToolCallFinalisesNarration(t *testing.T) {
 	if !strings.Contains(got, "✦ Checking the file.") {
 		t.Errorf("pre-tool narration not committed:\n%s", got)
 	}
-	if !strings.Contains(got, "✦ [Read File]") {
+	if !strings.Contains(got, "✦ Read File") {
 		t.Errorf("tool call not rendered:\n%s", got)
 	}
 	if n := len(tr.entries); n != 2 { // assistant narration + tool call
@@ -275,7 +275,7 @@ func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Reading it.",
 		"",
-		"✦ [Read File] main.go",
+		"✦ Read File main.go",
 	}, "\n")
 	if got := plainRender(tr); got != want {
 		t.Errorf("narration mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -485,7 +485,7 @@ func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 	if !strings.HasPrefix(got, "│ ⤷ sub-agent") {
 		t.Errorf("depth-1 run not opened by a ⤷ sub-agent label:\n%q", got)
 	}
-	if !strings.Contains(got, "│ ✦ [result]") {
+	if !strings.Contains(got, "│ ✦ result") {
 		t.Errorf("depth-1 entry not framed by the rail:\n%q", got)
 	}
 	if !strings.Contains(got, "│   ┕ line2") {

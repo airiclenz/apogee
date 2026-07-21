@@ -138,6 +138,18 @@ that reports no filesystem confinement, so it reproduces identically on a machin
   model is about to continue, while a just-opened empty buffer still shows its lone marker so you
   can see streaming has begun. Presentation only — the tool results, event payloads, and the
   upstream conversation the model sees are untouched. (`internal/tui`.)
+- **Tool labels lost their `[brackets]` and gained colour.** A tool call's header now reads
+  `✦ Read File main.go` instead of `✦ [Read File] main.go`, with the label alone rendered **bold in
+  orange `#f0883e`** — the tone inline code and the auto-mode marker already carry — and the target
+  left plain. The brackets were doing the work of making the label stand out from the target;
+  weight and colour do it better and cost no columns. The styling is deliberately **uniform**: a
+  known friendly label, an unregistered tool's raw name, and the stray-result `result` header all
+  look the same. That retires the old "a bare name means the tool has no presentation entry"
+  signal, which was the brackets' side effect rather than anything a reader could name — an unknown
+  tool still falls back to its raw name and its verbatim pretty-printed arguments, so nothing about
+  what the model asked for is hidden. The style is baked into the header before it is wrapped
+  (the `markdown.go` posture — `ansi.Wrap` is SGR-aware and `lipgloss.Width` strips ANSI), so the
+  soft-wrap and sticky-header arithmetic are unperturbed. Presentation only. (`internal/tui`.)
 
 ## [1.5.0] — 2026-07-21
 

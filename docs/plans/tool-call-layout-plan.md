@@ -144,7 +144,19 @@ Commit: `feat(tui): blank-line hygiene — trim assistant text at commit, collap
 
 ---
 
-## 3. Tool labels — brackets removed, bold + orange
+## 3. Tool labels — brackets removed, bold + orange — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): four deviations, all mechanical. (a) The bracketless assertions reuse the
+existing `renderPlain`/`plainRender` helpers, which strip ANSI with `ansiPattern` (a CSI regexp,
+`model_test.go:74`) rather than `ansi.Strip` — the same stripped surface the testing note asks
+for, without a second stripping idiom in one file. (b) The pinned-string line numbers in the item
+text were stale: the bracketed forms lived at `transcript_test.go:90,119,278,488` (line 370 has
+none), and 488 is the `✦ [result]` orphan header, now `✦ result`. (c) The bold+orange assertion
+landed as its own `TestToolHeaderLabelStyled` in `render_test.go` (it exercises
+`renderToolBlock`, not the transcript) — a loose contains against `th.toolLabel.Render(...)`,
+guarded by a check that the role paints anything at all. (d) `theme.go`'s `toolHeader` comment
+("the ✦ [Label] target header") was corrected alongside the new role; leaving a bracketed header
+described one line above the style that removes it would have been stale on arrival.
 
 Implements decision 2. All `internal/tui`:
 
