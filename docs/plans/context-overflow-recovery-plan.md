@@ -110,7 +110,15 @@ fold before sending** (predictive, item 4). Both reuse the existing generative f
 
 ---
 
-## 1. Loop seam: overflow becomes its own turn outcome
+## 1. Loop seam: overflow becomes its own turn outcome — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): the message is carried as a third return from `respondAndReview`
+(`(*domain.Response, turnOutcome, string)`, non-empty only on `turnOverflowed`) rather than a
+turn-scoped Agent field — the authorized implementer's choice, keeping no hidden state across
+Turns. Beyond the item's literal text, `step()` also gained an interim `case turnOverflowed:` arm
+(emit the carried message as `ErrorEvent` source `"loop"` → `restoreDeferred` → `abandonTurn`):
+without it the new outcome would fall through to `resp.ToolCalls()` on a nil response. It is
+today's give-up behaviour verbatim and is exactly the arm item 3 wraps in the retry loop.
 
 **What:** in `internal/agent/loop.go`:
 

@@ -303,10 +303,18 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		return a.abandonTurn(turn, start), nil
 	}
 
-	resp, outcome := a.respondAndReview(ctx, turn, req)
+	resp, outcome, overflowMsg := a.respondAndReview(ctx, turn, req)
 	switch outcome {
 	case turnCancelled:
 		return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+	case turnOverflowed:
+		// The prompt did not fit the context window. respondAndReview withholds the ErrorEvent
+		// for this outcome so recovery can own it; until recovery is wired the give-up path IS
+		// this arm, so it surfaces the carried message verbatim — same Source, same text, same
+		// ordering — and then degrades the Turn exactly like any other Upstream fault.
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
+		a.restoreDeferred(deferred)
+		return a.abandonTurn(turn, start), nil
 	case turnFailed:
 		a.restoreDeferred(deferred)
 		return a.abandonTurn(turn, start), nil
@@ -338,9 +346,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 type turnOutcome int
 
 const (
-	turnOK        turnOutcome = iota // a usable response (a nil-safe *Response is returned)
-	turnCancelled                    // ctx was cancelled mid-stream
-	turnFailed                       // an Upstream fault (already surfaced as an ErrorEvent)
+	turnOK         turnOutcome = iota // a usable response (a nil-safe *Response is returned)
+	turnCancelled                     // ctx was cancelled mid-stream
+	turnFailed                        // an Upstream fault (already surfaced as an ErrorEvent)
+	turnOverflowed                    // the request did not fit the model's context window — NOT surfaced; the caller owns the ErrorEvent
 )
 
 // respondAndReview streams one Upstream reply, parses its tool calls, builds the post-
@@ -353,16 +362,26 @@ const (
 // sim's retry builders carried. Corrections accumulate across attempts (each retry appends
 // onto the same request — the sim's escalating re-asks), bounded by the cap; at the cap
 // the last response passes through with no further append. It returns the reviewed
-// *Response on turnOK, or nil with turnCancelled / turnFailed.
-func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Request) (*domain.Response, turnOutcome) {
+// *Response on turnOK, or nil with turnCancelled / turnFailed / turnOverflowed.
+//
+// The third return is the fault message this call did NOT surface: non-empty only on
+// turnOverflowed, where the ErrorEvent is deliberately withheld because an overflow is
+// recoverable (fold the history, retry the request) and a recovered Turn must stay quiet.
+// The caller owns that decision, so it also owns the give-up event — emitting the carried
+// message verbatim keeps a give-up indistinguishable from the plain-fault path below. Every
+// other outcome surfaces its own fault here, exactly as before, and carries "".
+func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Request) (*domain.Response, turnOutcome, string) {
 	for attempt := 0; ; attempt++ {
 		reply := a.streamResponse(ctx, turn, req)
 		if ctx.Err() != nil {
-			return nil, turnCancelled // a cancel masquerades as a stream error; ctx wins
+			return nil, turnCancelled, "" // a cancel masquerades as a stream error; ctx wins
 		}
 		if reply.failed {
+			if reply.overflow {
+				return nil, turnOverflowed, reply.errMsg
+			}
 			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: reply.errMsg})
-			return nil, turnFailed
+			return nil, turnFailed, ""
 		}
 
 		nativeCalls, err := parseToolCalls(reply.toolCalls)
@@ -378,7 +397,7 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 		if hookErr != nil {
 			// A post-response hook panicked (recovered into an ErrorEvent): the model did
 			// reply, so proceed with the response as reviewed so far rather than abandon.
-			return resp, turnOK
+			return resp, turnOK, ""
 		}
 		if retry && attempt < maxPostResponseRetries {
 			// The Turn re-streams: tell observers the tokens emitted this attempt are
@@ -397,7 +416,7 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			}
 			continue
 		}
-		return resp, turnOK
+		return resp, turnOK, ""
 	}
 }
 
@@ -450,6 +469,7 @@ type reply struct {
 	toolCalls []provider.ToolCall
 	finish    domain.FinishReason
 	failed    bool   // a terminal DeltaError / DeltaContextOverflow arrived
+	overflow  bool   // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
 	errMsg    string // the terminal fault message when failed
 }
 
@@ -463,7 +483,9 @@ type reply struct {
 // verbatim and unbuffered — byte-identical to the pre-profile loop. The SSE body is drained to its
 // terminal Delta and closed before this returns — so Approval, consulted afterward in
 // dispatchTools, never blocks an open Upstream connection. A cancellation surfaces as a terminal
-// DeltaError; the caller distinguishes it from a real fault by checking ctx.Err().
+// DeltaError; the caller distinguishes it from a real fault by checking ctx.Err(). A prompt the
+// model's context window cannot hold surfaces as a terminal DeltaContextOverflow, which the reply
+// records as failed AND overflow so the caller can tell a recoverable request from a generic fault.
 func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) reply {
 	var out reply
 	var content, thinking strings.Builder
@@ -508,7 +530,11 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				})
 			}
 		case provider.DeltaError, provider.DeltaContextOverflow:
+			// Both are terminal, but only the overflow says something about the request that
+			// the loop can act on: the prompt exceeded the window, so a shorter history is a
+			// real remedy. Keep the bit here rather than re-classifying the message later.
 			out.failed = true
+			out.overflow = delta.Kind == provider.DeltaContextOverflow
 			out.errMsg = delta.Err
 		}
 	}
