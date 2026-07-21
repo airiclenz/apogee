@@ -187,6 +187,32 @@ type AskRequest = domain.AskRequest
 type AskAnswer = domain.AskAnswer
 
 // ----------------------------------------------------------------------------
+// Presentation (internal/domain) — the host delegate that shows a document (ADR 0019)
+// ----------------------------------------------------------------------------
+
+// Presenter is the host-supplied delegate the present_document tool routes a finished
+// deliverable to; the host picks the mechanism (the presentation ladder), the model supplies
+// only a path. Like Asker it is mode-independent and not a safety gate, and a nil Presenter
+// means present_document is not registered.
+type Presenter = domain.Presenter
+
+// PresentRequest is the document put in front of the user (a struct for freeze-safety).
+type PresentRequest = domain.PresentRequest
+
+// PresentOutcome reports which rung of the presentation ladder carried the document to the
+// user (a struct for freeze-safety).
+type PresentOutcome = domain.PresentOutcome
+
+// PresentMethod names the presentation-ladder rung that ran.
+type PresentMethod = domain.PresentMethod
+
+const (
+	PresentOpened = domain.PresentOpened
+	PresentServed = domain.PresentServed
+	PresentShown  = domain.PresentShown
+)
+
+// ----------------------------------------------------------------------------
 // Skills (internal/domain) — the host-supplied resolver for attached /skill IDs
 // ----------------------------------------------------------------------------
 

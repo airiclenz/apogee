@@ -109,7 +109,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   one tool. CONTEXT.md's four terms live in a new `### Deliverables and presentation` section
   placed after `### Context and history` (the plan did not fix a location).
 
-- [ ] **2. Domain seam: `Presenter`.** New `internal/domain/present.go` mirroring `ask.go` (P3.11
+- [x] **2. Domain seam: `Presenter`.** New `internal/domain/present.go` mirroring `ask.go` (P3.11
   pattern — read it first): `Presenter` interface with
   `Present(ctx context.Context, req PresentRequest) (PresentOutcome, error)`; `PresentRequest`
   struct: `Path` (absolute), `DisplayPath` (workspace-relative, for display), `Title` (optional,
@@ -120,6 +120,15 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   (`internal/domain/config.go:42`) with a matching "nil ⇒ present_document is not registered"
   comment. Acceptance: doc comments state mode-independence, fail-safe-under-ctx-cancel, and the
   nil-omission contract; `go vet ./internal/domain` clean.
+  NOTES (2026-07-21): the item names only `internal/domain`, but the seam is also re-exported
+  from the root facade (`apogee.go`, a `Presentation` block beside the existing `Ask-user`
+  one: `Presenter`/`PresentRequest`/`PresentOutcome`/`PresentMethod` + the three constants).
+  Without it no out-of-module embedder can implement the interface (the argument types would
+  be unnameable), which would contradict ADR 0019's "Presenter is additive public surface"
+  consequence and item 9's CHANGELOG line; ADR 0010's facade-re-exports-the-public-types rule
+  makes it the same edit `Asker` got. Also: `Presenter` sits directly after `Asker` in the
+  `Config` delegate block (the item said "next to `Asker`"), which regofmts that block's
+  comment alignment.
 
 - [ ] **3. `internal/present` — locality + advertise address (`detect.go`).** New package
   `internal/present` (host-side presentation mechanisms; consumed by the TUI, importable by any

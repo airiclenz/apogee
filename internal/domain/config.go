@@ -38,10 +38,11 @@ type Config struct {
 	ConfineNetworkAllow  []string
 
 	// Host-supplied delegates. The host (TUI / bench / embedder) owns these.
-	Approver Approver  // the human-in-the-loop gate; required unless Mode==Plan
-	Asker    Asker     // free-text Q&A delegate for the ask_user tool; nil ⇒ ask_user is not registered (P3.11)
-	Confiner Confiner  // nil ⇒ no confinement ⇒ Auto is refused (ADR 0004)
-	Events   EventSink // where typed Events are pushed; required
+	Approver  Approver  // the human-in-the-loop gate; required unless Mode==Plan
+	Asker     Asker     // free-text Q&A delegate for the ask_user tool; nil ⇒ ask_user is not registered (P3.11)
+	Presenter Presenter // document-presentation delegate for the present_document tool; nil ⇒ present_document is not registered (ADR 0019)
+	Confiner  Confiner  // nil ⇒ no confinement ⇒ Auto is refused (ADR 0004)
+	Events    EventSink // where typed Events are pushed; required
 
 	// Extension points. nil ⇒ the built-in defaults.
 	Tools *ToolRegistry // open extension point (ADR 0002)
