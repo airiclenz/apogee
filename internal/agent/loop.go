@@ -466,14 +466,22 @@ type reply struct {
 func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) reply {
 	var out reply
 	var content, thinking strings.Builder
-	emitted := 0 // bytes of stripped visible content already sent as TokenEvents this stream
+	emitted := 0  // bytes of stripped visible content already sent as TokenEvents this stream
+	reasoned := 0 // bytes of stripped inline reasoning already sent as ReasoningEvents this stream
 	for delta := range a.upstream.Stream(ctx, a.toProviderRequest(req)) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
-			emitted = a.emitVisibleDelta(turn, content.String(), emitted)
+			acc := content.String()
+			emitted = a.emitVisibleDelta(turn, acc, emitted)
+			reasoned = a.emitReasoningDelta(turn, acc, reasoned)
 		case provider.DeltaThinking:
 			thinking.WriteString(delta.Thinking)
+			// The native reasoning channel is already separated by the server, so every chunk
+			// is reasoning verbatim — no strip, no prefix bookkeeping (the provider never
+			// yields an empty Thinking chunk). Observation only: the channel still reaches
+			// history through reply.thinking, exactly as before.
+			a.cfg.Events.Emit(domain.ReasoningEvent{EventBase: a.base(turn), Text: delta.Thinking})
 		case provider.DeltaToolCall:
 			if delta.ToolCall != nil {
 				out.toolCalls = append(out.toolCalls, *delta.ToolCall)
@@ -532,6 +540,32 @@ func (a *Agent) emitVisibleDelta(turn int, acc string, emitted int) int {
 	}
 	a.cfg.Events.Emit(domain.TokenEvent{EventBase: a.base(turn), Text: visible[emitted:]})
 	return len(visible)
+}
+
+// emitReasoningDelta is emitVisibleDelta's mirror for the other half of the split: it emits the
+// newly-revealed tail of the accumulated INLINE reasoning as a ReasoningEvent and returns the
+// running count of reasoning bytes emitted so far this stream. Unlike the visible path it runs
+// WHILE stripper.IsMidChannel(acc) is true — that is the whole point: the visible stream is
+// deliberately silent for the length of a reasoning span, and this is the only signal that the
+// model is working rather than stalled. The no-op stripper of a native / no-inline-thinking
+// profile always strips to empty reasoning, so this never emits there (that profile's reasoning
+// arrives as DeltaThinking instead) and the content path stays byte-identical.
+//
+// It relies on the same prefix-stability the visible path does: an unclosed span's tail is
+// captured as reasoning while it streams (thinking.go:56-59, harmony.go:89-99) and a closed span
+// never changes again, so the accumulation normally only grows. Where it does NOT — a closing
+// token accumulating byte by byte counts as span text until it completes and then falls away, and
+// the harmony stripper appends the commentary channel after the analysis one — the length guard
+// is what keeps the slice in bounds: a shrunk or reordered accumulation emits nothing until it
+// passes the high-water mark again. Never slice without it. The bytes are reasoning either way,
+// so no visible content can leak here; Text is a liveness signal, not a transcript.
+func (a *Agent) emitReasoningDelta(turn int, acc string, reasoned int) int {
+	_, reasoning := a.stripper.Strip(acc)
+	if len(reasoning) <= reasoned {
+		return reasoned
+	}
+	a.cfg.Events.Emit(domain.ReasoningEvent{EventBase: a.base(turn), Text: reasoning[reasoned:]})
+	return len(reasoning)
 }
 
 // parseToolCalls adapts the provider's wire tool calls onto processing's native shape and

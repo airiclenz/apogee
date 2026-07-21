@@ -128,7 +128,19 @@ the block's alignment.
 
 ---
 
-## 2. Engine: emit reasoning on both paths
+## 2. Engine: emit reasoning on both paths — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): the split-channel-token edge got its own table-driven test
+(`TestStream_ReasoningSurvivesSplitChannelTokens`, both a split start AND a split end token)
+instead of being folded into the three existing tests — the three keep their verbatim
+assertions plus the new ReasoningEvent ones. The "concatenation reconstructs the recorded
+reasoning" property holds exactly for whole-token chunking (the three tests); with a closing
+token split across deltas the accumulated reasoning briefly contains the partial closer, so the
+concatenation is that reasoning plus stray markup — the guard then holds until the accumulation
+passes the high-water mark again (no panic, no double-emit; asserted as prefix + single
+occurrence). The harmony stripper's commentary-after-analysis fold is the same non-monotonic
+case; both are documented on `emitReasoningDelta`. Test fake `chunkedResponder` gained a
+`thinking []string` field to drive the native `DeltaThinking` path.
 
 **What:** in `internal/agent/loop.go`, `streamResponse`:
 
