@@ -80,7 +80,15 @@ against `ansi.Strip`-ed rendered lines (`charmbracelet/x/ansi`, already a depend
 
 ---
 
-## 1. `layout.md` amendment — the look spec of record
+## 1. `layout.md` amendment — the look spec of record — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): three deviations from the literal text. (a) The grouped run keeps the
+owner's members, padding and `┝ ┝ ┕` rails verbatim but is drawn with the renderer's real
+`✦ ` header marker and two-space branch indent (decision 5 / `renderDetails`), matching the
+rest of the sketch instead of the bare example. (b) The existing sub-agent sketch is otherwise
+untouched but lost its `[brackets]` — the spec of record must not show a bracketed header
+anywhere after decision 2. (c) The prose block sits in a short section under the sketch rather
+than inline, so the mock stays one contiguous screen.
 
 **This lands first; items 2–4 implement it.** Rework the tool-call region of `layout.md` (the
 sketch at lines ~8–28) to show the target look:
