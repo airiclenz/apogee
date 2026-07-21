@@ -479,7 +479,7 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) submit() (tea.Model, tea.Cmd) {
 	parsed, attached := m.promptEditor.submitParse()
 	if parsed.kind == kindCommand {
-		return m.runCommand(parsed.command)
+		return m.runCommand(parsed)
 	}
 	// Nothing to send only when there is neither text NOR an attached skill: an empty message
 	// with skills attached is a valid send (the skill bodies are the payload).
@@ -527,14 +527,25 @@ func (m Model) skillDisplayNames(ids []string) []string {
 // runCommand handles a recognised local /command from the idle state. /continue and /compact
 // open a worker: /continue a canned "Please continue" turn, /compact a generative summary
 // call; /clear (and its alias /new) acts on the engine's context synchronously and stays idle,
-// recording a transcript note. The input box and the autocomplete overlay are cleared either way. Reached
+// recording a transcript note, and /confine reports or swaps Auto's blast radius the same
+// synchronous way (confine.go). The input box and the autocomplete overlay are cleared either way. Reached
 // only from submit (stateIdle), so the engine is quiescent — no worker owns it — and
 // ClearContext/Compact are safe to launch here.
-func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
+//
+// It takes the whole parsedInput, not just the verb, because a verb with arguments can fail to
+// parse: parsed.err is reported as a note (it carries its own usage line) and nothing is driven,
+// so a mistyped /confine can never be mistaken for one that took effect.
+func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	m.autocomplete = autocompleteState{}
 
-	switch command {
+	if parsed.err != nil {
+		m.transcript.addNote(parsed.err.Error())
+		m.layout()
+		return m, nil
+	}
+
+	switch parsed.command {
 	case "continue":
 		// /continue carries any attached skills into the canned turn (the user lined them up
 		// before asking the model to keep going).
@@ -580,6 +591,11 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
 		m.setActivity(actCompacting, "", 0)
 		return m, tea.Batch(cmd, m.spinner.Tick)
+
+	case "confine":
+		// Report or swap the blast radius. Synchronous and idle-safe like /clear: no upstream
+		// call is involved, only the engine's live flag and (for --save) one config write.
+		return m.runConfine(parsed.confine)
 	}
 	return m, nil
 }

@@ -272,7 +272,15 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Workspace:     roots.workspace,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
-		Skills:        skillProvider,
+		// The same backend, capabilities, and host id the degradation notice above was built
+		// from, so /confine status inside the TUI reports the host's real situation rather than
+		// re-deriving it. internal/platform is the binary's dependency, not the renderer's.
+		Confinement: tui.ConfinementInfo{
+			Backend: confinerBackendName(confiner),
+			Caps:    confiner.Capabilities(),
+			HostID:  platform.HostID(),
+		},
+		Skills: skillProvider,
 		// Re-scan the skill source dirs when the /skill picker opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals

@@ -64,6 +64,11 @@ type Engine interface {
 	// effect on the next tool call and affects only this Session — persisting the host
 	// acknowledgement is the binary's job, not the engine's.
 	SetConfineToWorkspace(bool)
+	// ConfineToWorkspace reports the blast radius the NEXT tool call's Resolution will read —
+	// the live setting, so it already reflects any earlier SetConfineToWorkspace. The /confine
+	// status report renders it, and /confine off|on reads it to say whether the line changed
+	// anything. Goroutine-safe like SetMode, though the UI calls it only at idle.
+	ConfineToWorkspace() bool
 	// Close releases the Agent's resources.
 	Close() error
 }
@@ -93,6 +98,19 @@ type Options struct {
 	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
+	// Confinement is the host's confinement situation as the composition root resolved it, for
+	// the /confine status report to name. The TUI never derives it — internal/platform is the
+	// binary's dependency, not the renderer's — so an unwired zero value simply reports
+	// "unknown" rather than inventing a backend.
+	Confinement ConfinementInfo
+
+	// SaveHostAcknowledgement persists THIS host's `unconfined-hosts:` acknowledgement to the
+	// global config (the `/confine off --save` half) and returns the file it wrote, so the
+	// confirmation can name what changed and how to undo it. nil ⇒ persistence is unavailable
+	// and `--save` says so; the session toggle itself never depends on it. Writing config is
+	// the binary's job (it owns the path and the file format), exactly like Save below.
+	SaveHostAcknowledgement func() (path string, err error)
+
 	// Skills is the discovered skill catalog the /skill picker lists and the attached chips
 	// label; nil ⇒ no skills are wired (the picker offers nothing, chips fall back to the raw
 	// ID). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
@@ -114,6 +132,19 @@ type Options struct {
 	// passing the snapshot it took itself, so the file I/O stays out of the renderer while
 	// the "is it safe to snapshot" decision stays with the model that owns the Engine.
 	Save func(domain.Session) error
+}
+
+// ConfinementInfo is the host's confinement situation, resolved once by the composition root
+// and rendered by the /confine status report: which Confiner backend answered, what that
+// backend can actually enforce here, and the host id an `unconfined-hosts:` acknowledgement is
+// matched against (ADR 0012, amendment 2026-07-21). It is the diagnostic half of /confine —
+// the *effective* setting is read live off the [Engine], not from here, because the user can
+// change it mid-session. The zero value means "the binary wired nothing"; the report says
+// unknown rather than guessing.
+type ConfinementInfo struct {
+	Backend string                 // the backend's human label ("landlock", "seatbelt", "deny"); "" ⇒ unknown
+	Caps    domain.ConfinementCaps // what it can enforce on THIS host — FSWrite false is the degraded case
+	HostID  string                 // platform.HostID(), the id --save records; "" ⇒ unknown
 }
 
 // ----------------------------------------------------------------------------

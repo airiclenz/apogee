@@ -81,6 +81,23 @@ point is a **minor** bump, not a breaking change.
   one command that can widen what Auto may touch must never leave a user believing a mistyped
   line took effect. This lands the surface; the routing and the confirmation wording follow.
   (`internal/tui`.)
+- **`/confine` now acts: the session toggle and the status report.** `/confine off` and
+  `/confine on` swap Auto's blast radius on the running Agent — synchronous and idle-safe like
+  `/clear`, taking effect on the next tool call — and each records a transcript confirmation that
+  states the radius in plain words (`off` → "auto runs every command unfenced, with your full
+  privileges") and says whether it was session-only or written to disk. `/confine` (or
+  `/confine status`) reports the backend, what it can actually enforce here, the host id an
+  `unconfined-hosts:` entry is matched against, and the effective setting — read live off the
+  Agent, so it reflects an earlier toggle — and only on the host that prompts the question (Auto,
+  confined, no fs-write fencing) does it close with the two remedy lines. Turning confinement
+  **off** where it works, or off when it is already off, is allowed and simply says so: it is a
+  legitimate choice, just not the degraded case. Nothing here is worded as fixing a malfunction,
+  because nothing is broken — a host that cannot fence is ADR 0012's ladder working as specified.
+  `/confine off --save` drives the binary's config writer through a new `Options` seam and names
+  the file it wrote and how to undo it; the writer itself lands next, and until it does `--save`
+  says plainly that nothing was written while the session toggle still stands. (`internal/tui`,
+  plus the composition root handing the TUI the backend/capability/host-id facts it must not
+  derive itself.)
 
 ## [1.5.0] — 2026-07-21
 

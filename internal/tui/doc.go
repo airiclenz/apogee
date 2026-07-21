@@ -51,6 +51,18 @@
 // touch); @file *resolution* stays in the agent loop (reusing
 // the workspace fence), so the TUI only parses references — it never reads files itself.
 //
+// confine.go is the routing half of that verb (ADR 0012, amendment 2026-07-21): [Model.runConfine]
+// asserts the requested blast radius on the [Engine] and records a transcript note whose pure
+// builders state the radius in plain words — never as repairing a malfunction, because a host that
+// cannot fence is the ladder working as specified, not a fault. The diagnostic facts the status
+// report names (which backend answered, what it can enforce, the host id an acknowledgement is
+// recorded against) arrive as [Options.Confinement] from the composition root — the renderer never
+// imports internal/platform — while the *effective* setting is read live off
+// [Engine.ConfineToWorkspace], since the user can change it mid-session. `--save` delegates the
+// config write to [Options.SaveHostAcknowledgement] for the same reason the session saver is a
+// seam: file paths and formats are the binary's business, and a save that fails or is unwired
+// never invalidates the session toggle that already happened.
+//
 // The /skill flow (post-v1 apogee-code feature-parity) extends the same overlay without
 // thickening the renderer: the "/" menu offers /skill, accepting it chains into a skill picker
 // ("/skill <id>", an acSkill dropdown over the injected [SkillCatalog]), and a pick pops a chip

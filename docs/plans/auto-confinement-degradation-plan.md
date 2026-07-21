@@ -317,7 +317,25 @@ Commit: `feat(tui): /confine command surface in the chat mini-language`.
 
 ---
 
-## 7. `/confine` routing and the session toggle
+## 7. `/confine` routing and the session toggle — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): one deviation from the item's diff allowance plus three shaping choices.
+(a) **Deviation:** the diff also touches `cmd/apogee/wire.go` (+8 lines). `/confine status` must
+report "backend, capabilities, host id", none of which the renderer may derive — `internal/tui`
+must not import `internal/platform` — so they arrive as a new `Options.Confinement`
+(`tui.ConfinementInfo`) that the composition root fills from the very `confiner` and
+`confinerBackendName` item 4 already hoisted, plus `platform.HostID()`. No later item owns that
+wiring, and leaving the fields unwired would have made the report say "unknown" forever.
+(b) `runCommand` now takes the whole `parsedInput` rather than the verb, so item 6's
+`parsed.err` is reported as a transcript note carrying its usage line — the routing half of item
+6's "never a silent no-op" that its parse-only scope deferred here. (c) `--save` calls a new
+`Options.SaveHostAcknowledgement func() (path string, err error)` seam, nil until item 8 wires
+its writer (nil ⇒ the note says nothing was written and the session toggle still stands) —
+item 8's own text says its return values are for "item 7's confirmation" to name. (d) `off`/`on`
+assert the requested state on the Engine unconditionally, even when it already holds, because
+the user asked for a state and the setter is idempotent; the "already off/on" wording comes from
+reading `Engine.ConfineToWorkspace()` (the accessor item 6 deferred to this item) *before* the
+call, so the note stays honest without making the request conditional on a possibly-stale read.
 
 Route the parsed command in `runCommand`: `off`/`on` call `Engine.SetConfineToWorkspace`;
 `status` renders the report. All are synchronous and idle-safe (no worker), like `/clear` — see

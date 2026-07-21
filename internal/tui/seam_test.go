@@ -114,6 +114,7 @@ type fakeEngine struct {
 	stepCalls    int
 	modeSet      []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
 	confineSet   []bool        // records SetConfineToWorkspace calls (the /confine command)
+	confine      bool          // the live blast radius ConfineToWorkspace reports; SetConfineToWorkspace swaps it
 	clearCalls   int           // records ClearContext calls (the /clear command)
 	abortCalls   int           // records AbortExchange calls (discarding a cancelled Exchange)
 	compactCalls int           // records Compact calls (the /compact command)
@@ -200,7 +201,14 @@ func (f *fakeEngine) modesSet() []domain.Mode {
 func (f *fakeEngine) SetConfineToWorkspace(confine bool) {
 	f.mu.Lock()
 	f.confineSet = append(f.confineSet, confine)
+	f.confine = confine
 	f.mu.Unlock()
+}
+
+func (f *fakeEngine) ConfineToWorkspace() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.confine
 }
 
 // confinesSet reports the blast-radius values SetConfineToWorkspace was called with, in order —
