@@ -70,6 +70,12 @@ type Model struct {
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
 	quitting   bool               // a quit requested while busy; the exit waits for the worker's terminal Msg (C4)
 
+	// act is the live activity the status line renders while a worker runs — thinking,
+	// responding, a named tool, retrying, compacting, stopping (activity.go). It is derived
+	// from the Event stream (foldActivity) plus the transitions no Event announces, and it is
+	// deliberately NOT a uiState: the lifecycle machine above is untouched by it (ADR 0011).
+	act activity
+
 	// Live stats folded from the engine's UsageEvent (server token accounting). ctxUsed is
 	// the latest top-level (Depth 0) total-token count, driving the context-usage gauge;
 	// genStart marks when the current Turn began streaming content (set on its first token,
@@ -198,6 +204,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		m = m.foldStats(msg.Event)
 		m.transcript.apply(msg.Event)
+		// foldActivity runs AFTER apply, unlike foldStats: its ToolResultEvent rule asks the
+		// transcript whether any call is still open, and apply is what pairs this result with
+		// its call (activity.go).
+		m = m.foldActivity(msg.Event)
 		m.refreshViewport()
 		return m, nil
 
@@ -485,6 +495,9 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached})
 	m.cancel = cancel
 	m.state = stateRunning
+	// The request is away and nothing has come back yet: the honest phrase is "thinking" until
+	// the first Event re-derives it (activity.go).
+	m.setActivity(actThinking, "", 0)
 	return m, tea.Batch(cmd, m.spinner.Tick)
 }
 
@@ -534,6 +547,7 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 			domain.UserInput{Text: "Please continue", SkillIDs: attached})
 		m.cancel = cancel
 		m.state = stateRunning
+		m.setActivity(actThinking, "", 0) // a canned turn is still a request in flight (as in submit)
 		return m, tea.Batch(cmd, m.spinner.Tick)
 
 	case "clear", "new":
@@ -563,6 +577,8 @@ func (m Model) runCommand(command string) (tea.Model, tea.Cmd) {
 		cmd, cancel := startCompact(m.parent, m.eng)
 		m.cancel = cancel
 		m.state = stateRunning
+		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
+		m.setActivity(actCompacting, "", 0)
 		return m, tea.Batch(cmd, m.spinner.Tick)
 	}
 	return m, nil
@@ -590,10 +606,16 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 // stopWorker cancels the in-flight worker. The worker honours the cancel at the next
 // quiescent boundary and returns a cancelledMsg, which clears the state; until then the
 // model stays running. A cancelled approval gate unblocks the same way (C3/C4).
+//
+// It switches the status line to "stopping" for that window: the cancel is not instant, the
+// worker keeps emitting events until it unwinds, and the human needs to see their stop was
+// registered. The phrase is sticky (foldActivity refuses to overwrite it) until finishWorker
+// clears it.
 func (m *Model) stopWorker() {
 	if m.cancel != nil {
 		m.cancel()
 	}
+	m.setActivity(actStopping, "", 0)
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
@@ -618,6 +640,9 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.pending = nil
 	m.pendingAsk = nil
 	m.genStart = time.Time{}
+	// The worker has unwound, so the activity is over — including a sticky "stopping", which
+	// only this path clears (activity.go). Idle renders an empty left slot.
+	m.act = activity{}
 	m.state = next
 	if m.quitting {
 		// A quit was requested while busy (quit deferred the exit to here); the worker has now
@@ -1068,21 +1093,24 @@ func (m Model) throughputSuffix() string {
 	return m.th.statusBar.Render(fmt.Sprintf(" · %.0f tok/s", m.tokPerSec))
 }
 
-// statusLine renders the activity indicator and turn on the left and the live context gauge
-// (or a key hint) on the right, justified across the window. It reads only display values off
-// Options and the model's own state — never off the Engine mid-step.
+// statusLine renders what is happening on the left and the live context gauge (or a key hint)
+// on the right, justified across the window. While a worker runs the left slot is the live
+// activity phrase plus an elapsed clock ("⣻ reading · main.go · 3s") — what the human is
+// actually asking, in place of the turn index, which answered none of it. Idle renders nothing
+// there (the input box below already invites a message); the blocked and errored states keep
+// their own words, with no spinner and no clock (nothing is ticking). It reads only display
+// values off Options and the model's own state — never off the Engine mid-step.
 func (m Model) statusLine() string {
-	turn := m.th.statusBar.Render(fmt.Sprintf("turn %d", m.transcript.turn))
-	left := turn
+	var left string
 	switch m.state {
 	case stateRunning:
-		left = m.spinner.View() + m.th.statusBar.Render(" ") + turn + m.throughputSuffix()
+		left = m.spinner.View() + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
 	case stateAwaitingApproval:
-		left = m.th.statusBar.Render("approval needed · ") + turn
+		left = m.th.statusBar.Render("approval needed")
 	case stateAwaitingAsk:
-		left = m.th.statusBar.Render("answer needed · ") + turn
+		left = m.th.statusBar.Render("answer needed")
 	case stateErrored:
-		left = m.th.statusError.Render("error") + m.th.statusBar.Render(" · ") + turn
+		left = m.th.statusError.Render("error")
 	}
 	// Fill the whole width with black-bg cells — segments and the justify gap alike — so
 	// the info line reads as one solid black bar joined to the prompt box below it. A plain
@@ -1095,6 +1123,18 @@ func (m Model) statusLine() string {
 		return ansi.Truncate(left, max(0, m.width), "")
 	}
 	return left + m.th.statusBar.Render(strings.Repeat(" ", gap)) + right
+}
+
+// runningPhrase composes the running left slot's text: the activity phrase and the clock
+// counting THIS activity ("thinking · 12s"). An activity with no phrase — the defensive case,
+// since every path into stateRunning sets one — degrades to the bare clock rather than to a
+// dangling separator. now is passed in so the composition is testable off the wall clock.
+func (m Model) runningPhrase(now time.Time) string {
+	clock := formatElapsed(m.act.elapsed(now))
+	if phrase := m.act.text(); phrase != "" {
+		return phrase + " · " + clock
+	}
+	return clock
 }
 
 // statusRight is the status line's right slot: the live context gauge when token usage is

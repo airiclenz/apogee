@@ -213,7 +213,27 @@ column, including the unregistered-tool fallback.
 
 ---
 
-## 4. TUI: the activity model and the new status line
+## 4. TUI: the activity model and the new status line — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): deviations from the item's literal text, all recorded here.
+(1) `foldActivity` runs AFTER `m.transcript.apply` in the `eventMsg` case, not literally beside
+`foldStats` before it — the `ToolResultEvent` rule asks the transcript whether a call is still
+open, and `apply` is what marks this result's call `done`. (2) The `actTool` label uses `" · "`
+between verb and target uniformly (`reading · main.go`), per (a)'s `"<verb> · <clipped target>"`;
+the Why-section sketch's separator-less `reading main.go` is not used (the plan carries both
+forms; the item's own struct comment is the machine-readable one). (3) The target is clipped
+with a status-line cap (`statusTargetRunes = 32`) rather than `clipDetail`'s 160 runes, which
+cannot satisfy (d)'s "cannot crowd out the context gauge"; `clipDetail` now delegates to a
+shared `clipRunes(s, n)` in `toolpresent.go` so there is one clipper, not two. (4) `/continue`
+(the `"continue"` branch of `runCommand`) also sets `actThinking` — it launches a worker exactly
+as `submit` does, and (c)'s list omits it, which would leave the running phrase stale. (5)
+`formatElapsed` has no hour form: 3600s renders `60m 00s` (the item specifies only `3s` /
+`1m 04s`). (6) Three small helpers beyond the item's two functions: `activity.elapsed(now)`
+(zero for an unset/backwards clock), `Model.runningPhrase(now)` (composes phrase + clock,
+degrading to the bare clock rather than a dangling `·`), and `transcript.hasOpenToolCall()`.
+(7) `internal/tui/doc.go` gained a module-map paragraph for `activity.go` — package-internal
+code documentation, per the file's existing per-module convention; item 6 still owns every
+`docs/` + `CHANGELOG` edit.
 
 **Depends on items 1 and 3.** This is the visible change.
 

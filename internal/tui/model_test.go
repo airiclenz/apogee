@@ -821,19 +821,74 @@ func TestModelQuitWithoutSaver(t *testing.T) {
 // Layout: the status line and resizing
 // ----------------------------------------------------------------------------
 
-// The status line carries the turn; the footer carries the host alias, model, static context
-// window, and mode. The full endpoint URL is no longer shown — the footer uses the host alias.
+// The footer carries the host alias, model, static context window, and mode. The full endpoint
+// URL is no longer shown — the footer uses the host alias. (The status line's own left slot is
+// the live activity, covered by TestModelStatusLineActivity; at idle it is empty.)
 func TestModelStatusLine(t *testing.T) {
 	m := newTestModel(t)
 	got := plain(m.View())
 	// The footer renders the mode as a friendly, spaced label (ask-before → "ask before").
-	for _, want := range []string{"test-host", "test-model", "32k", "ask before", "turn"} {
+	for _, want := range []string{"test-host", "test-model", "32k", "ask before"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("status/footer missing %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "http://localhost:1234") {
 		t.Errorf("footer shows the full endpoint URL; want the host alias instead:\n%s", got)
+	}
+}
+
+// elapsedPattern matches the clock the status line hangs off the activity phrase
+// ("· 0s", "· 1m 04s").
+var elapsedPattern = regexp.MustCompile(`· (\d+m )?\d+s`)
+
+// statusText renders the model's status line with its styling stripped, so a test asserts on
+// the words rather than on the black-field escapes.
+func statusText(t *testing.T, m Model) string {
+	t.Helper()
+	return strings.TrimSpace(ansiPattern.ReplaceAllString(m.statusLine(), ""))
+}
+
+// TestModelStatusLineActivity proves the status line answers "what is it doing?" at the state
+// level: idle leaves the left slot empty (the input box below already invites a message), and a
+// running worker shows the live phrase with an elapsed clock, re-derived from each Event.
+func TestModelStatusLineActivity(t *testing.T) {
+	m := newTestModel(t)
+	if got := statusText(t, m); got != "" {
+		t.Errorf("idle status line is not empty: %q", got)
+	}
+
+	// Submit: the request is away, nothing has come back — "thinking · 0s".
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+	got := statusText(t, m)
+	if !strings.Contains(got, "thinking") {
+		t.Errorf("running status line = %q, want it to contain %q", got, "thinking")
+	}
+	if !elapsedPattern.MatchString(got) {
+		t.Errorf("running status line = %q, want an elapsed clock suffix", got)
+	}
+
+	// Each Event re-derives the phrase: streamed text, then a named tool with its target.
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "hi"}})
+	if got := statusText(t, m); !strings.Contains(got, "responding") {
+		t.Errorf("status line while streaming = %q, want it to contain %q", got, "responding")
+	}
+	m = step(t, m, eventMsg{Event: domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
+	}})
+	if got := statusText(t, m); !strings.Contains(got, "reading · main.go") {
+		t.Errorf("status line during a tool call = %q, want it to name the tool and target", got)
+	}
+
+	// Esc registers the stop, and the phrase stays until the worker's terminal Msg unwinds it.
+	m = step(t, m, keyEsc())
+	if got := statusText(t, m); !strings.Contains(got, "stopping") {
+		t.Errorf("status line after esc = %q, want it to contain %q", got, "stopping")
+	}
+	m = step(t, m, cancelledMsg{})
+	if got := statusText(t, m); got != "" {
+		t.Errorf("status line after the worker unwound = %q, want the idle empty slot", got)
 	}
 }
 

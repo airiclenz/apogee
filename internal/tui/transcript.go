@@ -205,6 +205,22 @@ func (t *transcript) addToolResult(result domain.ToolResult, depth int) {
 	t.entries = append(t.entries, entry{kind: entryToolResult, text: text, depth: depth})
 }
 
+// hasOpenToolCall reports whether any tool-call entry is still waiting for its result — the
+// signal the live status line uses to stay on the tool phrase while a batch of calls runs
+// (foldActivity). It reads the same call/result pairing addToolResult maintains, so a call is
+// "open" from the moment it is recorded until its result folds into it. A call whose result
+// never arrived (a run cancelled mid-tool) stays open forever, which at worst holds the tool
+// phrase one event longer after some later result; the next reasoning/token/message event
+// moves it on.
+func (t *transcript) hasOpenToolCall() bool {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if e := &t.entries[i]; e.kind == entryToolCall && !e.done {
+			return true
+		}
+	}
+	return false
+}
+
 // addApproval records an Approval observationally — the decision already came back through
 // the C3 reply channel, so this is a transcript record of what was decided, not the gate.
 func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.ApprovalDecision, depth int) {

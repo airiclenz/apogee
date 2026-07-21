@@ -80,6 +80,16 @@
 // stays the coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine.
 //
+// activity.go replaces the status line's turn index — which answered nothing the human was
+// asking — with a live activity phrase and an elapsed clock ("thinking · 12s", "reading ·
+// main.go · 3s", "sub-agent · searching · 6s"). [Model.foldActivity] derives it from the same
+// Event stream the transcript folds (including [domain.ReasoningEvent], the observability seam
+// that makes "thinking" a fact rather than a guess), and the transitions no Event announces —
+// submit, /compact, the stop key, the worker's terminal Msg — set it directly. It adds no
+// lifecycle state: compacting and stopping are activities, not uiStates, so the ADR 0011 state
+// machine is untouched and only statusLine's running branch consults it. The per-tool verb it
+// renders comes from the same open registry toolpresent.go already keys by tool name.
+//
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole
 // Model — every field it holds, recursively — is copied on every Update. A type that records

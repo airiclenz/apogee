@@ -436,11 +436,18 @@ const detailClipRunes = 160
 
 // clipDetail truncates s to detailClipRunes runes with an ellipsis.
 func clipDetail(s string) string {
+	return clipRunes(s, detailClipRunes)
+}
+
+// clipRunes truncates s to n runes with an ellipsis, counting runes rather than bytes so a
+// multi-byte path is not cut mid-character. The status line clips far tighter than the
+// transcript does (statusTargetRunes), so the cap is a parameter rather than the one constant.
+func clipRunes(s string, n int) string {
 	r := []rune(s)
-	if len(r) <= detailClipRunes {
+	if len(r) <= n {
 		return s
 	}
-	return string(r[:detailClipRunes]) + "…"
+	return string(r[:n]) + "…"
 }
 
 // plural renders "1 result" / "3 results" — count plus the word, naively pluralised.
