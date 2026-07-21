@@ -131,31 +131,36 @@ func (t *transcript) discardPending() {
 // commitAssistant finalises the streamed buffer into a committed assistant entry on a
 // MessageEvent. The MessageEvent's text is canonical (it carries the full, accepted
 // message), so it is preferred over the accumulated tokens; the tokens are a live preview
-// that should reconcile to the same text (§0 event-sequence rule). An empty canonical text
-// falls back to the accumulated tokens so nothing streamed is lost.
+// that should reconcile to the same text (§0 event-sequence rule). A canonical text that is
+// blank falls back to the accumulated tokens so nothing streamed is lost, and a text that is
+// blank either way commits no entry at all — a lone ✦ marker line is itself an unneeded line.
 func (t *transcript) commitAssistant(canonical string, depth int) {
-	text := canonical
-	if text == "" {
-		text = t.pending
-	}
 	// canonical is the MessageEvent's untrusted model text; strip its escapes (t.pending was
-	// already stripped as it streamed, so a double-strip there is a cheap no-op).
-	text = stripEscapes(text)
-	t.entries = append(t.entries, entry{kind: entryAssistant, text: text, depth: depth})
+	// already stripped as it streamed, so a double-strip there is a cheap no-op), then drop the
+	// blank lines the model padded the message with, so the block sits exactly one blank line
+	// from its neighbours instead of two or three (layout.md).
+	text := trimBlankLines(stripEscapes(canonical))
+	if text == "" {
+		text = trimBlankLines(t.pending)
+	}
 	t.streaming = false
 	t.pending = ""
+	if text == "" {
+		return
+	}
+	t.entries = append(t.entries, entry{kind: entryAssistant, text: text, depth: depth})
 }
 
 // finalizeNarration commits the in-progress buffer as the pre-tool narration when the first
 // ToolCallEvent of a Turn arrives (the C6 rule). A tool Turn emits no MessageEvent, so the
 // streamed tokens are the canonical narration text. Only the first ToolCall finalises:
 // afterwards streaming is false, so the Turn's remaining ToolCalls add no empty entry. A
-// Turn that streamed nothing before its tool call commits nothing.
+// Turn that streamed nothing — or only blank lines — before its tool call commits nothing.
 func (t *transcript) finalizeNarration(depth int) {
 	if !t.streaming {
 		return
 	}
-	text := t.pending
+	text := trimBlankLines(t.pending)
 	t.streaming = false
 	t.pending = ""
 	if text == "" {
@@ -270,6 +275,44 @@ func stripEscapesAll(xs []string) []string {
 		out[i] = stripEscapes(s)
 	}
 	return out
+}
+
+// blankLine reports whether ln carries nothing visible — it is empty or whitespace only. It is
+// the single definition of "blank" the layout's blank-line hygiene rests on: the commit-time
+// trim, the streaming preview's trim, and the markdown collapse all ask this one question.
+func blankLine(ln string) bool {
+	return strings.TrimSpace(ln) == ""
+}
+
+// trimBlankLines drops the leading and trailing blank lines of s, leaving its interior intact.
+// Model text routinely arrives padded with a trailing "\n\n" (and sometimes a leading one); each
+// such line renders as a blank row on top of the renderer's own one-line block separator, so the
+// transcript grows two- and three-line gaps. Trimming at the commit boundary makes layout.md's
+// "exactly one empty line between blocks" true rather than aspirational.
+func trimBlankLines(s string) string {
+	lines := strings.Split(s, "\n")
+	i := 0
+	for i < len(lines) && blankLine(lines[i]) {
+		i++
+	}
+	j := len(lines)
+	for j > i && blankLine(lines[j-1]) {
+		j--
+	}
+	return strings.Join(lines[i:j], "\n")
+}
+
+// trimTrailingBlankLines drops only the trailing blank lines of s. It is the render-time trim for
+// the still-streaming buffer: a mid-stream "\n\n" may be a paragraph break the model is about to
+// continue, so the buffer itself is never touched and a leading blank line is left alone — only
+// the trailing gap, which would otherwise wobble as tokens arrive, is held back from the display.
+func trimTrailingBlankLines(s string) string {
+	lines := strings.Split(s, "\n")
+	j := len(lines)
+	for j > 0 && blankLine(lines[j-1]) {
+		j--
+	}
+	return strings.Join(lines[:j], "\n")
 }
 
 // prettyJSON re-renders raw JSON arguments as indented, human-readable text. Empty or null

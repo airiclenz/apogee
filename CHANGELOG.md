@@ -120,6 +120,25 @@ that reports no filesystem confinement, so it reproduces identically on a machin
   not happen. A save that fails never invalidates the session toggle that already happened, and the
   confirmation says so. (`cmd/apogee`.)
 
+### Changed
+
+- **Blank-line hygiene in the transcript — one empty line between blocks, never three.** Models pad
+  their replies: a trailing `\n\n` (and often a leading one) survived the commit verbatim, and the
+  renderer drew every one of those empty lines *on top of* its own one-line block separator, so a
+  chat session grew two- and three-row gaps between every answer and whatever came next. Committed
+  assistant text — both a `MessageEvent` and the pre-tool narration the first `ToolCall` finalises —
+  is now trimmed of its leading and trailing blank lines, and interior runs of two or more blank
+  lines collapse to a single one, so `layout.md`'s "exactly one empty line between blocks" is
+  finally true rather than aspirational. **Fenced code blocks are exempt**: a blank line between two
+  statements is part of the code and comes back verbatim. Text that is blank all the way through now
+  commits **no entry at all**, where it used to leave a bare `✦` marker line sitting in the
+  scrollback — and a blank *canonical* message still falls back to the streamed tokens, so nothing
+  that arrived is lost. The live streaming preview trims only its trailing blanks, and only for
+  display: the buffer itself keeps them, because a mid-stream `\n\n` may be a paragraph break the
+  model is about to continue, while a just-opened empty buffer still shows its lone marker so you
+  can see streaming has begun. Presentation only — the tool results, event payloads, and the
+  upstream conversation the model sees are untouched. (`internal/tui`.)
+
 ## [1.5.0] — 2026-07-21
 
 Post-`v1.4.0`, **additive** (minor) — one TUI affordance and the one Event variant it needed to

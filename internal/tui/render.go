@@ -76,7 +76,11 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		prevDepth = e.depth
 	}
 	if t.streaming {
-		appendBlock(false, renderEntryLines(th, entry{kind: entryAssistant, text: t.pending}, width))
+		// The in-progress buffer is trimmed of its trailing blank lines for display only: the
+		// buffer keeps them (a mid-stream "\n\n" may be a paragraph break about to be continued),
+		// but the preview must not grow a wobbling gap above the footer. An empty buffer still
+		// renders its lone marker line, so the human sees that streaming has begun.
+		appendBlock(false, renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width))
 	}
 	return renderedTranscript{lines: lines, lastUserStart: lastUserStart, userBlocks: userBlocks}
 }

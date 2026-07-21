@@ -178,6 +178,61 @@ func TestFencedCodeBlockUnterminated(t *testing.T) {
 	}
 }
 
+// A run of two or more blank lines collapses to a single blank row (the paragraph break stays,
+// the padding goes); one blank line is left exactly as it was.
+func TestCollapsesBlankRuns(t *testing.T) {
+	th := newTheme()
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"single blank kept", "first\n\nsecond", []string{"first", "", "second"}},
+		{"triple blank collapses", "first\n\n\n\nsecond", []string{"first", "", "second"}},
+		{"whitespace-only lines count as blank", "first\n \n\t\nsecond", []string{"first", " ", "second"}},
+		{"leading run collapses", "\n\n\nfirst", []string{"", "first"}},
+		{"all blank is one blank line", "\n\n\n", []string{""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := renderMarkdownBody(th, tc.in, 40)
+			if len(out) != len(tc.want) {
+				t.Fatalf("renderMarkdownBody(%q) = %#v; want %#v", tc.in, visible(out), tc.want)
+			}
+			for i := range out {
+				if v := strip(out[i]); v != tc.want[i] {
+					t.Errorf("line %d visible = %q; want %q", i, v, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// Blank lines inside a fenced code block are code, not padding: they survive verbatim, and a
+// blank line immediately after the closing fence is not swallowed by one inside it.
+func TestFencedCodeBlockKeepsBlankLines(t *testing.T) {
+	th := newTheme()
+	out := renderMarkdownBody(th, "```go\na()\n\n\nb()\n```\n\ntail", 40)
+	want := []string{"  a()", "  ", "  ", "  b()", "", "tail"}
+	if len(out) != len(want) {
+		t.Fatalf("got %#v; want %#v (fence interior verbatim)", visible(out), want)
+	}
+	for i := range out {
+		if v := strip(out[i]); v != want[i] {
+			t.Errorf("line %d visible = %q; want %q", i, v, want[i])
+		}
+	}
+}
+
+// visible is the ANSI-stripped text of every rendered line — the failure-message form of a block.
+func visible(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = strip(ln)
+	}
+	return out
+}
+
 // Plain text with no markup is returned byte-identical (the no-regression property that keeps
 // existing assistant-text assertions green).
 func TestPlainTextUnchanged(t *testing.T) {

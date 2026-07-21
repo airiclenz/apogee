@@ -110,7 +110,13 @@ Commit: `docs(layout): tool-call blocks — no brackets, bold-orange labels, gro
 
 ---
 
-## 2. Blank-line hygiene — trim at commit, collapse in markdown
+## 2. Blank-line hygiene — trim at commit, collapse in markdown — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): one deviation. `commitAssistant` trims the canonical text *before* deciding
+whether to fall back to the streamed tokens (the literal text trims "the text" after the choice),
+so a whitespace-only `MessageEvent` still falls back to the buffer instead of discarding it —
+preserving the method's existing "nothing streamed is lost" invariant, which a post-choice trim
+would have quietly weakened. Both-blank still commits nothing, as specified.
 
 Implements decision 6. Three sites, all `internal/tui`:
 

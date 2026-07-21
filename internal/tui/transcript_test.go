@@ -222,6 +222,124 @@ func TestTranscriptMessageEventEmptyFallsBackToTokens(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Blank-line hygiene (tool-call layout item 2)
+// ----------------------------------------------------------------------------
+
+// Committed assistant text is trimmed of its leading and trailing blank lines, so the model's
+// habitual trailing "\n\n" no longer stacks blank rows on top of the renderer's own one-line
+// block separator. Each case pins the whole scrollback: exactly one empty line between blocks.
+func TestTranscriptTrimsCommittedBlankLines(t *testing.T) {
+	want := strings.Join([]string{
+		"❯ ping",
+		"",
+		"✦ the answer",
+	}, "\n")
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"no blank lines to trim", "the answer"},
+		{"trailing newlines", "the answer\n\n\n"},
+		{"leading newlines", "\n\nthe answer"},
+		{"whitespace-only lines at both ends", "  \n\t\nthe answer\n   \n\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tr.addUser("ping", nil)
+			tr.apply(domain.MessageEvent{Text: tc.text})
+			if got := plainRender(tr); got != want {
+				t.Errorf("transcript mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// The interior of a committed message keeps its paragraph breaks, but a run of two or more
+// blank lines collapses to one — a padded message never opens a three-row gap inside its block.
+func TestTranscriptCollapsesInteriorBlankRun(t *testing.T) {
+	tr := feed(domain.MessageEvent{Text: "first\n\n\n\nsecond"})
+	want := strings.Join([]string{"✦ first", "", "  second"}, "\n")
+	if got := plainRender(tr); got != want {
+		t.Errorf("interior blank run not collapsed:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// The same trim applies to pre-tool narration finalised by the first ToolCall: exactly one
+// empty line between the narration and the tool block it introduces.
+func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
+	tr := feed(
+		domain.TokenEvent{Text: "\nReading it.\n\n\n"},
+		domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}},
+	)
+	want := strings.Join([]string{
+		"✦ Reading it.",
+		"",
+		"✦ [Read File] main.go",
+	}, "\n")
+	if got := plainRender(tr); got != want {
+		t.Errorf("narration mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A message that is blank — empty, or nothing but whitespace and newlines — commits no entry
+// at all: the bare ✦ marker line it used to leave behind is itself an unneeded line. The
+// streamed-token fallback still applies when only the canonical text is blank.
+func TestTranscriptBlankMessageCommitsNothing(t *testing.T) {
+	t.Run("empty message, empty buffer", func(t *testing.T) {
+		tr := feed(domain.MessageEvent{Text: ""})
+		if n := len(tr.entries); n != 0 {
+			t.Errorf("entries = %d, want 0 (nothing to show)", n)
+		}
+	})
+	t.Run("whitespace-only message, empty buffer", func(t *testing.T) {
+		tr := feed(domain.MessageEvent{Text: "\n \t\n\n"})
+		if n := len(tr.entries); n != 0 {
+			t.Errorf("entries = %d, want 0 (nothing to show)", n)
+		}
+	})
+	t.Run("whitespace-only message keeps the streamed tokens", func(t *testing.T) {
+		tr := feed(
+			domain.TokenEvent{Text: "streamed only"},
+			domain.MessageEvent{Text: "\n\n"},
+		)
+		if got := plainRender(tr); got != "✦ streamed only" {
+			t.Errorf("render = %q; want the streamed tokens kept", got)
+		}
+	})
+	t.Run("whitespace-only narration commits nothing", func(t *testing.T) {
+		tr := feed(
+			domain.TokenEvent{Text: "  \n\n"},
+			domain.ToolCallEvent{Call: domain.ToolCall{Tool: "read_file"}},
+		)
+		if n := len(tr.entries); n != 1 { // the tool call alone
+			t.Errorf("entries = %d, want 1 (the tool call, no blank narration)", n)
+		}
+	})
+}
+
+// The streaming preview drops the buffer's trailing blank lines for display only — the buffer
+// keeps them, since a mid-stream "\n\n" may be a paragraph break about to be continued — while a
+// just-opened empty buffer still renders its lone marker so the human sees streaming has begun.
+func TestTranscriptStreamingPreviewTrimsTrailingBlanks(t *testing.T) {
+	tr := &transcript{}
+	tr.addUser("ping", nil)
+	tr.apply(domain.TokenEvent{Text: "thinking\n\n"})
+	want := strings.Join([]string{"❯ ping", "", "✦ thinking"}, "\n")
+	if got := plainRender(tr); got != want {
+		t.Errorf("preview mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if tr.pending != "thinking\n\n" {
+		t.Errorf("pending = %q; want the buffer itself untouched by the display trim", tr.pending)
+	}
+
+	empty := feed(domain.TokenEvent{Text: ""})
+	if got := plainRender(empty); got != "✦" {
+		t.Errorf("empty in-progress buffer = %q; want its lone ✦ marker line", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Terminal-escape hardening (item 8 — strip ESC from untrusted text)
 // ----------------------------------------------------------------------------
 

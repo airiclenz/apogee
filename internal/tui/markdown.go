@@ -28,12 +28,14 @@ import (
 // content width — the columns inside the ✦ marker gutter; the caller re-attaches the marker via
 // withMarker. It walks the text block by block: fenced code blocks, ATX headings, bullet/numbered
 // list items, then plain paragraphs. An empty message yields one empty line so its marker still
-// shows (matching the old wrapText("") behaviour for a just-opened assistant buffer).
+// shows (matching the old wrapText("") behaviour for a just-opened assistant buffer). Runs of two
+// or more blank lines are collapsed to one first (collapseBlankRuns), so a padded message never
+// opens a two- or three-row gap inside its own block.
 func renderMarkdownBody(th theme, text string, width int) []string {
 	if width < 1 {
 		width = 1
 	}
-	lines := strings.Split(text, "\n")
+	lines := collapseBlankRuns(strings.Split(text, "\n"))
 	var out []string
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
@@ -64,6 +66,34 @@ func renderMarkdownBody(th theme, text string, width int) []string {
 	}
 	if len(out) == 0 {
 		return []string{""}
+	}
+	return out
+}
+
+// collapseBlankRuns returns lines with every run of two or more blank lines reduced to the first
+// of them — a paragraph break is one empty row, never three. Fenced code blocks are exempt: a
+// blank line between two statements is part of the code and survives verbatim, so the walk toggles
+// on each fence line and copies the interior untouched (the same alternating fence boundaries
+// renderMarkdownBody itself walks, including an unterminated fence still streaming in).
+func collapseBlankRuns(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	inFence, prevBlank := false, false
+	for _, ln := range lines {
+		switch {
+		case isFence(ln):
+			inFence = !inFence
+			prevBlank = false
+		case inFence:
+			// code: verbatim, and it never arms the collapse for the line after the fence
+		case blankLine(ln):
+			if prevBlank {
+				continue
+			}
+			prevBlank = true
+		default:
+			prevBlank = false
+		}
+		out = append(out, ln)
 	}
 	return out
 }
