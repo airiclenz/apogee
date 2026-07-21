@@ -114,10 +114,11 @@ func TestRespondAndReviewSplitsOverflowFromPlainFault(t *testing.T) {
 }
 
 // TestStepOverflowStillAbandonsTheTurnUnchanged pins the observable contract the seam must not
-// move: with no recovery wired yet, an overflowed request degrades the Turn exactly as before —
-// one ErrorEvent from source "loop" carrying the provider's message verbatim, a clean
-// Exchange-complete boundary, and no assistant message committed. Recovery may later make this
-// path quiet on success; it may never change what the GIVE-UP looks like.
+// move: where recovery cannot run — baseConfig leaves `auto-compact` off, the decision-4 opt-out —
+// an overflowed request degrades the Turn exactly as before: one ErrorEvent from source "loop"
+// carrying the provider's message verbatim, a clean Exchange-complete boundary, and no assistant
+// message committed. Recovery is quiet on SUCCESS (overflowrecovery_test.go); it may never change
+// what the GIVE-UP looks like, and this is the anchor for that.
 func TestStepOverflowStillAbandonsTheTurnUnchanged(t *testing.T) {
 	sink := &recordingSink{}
 	a, err := newAgent(baseConfig(sink), faultResponder{kind: provider.DeltaContextOverflow, msg: overflowFaultMsg})

@@ -183,7 +183,18 @@ conversation.
 
 ---
 
-## 3. Recovery orchestration in step(): fold and retry once
+## 3. Recovery orchestration in step(): fold and retry once — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): the one-fold-per-Turn latch is the respond loop's own attempt counter measured
+against a new `maxOverflowRecoveries = 1` const (`loop.go`, beside `maxPostResponseRetries`) rather
+than a Turn-scoped flag — item 4's predictive fold can consume the Turn's fold by entering the loop
+with the counter already at 1. Beyond the item's bullets, `emergencyFold`'s silent-cancel contract
+(item 2: "the caller's ctx check routes to the cancel path") is honoured by an explicit
+`ctx.Err() != nil` check immediately after the fold, routing to `cancelTurn` with the pre-fold
+`rollback`; without it a cancelled fold would surface the withheld overflow message as a spurious
+give-up. Also refreshed the now-stale "with no recovery wired yet" comment on
+`TestStepOverflowStillAbandonsTheTurnUnchanged` (item 1's test — assertions untouched; it now reads
+as the `auto-compact: false` give-up anchor).
 
 **Depends on items 1–2.** This is the guarantee.
 

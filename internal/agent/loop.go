@@ -31,6 +31,14 @@ const experimentalMechanismID = domain.ExperimentalMechanismID
 // cannot spin the loop forever. After the cap the loop proceeds with the last response.
 const maxPostResponseRetries = 3
 
+// maxOverflowRecoveries caps how many times ONE Turn may fold its history and re-send a request
+// the model's context window rejected: exactly one. A fold is a lossy rewrite of the user's
+// history, so a second overflow means folding is not the answer here (the protected prefix alone
+// is over the window, or the server rejects even a minimal prompt) and the Turn gives up exactly
+// as it did before recovery existed — the same sanitized ErrorEvent, the same abandoned Exchange.
+// It is the one-fold-per-Turn latch: no separate flag, just the respond phase's attempt counter.
+const maxOverflowRecoveries = 1
+
 var (
 	errMissingEvents   = errors.New("apogee: Config.Events is required")
 	errMissingEndpoint = errors.New("apogee: Config.Endpoint is required")
@@ -236,7 +244,10 @@ func validateConfig(cfg domain.Config) error {
 //
 // Every return is at a serializable boundary. A ctx cancellation rolls this Turn's work
 // back and returns StatusCancelled with resumable state; a recovered extension panic or
-// Upstream fault degrades the Turn to a clean boundary without unwinding the host.
+// Upstream fault degrades the Turn to a clean boundary without unwinding the host. The one
+// Upstream fault that does NOT end the Turn on the spot is a context-window overflow: the
+// respond phase folds the history (emergencyFold) and re-sends the same Turn once before
+// falling back to that same clean boundary.
 func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	start := time.Now()
 	turn := a.turnIndex
@@ -303,21 +314,72 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		return a.abandonTurn(turn, start), nil
 	}
 
-	resp, outcome, overflowMsg := a.respondAndReview(ctx, turn, req)
-	switch outcome {
-	case turnCancelled:
-		return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
-	case turnOverflowed:
-		// The prompt did not fit the context window. respondAndReview withholds the ErrorEvent
-		// for this outcome so recovery can own it; until recovery is wired the give-up path IS
-		// this arm, so it surfaces the carried message verbatim — same Source, same text, same
-		// ordering — and then degrades the Turn exactly like any other Upstream fault.
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
+	// The respond phase is bounded by ONE recovery attempt (maxOverflowRecoveries): an overflow is
+	// the single Upstream fault the loop can act on — the PROMPT did not fit, so folding the
+	// history and re-sending the SAME Turn is a real remedy rather than a hopeful re-call. The fold
+	// rewrites history, so the retry re-derives every local it invalidated (rollback, req,
+	// deferred, deferredFloor) before the second attempt. Every other way out of this loop —
+	// a plain fault, a second overflow, a cancel — is exactly the behaviour it always had.
+	var resp *domain.Response
+	for attempt := 0; ; attempt++ {
+		reviewed, outcome, overflowMsg := a.respondAndReview(ctx, turn, req)
+		if outcome == turnOK {
+			resp = reviewed
+			break
+		}
+		if outcome == turnCancelled {
+			return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+		}
+		if outcome != turnOverflowed || attempt >= maxOverflowRecoveries {
+			// A plain Upstream fault (respondAndReview already surfaced it), or an overflow with
+			// this Turn's one recovery already spent. The overflow's ErrorEvent is withheld at the
+			// seam so a RECOVERED Turn can stay quiet, which makes this the give-up path that owns
+			// it: the carried message surfaces verbatim — same Source, same text, same ordering as
+			// a plain fault — and the Turn degrades to a clean boundary.
+			if outcome == turnOverflowed {
+				a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
+			}
+			a.restoreDeferred(deferred)
+			return a.abandonTurn(turn, start), nil
+		}
+
+		// The Turn's one recovery. The drained corrections are re-queued FIRST so the rebuilt
+		// request carries them (buildRequest drains the queue again below); then the emergency
+		// fold collapses the history to the protected prefix + summary + bridge.
 		a.restoreDeferred(deferred)
-		return a.abandonTurn(turn, start), nil
-	case turnFailed:
-		a.restoreDeferred(deferred)
-		return a.abandonTurn(turn, start), nil
+		folded := a.emergencyFold(ctx, turn)
+		if ctx.Err() != nil {
+			// The fold declined silently because ctx was cancelled mid-summary (the cancel
+			// masquerades as a stream error, so only ctx can tell them apart — the check the fold
+			// delegates to its caller). A cancelled fold leaves the conversation untouched, so
+			// rollback still points at this Turn's pre-request boundary, and cancelTurn's
+			// truncate-then-restore leaves the corrections re-queued above exactly once.
+			return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+		}
+		if !folded {
+			// Nothing was folded — recovery is opted out (`auto-compact: false`), there was nothing
+			// left past the protected prefix to shed, or the summary call itself faulted (the fold
+			// surfaced that one from source "compaction") — so the same request would overflow
+			// identically. Give up exactly as above, WITHOUT restoring a second time: the
+			// corrections went back on the queue just before the fold.
+			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
+			return a.abandonTurn(turn, start), nil
+		}
+
+		// The fold rewrote the conversation, so every local captured before it is stale. rollback
+		// moves PAST the fold (decision 6: the fold is history maintenance, not part of the Turn's
+		// attempt, so a later cancel keeps it and must never roll back into a pre-fold index); the
+		// request, its freshly drained corrections, and the deferred floor are all re-derived from
+		// the folded history. Pre-request hooks run per REQUEST, so they run again over the rebuilt
+		// one and keep their pre-request failure semantics: no assistant message, corrections
+		// re-queued, Turn degraded. exchangeStart is re-anchored by the fold itself (compact.go).
+		rollback = a.conv.Len()
+		req, deferred = a.buildRequest(turn)
+		deferredFloor = a.conv.DeferredLen()
+		if err := a.runPreRequestHooks(ctx, turn, req); err != nil {
+			a.restoreDeferred(deferred)
+			return a.abandonTurn(turn, start), nil
+		}
 	}
 
 	calls := resp.ToolCalls()
