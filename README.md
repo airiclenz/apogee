@@ -42,7 +42,7 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v1.5.0` shipped (2026-07-21).** The embeddable agent core is stable — the public
+**`v1.6.0` shipped (2026-07-21).** The embeddable agent core is stable — the public
 Go API follows semver from `v1.0.0` — with the full tool suite, MCP client,
 sub-agents, and OS-confined Auto mode (Linux landlock / macOS seatbelt; Windows
 confinement comes in a later phase, so Auto there still runs — it just falls back

@@ -6,7 +6,7 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
-## [Unreleased]
+## [1.6.0] — 2026-07-21
 
 Post-`v1.5.0`, **additive** (minor) — two features end to end, plus a presentation pass over how
 the chat reads. First: **Auto mode no longer degrades in silence.** On a host that cannot
@@ -192,6 +192,15 @@ added, so this is behaviour-only.
   rather than quietly mangled, and a failed write surfaces as an error instead of a save that did
   not happen. A save that fails never invalidates the session toggle that already happened, and the
   confirmation says so. (`cmd/apogee`.)
+
+- **`apogee.AuditEvent` — the facade's Event re-export is complete.** `apogee.go` aliased every
+  Event variant except `AuditEvent`, which has shipped in `internal/domain` since the Phase-3
+  security remediation. Because `internal/` is unimportable from outside the module, an embedder
+  could *receive* an audit observation through the `Event` interface but had no way to name the
+  type in a switch — the variant was effectively unreachable across the facade. The alias closes
+  that; the variant's own contract is untouched, so this is additive. `example_test.go`'s
+  compile-time facade guard now names every variant, `ReasoningEvent` and `UsageEvent` included, so
+  the next omission is a build failure rather than a silent gap. (`apogee.go`.)
 
 ### Changed
 
@@ -1868,6 +1877,8 @@ where the OS cannot enforce:
   Fixed by resolving each writable root through symlinks in `seatbeltProfile`; see
   the `[1.1.0]` Fixes entry.
 
+[1.6.0]: https://github.com/airiclenz/apogee/releases/tag/v1.6.0
+[1.5.0]: https://github.com/airiclenz/apogee/releases/tag/v1.5.0
 [1.4.0]: https://github.com/airiclenz/apogee/releases/tag/v1.4.0
 [1.3.0]: https://github.com/airiclenz/apogee/releases/tag/v1.3.0
 [1.2.0]: https://github.com/airiclenz/apogee/releases/tag/v1.2.0
