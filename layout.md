@@ -1,6 +1,8 @@
 ❯ The last prompt that the user sent is in white text. It's background color should be
-  dark gray. Word wrap must apply everywhere. The user must be able to scroll up in the 
-  chat session to see the complete chat history. The last user prompt must stick to
+  dark gray. Word wrap must apply everywhere, and it breaks short of the right edge:
+  two columns stay free between the text and the scroll bar, three between the text
+  and the window edge while no bar is painted. The user must be able to scroll up in
+  the chat session to see the complete chat history. The last user prompt must stick to
   the top of the vivible session area (this is also implemented in apogee-code).
 
 ✦ The LLM's answer looks like this. There is an empty line between the users prompt

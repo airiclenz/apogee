@@ -938,6 +938,77 @@ func TestStatusLineIndentFitsNarrowWindow(t *testing.T) {
 	}
 }
 
+// transcriptRows returns the composed View's transcript rows with styling stripped — the
+// viewport's own rows, scroll-bar column included, before the gap row and the bottom chrome.
+func transcriptRows(t *testing.T, m Model) []string {
+	t.Helper()
+	rows := strings.Split(plain(m.View()), "\n")
+	if len(rows) < m.viewport.Height() {
+		t.Fatalf("view has %d rows, fewer than the viewport's %d", len(rows), m.viewport.Height())
+	}
+	return rows[:m.viewport.Height()]
+}
+
+// TestTranscriptBodyLeavesRightGutter proves the chat body wraps short of its right edge: no
+// rendered body line comes within bodyRightGutter columns of the scroll-bar column beside it, so
+// there are two free columns next to a painted bar and three to the window edge while the gutter
+// is blank. Measured on the really-composed View (not on the renderer alone) so the wrap width
+// and the reserved scroll-bar column are pinned together, mirroring bodyIndent on the left.
+func TestTranscriptBodyLeavesRightGutter(t *testing.T) {
+	const width = 80
+	m := newTestModel(t)
+	// Single-character words pack every wrapped line flush to the wrap limit, so the widest row
+	// measured below is exactly the wrap width rather than wherever a word break happened to fall.
+	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: strings.Repeat("x ", 400)}})
+
+	widest := 0
+	for _, row := range transcriptRows(t, m) {
+		// Cut the reserved scroll-bar column off the right before measuring: the bar is chrome,
+		// not body text, and it paints in that column only while there is something to scroll.
+		body := strings.TrimRight(ansi.Truncate(row, width-scrollbarWidth, ""), " ")
+		widest = max(widest, ansi.StringWidth(body))
+	}
+
+	if widest == 0 {
+		t.Fatal("no body text rendered")
+	}
+	if want := width - scrollbarWidth - bodyRightGutter; widest > want {
+		t.Errorf("body reaches %d columns at window width %d; want at most %d (a %d-column right gutter)",
+			widest, width, want, bodyRightGutter)
+	}
+}
+
+// The gutter is a floor, not a bare subtraction: at window widths too small to hold it the body
+// still wraps to at least one column, and the transcript rows stay inside the viewport plus its
+// reserved scroll-bar column (both floored at one, so a 0/1-column window still draws two).
+func TestTranscriptBodyWidthAtTinyWindows(t *testing.T) {
+	m := newTestModel(t)
+	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: "a message long enough to wrap hard at a tiny width"}})
+
+	for _, width := range []int{0, 1, 2, 3, 5} {
+		m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 24})
+
+		body := m.transcriptWidth()
+		if body < 1 {
+			t.Errorf("transcript width = %d at window width %d; want at least 1", body, width)
+		}
+		if body > m.viewport.Width() {
+			t.Errorf("transcript width = %d at window width %d; want at most the viewport's %d",
+				body, width, m.viewport.Width())
+		}
+		limit := m.viewport.Width() + scrollbarWidth
+		for i, row := range transcriptRows(t, m) {
+			// Trailing blanks are not transcript content: JoinVertical pads every row of the
+			// composed view out to the widest block, which on a sub-minimal window is the input
+			// box's own border floor rather than anything the transcript drew.
+			if got := ansi.StringWidth(strings.TrimRight(row, " ")); got > limit {
+				t.Errorf("transcript row %d at window width %d renders %d columns; want at most %d",
+					i, width, got, limit)
+			}
+		}
+	}
+}
+
 func TestModelResizeDoesNotPanic(t *testing.T) {
 	m := newTestModel(t)
 	for _, size := range []struct{ w, h int }{{80, 24}, {120, 40}, {200, 60}, {20, 6}, {5, 2}, {1, 1}} {

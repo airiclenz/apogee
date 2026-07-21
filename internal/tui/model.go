@@ -739,6 +739,15 @@ func (m *Model) layout() {
 	m.refreshViewport()
 }
 
+// transcriptWidth is the column budget the transcript body wraps to: the viewport's own width
+// less the right gutter (bodyRightGutter), floored at one column so a window too narrow to hold
+// the gutter still wraps rather than going zero or negative. The viewport keeps its full width —
+// only the content is narrower — so the sticky-to-top arithmetic (wrappedOffset) and the mouse
+// mapping still measure against the viewport, and the gutter shows up as unpainted columns.
+func (m Model) transcriptWidth() int {
+	return max(1, m.viewport.Width()-bodyRightGutter)
+}
+
 // inputInnerWidth is the textarea's text width: the window less the border and padding
 // columns, floored at one so a very narrow window does not produce a zero-width box.
 func (m *Model) inputInnerWidth() int {
@@ -756,9 +765,11 @@ func (m *Model) inputRows() int {
 // scrolled, pins the last user prompt to the top of the visible area (sticky-to-top, as in
 // apogee-code) so the prompt stays put while the reply streams beneath it. With no user
 // prompt yet, it falls back to the bottom. A human scroll (userScrolled) suspends the pin so
-// reading history is not yanked back; submit re-arms it.
+// reading history is not yanked back; submit re-arms it. The body is rendered to
+// transcriptWidth — the viewport's width less the right gutter — while the sticky-to-top offset
+// still measures against the viewport's own width, which is what soft-wraps the stored lines.
 func (m *Model) refreshViewport() {
-	rendered := m.transcript.renderView(m.th, m.viewport.Width())
+	rendered := m.transcript.renderView(m.th, m.transcriptWidth())
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.userBlocks = rendered.userBlocks
 	m.transcriptSel = transcriptSel{} // the rendered lines regenerated: content-anchored coords are stale (mouse.go)

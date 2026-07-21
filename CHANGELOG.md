@@ -55,6 +55,21 @@ contract is untouched (no new `uiState`, no agent logic in the TUI), so no new A
   same `running <raw name>` fallback the transcript header already uses. No new `uiState` —
   `compacting` and `stopping` are activities, not lifecycle states (ADR 0011). (`internal/tui`.)
 
+### Changed
+
+- **The chat body now breaks two columns short of the scroll bar.** The transcript's text no
+  longer wraps flush against whatever sits at its right edge: the body is rendered to a
+  `bodyRightGutter`-narrower column than the viewport, so two columns stay free between the last
+  painted glyph and the scroll bar, and three between the glyph and the window edge while the bar
+  is blank — the mirror of the `bodyIndent` gutter on the left. The gutter is deliberately a
+  constant rather than a function of whether the bar is currently painted: the scroll-bar column
+  is reserved unconditionally, and the bar appears inside it the moment the content overflows, so
+  a wrap width that tracked its visibility would re-wrap the whole visible transcript mid-reply.
+  The viewport keeps its full width — only the content is narrower — so the sticky-to-top offset
+  (`wrappedOffset`) and the mouse mapping still measure against the viewport, and the wrap width
+  is floored at one column, so a window too narrow to hold the gutter still renders rather than
+  going negative. (`internal/tui`, `layout.md`.)
+
 ### Removed
 
 - **The `turn N` readout and the transcript turn counter behind it.** The status line's turn index

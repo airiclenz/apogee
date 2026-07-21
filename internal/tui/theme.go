@@ -72,6 +72,16 @@ const subAgentLabel = "sub-agent"
 // against a really-rendered block, so a change to the marker or the hanging indent fails there.
 const bodyIndent = "  "
 
+// bodyRightGutter is bodyIndent's mirror on the right: the columns the transcript body leaves
+// free at its right edge, so wrapped text breaks short of whatever sits beside it instead of
+// running up against it. The scroll-bar column is reserved unconditionally (scrollbarWidth) and
+// the bar paints inside it only while there is something to scroll, so the gutter is a constant
+// rather than a function of whether the bar is currently drawn: a wrap width that changed when
+// the bar appeared would re-wrap the whole visible transcript mid-run. That leaves two free
+// columns between the text and a painted bar, and three to the window edge while the gutter is
+// blank. TestTranscriptBodyLeavesRightGutter pins it against a really-composed View.
+const bodyRightGutter = 2
+
 // brailleFrames are the status-line spinner frames (a single braille cell that appears to
 // rotate), shown while a worker drives the Exchange.
 var brailleFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
