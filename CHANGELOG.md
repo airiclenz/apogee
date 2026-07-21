@@ -24,6 +24,22 @@ point is a **minor** bump, not a breaking change.
   across runs, never empty (a failing `os.Hostname()` yields `unknown-<hash>`), and restricted to
   `[A-Za-z0-9_.-]` so it is safe as an unquoted YAML scalar. Internal groundwork only — nothing
   reads it yet. (`internal/platform`.)
+- **`unconfined-hosts:` — the host-scoped confinement acknowledgement.** A new global-config-only
+  list in `~/.apogee/config.yaml` recording *which machines* you have acknowledged as disposable,
+  so Auto may run unconfined **there** without that claim following the file onto every other host
+  (ADR 0012, amendment 2026-07-21). Each entry carries an `id` (matched against
+  `platform.HostID()`), plus a free-form `acknowledged` date and `note` for the human reading the
+  file back later. Resolution runs in the order the ADR fixes: an explicit
+  `confine-to-workspace: false` still wins and still means *every* host (it is unchanged and not
+  deprecated); else an entry naming **this** machine yields an effective `false`; else the secure
+  default `true`. An explicit `confine-to-workspace: true` does not veto a matching entry — the
+  flag states the global default, the entry states a fact about one machine, and the more specific
+  claim wins. Like the flag, the list is settable **only** from the global config file — no flag,
+  no environment variable — so a hostile repo's invocation environment cannot name your host. An
+  id matching no machine is simply "not this host", never an error (the list is meant to
+  accumulate machines), and an entry with no `id` is skipped with one startup notice rather than
+  blocking the run. The template `config.yaml` documents the block beside
+  `confine-to-workspace`. (`cmd/apogee`.)
 
 ## [1.5.0] — 2026-07-21
 

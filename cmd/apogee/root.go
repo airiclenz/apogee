@@ -32,8 +32,17 @@ type options struct {
 
 	// confineToWorkspace tunes Auto's blast radius (ADR 0012); default true. It is NOT a
 	// flag — it is loaded from the GLOBAL config file only (a project config cannot loosen
-	// it), so applyConfig sets it from the resolved settings.
+	// it), so applyConfig sets it from the resolved settings. It is the EFFECTIVE value:
+	// either an explicit `confine-to-workspace: false` or a Host acknowledgement naming this
+	// machine resolves it to false (ADR 0012, amendment 2026-07-21).
 	confineToWorkspace bool
+
+	// unconfinedHosts is the Host acknowledgement list as configured — the machines recorded
+	// as disposable (`unconfined-hosts:`). Global-config-file only, like the flag above;
+	// applyConfig sets it from the resolved settings, having already collapsed a match for
+	// THIS host into confineToWorkspace. It is carried so the session can report the list
+	// back and extend it.
+	unconfinedHosts []unconfinedHost
 
 	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
 	// loaded from the config file only (empty ⇒ the built-in DuckDuckGo default; "off"
@@ -120,7 +129,9 @@ func newRootCommand(launch launcher) *cobra.Command {
 			// Resolve the upstream/autonomy settings by precedence (flag > env > file >
 			// default) before construction; the flag set tells us which flags were
 			// explicitly set so an unset flag's default never shadows a lower layer.
-			if err := applyConfig(&opts, changed, os.Getenv, os.ReadFile); err != nil {
+			// A soft notice from resolution (a malformed unconfined-hosts entry) prints here,
+			// on stderr before the alt-screen, like the seeding and discovery lines above.
+			if err := applyConfig(&opts, changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 				return err
 			}
 			// With no model configured by any layer, ask the server for its active model

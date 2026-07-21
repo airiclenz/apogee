@@ -139,7 +139,23 @@ Commit: `feat(platform): HostID — a stable per-machine interlock for confineme
 
 ---
 
-## 3. Config — the `unconfined-hosts:` list and its resolution
+## 3. Config — the `unconfined-hosts:` list and its resolution — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): three shaping choices the item's text left open, all inside its `cmd/apogee`
+diff allowance. (a) The ladder stays *in* `settings` as required, but as a named pure function
+`resolveConfineToWorkspace(explicit *bool, hosts []unconfinedHost, hostID string) (bool, []string)`
+that `resolveSettings` calls — so the three-way order is table-testable on its own. That required
+two signature changes: `resolveSettings` takes the current `hostID` (injected, so the ladder is
+pinned off whatever machine the tests run on — `applyConfig` passes `platform.HostID()`) and
+returns the soft notices beside the settings; `applyConfig` takes a `notify func(string)` seam for
+them, mirroring `resolveContextWindow`'s existing notify parameter in the same file rather than
+writing to `os.Stderr` from a dependency-injected function. `root.go` passes `cmd.PrintErrln`, so
+the notice still lands on stderr pre-alt-screen. (b) An explicit `confine-to-workspace: true`
+does **not** veto a matching acknowledgement — that is the ADR's literal order (only an explicit
+*false* short-circuits), and it is what makes the list usable beside the default-true flag; the
+behaviour is spelled out in the function's doc comment and pinned by a test case. (c) An entry
+whose `id` is whitespace-only is treated as the item's "empty `id`" (the value is trimmed before
+both the malformed check and the match), so a blank id can never match a degenerate empty host id.
 
 In `cmd/apogee/config.go`: add a `UnconfinedHosts []unconfinedHost` field to `fileConfig` (yaml tag
 `unconfined-hosts`; entry fields `id`, `acknowledged`, `note`), threaded through

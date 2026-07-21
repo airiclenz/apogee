@@ -12,11 +12,20 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 func strptr(s string) *string { return &s }
 func boolptr(b bool) *bool    { return &b }
 func intptr(i int) *int       { return &i }
+
+// noNotify drops applyConfig's soft startup notices — the tests below assert resolved
+// values, not the wording (resolveConfineToWorkspace's own table covers the notices).
+func noNotify(string) {}
+
+// testHostID is the machine identity injected into resolveSettings so the Host
+// acknowledgement ladder is pinned off whatever host the tests happen to run on.
+const testHostID = "testbox-a1b2c3"
 
 // The precedence rule itself: a flag beats an env var beats the file beats the default,
 // resolved per field (phase-2 detail plan §4 P2.5).
@@ -100,6 +109,18 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true},
 		},
 		{
+			name: "a matching unconfined-hosts entry resolves confine-to-workspace to false",
+			file: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true,
+				unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
+		},
+		{
+			name: "unconfined-hosts is NOT settable by env or flag (global-config-only)",
+			env:  layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
+			flag: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true},
+		},
+		{
 			name: "web-search endpoint is file-only (default empty)",
 			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, webSearchEndpoint: "https://search.example.com"},
@@ -147,11 +168,153 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := resolveSettings(tt.file, tt.env, tt.flag); !reflect.DeepEqual(got, tt.want) {
+			got, notices := resolveSettings(tt.file, tt.env, tt.flag, testHostID)
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("resolveSettings = %+v; want %+v", got, tt.want)
+			}
+			if len(notices) != 0 {
+				t.Errorf("resolveSettings notices = %q; want none for a well-formed config", notices)
 			}
 		})
 	}
+}
+
+// The Host acknowledgement ladder (ADR 0012, amendment 2026-07-21), pinned in the order the
+// ADR fixes: an explicit global false wins; else a match on THIS host's id loosens here; else
+// confinement stays on. A malformed entry degrades softly with a notice, and an entry naming
+// another machine is simply not this host — neither is an error.
+func TestResolveConfineToWorkspace(t *testing.T) {
+	t.Parallel()
+	const otherHost = "laptop-9f8e7d"
+	tests := []struct {
+		name        string
+		explicit    *bool
+		hosts       []unconfinedHost
+		hostID      string
+		want        bool
+		wantNotices int
+	}{
+		{name: "nothing configured → the secure default", hostID: testHostID, want: true},
+		{name: "explicit global false → unconfined everywhere", explicit: boolptr(false), hostID: testHostID, want: false},
+		{name: "explicit global true, no acknowledgement → confined", explicit: boolptr(true), hostID: testHostID, want: true},
+		{
+			name:   "this host is acknowledged → unconfined here",
+			hosts:  []unconfinedHost{{ID: otherHost}, {ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable container"}},
+			hostID: testHostID,
+			want:   false,
+		},
+		{
+			name:   "only other machines are acknowledged → still confined here",
+			hosts:  []unconfinedHost{{ID: otherHost}, {ID: "buildbox-000111"}},
+			hostID: testHostID,
+			want:   true,
+		},
+		{
+			name:     "an explicit true does not veto a match — the entry is the more specific claim",
+			explicit: boolptr(true),
+			hosts:    []unconfinedHost{{ID: testHostID}},
+			hostID:   testHostID,
+			want:     false,
+		},
+		{
+			name:        "a malformed entry is skipped with a notice, the well-formed one still matches",
+			hosts:       []unconfinedHost{{Note: "no id here"}, {ID: testHostID}},
+			hostID:      testHostID,
+			want:        false,
+			wantNotices: 1,
+		},
+		{
+			name:        "a blank id never matches a blank host id — it is malformed, not a wildcard",
+			hosts:       []unconfinedHost{{ID: "   "}},
+			hostID:      "",
+			want:        true,
+			wantNotices: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, notices := resolveConfineToWorkspace(tt.explicit, tt.hosts, tt.hostID)
+			if got != tt.want {
+				t.Errorf("confineToWorkspace = %v; want %v", got, tt.want)
+			}
+			if len(notices) != tt.wantNotices {
+				t.Errorf("notices = %q; want %d", notices, tt.wantNotices)
+			}
+			for _, n := range notices {
+				if !strings.Contains(n, "unconfined-hosts") {
+					t.Errorf("notice %q does not name the offending key", n)
+				}
+			}
+		})
+	}
+}
+
+// The unconfined-hosts block reaches opts end-to-end: an entry naming THIS machine (the real
+// platform.HostID(), which is what production matches against) resolves the effective
+// confine-to-workspace to false, and the list itself is carried on opts. This is the
+// load-bearing host-scoping proof — the same config on any other machine stays confined.
+func TestApplyConfigUnconfinedHosts(t *testing.T) {
+	t.Parallel()
+	noFlags := func(string) bool { return false }
+	noEnv := func(string) string { return "" }
+
+	t.Run("this host acknowledged", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		configYAML := "unconfined-hosts:\n  - id: \"" + platform.HostID() + "\"\n" +
+			"    acknowledged: \"2026-07-21\"\n    note: \"disposable container\"\n"
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		opts := options{configDir: home}
+		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("applyConfig: %v", err)
+		}
+		if opts.confineToWorkspace {
+			t.Error("opts.confineToWorkspace = true; want false — this host is acknowledged")
+		}
+		want := []unconfinedHost{{ID: platform.HostID(), Acknowledged: "2026-07-21", Note: "disposable container"}}
+		if !reflect.DeepEqual(opts.unconfinedHosts, want) {
+			t.Errorf("opts.unconfinedHosts = %+v; want %+v", opts.unconfinedHosts, want)
+		}
+	})
+
+	t.Run("another host acknowledged", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		const configYAML = "unconfined-hosts:\n  - id: \"someone-elses-box-abc123\"\n"
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		opts := options{configDir: home}
+		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("applyConfig: %v", err)
+		}
+		if !opts.confineToWorkspace {
+			t.Error("opts.confineToWorkspace = false; want true — the acknowledgement names another machine")
+		}
+	})
+
+	t.Run("a malformed entry notifies and does not block startup", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		const configYAML = "unconfined-hosts:\n  - note: \"forgot the id\"\n"
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		var got []string
+		opts := options{configDir: home}
+		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, func(msg string) { got = append(got, msg) }); err != nil {
+			t.Fatalf("applyConfig: %v; want a soft skip, not a blocked startup", err)
+		}
+		if !opts.confineToWorkspace {
+			t.Error("opts.confineToWorkspace = false; want true — a malformed entry acknowledges nothing")
+		}
+		if len(got) != 1 || !strings.Contains(got[0], "unconfined-hosts") {
+			t.Errorf("notices = %q; want one naming unconfined-hosts", got)
+		}
+	})
 }
 
 // applyConfig drives the whole chain end-to-end: a config file on disk, env overrides, and
@@ -178,7 +341,7 @@ func TestApplyConfigEndToEnd(t *testing.T) {
 	changed := func(name string) bool { return name == "endpoint" || name == "config" }
 	opts := options{configDir: home, endpoint: "http://flag"}
 
-	if err := applyConfig(&opts, changed, getenv, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if opts.endpoint != "http://flag" {
@@ -202,7 +365,7 @@ func TestApplyConfigDefaults(t *testing.T) {
 	noFlags := func(string) bool { return false }
 	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
 
-	if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if opts.endpoint != "" || opts.model != "" || opts.bypass {
@@ -225,7 +388,7 @@ func TestApplyConfigAutoCompactOptOut(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if opts.autoCompact {
@@ -244,7 +407,7 @@ func TestApplyConfigContextWindow(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if opts.contextWindow != 65536 {
@@ -271,7 +434,7 @@ func TestApplyConfigMCPServers(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 
@@ -299,7 +462,7 @@ func TestApplyConfigMechanisms(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 
@@ -314,7 +477,7 @@ func TestApplyConfigMechanisms(t *testing.T) {
 func TestApplyConfigNoMechanismsIsNil(t *testing.T) {
 	t.Parallel()
 	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if opts.mechanisms != nil {
@@ -338,7 +501,7 @@ func TestApplyConfigValidatedSets(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 
@@ -356,7 +519,7 @@ func TestApplyConfigValidatedSets(t *testing.T) {
 func TestApplyConfigNoValidatedSetsDefaultsOn(t *testing.T) {
 	t.Parallel()
 	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if !opts.validatedSetsEnable {
@@ -385,7 +548,7 @@ func TestApplyConfigModelProfile(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 
@@ -403,7 +566,7 @@ func TestApplyConfigModelProfile(t *testing.T) {
 func TestApplyConfigNoProfileIsZero(t *testing.T) {
 	t.Parallel()
 	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if (opts.profile != apogee.ModelProfile{}) {
@@ -431,7 +594,7 @@ func TestApplyConfigEnvDirsAndFile(t *testing.T) {
 		}
 	}
 	opts := options{}
-	if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if opts.configDir != home {
@@ -457,7 +620,7 @@ func TestApplyConfigFlagDirBeatsEnvDir(t *testing.T) {
 	}
 	changed := func(name string) bool { return name == "config" }
 	opts := options{configDir: flagHome}
-	if err := applyConfig(&opts, changed, getenv, os.ReadFile); err != nil {
+	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
 	if opts.configDir != flagHome {
@@ -473,7 +636,7 @@ func TestApplyConfigMalformedFileErrors(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := options{configDir: home}
-	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile)
+	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 	if err == nil {
 		t.Fatal("malformed config: want an error, got nil")
 	}
@@ -489,7 +652,7 @@ func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 		return ""
 	}
 	opts := options{configDir: t.TempDir()}
-	err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile)
+	err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify)
 	if err == nil {
 		t.Fatal("invalid APOGEE_BYPASS: want an error, got nil")
 	}

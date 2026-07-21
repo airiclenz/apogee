@@ -8,9 +8,11 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,7 +41,16 @@ type settings struct {
 	// file alone, never from a flag or env, so a hostile repo invoking apogee cannot loosen
 	// Auto's blast radius. Default true. (There is no project-level config file today; the
 	// file-only resolution is what keeps it un-loosenable by the invocation environment.)
+	// It is the EFFECTIVE value: an explicit `confine-to-workspace: false` OR a Host
+	// acknowledgement matching this machine resolves it to false (resolveConfineToWorkspace).
 	confineToWorkspace bool
+
+	// unconfinedHosts is the Host acknowledgement list as configured (ADR 0012, amendment
+	// 2026-07-21) — the machines the user has recorded as disposable. File-only on the same
+	// reasoning as confine-to-workspace: a hostile repo must not be able to name your host.
+	// It is carried past resolution (which collapses it into confineToWorkspace above) so the
+	// session can report the list back and extend it.
+	unconfinedHosts []unconfinedHost
 
 	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
 	// file-only (empty ⇒ the built-in DuckDuckGo default; "off" disables the tool).
@@ -110,6 +121,11 @@ type layer struct {
 	// env and flag layers leave it nil so the invocation environment cannot loosen it.
 	confineToWorkspace *bool
 
+	// unconfinedHosts is set only by the FILE layer (global-config-only on the same reasoning
+	// as confineToWorkspace above — ADR 0012, amendment 2026-07-21). A nil slice means the
+	// source acknowledges no host, which is the default: every host is confined.
+	unconfinedHosts []unconfinedHost
+
 	// webSearchEndpoint is set only by the FILE layer (P3.11 — web-search is config'd,
 	// with no flag/env). Empty/absent ⇒ the built-in DuckDuckGo default; "off" disables.
 	webSearchEndpoint *string
@@ -157,12 +173,20 @@ type layer struct {
 //
 // confine-to-workspace is the exception: it defaults true and is resolved from the FILE
 // layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
-// repo's invocation environment must not be able to loosen Auto's blast radius.
-func resolveSettings(file, env, flag layer) settings {
+// repo's invocation environment must not be able to loosen Auto's blast radius. hostID is
+// this machine's identity (platform.HostID(), injected so the ladder is testable off any
+// host): it selects the Host acknowledgement, if any, that applies here.
+//
+// It returns the soft notices resolution produced — today only malformed `unconfined-hosts`
+// entries, which are skipped rather than fatal (the ADR 0016 posture the validated-set
+// surface established: a data defect degrades, it never blocks startup).
+func resolveSettings(file, env, flag layer, hostID string) (settings, []string) {
 	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true}
-	if file.confineToWorkspace != nil {
-		s.confineToWorkspace = *file.confineToWorkspace
-	}
+	// file-only (ADR 0012 + its 2026-07-21 amendment); env/flag never carry either, so the
+	// invocation environment can neither flip the flag nor name a host.
+	s.unconfinedHosts = file.unconfinedHosts
+	confine, notices := resolveConfineToWorkspace(file.confineToWorkspace, file.unconfinedHosts, hostID)
+	s.confineToWorkspace = confine
 	if file.webSearchEndpoint != nil {
 		s.webSearchEndpoint = *file.webSearchEndpoint
 	}
@@ -201,7 +225,46 @@ func resolveSettings(file, env, flag layer) settings {
 			s.bypass = *l.bypass
 		}
 	}
-	return s
+	return s, notices
+}
+
+// resolveConfineToWorkspace is Auto's effective blast-radius decision (ADR 0012 as amended
+// 2026-07-21), in the order the ADR fixes:
+//
+//  1. an explicit global `confine-to-workspace: false` → false (the blanket loosen, on every
+//     host this config travels to — unchanged meaning);
+//  2. else a Host acknowledgement whose id is this machine's → false (the same loosen, at the
+//     grain the claim is actually true at);
+//  3. else true, the secure default.
+//
+// An explicit `confine-to-workspace: true` does NOT veto a matching acknowledgement: the
+// flag states the global default and the entry states a fact about THIS machine, so the
+// more specific statement wins — which is also what makes the list usable beside the
+// default-true flag at all.
+//
+// An entry with no id is a soft skip with a notice naming it: it acknowledges no machine, and
+// a malformed line must not block startup (nor, by matching an empty hostID, loosen anything).
+// An id that matches nothing is not an error either — the list is expected to accumulate
+// machines, so most entries name some other host on any given run.
+func resolveConfineToWorkspace(explicit *bool, hosts []unconfinedHost, hostID string) (bool, []string) {
+	var notices []string
+	acknowledged := false
+	for i, h := range hosts {
+		id := strings.TrimSpace(h.ID)
+		if id == "" {
+			notices = append(notices, fmt.Sprintf(
+				"apogee: skipping unconfined-hosts entry %d: it has no id, so it acknowledges no machine "+
+					"(this host is %q)", i+1, hostID))
+			continue
+		}
+		if id == hostID {
+			acknowledged = true // keep scanning: every malformed entry still gets named
+		}
+	}
+	if explicit != nil && !*explicit {
+		return false, notices
+	}
+	return !acknowledged, notices
 }
 
 // ----------------------------------------------------------------------------
@@ -223,6 +286,12 @@ type fileConfig struct {
 	// secure default true). It has no flag or env — editing the global config IS the
 	// deliberate acknowledgement required to run Auto unconfined.
 	ConfineToWorkspace *bool `yaml:"confine-to-workspace"`
+	// UnconfinedHosts is the Host acknowledgement list (ADR 0012, amendment 2026-07-21): the
+	// machines the user has recorded as disposable, so Auto may run unconfined THERE without
+	// the claim following this file onto every other host. Global-config-only like the flag
+	// above (a hostile repo must not be able to name your host), and absent/empty ⇒ no host is
+	// acknowledged, which is the default.
+	UnconfinedHosts []unconfinedHost `yaml:"unconfined-hosts"`
 	// WebSearch is the search endpoint the web_search tool sends a query to (P3.11).
 	// Absent ⇒ the built-in DuckDuckGo default; `off` disables the tool. Empty string is
 	// treated as absent.
@@ -262,6 +331,18 @@ type fileConfig struct {
 	// confidence and is offered at low. A pointer so an absent block falls through to that
 	// default rather than being an explicit zero setting.
 	ValidatedSets *validatedSetsConfig `yaml:"validated-sets"`
+}
+
+// unconfinedHost is one Host acknowledgement (CONTEXT: Host acknowledgement): the user's
+// recorded claim that ONE named machine is disposable. ID is what platform.HostID() is
+// matched against — the safety interlock that stops an acknowledgement travelling between
+// machines unnoticed, NOT authentication: anyone who can edit the config can write any id.
+// Acknowledged (a free-form date) and Note are for the human reading the file back months
+// later; nothing resolves off them, so neither is required.
+type unconfinedHost struct {
+	ID           string `yaml:"id"`
+	Acknowledged string `yaml:"acknowledged"`
+	Note         string `yaml:"note"`
 }
 
 // validatedSetsConfig is the on-disk schema for the Validated-set surface (ADR 0016):
@@ -352,6 +433,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.ConfineToWorkspace != nil {
 		l.confineToWorkspace = fc.ConfineToWorkspace
+	}
+	if len(fc.UnconfinedHosts) > 0 {
+		l.unconfinedHosts = fc.UnconfinedHosts
 	}
 	if fc.WebSearch != "" {
 		l.webSearchEndpoint = &fc.WebSearch
@@ -483,7 +567,12 @@ func flagLayer(opts options, changed func(string) bool) layer {
 // home (it lives inside it), so --config / APOGEE_CONFIG are overlaid onto opts first.
 // The workspace honours --workspace > APOGEE_WORKSPACE > cwd the same way. changed,
 // getenv, and readFile are injected so the whole chain is testable end-to-end.
-func applyConfig(opts *options, changed func(string) bool, getenv func(string) string, readFile func(string) ([]byte, error)) error {
+//
+// This is where the live machine identity enters resolution: platform.HostID() selects the
+// Host acknowledgement, if any, that applies on this host (ADR 0012, amendment 2026-07-21).
+// notify receives resolution's soft notices — a malformed acknowledgement is reported and
+// skipped, never fatal — on stderr, like the other pre-TUI startup lines.
+func applyConfig(opts *options, changed func(string) bool, getenv func(string) string, readFile func(string) ([]byte, error), notify func(string)) error {
 	opts.configDir = resolveConfigDir(opts.configDir, changed, getenv)
 	if !changed("workspace") {
 		if v := getenv(envWorkspace); v != "" {
@@ -500,13 +589,17 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 		return err
 	}
 
-	s := resolveSettings(file, env, flagLayer(*opts, changed))
+	s, notices := resolveSettings(file, env, flagLayer(*opts, changed), platform.HostID())
+	for _, n := range notices {
+		notify(n)
+	}
 	opts.endpoint = s.endpoint
 	opts.model = s.model
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.hostAlias = s.hostAlias
 	opts.confineToWorkspace = s.confineToWorkspace
+	opts.unconfinedHosts = s.unconfinedHosts
 	opts.webSearchEndpoint = s.webSearchEndpoint
 	opts.useProjectSkills = s.useProjectSkills
 	opts.autoCompact = s.autoCompact
