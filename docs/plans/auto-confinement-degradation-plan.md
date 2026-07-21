@@ -107,7 +107,18 @@ diff. Commit: `docs(adr): host-scoped confinement acknowledgement and the in-pla
 
 ---
 
-## 2. `platform.HostID()` — the machine interlock
+## 2. `platform.HostID()` — the machine interlock — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): three implementation choices beyond the item's literal text, all inside its
+`internal/platform` diff allowance. (a) `readMachineID(paths []string)` takes its paths as a
+parameter — a second injectable seam beside `hostIDFrom`, so the *file* fallback chain
+(`/etc/machine-id` → `/var/lib/dbus/machine-id` → none) is tested against temp files rather than
+whatever the test machine happens to have. (b) `HostID` memoizes through `sync.OnceValue`, making
+"deterministic within a process" structural rather than a property of the files staying put.
+(c) `sanitizeHostLabel` trims leading/trailing dashes after the `[A-Za-z0-9_.-]` substitution, so
+the id can never open with `-`; a label that sanitizes away entirely reads `unknown`, and the
+hash still carries the identity. `internal/platform/doc.go` gained one paragraph saying why
+HostID lives in this package — package godoc for a file this item creates.
 
 New file `internal/platform/hostid.go` (+ `hostid_test.go`). `HostID() string` per the composition
 above, with the doc comment stating the interlock-not-authentication framing and the ephemeral-

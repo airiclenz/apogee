@@ -11,4 +11,9 @@
 // incapable backend does not refuse Auto: the dispatch disposition gates the
 // subprocess surface through Approval instead (ADR 0012; §4–5 of
 // docs/design/confinement-execution-contract.md).
+//
+// HostID lives here for the same reason the backends do — it is a per-machine fact.
+// It is the interlock that keeps a host-scoped confinement acknowledgement
+// (`unconfined-hosts:`, ADR 0012 amendment 2026-07-21) from silently travelling
+// between machines; it is not an authentication mechanism.
 package platform

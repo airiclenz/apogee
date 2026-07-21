@@ -6,6 +6,25 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [Unreleased]
+
+### Added
+
+- **`platform.HostID()` — the machine interlock behind the host-scoped confinement
+  acknowledgement.** A stable per-machine id shaped `<sanitized hostname>-<first 6 hex of
+  sha256(machine identifier)>` (e.g. `devbox-a1b2c3`), where the identifier is the first available
+  of `/etc/machine-id`, `/var/lib/dbus/machine-id`, else the hostname itself — no shelling out, so
+  it stays dependency-free and correct on hosts (and future Windows builds) where neither file
+  exists. It is what an `unconfined-hosts:` entry will be matched against, so an acknowledgement
+  made on a disposable container cannot silently follow `~/.apogee/config.yaml` onto a laptop
+  (ADR 0012, amendment 2026-07-21). It is a **safety interlock, not an authentication mechanism**:
+  it stops an acknowledgement travelling between machines unnoticed, it does not resist forgery,
+  and it fails closed — an ephemeral container with a fresh machine-id per run simply does not
+  match its stored entry and is confined again. The value is deterministic within a process and
+  across runs, never empty (a failing `os.Hostname()` yields `unknown-<hash>`), and restricted to
+  `[A-Za-z0-9_.-]` so it is safe as an unquoted YAML scalar. Internal groundwork only — nothing
+  reads it yet. (`internal/platform`.)
+
 ## [1.5.0] — 2026-07-21
 
 Post-`v1.4.0`, **additive** (minor) — one TUI affordance and the one Event variant it needed to
