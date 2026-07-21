@@ -235,7 +235,19 @@ CHANGELOG. Commit: `feat(cli): notice when auto mode degrades to approval on an 
 
 ---
 
-## 5. Runtime toggle — `Agent.SetConfineToWorkspace`
+## 5. Runtime toggle — `Agent.SetConfineToWorkspace` — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): two choices the item's text left open, both inside its `internal/agent` diff
+allowance. (a) The live flag takes a **sibling** `confineMu sync.RWMutex` rather than sharing
+`modeMu` — the item offered both, and a sibling is what the existing code does (each mutex named
+for the single field it guards; the Resolution reads mode and blast radius as two independent
+facts, never as one pair that must be consistent). `modeMu`'s "the ONE field shared across
+goroutines" comment was corrected to name the second field. (b) The accessor is the exported
+`ConfineToWorkspace() bool` — item 7's `/confine status` needs to read the effective setting, and
+it mirrors `Mode()`. A sub-agent gets spawn-time inheritance only (the item's requirement); no
+live parent view like `liveMode` was built, and the limitation — a toggle never reaches an
+already-running delegation, in either direction — is stated in `SetConfineToWorkspace`'s doc
+comment.
 
 Mirror the existing `SetMode` precedent **exactly** (`internal/agent/agent.go:43-47`, `:189-202`):
 `Mode` is already a live field seeded from `cfg.Mode` and swapped from the UI under `modeMu`.

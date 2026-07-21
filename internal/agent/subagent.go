@@ -95,8 +95,10 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 }
 
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges
-// bounded (ADR 0005/0013): the parent's LIVE Mode at spawn (Shift+Tab can change it mid-session) /
-// Approver / Confiner / confine-to-workspace flag verbatim (never loosened), PLUS a tighten-only
+// bounded (ADR 0005/0013): the parent's LIVE Mode and LIVE confine-to-workspace flag at spawn
+// (Shift+Tab and /confine can move either mid-session — the child inherits what the parent
+// actually has NOW, never a stale construction seed) / Approver / Confiner verbatim (never
+// loosened beyond the parent's current privileges), PLUS a tighten-only
 // live view of the parent's mode (child.liveMode) so a mid-delegation tightening reaches the
 // still-running child, a Guards bundle that isolates live state but shares the dangerous
 // floor read-only (Guards.ForSubAgent), a tool set that is a SUBSET of this Agent's tools
@@ -108,6 +110,8 @@ func (a *Agent) newChildAgent() (*Agent, error) {
 	childCfg := a.cfg
 	childCfg.Mode = a.Mode() // inherit the parent's LIVE mode at spawn (Shift+Tab may have changed it),
 	//                          read under the lock since this runs on the worker goroutine during dispatch
+	childCfg.ConfineToWorkspace = a.ConfineToWorkspace() // likewise the parent's LIVE blast radius at spawn
+	//                                                     (/confine may have moved it since construction)
 	childCfg.Tools = a.defaultSubAgentTools()
 	// The sub-agent shares the parent's ALREADY-BUILT registry (a.registry — the parent's
 	// Config.Mechanisms merged with whatever Config.EnableMechanisms armed), so it fires the same

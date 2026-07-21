@@ -90,16 +90,17 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	}
 
 	return &Agent{
-		cfg:        cfg,
-		upstream:   up,
-		registry:   registry,
-		tools:      resolveTools(cfg),
-		guards:     security.NewDefaultGuards(),
-		mode:       cfg.Mode, // seed the live, swappable mode from the construction config
-		textParser: textParser,
-		stripper:   stripper,
-		tracker:    newSelfRegulator(),
-		tokens:     apogeectx.NewTokenEstimator(),
+		cfg:                cfg,
+		upstream:           up,
+		registry:           registry,
+		tools:              resolveTools(cfg),
+		guards:             security.NewDefaultGuards(),
+		mode:               cfg.Mode,               // seed the live, swappable mode from the construction config
+		confineToWorkspace: cfg.ConfineToWorkspace, // likewise the live, swappable blast-radius flag (/confine)
+		textParser:         textParser,
+		stripper:           stripper,
+		tracker:            newSelfRegulator(),
+		tokens:             apogeectx.NewTokenEstimator(),
 	}, nil
 }
 

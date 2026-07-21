@@ -99,8 +99,10 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 }
 
 // resolutionInput assembles the facts resolve() decides from for one call: the effective mode,
-// the resolved tool, the guardrail verdict, the confine-to-workspace flag, the backend caps
-// probe, the precomputed on-disk write-target check (the one I/O-tainted fact — resolve() does
+// the resolved tool, the guardrail verdict, the LIVE confine-to-workspace flag (read through
+// ConfineToWorkspace() under its lock, so a /confine toggle from the UI lands on the next call
+// exactly as a Shift+Tab mode change does), the backend caps probe, the precomputed on-disk
+// write-target check (the one I/O-tainted fact — resolve() does
 // none), the sub-agent depth bound, whether an Approver is configured, and the confinement box
 // a Confine verdict would run inside. It is dispatch's fact-gathering; the verdict logic lives
 // entirely in resolve().
@@ -110,7 +112,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		call:                   call,
 		tool:                   tool,
 		guard:                  guard,
-		confineToWorkspace:     a.cfg.ConfineToWorkspace,
+		confineToWorkspace:     a.ConfineToWorkspace(),
 		fsConfineAvailable:     a.fsConfinementAvailable(),
 		writeTargetInWorkspace: a.writeTargetInWorkspace(tool, call),
 		atDepthBound:           a.depth >= maxSubAgentDepth,

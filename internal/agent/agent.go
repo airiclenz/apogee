@@ -39,12 +39,22 @@ type Agent struct {
 	textParser processing.ToolCallParser
 	stripper   processing.ContentStripper
 
-	// modeMu guards mode — the ONE field shared across goroutines, the deliberate exception to
-	// the single-goroutine contract above. The UI cycles the autonomy mode (Shift+Tab → SetMode)
-	// while the worker goroutine reads it during dispatch (Mode() in toolMenu / the Resolution);
-	// the RWMutex makes that overlap race-free. cfg.Mode stays the immutable construction seed.
+	// modeMu guards mode — one of the two fields shared across goroutines (confineToWorkspace
+	// below is the other), the deliberate exception to the single-goroutine contract above. The
+	// UI cycles the autonomy mode (Shift+Tab → SetMode) while the worker goroutine reads it
+	// during dispatch (Mode() in toolMenu / the Resolution); the RWMutex makes that overlap
+	// race-free. cfg.Mode stays the immutable construction seed.
 	modeMu sync.RWMutex
 	mode   domain.Mode // live autonomy mode; seeded from cfg.Mode at construction, swappable via SetMode
+
+	// confineMu guards confineToWorkspace, the second live field the UI may swap while the
+	// worker drives a Step (/confine off|on → SetConfineToWorkspace). It is a SIBLING of modeMu,
+	// not the same lock, because the two settings are independent: the Resolution reads them as
+	// two separate facts (resolutionInput), never as one pair that must be consistent, and each
+	// mutex here stays named for the single field it guards. cfg.ConfineToWorkspace stays the
+	// immutable construction seed.
+	confineMu          sync.RWMutex
+	confineToWorkspace bool // live confine-to-workspace flag; seeded from cfg.ConfineToWorkspace, swappable via SetConfineToWorkspace
 
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
 	// parent's modeMu-guarded Mode accessor, captured at spawn (ADR 0013). The per-call
@@ -203,6 +213,36 @@ func (a *Agent) SetMode(m domain.Mode) {
 	a.modeMu.Lock()
 	a.mode = m
 	a.modeMu.Unlock()
+}
+
+// ConfineToWorkspace reports whether Auto's blast radius is currently fenced to the workspace
+// (ADR 0012). It reads the live flag under the lock, so a concurrent SetConfineToWorkspace
+// (/confine from the UI) is observed safely from the worker goroutine.
+func (a *Agent) ConfineToWorkspace() bool {
+	a.confineMu.RLock()
+	defer a.confineMu.RUnlock()
+	return a.confineToWorkspace
+}
+
+// SetConfineToWorkspace changes Auto's blast radius for subsequent tool calls: true (the
+// default) fences confinable subprocess writes to the workspace and gates what cannot be
+// fenced; false is the user's explicit "I am the sandbox" — Auto then runs every call
+// unconfined with the user's full privileges, which is safe ONLY on a disposable machine
+// (ADR 0012, as amended 2026-07-21). It is the engine half of /confine off|on; the Agent never
+// flips it on its own initiative, and the ladder itself is untouched either way.
+//
+// It is safe to call from another goroutine (the UI) while a Step runs: the per-call Resolution
+// reads the flag through ConfineToWorkspace() under the same lock, so the change lands on the
+// NEXT tool call with no rebuild — exactly like SetMode. It changes only THIS Session; nothing
+// is written to disk (persisting the host acknowledgement is the host's job, not the engine's).
+//
+// Sub-agents: a child spawned AFTER a toggle inherits the new value (newChildAgent reads the
+// live flag at spawn, as it does for the mode); one already mid-flight keeps the value it was
+// spawned with, so the toggle can neither loosen nor tighten a running delegation.
+func (a *Agent) SetConfineToWorkspace(confine bool) {
+	a.confineMu.Lock()
+	a.confineToWorkspace = confine
+	a.confineMu.Unlock()
 }
 
 // ----------------------------------------------------------------------------

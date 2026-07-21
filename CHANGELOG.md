@@ -52,6 +52,23 @@ point is a **minor** bump, not a breaking change.
   decision, never the tool loosening anything by itself. It is the mirror of the existing
   unconfined-Auto warning and the two never both fire; the three lower modes make no confinement
   promise and stay silent. (`cmd/apogee`.)
+- **`Agent.SetConfineToWorkspace` / `Agent.ConfineToWorkspace` — Auto's blast radius is now a
+  live, runtime-swappable setting.** `confine-to-workspace` was read from the construction Config
+  on every tool call, so changing it meant restarting Apogee. It is now a live field on the Agent
+  — seeded from `Config.ConfineToWorkspace`, read by the per-call Resolution through the
+  accessor, and swappable at any time — exactly mirroring the `SetMode`/`Mode` pair behind
+  Shift+Tab. Both methods are goroutine-safe (their own `RWMutex`, a sibling of `modeMu`), so the
+  UI may toggle while the worker is mid-Step; the change lands on the **next** tool call with no
+  rebuild and no registry churn. A sub-agent spawned after a toggle inherits the parent's live
+  value, as it already did for the mode; one already mid-flight keeps what it was spawned with,
+  so a toggle can neither loosen nor tighten a running delegation. The toggle changes only the
+  running Session — nothing is written to disk — and **the ladder itself is untouched**: the
+  engine never flips the flag on its own initiative, it only carries out the user's explicit act
+  (ADR 0012, amendment 2026-07-21). This is the engine half of the `/confine` command; the chat
+  surface lands next. **No breaking change** — `apogee.Agent` is an alias of `agent.Agent`, so the
+  public surface only *gains* methods (additive ⇒ **minor**, the same shape as the `Budget`
+  methods in `v1.4.0`); nothing exported is removed or re-typed and no facade edit was needed.
+  (`internal/agent`.)
 
 ## [1.5.0] — 2026-07-21
 
