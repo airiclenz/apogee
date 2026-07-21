@@ -20,8 +20,9 @@ import (
 // stays in lockstep with the viewport's own calculateLine (TestWrappedOffsetMatchesViewport).
 //
 // The look mirrors layout.md: the last user prompt is a full-width white-on-dark-gray block;
-// the assistant and tool headers lead with ✦; tool detail hangs off a ┝/┕ tree branch; one
-// blank line separates every block. Sub-agent depth (Phase 3) indents a whole block by two
+// the assistant and tool headers lead with ✦; a tool header carries its label alone and the
+// target leads a ┝/┕ tree branch beneath it, so a single call and a grouped run share one
+// shape; one blank line separates every block. Sub-agent depth (Phase 3) indents a whole block by two
 // columns per level — the tree-branch and depth-indent primitives are built here now so the
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
@@ -78,7 +79,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// call that arrives mid-stream joins its group on the next repaint for free, and a run
 		// is same-depth by construction, so the label logic above fires exactly as before.
 		if run := toolCallRun(t.entries, i); len(run) > 1 {
-			appendBlock(false, railLines(th, renderToolGroup(th, run, railedWidth(width, e.depth)), e.depth))
+			appendBlock(false, railLines(th, renderToolBlock(th, run, railedWidth(width, e.depth)), e.depth))
 			i += len(run) - 1
 		} else {
 			appendBlock(e.kind == entryUser, renderEntryLines(th, e, width))
@@ -114,7 +115,7 @@ func renderEntryLines(th theme, e entry, width int) []string {
 		body := renderMarkdownBody(th, e.text, inner-lipgloss.Width(marker))
 		return railLines(th, withMarker(marker, body), e.depth)
 	case entryToolCall:
-		return railLines(th, renderToolBlock(th, e.tool, inner), e.depth)
+		return railLines(th, renderToolBlock(th, []toolView{e.tool}, inner), e.depth)
 	case entryToolResult:
 		return railLines(th, renderOrphanResult(th, e.text, inner), e.depth)
 	case entryError:
@@ -183,20 +184,84 @@ func renderSkillChip(th theme, name string) string {
 	return th.skillChip.Render(" " + glyphSkill + " " + name + " ")
 }
 
-// renderToolBlock renders a tool call: the ✦ Label target header, then each summary detail
-// hanging off a ┝/┕ branch (the last line gets ┕). The caller frames the block for depth
-// (renderEntryLines applies the rail) — width is already the railed inner column.
+// renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the
+// one uniform shape layout.md sketches: a ✦ header carrying the **label alone**, then one ┝/┕
+// branch per call whose first column is that call's target. The target never sits on the header,
+// so a block does not visually reshape the moment a second call joins it: a block of one is
+// byte-identical in shape to a block of many. The caller frames the block for depth (renderView
+// and renderEntryLines apply the rail) — width is already the railed inner column.
 //
 // The label is styled (bold orange) before the header is wrapped — the markdown.go posture:
 // ansi.Wrap is SGR-aware and lipgloss.Width strips ANSI, so baking the style into the text
-// leaves the soft-wrap and sticky-offset arithmetic untouched. The target stays plain.
-func renderToolBlock(th theme, tv toolView, width int) []string {
-	head := th.toolLabel.Render(tv.Label)
-	if tv.Target != "" {
-		head += " " + tv.Target
+// leaves the soft-wrap and sticky-offset arithmetic untouched.
+//
+// Targets are padded to the block's widest so the detail column lines up; widths are display
+// cells (lipgloss.Width), so a multi-byte path pads correctly. A block of one pads to itself,
+// which is no padding at all. An empty slice renders nothing — every caller passes at least one
+// view, and a renderer on the repaint path must not be the thing that panics if one ever does not.
+func renderToolBlock(th theme, views []toolView, width int) []string {
+	if len(views) == 0 {
+		return nil
 	}
-	out := hangingWrap(th.toolHeader, glyphAssistant+" ", head, width)
-	out = append(out, renderDetails(th, tv.Details, width)...)
+	out := hangingWrap(th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width)
+	column := 0
+	for _, tv := range views {
+		column = max(column, lipgloss.Width(tv.Target))
+	}
+	for i, tv := range views {
+		out = append(out, renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width)...)
+	}
+	return out
+}
+
+// renderToolBranch renders one call of a tool block as its branch line (plus whatever hangs
+// beneath it). Four shapes, and they are the whole grammar:
+//
+//   - one detail — the branch is the target, padded to the block's column, one space, then the
+//     detail ("┕ main.go 1 - 154"); a detail carrying its own sub-content (a diff body under a
+//     "+2 -2" summary) indents that content beneath the branch;
+//   - two or more details — the branch carries the target alone and the details lay out beneath
+//     it at the branch marker's own width, not as ┝/┕ branches of their own (the Run case);
+//   - no detail yet (in flight) — the branch is the bare target; the block repaints whole once
+//     the result folds in;
+//   - no target at all — the only shape with no target line: the header stands alone and the
+//     details are themselves the ┝/┕ branches (an unregistered tool's pretty-printed arguments,
+//     a stray result).
+//
+// Anything overlong soft-wraps under its marker like any other detail line — nothing is clipped
+// for alignment's sake.
+func renderToolBranch(th theme, tv toolView, column int, marker string, width int) []string {
+	if tv.Target == "" {
+		return renderDetails(th, tv.Details, width)
+	}
+	if len(tv.Details) == 1 {
+		pad := strings.Repeat(" ", max(0, column-lipgloss.Width(tv.Target)))
+		text := tv.Target + pad + " " + tv.Details[0].Text
+		return hangingWrap(detailStyle(th, tv.Details[0].Kind), marker, text, width)
+	}
+	out := hangingWrap(th.toolDetail, marker, tv.Target, width)
+	return append(out, renderSubDetails(th, tv.Details, lipgloss.Width(marker), width)...)
+}
+
+// branchMarker is the tree marker leading a branch line: ┕ closes a block, ┝ continues it. Its
+// display width is also the sub-content indent, so detail text laid out beneath a branch lines
+// up with the target on it.
+func branchMarker(last bool) string {
+	if last {
+		return "  " + glyphBranchLast + " "
+	}
+	return "  " + glyphBranch + " "
+}
+
+// renderSubDetails lays a call's detail lines out beneath its branch line, indented to the
+// branch marker's width and styled by kind, so they read as that branch's content rather than
+// as siblings of it.
+func renderSubDetails(th theme, details []detailLine, indent, width int) []string {
+	pad := strings.Repeat(" ", indent)
+	out := make([]string, 0, len(details))
+	for _, d := range details {
+		out = append(out, hangingWrap(detailStyle(th, d.Kind), pad, d.Text, width)...)
+	}
 	return out
 }
 
@@ -240,57 +305,27 @@ func groupable(tv toolView) bool {
 	return true
 }
 
-// renderToolGroup renders a run of same-label tool calls as one block (layout.md): a ✦ Label header
-// carrying the label alone, then one ┝/┕ branch per member — its Target padded with spaces to the
-// group's widest target, one space, then its single detail line — so the detail column lines up. A
-// member still in flight shows its bare target and nothing after it; the whole block repaints once
-// the result folds in. Widths are display cells (lipgloss.Width), so a multi-byte path pads
-// correctly, and an overlong branch soft-wraps under its marker like any other detail line. The
-// caller frames the block for depth — width is already the railed inner column.
-func renderToolGroup(th theme, views []toolView, width int) []string {
-	out := hangingWrap(th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width)
-	column := 0
-	for _, tv := range views {
-		column = max(column, lipgloss.Width(tv.Target))
-	}
-	for i, tv := range views {
-		marker := "  " + glyphBranch + " "
-		if i == len(views)-1 {
-			marker = "  " + glyphBranchLast + " "
-		}
-		text := tv.Target
-		if len(tv.Details) > 0 {
-			text += strings.Repeat(" ", max(0, column-lipgloss.Width(tv.Target))) + " " + tv.Details[0].Text
-		}
-		out = append(out, hangingWrap(th.toolDetail, marker, text, width)...)
-	}
-	return out
-}
-
 // renderOrphanResult renders a tool result that matched no pending call (a defensive
 // fallback — normally a result folds into its call by CallID). It reads as a result block:
 // a ✦ result header — the bare word styled like any tool label — with the raw content hanging
-// off branches. The caller frames it for depth — width is already the railed inner column.
+// off branches. It is targetless by construction, so it renders through the block renderer's
+// no-target shape. The caller frames it for depth — width is already the railed inner column.
 func renderOrphanResult(th theme, text string, width int) []string {
-	out := hangingWrap(th.toolHeader, glyphAssistant+" ", th.toolLabel.Render("result"), width)
 	details := make([]detailLine, 0)
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
 	}
-	out = append(out, renderDetails(th, details, width)...)
-	return out
+	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width)
 }
 
 // renderDetails renders tool-detail lines as ┝/┕ tree branches (the last line gets ┕),
-// styled by their kind (plain dim, or red/green for the reserved diff kinds).
+// styled by their kind (plain dim, or red/green for the diff kinds). This is the targetless
+// shape only: where a call has a target, the target owns the branch and its details lay out
+// beneath it (renderToolBranch).
 func renderDetails(th theme, details []detailLine, width int) []string {
 	var out []string
 	for i, d := range details {
-		marker := "  " + glyphBranch + " "
-		if i == len(details)-1 {
-			marker = "  " + glyphBranchLast + " "
-		}
-		out = append(out, hangingWrap(detailStyle(th, d.Kind), marker, d.Text, width)...)
+		out = append(out, hangingWrap(detailStyle(th, d.Kind), branchMarker(i == len(details)-1), d.Text, width)...)
 	}
 	return out
 }

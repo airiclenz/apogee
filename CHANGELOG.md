@@ -27,8 +27,9 @@ that reports no filesystem confinement, so it reproduces identically on a machin
 
 Alongside it, a **presentation-only pass over the transcript layout** (`layout.md` is the amended
 spec of record): assistant text no longer drags the model's own padding blank lines into the
-scrollback, a tool header trades its `[brackets]` for a bold-orange label, and a batch of
-same-label tool calls folds into one aligned block instead of five stacked ones. The three land as
+scrollback, a tool header trades its `[brackets]` for a bold-orange label carrying nothing but
+that label, and a batch of same-label tool calls folds into one aligned block instead of five
+stacked ones — with a lone call taking the very same shape. The three land as
 separate **Changed** entries below because each is separately visible, but they are one change to
 how a session *reads* — nothing the model sees is touched: no tool result, no event payload, no
 upstream conversation, and nothing exported. `TestTranscriptLayoutGolden` pins the whole rendered
@@ -162,23 +163,32 @@ shows up as a layout diff rather than a subtly taller chat.
   what the model asked for is hidden. The style is baked into the header before it is wrapped
   (the `markdown.go` posture — `ansi.Wrap` is SGR-aware and `lipgloss.Width` strips ANSI), so the
   soft-wrap and sticky-header arithmetic are unperturbed. Presentation only. (`internal/tui`.)
-- **A batch of same-label tool calls is now one block, not five.** Five file reads used to render
-  as five separate headers, each with its own branch line and its own blank separator — a tall,
-  noisy column for what the reader thinks of as one action. Consecutive tool calls at the same
-  sub-agent depth carrying the same label now fold into a single block: one `✦ Read File` header,
-  then one `┝`/`┕` branch per call whose target is **padded to the group's widest** so the detail
-  column lines up (`┝ README.md 1 - 154` / `┝ TODO.md   1 - 408` / `┕ ISSUES.md 1 - 8`). Two
-  different tools sharing a label — a single and a multi find-and-replace are both "Edit File" —
-  do group, because the reader groups by what the header says, not by tool id. Anything between
-  two calls (narration, a note, an approval, an error) ends the run, and a call that cannot fit
-  one aligned branch line keeps its own block: several detail lines (a `Run` and its `… +N more
-  lines` remainder), a red/green diff detail, or no target at all. A member still waiting on its
-  result shows its bare target and nothing after it, and the whole block repaints once the result
-  folds in. A group of one is byte-identical to the single block it always was. **Grouping is
-  render-time only** — the transcript's append-only entry list, its call/result pairing, and the
-  open-call signal the status line reads are untouched, so a call arriving mid-stream joins its
-  group on the next repaint for free. Nothing is clipped for alignment's sake; an overlong branch
-  soft-wraps as before. Presentation only. (`internal/tui`.)
+- **A batch of same-label tool calls is now one block, not five — and every tool call takes that
+  same shape whether it is alone or in a batch.** Five file reads used to render as five separate
+  headers, each with its own branch line and its own blank separator — a tall, noisy column for
+  what the reader thinks of as one action. Consecutive tool calls at the same sub-agent depth
+  carrying the same label now fold into a single block: one `✦ Read File` header, then one
+  `┝`/`┕` branch per call whose target is **padded to the block's widest** so the detail column
+  lines up (`┝ README.md 1 - 154` / `┝ TODO.md   1 - 408` / `┕ ISSUES.md 1 - 8`). The header
+  carries **the label alone and never a target** — for a group, a lone call, a call still in
+  flight and the stray-result `result` header alike — and the target always leads the first
+  branch instead (`✦ Read File` / `┕ main.go 1 - 154`). That is what stops a block from visually
+  reshaping the moment a second call joins it: a block of one is byte-identical in shape to a
+  block of many, and growing one only ever *adds a line*. What a branch carries follows from how
+  much detail its call has, and nothing else: one detail follows the target on the branch; two or
+  more lay out **beneath** it at the branch marker's width rather than sprouting `┝`/`┕` branches
+  of their own (a `Run` and its `… +N more lines` remainder, a red/green diff body); an in-flight
+  call shows the bare target until its result lands; and a call with no target at all is the one
+  shape with no target line — the header stands alone and the details are the branches, as an
+  unregistered tool's pretty-printed arguments and a stray result still render. Two different
+  tools sharing a label — a single and a multi find-and-replace are both "Edit File" — do group,
+  because the reader groups by what the header says, not by tool id; anything between two calls
+  (narration, a note, an approval, an error) ends the run, and a call with several details, a diff
+  body, or no target keeps its own block. **Grouping is render-time only** — the transcript's
+  append-only entry list, its call/result pairing, and the open-call signal the status line reads
+  are untouched, so a call arriving mid-stream joins its group on the next repaint for free.
+  Nothing is clipped for alignment's sake; an overlong branch soft-wraps as before. Presentation
+  only. (`internal/tui`.)
 
 ## [1.5.0] — 2026-07-21
 

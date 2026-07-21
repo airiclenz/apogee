@@ -112,10 +112,21 @@
 // one empty line between blocks" holds; a tool header drops its square brackets for a bold-orange
 // label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
 // consecutive same-label calls at the same depth fold into one aligned block (toolCallRun /
-// groupable / renderToolGroup). Grouping is render-time only — the append-only entry list, the
-// call/result pairing, and transcript.hasOpenToolCall are untouched, so a call arriving mid-stream
-// joins its group on the next repaint. TestTranscriptLayoutGolden pins the whole rendered
-// scrollback.
+// groupable). Grouping is render-time only — the append-only entry list, the call/result pairing,
+// and transcript.hasOpenToolCall are untouched, so a call arriving mid-stream joins its group on
+// the next repaint.
+//
+// The shape a tool call takes is uniform, and one renderer draws it: [renderToolBlock] takes a
+// slice of [toolView] — a lone call is a slice of one — and emits a ✦ header carrying the **label
+// alone, never a target**, then one ┝/┕ branch per call led by that call's target
+// ([renderToolBranch]). A lone detail follows the target on its branch; two or more lay out
+// beneath it at the branch marker's width ([renderSubDetails]) rather than sprouting branches of
+// their own; an in-flight call shows the bare target; a call with no target at all is the one
+// shape with no target line, its details rendered as the branches themselves ([renderDetails] —
+// the stray-result and unregistered-tool fallbacks). So a block of one is byte-identical in shape
+// to a block of many and does not reshape when a second call joins it — the reason the standalone
+// and grouped paths were converged rather than kept in sync. TestTranscriptLayoutGolden pins the
+// whole rendered scrollback.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole

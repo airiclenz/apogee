@@ -10,29 +10,29 @@
   block, never two or three: the answer's own leading and trailing blank lines are
   trimmed off. Below there is the layout of a tool call.
 
-✦ Read File main.go
-  ┕ 1 - 154
+✦ Read File
+  ┕ main.go 1 - 154
 
 ✦ Read File
   ┝ README.md 1 - 154
   ┝ TODO.md   1 - 408
   ┕ ISSUES.md 1 - 8
 
-✦ Run go test ./...
-  ┝ ok      github.com/airiclenz/apogee/internal/tui      0.412s
-  ┕ … +2 more lines
+✦ Run
+  ┕ go test ./...
+    ok      github.com/airiclenz/apogee/internal/tui   0.412s
+    … +2 more lines
 
-✦ Update File main.go
-  ┕ +2 -2
+✦ Update File
+  ┕ main.go +2 -2
     098 - a code line that has been removed
-    099 - another code line that has been removed
     100 + a new code line
-    101 + another new code line
 
-✦ Sub Agent 3 Sub Agents
-  ┝ Sub Agent 1: Agent Name (= brief one line summary)
-  ┝ Sub Agent 2: Agent Name (= brief one line summary)
-  ┕ Sub Agent 3: Agent Name (= brief one line summary)
+✦ Sub Agent
+  ┕ 3 Sub Agents
+    Sub Agent 1: Agent Name (= brief one line summary)
+    Sub Agent 2: Agent Name (= brief one line summary)
+    Sub Agent 3: Agent Name (= brief one line summary)
 
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
@@ -52,11 +52,14 @@
 
 ## The rules behind the tool-call sketch
 
-**The label.** A tool header is `✦ ` plus the tool's label plus, on a standalone call, its
-target. The label carries no brackets and is rendered **bold in orange `#f0883e`** — the tone
-inline code and the auto-mode marker already use. The styling is uniform: a known friendly
-label ("Read File"), an unknown tool's raw name, and the stray-result `result` header all look
-the same. The bare-name-means-unregistered signal was the brackets' job and dies with them.
+**The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a
+target**. That holds for every block alike: a grouped run, a lone call, a call still in flight,
+and the stray-result `result` header. The target always leads the first branch line instead, so
+a block does not visually reshape the moment a second call joins it. The label carries no
+brackets and is rendered **bold in orange `#f0883e`** — the tone inline code and the auto-mode
+marker already use. The styling is uniform too: a known friendly label ("Read File"), an unknown
+tool's raw name, and `result` all look the same. The bare-name-means-unregistered signal was the
+brackets' job and dies with them.
 
 **What groups.** Consecutive tool calls at the same nesting depth carrying the same label fold
 into one block. Any entry between them — narration, a note, an approval, an error — breaks the
@@ -66,16 +69,29 @@ run. Two different tools that share a label (a single and a multi find-and-repla
 **What stays standalone.** A call is groupable when it has a target and at most one plain
 detail line — which includes an `error: …` line, and an in-flight call whose result has not
 landed yet. A call with several detail lines (the `Run` above, with its `… +N more lines`
-remainder), one with diff detail (the `Update File` above), or one with no target at all
-breaks the run and renders as its own block. A group of one is exactly today's single block,
-target on the header line.
+remainder), one with diff detail, or one with no target at all breaks the run and renders as its
+own block. It renders in the *same shape* it would have had inside a group, though: a block of
+one is byte-identical in shape to a block of many, which is the whole point of the header
+carrying no target.
 
-**The group's shape.** One header line carrying the label alone, then one branch line per
-member — `┝`, and `┕` for the last. Each branch shows the member's target padded with spaces
-to the widest target in the group, one space, then that member's single detail line, so the
-detail column lines up. An in-flight member shows its padded target and nothing after it; the
-whole block repaints when its result folds in. Anything too long soft-wraps under the branch
-like any other detail line — nothing is clipped for alignment's sake.
+**The block's shape.** One header line carrying the label alone, then one branch line per call —
+`┝`, and `┕` for the last. What a branch carries depends only on how much detail its call has:
+
+- **One detail line** — the branch is the target, one space, then that detail
+  (`┕ main.go 1 - 154`, `┕ main.go +2 -2`). Sub-content the detail itself carries — the diff body
+  under a `+2 -2` summary — indents beneath the branch.
+- **Two or more detail lines** — the branch carries the target alone and the details lay out
+  beneath it, indented to the branch marker's own width (the `Run` above). They are not `┝`/`┕`
+  branches of their own; only calls are.
+- **No detail yet** — an in-flight call shows the bare target and nothing after it; the whole
+  block repaints when its result lands.
+- **No target at all** — the one shape with no target line: the header stands alone and the
+  detail lines are themselves the `┝`/`┕` branches (an unregistered tool's pretty-printed
+  arguments, a stray `result`).
+
+Within a block, every target is padded with spaces to the widest target so the detail column lines
+up; a block of one pads to itself, which is no padding. Anything too long soft-wraps under its
+marker like any other detail line — nothing is clipped for alignment's sake.
 
 **Blank lines.** Exactly one empty line between blocks, never more. Assistant text is trimmed
 of its leading and trailing blank lines, and interior runs of two or more blank lines collapse

@@ -85,17 +85,21 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 // The tool header's label styling
 // ----------------------------------------------------------------------------
 
-// A tool header shows "Label target" with no brackets, and the label alone carries the
-// bold-orange style — baked in before the wrap, so the visible text is unaffected. The style
-// assertion is a loose contains against the theme's own render rather than a byte-exact
-// golden, so a lipgloss change cannot false-fail it; the guard above it catches the opposite
-// failure, a toolLabel role that paints nothing at all.
+// A tool header shows the label alone — no brackets and, now that the block shape is uniform, no
+// target either — and that label carries the bold-orange style, baked in before the wrap so the
+// visible text is unaffected. The style assertion is a loose contains against the theme's own
+// render rather than a byte-exact golden, so a lipgloss change cannot false-fail it; the guard
+// below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
 	th := newTheme()
-	head := renderToolBlock(th, toolView{Label: "Read File", Target: "main.go"}, 80)[0]
+	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80)
+	head := block[0]
 
-	if got, want := ansi.Strip(head), "✦ Read File main.go"; got != want {
-		t.Errorf("header text = %q; want %q (no brackets)", got, want)
+	if got, want := ansi.Strip(head), "✦ Read File"; got != want {
+		t.Errorf("header text = %q; want %q (no brackets, and never a target)", got, want)
+	}
+	if got, want := ansi.Strip(block[1]), "  ┕ main.go"; got != want {
+		t.Errorf("branch text = %q; want %q (the target leads the branch)", got, want)
 	}
 	styled := th.toolLabel.Render("Read File")
 	if styled == "Read File" {
@@ -211,22 +215,112 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 	}
 }
 
-// A run of one renders exactly as it always has — the target on the header line, its detail on a
-// lone ┕ branch — so a single call is never dressed up as a group of one.
-func TestRenderSingleCallUnchanged(t *testing.T) {
+// A lone call renders in the very shape a group does — label-only header, target leading the
+// branch — so the block does not reshape when a second call joins it. That is the whole point of
+// the uniform layout, and the ┕-with-no-padding is what "a group of one pads to itself" means.
+func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "main.go", "1", "154", 0)
 
-	th := newTheme()
-	want := renderToolBlock(th, tr.entries[0].tool, 80)
-	got := tr.renderLines(th, 80)
-	if len(got) != len(want) {
-		t.Fatalf("single call rendered %d lines; want %d (the plain single block)", len(got), len(want))
+	want := strings.Join([]string{
+		"✦ Read File",
+		"  ┕ main.go 1 - 154",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("single-call block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("line %d = %q; want %q (byte-identical to the single block)", i, got[i], want[i])
-		}
+
+	// …and a second call joins it by adding a line, not by moving the first one's target.
+	readCall(tr, "c2", "a-much-longer-name.go", "1", "9", 0)
+	want = strings.Join([]string{
+		"✦ Read File",
+		"  ┝ main.go               1 - 154",
+		"  ┕ a-much-longer-name.go 1 - 9",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("grown block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A standalone call with several detail lines keeps the same header and branch: the target owns
+// the branch alone and the details lay out beneath it at the branch marker's width — they are not
+// ┝/┕ branches of their own, because only calls are (layout.md's Run sketch).
+func TestRenderMultiDetailStandalone(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID:  "c1",
+		Content: "ok   apogee/internal/tui   0.412s\nok   apogee/internal/agent   1.203s\nPASS\n",
+	}})
+
+	want := strings.Join([]string{
+		"✦ Run",
+		"  ┕ go test ./...",
+		"    ok   apogee/internal/tui   0.412s",
+		"    … +2 more lines",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("multi-detail block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A diff-detail call takes the same multi-detail shape — target on the branch, body beneath — and
+// the body keeps its red/green colouring, which is why it can never fold into a group.
+func TestRenderDiffDetailStandalone(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "- a removed line\n+ an added line"}})
+
+	want := strings.Join([]string{
+		"✦ View Diff",
+		"  ┕ main.go",
+		"    - a removed line",
+		"    + an added line",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("diff block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	th := newTheme()
+	lines := tr.renderLines(th, 80)
+	if got, want := lines[2], th.diffRemoved.Render("    - a removed line"); got != want {
+		t.Errorf("removed line = %q; want the diffRemoved style %q", got, want)
+	}
+	if got, want := lines[3], th.diffAdded.Render("    + an added line"); got != want {
+		t.Errorf("added line = %q; want the diffAdded style %q", got, want)
+	}
+}
+
+// A call whose result has not landed shows the bare target on its branch and nothing after it —
+// the same line it will keep once the detail arrives beside it.
+func TestRenderInFlightStandalone(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
+
+	want := strings.Join([]string{
+		"✦ Read File",
+		"  ┕ main.go",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("in-flight block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// The one shape with no target line: an unregistered tool has nothing to lead a branch with, so
+// the header stands alone and its verbatim pretty-printed arguments are themselves the ┝/┕
+// branches — nothing about what the model asked for is hidden.
+func TestRenderNoTargetStandalone(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
+
+	want := strings.Join([]string{
+		"✦ mcp_thing",
+		"  ┝ {",
+		`  ┝   "a": 1`,
+		"  ┕ }",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
@@ -248,15 +342,16 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c3", "b.go", "1", "9", 0)
 			},
 			want: []string{
-				"✦ Read File a.go",
-				"  ┕ 1 - 5",
+				"✦ Read File",
+				"  ┕ a.go 1 - 5",
 				"",
-				"✦ Run go test",
-				"  ┝ ok",
-				"  ┕ … +2 more lines",
+				"✦ Run",
+				"  ┕ go test",
+				"    ok",
+				"    … +2 more lines",
 				"",
-				"✦ Read File b.go",
-				"  ┕ 1 - 9",
+				"✦ Read File",
+				"  ┕ b.go 1 - 9",
 			},
 		},
 		{
@@ -267,13 +362,13 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c2", "b.go", "1", "9", 0)
 			},
 			want: []string{
-				"✦ Read File a.go",
-				"  ┕ 1 - 5",
+				"✦ Read File",
+				"  ┕ a.go 1 - 5",
 				"",
 				"· approval allow: read_file",
 				"",
-				"✦ Read File b.go",
-				"  ┕ 1 - 9",
+				"✦ Read File",
+				"  ┕ b.go 1 - 9",
 			},
 		},
 		{
@@ -283,13 +378,13 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c2", "b.go", "1", "9", 1)
 			},
 			want: []string{
-				"✦ Read File a.go",
-				"  ┕ 1 - 5",
+				"✦ Read File",
+				"  ┕ a.go 1 - 5",
 				"",
 				"│ ⤷ sub-agent",
 				"",
-				"│ ✦ Read File b.go",
-				"│   ┕ 1 - 9",
+				"│ ✦ Read File",
+				"│   ┕ b.go 1 - 9",
 			},
 		},
 		{
@@ -300,8 +395,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "[File: ?, 1 lines total, showing lines 1-1]"}})
 			},
 			want: []string{
-				"✦ Read File a.go",
-				"  ┕ 1 - 5",
+				"✦ Read File",
+				"  ┕ a.go 1 - 5",
 				"",
 				"✦ Read File",
 				"  ┕ 1 - 1",
@@ -326,11 +421,13 @@ func TestRenderGroupBreakers(t *testing.T) {
 // TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
 // a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
 // output is too rich to group, an approval note, and a sub-agent read — as an exact line sequence,
-// blank lines included. It is the backstop across the three layout changes rather than a test of
-// any one of them: the blank-line hygiene shows as the single empty row between every block, the
-// bracketless bold-orange label as the header text, and the grouping as the one aligned Read File
-// block. A regression in any of them changes this golden, and the golden doubles as the living
-// example of what layout.md sketches.
+// blank lines included. It is the backstop across the layout changes rather than a test of any one
+// of them: the blank-line hygiene shows as the single empty row between every block, the
+// bracketless bold-orange label as the header text, the grouping as the one aligned Read File
+// block, and the uniform shape as the fact that every header here — grouped, standalone, railed —
+// is a label and nothing else, with the target always leading a branch. A regression in any of
+// them changes this golden, and the golden doubles as the living example of what layout.md
+// sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
 	tr := &transcript{}
 	tr.addUser("read the docs, then run the tests", nil)
@@ -357,16 +454,17 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"  ┝ TODO.md   1 - 408",
 		"  ┕ ISSUES.md 1 - 8",
 		"",
-		"✦ Run go test ./...",
-		"  ┝ ok   apogee/internal/tui     0.412s",
-		"  ┕ … +2 more lines",
+		"✦ Run",
+		"  ┕ go test ./...",
+		"    ok   apogee/internal/tui     0.412s",
+		"    … +2 more lines",
 		"",
 		"· approval allow: terminal",
 		"",
 		"│ ⤷ sub-agent",
 		"",
-		"│ ✦ Read File main.go",
-		"│   ┕ 1 - 154",
+		"│ ✦ Read File",
+		"│   ┕ main.go 1 - 154",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("transcript layout mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)

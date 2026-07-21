@@ -87,8 +87,8 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 		"",
 		"✦ Let me read it.",
 		"",
-		"✦ Read File main.go",
-		"  ┕ 1 - 1",
+		"✦ Read File",
+		"  ┕ main.go 1 - 1",
 		"",
 		"✦ It is a Go file.",
 	}, "\n")
@@ -275,7 +275,8 @@ func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Reading it.",
 		"",
-		"✦ Read File main.go",
+		"✦ Read File",
+		"  ┕ main.go",
 	}, "\n")
 	if got := plainRender(tr); got != want {
 		t.Errorf("narration mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)

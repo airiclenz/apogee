@@ -13,10 +13,11 @@ import (
 // Tool presentation (P2.7 — TUI presentation pass)
 // ----------------------------------------------------------------------------
 //
-// This file turns a tool call+result into a compact, human-facing view: a friendly label
-// and a target on the header line (✦ Read File main.go), and a one-line summary hanging
-// off a tree branch (┕ 1 - 100). It is pure — no lipgloss, no I/O — so it is trivially
-// table-testable (TestPresentToolCall); render.go owns the styling.
+// This file turns a tool call+result into a compact, human-facing view: a friendly label for
+// the header line (✦ Read File), the target that leads the branch beneath it, and the one-line
+// summary that follows the target on that branch (┕ main.go 1 - 100). It is pure — no lipgloss,
+// no I/O — so it is trivially table-testable (TestPresentToolCall); render.go owns the styling
+// and the block shape.
 //
 // The label+extractor map is an OPEN, name-keyed registry, not a closed switch: the Phase-3
 // tool fan-out (P3.7–P3.11, ~30 tools, ADR 0002) adds one entry per tool (terminal→"Run",
@@ -38,8 +39,9 @@ const (
 	detailDiffRemoved
 )
 
-// detailLine is one branch line under a tool header — a short summary (detailPlain) or, once
-// an edit tool exists, a red/green diff line (detailDiffAdded/detailDiffRemoved).
+// detailLine is one line of a tool call's outcome — a short summary (detailPlain) or a
+// red/green diff line (detailDiffAdded/detailDiffRemoved). A lone detail follows the target on
+// its branch line; several lay out beneath it (render.go owns that shape).
 type detailLine struct {
 	Kind detailKind
 	Text string
@@ -262,7 +264,8 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult) {
 // ----------------------------------------------------------------------------
 
 // stringArg returns a target extractor that reads one string argument by key. A missing or
-// non-string value yields the empty target (the header then shows just the label).
+// non-string value yields the empty target (the block then has no target line at all — its
+// details are the branches themselves).
 func stringArg(key string) func(map[string]any) string {
 	return func(args map[string]any) string {
 		if v, ok := args[key].(string); ok {
@@ -274,7 +277,7 @@ func stringArg(key string) func(map[string]any) string {
 
 // firstLineArg returns a target extractor for a possibly multi-line string argument (a
 // commit message, a Python script, a sub-agent task): the first line, clipped, so the
-// header shows the gist without flooding a row.
+// branch shows the gist without flooding a row.
 func firstLineArg(key string) func(map[string]any) string {
 	return func(args map[string]any) string {
 		if v, ok := args[key].(string); ok {
