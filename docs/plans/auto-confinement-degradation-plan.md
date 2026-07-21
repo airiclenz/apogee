@@ -443,7 +443,27 @@ to test files + CHANGELOG. Commit: `test: end-to-end auto-degradation notice, /c
 
 ---
 
-## 10. Docs closeout (owning item for the residue)
+## 10. Docs closeout (owning item for the residue) — ✅ DONE (2026-07-21)
+
+NOTES (2026-07-21): four deviations from the item's literal text, all docs-only.
+(a) **The README had no command list to add `/confine` to** — it never documented the chat
+mini-language at all. This item created one (`## In-chat commands`, the five parser verbs plus
+`/skill` and `@file`, taken from `knownCommands`/`commandMenu`) so the item's "document `/confine`
+in the command list" has somewhere true to land. (b) The Auto-mode paragraph corrected in `ac3b856`
+still read *true* but read *Windows-only*, which is the very misreading this plan exists to fix: it
+now also names the case where the facility is missing rather than unimplemented (containers,
+`ENOSYS`), as do the Key-capabilities bullet and the closing Note. (c) `defaults/config.yaml`'s
+`mode:` block claimed auto "needs OS filesystem confinement on the host" — false against shipped
+behaviour (auto runs and gates), so it was corrected, and a `/confine off --save` cross-reference
+was added beside `confine-to-workspace` so no user-facing doc leaves hand-editing as the only
+route. The `unconfined-hosts:` example comment was left verbatim: `cmd/apogee/configwrite_test.go:83`
+pins that exact line as a golden, and this item's diff is docs-only. (d) The `[Unreleased]`
+CHANGELOG block did **not** read as one feature — eight bullets in item order, four of them
+carrying implementation-sequencing language ("the chat surface lands next", "the writer itself
+lands next", "Internal groundwork only — nothing reads it yet"), which is meaningless to a reader
+of the released version. Consolidated per the item's own instruction into a preamble stating the
+feature and the no-breaking-change call, plus six bullets grouped by what shipped rather than by
+work item; the end-to-end test bullet folded into the preamble.
 
 The single owner of every remaining doc edit — no earlier item may do these:
 

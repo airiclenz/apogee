@@ -318,90 +318,51 @@ needs its own grill and bench evidence — deliberately not a rider on the decom
 
 ---
 
-## Auto-mode confinement degradation is silent
+## Auto-mode confinement degradation is silent — CLOSED (notice + `/confine` + host acknowledgement shipped)
 
-**Status:** filed 2026-07-21 (owner hit it in a Linux container); scope extended the same day
-(owner) from a passive notice to a **notice + an offer to apply the fix**. Post-`v1.4.0`,
-**additive** — a startup notice, an interactive accept path, and a config write. No behaviour
-change to the resolution ladder itself.
+**Status:** CLOSED 2026-07-21 (filed, designed, and implemented the same day —
+`docs/plans/auto-confinement-degradation-plan.md`, items 1–10; ADR 0012 amendment 2026-07-21).
+Post-`v1.4.0`, **additive**: a startup notice, an in-place accept path, and a config write. The
+resolution ladder is unchanged.
 
-**The symptom:** you select Auto, Auto is entered, and then every `terminal` call raises an
-Approval prompt — with nothing anywhere explaining why. It reads as "Auto is broken."
+**What was wrong:** `resolveLadderAuto` sends a subprocess tool to `Confine` when the backend can
+fence it and to `Gate` when it cannot — ADR 0012's *"confine if you can, gate if you can't"*. On a
+host reporting `Capabilities().FSWrite == false` that is an Approval prompt on **every** terminal
+command, and nothing said so, so Auto read as broken. It is the *common* case, not an edge one:
+`landlock_create_ruleset` returns **`ENOSYS`** in most containers regardless of kernel version
+(verified on 6.18.15, well past the 5.13 floor).
 
-**The mechanism (working as designed):** `resolveLadderAuto` (`internal/agent/resolution.go`)
-sends `classSubprocess` to `Confine` when `fsConfineAvailable`, else to `Gate` — ADR 0012's
-**"confine if you can, gate if you can't"**. On a host whose backend reports
-`Capabilities().FSWrite == false`, that is a gate on every command. This is *correct*: Auto's
-promise is unsupervised-but-**bounded**, and an unfenceable subprocess cannot be bounded, so it
-must fall back to supervision rather than silently running unconfined.
+**What shipped:**
 
-**Why it bites now:** `landlock_create_ruleset` returns **`ENOSYS`** in most containers and many
-VMs — the kernel version is irrelevant (verified 2026-07-21 on kernel 6.18.15, well past the
-5.13 floor: `NewConfiner()` → `*landlockConfiner`, `FSWrite=false`, errno 38). The landlock ABI
-probe is correct; the facility is simply absent. So the "degraded" path is the *common* path for
-containerised users, not an exotic edge case.
+1. **The capability-aware startup notice** (`cmd/apogee/wire.go`) — fires only on the one cell that
+   warrants it (Auto **and** confinement asked for **and** `FSWrite == false`), names the backend
+   and the consequence, and is worded as the ladder working, never as a malfunction.
+2. **`/confine`** — `status` reports the backend, its capabilities, the host id, and the effective
+   setting; `off` / `on` swap Auto's blast radius for the running session through
+   `Agent.SetConfineToWorkspace`; `off --save` also persists. A slash command was chosen over a
+   startup y/N prompt or an extra Approval choice precisely to keep the accept away from the moment
+   of peak frustration (the click-through-consent trap).
+3. **`unconfined-hosts:`** — the host-scoped acknowledgement, resolving the open scope question in
+   favour of *host*: `confine-to-workspace` keeps its global meaning, while "this machine is
+   disposable" is recorded per machine against `platform.HostID()`, so a throwaway container's
+   acknowledgement never follows `~/.apogee/config.yaml` onto a laptop.
+4. **A comment-preserving config writer** — `--save` splices the entry as text guided by the parsed
+   node positions (never unmarshal→marshal, which would delete the template's documentation),
+   idempotent, atomic, mode-preserving, and re-parse-verified before the write.
 
-**The actual defect — no notice.** `internal/agent/loop.go` refuses Auto only when
-`cfg.Confiner == nil`; a present-but-incapable backend enters Auto with no warning, and
-`cmd/apogee` emits nothing at startup (grepped 2026-07-21: no degrade notice exists). The user
-has no way to learn the backend is inert short of reading ADR 0012.
+**The constraint that must keep holding:** do **not** loosen the ladder. `resolveLadderAuto` must
+never auto-run unconfined subprocesses on its own initiative when the backend is incapable — that
+reintroduces the "unsupervised *and* unbounded" hole ADR 0004/0012 forbid, *without the user ever
+choosing it*. What shipped is the tool making the user's own decision reachable, never the tool
+deciding.
 
-**What to build:**
+**Deliberately deferred residue (the only parts still open):**
 
-1. **A startup notice when Auto is entered with `FSWrite == false`** — name the active backend,
-   what it can and cannot enforce, the concrete consequence ("terminal commands will ask for
-   approval"), and the `confine-to-workspace: false` opt-in. One line, not a wall.
-2. **An offer to apply that opt-in, in place** (owner, 2026-07-21). The user should not have to
-   leave the tool, find `~/.apogee/config.yaml`, and learn a key name to get the Auto they asked
-   for. The notice offers it; accepting writes the setting. See the constraints below — this is
-   the part that needs care, because the accept is a **real reduction in enforcement**, not a
-   preference toggle.
-3. **Surface it in the TUI too**, not just stderr — this is exactly the class of thing the
-   parked validated-set in-transcript banner work (deferred follow-up 04) should carry. Reuse the
-   existing Approval seam for the prompt rather than inventing a second interaction path.
-4. **Consider `apogee probe`** — already scoped for merge-plan Phase 5. Reporting the confinement
-   backend and its capability matrix is a natural first subcommand and makes this diagnosable
-   without running an agent at all.
-
-**The constraints that make the offer safe + shippable (must hold when we build it):**
-
-1. **Tell the truth about what is being traded.** The prompt must state the blast radius —
-   accepting means Auto runs **every** command unfenced, with the user's full privileges, able to
-   write anywhere on the machine — and must **not** be worded as repairing a malfunction
-   ("fix Auto", "enable Auto properly"). Nothing is broken; the user is choosing to drop a
-   guarantee because their environment is disposable. Wording that implies otherwise manufactures
-   consent.
-2. **No default-yes, no enter-to-accept, no remembered "always".** The accept needs a distinct,
-   affirmative action. This prompt appears exactly when the user is frustrated and primed to
-   dismiss anything in their way — which is the classic click-through-consent trap. ADR 0012 made
-   this flag an *explicit* acknowledgement on purpose; an offer may lower the friction of finding
-   it, never the deliberateness of choosing it.
-3. **Offer session-scoped before persistent.** "Just this session" is the lower-blast-radius
-   answer and should be the prominent one; persisting to `~/.apogee/config.yaml` is the heavier
-   choice and should read that way.
-4. **A config write is visible and reversible.** Name the file written, the key set, and how to
-   undo it. Never silently rewrite the user's config; preserve their comments and formatting
-   (the file is hand-edited and auto-seeded from the embedded template — see
-   `cmd/apogee/defaults/config.yaml`). Note the writer cannot just substitute a value: in the
-   seeded template the key ships **commented out** (`# confine-to-workspace: true`, line ~45), so
-   the write has to insert or uncomment it — and must stay correct against a config the user has
-   since reordered or rewritten. A round-trip-preserving edit, or an explicit "add this line"
-   diff shown for confirmation, beats a naive YAML re-marshal that would flatten the template's
-   extensive explanatory comments.
-5. **Decide the scope of the acknowledgement — open design question.** `confine-to-workspace` is
-   **global**, but the claim being acknowledged ("this machine is disposable") is **host-specific**.
-   A user who accepts on a throwaway container and later runs apogee on their laptop carries the
-   loosened setting with them, silently, into an environment where it is false and dangerous.
-   Since `~/.apogee` is a single uniform dotdir on every OS, a global flip is both the easy path
-   and the risky one. Resolve before building: host/workspace-scoped acknowledgement, or a
-   re-confirm when the host fingerprint changes, or accept the global flip with eyes open.
-6. **Only offer where it is warranted** — Auto actually selected *and* `FSWrite == false`. Never a
-   general startup nag, and never in the other three modes, which make no confinement promise.
-
-**Explicitly NOT the fix:** do not loosen the **ladder** — `resolveLadderAuto` must never
-auto-run unconfined subprocesses on its own initiative when the backend is incapable. That
-reintroduces the "unsupervised *and* unbounded" hole ADR 0004/0012 forbid, and it would do so
-*without the user ever choosing it*. Note this is **not** in tension with the offer above: the
-sanctioned blanket loosen remains `confine-to-workspace: false`, and that is exactly what the
-offer applies. What is forbidden is the tool deciding to loosen; what is being added is the tool
-making the user's own decision easier to reach and harder to misunderstand.
+- **Surfacing the startup notice in the transcript, not just stderr.** `/confine status` renders in
+  the transcript, but the startup notice is stderr-only (it is printed pre-alt-screen, like every
+  other startup notice). Folding it into the UI belongs to the parked validated-set in-transcript
+  banner work (deferred follow-up 04) — this plan explicitly did **not** build a banner framework.
+- **`apogee probe`** — reporting the confinement backend and its capability matrix as a subcommand,
+  diagnosable without running an agent. Already scoped as merge-plan **Phase 5** work; it needs the
+  Phase-5 CLI structure that does not exist yet. `/confine status` covers the need from inside the
+  TUI in the meantime.

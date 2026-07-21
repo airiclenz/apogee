@@ -30,7 +30,10 @@
 #   allow-edits — Apogee's own workspace edits run without asking; shell/exec, network, MCP,
 #                 and any out-of-workspace write still gate (needs no confinement)
 #   auto        — also runs the unbounded shell/subprocess surface unsupervised, fenced by
-#                 confine-to-workspace below; needs OS filesystem confinement on the host
+#                 confine-to-workspace below. Where the host offers no OS filesystem
+#                 confinement (Windows today; most containers, where landlock reports
+#                 ENOSYS), those commands ask for approval instead of running unfenced —
+#                 apogee says so at startup and /confine off is the opt-out
 #   flag: --mode       env: APOGEE_MODE
 # mode: ask-before
 
@@ -42,6 +45,8 @@
 #   false  — "I am the sandbox": nothing is fenced and nothing asks, EXCEPT the dangerous-
 #            action guard floor. Safe ONLY inside a VM/container — your responsibility. Prints
 #            a warning every session.
+# See also unconfined-hosts: below — the same loosen scoped to ONE machine, which the
+# `/confine off --save` command records for you rather than making you edit this by hand.
 # confine-to-workspace: true
 
 # Machines you have acknowledged as disposable: on a host listed here, auto mode runs
@@ -55,8 +60,9 @@
 # stays on. An id naming another machine is simply "not this host" — never an error, since
 # the list is meant to accumulate. An entry with no id is skipped with a startup notice.
 #
-# The id is `<hostname>-<6 hex characters of a hash of the machine identifier>`; apogee
-# reports this host's id, and `/confine off --save` appends the entry below for you. It is a
+# The id is `<hostname>-<6 hex characters of a hash of the machine identifier>`; the
+# `/confine` command reports this host's id, and `/confine off --save` appends the entry
+# below for you (this file's comments and formatting survive the write). It is a
 # safety INTERLOCK, not authentication: it stops an acknowledgement made on a throwaway
 # container from silently following this file onto your laptop. It does not resist forgery,
 # and it fails closed — a machine whose identifier changed is simply confined again.

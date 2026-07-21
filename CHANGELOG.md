@@ -8,127 +8,110 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+Post-`v1.5.0`, **additive** (minor) — one feature, end to end: **Auto mode no longer degrades in
+silence.** On a host that cannot fence a subprocess, ADR 0012's ladder ("confine if you can, gate
+if you can't") sends every terminal command to Approval. That is correct, and it is the *common*
+case rather than an exotic one — `landlock_create_ruleset` returns **`ENOSYS`** in most containers
+whatever the kernel version — but nothing anywhere said so, so Auto simply read as broken
+(`ISSUES.md`, 2026-07-21). Apogee now says so at startup, and offers the decision as a command:
+`/confine off` for this session, `/confine off --save` to record *this machine* as disposable in
+`~/.apogee/config.yaml` — a **host-scoped** acknowledgement, so a throwaway container's "I am the
+sandbox" never follows the config file onto a laptop. **The ladder itself is untouched** and
+auto-loosening stays forbidden: what shipped is visibility plus a signposted route to a decision
+only the user may take (ADR 0012, amendment 2026-07-21). **No breaking change** — the public facade
+(`apogee.go`) only *gains* methods, `Agent.SetConfineToWorkspace` / `Agent.ConfineToWorkspace`
+(additive ⇒ **minor**, the same shape as the `Budget` methods in `v1.4.0`); nothing exported is
+removed or re-typed. The whole journey is pinned by an acceptance test driven against a Confiner
+that reports no filesystem confinement, so it reproduces identically on a machine that *can* fence.
+
 ### Added
 
-- **`platform.HostID()` — the machine interlock behind the host-scoped confinement
-  acknowledgement.** A stable per-machine id shaped `<sanitized hostname>-<first 6 hex of
-  sha256(machine identifier)>` (e.g. `devbox-a1b2c3`), where the identifier is the first available
-  of `/etc/machine-id`, `/var/lib/dbus/machine-id`, else the hostname itself — no shelling out, so
-  it stays dependency-free and correct on hosts (and future Windows builds) where neither file
-  exists. It is what an `unconfined-hosts:` entry will be matched against, so an acknowledgement
-  made on a disposable container cannot silently follow `~/.apogee/config.yaml` onto a laptop
-  (ADR 0012, amendment 2026-07-21). It is a **safety interlock, not an authentication mechanism**:
-  it stops an acknowledgement travelling between machines unnoticed, it does not resist forgery,
-  and it fails closed — an ephemeral container with a fresh machine-id per run simply does not
-  match its stored entry and is confined again. The value is deterministic within a process and
-  across runs, never empty (a failing `os.Hostname()` yields `unknown-<hash>`), and restricted to
-  `[A-Za-z0-9_.-]` so it is safe as an unquoted YAML scalar. Internal groundwork only — nothing
-  reads it yet. (`internal/platform`.)
-- **`unconfined-hosts:` — the host-scoped confinement acknowledgement.** A new global-config-only
-  list in `~/.apogee/config.yaml` recording *which machines* you have acknowledged as disposable,
-  so Auto may run unconfined **there** without that claim following the file onto every other host
-  (ADR 0012, amendment 2026-07-21). Each entry carries an `id` (matched against
-  `platform.HostID()`), plus a free-form `acknowledged` date and `note` for the human reading the
-  file back later. Resolution runs in the order the ADR fixes: an explicit
-  `confine-to-workspace: false` still wins and still means *every* host (it is unchanged and not
-  deprecated); else an entry naming **this** machine yields an effective `false`; else the secure
-  default `true`. An explicit `confine-to-workspace: true` does not veto a matching entry — the
-  flag states the global default, the entry states a fact about one machine, and the more specific
-  claim wins. Like the flag, the list is settable **only** from the global config file — no flag,
-  no environment variable — so a hostile repo's invocation environment cannot name your host. An
-  id matching no machine is simply "not this host", never an error (the list is meant to
-  accumulate machines), and an entry with no `id` is skipped with one startup notice rather than
-  blocking the run. The template `config.yaml` documents the block beside
-  `confine-to-workspace`. (`cmd/apogee`.)
 - **A startup notice when Auto degrades to approval on an unfenceable host.** Entering `--mode
   auto` with confinement asked for (the default) on a host whose Confiner backend reports
   `FSWrite == false` now prints one stderr notice naming the backend, saying plainly that commands
-  cannot be fenced here and therefore fall back to Approval, and pointing at `/confine off`
-  (this session) and `/confine off --save` (remember this host). This is the *common* case in
-  containers, where `landlock_create_ruleset` returns `ENOSYS` regardless of kernel version: the
-  ladder was already doing the right thing — ADR 0012's "confine if you can, gate if you can't" —
-  but silently, so Auto read as broken when it asked to approve every terminal command. **Nothing
-  about the ladder changes**; the notice is visibility plus a signposted route to the user's own
-  decision, never the tool loosening anything by itself. It is the mirror of the existing
-  unconfined-Auto warning and the two never both fire; the three lower modes make no confinement
-  promise and stay silent. (`cmd/apogee`.)
-- **`Agent.SetConfineToWorkspace` / `Agent.ConfineToWorkspace` — Auto's blast radius is now a
-  live, runtime-swappable setting.** `confine-to-workspace` was read from the construction Config
-  on every tool call, so changing it meant restarting Apogee. It is now a live field on the Agent
-  — seeded from `Config.ConfineToWorkspace`, read by the per-call Resolution through the
-  accessor, and swappable at any time — exactly mirroring the `SetMode`/`Mode` pair behind
-  Shift+Tab. Both methods are goroutine-safe (their own `RWMutex`, a sibling of `modeMu`), so the
-  UI may toggle while the worker is mid-Step; the change lands on the **next** tool call with no
-  rebuild and no registry churn. A sub-agent spawned after a toggle inherits the parent's live
-  value, as it already did for the mode; one already mid-flight keeps what it was spawned with,
-  so a toggle can neither loosen nor tighten a running delegation. The toggle changes only the
-  running Session — nothing is written to disk — and **the ladder itself is untouched**: the
-  engine never flips the flag on its own initiative, it only carries out the user's explicit act
-  (ADR 0012, amendment 2026-07-21). This is the engine half of the `/confine` command; the chat
-  surface lands next. **No breaking change** — `apogee.Agent` is an alias of `agent.Agent`, so the
-  public surface only *gains* methods (additive ⇒ **minor**, the same shape as the `Budget`
-  methods in `v1.4.0`); nothing exported is removed or re-typed and no facade edit was needed.
-  (`internal/agent`.)
-- **`/confine` — the chat mini-language's blast-radius verb.** The TUI parser now recognises
-  `/confine [status]` (report the backend, its capabilities, and the effective setting),
-  `/confine off` (run Auto unconfined **for this session only** — nothing is written),
-  `/confine off --save` (and remember this host in `~/.apogee/config.yaml`), and `/confine on`
-  (re-enable confinement). It is the first verb that takes arguments, so `matchCommand` now hands
-  them to the parser and `parseConfine` owns the grammar; the `/` autocomplete menu offers
-  `/confine`, and `Engine` gained `SetConfineToWorkspace` beside `SetMode`. An argument the
-  grammar does not understand — an unknown subcommand, an unknown flag, or a `--save` that is not
-  persisting an `off` — is a parse **error carrying the usage line**, never a silent no-op: the
-  one command that can widen what Auto may touch must never leave a user believing a mistyped
-  line took effect. This lands the surface; the routing and the confirmation wording follow.
-  (`internal/tui`.)
-- **`/confine` now acts: the session toggle and the status report.** `/confine off` and
-  `/confine on` swap Auto's blast radius on the running Agent — synchronous and idle-safe like
-  `/clear`, taking effect on the next tool call — and each records a transcript confirmation that
-  states the radius in plain words (`off` → "auto runs every command unfenced, with your full
-  privileges") and says whether it was session-only or written to disk. `/confine` (or
-  `/confine status`) reports the backend, what it can actually enforce here, the host id an
-  `unconfined-hosts:` entry is matched against, and the effective setting — read live off the
-  Agent, so it reflects an earlier toggle — and only on the host that prompts the question (Auto,
-  confined, no fs-write fencing) does it close with the two remedy lines. Turning confinement
-  **off** where it works, or off when it is already off, is allowed and simply says so: it is a
-  legitimate choice, just not the degraded case. Nothing here is worded as fixing a malfunction,
-  because nothing is broken — a host that cannot fence is ADR 0012's ladder working as specified.
-  `/confine off --save` drives the binary's config writer through a new `Options` seam and names
-  the file it wrote and how to undo it; the writer itself lands next, and until it does `--save`
-  says plainly that nothing was written while the session toggle still stands. (`internal/tui`,
-  plus the composition root handing the TUI the backend/capability/host-id facts it must not
-  derive itself.)
-- **`/confine off --save` now writes — a comment-preserving config writer.** The `--save` half is
-  wired: it appends this host's `unconfined-hosts:` entry (id, today's date, and a note saying
-  what put the line there and that deleting it re-confines the machine) to
-  `~/.apogee/config.yaml`, and reports the file back so the confirmation can name it. Your config
-  survives intact. The file is edited as **text**, guided by the parsed node positions, never
-  round-tripped through unmarshal→marshal: `yaml.v3` hangs comments off nodes, and the seeded
-  template is *entirely* comments — it parses to no nodes at all — so a re-marshal would have
-  handed you back a file with one setting in it and every word of documentation deleted. Comments,
-  key order, indentation, and your own edits come back byte-identical. Because the key ships
-  commented out, the writer **inserts** rather than substitutes: it appends to an existing list
-  (matching that list's own indentation), starts one under a bare `unconfined-hosts:` key, or adds
-  a documented block at the end of the file — so it stays correct against a config you have since
-  reordered or rewritten by hand. Saving the same host twice records it once (the second call
-  reports the entry already on disk and writes nothing). An absent config is seeded from the
-  embedded template first, so `--save` never leaves a bare fragment where a documented file
-  belongs. The write is atomic (temp + rename in the same directory) and preserves the file's
-  mode, since a config may hold endpoint details. Every splice is re-parsed and compared against
-  the original *before* anything is written — the result must be the old list plus exactly this
-  entry, with no other setting touched — so an exotic file shape (a flow-style list, a second YAML
-  document apogee would never read) is refused with a "add the entry by hand" message rather than
-  quietly mangled, and a failed write surfaces as an error instead of a save that did not happen.
-  (`cmd/apogee`.)
-- **The whole loop is pinned end to end on a simulated incapable host.** One acceptance test now
-  walks the journey this release exists for, against a Confiner that reports no filesystem
-  confinement (so it reproduces identically on a machine that *can* fence): a real Auto Agent
-  gates its terminal command through Approval while the degradation notice is produced; the
-  `/confine off` seam makes the very next terminal command run ungated with no restart;
-  `/confine off --save`, driven through the composition root's own wiring, records this machine in
-  `config.yaml`; and a fresh resolution over that file comes back unconfined **here** and confined
-  — notice and all — under any other host id. That last step is the one that would fail if the
-  acknowledgement were ever made global again. (test-only.)
+  cannot be fenced here and therefore fall back to Approval, and pointing at `/confine off` (this
+  session) and `/confine off --save` (remember this host). Nothing is worded as repairing a
+  malfunction, because nothing is broken — a host that cannot fence is the ladder working as
+  specified. It is the mirror of the existing unconfined-Auto warning and the two never both fire;
+  the three lower modes make no confinement promise and stay silent, so this is never a general
+  startup nag. (`cmd/apogee`.)
+- **`/confine` — report and change Auto's blast radius from the chat.** A new verb in the TUI
+  mini-language, and the first one that takes arguments: `/confine` (or `/confine status`) reports
+  the backend, what it can actually enforce here, the host id an acknowledgement is matched
+  against, and the effective setting — read live, so it reflects an earlier toggle — closing with
+  the two remedy lines only on the host that prompts the question (Auto, confined, no fs-write
+  fencing). `/confine off` and `/confine on` swap the blast radius on the running Agent,
+  synchronous and idle-safe like `/clear` and taking effect on the next tool call, each recording a
+  transcript confirmation that states the radius in plain words (`off` → "auto runs every command
+  unfenced, with your full privileges") and says whether it was session-only or written to disk.
+  Turning confinement off where it works, or off when it is already off, is allowed and simply says
+  so: a legitimate choice, just not the degraded case. An argument the grammar does not understand
+  — an unknown subcommand, an unknown flag, or a `--save` that is not persisting an `off` — is a
+  parse **error carrying the usage line**, never a silent no-op: the one command that can widen what
+  Auto may touch must never leave a user believing a mistyped line took effect. A slash command was
+  chosen over a startup y/N prompt or an extra choice on the Approval prompt precisely to keep the
+  accept away from the moment of peak frustration. (`internal/tui`, plus the composition root
+  handing the TUI the backend/capability/host-id facts it must not derive itself.)
+- **`Agent.SetConfineToWorkspace` / `Agent.ConfineToWorkspace` — Auto's blast radius is now a live,
+  runtime-swappable setting.** `confine-to-workspace` was read from the construction Config on every
+  tool call, so changing it meant restarting Apogee. It is now a live field on the Agent — seeded
+  from `Config.ConfineToWorkspace`, read by the per-call Resolution through the accessor, and
+  swappable at any time — exactly mirroring the `SetMode`/`Mode` pair behind Shift+Tab. Both methods
+  are goroutine-safe (their own `RWMutex`, a sibling of `modeMu`), so the UI may toggle while the
+  worker is mid-Step; the change lands on the **next** tool call with no rebuild and no registry
+  churn. A sub-agent spawned after a toggle inherits the parent's live value, as it already did for
+  the mode; one already mid-flight keeps what it was spawned with, so a toggle can neither loosen
+  nor tighten a running delegation. The toggle changes only the running Session — nothing is written
+  to disk — and the engine never flips the flag on its own initiative; it only carries out the
+  user's explicit act. (`internal/agent`.)
+- **`unconfined-hosts:` — the host-scoped confinement acknowledgement.** A new global-config-only
+  list in `~/.apogee/config.yaml` recording *which machines* you have acknowledged as disposable, so
+  Auto may run unconfined **there** without that claim following the file onto every other host.
+  Each entry carries an `id` (matched against the new `platform.HostID()`), plus a free-form
+  `acknowledged` date and `note` for the human reading the file back later. Resolution runs in the
+  order the ADR fixes: an explicit `confine-to-workspace: false` still wins and still means *every*
+  host (it is unchanged and not deprecated); else an entry naming **this** machine yields an
+  effective `false`; else the secure default `true`. An explicit `confine-to-workspace: true` does
+  not veto a matching entry — the flag states the global default, the entry states a fact about one
+  machine, and the more specific claim wins. Like the flag, the list is settable **only** from the
+  global config file — no flag, no environment variable — so a hostile repo's invocation environment
+  cannot name your host. An id matching no machine is simply "not this host", never an error (the
+  list is meant to accumulate machines), and an entry with no `id` is skipped with one startup
+  notice rather than blocking the run. The template `config.yaml` documents the block beside
+  `confine-to-workspace`. (`cmd/apogee`.)
+- **`platform.HostID()` — the machine interlock the acknowledgement is matched against.** A stable
+  per-machine id shaped `<sanitized hostname>-<first 6 hex of sha256(machine identifier)>` (e.g.
+  `devbox-a1b2c3`), where the identifier is the first available of `/etc/machine-id`,
+  `/var/lib/dbus/machine-id`, else the hostname itself — no shelling out, so it stays
+  dependency-free and correct on hosts (and future Windows builds) where neither file exists. It is
+  a **safety interlock, not an authentication mechanism**: it stops an acknowledgement travelling
+  between machines unnoticed, it does not resist forgery (anyone who can edit the config can write
+  any id), and it fails closed — an ephemeral container with a fresh machine-id per run simply does
+  not match its stored entry and is confined again. The value is deterministic within a process and
+  across runs, never empty (a failing `os.Hostname()` yields `unknown-<hash>`), and restricted to
+  `[A-Za-z0-9_.-]` so it is safe as an unquoted YAML scalar. (`internal/platform`.)
+- **A comment-preserving config writer behind `/confine off --save`.** Saving appends this host's
+  `unconfined-hosts:` entry (id, today's date, and a note saying what put the line there and that
+  deleting it re-confines the machine) to `~/.apogee/config.yaml`, and reports the file back so the
+  confirmation can name it. Your config survives intact. The file is edited as **text**, guided by
+  the parsed node positions, never round-tripped through unmarshal→marshal: `yaml.v3` hangs comments
+  off nodes, and the seeded template is *entirely* comments — it parses to no nodes at all — so a
+  re-marshal would have handed you back a file with one setting in it and every word of
+  documentation deleted. Comments, key order, indentation, and your own edits come back
+  byte-identical. Because the key ships commented out, the writer **inserts** rather than
+  substitutes: it appends to an existing list (matching that list's own indentation), starts one
+  under a bare `unconfined-hosts:` key, or adds a documented block at the end of the file — so it
+  stays correct against a config you have since reordered or rewritten by hand. Saving the same host
+  twice records it once (the second call reports the entry already on disk and writes nothing). An
+  absent config is seeded from the embedded template first, so `--save` never leaves a bare fragment
+  where a documented file belongs. The write is atomic (temp + rename in the same directory) and
+  preserves the file's mode, since a config may hold endpoint details. Every splice is re-parsed and
+  compared against the original *before* anything is written — the result must be the old list plus
+  exactly this entry, with no other setting touched — so an exotic file shape (a flow-style list, a
+  second YAML document apogee would never read) is refused with a "add the entry by hand" message
+  rather than quietly mangled, and a failed write surfaces as an error instead of a save that did
+  not happen. A save that fails never invalidates the session toggle that already happened, and the
+  confirmation says so. (`cmd/apogee`.)
 
 ## [1.5.0] — 2026-07-21
 
