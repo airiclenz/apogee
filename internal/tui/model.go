@@ -1098,19 +1098,21 @@ func (m Model) throughputSuffix() string {
 // activity phrase plus an elapsed clock ("⣻ reading · main.go · 3s") — what the human is
 // actually asking, in place of the turn index, which answered none of it. Idle renders nothing
 // there (the input box below already invites a message); the blocked and errored states keep
-// their own words, with no spinner and no clock (nothing is ticking). It reads only display
+// their own words, with no spinner and no clock (nothing is ticking). The left slot hangs off
+// the transcript's own text column: it leads with bodyIndent, so the spinner lines up with the
+// body text above it rather than with the ✦/❯ marker column (layout.md). It reads only display
 // values off Options and the model's own state — never off the Engine mid-step.
 func (m Model) statusLine() string {
-	var left string
+	left := m.th.statusBar.Render(bodyIndent)
 	switch m.state {
 	case stateRunning:
-		left = m.spinner.View() + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
+		left += m.spinner.View() + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
 	case stateAwaitingApproval:
-		left = m.th.statusBar.Render("approval needed")
+		left += m.th.statusBar.Render("approval needed")
 	case stateAwaitingAsk:
-		left = m.th.statusBar.Render("answer needed")
+		left += m.th.statusBar.Render("answer needed")
 	case stateErrored:
-		left = m.th.statusError.Render("error")
+		left += m.th.statusError.Render("error")
 	}
 	// Fill the whole width with black-bg cells — segments and the justify gap alike — so
 	// the info line reads as one solid black bar joined to the prompt box below it. A plain

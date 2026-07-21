@@ -41,7 +41,11 @@ contract is untouched (no new `uiState`, no agent logic in the TUI), so no new A
   reasoning chunks arriving), `responding` (visible text streaming, keeping its `tok/s` suffix),
   `<verb> · <target>` for an open tool call, `retrying`, `compacting`, `stopping` — each with an
   elapsed clock that restarts only when the phrase itself changes, and prefixed with `sub-agent ·`
-  at nesting depth > 0. Idle renders nothing at all. The vocabulary lives in a new pure,
+  at nesting depth > 0. Idle renders nothing at all. The whole left slot — spinner, phrase,
+  clock, `tok/s` — hangs in the transcript's own text column (the two columns a `✦`/`❯` marker
+  occupies), so it lines up with the body text above it instead of sitting flush left
+  (`layout.md`); the indent is inside the width budget, so a narrow window still clips the line
+  rather than wrapping it. The vocabulary lives in a new pure,
   table-tested `internal/tui/activity.go`: `foldActivity` derives the phrase from the same Event
   stream the transcript folds, and the handful of transitions no Event announces (a submit,
   `/continue`, `/compact`, an Esc stop, the worker's terminal message) set it directly; `stopping`

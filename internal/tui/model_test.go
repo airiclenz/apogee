@@ -892,6 +892,52 @@ func TestModelStatusLineActivity(t *testing.T) {
 	}
 }
 
+// leadingColumns counts the blank columns a rendered line opens with, styling stripped — the
+// column its first painted glyph sits in.
+func leadingColumns(t *testing.T, line string) int {
+	t.Helper()
+	plainLine := ansiPattern.ReplaceAllString(line, "")
+	return len(plainLine) - len(strings.TrimLeft(plainLine, " "))
+}
+
+// TestStatusLineAlignsWithTranscriptText proves the status line hangs in the transcript's own
+// text column instead of flush left: the spinner opens in the column a wrapped assistant line's
+// text opens in, so the whole left slot (spinner, phrase, clock) lines up with the body above
+// it (layout.md). Measured against a really-rendered block, not against the constant, so a
+// change to the marker or the hanging indent fails here rather than drifting silently.
+func TestStatusLineAlignsWithTranscriptText(t *testing.T) {
+	const wrapWidth = 8 // narrow enough that "alpha beta" wraps onto a continuation line
+	body := renderEntryLines(newTheme(), entry{kind: entryAssistant, text: "alpha beta"}, wrapWidth)
+	if len(body) < 2 {
+		t.Fatalf("assistant block did not wrap at width %d: %q", wrapWidth, body)
+	}
+	want := leadingColumns(t, body[1]) // the hanging indent — the transcript's text column
+
+	m := newTestModel(t)
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter()) // running: the left slot carries the spinner and the phrase
+
+	if got := leadingColumns(t, m.statusLine()); got != want {
+		t.Errorf("status line starts in column %d; want %d (the transcript's text column)", got, want)
+	}
+}
+
+// The indent is part of the status line's width budget, not an overhang: a window too narrow
+// for the line clips it to the window rather than wrapping onto a second row.
+func TestStatusLineIndentFitsNarrowWindow(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+
+	for _, width := range []int{0, 1, 2, 3, 10, 40} {
+		m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 24})
+
+		if got := ansi.StringWidth(m.statusLine()); got > width {
+			t.Errorf("status line at width %d renders %d columns; want at most %d", width, got, width)
+		}
+	}
+}
+
 func TestModelResizeDoesNotPanic(t *testing.T) {
 	m := newTestModel(t)
 	for _, size := range []struct{ w, h int }{{80, 24}, {120, 40}, {200, 60}, {20, 6}, {5, 2}, {1, 1}} {

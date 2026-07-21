@@ -64,6 +64,14 @@ const (
 // (Depth > 0) blocks, announcing the nested section (P3.14).
 const subAgentLabel = "sub-agent"
 
+// bodyIndent is the column every transcript block's body text starts in, as a blank prefix: a
+// marker ("✦ " / "❯ " — the glyph plus its trailing space) is exactly this wide, and a wrapped
+// line hangs under it (hangingPrefixes). The status line indents by it so the spinner and the
+// activity phrase sit in the same column as the text above them (layout.md), rather than flush
+// left against the marker column. TestStatusLineAlignsWithTranscriptText pins the two together
+// against a really-rendered block, so a change to the marker or the hanging indent fails there.
+const bodyIndent = "  "
+
 // brailleFrames are the status-line spinner frames (a single braille cell that appears to
 // rotate), shown while a worker drives the Exchange.
 var brailleFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
