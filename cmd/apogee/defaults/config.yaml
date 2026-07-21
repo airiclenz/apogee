@@ -125,6 +125,41 @@
 # only (no flag or env).
 # context-window: 32768
 
+# How a finished document is shown to you. The model calls `present_document` after writing a
+# deliverable (a report, a diagram, an HTML summary), and apogee decides how to surface it —
+# the model never reasons about your platform. Config-file only (no flag or env).
+#
+# Whatever these keys say, the document's workspace-relative PATH is always printed in the
+# transcript: that is the one rung that is never wrong, and most terminals (Zed, VS Code, iTerm2,
+# WezTerm, kitty) make it cmd/ctrl+clickable. Above that baseline:
+#
+#   - running on your own desktop → apogee opens the document in the associated application
+#     (HTML in your default browser). This is the `auto-open` key below.
+#   - running over SSH (a devbox, a VM, a container) → apogee serves browser-renderable documents
+#     (.html/.htm/.svg/.pdf) from a small built-in server and prints the URL beside the path, so
+#     one cmd+click opens it in the browser on YOUR machine. It never auto-opens on the remote
+#     box — there is no display there to open into.
+#
+# The built-in server hands out ONE random-token URL per presented document (no directory
+# listing, no other file reachable), re-reads the file per request, starts only when a document
+# is actually served, and stops when apogee exits.
+#
+# present:
+#   auto-open: true      # open documents on a LOCAL desktop run; false = only print the path
+#   command: "zed {path}"  # open with THIS application instead of the OS default ({path} = the file)
+#   port: 0              # the built-in server's port; 0 (default) picks a free one per session
+#   host: ""             # address the printed URL advertises; empty = detected (see below)
+#
+# `host` is a FALLBACK, not an override: over SSH the address you connected to this box on
+# (from $SSH_CONNECTION) is used, because it is known-routable. Set `host` for topologies SSH
+# cannot describe — a container behind a NAT, a VM you reach by another name.
+#
+# TROUBLESHOOTING an unreachable URL: on macOS Sequoia and later, the FIRST connection from a
+# browser to a local-network address needs Local Network permission. Chrome fails with a generic
+# "this site can't be reached" until you allow it in System Settings → Privacy & Security → Local
+# Network; Safari tends to work straight away. Try the URL in Safari before suspecting apogee —
+# and the path line in the transcript works regardless.
+
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false

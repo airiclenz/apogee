@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/present"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
@@ -144,6 +146,19 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// program exists (phase-2 detail plan §3 C2/C3).
 	bridge := tui.NewBridge()
 
+	// The presentation ladder's host-side mechanisms (ADR 0019), resolved from the `present:`
+	// block and THIS session's environment and installed on the Bridge. Installing them is also
+	// what makes bridge.Presenter() non-nil, and with it registers present_document — so the tool
+	// exists exactly where a presentation can be carried out, which in the TUI is always (rung 0,
+	// the transcript line, needs no mechanism at all).
+	rungs := presentationRungs(opts.present, runtime.GOOS, os.Getenv)
+	bridge.SetPresentation(rungs)
+	if rungs.Docs != nil {
+		// The doc server's listener is owned by the app: it binds lazily on the first served
+		// presentation and closes with the session, like the MCP connections and the Agent below.
+		defer rungs.Docs.Close()
+	}
+
 	// The host's real Confiner backend, hoisted into a local so its Capabilities() can be read
 	// here for the degradation notice below — the backend probes once at construction, so this
 	// is the same value the engine's dispatch disposition will consult.
@@ -157,6 +172,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Events:       bridge.Sink(),
 		Approver:     bridge.Approver(),
 		Asker:        bridge.Asker(),
+		Presenter:    bridge.Presenter(),
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
 		SessionsDir:  roots.sessions,
@@ -300,19 +316,50 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	return err
 }
 
+// presentationRungs builds the host-side presentation ladder (ADR 0019) from the resolved
+// `present:` block and this session's environment: the mechanisms that exist on THIS machine, for
+// the TUI's presenter to walk. goos and env are injected — every seam in internal/present is, for
+// exactly this reason — so the wiring is table-testable off whatever machine the tests run on.
+//
+// A rung is wired only where this session could walk it, because internal/tui reads a zero field
+// as "a rung this host did not wire" rather than as a failure (tui.Presentation):
+//
+//   - the Opener (rungs 1 and 3) on a LOCAL session with auto-open on. Remote is excluded here
+//     rather than inside the Opener because an opener fired on a remote box opens into a display
+//     nobody is watching; `auto-open: false` wires none either, which covers the command override
+//     too — the key says whether a document is opened, present.command only says by what.
+//   - the doc server (rung 2) on a REMOTE session, where the user's browser is on another machine.
+//     It binds nothing until the first served presentation, so wiring it costs one struct. Its
+//     advertised address is resolved HERE, once: AdvertiseHost may probe the routing table, and
+//     where the user reaches this box from cannot change mid-session.
+//
+// Rung 0 — the transcript line carrying the path — is deliberately absent: it needs no mechanism,
+// it is never skipped, and nothing in the config can turn it off.
+func presentationRungs(p presentSettings, goos string, env func(string) string) tui.Presentation {
+	rungs := tui.Presentation{Local: present.Locality(env) == present.Local}
+	if rungs.Local && p.autoOpen {
+		rungs.Opener = &present.Opener{GOOS: goos, Env: env, CommandOverride: p.command}
+	}
+	if !rungs.Local {
+		rungs.Docs = &present.DocServer{Host: present.AdvertiseHost(env, p.host), Port: p.port}
+	}
+	return rungs
+}
+
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
 // workspace (with the same host configuration the Agent would derive from Config — the
-// url-safety floor, the web-search endpoint, the Asker) PLUS the dynamically discovered MCP
-// tools registered on top. MCP tools are DYNAMIC (discovered from a server at runtime), so they
-// are NOT in DefaultTools — they ride the registry as classMCP ExternalEffectTools the dispatch
-// disposition gates in Auto. A duplicate name (an MCP server's qualified tool colliding with a
-// built-in — unlikely given the alias prefix) is dropped with a stderr notice rather than
-// failing startup; the built-in wins.
+// url-safety floor, the web-search endpoint, the Asker, the Presenter) PLUS the dynamically
+// discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a server at
+// runtime), so they are NOT in DefaultTools — they ride the registry as classMCP
+// ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's
+// qualified tool colliding with a built-in — unlikely given the alias prefix) is dropped with a
+// stderr notice rather than failing startup; the built-in wins.
 func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool) *apogee.ToolRegistry {
 	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{
 		URLGuard:          security.URLGuard{},
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
+		Presenter:         cfg.Presenter,
 	})
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {

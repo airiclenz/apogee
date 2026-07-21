@@ -82,6 +82,13 @@ type options struct {
 	// set into apogee.Config.EnableMechanisms.
 	validatedSetsEnable bool
 	validatedSetsAlias  map[string]string
+
+	// present is the resolved `present:` block (ADR 0019) — the presentation ladder's config:
+	// auto-open, the command override, and the doc server's port and advertised host. Loaded from
+	// the config file only, like the blocks above. applyConfig sets it from the resolved settings;
+	// runRoot turns it into this host's actual mechanisms (presentationRungs) and installs them on
+	// the TUI bridge, which is what supplies Config.Presenter and registers present_document.
+	present presentSettings
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

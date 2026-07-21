@@ -310,7 +310,7 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   `presenter_test.go` — delegate, ladder, fold and rendering together (the `confine_test.go`
   precedent) rather than split across `transcript_test.go`/`render_test.go`.
 
-- [ ] **8. Config + wiring.** Read `cmd/apogee/config.go` (+ `defaults/config.yaml`) and
+- [x] **8. Config + wiring.** Read `cmd/apogee/config.go` (+ `defaults/config.yaml`) and
   `cmd/apogee/wire.go` (the `HostTools` build at ~line 312 and `bridge.Asker()` at ~159) first.
   New config-file-only block `present:` — `auto-open` (bool, default true; false disables rung 1
   but never rung 0), `command` (string, default empty), `port` (int, default 0), `host` (string,
@@ -323,6 +323,25 @@ comment density and doc.go conventions are load-bearing (see `internal/tools/ask
   hook `DocServer.Close` into the existing shutdown path. Acceptance: config parse/precedence
   tests for the four keys; a wire test asserting present_document is registered in the default
   interactive setup and absent when the bridge supplies no presenter (headless).
+  NOTES (2026-07-21): three points the bullet did not spell out. (a) The four keys travel as ONE
+  `presentSettings` value through `layer`/`settings`/`options`, mapped from one on-disk
+  `presentConfig` (the `modelProfileConfig`/`toModelProfile` pattern), rather than as four flat
+  fields each with its own default: they describe a single subsystem and are handed to the wire
+  as a unit. `auto-open` is a `*bool` on the on-disk struct so a block that sets only `port:`
+  keeps the other three defaults instead of reading as `auto-open: false`. (b)
+  `presentationRungs` wires each mechanism only where its rung could be walked — the `Opener` on
+  a Local session with auto-open on, the `DocServer` on a Remote one — rather than building both
+  unconditionally as the bullet's literal text reads. Item 7's `tui.Presentation` fixed a nil
+  field as "a rung this host did not wire" (skipped, never failed), so an opener a remote session
+  must never fire, or an advertise address resolved (it may probe the routing table) for a local
+  session that has no use for one, would be dead configuration the ladder then has to re-gate.
+  Consequently `auto-open: false` wires no `Opener` at all, which is also how it disables rung 3:
+  the key says whether a document is opened, `present.command` only says by what. (c) The
+  acceptance's registration check runs through `tools.NewDefaultRegistryWithHost` driven by the
+  Bridge `runRoot` handed the launcher — `*apogee.Agent` exposes no registry accessor, and that
+  builder is the one `resolveTools` uses. `registryWithMCP` gets its own test beside it, because
+  a hand-assembled `HostTools` is the one path on which a missing `Presenter:` line would
+  silently drop the tool.
 
 - [ ] **9. Docs sweep.** CHANGELOG `[Unreleased]`: the new tool, the `present:` config block, the
   Presenter seam (additive API surface → minor bump note, per the CHANGELOG header convention).

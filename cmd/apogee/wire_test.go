@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -283,6 +284,151 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The presentation ladder's mechanisms are wired per session (ADR 0019): an Opener only where
+// one could reach the eyes of the user (a LOCAL session with auto-open on), a doc server only
+// where those eyes are on another machine (a REMOTE session). tui.Presentation reads a nil field
+// as "a rung this host did not wire" rather than as a failure, so the zero cases below are the
+// feature, not a gap — and rung 0, the transcript line, needs nothing from here at all.
+func TestPresentationRungs(t *testing.T) {
+	t.Parallel()
+	// The owner's Zed-remoted devbox, as sshd writes it: "<client ip> <client port> <server ip>
+	// <server port>". The third field is the address the user's machine reaches this box on.
+	const devboxSSH = "192.168.64.1 50072 192.168.64.2 22"
+
+	tests := []struct {
+		name       string
+		cfg        presentSettings
+		env        map[string]string
+		wantLocal  bool
+		wantOpener bool
+		wantDocs   bool
+		wantHost   string
+		wantPort   int
+	}{
+		{
+			name:       "local desktop + auto-open → the opener, no server",
+			cfg:        presentSettings{autoOpen: true},
+			wantLocal:  true,
+			wantOpener: true,
+		},
+		{
+			name:       "local + a command override → the opener carries the template",
+			cfg:        presentSettings{autoOpen: true, command: "zed {path}"},
+			wantLocal:  true,
+			wantOpener: true,
+		},
+		{
+			name:      "local + auto-open off → no mechanism at all (rung 0 still runs)",
+			cfg:       presentSettings{autoOpen: false, command: "zed {path}"},
+			wantLocal: true,
+		},
+		{
+			name:     "remote → the doc server, advertising the SSH server IP; never an opener",
+			cfg:      presentSettings{autoOpen: true, port: 8934},
+			env:      map[string]string{"SSH_CONNECTION": devboxSSH},
+			wantDocs: true,
+			wantHost: "192.168.64.2",
+			wantPort: 8934,
+		},
+		{
+			name:     "remote with no SSH_CONNECTION → present.host answers instead",
+			cfg:      presentSettings{autoOpen: true, host: "devbox.internal"},
+			env:      map[string]string{"SSH_TTY": "/dev/pts/3"},
+			wantDocs: true,
+			wantHost: "devbox.internal",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := func(name string) string { return tt.env[name] }
+			rungs := presentationRungs(tt.cfg, "darwin", env)
+
+			if rungs.Local != tt.wantLocal {
+				t.Errorf("Local = %v; want %v", rungs.Local, tt.wantLocal)
+			}
+			if (rungs.Opener != nil) != tt.wantOpener {
+				t.Errorf("Opener wired = %v; want %v", rungs.Opener != nil, tt.wantOpener)
+			}
+			if (rungs.Docs != nil) != tt.wantDocs {
+				t.Errorf("Docs wired = %v; want %v", rungs.Docs != nil, tt.wantDocs)
+			}
+			if rungs.Opener != nil && rungs.Opener.CommandOverride != tt.cfg.command {
+				t.Errorf("Opener.CommandOverride = %q; want the configured %q", rungs.Opener.CommandOverride, tt.cfg.command)
+			}
+			if rungs.Docs == nil {
+				return
+			}
+			if rungs.Docs.Host != tt.wantHost {
+				t.Errorf("Docs.Host = %q; want %q", rungs.Docs.Host, tt.wantHost)
+			}
+			if rungs.Docs.Port != tt.wantPort {
+				t.Errorf("Docs.Port = %d; want the configured %d", rungs.Docs.Port, tt.wantPort)
+			}
+		})
+	}
+}
+
+// present_document is offered exactly where a presentation can be carried out. runRoot installs
+// the ladder on the Bridge, which is what makes bridge.Presenter() non-nil — and a non-nil
+// Presenter is the whole registration condition of the default tool set (tools.HostTools). A
+// Bridge nobody installed a presentation on — a headless embedder — supplies no Presenter, and
+// the same registry build then omits the tool rather than offering the model an affordance
+// nobody can honour.
+func TestRunRootInstallsPresenter(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	workspace := t.TempDir()
+	opts := options{
+		endpoint:  "http://127.0.0.1:1111",
+		model:     "fake",
+		mode:      "ask-before",
+		workspace: workspace,
+		present:   presentSettings{autoOpen: true},
+	}
+
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	presenter := rec.bridge.Presenter()
+	if presenter == nil {
+		t.Fatal("bridge.Presenter() = nil after runRoot; the interactive session installs no presentation")
+	}
+	if _, ok := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{Presenter: presenter}).Lookup("present_document"); !ok {
+		t.Error("present_document is not registered for the interactive setup's Presenter")
+	}
+
+	headless := tui.NewBridge() // never SetPresentation'd — the headless host
+	if headless.Presenter() != nil {
+		t.Fatal("a Bridge with no presentation installed supplies a non-nil Presenter")
+	}
+	if _, ok := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{Presenter: headless.Presenter()}).Lookup("present_document"); ok {
+		t.Error("present_document is registered with no Presenter; a headless host must not offer it")
+	}
+}
+
+// registryWithMCP is the one place the composition root assembles HostTools by hand, so it must
+// thread the Presenter as well — otherwise configuring an MCP server would silently take
+// present_document away, which is exactly the kind of coupling the default build has no way to
+// catch.
+func TestRegistryWithMCPThreadsPresenter(t *testing.T) {
+	t.Parallel()
+	cfg := validCfg(t)
+	cfg.Presenter = stubPresenter{}
+
+	if _, ok := registryWithMCP(t.TempDir(), cfg, nil).Lookup("present_document"); !ok {
+		t.Error("present_document is missing from the MCP registry build despite a configured Presenter")
+	}
+}
+
+// stubPresenter shows nothing: the wiring under test consults only whether the delegate is
+// non-nil (the registration condition), never what it does with a document.
+type stubPresenter struct{}
+
+func (stubPresenter) Present(context.Context, apogee.PresentRequest) (apogee.PresentOutcome, error) {
+	return apogee.PresentOutcome{}, nil
 }
 
 func TestParseMode(t *testing.T) {

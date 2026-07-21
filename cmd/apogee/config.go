@@ -104,6 +104,54 @@ type settings struct {
 	// low-confidence confirm ("my model is what the label says"); a differing mapping is the
 	// explicit transfer to a sibling quant/family member.
 	validatedSetsAlias map[string]string
+
+	// present is the resolved `present:` block (ADR 0019): which mechanisms of the presentation
+	// ladder this host offers a finished document. File-only (no flag/env, like the newer keys
+	// above). Its defaults are auto-open ON — the headline want is that a run on the user's own
+	// desktop simply opens the deliverable — with no command override, an ephemeral doc-server
+	// port, and a detected advertise host.
+	present presentSettings
+}
+
+// presentSettings is the resolved `present:` block (ADR 0019), in the form the composition root
+// turns into the host-side mechanisms themselves (wire.go's presentationRungs).
+//
+// It is one struct rather than four fields on settings because the four describe ONE subsystem
+// and travel together — from the on-disk block, through resolution, to the wire that builds the
+// ladder out of them. Nothing in here can switch presentation off: rung 0, the transcript line
+// carrying the path, needs no configuration and is never skipped. These keys only change WHICH
+// mechanism above it carries the document.
+type presentSettings struct {
+	// autoOpen gates rungs 1 and 3 — handing the document to a desktop application, on a LOCAL
+	// session. Default true. False wires no opener at all, which covers the command override too:
+	// present.command says which application shows a document, not whether one is opened.
+	autoOpen bool
+	// command is the present.command template (e.g. `zed {path}`), which replaces the built-in OS
+	// opener on every OS. Empty ⇒ the per-OS default (open / start / xdg-open).
+	command string
+	// port is the TCP port the doc server (rung 2) binds. Default 0 ⇒ an ephemeral port, which
+	// costs nothing: the URL is printed fresh per presentation, so a stable port buys the user
+	// nothing to remember.
+	port int
+	// host overrides the address the served URL advertises. Empty ⇒ present.AdvertiseHost's own
+	// chain ($SSH_CONNECTION's server IP, then an outbound-dial probe, then loopback). It is the
+	// fallback for topologies SSH cannot describe rather than a true override — SSH_CONNECTION,
+	// when present, is a live and verified-routable address and still wins (see AdvertiseHost).
+	host string
+}
+
+// validate rejects a present block that cannot be honoured. The port is the only checkable key:
+// a command template is a statement about the user's own machine (an unresolvable program is a
+// fail-visible opener error at presentation time, ADR 0019 §4 — not a startup error), and the
+// host is a display string this process cannot verify. An out-of-range port, by contrast, would
+// fail deep inside the first presentation, where all the user sees is a degraded rung — so it is
+// caught here, where the message can name the key that is wrong.
+func (p presentSettings) validate() error {
+	if p.port < 0 || p.port > 65535 {
+		return fmt.Errorf("apogee: invalid present.port %d: want a TCP port in 0-65535 "+
+			"(0 — the default — takes an ephemeral port)", p.port)
+	}
+	return nil
 }
 
 // layer is one precedence source. A nil pointer means the source does not set that
@@ -164,6 +212,11 @@ type layer struct {
 	// true; a nil alias map means no carry-over is configured.
 	validatedSetsEnable *bool
 	validatedSetsAlias  map[string]string
+
+	// present is set only by the FILE layer (the presentation ladder is config'd, no flag/env —
+	// like mechanisms). A nil pointer means the source configures no `present:` block, so
+	// resolution keeps the defaults (auto-open on, an ephemeral port, a detected host).
+	present *presentSettings
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -181,7 +234,8 @@ type layer struct {
 // entries, which are skipped rather than fatal (the ADR 0016 posture the validated-set
 // surface established: a data defect degrades, it never blocks startup).
 func resolveSettings(file, env, flag layer, hostID string) (settings, []string) {
-	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true}
+	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true,
+		validatedSetsEnable: true, present: presentSettings{autoOpen: true}}
 	// file-only (ADR 0012 + its 2026-07-21 amendment); env/flag never carry either, so the
 	// invocation environment can neither flip the flag nor name a host.
 	s.unconfinedHosts = file.unconfinedHosts
@@ -207,6 +261,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	s.validatedSetsAlias = file.validatedSetsAlias
 	if file.profile != nil { // file-only; env/flag never carry a model profile
 		s.profile = *file.profile
+	}
+	if file.present != nil { // file-only (ADR 0019); env/flag never carry the presentation block
+		s.present = *file.present
 	}
 	for _, l := range []layer{file, env, flag} {
 		if l.endpoint != nil {
@@ -347,6 +404,14 @@ type fileConfig struct {
 	// confidence and is offered at low. A pointer so an absent block falls through to that
 	// default rather than being an explicit zero setting.
 	ValidatedSets *validatedSetsConfig `yaml:"validated-sets"`
+	// Present configures how a finished document is shown to the user (ADR 0019): the
+	// presentation ladder's auto-open switch, the application that stands in for the OS opener,
+	// and the doc server's port and advertised host. File-only (no flag/env), like the blocks
+	// above. Absent ⇒ auto-open on, no command override, an ephemeral port and a detected host. A
+	// pointer so an absent block falls through to those defaults rather than being an explicit
+	// zero setting — which would read as `auto-open: false` and silently disable the rung the
+	// whole feature exists for.
+	Present *presentConfig `yaml:"present"`
 }
 
 // unconfinedHost is one Host acknowledgement (CONTEXT: Host acknowledgement): the user's
@@ -369,6 +434,32 @@ type unconfinedHost struct {
 type validatedSetsConfig struct {
 	Enable *bool             `yaml:"enable"`
 	Alias  map[string]string `yaml:"alias"`
+}
+
+// presentConfig is the on-disk schema for the `present:` block (ADR 0019). It mirrors
+// presentSettings with yaml tags; toPresentSettings maps it across so the on-disk shape and the
+// resolved value stay independently evolvable (as mcpServerConfig does for mcp.ServerConfig).
+type presentConfig struct {
+	// AutoOpen is a pointer so an explicit `auto-open: false` is distinguishable from an absent
+	// key (which keeps the default true).
+	AutoOpen *bool `yaml:"auto-open"`
+	// Command is the opener template with {path} where the document goes; empty ⇒ the OS default.
+	Command string `yaml:"command"`
+	// Port is the doc server's TCP port; 0 (the default) takes an ephemeral one.
+	Port int `yaml:"port"`
+	// Host is the address served URLs advertise; empty ⇒ detected (see presentSettings.host).
+	Host string `yaml:"host"`
+}
+
+// toPresentSettings maps the on-disk present block onto the resolved value, applying the
+// auto-open default (true) when the key is absent. A block that sets one key therefore leaves the
+// other three at their defaults, which is what makes it usable a line at a time.
+func (p presentConfig) toPresentSettings() presentSettings {
+	s := presentSettings{autoOpen: true, command: p.Command, port: p.Port, host: p.Host}
+	if p.AutoOpen != nil {
+		s.autoOpen = *p.AutoOpen
+	}
+	return s
 }
 
 // mcpServerConfig is the on-disk schema for one MCP server (P3.15). It mirrors mcp.ServerConfig
@@ -484,6 +575,10 @@ func (fc fileConfig) layer() layer {
 		if len(fc.ValidatedSets.Alias) > 0 {
 			l.validatedSetsAlias = fc.ValidatedSets.Alias
 		}
+	}
+	if fc.Present != nil {
+		p := fc.Present.toPresentSettings()
+		l.present = &p
 	}
 	return l
 }
@@ -609,6 +704,12 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	for _, n := range notices {
 		notify(n)
 	}
+	// A present block that cannot be honoured is a hard error, before anything is written back
+	// into opts: an out-of-range port would otherwise surface as a degraded rung at the first
+	// presentation, long after the typo (ADR 0019 §4 degrades MECHANISM failures, not config).
+	if err := s.present.validate(); err != nil {
+		return err
+	}
 	opts.endpoint = s.endpoint
 	opts.model = s.model
 	opts.mode = s.mode
@@ -625,6 +726,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.mechanisms = s.mechanisms
 	opts.validatedSetsEnable = s.validatedSetsEnable
 	opts.validatedSetsAlias = s.validatedSetsAlias
+	opts.present = s.present
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}
