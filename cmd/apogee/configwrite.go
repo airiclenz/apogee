@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,6 +60,11 @@ const hostAcknowledgementHeader = "# Machines acknowledged as disposable: on a h
 // path, and reports the file written and the entry that now names this machine (so the
 // confirmation can say what changed and how to undo it).
 //
+// A host with no identity to record is refused rather than written: on a machine that supplies
+// neither a hostname nor a machine id, platform.HostID() is the same value on every such machine,
+// so the entry would acknowledge a class of hosts instead of this one (the resolution refuses to
+// match it for the same reason). The session toggle is unaffected — it never reaches disk.
+//
 // It is idempotent: a hostID the list already names returns that existing entry and writes
 // nothing, so a repeated `--save` cannot accumulate duplicates. An absent config is seeded from
 // the embedded template first, so `--save` never leaves a bare fragment where a documented file
@@ -69,6 +75,12 @@ func saveHostAcknowledgement(path, hostID string, now time.Time) (string, unconf
 	if id == "" {
 		return "", unconfinedHost{}, errors.New(
 			"apogee: cannot save the host acknowledgement: this host has no id to record")
+	}
+	if platform.IsUnidentifiedHostID(id) {
+		return "", unconfinedHost{}, errors.New(
+			"apogee: cannot save the host acknowledgement: this machine reports neither a hostname nor a " +
+				"machine id, so the recorded id would name every such machine rather than this one — " +
+				"/confine off still applies to this session")
 	}
 	if path == "" {
 		return "", unconfinedHost{}, errors.New(

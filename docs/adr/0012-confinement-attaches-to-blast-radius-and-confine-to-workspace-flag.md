@@ -154,7 +154,13 @@ unconfined-hosts:               # explicit per-host acknowledgement
 ```
 
 Resolution order: an explicit global `confine-to-workspace: false` wins (unchanged meaning); else a
-current-host match in `unconfined-hosts[].id` yields an effective `false`; else `true`. The list is
+current-host match in `unconfined-hosts[].id` yields an effective `false`; else `true`. A match
+counts only where the host has an identity to be matched *by*: a machine that can supply neither a
+hostname nor a machine identifier computes the same id as every other such machine, so honouring
+that match would make one stored acknowledgement apply to all of them — the exact travel this
+interlock exists to prevent. There the match is refused with a notice and `--save` declines to write
+the id at all; `/confine off` (session-only) remains available, which is the same safe-direction
+answer the ephemeral-container case gets. The list is
 **global-config-only** on the same reasoning as the flag — a hostile repo must not be able to
 name your host — and an unknown id is simply "not this host", never an error, because the list is
 expected to accumulate machines.

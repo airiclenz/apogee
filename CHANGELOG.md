@@ -77,8 +77,12 @@ that reports no filesystem confinement, so it reproduces identically on a machin
   global config file — no flag, no environment variable — so a hostile repo's invocation environment
   cannot name your host. An id matching no machine is simply "not this host", never an error (the
   list is meant to accumulate machines), and an entry with no `id` is skipped with one startup
-  notice rather than blocking the run. The template `config.yaml` documents the block beside
-  `confine-to-workspace`. (`cmd/apogee`.)
+  notice rather than blocking the run. A host that can supply **no identity of its own** — no
+  hostname *and* no machine-id file — never matches either, however the entry is spelled: the id
+  such a host computes is the same on every one of them, so honouring it would let a single saved
+  acknowledgement loosen the lot. That match is reported and ignored, and `--save` refuses to
+  record it in the first place, so nothing is written that could quietly travel. The template
+  `config.yaml` documents the block beside `confine-to-workspace`. (`cmd/apogee`.)
 - **`platform.HostID()` — the machine interlock the acknowledgement is matched against.** A stable
   per-machine id shaped `<sanitized hostname>-<first 6 hex of sha256(machine identifier)>` (e.g.
   `devbox-a1b2c3`), where the identifier is the first available of `/etc/machine-id`,
@@ -89,7 +93,10 @@ that reports no filesystem confinement, so it reproduces identically on a machin
   any id), and it fails closed — an ephemeral container with a fresh machine-id per run simply does
   not match its stored entry and is confined again. The value is deterministic within a process and
   across runs, never empty (a failing `os.Hostname()` yields `unknown-<hash>`), and restricted to
-  `[A-Za-z0-9_.-]` so it is safe as an unquoted YAML scalar. (`internal/platform`.)
+  `[A-Za-z0-9_.-]` so it is safe as an unquoted YAML scalar. Exactly one composed value is *not*
+  per-machine — the one a host with neither a hostname nor a machine id computes, which is identical
+  on every such host — so `platform.IsUnidentifiedHostID` names it and both callers refuse it as an
+  identity: it never matches during resolution and it is never written to disk. (`internal/platform`.)
 - **A comment-preserving config writer behind `/confine off --save`.** Saving appends this host's
   `unconfined-hosts:` entry (id, today's date, and a note saying what put the line there and that
   deleting it re-confines the machine) to `~/.apogee/config.yaml`, and reports the file back so the

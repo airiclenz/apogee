@@ -246,8 +246,16 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 // a malformed line must not block startup (nor, by matching an empty hostID, loosen anything).
 // An id that matches nothing is not an error either — the list is expected to accumulate
 // machines, so most entries name some other host on any given run.
+//
+// Step 2 additionally requires that this machine HAVE an identity: on a host that can supply
+// neither a hostname nor a machine identifier, platform.HostID() is the same value everywhere
+// (platform.IsUnidentifiedHostID), so honouring a match there would let one saved
+// acknowledgement loosen every such host — the interlock's whole purpose reversed. That match
+// is refused with a notice instead. Step 1 is untouched: an explicit global false still means
+// every host, identity or not.
 func resolveConfineToWorkspace(explicit *bool, hosts []unconfinedHost, hostID string) (bool, []string) {
 	var notices []string
+	identified := !platform.IsUnidentifiedHostID(hostID)
 	acknowledged := false
 	for i, h := range hosts {
 		id := strings.TrimSpace(h.ID)
@@ -257,9 +265,17 @@ func resolveConfineToWorkspace(explicit *bool, hosts []unconfinedHost, hostID st
 					"(this host is %q)", i+1, hostID))
 			continue
 		}
-		if id == hostID {
-			acknowledged = true // keep scanning: every malformed entry still gets named
+		if id != hostID {
+			continue
 		}
+		if !identified {
+			notices = append(notices, fmt.Sprintf(
+				"apogee: ignoring unconfined-hosts entry %d (%q): this machine reports neither a hostname "+
+					"nor a machine id, so that id names every such machine rather than this one — auto stays "+
+					"confined; use /confine off for this session", i+1, id))
+			continue
+		}
+		acknowledged = true // keep scanning: every malformed entry still gets named
 	}
 	if explicit != nil && !*explicit {
 		return false, notices

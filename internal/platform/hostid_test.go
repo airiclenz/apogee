@@ -109,6 +109,44 @@ func TestHostIDFromDeterministicAndDiscriminating(t *testing.T) {
 	}
 }
 
+// The one id that identifies no machine: a host with neither a hostname nor a machine-id
+// file composes the SAME value as every other such host, so an acknowledgement recorded
+// against it would loosen all of them at once. IsUnidentifiedHostID is what the callers
+// match on to refuse it, so it must recognise that value and nothing that is a real id.
+func TestIsUnidentifiedHostID(t *testing.T) {
+	t.Parallel()
+
+	identityLess := hostIDFrom("", nil)
+	if other := hostIDFrom("", []byte{}); other != identityLess {
+		t.Fatalf("two identity-less hosts computed different ids (%q, %q); the collision this "+
+			"predicate exists for has moved", identityLess, other)
+	}
+
+	tests := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		{"the identity-less composition", identityLess, true},
+		{"the same value with surrounding whitespace", "  " + identityLess + "\t", true},
+		{"no id at all", "", true},
+		{"whitespace only", "   ", true},
+		{"a hostname-derived id", hostIDFrom("devbox", nil), false},
+		{"a machine-id-derived id", hostIDFrom("devbox", []byte("deadbeef")), false},
+		{"no hostname, but a machine id to hash", hostIDFrom("", []byte("deadbeef")), false},
+		{"an unrelated id from a config file", "laptop-9f8e7d", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := IsUnidentifiedHostID(tt.id); got != tt.want {
+				t.Errorf("IsUnidentifiedHostID(%q) = %v, want %v", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
 // The chain is first-available: /etc/machine-id, then /var/lib/dbus/machine-id, then
 // nothing (leaving hostIDFrom to hash the hostname). A missing or blank file is a link
 // in that chain, never an error.

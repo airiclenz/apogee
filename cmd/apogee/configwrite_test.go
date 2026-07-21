@@ -278,6 +278,16 @@ func TestSaveHostAcknowledgement_Errors(t *testing.T) {
 			wantMsg: "no id",
 		},
 		{
+			// The id an identity-less host composes is shared by every such host, so writing it
+			// would record an acknowledgement that matches all of them — refused at the writer as
+			// well as at the resolution, so the user hears about it instead of saving a line that
+			// silently never applies.
+			name:    "a host id that names every identity-less machine rather than this one",
+			content: "model: qwen2.5-coder\n",
+			hostID:  unidentifiedTestHostID,
+			wantMsg: "neither a hostname nor a machine id",
+		},
+		{
 			name:    "a config that does not parse",
 			content: "unconfined-hosts: [oops\n",
 			hostID:  savedHostID,

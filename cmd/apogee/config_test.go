@@ -27,6 +27,12 @@ func noNotify(string) {}
 // acknowledgement ladder is pinned off whatever host the tests happen to run on.
 const testHostID = "testbox-a1b2c3"
 
+// unidentifiedTestHostID is what platform.HostID() composes on a host that can supply
+// neither a hostname nor a machine id: the one value that is identical on every such
+// machine, and therefore the one an acknowledgement must never match. It is spelled out
+// rather than computed, so a change to the composition shows up here as a failure.
+const unidentifiedTestHostID = "unknown-e3b0c4"
+
 // The precedence rule itself: a flag beats an env var beats the file beats the default,
 // resolved per field (phase-2 detail plan §4 P2.5).
 func TestResolveSettingsPrecedence(t *testing.T) {
@@ -182,7 +188,9 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 // The Host acknowledgement ladder (ADR 0012, amendment 2026-07-21), pinned in the order the
 // ADR fixes: an explicit global false wins; else a match on THIS host's id loosens here; else
 // confinement stays on. A malformed entry degrades softly with a notice, and an entry naming
-// another machine is simply not this host — neither is an error.
+// another machine is simply not this host — neither is an error. Step 2 additionally requires
+// an identity to match: on a host that can supply none, the id stands for every such machine,
+// so honouring it would let one saved acknowledgement loosen all of them.
 func TestResolveConfineToWorkspace(t *testing.T) {
 	t.Parallel()
 	const otherHost = "laptop-9f8e7d"
@@ -230,10 +238,37 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 			want:        true,
 			wantNotices: 1,
 		},
+		{
+			name:        "an identity-less host is not acknowledged by an entry naming its shared id",
+			hosts:       []unconfinedHost{{ID: unidentifiedTestHostID, Acknowledged: "2026-07-21"}},
+			hostID:      unidentifiedTestHostID,
+			want:        true,
+			wantNotices: 1,
+		},
+		{
+			name:     "an explicit global false still loosens an identity-less host — step 1 is untouched",
+			explicit: boolptr(false),
+			hosts:    []unconfinedHost{{ID: unidentifiedTestHostID}},
+			hostID:   unidentifiedTestHostID,
+			want:     false,
+			// The entry is still reported: the match was refused, and saying so is what keeps
+			// the notice honest about why the id cannot stand for one machine.
+			wantNotices: 1,
+		},
+		{
+			name:   "an identity-less host with a real machine's entry is simply not that machine",
+			hosts:  []unconfinedHost{{ID: otherHost}},
+			hostID: unidentifiedTestHostID,
+			want:   true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			if !platform.IsUnidentifiedHostID(unidentifiedTestHostID) {
+				t.Fatalf("%q is no longer the identity-less host id; the cases below prove nothing",
+					unidentifiedTestHostID)
+			}
 			got, notices := resolveConfineToWorkspace(tt.explicit, tt.hosts, tt.hostID)
 			if got != tt.want {
 				t.Errorf("confineToWorkspace = %v; want %v", got, tt.want)

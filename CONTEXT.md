@@ -218,8 +218,10 @@ confined. It exists because the flag is **global** while the claim is **host-spe
 throwaway container's acknowledgement must not follow `~/.apogee/config.yaml` onto a laptop. The
 host id is a **safety interlock, not authentication** — it stops an acknowledgement travelling
 unnoticed, it does not resist forgery (anyone who can edit the config can write any id) — and it
-fails **closed**: an unmatched host is simply confined again. Written only by an explicit user act
-(`/confine off --save`); an unknown id is "not this host", never an error.
+fails **closed**: an unmatched host is simply confined again, and a machine with no identity to
+match by (no hostname *and* no machine id, so its id is shared by every such machine) is refused as
+an identity in both directions — the match is ignored and `--save` will not write it. Written only
+by an explicit user act (`/confine off --save`); an unknown id is "not this host", never an error.
 _Avoid_: "trusted host" (it is not a trust store, and nothing is verified), "whitelist",
 "per-host confine-to-workspace" (the key is global; only the acknowledgement is host-scoped).
 

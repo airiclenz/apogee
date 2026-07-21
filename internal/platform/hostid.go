@@ -52,7 +52,32 @@ var hostIDOnce = sync.OnceValue(func() string {
 // within a process and across runs on the same machine, is never empty (a failing
 // os.Hostname() yields "unknown-<hash>"), and contains only [A-Za-z0-9_.-] so it is
 // safe as an unquoted YAML scalar.
+//
+// One id is NOT per-machine: a host that can supply neither a hostname nor a machine
+// identifier composes the same value as every other such host. Callers matching a
+// stored acknowledgement must put the id through IsUnidentifiedHostID first, which is
+// what keeps that value from acting as one shared identity.
 func HostID() string { return hostIDOnce() }
+
+// unidentifiedHostID is what hostIDFrom composes for a host that supplies no identity at
+// all — os.Hostname() errors AND no machine-id file is readable, so both the label and the
+// hashed identifier are empty. Every identity-less host computes exactly this value.
+var unidentifiedHostID = hostIDFrom("", nil)
+
+// IsUnidentifiedHostID reports whether id names no particular machine: it is empty, or it
+// is the value HostID composes when the host could supply neither a hostname nor a machine
+// identifier. That value is identical on every such host, so an acknowledgement recorded
+// against it would apply to all of them at once — the precise thing the interlock exists to
+// prevent (ADR 0012, amendment 2026-07-21: an acknowledgement made on one machine must not
+// silently apply on a different one). Callers therefore refuse it as an identity, in both
+// directions: it never matches during resolution, and it is never written to disk.
+//
+// It is a property of the id rather than of this process, so the caller passes the id in —
+// the same injection seam that lets the confinement resolution be tested off any host.
+func IsUnidentifiedHostID(id string) bool {
+	trimmed := strings.TrimSpace(id)
+	return trimmed == "" || trimmed == unidentifiedHostID
+}
 
 // hostIDFrom composes the id from its two injected sources: hostname supplies the
 // human-readable label and, when machineID is empty, the hashed identity as well —
