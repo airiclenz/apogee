@@ -227,7 +227,9 @@ non-blocking) preparation and is not the run's lifetime.
 
 `cmd/apogee` stops injecting `denyConfiner` and selects the **real backend for the host OS** behind build
 tags — `platform.NewConfiner()` returns the landlock backend on Linux, the seatbelt backend on macOS,
-and `denyConfiner` elsewhere (Windows until Phase 5). The `ConfinementBox` is built from the injected
+and `denyConfiner` elsewhere. *(Amended 2026-07-22, §9: Windows is no longer "elsewhere" — it selects
+the token backend at or above build 17763, and `denyConfiner` only below that floor.)*
+The `ConfinementBox` is built from the injected
 `WorkspaceDir` plus the per-project `WritablePaths`/`NetworkAllow` from config (see §7 — the box must
 include the toolchain's cache/temp dirs or `go test`/`pip` fail under confinement). The `main` entry
 point dispatches the `__confined-exec` sentinel before Cobra (§2.3).

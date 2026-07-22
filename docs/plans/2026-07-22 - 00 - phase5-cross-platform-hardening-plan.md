@@ -523,7 +523,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   retirement bullet now states the record exists. **No code changed**; sanity check was
   `go build ./...`.
 
-- [ ] **10. Docs roll-up — the single owning item for every cross-cutting amendment.** (DEPENDS:
+- [x] **10. Docs roll-up — the single owning item for every cross-cutting amendment. — ✅ DONE (2026-07-22)** (DEPENDS:
   all.) README (Windows Auto now confined on capable hosts + probe usage + six-target cross
   note); `CONTEXT.md:37` ("no subcommands ship yet" → `probe` ships, `headless` stays
   deferred); `docs/design/technical-design.md` §5 rows (Platform shell/path, CLI/probe — and its
@@ -534,6 +534,38 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   `TODO(phase-5)` marker is gone (`grep -rn "TODO(phase-5)"` returns nothing — items 6–8
   removed them; this item only verifies); no doc still claims Windows Auto "falls back to
   asking" unconditionally.
+  NOTES (2026-07-22): the named surfaces all landed — README (status, the Auto-blast-radius
+  section incl. a Windows *token + disk-label* paragraph carrying item 8's measured ~1 ms/object
+  cost, a new `## Diagnosing a host — apogee probe` section, the six-target cross note, and the
+  closing Note), `CONTEXT.md:37`, `technical-design.md`'s `:105` note plus §5's *Platform
+  (shell/path)* and *CLI/headless/probe* rows, `TODO.md`'s degradation-residue block (the
+  `apogee probe` bullet struck through and CLOSED, plus a closing note that the notice now
+  narrows rather than fires on every Windows host), the merge plan's Phase 5 (a `*Status: ✅
+  Complete*` line pointing at this plan, ✅ on each bullet with a "shipped as" clause, and the
+  deliverable marked met with the still-owner-run remainder named), and the CHANGELOG
+  `[Unreleased]` roll-up (`### Added` + `### Changed` inserted ABOVE item 9's existing
+  `### Removed`, which is untouched). `ISSUES.md` untouched. **Four amendments beyond the
+  item's literal file list**, each inside this roll-up's own subject matter rather than a
+  drive-by: (a) `CONTEXT.md`'s *Confinement* term named the backend trio as "seatbelt /
+  landlock / **AppContainer**" and described only the Linux and macOS mechanisms — ADR 0020
+  rejected AppContainer, so a pinned vocabulary entry contradicting the shipped design is the
+  same defect class item 4 fixed for *Behavioral fingerprint*; the Windows token, the disk
+  label and the not-claimed `NetworkEgress` are now stated there; (b) the merge plan's §3
+  architecture row (`:265`) and §5 risk row (`:496`) both still said "Windows AppContainer
+  (Phase 5)" — corrected in place, and the risk row marked RETIRED. The three remaining
+  "AppContainer" mentions in that file (`:218`, `:251`, `:780`) are left verbatim: each is
+  explicitly attributed to the superseded ADR 0004 and reads as history; (c)
+  `confinement-execution-contract.md` §2.6 said `NewConfiner()` returns "`denyConfiner`
+  elsewhere (Windows until Phase 5)" — that IS a doc claiming Windows Auto falls back
+  unconditionally, which this item's acceptance forbids, so a one-clause `*(Amended
+  2026-07-22, §9)*` pointer was added rather than rewriting a P3.4 historical record; (d)
+  §5's *Confinement* row was updated alongside the two rows the item names, since leaving it
+  would have the same table describe a two-backend world one row after the Platform row
+  describes three. Acceptance run: `grep -rn "TODO(phase-5)"` matches **no `.go` file at all**
+  (and nothing outside this plan's own item text and two archived handoffs, which merely name
+  the marker); `go build ./...` and `go vet ./...` green. Historical records were deliberately
+  NOT rewritten — `technical-design.md:279`/`:308`, the merge plan's Phase-0 bullet and the
+  archived phase plans describe what P0.5/P3 shipped at the time and are true as history.
 
 ## Non-goals / deferred (record, don't build)
 

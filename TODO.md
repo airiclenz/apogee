@@ -361,16 +361,31 @@ reintroduces the "unsupervised *and* unbounded" hole ADR 0004/0012 forbid, *with
 choosing it*. What shipped is the tool making the user's own decision reachable, never the tool
 deciding.
 
-**Deliberately deferred residue (the only parts still open):**
+**Deliberately deferred residue:**
 
-- **Surfacing the startup notice in the transcript, not just stderr.** `/confine status` renders in
-  the transcript, but the startup notice is stderr-only (it is printed pre-alt-screen, like every
-  other startup notice). Folding it into the UI belongs to the parked validated-set in-transcript
-  banner work (deferred follow-up 04) — this plan explicitly did **not** build a banner framework.
-- **`apogee probe`** — reporting the confinement backend and its capability matrix as a subcommand,
-  diagnosable without running an agent. Already scoped as merge-plan **Phase 5** work; it needs the
-  Phase-5 CLI structure that does not exist yet. `/confine status` covers the need from inside the
-  TUI in the meantime.
+- **Surfacing the startup notice in the transcript, not just stderr.** *(Still open.)*
+  `/confine status` renders in the transcript, but the startup notice is stderr-only (it is
+  printed pre-alt-screen, like every other startup notice). Folding it into the UI belongs to the
+  parked validated-set in-transcript banner work (deferred follow-up 04) — this plan explicitly
+  did **not** build a banner framework.
+- ~~**`apogee probe`** — reporting the confinement backend and its capability matrix as a
+  subcommand, diagnosable without running an agent.~~ **CLOSED 2026-07-22 (Phase 5, items 1/3 —
+  `docs/plans/2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`;
+  [ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)).**
+  `apogee probe` (and `apogee probe host`, its scriptable twin) prints the host report — backend,
+  capability matrix, `AutoEligible()` verdict, the effective `confine-to-workspace` after the host
+  acknowledgement, the roots, endpoint reachability — free, offline and read-only, with no agent
+  and no model call. It does not duplicate `/confine status`: both render one extracted verdict
+  (`internal/probe`'s `BackendName` / `DegradedNotice` / `CapabilityLine`), so the CLI and the TUI
+  cannot word the same matrix two different ways, and the report closes with the startup
+  degradation notice verbatim.
+
+Also closed by Phase 5, though it was never the residue's own bullet: **the degradation notice no
+longer fires on a capable Windows host.** The notice's trigger cell (Auto + confinement asked for
++ `FSWrite == false`) is unchanged — what changed is that Windows now has a backend that reports
+`FSWrite: true` (ADR 0020's low-integrity token, floor build 17763), so the notice narrows to the
+hosts where it was always the honest answer: an older Windows, and the containers where landlock
+returns `ENOSYS`.
 
 ---
 

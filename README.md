@@ -43,15 +43,18 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v1.7.0` shipped (2026-07-21).** The embeddable agent core is stable — the public
-Go API follows semver from `v1.0.0` — with the full tool suite, MCP client,
-sub-agents, and OS-confined Auto mode (Linux landlock / macOS seatbelt; Windows
-confinement comes in a later phase, so Auto there still runs — it just falls back
-to asking before each shell/subprocess call instead of confining it). The same
-fallback applies wherever the facility is missing rather than unimplemented — most
-containers, where landlock reports `ENOSYS` whatever the kernel version. Apogee
-says so at startup and offers `/confine` as the way out (see
-[Auto mode's blast radius](#auto-modes-blast-radius)). Current work is per-model
+**`v1.7.0` shipped (2026-07-21); cross-platform hardening landed on `main`
+(2026-07-22).** The embeddable agent core is stable — the public Go API follows
+semver from `v1.0.0` — with the full tool suite, MCP client, sub-agents, and
+OS-confined Auto mode on **all three** platforms: Linux landlock, macOS seatbelt,
+and — new — Windows, where the fence is a restricted low-integrity token (Windows 10
+1809 / build 17763 / Server 2019 and newer). Auto still falls back to asking before
+each shell/subprocess call wherever the facility is genuinely missing rather than
+unimplemented: an older Windows build, or most containers, where landlock reports
+`ENOSYS` whatever the kernel version. Apogee says so at startup, `apogee probe`
+answers "what would Auto do on this box?" without running an agent, and `/confine`
+is the way out (see [Auto mode's blast radius](#auto-modes-blast-radius) and
+[Diagnosing a host](#diagnosing-a-host--apogee-probe)). Current work is per-model
 bench validation of the mechanism catalogue: the full catalogue is ported, and
 the first Validated set (gemma-4-E4B) ships with the binary.
 See [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
@@ -69,8 +72,13 @@ next.
   in the transcript. See [Showing a finished document](#showing-a-finished-document).
 - **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
   Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
-  at the OS level via Linux landlock / macOS seatbelt; where the OS cannot fence a
-  command, Auto asks before it rather than running it unbounded).
+  at the OS level via Linux landlock / macOS seatbelt / a Windows low-integrity
+  token; where the OS cannot fence a command, Auto asks before it rather than
+  running it unbounded).
+- **Diagnosable without running an agent** — `apogee probe` reports what this host can
+  do (backend, capability matrix, Auto verdict, roots, endpoint reachability) for free
+  and offline; `apogee probe model` runs a capability battery against the model. See
+  [Diagnosing a host](#diagnosing-a-host--apogee-probe).
 - **MCP support** — connect external tool servers over stdio / SSE / streamable-http.
 - **Model profiles** — adapt to models that don't speak native tool-calls: the tool
   menu and format instructions are injected as text on the request side, markdown-fenced
@@ -182,12 +190,28 @@ work straight away. The path line works regardless.
 ### Auto mode's blast radius
 
 Auto is the one unsupervised mode, so it is fenced: filesystem writes are confined to
-the workspace at the OS level, the network is open, and MCP still asks. Where the OS
-cannot fence a command — Windows today, and most containers, where landlock reports
-`ENOSYS` regardless of kernel version — Auto keeps the promise the honest way and asks
-before each shell call instead of running it unbounded ("confine if you can, gate if
-you can't"). That is not a fault, so Apogee says so at startup rather than letting Auto
+the workspace at the OS level, the network is open, and MCP still asks. All three
+platforms have a backend — landlock on Linux, `sandbox-exec` on macOS, a restricted
+low-integrity token on Windows. Where the OS cannot fence a command — a Windows build
+older than 10 1809 (17763), and most containers, where landlock reports `ENOSYS`
+regardless of kernel version — Auto keeps the promise the honest way and asks before
+each shell call instead of running it unbounded ("confine if you can, gate if you
+can't"). That is not a fault, so Apogee says so at startup rather than letting Auto
 look broken.
+
+**On Windows the fence is a token, and the box is a mark on your disk.** No Windows
+facility takes "these paths are writable" as an argument, so the command runs under a
+restricted, *low-integrity* token — the kernel then denies it any write to an object
+that is not explicitly marked low, and the denial is inherited by every process it
+spawns. The workspace (plus any configured writable paths) carries that mark for the
+session and it is reverted on exit; an interrupted run leaves a journal behind, which
+`apogee probe` reports. Two things worth knowing before you use it: network egress is
+**not** claimed on Windows (the network is open there exactly as elsewhere, and a box
+that asks for network *deny* is refused rather than silently ignored), and the marking
+pass costs roughly a millisecond per file or directory — with a large `.git` or
+`node_modules` in the workspace, the first confined command of a session visibly
+pauses while it runs (measured: ~5 s to mark a 5,000-object tree, ~2 s to revert it),
+after which every later command in that session pays nothing.
 
 If the machine is disposable and you would rather have Auto unfenced there, `/confine`
 is the route. `/confine` (or `/confine status`) reports the backend, what it can
@@ -214,6 +238,43 @@ host. Both keys are **global-config-file-only** — no flag, no environment vari
 no project config — because editing that file is the deliberate acknowledgement, and a
 repo you cloned must never be able to make that claim for you.
 
+## Diagnosing a host — `apogee probe`
+
+`apogee probe` answers "what would Auto do on this machine?" without running an agent.
+It reads `config.yaml` and the `APOGEE_*` environment exactly as a session would, and
+reports the OS/arch, the confinement backend and what it can *actually* enforce here,
+the Auto verdict, the effective `confine-to-workspace` after any host acknowledgement,
+the workspace root and config home, and whether the configured endpoint answers
+(`/v1/models`, plus llama.cpp's `/props`). It is free, offline and **read-only** — no
+model is called, no starter config is seeded, nothing is written. `apogee probe host`
+is the same report under a named child, for scripts.
+
+```console
+$ apogee probe
+apogee probe — host report
+  (no agent runs, no model is called, nothing is written)
+
+host
+  os/arch:       windows/arm64
+  ...
+confinement (ADR 0012)
+  backend:       token (fs-write: available · network: unavailable)
+  auto:          eligible — the backend can fence terminal commands, so auto runs them confined
+```
+
+`apogee probe model` is the other half, and it is deliberately an **explicit act**
+rather than something the bare noun triggers, because it costs live model calls *and*
+writes. It runs a three-part capability battery — a native tool call, JSON/structured
+output, and a multi-step tool chain — then prints what it observed, an ordinal
+capability tier, and the model-profile knobs the findings suggest as paste-ready YAML
+(your `config.yaml` is never edited). It also records a **behavioral fingerprint**: the
+model keeps its advertised name — probing never renames it, so Validated-set entries,
+aliases and Library observations keyed on that name keep matching — but its identity
+rises from *low* to *medium* confidence, which is what promotes a matching Validated
+set from offered to auto-applied on later runs. `--no-save` runs the whole battery and
+records nothing; the record's path is printed either way, so deleting that file undoes
+it.
+
 ## Building from source
 
 **Prerequisites:** Go 1.26+ (the toolchain version pinned in `go.mod`).
@@ -237,14 +298,19 @@ A `Makefile` wraps the common Go invocations:
 | `make help` | List every target |
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
-Makefile just gives the common commands one-word names.
+Makefile just gives the common commands one-word names. Releases are cross-compiled to
+all **six** targets — Linux, macOS and Windows × `amd64` and `arm64` — from any one of
+them: the tree is CGO-free, so `make cross` (or six `GOOS=… GOARCH=… go build ./...`
+invocations) is the whole release matrix, and every OS-specific backend is behind a
+build tag rather than a separate artifact.
 
 > **Note:** launch the TUI with `apogee --endpoint <openai-compatible-url> --model <name>`
 > to hold a real coding conversation with a local model. All four autonomy modes, the
 > full tool suite, MCP, sub-agents, and skills are live; Auto mode runs fully unattended
-> where OS confinement is actually available (Linux landlock and macOS seatbelt today —
-> Windows lands in a later phase, and a container may have neither), and where it is not,
-> Auto gates each shell/subprocess call through approval and tells you why. See
+> where OS confinement is actually available — Linux landlock, macOS seatbelt, and a
+> Windows low-integrity token on build 17763 or newer — and where it is not (an older
+> Windows, or a container with neither), Auto gates each shell/subprocess call through
+> approval and tells you why. `apogee probe` says which case this machine is in. See
 > [Auto mode's blast radius](#auto-modes-blast-radius).
 
 ## License

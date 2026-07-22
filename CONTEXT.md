@@ -34,7 +34,8 @@ retired predecessor structure).
 The public Go package other applications import to construct and run an Apogee agent
 in-process. Apogee ships as **both** a ready-to-use terminal tool (the `cmd/apogee` TUI +
 CLI — the headline product) **and** this reusable library: the TUI, the optional `apogee
-headless` CLI (deferred — no subcommands ship yet), and the bench are all consumers of one
+headless` CLI (still deferred — the subcommand surface now exists and carries
+[`apogee probe`](#probing-and-model-identity), but `headless` is not built), and the bench are all consumers of one
 public package over the same engine. The repo is the whole tool, not just the library. The public surface is guarded
 and versioned; everything else lives in `internal/`. See
 [ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md).
@@ -179,7 +180,9 @@ OS-level restriction of the **unbounded subprocess surface** (shell / subprocess
 **blast radius, not to a mode-wide binary** (ADR 0012, superseding ADR 0004): a tool runs
 unsupervised only if its blast radius is bounded — **either** by OS confinement of the subprocess
 surface (Linux **landlock** applied pre-`execve` on the child; macOS **`sandbox-exec`** wrapping
-the child — one clean subprocess granularity on both OSes), **or** by Apogee's own
+the child; Windows a restricted **low-integrity token** handed to process creation, with the box
+expressed as a mandatory label on the disk and reverted on teardown — one clean subprocess
+granularity on all three), **or** by Apogee's own
 **path-safety-to-workspace** for its own in-process write tools (a third-party in-process tool,
 whose scoping Apogee cannot vouch for, gates instead of running unsupervised). It is a **capability
 matrix, not a one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`,
@@ -190,9 +193,12 @@ surface is tuned by the global **`confine-to-workspace`** flag (below). The per-
 `confine-to-workspace` is on; and if fs-confinement is *unavailable* on the host, subprocess tools
 gate too ("confine if you can, gate if you can't") rather than refusing Auto. Apogee never runs a
 tool call both unsupervised *and* unbounded. Lives behind a `platform/` `Confiner` interface
-(seatbelt / landlock / AppContainer); default box = workspace-write-only + **network-open** +
-per-project allowlist. See
-[ADR 0012](docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md).
+(seatbelt / landlock / Windows token — AppContainer was **rejected**, ADR 0020); default box =
+workspace-write-only + **network-open** + per-project allowlist. Only `fs-write` is ever claimed
+on Windows: `network-egress` is not enforceable there, so it is not advertised, and a box that
+asks for it fails closed. See
+[ADR 0012](docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)
+and [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md).
 _Avoid_: "sandbox" (that is the bench's term — see below), "jail".
 
 **`confine-to-workspace`** (the Auto blast-radius flag):

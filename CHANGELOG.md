@@ -8,6 +8,188 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+*Merge-plan **Phase 5 — cross-platform hardening & retirement** — the last open phase — closed
+2026-07-22 (`docs/plans/2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`). Its
+deliverable was "cross-compiled binaries for Win/Mac/Linux, **Auto confined on all three**", and
+that is now true.*
+
+### Added
+
+- **Auto mode is confined on Windows: the fence is a restricted low-integrity token, and the box
+  is a label on the disk.** Windows was the last Phase-0 stub — `denyConfiner`, so `--mode auto`
+  reported `{FSWrite:false, NetworkEgress:false}`, every terminal/`python_exec` call took the
+  Approval path, and the degradation notice fired on every session. That was *correct* under
+  ADR 0012 ("confine if you can, gate if you can't"), never a bug, and it is what this release
+  ends. The two shipped backends fence by **path policy** — landlock takes a ruleset of
+  path-beneath rules, seatbelt a profile with `allow file-write*` under the box's roots, and
+  neither touches your disk. Windows has no facility of that shape: mandatory integrity control
+  fences by **identity**, and nothing in that model takes "these paths are writable" as an
+  argument. Everything below follows from that one asymmetry. **The fence** is a restricted,
+  Low-integrity primary token handed to `SysProcAttr.Token`: the child runs at Low, every object
+  carrying no explicit label is implicitly Medium with `NO_WRITE_UP`, so a write outside the box
+  is denied by the kernel *before* the DACL is consulted — and because a process inherits its
+  creator's token, the denial covers the whole descendant tree for free (the Windows equivalent of
+  "the domain survives `execve`"). `CreateRestrictedToken(…, DISABLE_MAX_PRIVILEGE, …)` is defence
+  in depth, not the fence — no restricting SIDs and no deny-only SIDs, which break ordinary
+  programs and buy nothing the integrity level does not already give. **The box** is a mandatory
+  label written on `WorkspaceRoot ∪ WritablePaths` for the run and **reverted on teardown** — a
+  side effect on the user's disk that landlock and seatbelt do not have, accepted deliberately
+  because it is the only way the box's writable half can be expressed at all, journalled per-PID
+  under `<apogee home>/confinement/` against a crash, recovered at construction, and reported by
+  `apogee probe host` when an interrupted run left one outstanding. There is **no helper process,
+  no argv sentinel and no argv rewrite**: Linux needs its 42-line re-exec helper only because the
+  CGO-free way to run code between `fork` and `execve` is to *be* a process that restricts itself,
+  and Windows has no "restrict myself" API to mirror — so `Confine` sets the token and returns,
+  `cmd.Path`/`cmd.Args` are untouched, and `maybeDispatchConfinedExec` gains no Windows arm.
+  (`internal/platform/{confiner_windows.go,winconfine.go}`;
+  [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md);
+  `docs/design/confinement-execution-contract.md` §9.)
+- **What the Windows backend honestly claims, and where it stops.** Capabilities are
+  `{FSWrite: true, NetworkEgress: false}` — **network egress is not claimed on Windows**, because
+  the token fences the filesystem and nothing else, and a `ConfinementBox` carrying a non-empty
+  `NetworkAllow` **fails closed** with `ErrConfinementUnavailable` (mirroring landlock's
+  `networkDenyDecision`) rather than pretending a requested tightening happened. `AutoEligible()`
+  stays FSWrite-only per ADR 0012, so Windows is Auto-eligible on that basis alone. The supported
+  floor is **Windows 10 1809 / build 17763 / Server 2019** — the oldest branch under any
+  servicing, at or above Go's own floor — read from the un-shimmed `RtlGetNtVersionNumbers`;
+  **below it nothing changes**: `NewConfiner()` returns the deny backend and the degradation
+  notice fires exactly as before. Honesty is split across two moments, the one structural
+  difference from Linux/macOS: `Capabilities()` probes the facility **once at construction**,
+  while a per-run labelling failure is a `Confine`-time `ErrConfinementUnavailable` that feeds the
+  execution contract's forced-Gate path. A box root that cannot be labelled — or cannot even be
+  *compared* (an unresolvable 8.3 short name, a device path, a drive-relative `C:work`) — fails
+  closed; a failure on an individual descendant is tolerated, because one locked file becoming
+  read-only to the child must not gate a whole session; symlinks and reparse points are skipped,
+  since `SetNamedSecurityInfo` follows them and labelling one would mutate a target outside the
+  box.
+- **`apogee probe` — the diagnosis command, in two halves with deliberately asymmetric cost.**
+  Promised twice (as the confinement-diagnosis subcommand and as model capability probing) and
+  blocked on a CLI that had no subcommands at all. `apogee probe` now prints the **host report**
+  from the parent's own `RunE` — OS/arch, the Confiner backend and its capability matrix, the
+  `AutoEligible()` verdict, the effective `confine-to-workspace` *after* the host acknowledgement
+  is resolved, the workspace root and config home, endpoint reachability and the `/v1/models` +
+  llama.cpp `/props` discovery outcomes reported **separately**, and an outstanding Windows label
+  journal if there is one. It runs no agent, calls no model, and writes nothing — unlike the root
+  command it does not even seed a starter config, which is pinned by a test — and it resolves
+  flags, `APOGEE_*` and `config.yaml` exactly as a session would, so what it reports is what a
+  session on this host would run with. `apogee probe host` is the same report under a named child,
+  so a script never has to rely on a bare parent's semantics staying put. Because `/confine
+  status` (TUI) and `apogee probe` (CLI) answer the same question, the selection and notice logic
+  was **extracted, not duplicated**: `internal/probe`'s `BackendName` / `DegradedNotice` /
+  `CapabilityLine` are the single source both render, so two views of one verdict cannot drift,
+  and the host report closes with the startup degradation notice verbatim.
+  (`cmd/apogee/probe.go`, `internal/probe`;
+  [ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md).)
+- **`apogee probe model` — the capability battery, and the `ConfidenceMedium` fingerprint slot
+  finally filled.** The model half is an **explicit act**, never a side effect of typing the bare
+  noun, because it spends live model calls *and* writes: it asks the model to emit a native tool
+  call, return a JSON object, and carry a tool result into a second call, then reports what it
+  observed, an ordinal **capability tier**, and the model-profile knobs the findings suggest as
+  **paste-ready YAML** (printed in the `offerNotice` tradition — `config.yaml` is never edited).
+  It then records a versioned, owner-private (0700/0600) probe record keyed on endpoint +
+  advertised label + timestamp, which `internal/library`'s resolver consults as the middle rung of
+  the ladder its `fingerprint.go:40` comment reserved: **weights hash (high) → stored probe record
+  (medium) → metadata label (low)**. Persistence is the point rather than a convenience — identity
+  resolves through a pure offline call at startup, so a Medium tier that was never written down
+  could never be observed. **Probing does not rename your model.** The behavioral tier promotes the
+  **advertised label** to medium confidence and files the observed feature vector beside it as a
+  separate **behavioral signature** (`probe:<battery>:<features>[:lp-<digest>]`) — evidence, never
+  a match key. The first implementation minted a synthesised label from the features, which matched
+  no Validated-set entry, no user alias and no Library key, so the command advertised as the
+  promotion from *offered* to *auto-applied* silently did the opposite; that is recorded as a dated
+  Amendment to ADR 0021 and the signature keeps ADR 0021 §6's substance (a fuzzy feature match over
+  observed capabilities, logprobs preferred where the server exposes them, **never** a hash of
+  response text) — only its role moved, from identity to evidence, and drift detection now rests on
+  it. Consequence worth knowing before you run it: at medium confidence a matching Validated set
+  **auto-applies** instead of being offered (ADR 0016 §5), so probing is the act that switches that
+  automatism on — `--no-save` runs the whole battery and records nothing, and the record's path is
+  printed either way so deleting the file undoes it. An **incomplete** battery mints no fingerprint
+  at all (a hole in the evidence must not become an identity), and `probe model` refuses when
+  neither `--model` nor the server names a model, since with no label there is nothing to key a
+  claim on. *Adaptive prompt complexity is deliberately NOT built*: the probe ships the capability
+  tier as a **signal with no automatism**, and the transform is recorded as a `TODO.md` follow-on,
+  because a model-facing transform is a Mechanism by definition and earns its place on the ADR 0009
+  non-inferiority gate with a bench campaign behind it — validated, not assumed.
+- **Cobra subcommands, with bare `apogee` byte-identical.** The root command now accepts children
+  (the seam shipped empty, so the Commands section in `--help` appeared only when `probe` landed).
+  Everything load-bearing is unchanged: `maybeDispatchConfinedExec` is still the first thing `main`
+  does, before Cobra parses anything, `Args: cobra.NoArgs` is retained on the root `RunE`, and no
+  existing flag or environment path moved. `apogee headless` remains **deferred** — the skeleton
+  merely makes it possible later.
+- **Windows kills the whole process tree, not just the leader.** `internal/tools`' teardown stub
+  killed only the process it started, so a cancelled `terminal` call could leave a grandchild
+  running. The container is now an unnamed **Job Object** created between `Start` and `Wait` (a
+  process can only be assigned to a job *after* `CreateProcess` returns, so `runSubprocess` runs
+  Start → contain → Wait instead of `cmd.Run()`; POSIX takes a no-op teardown and the path is
+  byte-for-byte what `Run` did) with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, terminated explicitly by
+  `cmd.Cancel`, honouring the same contract §2.4 obligations as the POSIX `Setpgid` +
+  negative-PID-kill path, `WaitDelay` unchanged. A **clean** run clears the kill-on-close limit
+  before closing the handle, so a process the command deliberately backgrounded outlives it exactly
+  as it does under a POSIX group leader — the limit's real job is the crash path. Both halves are
+  pinned by native tests **verified by negative control** (stub out the containment and the tree
+  test fails; remove the limit-clear and the survival test fails), and the shared decision function
+  `planTreeKill` is untagged and table-tested on every OS.
+- **The `platform` `Shell`/`Path` seam is real on both hosts.** The two Phase-0 widening `TODO`s
+  are retired: `Shell{Command, CommandLine, Quote, ScopeEnv}` and `Path{ExecExt, Contains}` now
+  live in **one untagged rule table** compiled on every target — only `Current()`'s choice is
+  build-tagged — so Windows semantics are table-tested from a Linux run and executed natively on
+  Windows. `CommandLine` exists because Windows has no argv at the syscall boundary: `os/exec`
+  joins arguments with `syscall.EscapeArg`, which escapes an embedded quote as `\"`, a form
+  `cmd.exe` does not understand (measured: a `cmd /c` of `echo "hello world"` prints `\"hello
+  world\"`, and a redirect to a quoted spaced path dies with "The filename, directory name, or
+  volume label syntax is incorrect"), so the verbatim command line goes to `SysProcAttr.CmdLine`
+  and is `""` on POSIX, where `execve` takes a real argv. `Contains` is the case-folded containment
+  the Windows Confiner needs, and it is **"resolve, else refuse"**: `\\?\` and `\\?\UNC\` are
+  normalised, drive-relative (`C:work`) and device (`\\.\…`) paths are refused as non-locations,
+  and an 8.3-shaped component is expanded through `GetLongPathNameW` (walking up to the longest
+  *existing* prefix, since the API is undefined for a path that does not exist yet) or the answer
+  is `false`. There is deliberately **no `LookPath` wrapper** — `os/exec` already implements per-OS
+  lookup including `%PATHEXT%`, so one would be dead surface. Two existing callers were adopted:
+  the `terminal` tool carries the verbatim command line, and `safeGitEnv` runs through `ScopeEnv`,
+  so a Windows `git` child finally gets `%SystemRoot%`/`%ComSpec%`/`%PATHEXT%`/the profile paths
+  its POSIX-shaped allowlist never named (POSIX output is byte-identical — that floor is empty by
+  design).
+
+### Changed
+
+- **The confinement degradation notice narrows to the hosts where it was always the honest
+  answer.** Its trigger cell is unchanged (Auto **and** confinement asked for **and**
+  `FSWrite == false`); what changed is that Windows ≥ build 17763 no longer lands in it. It still
+  fires on an older Windows and in the containers where `landlock_create_ruleset` returns `ENOSYS`
+  regardless of kernel version. Verified live on the execution host: `apogee probe host` prints
+  `backend: token (fs-write: available · network: unavailable)` / `auto: eligible` and **no
+  notice**, and the real `Terminal` tool under `platform.NewConfiner()` writes inside the box and
+  is denied outside it with the Job Object and the verbatim command line composing unchanged. The
+  escape battery (`internal/platform/confinetest`) now runs natively on Windows through
+  `cmd /c` — in-box and writable-path writes land; out-of-box, user-profile and **nested-exec**
+  writes all die with "Access is denied." and no file, so token inheritance across a second `exec`
+  is **asserted, not assumed**. The below-floor path stays **untested** — no such host exists here.
+- **Measured cost of the Windows disk mutation, which ADR 0020 accepted but did not quantify:
+  ~1 ms per object.** A synthetic 5,051-object tree took **5.2 s to label and 2.2 s to revert**.
+  It is paid once per box — the first confined command of a session — and once at shutdown, but a
+  workspace with a large `.git` or `node_modules` will make that first `Confine` visibly block.
+  Recorded rather than tuned: pruning the walk changes the ratified box semantics, so the cheap
+  remedies (a startup notice, excluding ignored trees) are an owner call, not a silent one.
+- **`internal/provider` gained an opt-in logprobs pair and a separate runtime context window.**
+  `Request.LogProbs` and `RawResponse.TopCandidates` let the battery prefer logprobs where a server
+  exposes them; the request fields are emitted as omitted pointers, so **every existing caller's
+  bytes are unchanged**. `ModelInfo.RuntimeContextWindow` is new because the host report must state
+  the `/v1/models` and llama.cpp `/props` outcomes separately, and `Discover` previously folded the
+  `/props` window into `ContextWindow` with no way to tell which probe answered.
+- **Fingerprint resolution grew its full ladder without breaking its callers.**
+  `ResolveFingerprint(modelID)` is kept as the two-rung wrapper; the three-rung form is
+  `ResolveFingerprintFrom(Sources{ModelID, Endpoint, ProbeDir})`, because the middle rung needs the
+  endpoint and the home the old signature cannot carry. `internal/agent`'s call site adopts it too,
+  deriving the probe dir from the injected `Config.ConfigDir` (an empty one simply removes the
+  rung — never an ambient `~/.apogee`, per ADR 0001), so the Library's keying and the Validated-set
+  match key **identically**; if only the wire-time call site could reach Medium, ADR 0021's
+  consequences would be false in-loop.
+- **Probe records written by an earlier build of `main` are not readable.** The ADR 0021 Amendment
+  moved the record's `fingerprint` field to `behavior` and bumped `ProbeRecordVersion` 1 → 2. Old
+  records are **skipped with a warning** naming the one-command fix — re-run `apogee probe model`
+  once per model — and no migration tooling is built, deliberately: nothing was released with
+  version 1. The same note ships in `apogee probe model --help`.
+
 ### Removed
 
 - **The proxy and the OpenCode plugin / transform-server bridge — retired, on the record.** The

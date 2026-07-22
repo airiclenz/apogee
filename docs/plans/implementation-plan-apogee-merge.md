@@ -262,7 +262,7 @@ force. P0.6's root-package loop was an explicit throwaway; **P1.0 moves it to th
 | Diagnostics (other langs) | structural checks (brackets, truncation) | `tsc`, language linters — *enhancement only* |
 | Git ops | start by shelling to `git` (ubiquitous); evaluate `go-git` if we want to drop even that dep | `git` |
 | `terminal` / `python-exec` tools | n/a — these *are* the external invocation the user asked for (inherent dep) | shell / python |
-| Auto-mode Confinement (**ADR 0012**, supersedes 0004) | Linux **landlock** — `AutoEligible()` needs **fs confinement only** (kernel ≥5.13; **network open by default**); network-egress (ABI v4 / ≥6.7) is an *optional* tightening | macOS **`sandbox-exec`** (system binary); Windows AppContainer (Phase 5) |
+| Auto-mode Confinement (**ADR 0012**, supersedes 0004) | Linux **landlock** — `AutoEligible()` needs **fs confinement only** (kernel ≥5.13; **network open by default**); network-egress (ABI v4 / ≥6.7) is an *optional* tightening | macOS **`sandbox-exec`** (system binary); Windows a restricted **low-integrity token** (Phase 5 ✅ 2026-07-22 — ADR 0020; AppContainer rejected as unreachable through `os/exec`, and `NetworkEgress` is not claimed there) |
 | Model fingerprint (Library keying) | **pure-Go GGUF tensor hash** (target) for a definitive weights ID when the file is reachable; behavioral `apogee probe` fingerprint otherwise | `llama-gguf-hash --uuid` (interim, if on PATH) |
 
 Rule: a fresh binary on a bare machine must still **read, edit, search, and run the
@@ -431,26 +431,56 @@ before keeping it on**:
   an A/B, not by faith.
 
 ### Phase 5 — Cross-platform hardening & retirement
+*Status: ✅ **Complete** (2026-07-22) — detail & acceptance in
+[`2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`](./2026-07-22%20-%2000%20-%20phase5-cross-platform-hardening-plan.md),
+executed item-by-item on a real Windows machine (native toolchain, not WSL) with the
+landlock-tagged half re-verified on the Linux devbox. This was the last open phase of the
+merge plan.*
 
 > **Execution plan (2026-07-22):** `2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`
 > is the numbered work-item breakdown for `/implement-plan`. This section stays the scope
 > authority; that plan carries the anchors, design-call gates and verification hooks.
-- Implement the **Windows** shell/path backend **and the Windows `Confiner`**
+- ✅ Implement the **Windows** shell/path backend **and the Windows `Confiner`**
   (AppContainer / Job Objects / restricted tokens) behind `platform/`; test the matrix
   (the real cross-platform risk). The interfaces were designed in Phase 0, so this is
   implementing them — but the Confiner backend is genuine new work (and **Auto mode on
   Windows is gated on it**, per ADR 0004 — since superseded by ADR 0012, which keeps the
   fs-confinement gate).
-- Add `apogee probe` (model capability probing → auto profile) and adaptive prompt
+  **Shipped as:** `Shell{Command, CommandLine, Quote, ScopeEnv}` + `Path{ExecExt, Contains}`
+  in one untagged rule table; Job-Object process-**tree** teardown; and — the design session
+  the risk table asked for — [ADR 0020](../adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md):
+  the facility is a **restricted low-integrity token** on `SysProcAttr.Token` (AppContainer
+  rejected — unreachable through `os/exec`), the box is a **mandatory label on the disk**
+  reverted at teardown, caps are `{FSWrite: true, NetworkEgress: false}`, and the floor is
+  **Windows 10 1809 / build 17763 / Server 2019**, below which the deny backend and the
+  degradation notice persist unchanged.
+- ✅ Add `apogee probe` (model capability probing → auto profile) and adaptive prompt
   complexity (from `apogee-sim/mission.md`). **`apogee probe` does double duty (new):** the
   same battery yields the **behavioral model fingerprint** (fuzzy feature match, not a
   response hash; logprobs preferred when exposed) used for Library keying when the GGUF file
   is unreachable.
-- **Retire the proxy and the OpenCode plugin / transform-server bridge** (decided —
+  **Shipped as** [ADR 0021](../adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md):
+  `probe` (host report — free, offline, read-only) + `probe host` + `probe model` (the
+  battery, an explicit act that spends tokens and writes a record). Per the ADR's 2026-07-22
+  Amendment the behavioral tier promotes the **advertised label** to `ConfidenceMedium` and
+  files the feature vector beside it as a separate behavioral **signature** — evidence, never
+  a match key, so probing can never orphan a Validated-set entry, an alias or a Library
+  observation. **Adaptive prompt complexity was deliberately NOT built** (ADR 0021 Q3): the
+  probe ships the `capabilityTier` signal and the transform is a recorded `TODO.md` follow-on,
+  because a model-facing transform is a Mechanism and earns its place on the ADR 0009 gate.
+- ✅ **Retire the proxy and the OpenCode plugin / transform-server bridge** (decided —
   not ported forward; they remain in apogee-sim's history). **Retirement recorded
   2026-07-22** in `CHANGELOG.md` `[Unreleased]`; the apogee-sim-side archival stays that
   repo's business.
 - **Deliverable:** cross-compiled binaries for Win/Mac/Linux, Auto confined on all three.
+  ✅ **Met (2026-07-22).** All six targets cross-build CGO-free, and Auto is confined on
+  Linux (landlock), macOS (seatbelt) and Windows (token) — the Windows half proven live on
+  the execution host: the escape battery denies out-of-box, user-profile and nested-exec
+  writes, the real `Terminal` tool under `platform.NewConfiner()` writes inside the box and
+  is denied outside it, and the degradation notice is gone (`backend: token (fs-write:
+  available · network: unavailable)` / `auto: eligible`). Still owner-run: a live
+  Auto-confined session on Windows against a reachable endpoint, a below-floor Windows host
+  (none exists here — recorded UNTESTED in ADR 0020), and the macOS cross-binary smoke.
 - *(The eval harness lives in apogee-sim and reaches Apogee by Go import — **decided, not
   deferred** (ADR 0001). There is no `sim`/`bench` subcommand in apogee; an opt-in
   reduced-weight bleed of sim observations into the production Library may be added later
@@ -463,7 +493,7 @@ before keeping it on**:
 | Risk | Why it's hard | Mitigation |
 |---|---|---|
 | `processing/` port | fiddly string logic (harmony channels, fenced/native parsing), currently TS-tested | keep TS as oracle; port test vectors; validate parity via the bench |
-| Windows shell exec **+ Confiner** | shell is POSIX-shaped; Windows OS confinement (AppContainer) is a different model and genuine new work | `platform/` shell/path **and `Confiner`** interfaces from Phase 0; Windows backend in Phase 5 |
+| Windows shell exec **+ Confiner** | shell is POSIX-shaped; Windows OS confinement is a different model (identity, not path policy) and genuine new work | `platform/` shell/path **and `Confiner`** interfaces from Phase 0; **RETIRED 2026-07-22** — the Windows backend shipped in Phase 5: the widened `Shell`/`Path` rule table, Job-Object tree teardown, and the ADR 0020 low-integrity-token Confiner, all exercised natively on a real Windows host |
 | **Auto-mode Confinement** | OS confinement is OS-specific + partly external; must not become a silent hard dep | ADR 0012 (supersedes 0004): landlock (Linux, in-kernel) / seatbelt (mac) for v1; **when unavailable, Auto runs and gates the unfenceable surface ("confine if you can, gate if you can't")**; own design session |
 | Mechanism re-validation | proxy-era effects may not transfer to in-loop firing | bench A/Bs each one (Phase 4); never carry forward on faith |
 | **Public Go API stability** | the bench *and* third-party embedders depend on it; costly to change later (ADR 0001) | design first (Phase 0); minimal guarded surface; **semver**; typed Events; everything else `internal/` |
