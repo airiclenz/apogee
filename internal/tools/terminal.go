@@ -84,7 +84,10 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 
 	spec := subprocessSpec{
-		argv:    shellHost.Command(args.Command),
+		argv: shellHost.Command(args.Command),
+		// The line is handed to the shell verbatim where the platform needs it (Windows:
+		// os/exec's argv joining would escape the model's quotes into cmd.exe's face).
+		cmdline: shellHost.CommandLine(args.Command),
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 	}

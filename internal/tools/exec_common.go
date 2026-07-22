@@ -45,6 +45,12 @@ type subprocessSpec struct {
 	// scrubbed, allowlisted environment (e.g. git) sets it; the shell/interpreter tools
 	// leave it nil to inherit.
 	env []string
+	// cmdline, when non-empty, is the verbatim process command line to launch argv with
+	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
+	// POSIX and for any argv that is a real argv; a tool handing a SHELL LINE to
+	// cmd.exe on Windows sets it, because os/exec's argv joining mangles the quotes the
+	// shell needs (exec_cmdline_other.go).
+	cmdline string
 }
 
 // subprocessResult is the captured outcome of one subprocess execution.
@@ -114,6 +120,9 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	// Wire the process-group teardown BEFORE confining: the Confiner only appends to
 	// SysProcAttr (Setpgid) and never touches cmd.Cancel, so the two compose.
 	setProcessGroupTeardown(cmd)
+	// A shell line on Windows must reach the shell verbatim; every other platform and
+	// every real argv leaves this empty and the cmd untouched.
+	setRawCommandLine(cmd, spec.cmdline)
 
 	// Confine the command if the disposition installed a handle. ErrConfinementUnavailable
 	// is propagated so dispatch demotes to Approval rather than running unconfined.

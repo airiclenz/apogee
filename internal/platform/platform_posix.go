@@ -2,18 +2,8 @@
 
 package platform
 
-// posixHost is the POSIX implementation of Host (Linux, macOS, and the other
-// Unix targets). It is the real Phase-0 backend; the Windows counterpart is a
-// stub (plan §P0.5).
-type posixHost struct{}
-
-// Command wraps line in `sh -c`, the POSIX shell invocation.
-func (posixHost) Command(line string) []string { return []string{"sh", "-c", line} }
-
-// ExecExt is empty on POSIX — executables carry no filename extension.
-func (posixHost) ExecExt() string { return "" }
-
-// Current returns the platform Host for this (non-Windows) build target.
-func Current() Host { return posixHost{} }
-
-var _ Host = posixHost{}
+// Current returns the platform Host for this (non-Windows) build target: the POSIX rule
+// set — `sh -c`, no executable suffix, exact-case slash-separated paths, and an argv that
+// execve takes verbatim, so no raw command line is needed (host.go carries the rules and
+// their reasoning).
+func Current() Host { return posixRules() }

@@ -3,8 +3,10 @@
 // that gate Auto mode as a capability matrix (ADR 0004). The Confiner interface
 // itself is public (package apogee); only the backends live here.
 //
-// The Shell/Path interfaces and a Host accessor exist with a real POSIX
-// implementation and a Windows stub that ships unexercised (Phase 5). The real
+// The Shell/Path interfaces and a Host accessor carry real POSIX and Windows
+// implementations: one rule table (host.go), compiled on every target and
+// selected by build tag, so Windows shell/quoting/path semantics are
+// table-testable from any host and exercised natively on Windows. The real
 // Confiner backends landed in Phase 3 and are selected per OS at build time:
 // landlock on Linux, seatbelt on macOS, and denyConfiner — a deny-all stub
 // reporting {false, false} — everywhere else (Windows until Phase 5). An

@@ -309,7 +309,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   the `Token` field the design rests on. Docs-only item: no code, and no CHANGELOG/README/CONTEXT.md
   (item 10's roll-up). Sanity check on this host (`make` absent): `go build ./...`, `go vet ./...`.
 
-- [ ] **6. Platform `Shell`/`Path` widening.** (DEPENDS: 5.) Retire the two `TODO(phase-5)`
+- [x] **6. Platform `Shell`/`Path` widening. — ✅ DONE (2026-07-22)** (DEPENDS: 5.) Retire the two `TODO(phase-5)`
   markers at `internal/platform/platform.go:16` and `:32` by widening exactly to the surface
   items 7–8 and the existing `terminal` tool consume — environment-scoped execution, executable
   lookup (`LookPath` semantics + `ExecExt`/PATH), argument quoting, and the case-folded
@@ -321,6 +321,50 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   collisions); `make cross`; existing callers compile unchanged or are adopted in this item.
   Per the Ground-truth NOTES, the Windows-tagged tests also run natively on the execution
   machine, not just compile.
+  NOTES (2026-07-22): the widened surface is `Shell{Command, CommandLine, Quote, ScopeEnv}`
+  and `Path{ExecExt, Contains}`, all of it in one untagged rule table
+  (`internal/platform/host.go`) whose two rule sets are compiled on EVERY target — only
+  `Current()`'s choice is build-tagged — so Windows semantics are table-tested from a Linux
+  run and natively here. Four deviations from the item's literal text: (a) **no `LookPath`
+  method.** `os/exec` already implements per-OS lookup including `%PATHEXT%` (verified
+  natively: `exec.LookPath("go")` → `…\go.exe`), so a wrapper would be exactly the dead
+  surface this item's acceptance forbids; `Path`'s doc comment records why, and `ExecExt`
+  stays as the one lookup-shaped fact `os/exec` does not expose. (b) **`Shell` gained
+  `CommandLine`, which the item does not name**, because shipping `Quote` without it would
+  hand item 8 a trap: Windows has no argv at the syscall boundary, so `os/exec` joins argv
+  with `syscall.EscapeArg`, which escapes an embedded quote as `\"` — a form cmd.exe does
+  not understand. Measured on this host: an `exec.Command("cmd", "/c", …)` of
+  `echo "hello world"` prints `\"hello world\"`, and a redirect to a quoted spaced path
+  fails with "The
+  filename, directory name, or volume label syntax is incorrect". `CommandLine` returns the
+  verbatim process command line for `syscall.SysProcAttr.CmdLine` ("" on POSIX, where
+  execve takes a real argv), which fixes both. (c) **two existing callers adopted** (the
+  item's own "or are adopted in this item"): the terminal tool now carries
+  `spec.cmdline` through the new `internal/tools/exec_cmdline_unix.go` / `_other.go` (the
+  setter only ever sets `CmdLine` and creates `SysProcAttr` if absent, so it composes with
+  item 7's teardown and item 8's `Token`), and `safeGitEnv` now runs through `ScopeEnv`, so
+  a Windows git child gets `%SystemRoot%`/`%ComSpec%`/`%PATHEXT%`/the profile paths its
+  POSIX-shaped allowlist never named — POSIX output is byte-identical, since the POSIX
+  platform floor is empty by design. (d) **8.3 is "resolve, else refuse"** (ADR 0020 §6's
+  "normalise or be rejected"): `Contains` treats a component as an alias only when it has
+  the 8.3 *shape* (so `my~file.txt` stays comparable), expands it through an injected
+  `longPath` seam — nil in the pure rule sets, `GetLongPathNameW` wired by `Current()` on
+  Windows and walking up to the longest EXISTING prefix, since that API is undefined for a
+  path that does not exist yet — and returns false when it cannot expand, which is the safe
+  answer for both of ADR 0020's callers. Also normalised: `\\?\` and `\\?\UNC\`; refused as
+  non-locations: `C:work` (drive-relative) and `\\.\…` (device). **Flag for item 8:**
+  contract §9.3's "ask `platform.Current().Command(line)`" is NOT reachable from
+  `internal/platform/confinetest` — `GOOS=darwin go vet ./internal/platform/` proves the
+  cycle (`seatbelt_darwin_test.go` is `package platform` and imports confinetest), so item 8
+  must pass the shell/quoting in from the caller or move those tests to `package
+  platform_test`. TODOs retired: `platform.go:16`, `:32` and `platform_windows.go:10` (only
+  item 7's `exec_pgroup_other.go:16` remains). No CHANGELOG/README/CONTEXT.md — item 10's
+  roll-up; `internal/platform/doc.go`'s "Windows stub … ships unexercised" sentence was
+  corrected in place, as it describes the code this item replaced. Sanity check on this host
+  (`make` absent): `go build ./...`, `go vet ./...` (plus `GOOS=linux|darwin|windows go
+  vet ./...`, which type-checks the tagged tests too), `go test -count=1 ./...` (only the
+  known pre-existing failures), all six cross targets, `--help` exit 0, the ADR-0010 grep,
+  and gofmt over LF copies of the changed files.
 
 - [ ] **7. Windows process-tree teardown (Job Objects).** (DEPENDS: 5.) Replace the leader-only
   stub in `internal/tools/exec_pgroup_other.go` (its `:16` TODO) with real job-object teardown

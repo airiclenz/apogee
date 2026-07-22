@@ -40,6 +40,11 @@ const gitDiffTimeout = 10 * time.Second
 // (ported from the TS oracle's SAFE_ENV_KEYS). Everything else is dropped, so a
 // surprising inherited variable cannot redirect git (config, auth, pager) — the
 // process sees only the keys a normal git invocation needs.
+//
+// The list is POSIX-shaped, which is a policy choice, not a portability one: the
+// variables a Windows process cannot start without (%SystemRoot%, %ComSpec%,
+// %PATHEXT%, the profile paths git reads its user config from) are the platform's
+// floor and are appended by platform.Shell.ScopeEnv rather than restated here.
 var safeEnvKeys = []string{
 	"PATH", "HOME", "USER", "SHELL", "LOGNAME", "HOSTNAME", "PWD",
 	"LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE",
@@ -52,16 +57,12 @@ var safeEnvKeys = []string{
 }
 
 // safeGitEnv returns the allowlisted environment for a git subprocess: each
-// safeEnvKeys entry that is present in the host environment, in "KEY=value" form.
-// It is a package var so a test can substitute the lookup.
+// safeEnvKeys entry that is present in the host environment, in "KEY=value" form,
+// followed by the platform's own essentials (none on POSIX — the output there is
+// exactly the allowlist, as before). It is a package var so a test can substitute
+// the lookup.
 var safeGitEnv = func() []string {
-	env := make([]string, 0, len(safeEnvKeys))
-	for _, key := range safeEnvKeys {
-		if value, ok := os.LookupEnv(key); ok {
-			env = append(env, key+"="+value)
-		}
-	}
-	return env
+	return shellHost.ScopeEnv(safeEnvKeys, os.LookupEnv)
 }
 
 // lookGit resolves the system git on PATH (a package var so a test can inject a
