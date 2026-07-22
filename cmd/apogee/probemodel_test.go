@@ -83,7 +83,7 @@ func runProbeModel(t *testing.T, configHome string, args ...string) string {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs(append([]string{"model", "--config", configHome, "--workspace", t.TempDir()}, args...))
+	cmd.SetArgs(append([]string{"model", "--config", configHome}, args...))
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("probe model: %v\n%s", err, out.String())
@@ -178,6 +178,116 @@ func TestProbeModelNoSaveWritesNothing(t *testing.T) {
 	entries, err := os.ReadDir(configHome)
 	if err != nil || len(entries) != 0 {
 		t.Errorf("--no-save wrote into the apogee home (entries=%v, err=%v)", entries, err)
+	}
+}
+
+// --no-save with a record an earlier run already stored: the effect line must not deny the
+// surviving record — it stays on disk untouched and keeps resolving this model at medium
+// confidence, which is exactly the drift-check scenario --no-save serves. "With no record
+// stored, identity stays at the label tier" would be a false claim about this machine.
+func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstream(t)
+	configHome := t.TempDir()
+	dir := library.ProbeDir(configHome)
+	probedAt := mustTime(t, "2026-01-02T03:04:05Z")
+
+	if _, err := library.SaveProbeRecord(dir, library.ProbeRecord{
+		Endpoint:   srv.URL,
+		ModelLabel: "battery-model",
+		ProbedAt:   probedAt,
+		Behavior:   "probe:1:tools+json+chain",
+	}); err != nil {
+		t.Fatalf("seed previous record: %v", err)
+	}
+
+	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--no-save")
+
+	if !strings.Contains(report,
+		"none new — the record from 2026-01-02T03:04:05Z continues to apply; this run recorded nothing") {
+		t.Errorf("the effect line must name the surviving record:\n%s", report)
+	}
+	if strings.Contains(report, "identity stays at the label tier") {
+		t.Errorf("the report denies a record that is still on disk:\n%s", report)
+	}
+	rec, warning, ok := library.LoadProbeRecord(dir, srv.URL, "battery-model")
+	if !ok || !rec.ProbedAt.Equal(probedAt) {
+		t.Errorf("--no-save must leave the stored record untouched (ok=%v warning=%q rec=%+v)", ok, warning, rec)
+	}
+}
+
+// The command's Long text promises records from an earlier build "are skipped with a warning" —
+// this is that warning, surfaced on stderr (the report's own stream stays clean) while the run
+// still renders the full report and records a fresh claim in the current format.
+func TestProbeModelWarnsAboutAnOldFormatRecord(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstream(t)
+	configHome := t.TempDir()
+	dir := library.ProbeDir(configHome)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir probe dir: %v", err)
+	}
+	v1 := `{"version":1,"battery-version":1,"endpoint":"` + srv.URL +
+		`","model-label":"battery-model","probed-at":"2026-01-02T03:04:05Z"}`
+	if err := os.WriteFile(library.ProbeRecordPath(dir, srv.URL, "battery-model"), []byte(v1), 0o600); err != nil {
+		t.Fatalf("write v1 record: %v", err)
+	}
+
+	cmd := newProbeCommand()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"model", "--config", configHome, "--endpoint", srv.URL})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("probe model: %v\n%s%s", err, out.String(), errOut.String())
+	}
+
+	for _, want := range []string{
+		"skipping probe record",
+		"schema version 1",
+		"re-run `apogee probe model`",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr does not carry the old-format warning (%q missing):\n%s", want, errOut.String())
+		}
+	}
+	if !strings.Contains(out.String(), "apogee probe — model battery") {
+		t.Errorf("the report must still render after the warning:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "yes — delete the file above to undo") {
+		t.Errorf("the fresh record must still be written:\n%s", out.String())
+	}
+}
+
+// --workspace is gone from `probe model`: the model path never read roots.workspace (only
+// `probe host` reports it), and the probe commands' own flag rule admits only flags that CHANGE
+// what is reported — an inert flag trains users to expect an effect it never had.
+func TestProbeModelRejectsTheWorkspaceFlag(t *testing.T) {
+	t.Parallel()
+	cmd := newProbeCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"model", "--config", t.TempDir(), "--workspace", "x"})
+
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("probe model accepted --workspace:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "unknown flag: --workspace") {
+		t.Errorf("error = %v; want the unknown-flag refusal", err)
+	}
+
+	help := newProbeCommand()
+	var helpOut bytes.Buffer
+	help.SetOut(&helpOut)
+	help.SetErr(&helpOut)
+	help.SetArgs([]string{"model", "--help"})
+	if err := help.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("probe model --help: %v", err)
+	}
+	if strings.Contains(helpOut.String(), "--workspace") {
+		t.Errorf("--help still lists --workspace:\n%s", helpOut.String())
 	}
 }
 
@@ -523,7 +633,7 @@ func TestProbeModelRefusesWithoutAnEndpoint(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"model", "--config", t.TempDir(), "--workspace", t.TempDir()})
+	cmd.SetArgs([]string{"model", "--config", t.TempDir()})
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
@@ -619,7 +729,7 @@ func probeModelRefusal(t *testing.T, configHome string, args ...string) error {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs(append([]string{"model", "--config", configHome, "--workspace", t.TempDir()}, args...))
+	cmd.SetArgs(append([]string{"model", "--config", configHome}, args...))
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {

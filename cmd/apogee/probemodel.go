@@ -77,7 +77,11 @@ func probeModelCommand() *cobra.Command {
 			if err := applyConfig(&opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 				return err
 			}
-			roots, err := resolveRoots(opts.configDir, opts.workspace)
+			// The workspace argument is deliberately empty: the model path reads only the
+			// home-derived roots (probe records, validated entries), so there is no
+			// --workspace flag here — the probe commands admit only flags that CHANGE what
+			// is reported (probe.go), and a workspace never changed this report.
+			roots, err := resolveRoots(opts.configDir, "")
 			if err != nil {
 				return err
 			}
@@ -116,7 +120,8 @@ func probeModelCommand() *cobra.Command {
 					return client.Respond(ctx, req)
 				},
 			})
-			result.Save = recordProbeFingerprint(result, roots, opts, !noSave)
+			result.Save = recordProbeFingerprint(result, roots, opts, !noSave,
+				func(msg string) { cmd.PrintErrln(msg) })
 
 			cmd.Println(result.Report())
 			return nil
@@ -127,8 +132,6 @@ func probeModelCommand() *cobra.Command {
 	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL to probe")
 	flags.StringVar(&opts.model, "model", "",
 		"model to probe (default: ask the server for its active model)")
-	flags.StringVar(&opts.workspace, "workspace", "",
-		"workspace root (default: current directory)")
 	flags.StringVar(&opts.configDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
 	flags.BoolVar(&noSave, "no-save", false,
@@ -151,8 +154,9 @@ func probeModelCommand() *cobra.Command {
 // The order matters twice: the previous-record comparison must read the disk BEFORE the write
 // replaces it, and the effect claim is computed only AFTER a successful write — against the
 // home as the next session start will actually find it. A record that was not written (--no-save,
-// a failed write) has no effect to claim, and the report's effect line already says so.
-func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save bool) probe.SaveOutcome {
+// a failed write) has no NEW effect to claim; the report's effect line says so, naming any
+// earlier record that survives and therefore continues to apply.
+func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save bool, printErr func(string)) probe.SaveOutcome {
 	out := probe.SaveOutcome{Requested: save}
 	if m.Fingerprint.IsZero() {
 		return out
@@ -162,10 +166,20 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 	// A previous record for the same key whose behavioral SIGNATURE differs is the ADR 0021 §3
 	// signal: the label did not change, the model behind it did. The identity cannot carry that
 	// signal — it is the label, which by construction did not move — which is exactly why the
-	// signature is recorded beside it. A defective previous record is simply not a comparison
-	// (LoadProbeRecord already reports why), so it is silently not one here.
-	if prev, _, ok := library.LoadProbeRecord(roots.probe, m.Endpoint, m.Model); ok && prev.Behavior != m.Behavior {
-		out.Changed = prev.ProbedAt.Format(time.RFC3339)
+	// signature is recorded beside it. A defective previous record is not a comparison;
+	// LoadProbeRecord returns the reason for THIS caller to surface, and printing it here is
+	// the warning the command's own Long text promises for v1-format records.
+	prev, warning, ok := library.LoadProbeRecord(roots.probe, m.Endpoint, m.Model)
+	if warning != "" {
+		printErr(warning)
+	}
+	if ok {
+		if prev.Behavior != m.Behavior {
+			out.Changed = prev.ProbedAt.Format(time.RFC3339)
+		}
+		// The record still in force should this run write nothing below — a successful
+		// write replaces it and clears this again.
+		out.Previous = prev.ProbedAt.Format(time.RFC3339)
 	}
 
 	if !save {
@@ -185,6 +199,7 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 	}
 	out.Path = path
 	out.Written = true
+	out.Previous = "" // this run's record replaced it; nothing earlier survives
 	out.AutoApply, out.Promoted, out.Suppressed = autoApplyKeys(m, opts, roots.validated, roots.probe)
 	return out
 }

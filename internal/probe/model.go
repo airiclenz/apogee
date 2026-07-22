@@ -64,6 +64,13 @@ type SaveOutcome struct {
 	// behavioral signature differed: the model behind the label changed since then. Empty when
 	// there was no previous record, or when it agreed.
 	Changed string
+	// Previous is the date of a usable earlier record for this same endpoint + advertised label
+	// that is STILL on disk because this run recorded nothing (--no-save, a failed write). The
+	// no-record effect line names it instead of claiming the identity fell back to the label
+	// tier — the surviving record keeps resolving this model at medium confidence, which is
+	// exactly the drift-check scenario --no-save serves. Empty when no usable record preceded
+	// this run, or when this run's write replaced it.
+	Previous string
 	// AutoApply names the Validated-set entries that auto-apply for this model once the record
 	// exists.
 	AutoApply []string
@@ -243,6 +250,14 @@ func (m Model) recordSection() string {
 // abstract.
 func (m Model) effectLine() string {
 	if !m.Save.Requested || !m.Save.Written {
+		// "No record stored" must mean stored by ANYONE: an earlier run's record survives a
+		// --no-save (or a failed write) untouched and keeps resolving this model at medium,
+		// so denying it here would be false in exactly the drift-check scenario --no-save
+		// serves.
+		if m.Save.Previous != "" {
+			return "none new — the record from " + m.Save.Previous +
+				" continues to apply; this run recorded nothing"
+		}
 		return "none — with no record stored, this model's identity stays at the label tier (low confidence)"
 	}
 	if m.Save.Suppressed != "" {

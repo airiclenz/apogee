@@ -356,7 +356,19 @@ Mutation-check (a) and (b) against the pre-fix code.
 next session start agree — including the two new rungs; no off-switch branch is untested.
 **Commit:** `fix(cli): probe model's effect claim runs startup's identity ladder`
 
-## 7. The probe report's remaining honesty gaps: `--no-save` wording, v1 warning, inert flag
+## 7. The probe report's remaining honesty gaps: `--no-save` wording, v1 warning, inert flag — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): Of the item's two offered routes for (b), the `cmd.PrintErrln` one was
+taken — `recordProbeFingerprint` gained a `printErr func(string)` parameter (the applyConfig
+idiom in the same file) rather than a `SaveOutcome` field. The new `SaveOutcome.Previous`
+(the surviving record's date) is set for BOTH non-written paths — --no-save and a failed
+write, since the no-record effect branch covers both — and cleared on a successful write
+(the new record replaced it, so nothing earlier survives). Dropping `--workspace` also
+removed the `--workspace t.TempDir()` arguments from the existing `runProbeModel` /
+`probeModelRefusal` helpers and `TestProbeModelRefusesWithoutAnEndpoint` — a forced
+consequence, behaviourally inert (the model path never read the result). A pure report row
+("--no-save with a surviving record") was added in `internal/probe/model_test.go` beside the
+required end-to-end `runProbeModel` test.
 
 **What:** (Review: Mediums "`--no-save` denies a surviving record" + "v1 warning dropped" +
 "`--workspace` is inert" — three small strokes, one item, all in the probe-model report path.)

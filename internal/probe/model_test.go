@@ -104,6 +104,17 @@ func TestModelReportRecordSection(t *testing.T) {
 			want: []string{"NO — --no-save was given", "none — with no record stored"},
 		},
 		{
+			// --no-save while an earlier saved record survives on disk: claiming the identity
+			// "stays at the label tier" would be false in exactly the drift-check scenario
+			// --no-save serves — the surviving record keeps resolving this model at medium.
+			name: "--no-save with a surviving record",
+			save: SaveOutcome{Requested: false, Path: "/p.json", Previous: "2026-01-02T03:04:05Z"},
+			want: []string{
+				"NO — --no-save was given",
+				"none new — the record from 2026-01-02T03:04:05Z continues to apply; this run recorded nothing",
+			},
+		},
+		{
 			name: "write failed",
 			save: SaveOutcome{Requested: true, Path: "/p.json", Failure: "permission denied"},
 			want: []string{"the write failed: permission denied"},
