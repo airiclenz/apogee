@@ -498,7 +498,7 @@ windows-tagged construction test is preferred (it pins the wiring, not just the 
 **Acceptance:** the only trace of an unknown mutation cannot be destroyed by any constructor.
 **Commit:** `test(confine): recovery leaves an undecodable journal in place`
 
-## 11. Roll-up: CHANGELOG, review cross-reference, full native gate
+## 11. Roll-up: CHANGELOG, review cross-reference, full native gate — ✅ DONE (2026-07-22)
 
 **What:** (Closes the plan — run last.) CHANGELOG `[Unreleased]`: one Fixed block summarising
 this plan (journal edge symmetry: unreadable-prior skip, verified revert, deleted-prior

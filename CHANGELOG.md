@@ -230,6 +230,73 @@ that had never run live. All of them are fixed below, before the owner's live-en
   `ConfineWritablePaths` gap is now recorded in `TODO.md` with its anchors and called out in the
   README, rather than left implicit.
 
+*The post-fixes review (`docs/reviews/code-review-2026-07-22-phase5-post-fixes.md` — 2 High,
+12 Medium) found the hardened journal correct on its happy path and concentrated its defects at
+the lifecycle's **edges**, plus one recurrence of the twin-ladder defect class. All of it is
+fixed below (`docs/plans/2026-07-22 - 03 - phase5-second-review-fixes-plan.md`).*
+
+- **The label journal's fail-closed rule now holds at every edge, in both directions** — no label
+  without a journalled prior, no retirement while labels remain — where the first pass had proven
+  it only for the happy path. Five edges were open. (a) A descendant whose prior label could not
+  be *read* was relabelled anyway, unjournalled — a foreign security label destroyed with no
+  record; the walk's three-way choice is now the untagged `descendantLabelDecision`, and a read
+  error skips the path entirely (no label, no entry — the same tolerated-descendant posture as
+  any other locked file). (b) `clearLabelTree` swallowed every descendant failure, so teardown
+  retired the journal while Low labels remained on disk with no residue report; below-root
+  failures are now counted into `clearTreeOutcome` — tolerating only `os.IsNotExist` — and any
+  remainder keeps the journal for the next session's retry. (c) A prior-labelled file the agent
+  deleted (routine workspace activity) failed the revert *forever* — `Close` warned every
+  session, recovery failed silently every startup; a vanished path is now a completed revert,
+  the "restored, not reconstructed" posture the root already took. (d) A failed ROOT label write
+  refused the box but stranded its just-journalled entry, turning every later `Close` into a
+  failing no-op and `apogee probe` into a permanent false alarm over a disk carrying no label;
+  `labelBox` now unwinds the entry (`unwindLabelEntry`) when it recorded no foreign prior — an
+  entry *with* one is kept, ambiguity resolving toward the record. (e) Two concurrent sessions
+  on one workspace un-fenced each other: A's teardown stripped the shared root while B ran, and
+  B's labelled-memo never re-labels; teardown and recovery now leave any root named in a live
+  sibling's journal in place (`revertibleRoots`, untagged and liveness-injected) — the sibling
+  owns the clear obligation, so the retiring journal still retires. And the single behaviour the
+  machinery exists to deliver — a foreign prior label actually restored end-to-end — is now
+  pinned natively and verified by negative control against both silent regressions (prior-restore
+  loop deleted; clear/restore order swapped), alongside a construction test proving session
+  recovery never deletes a journal it cannot decode.
+- **`probe model` and startup no longer run twin identity ladders — the claim IS startup's
+  decision.** The defect class closed for catalogue validation recurred at two more rungs:
+  with no `model:` pinned, the report claimed `AUTO-APPLIES` for a record startup's empty model
+  id can never resolve, and a `--model` naming a reachable weights file resolves at High so the
+  Medium behavioural record is inert — both now suppressed lines naming the reason. The
+  consolidation recorded in `TODO.md` was pulled forward rather than patched around: one shared
+  ladder, `startupSetDecision` (`cmd/apogee/validatedsets.go` — off-switches,
+  `ResolveFingerprintFrom`, `Match`, explicit-`mechanisms:` precedence, catalogue validation, in
+  startup's order), which `resolveValidatedSet` enacts and `autoApplyKeys` reports — computed
+  against the disk as the probe run leaves it, the promotion computed counterfactually with the
+  record rung removed. The three off-switch branches each carry a test; parity is now by
+  construction, not by parallel re-implementation.
+- **The probe report's remaining honesty gaps are closed.** The no-record branch claimed
+  "identity stays at the label tier" even when an earlier saved record survives and still
+  applies — exactly the drift-check scenario `--no-save` serves; it now names the surviving
+  record's date ("none new — the record from <date> continues to apply"). The v1-record warning
+  the `Long` text promises was silently discarded on the model path's only read; it now prints
+  on stderr. And `--workspace` changed nothing `probe model` reports or writes — dropped, per
+  the probe commands' own flag rule (only `probe host` reads it).
+- **A directory genuinely named like a short name is containable.** For a directory literally
+  named `demo~1`, `GetLongPathName` returns its input — it *is* the long name — and that
+  authoritative answer was indistinguishable from the nothing-resolvable fallback, so `Contains`
+  refused a perfectly resolvable workspace into Gate. The `longPath` seam now signals authority
+  (`(string, ok)`): `split` trusts an answered resolution without re-running the shape test,
+  while an 8.3-shaped component the resolver could not verify still rejects, and POSIX rules are
+  untouched.
+- **The label guardrail sees through reparse-point roots and trailing-dot spellings.** The
+  guardrail was lexical while `SetNamedSecurityInfo` is not: a root spelled `C:\Windows.` (OS
+  canonicalisation strips the dot) or a junction targeting a protected location passed
+  `Contains` and would have labelled the target Low. A box root that is itself a reparse point
+  is now refused outright, every root is resolved to its final on-disk form
+  (`GetFinalPathNameByHandle`) before the guardrail judges it — so the journal names the
+  location the OS actually mutates — and the untagged rule table folds trailing dots and spaces
+  off Windows components. Invariant hygiene, not an emergency: the roots come from trusted
+  config and the confined Low child cannot create the precondition (ADR 0020 §6 gains the
+  refusal sentence).
+
 ### Changed
 
 - **The confinement degradation notice narrows to the hosts where it was always the honest

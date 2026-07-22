@@ -473,7 +473,12 @@ wants an owner decision. Logged here rather than left in the archive so it isn't
   **STILL OUTSTANDING as of 2026-07-22**, and now it also covers the Phase-5 *review fixes* plan
   (`docs/plans/2026-07-22 - 02 - phase5-review-fixes-plan.md`), whose item 13 the owner ratified
   closing without it — the devbox is unreachable from the Windows host (no WSL, no container
-  runtime, no sanctioned network path). What stood in for it there: the native Windows gate (vet,
+  runtime, no sanctioned network path) — **and the Phase-5 *second* review-fixes plan**
+  (`docs/plans/2026-07-22 - 03 - phase5-second-review-fixes-plan.md`), which changed the untagged
+  platform tests `internal/platform/winconfine_test.go` and `internal/platform/host_test.go`
+  (plus untagged rule/decision code in `winconfine.go` and `host.go`); those tables run in any
+  `go test` and passed natively on Windows, but their Linux execution belongs to the same devbox
+  pass. What stood in for it there: the native Windows gate (vet,
   build, `go test -count=1 ./...` modulo the three known host failures, ADR-0010 import check,
   `apogee --help`), plus `GOOS=linux go vet ./...`, `GOOS=darwin go vet ./...` and all six
   cross-compile targets. That proxy proves the landlock- and seatbelt-tagged code and its test
