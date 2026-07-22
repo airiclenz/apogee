@@ -70,8 +70,9 @@ type subprocessResult struct {
 //
 //   - It builds an idiomatic *exec.Cmd with exec.CommandContext, owning all I/O (the
 //     contract's tool-builds-and-runs-the-cmd model, §2.2).
-//   - It wires the process-group teardown (Setpgid + negative-PID kill on cancel +
-//     WaitDelay) so a cancelled or timed-out command never orphans its children.
+//   - It wires the process-tree teardown (Setpgid + a negative-PID kill on POSIX, a Job
+//     Object terminated on cancel on Windows, plus WaitDelay on both) so a cancelled or
+//     timed-out command never orphans its children.
 //   - If a Confinement handle is on ctx (the dispatch disposition installed it for an
 //     Auto/confine subprocess call), it asks the Confiner to wrap the cmd before running.
 //     A backend that cannot establish the box returns ErrConfinementUnavailable, which this
@@ -117,9 +118,11 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 
-	// Wire the process-group teardown BEFORE confining: the Confiner only appends to
-	// SysProcAttr (Setpgid) and never touches cmd.Cancel, so the two compose.
-	setProcessGroupTeardown(cmd)
+	// Wire the process-tree teardown BEFORE confining: the Confiner only appends to
+	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
+	// two compose. The returned handle is what the teardown needs once the process exists —
+	// nothing on POSIX, the Job Object assignment on Windows (exec_teardown.go).
+	teardown := setProcessGroupTeardown(cmd)
 	// A shell line on Windows must reach the shell verbatim; every other platform and
 	// every real argv leaves this empty and the cmd untouched.
 	setRawCommandLine(cmd, spec.cmdline)
@@ -132,7 +135,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		}
 	}
 
-	runErr := cmd.Run()
+	runErr := runWithTeardown(cmd, teardown)
 
 	// A ctx cancellation is the one case surfaced as a Go error (the loop rolls back).
 	if ctx.Err() != nil {

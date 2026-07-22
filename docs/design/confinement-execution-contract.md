@@ -176,21 +176,38 @@ decides raw-syscall vs the `github.com/landlock-l/go-landlock` helper and record
 > Cobra. The box is passed inline (argv) so the helper needs no shared state with the parent — coherent
 > with statelessness (ADR 0008).
 
-### 2.4 Process-group teardown and cancellation
+### 2.4 Process-tree teardown and cancellation
 
 The wrapping changes the process tree (`sandbox-exec` is the parent of the real child on macOS; the
-re-exec helper execs-in-place on Linux, preserving the PID). A naïve `cmd.Process.Kill()` may leave
-descendants. The contract makes teardown OS-agnostic for the tool:
+re-exec helper execs-in-place on Linux, preserving the PID; on Windows there is no wrapper process at
+all — §9.2 — but a shell still spawns descendants). A naïve `cmd.Process.Kill()` may leave descendants.
+The contract makes teardown OS-agnostic for the tool: **one container holds the whole tree, and cancel
+kills the container.** What the container *is* is the only per-OS part.
 
-- **Backend obligation:** `Confine` sets `cmd.SysProcAttr.Setpgid = true` (POSIX) so the wrapped child
-  and its descendants share a process group.
-- **Tool obligation (P3.8):** the execution tools set `cmd.Cancel` to signal the **negative PID**
+- **Backend obligation (POSIX):** `Confine` sets `cmd.SysProcAttr.Setpgid = true` so the wrapped child
+  and its descendants share a process group. The Windows backend sets **no** `SysProcAttr` field other
+  than `Token` (§9.2) — its container is owned entirely by the tool, below.
+- **Tool obligation (P3.8) — POSIX:** the execution tools set `cmd.Cancel` to signal the **negative PID**
   (`syscall.Kill(-cmd.Process.Pid, SIGKILL)`) and set a short `cmd.WaitDelay`, so a ctx cancel / timeout
-  reaps the whole group — no orphaned `sandbox-exec`, no orphaned child. The tool never needs to know
-  *how* the command was wrapped; the process-group contract abstracts it.
+  reaps the whole group — no orphaned `sandbox-exec`, no orphaned child.
+- **Tool obligation — Windows (Phase 5):** Windows has no process groups, so the container is a **Job
+  Object** created before `Start` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the started process is
+  assigned to and which `cmd.Cancel` **terminates** (`TerminateJobObject`) instead of killing the leader;
+  `cmd.WaitDelay` is identical. A job that could not be created or assigned degrades to a leader-only
+  kill, never to a failed command — teardown is a safety net, not the confinement fence (ADR 0020).
+  Two Windows-only properties follow from the facility and are deliberate:
+  - **The assignment happens just after `CreateProcess` returns**, because creating a process directly
+    into a job needs `PROC_THREAD_ATTRIBUTE_JOB_LIST` on a `STARTUPINFOEX`, which `syscall.SysProcAttr`
+    cannot express and a suspended start cannot substitute for (`os/exec` closes the initial thread
+    handle). The residual window closes before a shell has parsed its command line.
+  - **The `KILL_ON_JOB_CLOSE` limit is cleared before the handle is closed** on a completed run, so a
+    process the command deliberately left running outlives the call exactly as it does on POSIX. The
+    limit's job is the crash path; the cancel path terminates explicitly.
 
-The run is governed by the **cmd's own context** (built with `exec.CommandContext`); the `ctx` passed to
-`Confine` covers only the (synchronous, non-blocking) preparation and is not the run's lifetime.
+The tool never needs to know *how* the command was wrapped, and the two backends' observable behaviour
+is the same: the container contract abstracts both. The run is governed by the **cmd's own context**
+(built with `exec.CommandContext`); the `ctx` passed to `Confine` covers only the (synchronous,
+non-blocking) preparation and is not the run's lifetime.
 
 ### 2.5 Rejected alternatives
 
@@ -604,8 +621,8 @@ verbatim below the floor — no new wording, no new surface.
   (`cmd/apogee/probe.go:79`) and is pinned free/offline/read-only by ADR 0021 §1.
 - **`NetworkEgress` is false and a network-deny box fails closed** — a non-empty `NetworkAllow`
   yields `ErrConfinementUnavailable`, mirroring `landlock_linux.go`'s `networkDenyDecision`.
-- **Teardown of the process tree is §2.4's Windows half** (job objects) and is owned separately; the
-  backend sets no `SysProcAttr` field other than `Token`.
+- **Teardown of the process tree is §2.4's Windows half** (the Job Object, owned by the execution
+  tools, not by this backend); the backend sets no `SysProcAttr` field other than `Token`.
 - **Known gap, fail-closed:** a `CreateProcessAsUser` refusal (`ERROR_PRIVILEGE_NOT_HELD`) happens at
   `cmd.Start()`, after `Confine` has returned, so it surfaces as the tool's run error. The command
   **fails**; it does not run unconfined.

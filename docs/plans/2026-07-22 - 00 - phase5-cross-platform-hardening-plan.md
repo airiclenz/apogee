@@ -366,7 +366,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   known pre-existing failures), all six cross targets, `--help` exit 0, the ADR-0010 grep,
   and gofmt over LF copies of the changed files.
 
-- [ ] **7. Windows process-tree teardown (Job Objects).** (DEPENDS: 5.) Replace the leader-only
+- [x] **7. Windows process-tree teardown (Job Objects). — ✅ DONE (2026-07-22)** (DEPENDS: 5.) Replace the leader-only
   stub in `internal/tools/exec_pgroup_other.go` (its `:16` TODO) with real job-object teardown
   killing the whole tree, honouring the same §2.4 contract `exec_pgroup_unix.go` implements
   (Cancel + WaitDelay so Wait can never wedge on a held pipe). Extract any decision logic into
@@ -374,6 +374,43 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   execution machine (Ground-truth NOTES) — a test that cancels a shell command spawning a child
   and asserts the whole tree died. Acceptance: `make cross` green; the native suite green; the
   §2.4 contract comment updated to describe both backends.
+  NOTES (2026-07-22): the container is an unnamed **Job Object** created before `Start` with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, terminated by `cmd.Cancel`; `WaitDelay` is unchanged.
+  Five deviations from the item's literal text: (a) **`setProcessGroupTeardown` now returns a
+  `processTeardown`** and `runSubprocess` runs the cmd through the new `runWithTeardown`
+  (Start → contain → Wait) instead of `cmd.Run()`. Forced by the facility: a process can only
+  be assigned to a job AFTER `CreateProcess` returns (creating one directly into a job needs
+  `PROC_THREAD_ATTRIBUTE_JOB_LIST` on a `STARTUPINFOEX`, which `syscall.SysProcAttr` cannot
+  express, and a suspended start is unreachable because `os/exec` closes the initial thread
+  handle), so the teardown needs the gap between Start and Wait that `Run` hides. POSIX returns
+  `noTeardown{}` and `runWithTeardown` is byte-for-byte what `Run` does there. (b) **the
+  platform-neutral decision function is `planTreeKill(started, treeHeld)`** (new untagged
+  `exec_teardown.go`, table-tested on every OS) and **`exec_pgroup_unix.go`'s `Cancel` was
+  switched onto it too** — semantically identical (POSIX passes `treeHeld=true` unconditionally,
+  since `Setpgid` establishes the group at fork), but it is a POSIX edit that cannot be executed
+  on this host; type-checked via `GOOS=linux|darwin go vet ./...` and left for the closeout Linux
+  pass. Sharing it is what keeps the function from being dead code on the OS it was extracted
+  for. (c) **`release()` clears `KILL_ON_JOB_CLOSE` before closing the handle**, so a process the
+  command deliberately left running outlives a CLEAN run exactly as a backgrounded process
+  outlives its POSIX group leader; the limit's real job is the crash path, and the cancel path
+  terminates the job explicitly. Both halves are pinned by native tests. (d) **the Windows
+  `syscallKill0` test stub became a real liveness probe** (`OpenProcess` +
+  `GetExitCodeProcess`/`STILL_ACTIVE`), which is what makes the shared `pidAlive` helper usable
+  here; `waitForPIDFile`'s deadline went 5s → 20s for PowerShell's cold start (it returns as soon
+  as the file appears, so POSIX pays nothing). (e) **two behavioural tests, not one**:
+  `TestTerminal_WindowsCancelKillsTheProcessTree` (cmd.exe → powershell → a DETACHED `cmd /c
+  ping`, whose PID is recorded and asserted gone after cancel) and
+  `TestTerminal_WindowsCleanRunLeavesADetachedProcessAlive` (the (c) claim). **Both were verified
+  by negative control** — with `contain` stubbed out the first fails ("grandchild survived"), with
+  the limit-clear removed the second fails ("died with the completed command") — so neither passes
+  vacuously. Also: the residual assign-after-create window and the KILL_ON_JOB_CLOSE/clear
+  rationale are documented in the code and in contract §2.4, which was rewritten as
+  *Process-**tree** teardown* describing both backends (§9.2's teardown bullet re-worded to match);
+  the last in-code `TODO(phase-5)` marker is now gone (item 10 verifies). No
+  CHANGELOG/README/CONTEXT.md/technical-design edits — item 10's roll-up. Sanity check on this
+  host (`make` absent): `go build ./...`, `go vet ./...` plus `GOOS=linux|darwin|windows go vet
+  ./...`, `go test -count=1 ./...` (only the known pre-existing failures), all six cross targets,
+  `--help` exit 0, the ADR-0010 grep, and gofmt over LF copies of the changed files.
 
 - [ ] **8. Windows Confiner implementation + wiring.** (DEPENDS: 5, 6, 7.) Implement ADR 0020:
   `confiner_windows.go` (narrow `confiner_other.go`'s build tags so Windows selects the real

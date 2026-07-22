@@ -238,7 +238,9 @@ func TestTerminal_CancelKillsChildProcessGroup(t *testing.T) {
 
 func waitForPIDFile(t *testing.T, path string) int {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	// Generous: the Windows tree test starts a PowerShell, whose cold start dwarfs a POSIX
+	// shell's. The wait ends as soon as the file appears, so the ceiling costs nothing.
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(path); err == nil {
 			if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && pid > 0 {

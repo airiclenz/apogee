@@ -20,9 +20,12 @@ import (
 //   - cmd.WaitDelay bounds how long Wait blocks for I/O to drain after the process exits
 //     or is killed, so a child that leaves a pipe open cannot wedge the tool forever.
 //
-// It must be called after exec.CommandContext built cmd but before cmd.Run/Output, and
-// before any Confine (the Confiner only appends to SysProcAttr, never clearing Cancel).
-func setProcessGroupTeardown(cmd *exec.Cmd) {
+// It must be called after exec.CommandContext built cmd but before cmd.Start, and before any
+// Confine (the Confiner only appends to SysProcAttr, never clearing Cancel). The returned
+// processTeardown is noTeardown: the group is a fork-time property of the cmd, so POSIX needs
+// no post-start step and owns no handle — the seam exists for Windows, whose Job Object can
+// only take the process once it has been created (exec_pgroup_other.go).
+func setProcessGroupTeardown(cmd *exec.Cmd) processTeardown {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -32,17 +35,24 @@ func setProcessGroupTeardown(cmd *exec.Cmd) {
 	// whole process group (Setpgid put the child in its own group whose PGID == its PID),
 	// reaping descendants the wrapper spawned. A "process already finished" is benign.
 	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-			// The group may already be gone (the process exited between Done and here);
-			// fall back to killing the leader directly, ignoring "no such process".
+		// treeHeld is unconditionally true here: Setpgid establishes the group at fork,
+		// before the child can spawn anything, so the group always holds the whole tree.
+		// The leader-only rung is Windows', where the job assignment can be refused.
+		switch planTreeKill(cmd.Process != nil, true) {
+		case treeKillTree:
+			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+				// The group may already be gone (the process exited between Done and
+				// here); fall back to killing the leader, ignoring "no such process".
+				_ = cmd.Process.Kill()
+			}
+		case treeKillLeader:
 			_ = cmd.Process.Kill()
+		case treeKillNothing:
 		}
 		return nil
 	}
 	cmd.WaitDelay = processWaitDelay
+	return noTeardown{}
 }
 
 // processWaitDelay bounds the post-exit drain so a child holding a pipe open cannot wedge
