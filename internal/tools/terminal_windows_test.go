@@ -128,7 +128,14 @@ func TestTerminal_WindowsCleanRunLeavesADetachedProcessAlive(t *testing.T) {
 
 	// The script starts a detached process and then EXITS — the whole command completes
 	// cleanly in well under a second, so nothing cancels the run.
-	script := "$p = Start-Process -FilePath cmd.exe -ArgumentList '/c','ping -n 60 127.0.0.1' -PassThru -WindowStyle Hidden\r\n" +
+	//
+	// Two details keep the surviving process from wrecking t.TempDir's RemoveAll, which runs
+	// while it is still alive. It is a single ping.exe rather than a cmd.exe wrapping one, so
+	// the recorded PID *is* the whole detached tree and the cleanup below reaps all of it; and
+	// it is started with its working directory outside the temp dir, because a process's cwd
+	// is an open directory handle and Windows refuses to delete a directory anyone holds.
+	script := "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1'" +
+		" -WorkingDirectory $env:SystemRoot -PassThru -WindowStyle Hidden\r\n" +
 		"Set-Content -LiteralPath '" + pidFile + "' -Value $p.Id\r\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatalf("write %q: %v", scriptPath, err)
