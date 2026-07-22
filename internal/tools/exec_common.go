@@ -122,7 +122,12 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
 	// two compose. The returned handle is what the teardown needs once the process exists —
 	// nothing on POSIX, the Job Object assignment on Windows (exec_teardown.go).
-	teardown := setProcessGroupTeardown(cmd)
+	teardown := newProcessTeardown(cmd)
+	// The teardown owns an OS resource from the moment it is built (the Windows Job Object
+	// handle), so this function owns releasing it: the confine refusal below and a cmd.Start()
+	// failure both return without ever reaching Wait, and neither may leak the handle. release
+	// is idempotent, so the normal path pays nothing for the guarantee.
+	defer teardown.release()
 	// A shell line on Windows must reach the shell verbatim; every other platform and
 	// every real argv leaves this empty and the cmd untouched.
 	setRawCommandLine(cmd, spec.cmdline)

@@ -324,7 +324,17 @@ existing terminal tests unchanged. Windows-tagged: one end-to-end row in
 Windows; POSIX behaviour byte-identical.
 **Commit:** `fix(tools): stop gating cmd.exe lines behind a POSIX parser`
 
-## 7. The Job Object is released on the confine-failure and start-failure paths
+## 7. The Job Object is released on the confine-failure and start-failure paths — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): `runSubprocess` is confirmed `runWithTeardown`'s only caller. Two deviations.
+(a) The fake `processTeardown` implements the existing interface, but there was no INJECTION
+point — `setProcessGroupTeardown` is a per-build-tag function — so the untagged test needed a
+package-var seam, `newProcessTeardown = setProcessGroupTeardown` in `exec_teardown.go`, the same
+idiom as `shellHost`; the tests that substitute it are deliberately not `t.Parallel()`. (b) A
+third row was added beyond the item's two: a clean run must `contain` once and `release` EXACTLY
+once — that count is what proves the redundant `defer td.release()` was deleted rather than
+duplicated, which no early-exit row can see. All three rows were mutation-checked against the
+pre-fix placement (both early-exit rows fail with `release called 0 times`).
 
 **What:** (Review: Medium "handle leaks on the two routine early-exit paths".) In
 `internal/tools/exec_common.go`, `defer teardown.release()` immediately after

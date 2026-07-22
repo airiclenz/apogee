@@ -58,6 +58,12 @@ type processTeardown interface {
 	release()
 }
 
+// newProcessTeardown builds the per-run teardown for cmd. It is the package's seam onto the
+// platform constructor (setProcessGroupTeardown, one per build tag) — a package var so a test
+// can substitute a fake processTeardown and observe the release lifecycle on every OS, the
+// same idiom as shellHost. Production code never reassigns it.
+var newProcessTeardown = setProcessGroupTeardown
+
 // noTeardown is the POSIX implementation of processTeardown: the process group is established
 // by the kernel at fork and needs neither a post-start step nor an owned handle.
 type noTeardown struct{}
@@ -71,11 +77,15 @@ func (noTeardown) release() {}
 // on Windows: a process can only be assigned to a Job Object once CreateProcess has returned,
 // so the teardown needs the gap between Start and Wait. On POSIX contain/release are no-ops
 // and this is byte-for-byte what cmd.Run does.
+//
+// It does NOT release td: the resource exists from the moment the teardown was built, which is
+// before this function is reached, so releasing it belongs to the caller that built it
+// (runSubprocess, its only caller). That is the only placement a Start failure — or a Confine
+// failure, which never gets here at all — also drops.
 func runWithTeardown(cmd *exec.Cmd, td processTeardown) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	defer td.release()
 	td.contain(cmd)
 	return cmd.Wait()
 }
