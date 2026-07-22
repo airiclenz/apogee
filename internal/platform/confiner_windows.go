@@ -397,6 +397,13 @@ func (c *tokenConfiner) flushJournal() error {
 // under each journalled root, then restore the prior descriptors. Clearing first and
 // restoring second is the order that matters — a prior label inside a root would otherwise
 // be wiped by the walk that follows it.
+//
+// A prior-labelled path that no longer exists is a completed revert, not a failure: the
+// agent deleting or renaming a workspace file is routine activity, and an object that is
+// gone carries no label to put back ("restored, not reconstructed" — the posture
+// clearLabelTree's root already takes). Failing on it instead would wedge the lifecycle
+// permanently: Close would warn every session and recovery would retry and fail every
+// startup, over a label that stopped existing.
 func revertLabelJournal(j labelJournal) error {
 	var firstErr error
 	for _, root := range j.roots() {
@@ -405,8 +412,8 @@ func revertLabelJournal(j labelJournal) error {
 		}
 	}
 	for path, sddl := range j.priorLabels() {
-		if err := setLabelSDDL(path, sddl); err != nil && firstErr == nil {
-			firstErr = err
+		if err := setLabelSDDL(path, sddl); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = fmt.Errorf("apogee: confine: restore the prior label of %q: %w", path, err)
 		}
 	}
 	return firstErr
@@ -414,7 +421,13 @@ func revertLabelJournal(j labelJournal) error {
 
 // clearLabelTree removes the mandatory label from root and everything beneath it, returning
 // it to the unlabelled (implicitly Medium) state it was in before the run. A path that has
-// since been deleted is not an error — the tree is being restored, not reconstructed.
+// since been deleted is not an error — the tree is being restored, not reconstructed — and
+// that is the ONLY failure the walk tolerates: every other descendant failure (a subtree the
+// walk cannot enumerate, a label write the object's DACL denies) is counted and reported
+// through clearTreeOutcome, because a nil return here is what retireLabelJournal takes as
+// "verifiably reverted" before deleting the journal. Swallowing those failures would strand
+// Low labels on the disk with no record and no residue report; returning them keeps the
+// journal, so the next session or recovery retries.
 func clearLabelTree(root string) error {
 	if err := setLabelSDDL(root, windowsClearLabelSDDL); err != nil {
 		if os.IsNotExist(err) {
@@ -422,8 +435,26 @@ func clearLabelTree(root string) error {
 		}
 		return fmt.Errorf("apogee: confine: clear the mandatory label of %q: %w", root, err)
 	}
-	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil || path == root {
+	failures := 0
+	var first error
+	fail := func(path string, err error) {
+		failures++
+		if first == nil {
+			first = fmt.Errorf("%q: %v", path, err)
+		}
+	}
+	// The callback only ever returns nil or SkipDir — failures go into the count — so the
+	// walk itself cannot error.
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			// An unenumerable point means any labels beneath it were not reached; a path
+			// that has since vanished carries no label to clear.
+			if !os.IsNotExist(walkErr) {
+				fail(path, walkErr)
+			}
+			return nil
+		}
+		if path == root {
 			return nil
 		}
 		if info, err := entry.Info(); err == nil && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
@@ -432,9 +463,12 @@ func clearLabelTree(root string) error {
 			}
 			return nil
 		}
-		_ = setLabelSDDL(path, windowsClearLabelSDDL)
+		if err := setLabelSDDL(path, windowsClearLabelSDDL); err != nil && !os.IsNotExist(err) {
+			fail(path, err)
+		}
 		return nil
 	})
+	return clearTreeOutcome(root, failures, first)
 }
 
 // recoverLabelJournals finishes the restore for every journal under home whose owning

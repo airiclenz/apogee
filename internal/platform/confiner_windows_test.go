@@ -541,6 +541,123 @@ func restoreFileDACL(t *testing.T, path, sddl string) {
 	}
 }
 
+func TestWindowsUnclearableDescendantKeepsTheJournal(t *testing.T) {
+	// Half (a) of the verified-revert item: teardown may retire the journal only when every
+	// label it describes is verifiably gone. A descendant whose clear fails at Close — here a
+	// DACL withholding WRITE_OWNER, the access the label write needs, planted after the box
+	// was labelled the way a confined child (which owns in-box objects) can — must fail the
+	// revert, so the journal survives and the next session's recovery finishes the job once
+	// the obstacle is gone. Before this, clearLabelTree swallowed every descendant failure
+	// and the Low label was stranded with no record and no residue report.
+	home := t.TempDir()
+	ws := t.TempDir()
+	child := filepath.Join(ws, "stuck.txt")
+	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", child, err)
+	}
+
+	c := newTokenConfiner(home)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = c.Close()
+		}
+	})
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	if label, _ := readLabelSDDL(child); !isLowLabelSDDL(label) {
+		t.Fatalf("child label = %q, want apogee's Low label before the revert is obstructed", label)
+	}
+
+	// Withhold WRITE_OWNER while keeping READ_CONTROL and the rights the cleanup below needs
+	// (READ_CONTROL|WRITE_DAC|DELETE|SYNCHRONIZE|FILE_READ_ATTRIBUTES = 0x170080), so the
+	// clear's label write — and only that write — is denied by the kernel.
+	setFileDACL(t, child, "D:P(A;;0x170080;;;OW)")
+	t.Cleanup(func() { restoreFileDACL(t, child, "D:(A;;FA;;;WD)") })
+
+	err := c.Close()
+	closed = true
+	if err == nil {
+		t.Fatal("Close reported success while a descendant kept its Low label; the journal would be retired over live residue")
+	}
+	if journals := listLabelJournals(home); len(journals) != 1 {
+		t.Fatalf("journals = %v after the failed revert, want the journal kept so the next run retries", journals)
+	}
+
+	// The keep is what makes the retry real: with the DACL healed, the next session's
+	// recovery finishes the revert and retires the journal.
+	restoreFileDACL(t, child, "D:(A;;FA;;;WD)")
+	recovered := newTokenConfiner(home)
+	t.Cleanup(func() { _ = recovered.Close() })
+	if label, _ := readLabelSDDL(child); label != "" {
+		t.Errorf("child still labelled %q after recovery; the kept journal must let the next run finish the revert", label)
+	}
+	if left := listLabelJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after recovery, want the fully reverted journal retired", left)
+	}
+}
+
+func TestWindowsDeletedPriorLabelledPathDoesNotWedgeTheRevert(t *testing.T) {
+	// Half (b) of the verified-revert item: a prior-labelled file the agent deleted is a
+	// COMPLETED revert, not a failure — there is no object left to carry the label. Before
+	// this, the prior-restore loop failed on it forever: Close warned every session, recovery
+	// retried and failed every startup, and the only remedy was deleting the journal by hand.
+	home := t.TempDir()
+	ws := t.TempDir()
+	child := filepath.Join(ws, "foreign.txt")
+	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", child, err)
+	}
+	if err := setLabelSDDL(child, "S:(ML;;NW;;;ME)"); err != nil {
+		t.Fatalf("apply the foreign Medium label to %q: %v", child, err)
+	}
+
+	c := newTokenConfiner(home)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = c.Close()
+		}
+	})
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	// The journal really carries a restore obligation for the child — otherwise the delete
+	// below would prove nothing.
+	prior, found := c.journal.priorLabels()[child]
+	if !found || prior == "" {
+		t.Fatalf("journal priors = %v; the foreign prior of %q was not journalled", c.journal.priorLabels(), child)
+	}
+
+	// Routine workspace activity: the (simulated) agent deletes the prior-labelled file.
+	if err := os.Remove(child); err != nil {
+		t.Fatalf("delete %q: %v", child, err)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close = %v; a vanished prior-labelled path must not fail the revert", err)
+	}
+	closed = true
+	if left := listLabelJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after teardown, want the journal retired — the revert is complete", left)
+	}
+	if label, err := readLabelSDDL(ws); err != nil || label != "" {
+		t.Errorf("root label = %q (err %v) after teardown, want the disk clean", label, err)
+	}
+	if got := confinementResidue(home); got != "" {
+		t.Errorf("confinementResidue = %q after teardown, want nothing outstanding", got)
+	}
+}
+
 func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	// ADR 0020 §2's interrupted-cleanup remedy. A process killed mid-run leaves labels and a
 	// journal; the next NewConfiner finishes the restore. It is simulated by dropping the

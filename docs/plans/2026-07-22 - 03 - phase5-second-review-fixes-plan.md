@@ -206,7 +206,19 @@ the journal has NO entry for it; item 1's restore test still green.
 journal.
 **Commit:** `fix(confine): never label a descendant whose prior label cannot be read`
 
-## 3. The revert is verified below the root before the journal is retired
+## 3. The revert is verified below the root before the journal is retired — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): The below-root failure accounting is extracted as the untagged pure
+helper `clearTreeOutcome` (`winconfine.go`) — the item named no helper, but that is what
+makes the accounting Linux-table-testable (`TestClearTreeOutcome`), matching the
+retireLabelJournal seam pattern; `clearLabelTree` counts descendant walk/clear failures
+(tolerating only `os.IsNotExist`) and hands them to it. Both mutation checks demonstrated
+natively: (a) with the verdict forced to `clearTreeOutcome(root, 0, nil)` (the pre-fix
+swallow-everything behaviour), `TestWindowsUnclearableDescendantKeepsTheJournal` FAILED
+("Close reported success while a descendant kept its Low label"); (b) with the
+`!os.IsNotExist` tolerance removed from the prior-restore loop,
+`TestWindowsDeletedPriorLabelledPathDoesNotWedgeTheRevert` FAILED (Close errored on the
+vanished path). Both mutations reverted; full platform suite green after each revert.
 
 **What:** (Review: Mediums "journal retired without verifying the revert" + "deleted
 prior-labelled path makes the journal permanently un-retirable" — one item, both make

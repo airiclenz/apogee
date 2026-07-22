@@ -471,6 +471,22 @@ func retireLabelJournal(path string, j labelJournal, revert func(labelJournal) e
 	return nil
 }
 
+// clearTreeOutcome is clearLabelTree's below-root verdict: nil when failures is zero —
+// every descendant is verifiably cleared or gone — else an error carrying the count and the
+// first failure. Returning an error is what makes retireLabelJournal KEEP the journal, so
+// labels the walk could not remove stay recorded, ConfinementResidue reports them meanwhile,
+// and the next session or recovery retries them; a nil verdict over remaining failures would
+// retire the journal above labels still on the disk (ADR 0020 §2's "verifiably reverted").
+// It is pure so the accounting is table-testable on any OS — the retireLabelJournal seam
+// pattern.
+func clearTreeOutcome(root string, failures int, first error) error {
+	if failures == 0 {
+		return nil
+	}
+	return fmt.Errorf("apogee: confine: %d path(s) under %q could not be cleared of the mandatory label (first failure: %w)",
+		failures, root, first)
+}
+
 // readLabelJournal loads one journal file.
 func readLabelJournal(path string) (labelJournal, error) {
 	raw, err := os.ReadFile(path)

@@ -434,6 +434,35 @@ func TestRetireLabelJournalWithoutAJournalFile(t *testing.T) {
 	}
 }
 
+func TestClearTreeOutcome(t *testing.T) {
+	t.Parallel()
+
+	// The below-root accounting clearLabelTree hands to retireLabelJournal's decision. A nil
+	// verdict is what retires the journal, so it may only ever mean "every descendant is
+	// verifiably cleared or gone"; any remaining failure must surface as an error naming the
+	// first one and the count, which keeps the journal for the next run. The walk itself is
+	// Windows-only (it clears real labels), so the verdict is proven here on every OS — the
+	// same seam TestRetireLabelJournalKeepsTheFileWhenTheRevertFails uses.
+	first := errors.New(`"C:\work\stuck.txt": access is denied`)
+
+	if err := clearTreeOutcome(`C:\work`, 0, nil); err != nil {
+		t.Errorf("clearTreeOutcome with no failures = %v, want nil so the journal is retired", err)
+	}
+
+	err := clearTreeOutcome(`C:\work`, 3, first)
+	if err == nil {
+		t.Fatal("clearTreeOutcome with 3 failures = nil; the journal would be retired over labels still on the disk")
+	}
+	if !errors.Is(err, first) {
+		t.Errorf("err = %v, want the first failure wrapped so callers can inspect it", err)
+	}
+	for _, want := range []string{"3 path(s)", `C:\work`, first.Error()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
 func TestConfinementTeardownNoticeWordsTheFailure(t *testing.T) {
 	t.Parallel()
 
