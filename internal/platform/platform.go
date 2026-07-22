@@ -85,9 +85,9 @@ type Host interface {
 
 // denyConfiner is the no-confinement backend. It enforces nothing: Capabilities
 // reports neither fs-write nor network-egress confinement, so AutoEligible is false.
-// It is the host backend on OSes without a real Confiner (Windows until Phase 5), and
-// the seam the P0.6 harness used to exercise New's Auto gate before the real backends
-// landed. Because it reports {false, false}, the dispatch disposition gates the
+// It is the host backend on OSes without a real Confiner — including a Windows host below
+// ADR 0020's build floor — and the seam the P0.6 harness used to exercise New's Auto gate
+// before the real backends landed. Because it reports {false, false}, the dispatch disposition gates the
 // subprocess surface rather than handing it a cmd to confine; if a cmd is passed
 // anyway (a caller that skipped the caps check), Confine honestly reports
 // ErrConfinementUnavailable — "confine if you can, gate if you can't" (ADR 0012).

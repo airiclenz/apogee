@@ -11,9 +11,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// ----------------------------------------------------------------------------
-// Windows token Confiner — the OS-free half (ADR 0020; confinement-execution-contract §9)
-// ----------------------------------------------------------------------------
+// Windows token Confiner — the OS-free half (ADR 0020; confinement-execution-contract §9).
 //
 // Everything here is a pure function or plain file I/O over JSON, so the Windows
 // backend's DECISIONS — which roots get labelled, which are refused outright, what
@@ -243,6 +241,21 @@ func windowsNetworkDenyDecision(box domain.ConfinementBox) error {
 		domain.ErrConfinementUnavailable)
 }
 
+// confinementJournalHome resolves the apogee home the label journals live under, matching the
+// composition root's DEFAULT (~/.apogee). NewConfiner takes no arguments — it is the per-OS
+// selector every backend shares — so a --config override is deliberately not threaded into it;
+// the journal is a crash-recovery aid whose location must be findable without one. Everything
+// that reads the journals resolves them through here for the same reason: a reader that used
+// the session's configured root instead would report "no outstanding labels" under a
+// non-default --config while the labels were sitting in the default home.
+func confinementJournalHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".apogee")
+}
+
 // labelJournalDir returns the journal directory inside the apogee home.
 func labelJournalDir(home string) string { return filepath.Join(home, labelJournalDirName) }
 
@@ -301,16 +314,24 @@ func listLabelJournals(home string) []string {
 	return out
 }
 
-// ConfinementResidue reports mandatory-label journals left under the apogee home by a run
-// that did not get to revert them — the Windows-specific line ADR 0021's host report gains
-// (ADR 0020 §2). It returns "" when there is nothing outstanding, which is every OS but
-// Windows and the normal case on Windows, so the caller can state it unconditionally.
+// ConfinementResidue reports mandatory-label journals left by a run that did not get to
+// revert them — the Windows-specific line ADR 0021's host report gains (ADR 0020 §2). It
+// returns "" when there is nothing outstanding, which is every OS but Windows and the normal
+// case on Windows, so the caller can state it unconditionally.
+//
+// It takes no home: the journals live where the backend writes them (confinementJournalHome),
+// not under the session's configured root, and a caller that could name a root could name the
+// wrong one and report residue-free a disk that is not.
+func ConfinementResidue() string { return confinementResidue(confinementJournalHome()) }
+
+// confinementResidue is ConfinementResidue against a given home, so the reporting rules are
+// testable against a temporary directory.
 //
 // A journal belonging to THIS process is skipped: an in-session report must not describe the
 // session's own live labels as residue. A journal belonging to another live apogee is still
 // listed, because from the reader's point of view "there are Low labels on your disk right
 // now" is the fact worth stating, and the wording names both causes.
-func ConfinementResidue(home string) string {
+func confinementResidue(home string) string {
 	if home == "" {
 		return ""
 	}

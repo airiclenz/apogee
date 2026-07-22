@@ -37,8 +37,8 @@ import (
 //
 // This file is //go:build !windows (not darwin-only) so the hermetic tests run on the
 // Linux dev host: SysProcAttr.Setpgid (the process-group teardown contract, §2.4) is
-// POSIX-only and does not exist on Windows, where only denyConfiner is selected (Windows
-// confinement is Phase 5, plan §6). Only NewSeatbeltConfiner is selected per-OS (P3.4
+// POSIX-only and does not exist on Windows, whose own backend fences with a restricted
+// low-integrity token instead (ADR 0020). Only NewSeatbeltConfiner is selected per-OS (P3.4
 // picks it on darwin); on Linux this concrete type is compiled but never chosen as the
 // backend.
 //

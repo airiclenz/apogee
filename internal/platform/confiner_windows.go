@@ -19,10 +19,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// ----------------------------------------------------------------------------
 // Windows token Confiner backend (Phase 5 item 8 — ADR 0020;
-// confinement-execution-contract §9)
-// ----------------------------------------------------------------------------
+// confinement-execution-contract §9).
 //
 // The two shipped backends fence by PATH POLICY: landlock is handed a ruleset of
 // path-beneath allow rules, seatbelt a profile with `allow file-write*` under the box's
@@ -114,7 +112,7 @@ func NewConfiner() domain.Confiner {
 	if _, _, build := windows.RtlGetNtVersionNumbers(); build < windowsFloorBuild {
 		return NewDenyConfiner()
 	}
-	return newTokenConfiner(defaultApogeeHome())
+	return newTokenConfiner(confinementJournalHome())
 }
 
 // newTokenConfiner builds the backend against a given apogee home (the journal's location),
@@ -471,18 +469,6 @@ func setLabelSDDL(path, sddl string) error {
 	}
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
 		windows.LABEL_SECURITY_INFORMATION, nil, nil, nil, sacl)
-}
-
-// defaultApogeeHome resolves the apogee home the journal lives under, matching the
-// composition root's default (~/.apogee). NewConfiner takes no arguments — it is the per-OS
-// selector every backend shares — so a --config override is deliberately not threaded here;
-// the journal is a crash-recovery aid whose location must be findable without one.
-func defaultApogeeHome() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".apogee")
 }
 
 // userProfileRoot returns the user-profile directory the labelling guardrails protect.

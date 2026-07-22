@@ -258,8 +258,8 @@ func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	if left := listLabelJournals(home); len(left) != 0 {
 		t.Errorf("journals = %v after recovery, want the recovered one removed", left)
 	}
-	if got := ConfinementResidue(home); got != "" {
-		t.Errorf("ConfinementResidue = %q after recovery, want nothing outstanding", got)
+	if got := confinementResidue(home); got != "" {
+		t.Errorf("confinementResidue = %q after recovery, want nothing outstanding", got)
 	}
 }
 
@@ -287,8 +287,8 @@ func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
 	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
 		t.Errorf("a second apogee reverted a LIVE run's label (%q); its session would be un-fenced", label)
 	}
-	if got := ConfinementResidue(home); !strings.Contains(got, ws) {
-		t.Errorf("ConfinementResidue = %q; want the outstanding journal reported off-session", got)
+	if got := confinementResidue(home); !strings.Contains(got, ws) {
+		t.Errorf("confinementResidue = %q; want the outstanding journal reported off-session", got)
 	}
 }
 

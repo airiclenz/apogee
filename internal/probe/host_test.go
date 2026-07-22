@@ -184,6 +184,46 @@ func TestReportDegradedHostCarriesTheStartupNotice(t *testing.T) {
 	}
 }
 
+// The one backend-specific line: residue the composition root handed in is rendered verbatim
+// under a "labels:" field, so a Windows run that was killed before it could revert its
+// mandatory labels is diagnosable off-session (ADR 0020 §2).
+func TestReportRendersTheResidueLabelsLine(t *testing.T) {
+	t.Parallel()
+	const residue = `1 path(s) may still carry apogee's Low integrity label: C:\work\proj`
+
+	report := probe.GatherHost(context.Background(), probe.Inputs{
+		Confiner:           fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		ConfineToWorkspace: true,
+		Residue:            residue,
+	}).Report()
+
+	if !strings.Contains(report, "labels:") {
+		t.Errorf("report does not carry the labels field:\n%s", report)
+	}
+	if !strings.Contains(report, residue) {
+		t.Errorf("report does not state the residue verbatim:\n%s", report)
+	}
+	// It belongs to the confinement block, not the upstream one: a reader scanning for what
+	// this host does to Auto must find it there.
+	if labels, upstream := strings.Index(report, "labels:"), strings.Index(report, "upstream"); labels > upstream {
+		t.Errorf("the labels line landed outside the confinement block:\n%s", report)
+	}
+}
+
+// The overwhelmingly common case — nothing outstanding — renders NO labels line at all,
+// rather than an empty field a reader would have to interpret.
+func TestReportOmitsTheLabelsLineWithoutResidue(t *testing.T) {
+	t.Parallel()
+	report := probe.GatherHost(context.Background(), probe.Inputs{
+		Confiner:           fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		ConfineToWorkspace: true,
+	}).Report()
+
+	if strings.Contains(report, "labels:") {
+		t.Errorf("a host with no residue got a labels line:\n%s", report)
+	}
+}
+
 // An unconfined host (an explicit confine-to-workspace: false, or an unconfined-hosts entry
 // matching this machine) gets no gating notice — nothing is being gated — and the report states
 // the blast radius plainly instead.

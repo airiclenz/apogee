@@ -13,7 +13,8 @@ import "testing"
 // (seatbelt_test.go) DO run here and cover everything provable without a real macOS.
 //
 // The !windows guard matches seatbelt.go's build tag: the seatbelt backend (and these
-// test names) do not compile on Windows, where only denyConfiner exists (Phase 5).
+// test names) do not compile on Windows, whose own backend is a restricted low-integrity
+// token (ADR 0020).
 
 func TestSeatbeltProbe(t *testing.T) {
 	t.Skip("seatbelt live escape-probe is macOS-only (sandbox-exec absent on " +

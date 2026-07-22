@@ -301,8 +301,8 @@ func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
 	t.Parallel()
 
 	home := t.TempDir()
-	if got := ConfinementResidue(home); got != "" {
-		t.Errorf("ConfinementResidue on a clean home = %q, want \"\" (there is nothing to report)", got)
+	if got := confinementResidue(home); got != "" {
+		t.Errorf("confinementResidue on a clean home = %q, want \"\" (there is nothing to report)", got)
 	}
 
 	// This process's own journal is the live session's fence, not residue: reporting it would
@@ -313,8 +313,8 @@ func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write own journal: %v", err)
 	}
-	if got := ConfinementResidue(home); got != "" {
-		t.Errorf("ConfinementResidue reported this process's own journal: %q", got)
+	if got := confinementResidue(home); got != "" {
+		t.Errorf("confinementResidue reported this process's own journal: %q", got)
 	}
 
 	// A journal from another process is the finding the host report exists to surface, and it
@@ -325,7 +325,7 @@ func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write foreign journal: %v", err)
 	}
-	got := ConfinementResidue(home)
+	got := confinementResidue(home)
 	if !strings.Contains(got, `C:\work\proj`) {
 		t.Errorf("residue = %q; want it to name the still-labelled path", got)
 	}

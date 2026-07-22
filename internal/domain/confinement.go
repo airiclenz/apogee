@@ -17,7 +17,8 @@ import (
 
 // Confiner is the OS-level confinement facility for the unbounded subprocess surface
 // (ADR 0012). The interface is PUBLIC because the host injects it via Config; the
-// backends (seatbelt / landlock / AppContainer) live in internal/platform.
+// backends (seatbelt / landlock / a restricted low-integrity Windows token) live in
+// internal/platform.
 //
 // Granularity is the single, all-OS subprocess (Linux landlock applied to the child
 // after fork, before execve; macOS sandbox-exec wrapping the child). There is no

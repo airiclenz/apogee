@@ -83,9 +83,12 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				Endpoint:           opts.endpoint,
 				ConfineToWorkspace: opts.confineToWorkspace,
 				// Mandatory labels an interrupted Windows run left on the disk — "" on every
-				// other OS and on the normal Windows path. Reading the journal directory is a
-				// directory listing, so the host half stays read-only (ADR 0020 §2 / 0021 §1).
-				Residue: platform.ConfinementResidue(roots.config),
+				// other OS and on the normal Windows path. It resolves the journal's own home
+				// rather than roots.config: the backend writes there under any --config, so
+				// reading the resolved root instead would let a non-default --config report a
+				// clean disk that is not. Reading the journal directory is a directory listing,
+				// so the host half stays read-only (ADR 0020 §2 / 0021 §1).
+				Residue: platform.ConfinementResidue(),
 			})
 			cmd.Println(host.Report())
 			return nil
