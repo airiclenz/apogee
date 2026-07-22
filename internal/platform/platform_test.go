@@ -72,14 +72,11 @@ func TestCurrentHost(t *testing.T) {
 		t.Errorf("Command(%q) last arg = %q, want %q", line, argv[2], line)
 	}
 
-	wantShell, wantExt := "sh", ""
+	wantShell := "sh"
 	if runtime.GOOS == "windows" {
-		wantShell, wantExt = "cmd", ".exe"
+		wantShell = "cmd"
 	}
 	if argv[0] != wantShell {
 		t.Errorf("Command(%q)[0] = %q, want %q", line, argv[0], wantShell)
-	}
-	if got := h.ExecExt(); got != wantExt {
-		t.Errorf("ExecExt() = %q, want %q", got, wantExt)
 	}
 }

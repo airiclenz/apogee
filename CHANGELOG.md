@@ -130,7 +130,7 @@ that is now true.*
   test fails; remove the limit-clear and the survival test fails), and the shared decision function
   `planTreeKill` is untagged and table-tested on every OS.
 - **The `platform` `Shell`/`Path` seam is real on both hosts.** The two Phase-0 widening `TODO`s
-  are retired: `Shell{Command, CommandLine, Quote, ScopeEnv}` and `Path{ExecExt, Contains}` now
+  are retired: `Shell{Command, CommandLine, Quote, ScopeEnv}` and `Path{Contains}` now
   live in **one untagged rule table** compiled on every target — only `Current()`'s choice is
   build-tagged — so Windows semantics are table-tested from a Linux run and executed natively on
   Windows. `CommandLine` exists because Windows has no argv at the syscall boundary: `os/exec`
@@ -138,7 +138,12 @@ that is now true.*
   `cmd.exe` does not understand (measured: a `cmd /c` of `echo "hello world"` prints `\"hello
   world\"`, and a redirect to a quoted spaced path dies with "The filename, directory name, or
   volume label syntax is incorrect"), so the verbatim command line goes to `SysProcAttr.CmdLine`
-  and is `""` on POSIX, where `execve` takes a real argv. `Contains` is the case-folded containment
+  and is `""` on POSIX, where `execve` takes a real argv. `Quote` answers to **both** parsers that
+  read that line: `CommandLineToArgvW`'s backslash rules in the child (every backslash run touching
+  a quote is doubled) and `cmd.exe`'s quote-toggling in front of it — so a value carrying a quote
+  of its own is caret-escaped, which is what stops a quote plus an `&` from reaching `cmd` as a
+  live command separator. Both halves are proven by a native round-trip through a real `cmd /c`,
+  not by a golden string. `Contains` is the case-folded containment
   the Windows Confiner needs, and it is **"resolve, else refuse"**: `\\?\` and `\\?\UNC\` are
   normalised, drive-relative (`C:work`) and device (`\\.\…`) paths are refused as non-locations,
   and an 8.3-shaped component is expanded through `GetLongPathNameW` (walking up to the longest

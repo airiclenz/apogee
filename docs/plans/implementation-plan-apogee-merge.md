@@ -446,7 +446,7 @@ merge plan.*
   implementing them — but the Confiner backend is genuine new work (and **Auto mode on
   Windows is gated on it**, per ADR 0004 — since superseded by ADR 0012, which keeps the
   fs-confinement gate).
-  **Shipped as:** `Shell{Command, CommandLine, Quote, ScopeEnv}` + `Path{ExecExt, Contains}`
+  **Shipped as:** `Shell{Command, CommandLine, Quote, ScopeEnv}` + `Path{Contains}`
   in one untagged rule table; Job-Object process-**tree** teardown; and — the design session
   the risk table asked for — [ADR 0020](../adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md):
   the facility is a **restricted low-integrity token** on `SysProcAttr.Token` (AppContainer

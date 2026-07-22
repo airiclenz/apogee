@@ -32,10 +32,13 @@ type Shell interface {
 	// line verbatim instead (internal/tools/exec_cmdline_other.go).
 	CommandLine(line string) string
 
-	// Quote returns arg quoted so the platform shell reads it as one argument:
-	// single quotes on POSIX, double quotes on cmd.exe. A line assembled with
-	// Quote must be launched with CommandLine on Windows — quoting is exactly what
-	// the argv path mangles there.
+	// Quote returns arg quoted so the platform shell reads it as one argument, and
+	// so the child the shell launches reads it back byte for byte: single quotes on
+	// POSIX, and on Windows the double-quote-plus-backslash form CommandLineToArgvW
+	// specifies, caret-escaped for cmd when arg contains a quote of its own (see
+	// windowsQuote — cmd and CommandLineToArgvW disagree, and both parse the line).
+	// A line assembled with Quote must be launched with CommandLine on Windows —
+	// quoting is exactly what the argv path mangles there.
 	Quote(arg string) string
 
 	// ScopeEnv returns the environment ("KEY=value" entries) a subprocess runs
@@ -50,21 +53,18 @@ type Shell interface {
 	ScopeEnv(keys []string, lookup func(string) (string, bool)) []string
 }
 
-// Path abstracts the path semantics that the standard library's path/filepath
-// does not settle on its own: the executable suffix, and containment — which is
-// case-insensitive on Windows and exact on POSIX, and which the Windows Confiner
-// needs to collapse a ConfinementBox's roots and to enforce its labelling
-// guardrails (ADR 0020 §6).
+// Path abstracts the one path semantic the standard library's path/filepath does
+// not settle on its own: containment — case-insensitive on Windows and exact on
+// POSIX, which the Windows Confiner needs to collapse a ConfinementBox's roots and
+// to enforce its labelling guardrails (ADR 0020 §6).
 //
-// There is deliberately no LookPath here. os/exec already implements per-OS
-// executable lookup, including %PATHEXT% resolution on Windows, and a wrapper
-// would add a seam with nothing behind it; ExecExt covers the one thing os/exec
-// does not expose — the suffix itself — for callers that name a binary.
+// There is deliberately no LookPath and no ExecExt here. os/exec already
+// implements per-OS executable lookup, including %PATHEXT% resolution on Windows,
+// so a wrapper would add a seam with nothing behind it; the executable suffix was
+// the one lookup-shaped fact os/exec does not expose, but nothing in the tree ever
+// named a binary through it. It returns with its first real caller — Phase 5's own
+// acceptance rule: no platform surface without a production caller.
 type Path interface {
-	// ExecExt returns the filename extension the platform appends to
-	// executables ("" on POSIX, ".exe" on Windows).
-	ExecExt() string
-
 	// Contains reports whether target is root itself or lies beneath it,
 	// comparing normalised path components under the platform's case rules
 	// (folded on Windows, exact on POSIX) so C:\Work2 is not inside C:\Work.

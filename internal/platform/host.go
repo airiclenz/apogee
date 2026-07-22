@@ -6,8 +6,8 @@ import (
 )
 
 // hostRules is the per-OS behaviour table behind Host: the shell argv prefix, the
-// executable suffix, the platform-essential environment variables, and the one flag
-// (windows) that switches path syntax, path case-folding and quoting style.
+// platform-essential environment variables, and the one flag (windows) that switches
+// path syntax, path case-folding and quoting style.
 //
 // Both rule sets are compiled on EVERY target — only Current's choice of rule set is
 // build-tagged — so Windows semantics are table-testable from a Linux or macOS test run
@@ -21,8 +21,6 @@ type hostRules struct {
 	// shell is the argv prefix that hands a command line to the platform shell —
 	// {"sh", "-c"} on POSIX, {"cmd", "/c"} on Windows.
 	shell []string
-	// execExt is the filename extension the platform appends to executables.
-	execExt string
 	// envKeys are the variables a process on this platform needs in order to start and
 	// behave normally, over and above whatever allowlist a caller names (see ScopeEnv).
 	envKeys []string
@@ -34,19 +32,18 @@ type hostRules struct {
 }
 
 // posixRules is the POSIX rule set (Linux, macOS and the other Unix targets): `sh -c`,
-// no executable suffix, exact-case slash-separated paths, and no platform-essential
-// environment variables — a POSIX process needs only what its caller allowlists (PATH,
-// HOME and friends are the caller's policy, not the platform's floor).
+// exact-case slash-separated paths, and no platform-essential environment variables — a
+// POSIX process needs only what its caller allowlists (PATH, HOME and friends are the
+// caller's policy, not the platform's floor).
 func posixRules() hostRules {
 	return hostRules{
 		windows: false,
 		shell:   []string{"sh", "-c"},
-		execExt: "",
 		envKeys: nil,
 	}
 }
 
-// windowsRules is the Windows rule set: `cmd /c`, ".exe", case-insensitive backslash
+// windowsRules is the Windows rule set: `cmd /c`, case-insensitive backslash
 // paths, and the environment floor below which ordinary Windows programs misbehave in
 // ways that look nothing like a missing variable (a child without %SystemRoot% cannot
 // initialise Winsock or CryptoAPI; git without %HOMEDRIVE%/%USERPROFILE% cannot find the
@@ -58,7 +55,6 @@ func windowsRules() hostRules {
 	return hostRules{
 		windows: true,
 		shell:   []string{"cmd", "/c"},
-		execExt: ".exe",
 		envKeys: []string{
 			"SystemRoot", "SystemDrive", "windir", "ComSpec", "PATHEXT",
 			"TEMP", "TMP", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
@@ -92,9 +88,6 @@ func (r hostRules) Quote(arg string) string {
 	}
 	return posixQuote(arg)
 }
-
-// ExecExt returns the filename extension the platform appends to executables.
-func (r hostRules) ExecExt() string { return r.execExt }
 
 // ScopeEnv returns the scoped environment for a subprocess: every key in keys that is
 // present in the environment, in the order given, followed by this platform's essential
@@ -323,15 +316,47 @@ func posixQuote(s string) string {
 	return string(append(out, '\''))
 }
 
-// windowsQuote wraps s in double quotes for cmd.exe, doubling an embedded quote ("" is
-// cmd's escape for a literal quote inside a quoted string) and doubling a trailing
-// backslash run so the closing quote is not swallowed as an escape by the child's own
-// CommandLineToArgvW parsing ("C:\dir\" would otherwise leave the string open).
+// windowsQuote returns s as one argument of a command line handed to cmd.exe.
 //
-// It does NOT neutralise %VAR% — cmd expands variables inside double quotes and there is
-// no in-line escape for it — so a caller embedding untrusted text is quoting a value cmd
-// may still expand. Apogee's callers quote filesystem paths.
+// TWO parsers read that line and they agree on nothing. The child process splits it with
+// CommandLineToArgvW, which counts backslashes: a run of n backslashes that immediately
+// precedes a double quote is an escape run — 2n+1 backslashes yield n literal backslashes
+// and a LITERAL quote, 2n yield n literal backslashes and a quote that opens or closes the
+// argument. cmd.exe, in front of it, counts nothing: every quote toggles its own quote
+// state, and the characters in cmdMetacharacters are syntax wherever that state is
+// "outside".
+//
+// A value with no quote of its own needs nothing clever. One surrounding pair puts the
+// whole token inside a single cmd-quoted region — so metacharacters are inert — and
+// CommandLineToArgvW reads it back verbatim, provided a trailing backslash run is doubled
+// so it escapes itself rather than the closing quote ("C:\dir\" would otherwise leave the
+// argument open).
+//
+// A value that DOES contain a quote cannot stay inside one cmd-quoted region: the \" that
+// CommandLineToArgvW requires for a literal quote is still just a quote to cmd, which
+// toggles out and reads the REST of the token as its own syntax — a value carrying both a
+// quote and an & would hand cmd a live command separator. Such a value is emitted
+// caret-escaped instead: every metacharacter, quotes included, is prefixed with ^, so cmd
+// never enters quote mode at all, strips the carets, and passes the child exactly the
+// CommandLineToArgvW-correct string. That branch's output is meaningful only to cmd —
+// which is the only place Command and CommandLine ever send it.
+//
+// It does NOT neutralise %VAR% — cmd expands variables before either parser sees the line
+// and there is no in-line escape for it — so a caller embedding untrusted text is quoting
+// a value cmd may still expand. Apogee's callers quote filesystem paths.
 func windowsQuote(s string) string {
+	quoted := windowsArgvQuote(s)
+	if !strings.ContainsRune(s, '"') {
+		return quoted
+	}
+	return caretEscape(quoted)
+}
+
+// windowsArgvQuote wraps s in double quotes under CommandLineToArgvW's backslash rules:
+// ANY backslash run that immediately precedes a quote — an embedded one or the closing
+// one — is doubled, and an embedded quote takes one further backslash on top. A run that
+// precedes an ordinary character is not an escape run and is emitted as it stands.
+func windowsArgvQuote(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + 2)
 	b.WriteByte('"')
@@ -340,17 +365,38 @@ func windowsQuote(s string) string {
 		switch s[i] {
 		case '\\':
 			backslashes++
-			b.WriteByte('\\')
 		case '"':
+			b.WriteString(strings.Repeat(`\`, 2*backslashes+1))
 			backslashes = 0
-			b.WriteString(`""`)
+			b.WriteByte('"')
 		default:
+			b.WriteString(strings.Repeat(`\`, backslashes))
 			backslashes = 0
 			b.WriteByte(s[i])
 		}
 	}
-	b.WriteString(strings.Repeat(`\`, backslashes))
+	b.WriteString(strings.Repeat(`\`, 2*backslashes))
 	b.WriteByte('"')
+	return b.String()
+}
+
+// cmdMetacharacters are the bytes cmd.exe reads as syntax outside a quoted region. The
+// double quote is one of them: it is the character that opens and closes such a region.
+const cmdMetacharacters = `&|<>()^!"`
+
+// caretEscape prefixes every cmd.exe metacharacter in line with ^, cmd's escape for the
+// single character that follows it. With every quote escaped too, cmd never enters quote
+// mode, so there is no "outside the quotes" for anything to leak into: cmd strips the
+// carets and passes line on byte for byte.
+func caretEscape(line string) string {
+	var b strings.Builder
+	b.Grow(len(line) + 8)
+	for i := 0; i < len(line); i++ {
+		if strings.IndexByte(cmdMetacharacters, line[i]) >= 0 {
+			b.WriteByte('^')
+		}
+		b.WriteByte(line[i])
+	}
 	return b.String()
 }
 

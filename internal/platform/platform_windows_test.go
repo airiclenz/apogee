@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,94 @@ import (
 // These tests run the Windows rule set against the real OS — a real cmd.exe and the real
 // long-path resolver — which the shared table tests in host_test.go cannot do from a Linux
 // or macOS run. They are the "validate on a real Windows target" the Phase-0 stub deferred.
+
+// quoteEchoSentinel makes the test binary double as the child half of the quoting
+// round-trip below: launched with it, the binary prints its own argv and exits, so a real
+// CommandLineToArgvW does the splitting (the TestHelperProcess idiom this package already
+// uses for confined re-exec in landlock_linux_test.go).
+const quoteEchoSentinel = "__quote-echo"
+
+func TestMain(m *testing.M) {
+	if len(os.Args) >= 2 && os.Args[1] == quoteEchoSentinel {
+		for _, arg := range os.Args[2:] {
+			fmt.Printf("<%s>", arg)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// echoThroughCmd runs the test binary's sentinel half behind a real cmd.exe with quoted
+// spliced into the command line, and returns what the child's argv came back as, each
+// argument wrapped in <>.
+//
+// The whole tail is wrapped in one more pair of quotes: with /c, cmd strips the first and
+// last character of a line that starts with a quote, which is the documented way to give
+// it both an executable path containing spaces and arguments of its own.
+func echoThroughCmd(t *testing.T, quoted string) string {
+	t.Helper()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate the test binary: %v", err)
+	}
+	cmd := exec.Command("cmd")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CmdLine: `cmd /c ""` + self + `" ` + quoteEchoSentinel + ` ` + quoted + `"`,
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cmd /c with %s: %v (output %q)", quoted, err, out)
+	}
+	return strings.TrimRight(string(out), "\r\n")
+}
+
+func TestWindowsQuoteRoundTripsThroughCmd(t *testing.T) {
+	t.Parallel()
+
+	// Exactly the values host_test.go pins the quoting of. That table asserts the string
+	// Quote produces; this asserts what the string MEANS — a real cmd.exe parses it and a
+	// real CommandLineToArgvW splits it, and the child must see the input back byte for
+	// byte. Either half alone is a guess: the previous shape of this quoting passed a
+	// string table that had simply written the defect down as the expected answer.
+	args := []string{
+		`C:\Work`,
+		`C:\pro be\x.txt`,
+		`C:\Work\`,
+		`C:\Work\\`,
+		``,
+		`a & b | c ^ d > e`,
+		`say "hi"`,
+		`a\"b`,
+		`a\\"b`,
+		`say "hi"\\`,
+		`a"b & c"d`,
+		`x">"y`,
+	}
+	host := Current()
+	for _, arg := range args {
+		t.Run(fmt.Sprintf("%q", arg), func(t *testing.T) {
+			t.Parallel()
+			quoted := host.Quote(arg)
+			if got, want := echoThroughCmd(t, quoted), "<"+arg+">"; got != want {
+				t.Errorf("Quote(%q) = %s, which reached the child as %s, want %s", arg, quoted, got, want)
+			}
+		})
+	}
+}
+
+func TestWindowsQuoteDoesNotNeutraliseEnvironmentExpansion(t *testing.T) {
+	t.Parallel()
+
+	// The non-guarantee host_test.go pins as a table row, proven rather than asserted:
+	// cmd expands %VAR% before either parser sees the line and offers no in-line escape,
+	// so a caller quoting untrusted text is quoting a value cmd may still expand. If this
+	// ever stops being true, windowsQuote's doc comment can drop the caveat.
+	got := echoThroughCmd(t, Current().Quote(`%PATH%`))
+	if got == `<%PATH%>` {
+		t.Errorf("Quote(%%PATH%%) survived cmd unexpanded (%s); the documented non-guarantee no longer holds", got)
+	}
+}
 
 func TestWindowsShellLineSurvivesQuotingOnlyThroughCommandLine(t *testing.T) {
 	// A directory whose name contains a space is the ordinary case (%USERPROFILE% is

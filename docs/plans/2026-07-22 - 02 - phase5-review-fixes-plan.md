@@ -428,7 +428,45 @@ selection tests unchanged.
 two lines.
 **Commit:** `test(confine): pin the Windows build-floor selection`
 
-## 11. Adversarial quoting rows; delete the caller-less `ExecExt`
+## 11. Adversarial quoting rows; delete the caller-less `ExecExt` — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): the item said "add rows"; the rows could not be written truthfully without
+first fixing what they describe, so this item also changes `windowsQuote`. Measured natively on the
+owner's Windows host (`CommandLineToArgvW` round-trip AND end-to-end through a real `cmd /c`),
+across 27 adversarial values:
+
+- The shipped `windowsQuote` doubled only a TRAILING backslash run, so a run touching an embedded
+  quote was eaten: `a\"b` reached the child as `a"b`, `a\\"b` as `a\"b`, `say "hi"\\` as
+  `say "hi\\`. A first attempt at this item wrote those three outcomes into the table as the
+  expected answers, with a rationale comment inverting the rule. The user's ratified decision
+  (2026-07-22) is to fix the quoting instead and assert the correct round-trip.
+- Doubling every backslash run that touches a quote is necessary but NOT sufficient, and this is
+  the deviation from the decision's literal wording: measured, it fixes `a\"b` and `a\\"b` and
+  leaves `say "hi"\\` still arriving as `say "hi\\`. The cause is the `""` escape itself —
+  `CommandLineToArgvW` decodes `""` inside a quoted argument to a literal quote but LEAVES quoted
+  mode, so every later space splits the argument. The standard MSVCRT form the decision names
+  (`2n+1` backslashes, then `\"`) round-trips all 27 values through `CommandLineToArgvW`.
+- That form alone would have introduced a worse defect than the one being fixed: `\"` is still a
+  quote to `cmd`, which toggles out of its own quoted region, so a value carrying both a quote and
+  an `&` or `>` reached `cmd` as a live command separator or redirect (measured: `a"b & c"d` ran a
+  second command). `windowsQuote` therefore caret-escapes a value that contains a quote — every
+  metacharacter including the quotes, so `cmd` never enters quote mode at all. Output for a
+  quote-free value (every production and test caller quotes filesystem paths) is byte-identical to
+  before; only the values that were broken change.
+- The table rows are backed by `TestWindowsQuoteRoundTripsThroughCmd` (new, windows-tagged), which
+  re-runs the same values through a real `cmd /c` into a sentinel child — the `TestHelperProcess`
+  idiom `landlock_linux_test.go` already uses, which needed a windows-tagged `TestMain`. Verified
+  by negative control: single-escaping the backslash run fails the two backslash rows, and removing
+  the caret branch fails the two metacharacter rows. `%PATH%` is pinned twice — as the documented
+  non-guarantee row, and natively as `TestWindowsQuoteDoesNotNeutraliseEnvironmentExpansion`.
+- The `ExecExt` deletion also removes the now-unreachable `hostRules.execExt` field and its two
+  initialisers, and rewords the `Path`/`hostRules`/`posixRules`/`windowsRules` doc comments — the
+  interface method alone would have left a field no code can read.
+- Docs corrected because they now assert something false, not as drive-by edits: the `[Unreleased]`
+  CHANGELOG platform paragraph and `technical-design.md` §5's P5.6 cell (both the retired `ExecExt`
+  and the quoting claim), `Shell.Quote`'s interface comment, and the stale `Path{ExecExt, Contains}`
+  at `implementation-plan-apogee-merge.md:449` named in the decision. Item 13 still owns the
+  roll-up CHANGELOG entry.
 
 **What:** (Review: Mediums "windowsQuote lacks adversarial rows" + "`ExecExt` is dead surface".)
 Two mechanical strokes in `internal/platform`: (a) extend the `windowsQuote` table

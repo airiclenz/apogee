@@ -81,9 +81,42 @@ func TestQuoteIsLiteralForThePlatformShell(t *testing.T) {
 		{"posix empty", posixRules(), "", `''`},
 		{"windows plain", windowsRules(), `C:\Work`, `"C:\Work"`},
 		{"windows space", windowsRules(), `C:\pro be\x.txt`, `"C:\pro be\x.txt"`},
-		{"windows quote", windowsRules(), `say "hi"`, `"say ""hi"""`},
 		{"windows trailing backslash", windowsRules(), `C:\Work\`, `"C:\Work\\"`},
 		{"windows empty", windowsRules(), "", `""`},
+		// Only a backslash run that actually touches a quote is an escape run, and then
+		// EVERY such run is doubled, however long — the closing quote is otherwise
+		// swallowed as an escape and the argument runs on into the next one.
+		{"windows multiple trailing backslashes", windowsRules(), `C:\Work\\`, `"C:\Work\\\\"`},
+		// cmd metacharacters need no escape of their own while the token stays inside one
+		// cmd-quoted region: &, |, ^ and > are not syntax there, so they survive literally.
+		{"windows cmd metacharacters", windowsRules(), `a & b | c ^ d > e`, `"a & b | c ^ d > e"`},
+		// PINNED NON-GUARANTEE (host.go, windowsQuote's doc comment): %VAR% is expanded by
+		// cmd.exe before either parser sees the line and has no in-line escape, so Quote
+		// passes it through untouched. Apogee's callers quote filesystem paths; a caller
+		// quoting untrusted text is quoting a value cmd may still expand. If this row ever
+		// needs to change, the doc comment and every caller's threat model change with it.
+		{"windows env var is not neutralised", windowsRules(), `%PATH%`, `"%PATH%"`},
+
+		// ADVERSARIAL: a value that contains a quote of its own. The \" that
+		// CommandLineToArgvW needs for a literal quote is still a quote to cmd, which would
+		// toggle out of its quoted region and read the remainder of the token as syntax, so
+		// the whole token is caret-escaped instead and cmd never enters quote mode. Each
+		// `want` below is the string that was verified to round-trip byte-for-byte through
+		// a real `cmd /c` launch — see TestWindowsQuoteRoundTripsThroughCmd, which re-runs
+		// exactly these values natively.
+		{"windows quote", windowsRules(), `say "hi"`, `^"say \^"hi\^"^"`},
+		// A backslash run that ends AT an embedded quote is an escape run like any other
+		// and is doubled: one backslash becomes two, so the child reads one back. Leaving
+		// it single would let it escape the quote and eat the backslash outright.
+		{"windows backslash before an embedded quote", windowsRules(), `a\"b`, `^"a\\\^"b^"`},
+		{"windows backslash run before an embedded quote", windowsRules(), `a\\"b`, `^"a\\\\\^"b^"`},
+		// Backslashes AFTER an embedded quote are the trailing run, doubled as usual — the
+		// two rules are about position, not about which one fired first.
+		{"windows trailing backslashes after a quote", windowsRules(), `say "hi"\\`, `^"say \^"hi\^"\\\\^"`},
+		// The reason the caret branch exists: a value carrying both a quote and an & would
+		// otherwise hand cmd a live command separator halfway through the argument.
+		{"windows quote and metacharacter", windowsRules(), `a"b & c"d`, `^"a\^"b ^& c\^"d^"`},
+		{"windows quote and redirect", windowsRules(), `x">"y`, `^"x\^"^>\^"y^"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,17 +125,6 @@ func TestQuoteIsLiteralForThePlatformShell(t *testing.T) {
 				t.Errorf("Quote(%q) = %s, want %s", tt.arg, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestExecExt(t *testing.T) {
-	t.Parallel()
-
-	if got := posixRules().ExecExt(); got != "" {
-		t.Errorf("posix ExecExt() = %q, want \"\"", got)
-	}
-	if got := windowsRules().ExecExt(); got != ".exe" {
-		t.Errorf("windows ExecExt() = %q, want \".exe\"", got)
 	}
 }
 
