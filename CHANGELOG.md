@@ -6,6 +6,29 @@ onward (ADR 0001 §consequences, as amended at the Phase-3 cut): Events and
 hook points stay **additively extensible**, so a new Event variant or hook
 point is a **minor** bump, not a breaking change.
 
+## [Unreleased]
+
+### Removed
+
+- **The proxy and the OpenCode plugin / transform-server bridge — retired, on the record.** The
+  decision was taken with the merge itself (merge plan §6 #4, 2026-06-22) and has governed every
+  phase since, but nothing in *this* repo ever said so — which left a reader who met the
+  `internal/proxy/…` breadcrumbs scattered through `internal/mechanisms` no way to tell a dead
+  ancestor from a live dependency. Recorded here in the form it was actually executed: apogee-sim's
+  OpenAI-compatible **reverse proxy**, the **transform-server bridge** and the **OpenCode plugin**
+  are **not ported forward**, they remain in apogee-sim's git history as reference, and **apogee
+  *is* the integration** — one integrated tool, not a Core exposed through peer integrations
+  (`CONTEXT.md`'s retired-vocabulary section). Nothing is deleted and no behaviour changes, because
+  none of that code was ever ported: this repo's only references to it are the **`@pin` provenance
+  comments** on the ported Mechanisms (seventeen files in `internal/mechanisms` — `toolloop.go`
+  pins `internal/proxy/tool_loop_interceptor.go`, `grammar.go` pins `proxy.go`'s
+  `injectGrammarConstraint`, and so on), which say where a behaviour came from and what its A/B
+  measured. Those are **history pins, not live references, and they stay verbatim**; the word's
+  other occurrences in the tree — self-regulation's "proxy signals" and `internal/tools`' refusal
+  of the `Proxy-*` hop-by-hop headers — are unrelated senses. Archival on the apogee-sim side is
+  that repo's business, not this one's.
+  (Merge plan §4 "Phase 5 — Cross-platform hardening & retirement", §6 #4.)
+
 ## [1.7.0] — 2026-07-21
 
 ### Added

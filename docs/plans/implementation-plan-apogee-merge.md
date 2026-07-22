@@ -447,7 +447,9 @@ before keeping it on**:
   response hash; logprobs preferred when exposed) used for Library keying when the GGUF file
   is unreachable.
 - **Retire the proxy and the OpenCode plugin / transform-server bridge** (decided —
-  not ported forward; they remain in apogee-sim's history).
+  not ported forward; they remain in apogee-sim's history). **Retirement recorded
+  2026-07-22** in `CHANGELOG.md` `[Unreleased]`; the apogee-sim-side archival stays that
+  repo's business.
 - **Deliverable:** cross-compiled binaries for Win/Mac/Linux, Auto confined on all three.
 - *(The eval harness lives in apogee-sim and reaches Apogee by Go import — **decided, not
   deferred** (ADR 0001). There is no `sim`/`bench` subcommand in apogee; an opt-in

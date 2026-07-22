@@ -489,13 +489,39 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   network: unavailable)` / `auto: eligible` and no notice. The below-floor path stays UNTESTED
   (no such host exists here), exactly as ADR 0020's consequences record.
 
-- [ ] **9. Proxy / OpenCode-bridge retirement record.** Confirm by grep that this repo's only
+- [x] **9. Proxy / OpenCode-bridge retirement record. — ✅ DONE (2026-07-22)** Confirm by grep that this repo's only
   proxy references are the `@pin` provenance comments (list them in the item's NOTES — they are
   preserved verbatim, per Ground truth); record the retirement decision as a CHANGELOG
   `[Unreleased]` entry (decided in merge-plan §6 #4, executed as: not ported, remains in
   apogee-sim history, apogee *is* the integration); note in the merge plan's Phase 5 bullet that
   retirement is recorded. The apogee-sim-side archival is explicitly out of scope (owner, other
   repo). Acceptance: grep transcript in NOTES; CHANGELOG entry present; no code changed.
+  NOTES (2026-07-22): grep transcript, run on the Windows execution machine (Git Bash).
+  **Command 1** — `grep -rniE "proxy|opencode" --include="*.go" .` → **45 matches, three
+  disjoint buckets, none of them live**: (a) the **`@pin` provenance comments naming apogee-sim's
+  `internal/proxy`** — 24 lines in 17 files, all under `internal/mechanisms/`, PRESERVED VERBATIM:
+  `autofix.go:35`, `cachedcontent.go:12`, `catalogue.go:46`, `empty_response.go:18`,
+  `errorenrich.go:13`, `filehint.go:19`, `grammar.go:13,27,68,132`, `historyhints.go:22`,
+  `offramps.go:11`, `readloop.go:14,20`, `readrepeat.go:14`, `robustness.go:15,23,49`,
+  `syntax.go:18,26`, `toolloop.go:16`, `tool_result_cap.go:99`, `tool_use_enforcer.go:19`,
+  `validate.go:21` (the pin token sits on the comment's continuation line for `robustness.go:49`
+  and `syntax.go:18,26`, so `grep "@pin" | grep proxy` alone shows 21 of the 24); (b) four
+  narrative history mentions carrying no `@pin` token — `internal/domain/mechanism.go:53`
+  ("the proxy could not host it"), `internal/mechanisms/robustness.go:18`,
+  `truncate_history.go:32`, `grammar_test.go:93`; (c) the unrelated word senses — self-regulation's
+  "proxy signals" (`internal/agent/dispatch.go:57`, `loop.go:441,809`,
+  `selfreg.go:7,17,50,102,169,232,248`, `selfreg_test.go:4`) and the `Proxy-*` hop-by-hop header
+  refusals (`internal/tools/http_request.go:57,58,72,73,74`, `network_test.go:190`). **Command 2**
+  — `grep -rniE "opencode" . --exclude-dir=.git` → **no source match at all**: only docs
+  (`CONTEXT.md:635`, `docs/plans/implementation-plan-apogee-merge.md:133,449,492`, this plan) plus
+  the gitignored build artefact `apogee.exe`, whose hit is the Go runtime symbol
+  `initOpenCodedDefers` — a false positive. **Command 3** — `git ls-files | grep -iE
+  "proxy|opencode"` → empty (no proxy/bridge/plugin file is tracked here). Conclusion: nothing
+  in this repo calls, embeds, spawns or speaks to a proxy; the retirement is a recording task, as
+  the plan says. Outputs: `CHANGELOG.md` gains a `[Unreleased]` → `### Removed` entry (item 10
+  adds the rest of the Phase 5 roll-up under the same heading) and the merge plan's Phase 5
+  retirement bullet now states the record exists. **No code changed**; sanity check was
+  `go build ./...`.
 
 - [ ] **10. Docs roll-up — the single owning item for every cross-cutting amendment.** (DEPENDS:
   all.) README (Windows Auto now confined on capable hosts + probe usage + six-target cross
