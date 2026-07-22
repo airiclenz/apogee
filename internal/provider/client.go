@@ -19,6 +19,11 @@ const (
 	maxErrorLength   = 500
 	maxToolCallBytes = 1 << 20 // 1 MiB — cap on accumulated streamed tool-call arguments
 
+	// topLogProbsCount is how many alternatives a Request that asks for LogProbs requests per
+	// token position. Five is enough for the candidate set to identify a model's distribution
+	// while staying inside every server's top_logprobs cap.
+	topLogProbsCount = 5
+
 	defaultMaxRetries     = 2
 	defaultRetryBaseDelay = 200 * time.Millisecond
 )
@@ -210,7 +215,9 @@ func (c *Client) statusError(resp *http.Response) error {
 // buildBody projects a Request onto the OpenAI chat-completions JSON body, faithfully to
 // the TS oracle: the configured model wins over the request's, sampling knobs are
 // included only when set, stream_options.include_usage rides every streamed request, and
-// tools (when present) switch message formatting into native-tool mode.
+// tools (when present) switch message formatting into native-tool mode. The logprobs pair is
+// added only when the caller asked for it (`apogee probe model`), so the loop's bytes are
+// untouched.
 func (c *Client) buildBody(req Request) chatRequest {
 	hasTools := len(req.Tools) > 0
 
@@ -236,6 +243,14 @@ func (c *Client) buildBody(req Request) chatRequest {
 	body.TopK = s.TopK
 	body.RepeatPenalty = s.RepeatPenalty
 	body.MaxTokens = s.MaxTokens
+
+	if req.LogProbs {
+		// Asked for only when the caller wants the candidate distribution, so an ordinary
+		// loop request stays byte-identical on the wire (see chatRequest's pointer fields).
+		on, n := true, topLogProbsCount
+		body.LogProbs = &on
+		body.TopLogProbs = &n
+	}
 
 	if hasTools {
 		body.Tools = make([]chatTool, 0, len(req.Tools))

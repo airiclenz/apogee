@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -221,7 +222,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// opts.mechanisms was empty (manual control suppresses the apply), so the assignment
 	// replaces an empty list, never a user's choice. The notices are the ADR's visible
 	// per-session notice, on stderr pre-TUI like the unconfined-Auto warning above.
-	vset, vnotices, err := resolveValidatedSet(opts, roots.validated)
+	vset, vnotices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
 	if err != nil {
 		return err // a dangling validated-sets alias — the user's own config, loud by design
 	}
@@ -438,6 +439,7 @@ type stateRoots struct {
 	library   string
 	sessions  string
 	validated string
+	probe     string
 	workspace string
 }
 
@@ -485,6 +487,11 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		library:   filepath.Join(absHome, "library"),
 		sessions:  filepath.Join(absHome, "sessions"),
 		validated: filepath.Join(absHome, "validated"),
+		// The behavioral-probe records `apogee probe model` writes and the fingerprint
+		// resolver reads back (ADR 0021 §3). Named by internal/library rather than joined
+		// here, because the resolver has to find the same directory from the apogee home
+		// alone when it is reached from the engine's construction path.
+		probe:     library.ProbeDir(absHome),
 		workspace: absWorkspace,
 	}, nil
 }

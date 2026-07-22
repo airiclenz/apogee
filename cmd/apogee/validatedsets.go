@@ -31,11 +31,19 @@ import (
 //     would be an unvalidated stack).
 //   - An applying entry is validated whole against the live catalogue first; a defect
 //     (unknown ID after catalogue evolution, now-invalid stacking) skips the entry.
-func resolveValidatedSet(opts options, userDir string) (set []apogee.MechanismID, notices []string, err error) {
+func resolveValidatedSet(opts options, userDir, probeDir string) (set []apogee.MechanismID, notices []string, err error) {
 	if opts.bypass || !opts.validatedSetsEnable {
 		return nil, nil, nil
 	}
-	fp := library.ResolveFingerprint(opts.model)
+	// The full identity ladder (ADR 0021 §3): the weights-hash when the model id is a
+	// reachable file, else a behavioral record a previous `apogee probe model` left for THIS
+	// endpoint and label, else the bare label. The middle rung is what lets an entry
+	// auto-apply below the weights tier — and it exists only because a human ran the probe.
+	fp := library.ResolveFingerprintFrom(library.Sources{
+		ModelID:  opts.model,
+		Endpoint: opts.endpoint,
+		ProbeDir: probeDir,
+	})
 	if fp.IsZero() {
 		return nil, nil, nil
 	}

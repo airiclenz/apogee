@@ -17,8 +17,8 @@ import (
 // named child, so a script never has to rely on the bare parent's semantics staying put.
 //
 // The model half — `apogee probe model`, which spends live tokens AND writes a fingerprint
-// record — is a separate, explicit child and is NOT registered here: the asymmetry in cost is
-// the whole reason the command has halves at all.
+// record — is a separate, explicit child: the asymmetry in cost is the whole reason the command
+// has halves at all, and nothing about a reachable endpoint may cause the battery to run.
 func newProbeCommand() *cobra.Command {
 	cmd := probeHostCommand("probe",
 		"Report this host: confinement, roots, and endpoint reachability",
@@ -34,6 +34,7 @@ func newProbeCommand() *cobra.Command {
 		"Report this host (the same report as bare `apogee probe`)",
 		"apogee probe host is the named child form of the host report bare `apogee probe`\n"+
 			"prints — identical output, spelled out for scripts."))
+	cmd.AddCommand(probeModelCommand())
 
 	return cmd
 }

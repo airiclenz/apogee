@@ -144,7 +144,10 @@ config.yaml` is **not touched**, following the `offerNotice` precedent verbatim
 produces *evidence*, and turning evidence into a preference is the user's move. This also keeps
 the one write `probe model` performs down to a single, deletable, purpose-built file.
 
-**6. The behavioral fingerprint is a fuzzy feature match, never a response hash.** Merge-plan
+**6. The behavioral fingerprint is a fuzzy feature match, never a response hash.**
+*(Amended 2026-07-22 — see the Amendment section below: the feature match is what the probe
+record **records as evidence**, not how the fingerprint's label is **spelled**. The label stays
+the advertised model label; the battery raises its confidence tier.)* Merge-plan
 Phase 5 wording governs: the label is derived from *which capabilities the battery observed* —
 native tool calls, structured/JSON output, a multi-step tool chain — with logprobs preferred
 where the server exposes them, so that sampling noise, temperature, or a re-worded system prompt
@@ -198,3 +201,68 @@ random-number generator wearing an identity's clothes.
   degradation story diagnosable off-session for the first time — including on the Windows hosts
   Phase 5's remaining items are about, where "which backend answered?" is the first question
   anyone will ask.
+
+## Amendment (2026-07-22) — the behavioral tier promotes an identity, it does not mint one
+
+§6 as written said the behavioral fingerprint's **label** is derived from the observed feature
+set. Implementing it exposed that this contradicts §4 — the section that gives `probe model` its
+whole reason to exist — and, through it, [ADR 0016](0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)
+§§3 and 5. ADR 0016 is a pinned source and wins; §6 is amended here.
+
+**The defect.** A Validated-set entry is keyed on a human-authored model name (§6 of ADR 0016:
+`gemma-4-e4b-it-qat`), a `validated-sets: alias:` maps *from* the runtime label, and the Library
+files its observations under the same label. `validated.Match` matches those keys by string
+equality. A fingerprint label of the form `probe:1:<model>:<features>` matches none of them, so
+`apogee probe model` **demoted** the model it was run on: an entry that was OFFERED before the
+probe matched nothing after it, and a user who had already pasted the ADR 0016 §3 identity alias
+silently lost their applying set, because the alias was keyed on the label the probe had just
+walked away from. The command advertised as the promotion from *offered* to *auto-applied* did
+the opposite, quietly.
+
+**The decision.** The behavioral tier changes an identity's **confidence**, never its spelling.
+
+- `probe.Fingerprint` returns `{Label: <the advertised model label>, Confidence: Medium}`. The
+  Medium rung of `library.ResolveFingerprintFrom` therefore returns a label byte-identical to
+  Low's; the *only* difference a probe record makes to identity resolution is the tier.
+- The observed feature vector becomes the **behavioral signature**,
+  `probe:<battery>:<features>[:lp-<digest>]`, recorded in the probe record beside the claim
+  (`library.ProbeRecord.Behavior`). It is evidence, never a match key.
+- §3's drift detection is unchanged in intent and now rests on the signature: a re-probe of the
+  same `endpoint + label` whose **signature** differs is what says "the model behind this label
+  changed since &lt;date&gt;". §6's substance — a fuzzy feature match over observed capabilities,
+  logprobs preferred where exposed, never a response hash — survives intact; only its *role*
+  moves, from identity to evidence.
+
+**Why this over the alternative.** The rejected remedy was to keep behavioral labels and teach
+entries and aliases to match them. It fails on all three of stability, maintainability and
+modularity. *Stability:* a key that encodes the battery version, the feature set, and whether the
+server happened to expose logprobs is a key that moves under the user's feet — a battery bump, a
+newly capable model, or a server upgrade would orphan every entry, alias and Library observation
+for that model, and the failure would be silent each time. *Maintainability:* one key space
+across the Low and Medium rungs means no dual lookup in `validated.Match`, no second spelling for
+a user to learn, and no question of which string to paste into an alias. *Modularity:* the
+behavioural evidence stays entirely inside `internal/library`'s record, whose only consumer is
+the probe's own re-probe comparison; `internal/validated` and the Library's observation keying
+are untouched. Nothing is lost in discrimination, because identity resolution is pure and offline
+— it can only read back what a probe wrote — so a signature baked into the key bought no safety
+there that the record does not already provide.
+
+**Migration: none, deliberately.** `library.ProbeRecordVersion` moves 1 → 2 (the record's
+`fingerprint` field is replaced by `behavior`). Probe records written before this amendment are
+**not readable and not matchable**; they are skipped with a one-line warning naming the fix, and
+the fix is to **re-run `apogee probe model` once for each model**. No migration tooling is built:
+re-running costs one command and re-earns the claim against this build's battery, which a
+rewritten old record could only pretend to. This is a breaking data-format change, taken while
+the tool has exactly one user and no release carries the v1 format.
+
+**Consequences.**
+
+- `probe model`'s report says out loud that the label is *unchanged*, prints the behavioral
+  signature on its own line, and states the effect it actually had — including the two cases a
+  blanket "it was previously only offered" would get wrong: a set already applying through the
+  user's alias (promoted nothing), and a session-level off-switch (Bypass, `validated-sets:
+  enable: false`, an explicit `mechanisms:` block) that holds whatever the record says.
+- §4's three binding requirements are unchanged and now actually hold: the promotion happens,
+  `--no-save` writes nothing, and the record's path is printed as the undo.
+- Existing Library observations for a probed model keep matching, because the key they are filed
+  under is the key the probe promotes.

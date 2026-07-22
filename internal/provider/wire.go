@@ -61,6 +61,13 @@ type Request struct {
 	Tools    []ToolSpec
 	Sampling Sampling
 	Stream   bool
+
+	// LogProbs asks the Upstream to report the candidate-token distribution alongside the
+	// reply (OpenAI's `logprobs` + `top_logprobs`). The loop never sets it; `apogee probe
+	// model` does, because the distribution is a far more stable identity signal than
+	// generated text — ADR 0021 §6 prefers logprobs where the server exposes them. A server
+	// that does not support the fields simply answers without them, so setting it is safe.
+	LogProbs bool
 }
 
 // Usage is the token accounting an Upstream reply may carry (absent on servers that omit
@@ -80,4 +87,12 @@ type RawResponse struct {
 	ToolCalls    []ToolCall
 	FinishReason string
 	Usage        Usage
+
+	// TopCandidates are the candidate tokens the server reported for the FIRST generated
+	// token position, most-likely first. It is non-nil only when the Request asked for
+	// LogProbs *and* the server exposed them — an OpenAI-compatible server that ignores the
+	// fields leaves it nil, which is a finding rather than a failure. It carries the tokens
+	// the model *could* have emitted rather than the one that was drawn, so it survives the
+	// sampling noise a response hash would mistake for a different model (ADR 0021 §6).
+	TopCandidates []string
 }

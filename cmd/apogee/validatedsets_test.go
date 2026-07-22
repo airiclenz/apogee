@@ -32,7 +32,7 @@ func TestResolveValidatedSet_OffSwitches(t *testing.T) {
 		{"unknown model matches nothing", baseOpts("some-unknown-model")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			set, notices, err := resolveValidatedSet(tt.opts, t.TempDir())
+			set, notices, err := resolveValidatedSet(tt.opts, t.TempDir(), t.TempDir())
 			if err != nil || set != nil || len(notices) != 0 {
 				t.Fatalf("want silence, got set=%v notices=%v err=%v", set, notices, err)
 			}
@@ -42,7 +42,7 @@ func TestResolveValidatedSet_OffSwitches(t *testing.T) {
 
 func TestResolveValidatedSet_DirectLowMatchOffers(t *testing.T) {
 	t.Parallel()
-	set, notices, err := resolveValidatedSet(baseOpts(gemmaKey), t.TempDir())
+	set, notices, err := resolveValidatedSet(baseOpts(gemmaKey), t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestResolveValidatedSet_IdentityAliasApplies(t *testing.T) {
 	opts := baseOpts(gemmaKey)
 	opts.validatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
 
-	set, notices, err := resolveValidatedSet(opts, t.TempDir())
+	set, notices, err := resolveValidatedSet(opts, t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestResolveValidatedSet_ManualControlSuppresses(t *testing.T) {
 	opts.validatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
 	opts.mechanisms = map[string]bool{"validate": true} // any non-empty block = manual control
 
-	set, notices, err := resolveValidatedSet(opts, t.TempDir())
+	set, notices, err := resolveValidatedSet(opts, t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestResolveValidatedSet_DanglingAliasIsLoud(t *testing.T) {
 	opts := baseOpts("my-model")
 	opts.validatedSetsAlias = map[string]string{"my-model": "no-such-entry"}
 
-	_, _, err := resolveValidatedSet(opts, t.TempDir())
+	_, _, err := resolveValidatedSet(opts, t.TempDir(), t.TempDir())
 	var dangling *validated.DanglingAliasError
 	if !errors.As(err, &dangling) {
 		t.Fatalf("want DanglingAliasError, got %v", err)
@@ -123,7 +123,7 @@ func TestResolveValidatedSet_UserEntryWinsAndSorts(t *testing.T) {
 	opts := baseOpts(gemmaKey)
 	opts.validatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
 
-	set, notices, err := resolveValidatedSet(opts, dir)
+	set, notices, err := resolveValidatedSet(opts, dir, t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestResolveValidatedSet_DefectiveEntrySkipsSoft(t *testing.T) {
 	opts := baseOpts("mystery-model")
 	opts.validatedSetsAlias = map[string]string{"mystery-model": "mystery-model"}
 
-	set, notices, err := resolveValidatedSet(opts, dir)
+	set, notices, err := resolveValidatedSet(opts, dir, t.TempDir())
 	if err != nil {
 		t.Fatalf("a defective entry must stay soft, got %v", err)
 	}
@@ -169,7 +169,7 @@ func TestResolveValidatedSet_MalformedUserFileWarnsEvenUnmatched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	set, notices, err := resolveValidatedSet(baseOpts("some-unknown-model"), dir)
+	set, notices, err := resolveValidatedSet(baseOpts("some-unknown-model"), dir, t.TempDir())
 	if err != nil || set != nil {
 		t.Fatalf("want soft warning only, got set=%v err=%v", set, err)
 	}

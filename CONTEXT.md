@@ -542,20 +542,27 @@ bench](#validation-and-the-bench)'s job), "health check" (it diagnoses, it does 
 "auto-configure" (nothing is written into config).
 
 **Behavioral fingerprint**:
-The model identity the **model battery** produces — a **fuzzy feature match over battery
-outcomes** (which capabilities were observed; logprobs preferred where the Upstream exposes
-them), **never a hash of response text**, so sampling noise or a re-worded prompt does not mint a
-new identity. It is the middle rung of the [Library](#self-regulation)'s best-available ladder —
-weights-hash (**high**) → behavioral fingerprint (**medium**) → metadata label (**low**) — and it
-is the *only* source of `ConfidenceMedium`, because identity is resolved offline at startup: it
-reaches later sessions **through a persisted probe record** (versioned, owner-private, keyed on
-endpoint + advertised label + probe timestamp, so a swapped model behind an unchanged label is
-detectable; any defect is skipped with a warning, never a blocked startup). Consequence worth
-knowing before running it: at medium confidence a matching [Validated set](#validation-and-the-bench)
-**auto-applies** instead of being offered (ADR 0016 §5) — so probing is the act that switches
-that automatism on, and deleting the record (or `--no-save`) is the off-switch.
+The model identity a completed **model battery** earns — the model's own advertised label, at
+**medium** confidence. The battery raises an identity's *tier*; it never re-spells it (ADR 0021,
+Amendment 2026-07-22), because that label is the key [Validated set](#validation-and-the-bench)
+entries, user aliases and [Library](#self-regulation) observations are all filed under, and a
+probe that renamed the model would orphan every one of them. It is the middle rung of the
+Library's best-available ladder — weights-hash (**high**) → behavioral fingerprint (**medium**) →
+metadata label (**low**) — and the *only* source of `ConfidenceMedium`, because identity is
+resolved offline at startup: it reaches later sessions **through a persisted probe record**
+(versioned, owner-private, keyed on endpoint + advertised label + probe timestamp; any defect is
+skipped with a warning, never a blocked startup). What the battery observed is recorded beside
+the claim as the **behavioral signature** — a **fuzzy feature match over battery outcomes**
+(which capabilities were observed; logprobs preferred where the Upstream exposes them), **never a
+hash of response text**, so sampling noise or a re-worded prompt does not move it. The signature
+is *evidence*, never a match key: comparing it across probes is what makes a swapped model behind
+an unchanged label detectable. Consequence worth knowing before running the battery: at medium
+confidence a matching Validated set **auto-applies** instead of being offered (ADR 0016 §5) — so
+probing is the act that switches that automatism on, and deleting the record (or `--no-save`) is
+the off-switch.
 _Avoid_: "response hash" / "output signature" (explicitly rejected — noise, not identity),
-"model detection" (it identifies the model *behind* a label, it does not name it).
+"model detection" (it identifies the model *behind* a label, it does not name it), calling the
+signature a fingerprint (the signature is the evidence; the fingerprint is the identity).
 
 **Capability tier**:
 The ordinal summary of a battery run — what the model can be **asked** to do (native tool calls,

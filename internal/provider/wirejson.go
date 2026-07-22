@@ -21,6 +21,12 @@ type chatRequest struct {
 	RepeatPenalty *float64       `json:"repeat_penalty,omitempty"`
 	MaxTokens     *int           `json:"max_tokens,omitempty"`
 	Tools         []chatTool     `json:"tools,omitempty"`
+	// LogProbs/TopLogProbs are pointers so they are OMITTED unless a caller asks for the
+	// candidate distribution: an unasked-for `logprobs: false` on every request would change
+	// the bytes every existing caller puts on the wire, and the byte-identical anchor holds
+	// here too.
+	LogProbs    *bool `json:"logprobs,omitempty"`
+	TopLogProbs *int  `json:"top_logprobs,omitempty"`
 }
 
 // chatMessage is one wire message. Content is a pointer so a tool-call-only assistant
@@ -50,7 +56,8 @@ type chatToolFunction struct {
 }
 
 // chatCompletionResponse is the whole (non-streamed) reply. reasoning_content is the
-// thinking channel some servers emit; usage is absent on servers that omit it.
+// thinking channel some servers emit; usage is absent on servers that omit it, and logprobs
+// is absent on every server that was not asked for it (or cannot supply it).
 type chatCompletionResponse struct {
 	Choices []struct {
 		Message struct {
@@ -58,9 +65,23 @@ type chatCompletionResponse struct {
 			ReasoningContent string     `json:"reasoning_content"`
 			ToolCalls        []ToolCall `json:"tool_calls"`
 		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
+		LogProbs     *logProbsJSON `json:"logprobs"`
+		FinishReason string        `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usageJSON `json:"usage"`
+}
+
+// logProbsJSON is the subset of OpenAI's per-choice logprobs payload the probe reads: for
+// each generated token position, the alternatives the model was choosing between. Only the
+// token strings are kept — the probabilities themselves drift with temperature and server
+// build, while the candidate SET is the stable shape of the distribution.
+type logProbsJSON struct {
+	Content []struct {
+		Token       string `json:"token"`
+		TopLogProbs []struct {
+			Token string `json:"token"`
+		} `json:"top_logprobs"`
+	} `json:"content"`
 }
 
 type usageJSON struct {
@@ -79,9 +100,33 @@ func (r chatCompletionResponse) toRawResponse() RawResponse {
 		out.Thinking = choice.Message.ReasoningContent
 		out.ToolCalls = choice.Message.ToolCalls
 		out.FinishReason = choice.FinishReason
+		out.TopCandidates = topCandidates(choice.LogProbs)
 	}
 	if r.Usage != nil {
 		out.Usage = Usage(*r.Usage)
+	}
+	return out
+}
+
+// topCandidates extracts the candidate tokens for the FIRST generated token position — the
+// one position every reply has, however short, and therefore the only one a probe can rely
+// on. A server that reported logprobs without alternatives still yields the chosen token, so
+// "the server exposes logprobs" and "the server exposes nothing" stay distinguishable. nil
+// (not an empty slice) means the server exposed no distribution at all.
+func topCandidates(lp *logProbsJSON) []string {
+	if lp == nil || len(lp.Content) == 0 {
+		return nil
+	}
+	first := lp.Content[0]
+	if len(first.TopLogProbs) == 0 {
+		if first.Token == "" {
+			return nil
+		}
+		return []string{first.Token}
+	}
+	out := make([]string, 0, len(first.TopLogProbs))
+	for _, c := range first.TopLogProbs {
+		out = append(out, c.Token)
 	}
 	return out
 }

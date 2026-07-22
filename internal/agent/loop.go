@@ -153,7 +153,16 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 			fmt.Fprintf(os.Stderr, "apogee: library store degraded to empty: %v\n", err)
 		}
 		deps.Library = store
-		deps.Fingerprint = library.ResolveFingerprint(cfg.Model)
+		// The full identity ladder (ADR 0021 §3), keyed IDENTICALLY to the Validated-set
+		// match at wire time so the Library's observations and an auto-applied set cannot end
+		// up filed under two different identities for one model. The probe records live under
+		// the injected ConfigDir — an empty one simply removes the behavioral rung rather
+		// than reaching for an ambient ~/.apogee (ADR 0001).
+		deps.Fingerprint = library.ResolveFingerprintFrom(library.Sources{
+			ModelID:  cfg.Model,
+			Endpoint: cfg.Endpoint,
+			ProbeDir: library.ProbeDir(cfg.ConfigDir),
+		})
 	}
 
 	for _, id := range ids {

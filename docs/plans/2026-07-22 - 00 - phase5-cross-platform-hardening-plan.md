@@ -184,7 +184,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   (a Commands section now appears — the permitted delta), the ADR-0010 grep, and gofmt over
   LF copies of the changed files.
 
-- [ ] **4. `apogee probe` — model battery + behavioral fingerprint.** (DEPENDS: 2, 3.) The
+- [x] **4. `apogee probe` — model battery + behavioral fingerprint. — ✅ DONE (2026-07-22)** (DEPENDS: 2, 3.) The
   capability battery per `mission.md` item 3 — native tool call, JSON/structured output,
   multi-step tool chain — produces (a) a capability report with suggested profile knobs
   (`tool-call-format`, `thinking.style`, …), and (b) a behavioral `domain.ModelFingerprint` at
@@ -195,6 +195,62 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   decision. Acceptance: `httptest` fake server scripted per battery outcome (all-pass,
   no-native-tools, JSON-fails) drives deterministic reports and fingerprints; a live smoke
   behind `APOGEE_LIVE_ENDPOINT` is added but skipped by default; `make check` green.
+  NOTES (2026-07-22): eight deviations from the item's literal text, each forced by a pinned
+  source. (a) **`internal/provider` gained a logprobs pair** — `Request.LogProbs` (opt-in,
+  emitted as OMITTED pointer fields so every existing caller's bytes are unchanged) and
+  `RawResponse.TopCandidates` (the candidate tokens for the first generated position). The
+  item requires "logprobs preferred when the server exposes them" and the client had no way
+  to ask; this is the same shape of extension item 3 made for `/props`. (b) **The persisted
+  record lives in `internal/library`, not `internal/probe`** (`proberecord.go`:
+  `ProbeRecord`, `ProbeDir`, `Save`/`LoadProbeRecord`, 0700/0600, soft-degrade). The resolver
+  is the record's real consumer and `library` must not import `probe` to read it — so the
+  record and its `ProbeBatteryVersion` are homed at the lower layer and `probe.BatteryVersion`
+  mirrors the constant; `probe` writes, `library` reads. (c) **`ResolveFingerprint(modelID)`
+  is kept** as the two-rung wrapper and the full ladder is the new
+  `ResolveFingerprintFrom(Sources{ModelID, Endpoint, ProbeDir})` — the middle rung needs the
+  endpoint and the home, which the old signature cannot carry, and keeping the old name
+  spared ~10 unrelated test call sites. (d) **`internal/agent/loop.go:156` adopts the new
+  ladder too** (one call site, outside `cmd/apogee`): ADR 0021's consequences require the
+  Library's keying and the Validated-set match to key IDENTICALLY, which is false if only the
+  wire-time call site can reach Medium. It derives the probe dir from the injected
+  `cfg.ConfigDir` — an empty one just removes the rung, never an ambient `~/.apogee`
+  (ADR 0001). (e) **The behavioral tier promotes the ADVERTISED LABEL rather than minting a new
+  one** — `Fingerprint` returns `{Label: <advertised label>, Confidence: Medium}`, and the
+  feature vector becomes a separate *behavioral signature*
+  (`probe:<battery>:<features>[:lp-<digest>]`) recorded beside the claim as EVIDENCE, never as
+  a match key. A synthesised label (the first attempt's `probe:1:<label>:<features>`) matches
+  no `validated.Entry.Key` and no user alias, so `apogee probe model` silently DEMOTED the
+  model it ran on and dropped an aliased user's applying set — the opposite of ADR 0021 §4 /
+  ADR 0016 §5. Chosen over "teach entries and aliases to match behavioral labels" on
+  stability (a key encoding battery version + feature set + logprob exposure moves under the
+  user's feet), maintainability (one key space across Low and Medium; nothing to dual-look-up
+  or re-paste) and modularity (the evidence stays inside `library.ProbeRecord`, whose only
+  consumer is the re-probe comparison). Consequences recorded in **ADR 0021's dated
+  `## Amendment (2026-07-22)`** (§6 also carries a pointer): `ProbeRecordVersion` 1 → 2 (the
+  record's `fingerprint` field is now `behavior`), pre-amendment records are unreadable and
+  unmatchable, skipped with a warning naming the one-command fix (**re-run `apogee probe
+  model`**), and NO migration tooling is built — the same note ships in `probe model --help`.
+  §3's drift detection now compares the SIGNATURE (the label cannot move, by design), and
+  `Model.effectLine` computes the counterfactual match at low confidence so it never claims a
+  promotion that did not happen (an alias already applying the set) nor an effect a
+  session-level off-switch will refuse (Bypass, `enable: false`, an explicit `mechanisms:`
+  block — `SaveOutcome` gained `Promoted`/`Suppressed` for exactly these two). (f) **Two now-false doc comments in
+  the pinned `internal/domain/fingerprint.go` were corrected** ("no resolver produces it yet"
+  on `ConfidenceMedium`, and the resolver seam's Phase-5 wording) — the slot this item fills.
+  (g) **CONTEXT.md's *Behavioral fingerprint* term was corrected in place** — one paragraph,
+  not a roll-up: item 2 wrote it to ADR 0021 §6's original wording ("the model identity … a
+  fuzzy feature match"), which deviation (e) makes false, and a pinned vocabulary entry that
+  contradicts the shipped design is the same defect class as a stale ADR. Item 10's
+  CHANGELOG/README/TODO.md roll-up is untouched. (h) **`probe model` refuses when neither
+  `--model` nor the server names a model** (`errProbeModelNeedsLabel`): under (e) the label IS
+  the identity, so with none there is nothing to key a claim on and the battery would spend
+  tokens for a report that could record nothing.
+  Also: `stateRoots` gained `probe`, `resolveValidatedSet` gained a `probeDir` parameter, and
+  an incomplete battery mints NO fingerprint (a hole in the evidence must not become an
+  identity). No CHANGELOG/README/TODO.md edits — the Phase-5 roll-up is item 10's. Sanity
+  check on this host (`make` absent): `go build ./...`, `go vet ./...`, `go test -count=1
+  ./...` (only the 5 known pre-existing failures), all six cross targets, `--help` exit 0,
+  the ADR-0010 grep, and gofmt over LF copies of the changed files.
 
 - [ ] **5. DESIGN-CALL — Windows Confiner design → ADR 0020 + contract §Windows.** The merge
   plan's risk table calls this "own design session" — treat it as one. Decide the facility

@@ -17,9 +17,15 @@ const (
 	// one label (CONTEXT: "keyed on the model name" was the predecessor's gap).
 	ConfidenceLow FingerprintConfidence = iota
 
-	// ConfidenceMedium is a behavioral-probe identity (`apogee probe`, Phase 5). The slot
-	// exists so the store format and the FingerprintResolver seam are forward-compatible;
-	// no resolver produces it yet — the probe is explicitly out of scope for Phase 4 (D8).
+	// ConfidenceMedium is a behavioral-probe identity: the same metadata Label as Low, promoted
+	// because a live capability battery OBSERVED this model (native tool calls, structured
+	// output, a multi-step chain, the candidate-token distribution where the server exposes it)
+	// — a fuzzy feature match, never a hash of a response, which sampling alone would move. The
+	// tier moves and the Label does not, deliberately: the Label is the key the Library and the
+	// Validated-set match are filed under (ADR 0021, Amendment 2026-07-22). It is produced only
+	// by a human running `apogee probe model`, which records a dated claim the resolver then
+	// reads back (ADR 0021 §3); nothing auto-probes, so no startup path can manufacture this
+	// tier as a side effect.
 	ConfidenceMedium
 
 	// ConfidenceHigh is a weights-hash: a digest derived from the reachable model file, so
@@ -57,10 +63,10 @@ func (f ModelFingerprint) IsZero() bool { return f.Label == "" }
 
 // FingerprintResolver resolves the model behind the Upstream to a confidence-tagged
 // ModelFingerprint. It is the seam for the three identity tiers: a production resolver
-// returns the best available (a weights-hash when the model file is reachable, else the
-// metadata label), and the Phase-5 behavioral probe (ConfidenceMedium) slots in behind this
-// same interface without the loop changing (D8). Domain declares the seam; internal/library
-// implements it (ADR 0010 — the dependency points at domain).
+// returns the best available — a weights-hash when the model file is reachable, else a stored
+// behavioral-probe record for this endpoint and label, else the metadata label — and the loop
+// never changes shape as rungs are added behind it (D8). Domain declares the seam;
+// internal/library implements it (ADR 0010 — the dependency points at domain).
 type FingerprintResolver interface {
 	// Resolve returns the best-available fingerprint for modelID. A resolver that cannot
 	// identify the model returns the zero ModelFingerprint rather than an error — an
