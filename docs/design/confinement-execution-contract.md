@@ -100,6 +100,11 @@ The semantics flip from **run-fn** to **prepare-cmd**:
   the tool, where it belongs — the backend owns *only* the wrapping.
 - `Confine` mutates `cmd` in place: it rewrites `cmd.Path` + `cmd.Args` to launch under the OS facility
   and sets `cmd.SysProcAttr`. It performs no I/O and blocks on nothing.
+  > **Amended 2026-07-22 (§9, ADR 0020).** The Windows backend rewrites neither `cmd.Path` nor
+  > `cmd.Args` — it sets `cmd.SysProcAttr.Token` and nothing else — and it *does* perform bounded,
+  > idempotent, once-per-box filesystem I/O (the mandatory-label pass), because on Windows the box's
+  > writable half can only be expressed on the objects themselves. It still never runs the command
+  > and never blocks on it. See §9.
 - The tool then runs `cmd`. A confined child that writes outside the box gets an OS error (EPERM); the
   command simply fails and the model routes around it — there is no Approval prompt for a *subprocess*
   escape (ADR 0012: the subprocess surface is OS-fenced, not gated).
@@ -118,6 +123,11 @@ and runs the cmd; the **backend** wraps it.
 Both backends implement the same `Confine`, build-tagged per OS; every other OS keeps `denyConfiner`
 (which now reports `AutoEligible()==false` and is never handed a cmd to confine, because the disposition
 gates the subprocess surface when caps are insufficient).
+
+> **Amended 2026-07-22 (§9, ADR 0020).** Windows gains a **third** backend — a restricted,
+> Low-integrity token handed to `SysProcAttr.Token`. It is neither an argv rewrite nor a re-exec
+> wrapper: there is **no Windows helper mode and no `__confined-exec` sentinel arm**, because Windows
+> has no "restrict myself, then exec in place" API for a helper to call. Its obligations are in §9.
 
 **macOS (P3.3, `//go:build darwin`).** `Confine` generates a `sandbox-exec` profile string from `box`
 (deny default; `allow file-write*` under `WorkspaceRoot` + each `WritablePaths` entry; network
@@ -409,6 +419,13 @@ never optimistic:
   true`. A kernel without landlock ⇒ `{false, false}`.
 - **macOS:** probe for `/usr/bin/sandbox-exec` (present on stock macOS). Present ⇒ `{true, true}` (one
   profile enforces both). Absent ⇒ `{false, false}`.
+- **Windows** *(added 2026-07-22, §9 / ADR 0020)*: read the un-shimmed build number
+  (`RtlGetNtVersionNumbers`) and mint the restricted Low-integrity token. At/above build **17763**
+  with the token minted ⇒ `{FSWrite: true, NetworkEgress: false}` — **Auto-eligible**, since
+  `AutoEligible()` is `FSWrite`-only. A mint failure ⇒ `{false, false}`; **below the floor
+  `NewConfiner()` returns `denyConfiner`** outright. The probe covers the **facility** only; a
+  per-run *path-labelling* failure is a `Confine`-time `ErrConfinementUnavailable` (§9) — the one
+  place capability honesty splits in two.
 - **Other OSes:** `denyConfiner` ⇒ `{false, false}`.
 
 P3.4 changes `AutoEligible()` from `FSWrite && NetworkEgress` to **`FSWrite` only** (ADR 0012: the
@@ -463,13 +480,24 @@ helper (the standard `TestHelperProcess` idiom) that `net.Dial`s a target. Each 
 | 3 | write `<sibling-temp>/escape.txt` (outside box) | **denied** — non-zero exit / EPERM; file absent | both |
 | 4 | write `$HOME/.ssh/escape` (outside box) | **denied** | both |
 | 5 | after #1–#4, the **parent** writes `<sibling-temp>/parent.txt` | **succeeds** — parent unrestricted | both |
-| 6 | the confined child `exec`s a second program that writes outside | **denied** — domain inherits across `execve` | Linux |
+| 6 | the confined child `exec`s a second program that writes outside | **denied** — domain inherits across `execve` | Linux, **Windows** |
 | 7 | (net) connect a non-allowlisted host, box network-**deny** | **denied** | net-capable |
 | 8 | (net) connect a host, box network-**open** (default) | **allowed** — network is open by default | net-capable |
+| 9 | after teardown, the box roots' mandatory labels | **back to their prior state** — the disk mutation is reverted | **Windows** |
+| 10 | `Confine` a box with a non-empty `NetworkAllow` | **`ErrConfinementUnavailable`** — a requested tightening is never a silent no-op | **Windows** |
 
 #3/#4 are the core "escape is OS-blocked" proof; #5 is the "no per-thread landlock, parent untouched"
 proof; #6 is the "after fork, before execve, inherited across exec" proof specific to the re-exec
 wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
+
+> **Amended 2026-07-22 (§9, ADR 0020).** Rows **#9/#10 are Windows-only** and cover what the token
+> backend adds to the model: a disk mutation that must be undone, and a capability it must refuse to
+> fake. Row **#6 gains a Windows arm** — under a token backend "the restriction is inherited by
+> descendants" is exactly as load-bearing as landlock's `execve` claim, and exactly as unproven until
+> asserted, so it is **asserted, not assumed**. Rows #7/#8 **skip** on Windows (`ProbeNetwork` guards
+> on `NetworkEgress`, which is false there by §9); #5 is free (the restricted token is a copy, so the
+> parent's own token is never touched). The harness itself is POSIX-shaped — `sh -c` at
+> `confinetest.go:130/:143/:160/:170` — and item 8 widens it; see §9's probe-expectations list.
 
 ### 6.3 Per-backend acceptance checklists (now mechanical)
 
@@ -478,6 +506,9 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 `confinetest.ProbeNetwork` passes #7 on ≥6.7 (skipped below); the parent stays unrestricted after a
 confined child (#5); cross-build green (file `linux`-tagged; other OSes keep `denyConfiner`); x/sys
 promoted to a direct dep with `go mod tidy` clean.
+
+*(Added 2026-07-22: the Windows token backend's checklist is **§9.4**, kept there with the rest of its
+obligations rather than tacked on here.)*
 
 **P3.3 (macOS seatbelt)** is done when: the generated profile is unit-tested as a pure string from a box
 (hermetic, runs in the dev env — no macOS needed for that test); on a macOS runner `confinetest.Probe`
@@ -520,3 +551,87 @@ handed.
 **Successor tasks build to this contract mechanically:** P3.2 (§2.3 Linux + §6.3), P3.3 (§2.3 macOS +
 §6.3), P3.4 (§2.2 signature change, §4 table, §5 `AutoEligible`, §2.6 wiring, §7 box), P3.7 (§3 marker on
 the write family + the §4 out-of-workspace realisation), P3.8 (§2.4 teardown, §7 caches).
+
+---
+
+## 9. Windows — the token backend (amendment, 2026-07-22)
+
+**Owner ADR:** [ADR 0020](../adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md).
+This section is the Windows half of §2.3's backend obligations, §5's capability table and §6's probe
+harness. It is an **amendment**, not a renegotiation: §2.2's prepare-in-place shape, §4's Resolution
+and §5's `FSWrite`-only `AutoEligible()` are unchanged. ADR 0020 carries the reasoning and the
+rejected alternatives; what follows is only what an implementer must build to.
+
+### 9.1 Disposition row
+
+Windows is not a new column in §4's table — it is a **host that fills in the existing
+`subproc (caps sufficient) → confine` cell** for the first time. Before this section a Windows host
+always took the `caps insufficient → gate` row; at or above the version floor it now takes the
+`confine` row, with §4's precomputed `ErrConfinementUnavailable` fallback carrying the remainder.
+
+| host | `Capabilities()` | Auto · `confine=true`, subproc | `Confine` failure mode |
+|---|---|---|---|
+| Windows ≥ build 17763, token minted | `{FSWrite: true, NetworkEgress: false}` | **confine** (§4 row 4) | per-run labelling failure ⇒ `ErrConfinementUnavailable` ⇒ forced `Gate` |
+| Windows ≥ 17763, token mint failed | `{false, false}` | **gate** (§4 row 5) | never invoked |
+| Windows < build 17763 | `denyConfiner` ⇒ `{false, false}` | **gate** (§4 row 5) | never invoked |
+
+The degradation notice (`probe.DegradedNotice`) therefore vanishes on a capable host and persists
+verbatim below the floor — no new wording, no new surface.
+
+### 9.2 Backend obligations
+
+- **`Confine` sets `cmd.SysProcAttr.Token` and nothing else on the cmd.** `cmd.Path` and `cmd.Args`
+  are untouched; there is no argv sentinel, no helper mode, and no `confined_exec_windows.go`.
+  `maybeDispatchConfinedExec` gains no Windows arm.
+- **The token** is a `CreateRestrictedToken(…, DISABLE_MAX_PRIVILEGE, …)` copy of the process token,
+  relabelled to **Low** integrity (`SetTokenInformation` / `TokenIntegrityLevel` /
+  `CreateWellKnownSid(WinLowLabelSid)`). The **fence is the mandatory integrity check**; the
+  privilege strip is defence in depth. It is minted **once at construction** and reused — it carries
+  no path policy, so it is box-independent, which also settles handle ownership under
+  prepare-in-place.
+- **The box is a label on the disk.** `WorkspaceRoot ∪ WritablePaths`, collapsed to a minimal set of
+  non-overlapping roots, are labelled `S:(ML;OICI;NW;;;LW)` **recursively over existing contents**
+  (inheritance covers new objects only). The pass is **memoised per box** — once per session, not
+  per command — and is the one piece of I/O §2.2 now permits.
+- **Guardrails:** a volume root, `%SystemRoot%`, `%ProgramFiles%`/`%ProgramFiles(x86)%` or the
+  user-profile root is **refused** with `ErrConfinementUnavailable`, never labelled.
+- **Teardown reverts the labels.** The backend implements `io.Closer`; the composition root defers it
+  beside its existing `Close()` calls. **`domain.Confiner` does not change** — the hook is an
+  optional-interface assertion. A **journal** written under the apogee home *before* the first label
+  makes an interrupted cleanup recoverable by the next `NewConfiner()` and visible to
+  `apogee probe host`.
+- **Construction performs no disk I/O.** `apogee probe host` constructs a real backend
+  (`cmd/apogee/probe.go:79`) and is pinned free/offline/read-only by ADR 0021 §1.
+- **`NetworkEgress` is false and a network-deny box fails closed** — a non-empty `NetworkAllow`
+  yields `ErrConfinementUnavailable`, mirroring `landlock_linux.go`'s `networkDenyDecision`.
+- **Teardown of the process tree is §2.4's Windows half** (job objects) and is owned separately; the
+  backend sets no `SysProcAttr` field other than `Token`.
+- **Known gap, fail-closed:** a `CreateProcessAsUser` refusal (`ERROR_PRIVILEGE_NOT_HELD`) happens at
+  `cmd.Start()`, after `Confine` has returned, so it surfaces as the tool's run error. The command
+  **fails**; it does not run unconfined.
+
+### 9.3 Probe expectations
+
+`internal/platform/confinetest` is POSIX-shaped and must be widened, not assumed:
+
+1. **`sh -c` (`:130`, `:143`, `:160`, `:170`) does not exist on stock Windows** — add a `cmd /c` arm,
+   preferably by asking `platform.Current().Command(line)` for the argv rather than hard-coding a
+   shell, with a per-OS write line (`printf x > <p>` vs `echo x> <p>`) and platform quoting.
+   `assertDenied`'s "non-zero exit **and** no file" holds unchanged: MIC denies the redirect's
+   `CreateFile`, `cmd` prints "Access is denied." and exits non-zero.
+2. **Row #4's target (`:60`) ports as code but not as intent.** `os.UserHomeDir()` already resolves
+   `%USERPROFILE%`; `.ssh` is simply not a meaningful Windows credential path, so the row should be
+   worded as what it actually claims — *a path under the user profile, outside the box*.
+3. **Row #6 is asserted on Windows**, per §6.2's amendment.
+4. **Rows #9/#10** are the Windows-only additions: labels restored after teardown, and a network-deny
+   box refused.
+5. `t.TempDir()` cleanup survives the labelling — the test process is Medium and writing *down* is
+   permitted.
+
+### 9.4 Acceptance checklist (the Windows counterpart of §6.3)
+
+Done when: `Capabilities()` is honest at/above and below the floor (below ⇒ `denyConfiner` and the
+unchanged degradation notice); `confinetest.Probe` passes #1–#6 **natively**; #9/#10 pass; a box on a
+SACL-less filesystem yields `ErrConfinementUnavailable` and §4's forced `Gate`; `ProbeNetwork` skips;
+the labels are provably reverted after teardown and an interrupted run is recoverable from the
+journal; `make cross` + `GOOS=windows go vet ./...` green; the other OSes' backends untouched.

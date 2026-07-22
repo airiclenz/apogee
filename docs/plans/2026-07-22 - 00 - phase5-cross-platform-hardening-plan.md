@@ -252,7 +252,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   ./...` (only the 5 known pre-existing failures), all six cross targets, `--help` exit 0,
   the ADR-0010 grep, and gofmt over LF copies of the changed files.
 
-- [ ] **5. DESIGN-CALL — Windows Confiner design → ADR 0020 + contract §Windows.** The merge
+- [x] **5. DESIGN-CALL — Windows Confiner design → ADR 0020 + contract §Windows. — ✅ DONE (2026-07-22)** The merge
   plan's risk table calls this "own design session" — treat it as one. Decide the facility
   (AppContainer vs. restricted token vs. Job-Object-only) and what `ConfinementCaps` it can
   HONESTLY report (per Settled design, FSWrite is the Auto gate; claim NetworkEgress only if
@@ -263,6 +263,51 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   Windows section in `docs/design/confinement-execution-contract.md` (disposition table row,
   probe expectations). **Q:** facility choice + minimum Windows version — recommend one with
   rationale, owner decides.
+  NOTES (2026-07-22): the owner ratified the **Q** answers before this item ran — facility: a
+  **restricted / Low-integrity token** (`CreateRestrictedToken` + Low integrity handed straight to
+  `SysProcAttr.Token`) over AppContainer; floor: **Windows 10 1809 / build 17763 / Server 2019**.
+  Both are recorded with reasoning in the new
+  `docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md`,
+  together with the accepted **disk mutation** (the box's writable half can only be expressed as a
+  mandatory label on `WorkspaceRoot ∪ WritablePaths`, reverted on teardown) — the side effect
+  landlock and seatbelt never have. Five deviations from this item's literal text, each authorized:
+  (a) **there is NO re-exec helper.** This item's text (`:259`) and item 8's (`:291`) both assume a
+  `confined_exec_windows.go` "mirroring the Linux 42-liner + the main.go sentinel path"; under the
+  token design `Confine` sets `cmd.SysProcAttr.Token` and returns, `cmd.Path`/`cmd.Args` are
+  untouched, and `maybeDispatchConfinedExec` gains **no** Windows arm (Linux needs its helper only
+  because it must restrict *itself* then `syscall.Exec` in place — `confined_exec_linux.go:37` —
+  and Windows has no such API; the restriction is handed to the process-creation call instead).
+  ADR 0020 §1 and contract §9.2 state this plainly so item 8 is not written against the wrong shape.
+  (b) **`internal/platform/confinetest` is POSIX-shaped and item 8 must widen it**: `sh -c` at
+  `:130/:143/:160/:170` needs a `cmd /c` arm; row #4's `$HOME/.ssh` (`:60`) ports as *code*
+  (`os.UserHomeDir()` already resolves `%USERPROFILE%`) but not as *intent*; and battery row #6
+  (exec inheritance) is Linux-tagged today and must be **ASSERTED** under a token backend. All named
+  in ADR 0020 §7 and contract §9.3 so item 8 does not discover it late. (c) the item asks for a
+  "disposition table row", but §4's table is keyed on tool-class × mode, not on OS — so the row
+  landed as **§9.1's host table** (which §4 cell a Windows host takes), plus a Windows bullet in
+  §5's capability list and **two new Windows-only battery rows (#9/#10)** in §6.2. (d) the ratified
+  floor's rationale is stated precisely rather than as "matching Go's own minimum": Go's
+  supported-Windows floor is lower (Windows 10 / Server 2016), so ADR 0020 records 17763 as the
+  oldest branch under any servicing (LTSC 2019), sitting *at or above* Go's floor — the number is
+  the owner's, unchanged. (e) decision (b) forced two design outputs the item's list does not name
+  but cannot do without: the **restore path** (an optional `io.Closer` on the backend deferred at
+  the composition root — `domain.Confiner` does NOT change — plus a pre-labelling **journal** so an
+  interrupted cleanup is recoverable and visible to `apogee probe host`), and an **amendment to
+  contract §2.2's "performs no I/O"** clause, since the label pass is bounded, idempotent,
+  once-per-box I/O inside `Confine`. Recorded from the pinned sources rather than re-decided:
+  `NetworkEgress` is **false** on Windows and a non-empty `NetworkAllow` **fails closed** (mirroring
+  `landlock_linux.go`'s `networkDenyDecision`); `AutoEligible()` stays FSWrite-only, so Windows is
+  Auto-eligible anyway; the honest-capability **split** (`Capabilities()` probes the facility once
+  at construction; a per-run labelling failure is a `Confine`-time `ErrConfinementUnavailable`
+  feeding §4's precomputed fallback) is called out as the one structural difference from
+  Linux/macOS; and the **below-floor path is recorded UNTESTED** (the execution box is build 26200).
+  Two facts verified against the pinned deps while writing: `x/sys/windows` v0.45.0 carries the
+  whole identity half (`SetTokenInformation`/`TokenIntegrityLevel`/`Tokenmandatorylabel`,
+  `CreateWellKnownSid(WinLowLabelSid)`, `Set/GetNamedSecurityInfo`, `SecurityDescriptorFromString`,
+  `RtlGetNtVersionNumbers`) but has **no** `CreateRestrictedToken` binding (one `advapi32` LazyProc
+  for item 8) and **no** AppContainer surface at all; and `syscall.SysProcAttr` on windows does have
+  the `Token` field the design rests on. Docs-only item: no code, and no CHANGELOG/README/CONTEXT.md
+  (item 10's roll-up). Sanity check on this host (`make` absent): `go build ./...`, `go vet ./...`.
 
 - [ ] **6. Platform `Shell`/`Path` widening.** (DEPENDS: 5.) Retire the two `TODO(phase-5)`
   markers at `internal/platform/platform.go:16` and `:32` by widening exactly to the surface
