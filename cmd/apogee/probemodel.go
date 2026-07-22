@@ -11,10 +11,8 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
-	"github.com/airiclenz/apogee/internal/validated"
 )
 
 // batteryRequestTimeout bounds ONE battery call. The battery is four short exchanges against a
@@ -149,14 +147,17 @@ func probeModelCommand() *cobra.Command {
 // because keeping the write at wire time is the same placement discipline ADR 0016's
 // realisation set for the Validated-set decision. A zero fingerprint (an incomplete battery)
 // writes nothing at all: an identity may not be minted from evidence with a hole in it.
+//
+// The order matters twice: the previous-record comparison must read the disk BEFORE the write
+// replaces it, and the effect claim is computed only AFTER a successful write — against the
+// home as the next session start will actually find it. A record that was not written (--no-save,
+// a failed write) has no effect to claim, and the report's effect line already says so.
 func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save bool) probe.SaveOutcome {
 	out := probe.SaveOutcome{Requested: save}
 	if m.Fingerprint.IsZero() {
 		return out
 	}
-
 	out.Path = library.ProbeRecordPath(roots.probe, m.Endpoint, m.Model)
-	out.AutoApply, out.Promoted, out.Suppressed = autoApplyKeys(m, opts, roots.validated)
 
 	// A previous record for the same key whose behavioral SIGNATURE differs is the ADR 0021 §3
 	// signal: the label did not change, the model behind it did. The identity cannot carry that
@@ -184,6 +185,7 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 	}
 	out.Path = path
 	out.Written = true
+	out.AutoApply, out.Promoted, out.Suppressed = autoApplyKeys(m, opts, roots.validated, roots.probe)
 	return out
 }
 
@@ -192,53 +194,64 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 // `probe model` to state at the moment it happens, rather than leaving the user to notice a
 // changed session next time.
 //
-// It asks the same question resolveValidatedSet asks at startup, twice: once at the confidence
-// the record will carry and once at the confidence this model resolves to WITHOUT it. The
-// difference between the two answers is the promotion, and computing it rather than assuming it
-// is what keeps the report's effect line true on a machine where an alias was already applying
-// the set. A LOADING defect stays silent here: this is a courtesy line in a report, and a broken
-// user file is already loud at the startup path that owns it. A catalogue defect in the entry
-// that would otherwise apply is named instead of dropped, because that one changes the answer.
-func autoApplyKeys(m probe.Model, opts options, validatedDir string) (keys []string, promoted bool, suppressed string) {
-	// The session-level off-switches resolveValidatedSet checks first. They hold whatever the
-	// record says, so the report must name them rather than promising an effect startup will
-	// not deliver.
+// It does not re-derive startup's answer; it RUNS it. startupSetDecision — the one ladder
+// resolveValidatedSet enacts — is asked twice: once against the home as this run just left it
+// (the record is on disk before this is called, so the with-record answer is startup's own,
+// not a prediction), and once with the record rung removed (an empty probe dir), which is the
+// tier this model resolves to WITHOUT what this run recorded. The difference between the two
+// answers is the promotion, and computing it rather than assuming it is what keeps the effect
+// line true on a machine where an alias was already applying the set — or where startup's
+// identity ladder never reaches the record at all: an unpinned `model:` resolves nothing, and
+// a model id naming a reachable weight file resolves at the weights tier above it. A LOADING
+// defect stays silent here: this is a courtesy line in a report, and a broken user file is
+// already loud at the startup path that owns it. A catalogue defect in the entry that would
+// otherwise apply is named instead of dropped, because that one changes the answer.
+func autoApplyKeys(m probe.Model, opts options, validatedDir, probeDir string) (keys []string, promoted bool, suppressed string) {
+	with := startupSetDecision(opts, validatedDir, probeDir)
 	switch {
-	case opts.bypass:
+	// The session-level off-switches startup checks first. They hold whatever the record
+	// says, so the report must name them rather than promising an effect startup will not
+	// deliver.
+	case with.kind == setSurfaceOff && with.bypass:
 		return nil, false, "Bypass suppresses the Validated-set surface entirely, so no set applies as this session is configured"
-	case !opts.validatedSetsEnable:
+	case with.kind == setSurfaceOff:
 		return nil, false, "`validated-sets: enable: false` turns the surface off, so no set applies as this session is configured"
+	// The probe discovered the label from the server, but startup resolves identity from the
+	// pinned `model:` — empty here, so the next session start resolves nothing and the record,
+	// though written, is never reached.
+	case with.kind == setNoIdentity:
+		return nil, false, "no `model:` is pinned in your config, so the next session start cannot resolve this identity — " +
+			"pin `model: " + m.Model + "` for the record to take effect"
+	// The model id names a reachable weight file, so startup's ladder resolves at the weights
+	// tier (high) and never reads the behavioral record below it.
+	case with.fp.Confidence == domain.ConfidenceHigh:
+		return nil, false, "identity resolves at the weights tier on this machine, so the behavioral record is inert here"
 	}
-
-	shipped, _ := validated.Shipped()
-	user, _ := validated.LoadUserDir(validatedDir)
-	entries, _ := validated.Merge(shipped, user)
-
-	withRecord, err := validated.Match(m.Fingerprint.Label, m.Fingerprint.Confidence, opts.validatedSetsAlias, entries)
-	if err != nil || withRecord.Kind != validated.KindApplied {
+	if with.aliasErr != nil {
+		// The dangling alias is the user's own config referencing nothing — loud at the
+		// startup path that owns it (resolveValidatedSet's one error); a courtesy line in a
+		// report stays silent about it.
 		return nil, false, ""
 	}
-	if len(opts.mechanisms) > 0 {
+
+	switch with.kind {
+	case setSuppressed:
 		return nil, false, fmt.Sprintf("Validated set %s matches, but your explicit mechanisms: config takes "+
-			"precedence (whole-set-or-nothing), so it is not applied", withRecord.Entry.Key)
-	}
-
-	// The catalogue check startup runs as its last rung (resolveValidatedSet's Validate call).
-	// Asking it HERE too is what keeps this report and the next session start from disagreeing
-	// about the same entry: a set this build cannot assemble — an unknown ID after the catalogue
-	// evolved, a now-invalid stacking — is skipped whole at startup, so claiming it auto-applies
-	// would promise an effect that never arrives. Named rather than silent, and carrying the
-	// catalogue's own reason — the text startup's skip notice prints — so the two surfaces read
-	// as one answer about one entry.
-	if verr := validated.Validate(withRecord.Entry, mechanisms.Descriptors()); verr != nil {
+			"precedence (whole-set-or-nothing), so it is not applied", with.match.Entry.Key)
+	case setSkipped:
+		// Carrying the catalogue's own reason — the text startup's skip notice prints — so the
+		// two surfaces read as one answer about one entry.
 		return nil, false, fmt.Sprintf("the next session start skips validated-set entry %q: %v; it is not applied",
-			withRecord.Entry.Key, verr)
+			with.match.Entry.Key, with.skipErr)
+	case setApplied:
+		// The one claimable outcome — fall through to the counterfactual below.
+	default:
+		return nil, false, "" // no entry carries the resolved label: nothing to claim
 	}
 
-	// The counterfactual: the same label at the tier it would resolve to with no record stored.
-	// An alias applies at ANY confidence (the human decision replaced the gate), so a set matched
-	// that way was already applying and this probe promoted nothing. Match's only error is the
-	// dangling alias, which is confidence-independent and already returned above.
-	without, _ := validated.Match(m.Fingerprint.Label, domain.ConfidenceLow, opts.validatedSetsAlias, entries)
-	return []string{withRecord.Entry.Key}, without.Kind != validated.KindApplied, ""
+	// The counterfactual: the same ladder with the record rung removed. An alias applies at
+	// ANY confidence (the human decision replaced the gate), so a set matched that way was
+	// already applying and this probe promoted nothing.
+	without := startupSetDecision(opts, validatedDir, "")
+	return []string{with.match.Entry.Key}, without.kind != setApplied, ""
 }

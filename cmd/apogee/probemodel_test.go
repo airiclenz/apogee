@@ -23,9 +23,17 @@ import (
 // logprobs were asked for — so the command under test drives the real provider client.
 func modelUpstream(t *testing.T) *httptest.Server {
 	t.Helper()
+	return modelUpstreamAdvertising(t, "battery-model")
+}
+
+// modelUpstreamAdvertising is modelUpstream with the advertised active model under the caller's
+// control — the fixture for the unpinned-model flow, where the label the probe keys its record
+// on is whatever /v1/models names.
+func modelUpstreamAdvertising(t *testing.T, active string) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
-			_, _ = w.Write([]byte(`{"data":[{"id":"battery-model","context_length":4096}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":"` + active + `","context_length":4096}]}`))
 			return
 		}
 		if r.URL.Path == "/props" {
@@ -310,14 +318,16 @@ func TestProbeModelDoesNotClaimAnEntryStartupWillSkip(t *testing.T) {
 		}
 	}
 
-	// The claim itself, at the seam that makes it: nothing applied, nothing promoted, the skip named.
+	// The claim itself, at the seam that makes it: nothing applied, nothing promoted, the skip
+	// named. The probe run above left its record in roots.probe, so the seam resolves the same
+	// medium-confidence identity the next session start will.
 	opts := baseOpts(key)
 	opts.endpoint = srv.URL
 	keys, promoted, suppressed := autoApplyKeys(probe.Model{
 		Endpoint:    srv.URL,
 		Model:       key,
 		Fingerprint: domain.ModelFingerprint{Label: key, Confidence: domain.ConfidenceMedium},
-	}, opts, roots.validated)
+	}, opts, roots.validated, roots.probe)
 	if len(keys) != 0 || promoted {
 		t.Errorf("autoApplyKeys claimed keys=%v promoted=%v for an entry startup skips", keys, promoted)
 	}
@@ -361,6 +371,114 @@ func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
 	}
 	if noticeContains(notices, "To apply it") {
 		t.Errorf("the offer notice must be gone once a record exists: %v", notices)
+	}
+}
+
+// With no `model:` pinned anywhere, the probe discovers the active model and records a
+// fingerprint for it — but the next session start resolves identity from the pinned `model:`,
+// which is empty, so startup's ladder reaches nothing and NO set applies. The report must say
+// that (and name the pin that would change it) instead of promising an auto-apply the reader's
+// machine never delivers (ADR 0021 §4 — the same defect class as the catalogue-skip parity).
+func TestProbeModelSuppressesTheClaimWhenNoModelIsPinned(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstreamAdvertising(t, gemmaKey)
+	configHome := t.TempDir()
+
+	report := runProbeModel(t, configHome, "--endpoint", srv.URL)
+
+	if strings.Contains(report, "AUTO-APPLIES") {
+		t.Errorf("the report claims a promotion an unpinned startup cannot resolve:\n%s", report)
+	}
+	for _, want := range []string{
+		"no `model:` is pinned in your config",
+		"pin `model: " + gemmaKey + "`",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the suppressed line must name the missing pin (%q missing):\n%s", want, report)
+		}
+	}
+	// The record itself IS written — the suppression is about startup's identity resolution,
+	// not about the save, and pinning `model:` later makes the record take effect as stored.
+	if _, _, ok := library.LoadProbeRecord(library.ProbeDir(configHome), srv.URL, gemmaKey); !ok {
+		t.Errorf("the record must still be written; only the effect claim is suppressed")
+	}
+}
+
+// A --model naming a reachable weight file resolves at the weights tier (high) on this machine:
+// startup hashes the file and never reads the behavioral record below that rung, so the report
+// must call the record inert here rather than claim a Medium promotion the ladder out-ranks.
+func TestProbeModelSuppressesTheClaimForAWeightsFileModel(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstream(t)
+	configHome := t.TempDir()
+	weights := filepath.Join(t.TempDir(), "local-model.gguf")
+	if err := os.WriteFile(weights, []byte("fake weight bytes"), 0o600); err != nil {
+		t.Fatalf("write weight file: %v", err)
+	}
+
+	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--model", weights)
+
+	if strings.Contains(report, "AUTO-APPL") {
+		t.Errorf("the report claims an effect the weights tier out-ranks:\n%s", report)
+	}
+	if !strings.Contains(report, "identity resolves at the weights tier on this machine") {
+		t.Errorf("the suppressed line must name the weights tier:\n%s", report)
+	}
+}
+
+// Every session-level off-switch startup honours must be named by the probe's claim rather than
+// silently ignored. Each row seeds a record that would otherwise auto-apply the shipped gemma
+// set, so deleting the branch under test makes the row see a claimed apply and fail.
+func TestAutoApplyKeysNamesEverySessionOffSwitch(t *testing.T) {
+	t.Parallel()
+	const endpoint = "http://127.0.0.1:65535"
+
+	cases := []struct {
+		name   string
+		mutate func(*options)
+		want   string
+	}{
+		{
+			name:   "bypass",
+			mutate: func(o *options) { o.bypass = true },
+			want:   "Bypass suppresses the Validated-set surface",
+		},
+		{
+			name:   "validated-sets disabled",
+			mutate: func(o *options) { o.validatedSetsEnable = false },
+			want:   "`validated-sets: enable: false` turns the surface off",
+		},
+		{
+			name:   "explicit mechanisms block",
+			mutate: func(o *options) { o.mechanisms = map[string]bool{"validate": true} },
+			want:   "explicit mechanisms: config takes precedence",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			probeDir := t.TempDir()
+			if _, err := library.SaveProbeRecord(probeDir, library.ProbeRecord{
+				Endpoint:   endpoint,
+				ModelLabel: gemmaKey,
+				ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
+				Behavior:   "probe:1:tools+json+chain",
+			}); err != nil {
+				t.Fatalf("save probe record: %v", err)
+			}
+			opts := baseOpts(gemmaKey)
+			opts.endpoint = endpoint
+			tc.mutate(&opts)
+
+			keys, promoted, suppressed := autoApplyKeys(probe.Model{Endpoint: endpoint, Model: gemmaKey},
+				opts, t.TempDir(), probeDir)
+			if keys != nil || promoted {
+				t.Errorf("keys=%v promoted=%v; an off-switch must claim nothing", keys, promoted)
+			}
+			if !strings.Contains(suppressed, tc.want) {
+				t.Errorf("suppressed = %q; want it to name %q", suppressed, tc.want)
+			}
+		})
 	}
 }
 

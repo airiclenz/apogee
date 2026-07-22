@@ -303,7 +303,21 @@ journal is retired; kill the child, run recovery ⇒ the root is cleared.
 writable; nothing is stranded once both sessions end.
 **Commit:** `fix(confine): leave a live sibling session's box labels in place`
 
-## 6. DESIGN-CALL — `probe model`'s claim runs startup's own ladder
+## 6. DESIGN-CALL — `probe model`'s claim runs startup's own ladder — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): Owner picked the consolidation. The shared function is `startupSetDecision`
+(`cmd/apogee/validatedsets.go`) — the whole ladder including `library.ResolveFingerprintFrom`;
+`resolveValidatedSet` renders/enacts it, `autoApplyKeys` reports it. Two consequences beyond the
+item's literal text: (1) `autoApplyKeys` gained a `probeDir` parameter and the claim is now
+computed AFTER a successful `SaveProbeRecord` — the with-record answer is startup's ladder run
+against the disk as the next session will find it, and the counterfactual is the same call with
+the record rung removed (empty probe dir); under `--no-save` or a failed write the
+`AutoApply`/`Promoted`/`Suppressed` fields stay empty (previously computed but never rendered —
+`effectLine` gates on `Requested && Written`). (2) `TestProbeModelDoesNotClaimAnEntryStartupWillSkip`
+is green with assertions unchanged, but its direct `autoApplyKeys` call carries the new
+`roots.probe` argument (the record the probe run itself stored supplies the Medium rung).
+Mutation checks (a) and (b) demonstrated: keying the claim on the probed label and dropping the
+weights rung fails both new tests. `TODO.md`'s "Validated-set twin ladders" entry marked DONE.
 
 **What:** (Review: High "auto-apply claim diverges from startup", cross-validated by two lenses;
 plus Medium "off-switch branches untested".) `autoApplyKeys`
