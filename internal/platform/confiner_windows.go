@@ -204,7 +204,11 @@ func (c *tokenConfiner) Close() error {
 
 // labelBox labels the box's roots Low, once per root per session. The journal is written
 // BEFORE the first label so a process killed mid-pass still leaves a complete-enough record
-// to undo the mutation.
+// to undo the mutation, and what it may say about a root is journalLabelEntry's decision —
+// never apogee's own label as the state to restore.
+//
+// The memo is keyed by the folded path for the same reason the journal is: C:\Work and
+// c:\work are one root, and labelling it twice would journal it twice.
 func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 	roots, err := windowsBoxRoots(c.rules, box, c.protected)
 	if err != nil {
@@ -215,21 +219,36 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 	defer c.mu.Unlock()
 
 	for _, root := range roots {
-		if c.labelled[root] {
+		key := foldLabelPath(root)
+		if c.labelled[key] {
 			continue
 		}
 		prior, err := readLabelSDDL(root)
 		if err != nil {
 			return fmt.Errorf("%w: cannot read the mandatory label of %q: %v", domain.ErrConfinementUnavailable, root, err)
 		}
-		c.journal.Entries = append(c.journal.Entries, labelJournalEntry{Path: root, Root: true, PriorSDDL: prior})
-		if err := c.flushJournal(); err != nil {
-			return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
+		if err := c.journalLabel(labelJournalEntry{Path: root, Root: true, PriorSDDL: prior}); err != nil {
+			return err
 		}
 		if err := c.labelTree(root); err != nil {
 			return err
 		}
-		c.labelled[root] = true
+		c.labelled[key] = true
+	}
+	return nil
+}
+
+// journalLabel records one about-to-be-labelled path and persists the journal when the record
+// changed, wrapping a flush failure as ErrConfinementUnavailable — nothing is ever labelled
+// without a journal on disk describing how to undo it. Callers hold c.mu.
+func (c *tokenConfiner) journalLabel(entry labelJournalEntry) error {
+	entries, changed := journalLabelEntry(c.journal.Entries, entry, foldLabelPath)
+	c.journal.Entries = entries
+	if !changed {
+		return nil
+	}
+	if err := c.flushJournal(); err != nil {
+		return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
 	}
 	return nil
 }
@@ -269,9 +288,11 @@ func (c *tokenConfiner) labelTree(root string) error {
 			return nil
 		}
 		if prior, err := readLabelSDDL(path); err == nil && prior != "" {
-			c.journal.Entries = append(c.journal.Entries, labelJournalEntry{Path: path, PriorSDDL: prior})
-			if err := c.flushJournal(); err != nil {
-				return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
+			// A Low prior here is apogee's own label — a tree being re-walked, or one a
+			// concurrent session labelled — and journalLabel drops it rather than recording
+			// an instruction to put it back.
+			if err := c.journalLabel(labelJournalEntry{Path: path, PriorSDDL: prior}); err != nil {
+				return err
 			}
 		}
 		sddl := windowsFileLabelSDDL

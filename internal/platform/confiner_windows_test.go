@@ -292,6 +292,100 @@ func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
 	}
 }
 
+func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
+	// The self-perpetuating-residue scenario, on a real SACL. Both triggers are exercised: a
+	// box labelled a SECOND time by the same backend (a partial pass, or the once-per-box memo
+	// reopened), and a second backend reading a box another session has already labelled. Under
+	// either, a journal that recorded apogee's own Low label as "prior state" would make
+	// teardown RE-APPLY it, and the residue would survive every future cleanup.
+	home := t.TempDir()
+	ws := t.TempDir()
+	existing := filepath.Join(ws, "existing.txt")
+	if err := os.WriteFile(existing, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed existing file: %v", err)
+	}
+
+	first := newTokenConfiner(home)
+	if !first.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to journal")
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = first.Close()
+		}
+	})
+
+	box := domain.ConfinementBox{WorkspaceRoot: ws}
+	if err := first.labelBox(box); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
+		t.Fatalf("box root label = %q, want Low before the second pass", label)
+	}
+
+	// Reopen the once-per-box memo: the label pass now runs over a tree that already carries
+	// apogee's own labels, which is exactly what it reads as "prior state".
+	first.mu.Lock()
+	first.labelled = make(map[string]bool)
+	first.mu.Unlock()
+	if err := first.labelBox(box); err != nil {
+		t.Fatalf("second labelBox over the same box: %v", err)
+	}
+
+	// A second backend with its own journal home, over the still-labelled box — the concurrent
+	// session's read of a transient Low label. (Its own home keeps construction from recovering
+	// the first backend's journal, which shares this process's PID.)
+	second := newTokenConfiner(t.TempDir())
+	secondClosed := false
+	t.Cleanup(func() {
+		if !secondClosed {
+			_ = second.Close()
+		}
+	})
+	if err := second.labelBox(box); err != nil {
+		t.Fatalf("a second backend could not label the already-labelled box: %v", err)
+	}
+
+	journals := listLabelJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals under %q = %v, want exactly one", home, journals)
+	}
+	onDisk, err := readLabelJournal(journals[0])
+	if err != nil {
+		t.Fatalf("read journal %q: %v", journals[0], err)
+	}
+	for _, j := range []labelJournal{onDisk, second.journal} {
+		for _, entry := range j.Entries {
+			if isLowLabelSDDL(entry.PriorSDDL) {
+				t.Errorf("journal entry %+v records apogee's own Low label as prior state; the revert would put it back", entry)
+			}
+		}
+	}
+	if len(onDisk.Entries) != 1 || !onDisk.Entries[0].Root {
+		t.Errorf("journal entries = %+v, want the single box root recorded once", onDisk.Entries)
+	}
+
+	if err := second.Close(); err != nil {
+		t.Fatalf("second Close (teardown): %v", err)
+	}
+	secondClosed = true
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close (teardown): %v", err)
+	}
+	closed = true
+
+	for _, path := range []string{ws, existing} {
+		label, err := readLabelSDDL(path)
+		if err != nil {
+			t.Fatalf("read label of %q after teardown: %v", path, err)
+		}
+		if label != "" {
+			t.Errorf("%q still carries a mandatory label after teardown: %q", path, label)
+		}
+	}
+}
+
 // runConfinedLine runs a confined `cmd /c echo x> "<target>"` and returns the run error.
 func runConfinedLine(t *testing.T, c domain.Confiner, box domain.ConfinementBox, target string) error {
 	t.Helper()

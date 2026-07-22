@@ -439,3 +439,154 @@ func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
 		t.Errorf("residue = %q; want it to name the manual remedy", got)
 	}
 }
+
+func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
+	t.Parallel()
+
+	// A journal entry is an instruction to a future revert, so the one thing it must never say
+	// is "this path carried a Low label before the run" — apogee is the only thing that writes
+	// Low labels here, and restoring one is residue that puts itself back. The two ways that
+	// happens are a path journalled twice (the second read sees apogee's own label) and a prior
+	// read off a tree apogee (or a concurrent session) has already labelled, so both are decided
+	// here, on every OS, rather than only on a machine that can write a real SACL.
+	const (
+		foreignMedium = "S:AI(ML;;NW;;;ME)"
+		foreignHigh   = "S:(ML;OICI;NW;;;HI)"
+		ownInherited  = "S:AI(ML;OICIID;NW;;;LW)"
+		ownCanonical  = "S:(ML;;NW;;;S-1-16-4096)"
+	)
+
+	tests := []struct {
+		name        string
+		entries     []labelJournalEntry
+		entry       labelJournalEntry
+		wantChanged bool
+		wantEntries []labelJournalEntry
+	}{
+		{
+			name:        "first_root_is_recorded",
+			entry:       labelJournalEntry{Path: `C:\work`, Root: true},
+			wantChanged: true,
+			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true}},
+		},
+		{
+			name:        "foreign_prior_is_kept_verbatim",
+			entry:       labelJournalEntry{Path: `C:\work\vendor`, PriorSDDL: foreignMedium},
+			wantChanged: true,
+			wantEntries: []labelJournalEntry{{Path: `C:\work\vendor`, PriorSDDL: foreignMedium}},
+		},
+		{
+			name:        "foreign_root_prior_is_kept_verbatim",
+			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: foreignHigh},
+			wantChanged: true,
+			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignHigh}},
+		},
+		{
+			name:        "own_dir_label_as_root_prior_is_recorded_as_no_prior",
+			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			wantChanged: true,
+			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true}},
+		},
+		{
+			name:  "own_file_label_on_a_descendant_is_not_recorded_at_all",
+			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: windowsFileLabelSDDL},
+		},
+		{
+			name:  "inherited_own_label_on_a_descendant_is_not_recorded_at_all",
+			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: ownInherited},
+		},
+		{
+			name:  "canonical_low_sid_is_recognised_as_our_own",
+			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: ownCanonical},
+		},
+		{
+			name:        "duplicate_path_keeps_the_first_prior",
+			entries:     []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
+			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
+		},
+		{
+			name:        "case_varied_duplicate_path_is_the_same_path",
+			entries:     []labelJournalEntry{{Path: `C:\Work`, Root: true}},
+			entry:       labelJournalEntry{Path: `c:\work`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			wantEntries: []labelJournalEntry{{Path: `C:\Work`, Root: true}},
+		},
+		{
+			name:        "a_journalled_descendant_can_still_become_a_root",
+			entries:     []labelJournalEntry{{Path: `C:\work\vendor`, PriorSDDL: foreignMedium}},
+			entry:       labelJournalEntry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			wantChanged: true,
+			wantEntries: []labelJournalEntry{{Path: `C:\work\vendor`, Root: true, PriorSDDL: foreignMedium}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, changed := journalLabelEntry(tt.entries, tt.entry, foldLabelPath)
+			if changed != tt.wantChanged {
+				t.Errorf("changed = %v, want %v (it decides whether the journal is flushed)", changed, tt.wantChanged)
+			}
+			if len(got) != len(tt.wantEntries) {
+				t.Fatalf("entries = %+v, want %+v", got, tt.wantEntries)
+			}
+			for i, want := range tt.wantEntries {
+				if got[i] != want {
+					t.Errorf("entries[%d] = %+v, want %+v", i, got[i], want)
+				}
+			}
+			for _, entry := range got {
+				if isLowLabelSDDL(entry.PriorSDDL) {
+					t.Errorf("entry %+v records a Low prior; the revert would re-apply apogee's own label", entry)
+				}
+			}
+		})
+	}
+}
+
+func TestJournalLabelEntryUsesTheInjectedFold(t *testing.T) {
+	t.Parallel()
+
+	// The fold is a parameter so the rule is provable off Windows: under a fold that treats two
+	// spellings as one path, the second spelling adds nothing.
+	entries := []labelJournalEntry{{Path: `C:\Work`, Root: true}}
+	if _, changed := journalLabelEntry(entries, labelJournalEntry{Path: `c:\WORK`, Root: true}, nil); changed {
+		t.Error("the default fold treated two case spellings of one path as two paths")
+	}
+	identity := func(p string) string { return p }
+	if _, changed := journalLabelEntry(entries, labelJournalEntry{Path: `c:\WORK`, Root: true}, identity); !changed {
+		t.Error("the injected fold was ignored; the helper is not honouring its seam")
+	}
+}
+
+func TestIsLowLabelSDDL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		sddl string
+		want bool
+	}{
+		{name: "empty_descriptor", sddl: ""},
+		{name: "no_label_ace", sddl: "S:"},
+		{name: "own_dir_label", sddl: windowsDirLabelSDDL, want: true},
+		{name: "own_file_label", sddl: windowsFileLabelSDDL, want: true},
+		{name: "inherited_own_label", sddl: "S:AI(ML;OICIID;NW;;;LW)", want: true},
+		{name: "canonical_low_sid", sddl: "S:AI(ML;;NW;;;s-1-16-4096)", want: true},
+		{name: "medium_label", sddl: "S:AI(ML;;NW;;;ME)"},
+		{name: "high_label", sddl: "S:(ML;OICI;NW;;;HI)"},
+		{name: "truncated_ace", sddl: "S:(ML;OICI;NW;;;LW"},
+		{name: "audit_ace_then_low_label", sddl: "S:(AU;SA;WD;;;WD)(ML;;NW;;;LW)", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := isLowLabelSDDL(tt.sddl); got != tt.want {
+				t.Errorf("isLowLabelSDDL(%q) = %v, want %v", tt.sddl, got, tt.want)
+			}
+		})
+	}
+}

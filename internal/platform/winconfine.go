@@ -69,19 +69,22 @@ type labelJournal struct {
 	// PID owns this journal. A journal whose process is still alive belongs to a running
 	// apogee and must never be recovered by another one.
 	PID int `json:"pid"`
-	// Entries are the labelled roots (Root == true) plus every path found already carrying
-	// an explicit label, whose prior descriptor teardown puts back verbatim.
+	// Entries are the labelled roots (Root == true) plus every path found already carrying a
+	// FOREIGN explicit label, whose prior descriptor teardown puts back verbatim. One entry
+	// per path, and never one whose prior is a label apogee itself could have written — see
+	// journalLabelEntry, which is the only thing that builds them.
 	Entries []labelJournalEntry `json:"entries"`
 }
 
 // labelJournalEntry is one journalled path: a box root the backend labelled, and/or a path
-// that already carried a mandatory label before the run.
+// that already carried a foreign mandatory label before the run.
 type labelJournalEntry struct {
 	Path string `json:"path"`
 	// Root marks a box root whose whole tree teardown walks and clears.
 	Root bool `json:"root,omitempty"`
 	// PriorSDDL is the descriptor the path carried before labelling, empty when it carried
-	// no label (the overwhelmingly common case) and teardown should clear it instead.
+	// no label (the overwhelmingly common case) or carried a Low one apogee must never put
+	// back (journalLabelEntry); teardown then clears the path instead.
 	PriorSDDL string `json:"prior_sddl,omitempty"`
 }
 
@@ -106,6 +109,93 @@ func (j labelJournal) priorLabels() map[string]string {
 		}
 	}
 	return out
+}
+
+// foldLabelPath case-folds a path for the journal's one-entry-per-path rule. Windows paths are
+// case-insensitive, so C:\Work and c:\work name one location and must never become two journal
+// entries — the same upper-casing windowsProtectedRoots dedupes its locations with, and the
+// whole-path form of the component-wise fold hostRules.sameComponent applies.
+func foldLabelPath(p string) string { return strings.ToUpper(p) }
+
+// windowsLowLabelSIDs are the SDDL spellings of the Low integrity level — the ONE level this
+// backend ever writes — in both the alias and the canonical form, so a descriptor is recognised
+// whichever way the OS rendered it.
+var windowsLowLabelSIDs = map[string]bool{"LW": true, "S-1-16-4096": true}
+
+// isLowLabelSDDL reports whether sddl carries a mandatory-label ACE naming the Low integrity
+// level. It is deliberately looser than comparing against windowsDirLabelSDDL /
+// windowsFileLabelSDDL verbatim: the same label read back from the OS carries descriptor flags
+// (S:AI(…)) and, on a path that inherited it from a labelled root, the inherited ACE flag
+// (OICIID), so a string equality test would recognise apogee's own label only in the one
+// spelling apogee happens to write it in.
+func isLowLabelSDDL(sddl string) bool {
+	for rest := sddl; ; {
+		start := strings.Index(rest, windowsLabelACEPrefix)
+		if start < 0 {
+			return false
+		}
+		rest = rest[start+len(windowsLabelACEPrefix):]
+		end := strings.IndexByte(rest, ')')
+		if end < 0 {
+			return false
+		}
+		// What follows the consumed "(ML;" is flags;rights;object;inherit;sid — the integrity
+		// level is the trailing SID field.
+		if fields := strings.Split(rest[:end], ";"); len(fields) >= 5 &&
+			windowsLowLabelSIDs[strings.ToUpper(strings.TrimSpace(fields[4]))] {
+			return true
+		}
+		rest = rest[end+1:]
+	}
+}
+
+// journalLabelEntry folds one about-to-be-labelled path into a journal's entries, returning the
+// entries to persist and whether anything actually changed (unchanged ⇒ there is nothing new to
+// flush before the label goes on).
+//
+// It is the only thing that builds an entry, because a journal is an INSTRUCTION to a future
+// revert and the two ways it can lie both end in apogee's own Low label being restored rather
+// than removed — residue that puts itself back (ADR 0020 §2):
+//
+//   - One entry per path, first prior wins. Labelling a root twice — a re-Confine after a
+//     partial pass, or a second backend over a box another session already labelled — would
+//     otherwise read the label apogee just wrote and record it as "the state before the run".
+//   - A prior that is itself a LOW label is recorded as NO prior at all, so teardown clears the
+//     path to unlabelled rather than putting a Low label back. That covers this backend's own
+//     spellings, the inherited variant a labelled root propagates, and a genuinely foreign Low
+//     label — which is ambiguous by construction, and where clearing is the SAFE direction:
+//     unlabelled means implicitly Medium, i.e. LESS writable, and ADR 0020's manual remedy
+//     states an explicit Medium label is behaviourally identical to no label at all.
+//
+// An entry naming neither a root to walk nor a prior to put back describes no mutation to undo,
+// so it is not recorded — that is what keeps a re-walked tree of apogee's own labels out of the
+// journal instead of appending (and re-flushing) one useless entry per file.
+//
+// fold is injected (nil ⇒ foldLabelPath) so the decision is table-testable on any OS.
+func journalLabelEntry(entries []labelJournalEntry, entry labelJournalEntry, fold func(string) string) ([]labelJournalEntry, bool) {
+	if fold == nil {
+		fold = foldLabelPath
+	}
+	if isLowLabelSDDL(entry.PriorSDDL) {
+		entry.PriorSDDL = ""
+	}
+	if !entry.Root && entry.PriorSDDL == "" {
+		return entries, false
+	}
+	key := fold(entry.Path)
+	for i := range entries {
+		if fold(entries[i].Path) != key {
+			continue
+		}
+		// The first prior recorded for a path is the only honest one, but a path first seen as
+		// a labelled descendant can still be promoted to a ROOT, whose tree teardown walks.
+		if entry.Root && !entries[i].Root {
+			entries[i].Root = true
+			return entries, true
+		}
+		return entries, false
+	}
+	return append(entries, entry), true
 }
 
 // windowsProtectedRoots lists the locations the backend refuses to label, resolved from the

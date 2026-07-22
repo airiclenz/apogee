@@ -156,7 +156,23 @@ revert as a `func(labelJournal) error` so the retention rule is Linux-table-test
 host; a forced revert failure demonstrably leaves the journal file on disk.
 **Commit:** `fix(confine): keep the label journal when a revert fails`
 
-## 2. Never journal apogee's own label as prior state; dedupe entries per path
+## 2. Never journal apogee's own label as prior state; dedupe entries per path — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): three deviations, all widening the item's rule in the Settled-design
+direction ("restoring toward LESS privilege is the safe direction"). (a) The own-label guard
+(`isLowLabelSDDL`) recognises ANY mandatory-label ACE naming the LOW level — `LW` or
+`S-1-16-4096` — not only the two constants' verbatim spelling: the same label read back from the
+OS carries descriptor flags (`S:AI(…)`) and, on a path that inherited it from a labelled root,
+the `ID` ACE flag, so string equality would recognise apogee's own label in one spelling only. A
+genuinely foreign Low prior is therefore also cleared rather than restored, which is exactly the
+ambiguity the Settled design resolves that way. (b) An entry left naming neither a root to walk
+nor a prior to put back is not recorded at all, instead of being appended with an empty prior:
+re-walking an already-labelled tree would otherwise append (and re-flush) one useless entry per
+file — O(n²) journal writes. (c) `Root` is sticky: a path first journalled as a labelled
+descendant and later handed in as a box root is promoted, because teardown walks roots and
+first-prior-wins alone would leave that tree labelled. The fold is `foldLabelPath`
+(`strings.ToUpper`) — the whole-path form of `hostRules.sameComponent`'s case-folding and the
+same fold `windowsProtectedRoots` already dedupes with.
 
 **What:** (Review: High "journal records apogee's own Low label as prior".) In
 `labelBox`/`labelTree` (`confiner_windows.go`): (a) skip appending an entry for a path already
