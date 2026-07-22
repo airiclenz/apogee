@@ -309,6 +309,114 @@ func TestWindowsLabelsAreRevertedOnTeardown(t *testing.T) {
 	}
 }
 
+func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
+	// The one behaviour the journal machinery exists to deliver, pinned end-to-end: a file
+	// that carried a FOREIGN explicit label before the run gets that exact label back after
+	// teardown, while the paths apogee labelled itself read back unlabelled. Every piece of
+	// this — journalling the prior before the label lands, clearing the trees FIRST and
+	// restoring priors SECOND (revertLabelJournal's order comment) — is otherwise invisible
+	// to the suite: deleting the prior-restore loop, or swapping the clear/restore order,
+	// passes every other test.
+	home := t.TempDir()
+	ws := t.TempDir()
+	child := filepath.Join(ws, "foreign.txt")
+	sibling := filepath.Join(ws, "sibling.txt")
+	for _, path := range []string{child, sibling} {
+		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatalf("seed %q: %v", path, err)
+		}
+	}
+
+	c := newTokenConfiner(home)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = c.Close()
+		}
+	})
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label or restore")
+	}
+
+	// Plant the foreign prior with the same helper the backend labels with — an explicit
+	// Medium label, i.e. one apogee never writes — then capture the OS's own rendering of
+	// it: the journal records readLabelSDDL's output, so THAT string, not the spelling
+	// written here, is the verbatim the restore must reproduce.
+	if err := setLabelSDDL(child, "S:(ML;;NW;;;ME)"); err != nil {
+		t.Fatalf("apply the foreign Medium label to %q: %v", child, err)
+	}
+	foreignPrior, err := readLabelSDDL(child)
+	if err != nil {
+		t.Fatalf("read the planted label of %q: %v", child, err)
+	}
+	if foreignPrior == "" || isLowLabelSDDL(foreignPrior) {
+		t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low prior", foreignPrior)
+	}
+
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+
+	// While the box is up, the foreign-prior file is Low like everything else — the
+	// restore below is only meaningful because the label pass really overwrote the prior.
+	if label, _ := readLabelSDDL(child); !isLowLabelSDDL(label) {
+		t.Fatalf("foreign-prior file label = %q while the box is up, want apogee's Low label over the prior", label)
+	}
+
+	// The ON-DISK journal — what a crash recovery would replay — carries the prior
+	// verbatim for the child, beside the root's own entry.
+	journals := listLabelJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals = %v, want exactly one", journals)
+	}
+	onDisk, err := readLabelJournal(journals[0])
+	if err != nil {
+		t.Fatalf("read journal %q: %v", journals[0], err)
+	}
+	var childEntry *labelJournalEntry
+	for i := range onDisk.Entries {
+		if strings.EqualFold(onDisk.Entries[i].Path, child) {
+			childEntry = &onDisk.Entries[i]
+		}
+	}
+	if childEntry == nil {
+		t.Fatalf("journal entries = %+v; no entry journals the foreign prior of %q", onDisk.Entries, child)
+	}
+	if childEntry.PriorSDDL != foreignPrior {
+		t.Errorf("journalled prior = %q, want the planted descriptor %q verbatim", childEntry.PriorSDDL, foreignPrior)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close (teardown): %v", err)
+	}
+	closed = true
+
+	// The restore: the foreign Medium label is back verbatim — NOT cleared to "" — while
+	// the root and the sibling are unlabelled again. Restored, not wiped wholesale.
+	restored, err := readLabelSDDL(child)
+	if err != nil {
+		t.Fatalf("read label of %q after teardown: %v", child, err)
+	}
+	if restored == "" {
+		t.Fatal("the foreign Medium label was cleared, not restored; teardown destroyed a label apogee did not write")
+	}
+	if restored != foreignPrior {
+		t.Errorf("label after teardown = %q, want the prior %q back verbatim", restored, foreignPrior)
+	}
+	for _, path := range []string{ws, sibling} {
+		label, err := readLabelSDDL(path)
+		if err != nil {
+			t.Fatalf("read label of %q after teardown: %v", path, err)
+		}
+		if label != "" {
+			t.Errorf("%q still carries a mandatory label after teardown: %q", path, label)
+		}
+	}
+	if left := listLabelJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after teardown, want the fully reverted journal retired", left)
+	}
+}
+
 func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	// ADR 0020 §2's interrupted-cleanup remedy. A process killed mid-run leaves labels and a
 	// journal; the next NewConfiner finishes the restore. It is simulated by dropping the

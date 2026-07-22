@@ -144,7 +144,14 @@ the package tests, then mark the item done here. Any authorized deviation from i
 a dated `NOTES (YYYY-MM-DD):` line under the item. Review finding IDs refer to
 `docs/reviews/code-review-2026-07-22-phase5-post-fixes.md`.
 
-## 1. The foreign-prior restore path gets its end-to-end proof
+## 1. The foreign-prior restore path gets its end-to-end proof — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): Both mutation checks demonstrated natively
+(`TestWindowsForeignPriorLabelIsRestoredOnTeardown`): (1) with `revertLabelJournal`'s
+prior-restore loop deleted the test FAILED ("the foreign Medium label was cleared, not
+restored"); (2) with the clear/restore order swapped (restore first, clear second) the test
+FAILED with the same assertion — the walk wipes the just-restored prior. Both mutations
+reverted; `confiner_windows.go` is byte-identical to HEAD (`git diff` empty).
 
 **What:** (Review: High "foreign-prior restore untested end-to-end" — tests only, and run FIRST:
 it is the safety net under items 2–5, which all touch the code it pins.) Windows-tagged, in
