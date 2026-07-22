@@ -435,7 +435,22 @@ accept it and the label pass runs; a genuinely unresolvable short name still ref
 be normalised; no resolvable workspace is forced into Gate.
 **Commit:** `fix(platform): trust the resolver's authoritative answer for tilde-named paths`
 
-## 9. The label guardrail sees through reparse-point roots and trailing-dot spellings
+## 9. The label guardrail sees through reparse-point roots and trailing-dot spellings — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): Two consequences beyond the item's literal text. (1) The resolved final
+form is not only what the guardrail judges but also what is journalled and labelled
+(resolveBoxRoots runs in front of windowsBoxRoots in labelBox) — the journal then names the
+location the OS actually mutated; a side effect is that a NONEXISTENT root is now refused by
+the resolver ("cannot resolve it to its final on-disk form") rather than by split's guardrail
+wording — the existing ghost-root test asserts only the "cannot resolve" substring and stays
+green with assertions unchanged. (2) One test beyond the item's list: a root REACHED through
+a junction (`door\sub` resolving into a tree that contains the protected stand-in), because a
+junction ROOT is caught by stroke (a) and a trailing-dot spelling by stroke (c), leaving
+stroke (b) otherwise unpinned. All three strokes mutation-checked natively: (a) reparse
+refusal disabled ⇒ the junction root is accepted (FAIL); (b) resolution skipped ⇒ the
+junction-traversing root is accepted (FAIL); (c) fold reverted to plain EqualFold ⇒ all six
+trailing dot/space rows across Contains and windowsBoxRoots FAIL. All mutations reverted;
+platform suite green after each revert.
 
 **What:** (Review: Medium (uncertain) "lexical guardrail defeated by root spellings" — invariant
 hygiene per Settled design, not an emergency.) The guardrail (`winconfine.go:314`) and the rule

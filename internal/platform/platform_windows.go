@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 // Current returns the platform Host for this Windows build target: the Windows rule set
@@ -22,6 +24,7 @@ func Current() Host { return currentRules() }
 func currentRules() hostRules {
 	rules := windowsRules()
 	rules.longPath = longPathName
+	rules.finalPath = finalPathName
 	return rules
 }
 
@@ -55,6 +58,43 @@ func longPathName(p string) (string, bool) {
 		}
 		tail = filepath.Join(filepath.Base(current), tail)
 		current = parent
+	}
+}
+
+// finalPathName resolves p to its final on-disk form through kernel32's
+// GetFinalPathNameByHandle — the finalPath seam (hostRules.finalPath). Unlike longPathName
+// it answers only for a path that EXISTS: the answer comes from an open handle, which is
+// what makes it authoritative — reparse points traversed, 8.3 aliases expanded, the
+// trailing dots and spaces Win32 canonicalization strips removed — and a path that cannot
+// be opened yields ok=false, which the caller refuses on rather than guesses about
+// (resolveBoxRoots). The `\\?\` prefix the API returns is stripped so the answer compares
+// — and reads, in a refusal — as an ordinary path.
+func finalPathName(p string) (string, bool) {
+	pathW, err := windows.UTF16PtrFromString(p)
+	if err != nil {
+		return "", false
+	}
+	// Zero desired access opens the handle for metadata only, and FILE_FLAG_BACKUP_SEMANTICS
+	// is what permits CreateFile to open a directory at all.
+	handle, err := windows.CreateFile(pathW, 0,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+
+	buf := make([]uint16, windows.MAX_PATH)
+	for {
+		n, err := windows.GetFinalPathNameByHandle(handle, &buf[0], uint32(len(buf)), 0)
+		if err != nil || n == 0 {
+			return "", false
+		}
+		if int(n) < len(buf) {
+			final, _ := stripLongPathPrefix(syscall.UTF16ToString(buf[:n]))
+			return final, true
+		}
+		buf = make([]uint16, n) // n is the required length, including the NUL
 	}
 }
 

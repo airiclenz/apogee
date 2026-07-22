@@ -260,6 +260,10 @@ func (c *tokenConfiner) Close() error {
 // forced Gate, and refusing here is what leaves the "journal first, label second" invariant
 // with no bypass at all (ADR 0020 §2).
 //
+// The roots are first resolved to their final on-disk form — and a reparse-point root
+// refused — by resolveBoxRoots, so the guardrails, the journal and the label pass all see
+// the location the OS will actually mutate rather than a spelling of it.
+//
 // The memo is keyed by the folded path for the same reason the journal is: C:\Work and
 // c:\work are one root, and labelling it twice would journal it twice.
 func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
@@ -268,6 +272,10 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 			domain.ErrConfinementUnavailable, box.WorkspaceRoot)
 	}
 
+	box, err := c.resolveBoxRoots(box)
+	if err != nil {
+		return err
+	}
 	roots, err := windowsBoxRoots(c.rules, box, c.protected)
 	if err != nil {
 		return err
@@ -308,6 +316,61 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 		c.labelled[key] = true
 	}
 	return nil
+}
+
+// resolveBoxRoots returns box with each root replaced by its final on-disk form, or a
+// refusal wrapping ErrConfinementUnavailable. It runs BEFORE windowsBoxRoots because the
+// guardrails there are lexical while SetNamedSecurityInfo is not: the OS strips the
+// trailing dots and spaces Win32 canonicalization ignores and follows every reparse point,
+// so a guardrail judging the SPELLING would wave through a root whose label write then
+// lands on a protected location — `C:\Windows.` is C:\Windows, and a junction is wherever
+// it points (ADR 0020 §6).
+func (c *tokenConfiner) resolveBoxRoots(box domain.ConfinementBox) (domain.ConfinementBox, error) {
+	workspace, err := c.resolveBoxRoot(box.WorkspaceRoot)
+	if err != nil {
+		return box, err
+	}
+	box.WorkspaceRoot = workspace
+	if len(box.WritablePaths) > 0 {
+		resolved := make([]string, len(box.WritablePaths))
+		for i, path := range box.WritablePaths {
+			if resolved[i], err = c.resolveBoxRoot(path); err != nil {
+				return box, err
+			}
+		}
+		box.WritablePaths = resolved
+	}
+	return box, nil
+}
+
+// resolveBoxRoot resolves one box root to its final form. An empty root names nothing —
+// windowsBoxRoots drops it — and resolves to itself. Two rules:
+//
+//   - A root that IS a reparse point (a junction or symlink) is refused outright: labelling
+//     it would silently mutate its target, which is why the label walk skips descendant
+//     reparse points entirely (labelTree) — the root was the one spelling that escaped that
+//     rule, and no resolution makes it honestly labellable.
+//   - Every other root must resolve through the finalPath seam (GetFinalPathNameByHandle),
+//     so the guardrails judge the answer; a root the resolver cannot answer for is refused,
+//     never guessed about — the same posture windowsLabelGuardrail takes with a path split
+//     cannot compare.
+func (c *tokenConfiner) resolveBoxRoot(root string) (string, error) {
+	if root == "" {
+		return "", nil
+	}
+	if info, err := os.Lstat(root); err == nil && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+		return "", fmt.Errorf("%w: refusing to label %q — a box root that is itself a reparse point (a junction or symlink) would be labelled through to its target",
+			domain.ErrConfinementUnavailable, root)
+	}
+	final, ok := "", false
+	if c.rules.finalPath != nil {
+		final, ok = c.rules.finalPath(root)
+	}
+	if !ok {
+		return "", fmt.Errorf("%w: refusing to label %q — this host cannot resolve it to its final on-disk form, so the guardrails cannot be evaluated",
+			domain.ErrConfinementUnavailable, root)
+	}
+	return final, nil
 }
 
 // journalLabel records one about-to-be-labelled path and persists the journal when the record

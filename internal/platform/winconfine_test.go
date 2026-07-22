@@ -103,6 +103,18 @@ func TestWindowsBoxRootsCollapsesAndGuards(t *testing.T) {
 			wantRefus: "protected location",
 		},
 		{
+			// Win32 canonicalization strips a trailing dot, so this spelling IS the system
+			// root and the guardrail must see it as such (the fold in sameComponent).
+			name:      "trailing_dot_spelling_of_a_protected_root_refused",
+			box:       domain.ConfinementBox{WorkspaceRoot: `C:\Windows.`},
+			wantRefus: "protected location",
+		},
+		{
+			name:      "trailing_space_spelling_of_a_protected_root_refused",
+			box:       domain.ConfinementBox{WorkspaceRoot: `C:\Windows `},
+			wantRefus: "protected location",
+		},
+		{
 			name: "a_guardrailed_WRITABLE_PATH_refuses_the_whole_box",
 			box: domain.ConfinementBox{
 				WorkspaceRoot: `C:\Users\dev\proj`,

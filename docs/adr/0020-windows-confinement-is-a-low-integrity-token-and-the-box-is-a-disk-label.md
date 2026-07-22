@@ -190,6 +190,11 @@ no special case: a below-floor Windows host is exactly today's Windows host.
 - Named edges for item 6's tests, beyond the plan's own `C:\Work` vs `c:\work`: 8.3 short names
   (`PROGRA~1`) and the `\\?\` long-path prefix. Both must normalise or be rejected — never
   silently mismatch.
+- **A box root that is itself a reparse point (a junction or symlink) is refused** —
+  `SetNamedSecurityInfo` follows it, so labelling one would mutate its target; every other root
+  is resolved to its final on-disk form before the guardrails run, and trailing dots and spaces
+  (which Win32 canonicalization strips) fold off in the component comparison, so `C:\Windows.`
+  compares equal to `C:\Windows`.
 
 **7. Probe expectations (the escape battery on Windows).**
 

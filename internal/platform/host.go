@@ -34,6 +34,16 @@ type hostRules struct {
 	// short names are simply not comparable, which Contains reports as "not contained"
 	// rather than guessing.
 	longPath func(string) (string, bool)
+	// finalPath resolves an EXISTING path to its final on-disk form — reparse points
+	// (junctions and symlinks) traversed, 8.3 aliases expanded, the trailing dots and
+	// spaces Win32 canonicalization strips removed — reporting whether it answered. The
+	// token backend resolves each box root through it before the labelling guardrails run
+	// (resolveBoxRoots): SetNamedSecurityInfo mutates the final form, so the guardrails
+	// must judge that form, not the spelling. Like longPath it is nil in the pure rule
+	// sets and wired to the real OS resolver (GetFinalPathNameByHandle) by Current on
+	// Windows; nil means final forms cannot be resolved here, which the backend refuses
+	// on rather than guesses about.
+	finalPath func(string) (string, bool)
 }
 
 // posixRules is the POSIX rule set (Linux, macOS and the other Unix targets): `sh -c`,
@@ -162,13 +172,23 @@ func (r hostRules) Contains(root, target string) bool {
 	return true
 }
 
-// sameComponent compares two path components under this platform's case rules.
+// sameComponent compares two path components under this platform's case rules. The
+// Windows comparison first folds off trailing dots and spaces: Win32 canonicalization
+// strips them, so `C:\Windows.` and `C:\Windows ` open C:\Windows, and comparing the
+// spellings as different names would let a decorated spelling of a protected location walk
+// past the labelling guardrail (windowsLabelGuardrail). POSIX components compare byte for
+// byte — "work." and "work" really are two names there.
 func (r hostRules) sameComponent(a, b string) bool {
 	if r.windows {
-		return strings.EqualFold(a, b)
+		return strings.EqualFold(trimTrailingDotsAndSpaces(a), trimTrailingDotsAndSpaces(b))
 	}
 	return a == b
 }
+
+// trimTrailingDotsAndSpaces folds off the trailing dots and spaces Win32 path
+// canonicalization ignores, so two spellings the OS opens as one object compare as one
+// component (sameComponent).
+func trimTrailingDotsAndSpaces(s string) string { return strings.TrimRight(s, ". ") }
 
 // split normalises p and decomposes it into its anchor (the part that says where the path
 // starts — "/" on POSIX, "C:" or `\\server\share` or `\` on Windows, "" for a relative

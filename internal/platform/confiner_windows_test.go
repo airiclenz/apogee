@@ -5,6 +5,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -206,6 +207,113 @@ func TestWindowsGenuinelyTildeNamedRootIsContainable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot resolve") {
 		t.Errorf("err = %v; want the unresolvable-path refusal, so this pins the guardrail and not some other check", err)
+	}
+}
+
+func TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings(t *testing.T) {
+	// The root was the one spelling that could still walk past the guardrail: descendant
+	// reparse points are skipped by the label walk, but the guardrail and the rule table are
+	// lexical while SetNamedSecurityInfo is not — a box root that IS a junction, or is
+	// REACHED through one, or carries the trailing dot Win32 canonicalization strips, passed
+	// the check as spelled and was then labelled through the OS's canonical form. Three
+	// refusals and one acceptance, against a temp stand-in wired into the protected list so
+	// no real system location is ever at stake.
+	base := t.TempDir()
+
+	c := newTokenConfiner(t.TempDir())
+	t.Cleanup(func() { _ = c.Close() })
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+
+	// The protected stand-in lives under base\real\sub so a junction-traversing root can
+	// resolve to a tree that CONTAINS it — the shape the guardrail refuses.
+	sub := filepath.Join(base, "real", "sub")
+	guarded := filepath.Join(sub, "guarded")
+	if err := os.MkdirAll(guarded, 0o700); err != nil {
+		t.Fatalf("mkdir %q: %v", guarded, err)
+	}
+	c.protected = append(c.protected, guarded)
+
+	refused := func(root, wantSubstring string) {
+		t.Helper()
+		err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: root})
+		if err == nil {
+			t.Fatalf("labelBox(%q) accepted the box; want a refusal mentioning %q", root, wantSubstring)
+		}
+		if !errors.Is(err, domain.ErrConfinementUnavailable) {
+			t.Errorf("labelBox(%q) = %v; want ErrConfinementUnavailable so dispatch demotes to a forced Gate", root, err)
+		}
+		if !strings.Contains(err.Error(), wantSubstring) {
+			t.Errorf("labelBox(%q) = %v; want the refusal to mention %q", root, err, wantSubstring)
+		}
+		for _, path := range []string{guarded, sub} {
+			if label, readErr := readLabelSDDL(path); readErr != nil || label != "" {
+				t.Errorf("label of %q = %q (err %v) after the refusal, want the disk untouched", path, label, readErr)
+			}
+		}
+		if len(c.journal.Entries) != 0 {
+			t.Errorf("journal entries = %+v after the refusal, want none — a refused box mutates nothing", c.journal.Entries)
+		}
+	}
+
+	// A root that IS a junction is refused outright — even one whose target is entirely
+	// innocent, because a reparse root is labelled through to its target and no resolution
+	// makes that honest.
+	innocent := filepath.Join(base, "innocent")
+	if err := os.Mkdir(innocent, 0o700); err != nil {
+		t.Fatalf("mkdir %q: %v", innocent, err)
+	}
+	junction := filepath.Join(base, "junc")
+	makeJunction(t, junction, innocent)
+	refused(junction, "reparse point")
+	if label, readErr := readLabelSDDL(innocent); readErr != nil || label != "" {
+		t.Errorf("label of %q = %q (err %v); the junction's target must stay untouched", innocent, label, readErr)
+	}
+
+	// A root REACHED through a junction resolves to its final form before the guardrail
+	// runs: door\sub IS real\sub, which contains the stand-in — a containment the lexical
+	// check alone could never connect.
+	door := filepath.Join(base, "door")
+	makeJunction(t, door, filepath.Join(base, "real"))
+	refused(filepath.Join(door, "sub"), "protected location")
+
+	// The trailing-dot spelling Win32 canonicalization strips: guarded. IS guarded.
+	refused(guarded+".", "protected location")
+
+	// An ordinary root is unaffected: the honest workspace labels and tears back down.
+	plain := filepath.Join(base, "plain")
+	if err := os.Mkdir(plain, 0o700); err != nil {
+		t.Fatalf("mkdir %q: %v", plain, err)
+	}
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: plain}); err != nil {
+		t.Fatalf("labelBox(%q) refused an ordinary root: %v", plain, err)
+	}
+	if label, _ := readLabelSDDL(plain); !isLowLabelSDDL(label) {
+		t.Errorf("label of %q = %q, want apogee's Low label — an honest workspace is unaffected", plain, label)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close (teardown): %v", err)
+	}
+	if label, _ := readLabelSDDL(plain); label != "" {
+		t.Errorf("%q still carries a mandatory label after teardown: %q", plain, label)
+	}
+}
+
+// makeJunction creates a directory junction at link pointing to target. Unlike a symlink, a
+// junction needs no administrator rights and no developer mode — which is exactly why the
+// guardrail must see through one: it is the reparse point any user can plant.
+func makeJunction(t *testing.T, link, target string) {
+	t.Helper()
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J %q %q: %v (%s)", link, target, err, out)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat the junction %q: %v", link, err)
+	}
+	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) == 0 {
+		t.Fatalf("lstat %q mode = %v; the junction did not register as a reparse point", link, info.Mode())
 	}
 }
 

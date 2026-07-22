@@ -217,6 +217,8 @@ func TestContainsPOSIX(t *testing.T) {
 		{"relative pair", "work", "work/src", true},
 		{"empty root contains nothing", "", "/work", false},
 		{"root of the filesystem", "/", "/work", true},
+		{"trailing dot is a distinct name on POSIX", "/work.", "/work/src", false},
+		{"trailing space is a distinct name on POSIX", "/work ", "/work/src", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -256,6 +258,13 @@ func TestContainsWindows(t *testing.T) {
 		{"device path is refused", `\\.\PhysicalDrive0`, `\\.\PhysicalDrive0\x`, false},
 		{"empty root contains nothing", "", `C:\Work`, false},
 		{"drive root", `C:\`, `C:\Work`, true},
+		// Win32 canonicalization strips trailing dots and spaces off a component, so these
+		// spellings open the SAME object and must compare as one name — a guardrail that read
+		// them as different would let `C:\Windows.` walk past the protected-location check.
+		{"trailing dot on the root folds away", `C:\Windows.`, `C:\Windows\System32`, true},
+		{"trailing dot on the target folds away", `C:\Windows`, `C:\Windows.`, true},
+		{"trailing space on the root folds away", `C:\Work `, `C:\Work\src`, true},
+		{"trailing dot on an intermediate component folds away", `C:\Work.\src`, `C:\Work\src\main.go`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
