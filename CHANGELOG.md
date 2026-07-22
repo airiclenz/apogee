@@ -155,6 +155,81 @@ that is now true.*
   its POSIX-shaped allowlist never named (POSIX output is byte-identical — that floor is empty by
   design).
 
+### Fixed
+
+*The Phase 5 code review (`docs/reviews/code-review-2026-07-22.md` — 4 High, 10 Medium) found the
+implementation faithful to its ADRs on the happy path and concentrated its defects in the paths
+that had never run live. All of them are fixed below, before the owner's live-enforcement proofs
+(`docs/plans/2026-07-22 - 02 - phase5-review-fixes-plan.md`).*
+
+- **The Windows label journal now survives every path that could lose it.** The journal exists so
+  the one disk mutation apogee performs — the Low mandatory labels on the box roots (ADR 0020 §2) —
+  is always revertible, and four defects could leave it wrong or absent. (a) It was deleted
+  *regardless* of whether the revert succeeded: `restoreLabels` and `recoverLabelJournals` now
+  remove the file **only** when the revert returned nil, so a failed teardown leaves the record on
+  disk for the next `NewConfiner()` to retry and for `apogee probe host` to report; the decision is
+  an untagged helper, table-tested off Windows, and the surviving `Close()` error — previously
+  swallowed at the composition root — prints one stderr line naming the journal path and the
+  `icacls` remedy (`platform.ConfinementTeardownNotice`, sharing its wording with the residue
+  notice). (b) The journal could record apogee's **own** Low label as the user's prior state, so
+  teardown *restored* the label it was meant to remove, self-perpetuatingly: entries are now
+  deduped per path (case-folded, first prior wins) and any prior naming the LOW level — `LW` or
+  `S-1-16-4096`, in any descriptor spelling — is recorded as *empty*, so the revert clears to
+  unlabelled. Where a prior is ambiguous, restoring toward **less** privilege is the safe
+  direction, and ADR 0020's own manual remedy says an explicit Medium label and no label are
+  behaviourally identical. (c) An unresolvable `%USERPROFILE%` meant no journal home and labelling
+  proceeded anyway: `labelBox` now returns `ErrConfinementUnavailable` **before any label read or
+  write**, which the execution contract demotes to a Gate — nothing is ever labelled without an
+  undo record. (d) Writes were truncate-in-place and re-issued for every pre-labelled descendant
+  found during the walk: journals are now published atomically (temp file, `Sync`, `os.Rename`) and
+  a journal that cannot be decoded is no longer silently skipped by `confinementResidue` — it is
+  reported as "journal present but unreadable", with the manual remedy stated as the only one.
+  (`internal/platform/{winconfine.go,confiner_windows.go}`, `cmd/apogee/wire.go`.)
+- **`apogee probe` reports outstanding confinement residue instead of healing it away.** In the
+  `probe.Inputs` literal the Confiner was constructed *before* the residue was read, and on Windows
+  that constructor reverts labels and deletes dead journals — so the interrupted-run case ADR 0020
+  §2 assigns to `probe host` could never be reported, on a command three surfaces pin as read-only.
+  The residue is now captured into a local first, and the probe path constructs through a new
+  `platform.NewReportConfiner()` whose Windows variant performs **no** recovery: the read-only
+  pledge (ADR 0021 §1, the README, the command's own `Long` text) stays absolute and unamended, the
+  session constructor still heals on the next real run, and — since the journal now survives a
+  failed revert — nothing is lost by reporting rather than repairing. The stale "the host half
+  stays read-only" comment and the two docs that claimed construction touches no disk (ADR 0020
+  §2/§3, `docs/design/confinement-execution-contract.md` §9.2) were corrected in the same change.
+- **Ordinary cmd.exe command lines are no longer rejected by a POSIX parser.** The `terminal` tool
+  ran `shlex.Split` over every command before handing it to the shell — including on Windows, where
+  the shell is cmd.exe — so `echo don't panic` and `dir "C:\Program Files\"` died with "could not
+  parse command line" on one of the three shipped platforms. The pre-flight now runs only where the
+  platform hands the shell a real argv (the established raw-command-line convention:
+  `shellHost.CommandLine(line) == ""`), and cmd reports its own errors, which is the honest
+  arrangement — cmd has no stable quoting grammar worth pre-parsing, and no malformed-input class
+  survives a check that would be truthful. POSIX behaviour is byte-identical. The
+  "shlex-validated" claim in `docs/design/technical-design.md` §5 (P3.8) documented the defect and
+  is corrected.
+- **The Job Object handle is released on the two routine early-exit paths.** The teardown handle
+  was created before `Confine` ran, but a `Confine` error returned before `runWithTeardown` was
+  ever called, and a `cmd.Start()` failure returned before that function installed its own
+  `defer`. Ownership moves to `runSubprocess`, which defers `release()` immediately after creating
+  the teardown; the redundant inner `defer` is gone and `release` stays idempotent. A clean run is
+  pinned to release exactly once, so the fix cannot silently become a double-release.
+- **`probe model` can no longer claim an auto-apply that the next session start will refuse.**
+  `autoApplyKeys` mirrored the startup ladder but omitted its catalogue-validation step, so a
+  user-local validated-set entry naming a nonexistent mechanism ID was reported as `AUTO-APPLIES`
+  and then skipped with a warning at startup. It now runs the same `validated.Validate` step and
+  names the skip in the report's `suppressed` wording, carrying the catalogue's own reason
+  verbatim. Consolidating the two ladders into one shared "would this entry apply" function is
+  recorded in `TODO.md` for `/improve-codebase-architecture` rather than done here.
+- **The review's remaining findings landed as tests and seams, not behaviour changes**: the
+  pre-spend refusal gates in `probe model` are covered (empty `/v1/models`, discovery failure —
+  zero `/chat/completions` hits, config home untouched) and the vacuous
+  `TestGatherModelWritesNothing` — which asserted an unrelated temp dir was empty — is deleted in
+  favour of the honest cmd-level coverage; the Windows build-floor decision moved into the untagged
+  `belowWindowsFloor` predicate so the deny-vs-token selection is provable on every OS; the
+  `windowsQuote` table gained its adversarial rows (which surfaced the quoting fix recorded under
+  *Added* above) and the caller-less `Path.ExecExt` is gone; and the confined-`%TEMP%` /
+  `ConfineWritablePaths` gap is now recorded in `TODO.md` with its anchors and called out in the
+  README, rather than left implicit.
+
 ### Changed
 
 - **The confinement degradation notice narrows to the hosts where it was always the honest

@@ -504,7 +504,31 @@ applies.
 longer implies confined toolchain builds work on Windows; no other doc touched.
 **Commit:** `docs: record the confined-%TEMP% prerequisite as a follow-on`
 
-## 13. Roll-up: CHANGELOG, review cross-reference, full gates on both machines
+## 13. Roll-up: CHANGELOG, review cross-reference, full gates on both machines — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): one deviation, and it is the item's second host. **The Linux devbox pass was
+not run** — the devbox is a separate machine and this Windows host has no WSL, no container
+runtime and no sanctioned network path to it, so `make check` there remains an **outstanding
+owner action**, recorded under *Phase-5 verification leftovers* in `TODO.md`. Everything reachable
+from the Windows host was run and
+is green: `go vet ./...`, `go build ./...`, `go test -count=1 ./...` (only the three pre-existing
+host failures — `TestSaveHostAcknowledgement_PreservesTheFileMode`,
+`TestAutofixRepairsBrokenContentWhenFormatterImproves`, `TestFoldActivityClockRunsPerPhrase`; the
+two `TestDiagnostics_…GoVet…` failures Ground truth predicted did NOT reproduce), all six cross
+targets, the ADR-0010 import check, `apogee --help`, and `gofmt -l` over LF copies of every Go file
+this plan touched. As the closest available proxy for the unreachable host, `GOOS=linux go vet
+./...` and `GOOS=darwin go vet ./...` are clean — that type-checks and vets the landlock- and
+seatbelt-tagged code **and their test files**, so the Linux gap is execution only, not compilation.
+
+NOTES (2026-07-22): the owner **ratified closing this item without the devbox pass**. The Linux
+devbox is unreachable from this host, and the accepted proxy for its `make check` is the native
+Windows gate above plus `GOOS=linux`/`GOOS=darwin go vet ./...` and the six cross-compile targets —
+a proxy that proves compilation and vetting of the landlock-tagged code, not its execution. That
+is a knowingly accepted gap, not a green light: the outstanding devbox `make check` is tracked as
+a dated owner action in `TODO.md` (*Phase-5 verification leftovers* → "Closeout Linux pass"), and
+this item's literal "both hosts green" acceptance is therefore met on one host only. The gate was
+re-run at close-out and is unchanged: vet/build clean, the same three pre-existing host test
+failures and no others, six cross targets OK, ADR-0010 import check clean, `apogee --help` exit 0.
 
 **What:** (Closes the plan — run last.) CHANGELOG `[Unreleased]`: one Fixed block summarizing the
 review fixes (journal lifecycle: survives failed revert, own-label guard, journal-or-refuse,

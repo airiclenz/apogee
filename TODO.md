@@ -482,6 +482,16 @@ wants an owner decision. Logged here rather than left in the archive so it isn't
 - **Closeout Linux pass — `make check` on the Linux devbox.** The linux-tagged landlock tests
   cannot run on the Windows execution machine, so that gate has only ever been proven there
   through the cross-compile, never by running the build-tagged Linux code paths.
+  **STILL OUTSTANDING as of 2026-07-22**, and now it also covers the Phase-5 *review fixes* plan
+  (`docs/plans/2026-07-22 - 02 - phase5-review-fixes-plan.md`), whose item 13 the owner ratified
+  closing without it — the devbox is unreachable from the Windows host (no WSL, no container
+  runtime, no sanctioned network path). What stood in for it there: the native Windows gate (vet,
+  build, `go test -count=1 ./...` modulo the three known host failures, ADR-0010 import check,
+  `apogee --help`), plus `GOOS=linux go vet ./...`, `GOOS=darwin go vet ./...` and all six
+  cross-compile targets. That proxy proves the landlock- and seatbelt-tagged code and its test
+  files **compile and vet**; it does not run a single landlock-tagged test. Until `make check` is
+  green on the devbox, the Linux execution paths of Phases 5 and 5-review-fixes are unproven —
+  this is the owner action that closes that gap.
 - **Live Auto-confined deliverable run on Windows**, if an LLM endpoint is reachable from that
   machine. The ADR 0020 backend itself is proven natively (escape battery + the real `Terminal`
   tool under `platform.NewConfiner()`, item 8's live evidence); an end-to-end deliverable
