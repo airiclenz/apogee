@@ -24,11 +24,16 @@ type hostRules struct {
 	// envKeys are the variables a process on this platform needs in order to start and
 	// behave normally, over and above whatever allowlist a caller names (see ScopeEnv).
 	envKeys []string
-	// longPath resolves an 8.3 short path ("C:\PROGRA~1") to its long form. It is nil in
-	// the pure rule sets — the shared tests inject a deterministic fake — and wired to the
-	// real OS resolver by Current on Windows. A nil resolver means short names are simply
-	// not comparable, which Contains reports as "not contained" rather than guessing.
-	longPath func(string) string
+	// longPath resolves an 8.3 short path ("C:\PROGRA~1") to its long form, reporting
+	// whether it ANSWERED: ok is true when every 8.3-shaped component was expanded or
+	// verified against the disk — including verified UNCHANGED, since a directory
+	// genuinely named like a short name (demo~1) is its own long name — and false when it
+	// could not resolve (no existing ancestor covering the short-shaped components, API
+	// failure). It is nil in the pure rule sets — the shared tests inject a deterministic
+	// fake — and wired to the real OS resolver by Current on Windows. A nil resolver means
+	// short names are simply not comparable, which Contains reports as "not contained"
+	// rather than guessing.
+	longPath func(string) (string, bool)
 }
 
 // posixRules is the POSIX rule set (Linux, macOS and the other Unix targets): `sh -c`,
@@ -187,10 +192,15 @@ func (r hostRules) split(p string) (anchor string, parts []string, ok bool) {
 			if r.longPath == nil {
 				return "", nil, false // an 8.3 name with no resolver: reject, never guess
 			}
-			p = strings.ReplaceAll(r.longPath(p), "/", sep)
-			if hasShortName(p, sep) {
-				return "", nil, false // the resolver could not expand it either
+			long, resolved := r.longPath(p)
+			if !resolved {
+				return "", nil, false // the resolver could not expand or verify it: reject, never guess
 			}
+			// The resolver ANSWERED — every short-shaped component was expanded or verified
+			// on the disk — so its result is trusted as it stands. It may still LOOK like an
+			// 8.3 name: a directory genuinely named demo~1 IS its own long name, and re-running
+			// the shape test here would misread that authoritative success as failure.
+			p = strings.ReplaceAll(long, "/", sep)
 		}
 	}
 

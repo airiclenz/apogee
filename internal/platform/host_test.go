@@ -295,14 +295,40 @@ func TestContainsRefusesUnresolvableShortNames(t *testing.T) {
 	// With a resolver wired (what Current does on Windows) the short name normalises and
 	// the containment is answered honestly.
 	resolved := windowsRules()
-	resolved.longPath = func(p string) string {
-		return strings.ReplaceAll(p, `PROGRA~1`, `Program Files`)
+	resolved.longPath = func(p string) (string, bool) {
+		if !strings.Contains(p, `PROGRA~1`) {
+			return p, false
+		}
+		return strings.ReplaceAll(p, `PROGRA~1`, `Program Files`), true
 	}
 	if !resolved.Contains(`C:\Program Files`, `C:\PROGRA~1\Go`) {
 		t.Error(`Contains("C:\Program Files", "C:\PROGRA~1\Go") with a resolver = false, want true`)
 	}
 	if resolved.Contains(`C:\Program Files`, `C:\PROGRA~2\Go`) {
 		t.Error("Contains matched a short name the resolver could not expand, want refusal")
+	}
+}
+
+func TestContainsTrustsAnAuthoritativeUnchangedResolution(t *testing.T) {
+	t.Parallel()
+
+	// A directory GENUINELY named like a short name (demo~1) is its own long name: the OS
+	// resolver answers with the input unchanged, and that authoritative success must not be
+	// misread as failure — re-running the shape test on the answer would refuse a perfectly
+	// resolvable workspace into Gate mode (ADR 0020 §6 rejects only what genuinely cannot
+	// be normalised).
+	genuine := windowsRules()
+	genuine.longPath = func(p string) (string, bool) { return p, true }
+	if !genuine.Contains(`C:\Work\demo~1`, `C:\Work\demo~1\src\main.go`) {
+		t.Error(`Contains("C:\Work\demo~1", child) with an authoritative unchanged answer = false, want true`)
+	}
+
+	// A resolver that could NOT answer still rejects — today's behaviour, unchanged: an
+	// unverified short-shaped name might alias anything.
+	failing := windowsRules()
+	failing.longPath = func(p string) (string, bool) { return p, false }
+	if failing.Contains(`C:\Work\demo~1`, `C:\Work\demo~1\src`) {
+		t.Error("Contains matched a short-shaped path the resolver could not verify, want refusal")
 	}
 }
 

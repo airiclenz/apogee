@@ -18,14 +18,13 @@ import (
 // short name.
 
 // winTestRules is the Windows rule table with a deterministic long-path resolver, so an 8.3
-// short name resolves exactly when the test says it does.
+// short name resolves exactly when the test says it does: a hit in long is an authoritative
+// answer, a miss is a resolver that could not answer (the real seam's ok=false).
 func winTestRules(long map[string]string) hostRules {
 	rules := windowsRules()
-	rules.longPath = func(p string) string {
-		if expanded, ok := long[p]; ok {
-			return expanded
-		}
-		return p
+	rules.longPath = func(p string) (string, bool) {
+		expanded, ok := long[p]
+		return expanded, ok
 	}
 	return rules
 }
@@ -185,6 +184,15 @@ func TestWindowsBoxRootsRefusesUnresolvableShortName(t *testing.T) {
 	}
 	if _, err := windowsBoxRoots(resolving, domain.ConfinementBox{WorkspaceRoot: `C:\PROGRA~1`}, []string{`C:\Program Files`}); err == nil {
 		t.Error("a short name resolving TO the protected location itself was accepted; want a refusal")
+	}
+
+	// A root GENUINELY named like a short name comes back from the resolver unchanged —
+	// demo~1 IS its own long name. That is an authoritative answer, not a failure, and the
+	// box is accepted rather than forced into Gate mode (ADR 0020 §6 rejects only what
+	// genuinely cannot be normalised).
+	genuine := winTestRules(map[string]string{`C:\work\demo~1`: `C:\work\demo~1`})
+	if _, err := windowsBoxRoots(genuine, domain.ConfinementBox{WorkspaceRoot: `C:\work\demo~1`}, []string{`C:\Program Files`}); err != nil {
+		t.Errorf("a genuinely tilde-named root the resolver verified unchanged was refused: %v", err)
 	}
 }
 

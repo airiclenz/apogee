@@ -397,7 +397,21 @@ record on disk ⇒ the warning appears on stderr and the report still renders; `
 migration story explains itself; no inert flags on `probe model`.
 **Commit:** `fix(cli): probe model report matches the disk; drop the inert --workspace flag`
 
-## 8. A directory genuinely named like a short name is containable
+## 8. A directory genuinely named like a short name is containable — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): The item's two sentences about ok conflict for a partially resolved
+path (existing prefix resolved, short-SHAPED component left in the nonexistent tail):
+"every component expanded or verified" says ok=false, "ok is false only when nothing at
+all was resolvable" says ok=true. Implemented the former — `longPathName` reports ok=false
+whenever an 8.3-shaped component remains in the unresolved tail — because an unverified
+short-shaped name might alias anything (e.g. an existing PROGRA~1 whose expansion failed
+would otherwise pass the guardrail as lexically "not contained"), and this preserves
+today's rejections for every case except the genuinely-named existing directory the item
+fixes. Mutation check demonstrated natively: with split's pre-fix shape re-test
+reinstated after an ok=true answer, all three new tests FAIL
+(`TestWindowsGenuinelyTildeNamedRootIsContainable` on Contains AND the guardrail refusal,
+`TestContainsTrustsAnAuthoritativeUnchangedResolution`, and the new genuine-name check in
+`TestWindowsBoxRootsRefusesUnresolvableShortName`); mutation reverted, suite green.
 
 **What:** (Review: Medium "authoritative resolution misread as failure".) `split`
 (`internal/platform/host.go:186-193`) rejects a path when the resolver's output still has the

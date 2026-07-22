@@ -160,6 +160,55 @@ func TestWindowsConfineRefusesAGuardrailedRoot(t *testing.T) {
 	}
 }
 
+func TestWindowsGenuinelyTildeNamedRootIsContainable(t *testing.T) {
+	// A directory literally named demo~1 IS its own long name, so GetLongPathName answers
+	// with the input unchanged — an authoritative success the split used to misread as
+	// failure, refusing the box into Gate mode. With the longPath seam carrying ok, the
+	// verified name is contained, the guardrail accepts it, and the label pass runs; a
+	// short name nothing on the disk can verify is still refused.
+	parent := t.TempDir()
+	root := filepath.Join(parent, "demo~1")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatalf("mkdir %q: %v", root, err)
+	}
+
+	if !Current().Contains(root, filepath.Join(root, "src", "main.go")) {
+		t.Errorf("Contains(%q, child) = false, want true — the OS resolver verified the name as its own long form", root)
+	}
+
+	c := newTokenConfiner(t.TempDir())
+	t.Cleanup(func() { _ = c.Close() })
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: root}); err != nil {
+		t.Fatalf("labelBox(%q) refused a genuinely tilde-named workspace: %v", root, err)
+	}
+	if label, _ := readLabelSDDL(root); !isLowLabelSDDL(label) {
+		t.Errorf("root label = %q while the box is up, want apogee's Low label — the label pass must run", label)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close (teardown): %v", err)
+	}
+	if label, _ := readLabelSDDL(root); label != "" {
+		t.Errorf("%q still carries a mandatory label after teardown: %q", root, label)
+	}
+
+	// The refusal half: a short-shaped name with no object behind it cannot be verified by
+	// anything, so the guardrail still fails it closed rather than comparing a guess.
+	ghost := filepath.Join(parent, "nosuch~1")
+	after := newTokenConfiner(t.TempDir())
+	t.Cleanup(func() { _ = after.Close() })
+	err := after.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ghost}, exec.Command("cmd", "/c", "echo hi"))
+	if err == nil || !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Fatalf("Confine(%q) = %v; want an ErrConfinementUnavailable refusal for an unverifiable short name", ghost, err)
+	}
+	if !strings.Contains(err.Error(), "cannot resolve") {
+		t.Errorf("err = %v; want the unresolvable-path refusal, so this pins the guardrail and not some other check", err)
+	}
+}
+
 func TestWindowsNoJournalHomeRefusesToLabel(t *testing.T) {
 	// ADR 0020 §2's invariant with its last bypass closed: the journal is the ONLY record of
 	// the disk mutation this backend makes, so a backend that has nowhere to write one must

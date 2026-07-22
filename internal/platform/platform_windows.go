@@ -26,26 +26,32 @@ func currentRules() hostRules {
 }
 
 // longPathName expands an 8.3 short path ("C:\PROGRA~1\Go") to its long form through
-// kernel32's GetLongPathNameW.
+// kernel32's GetLongPathNameW, reporting whether the answer is AUTHORITATIVE — the ok the
+// longPath seam requires (hostRules.longPath).
 //
 // That call is only defined for a path that EXISTS, and a confinement box is routinely
 // asked about a file that does not exist yet, so the expansion walks up to the longest
-// existing prefix and re-appends the unresolved tail. Nothing resolvable at all (a volume
-// that never generated short names, a path with no existing ancestor) comes back
-// unchanged: Contains then reports "not contained" rather than matching a name it could
-// not verify, which is the safe answer for both of its callers — a root it cannot resolve
-// is neither collapsed into another root nor waved past a labelling guardrail.
-func longPathName(p string) string {
+// existing prefix and re-appends the unresolved tail. ok is true when every 8.3-SHAPED
+// component fell inside the resolved prefix: GetLongPathNameW expanded or verified each
+// one, and a component it verified UNCHANGED is a directory genuinely named like a short
+// name (demo~1) — its own long form, not a failure. ok is false when a short-shaped
+// component is left in the unresolved tail, or nothing at all was resolvable (a path with
+// no existing ancestor, an API failure): such a name might alias anything — PROGRA~1 is
+// "Program Files" on one machine and "Program Files (x86)" on the next — so split rejects
+// it and Contains reports "not contained" rather than matching a name it could not
+// verify, which is the safe answer for both of its callers: a root it cannot resolve is
+// neither collapsed into another root nor waved past a labelling guardrail.
+func longPathName(p string) (string, bool) {
 	if !strings.Contains(p, "~") {
-		return p
+		return p, true // nothing short-shaped to expand: the input is its own answer
 	}
 	for current, tail := p, ""; ; {
 		if long, ok := expandShortPath(current); ok {
-			return filepath.Join(long, tail)
+			return filepath.Join(long, tail), !hasShortName(tail, `\`)
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return p // reached the volume root with nothing resolvable
+			return p, false // reached the volume root with nothing resolvable
 		}
 		tail = filepath.Join(filepath.Base(current), tail)
 		current = parent
