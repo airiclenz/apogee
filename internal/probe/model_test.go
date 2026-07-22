@@ -2,7 +2,6 @@ package probe
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -52,20 +51,6 @@ func TestModelReportStatesTheFindings(t *testing.T) {
 		if !strings.Contains(m.Report(), want) {
 			t.Errorf("report does not state %q:\n%s", want, m.Report())
 		}
-	}
-}
-
-// GatherModel WRITES NOTHING — the persistence is the caller's explicit act, which is what makes
-// --no-save an off-switch rather than a rollback.
-func TestGatherModelWritesNothing(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-
-	_ = gatherModel(t, script{nativeTools: true, structured: true, chain: true}, "fake-model")
-
-	entries, err := os.ReadDir(home)
-	if err != nil || len(entries) != 0 {
-		t.Errorf("the battery touched disk (entries=%v, err=%v); only the caller may write", entries, err)
 	}
 }
 

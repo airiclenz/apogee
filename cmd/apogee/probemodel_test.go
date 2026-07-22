@@ -416,6 +416,100 @@ func TestProbeModelRefusesWithoutAnEndpoint(t *testing.T) {
 	}
 }
 
+// The battery is never entered against a server that cannot name the model to probe. Both
+// pre-spend gates refuse BEFORE the first /chat/completions call, for the same reason ADR 0021 §4
+// states the costs up front: a probe that spends tokens and then reports that it could not tell
+// what it probed has already charged for the answer it failed to give. Nothing is recorded
+// either — an identity may not be minted from a discovery that did not happen.
+func TestProbeModelRefusesBeforeSpendingTokens(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		wantErr string
+	}{
+		{
+			// An empty model list is a discovery FAILURE by the provider's own contract
+			// (Discover rejects a server that advertises nothing), so the refusal that fires
+			// is discovery's — one rung above errProbeModelNeedsLabel. Pinning the wording is
+			// what makes this row catch a mutation of the `derr != nil` branch: drop that
+			// branch and the run falls through to the label gate's different sentence.
+			name:    "the server advertises no model",
+			status:  http.StatusOK,
+			body:    `{"data":[]}`,
+			wantErr: "server returned no models",
+		},
+		{
+			name:    "discovery itself fails",
+			status:  http.StatusInternalServerError,
+			body:    `{"error":"boom"}`,
+			wantErr: "upstream HTTP 500",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var chatCalls int
+			srv := discoveryUpstream(t, tc.status, tc.body, &chatCalls)
+			configHome := t.TempDir()
+
+			err := probeModelRefusal(t, configHome, "--endpoint", srv.URL)
+
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %v; want the refusal to name %q", err, tc.wantErr)
+			}
+			if chatCalls != 0 {
+				t.Errorf("the refusal spent %d battery call(s); the gate must land before the first one", chatCalls)
+			}
+			if entries, readErr := os.ReadDir(configHome); readErr != nil || len(entries) != 0 {
+				t.Errorf("a refused probe wrote into the apogee home (entries=%v, err=%v)", entries, readErr)
+			}
+		})
+	}
+}
+
+// discoveryUpstream is a fake Upstream whose /v1/models answers with status and body, and which
+// counts every battery call it is asked for — that counter is what turns "the command failed"
+// into "the command failed before spending anything".
+func discoveryUpstream(t *testing.T, status int, body string, chatCalls *int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		case "/v1/chat/completions":
+			*chatCalls++
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// probeModelRefusal runs `apogee probe model` against a hermetic apogee home EXPECTING a refusal
+// and returns it. A nil error is the failure: it means the run continued past the gate under test.
+func probeModelRefusal(t *testing.T, configHome string, args ...string) error {
+	t.Helper()
+	cmd := newProbeCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(append([]string{"model", "--config", configHome, "--workspace", t.TempDir()}, args...))
+
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("probe model succeeded; the refusal gate did not fire:\n%s", out.String())
+	}
+	return err
+}
+
 // `apogee probe` (the free half) never runs the battery, even with a perfectly reachable
 // endpoint sitting in the config: the model half is an explicit act, never a side effect of a
 // port answering (ADR 0021 §1).

@@ -379,7 +379,21 @@ existing `DirectLowMatchOffers` case only offers.
 the record-present startup path is pinned by a test.
 **Commit:** `fix(cli): probe model's auto-apply claim passes catalogue validation`
 
-## 9. The pre-spend refusal gates are tested; the vacuous writes-nothing test is fixed
+## 9. The pre-spend refusal gates are tested; the vacuous writes-nothing test is fixed — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): one deviation and one finding. (a) `{"data":[]}` does NOT reach
+`errProbeModelNeedsLabel`: `provider.Discover` rejects an empty model list itself
+(`discovery.go:92–94`, "server returned no models"), so the refusal that fires on that payload is
+the discovery branch and the test row asserts THAT wording. Both rows (empty list, HTTP 500) were
+mutation-checked against a build with the `derr != nil` return deleted — both then fail, reporting
+the label refusal instead, so the discovery gate is genuinely pinned. (b) Consequently
+`errProbeModelNeedsLabel` (`probemodel.go:105–110`) is unreachable through `Discover` today:
+`toModelInfo` drops id-less entries, and a list that ends up empty is an error, so no `/v1/models`
+payload can yield a nil error with an empty `ActiveModel`. It is a defensive gate no test can
+exercise without a production seam, which this tests-only item may not add — left as is and
+recorded here. `TestGatherModelWritesNothing` was DELETED (the item's recommended outcome): it
+asserted an unrelated `t.TempDir()` was empty while `GatherModel` takes no path, and the honest
+contract is covered by `TestProbeModelNoSaveWritesNothing` in `cmd/apogee`.
 
 **What:** (Review: Mediums "refusal gates untested" + "`TestGatherModelWritesNothing` asserts
 nothing".) Tests only, no production change. Cover `probemodel.go:98–110`: an `httptest` server
