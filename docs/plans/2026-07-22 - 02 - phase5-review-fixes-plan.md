@@ -481,7 +481,14 @@ with its first real caller (the plan-item-6 acceptance rule the Phase 5 run itse
 Linux and natively on Windows; grep for `ExecExt` finds nothing.
 **Commit:** `test(platform): adversarial quoting rows; drop the caller-less ExecExt`
 
-## 12. Record the confined-`%TEMP%`/writable-paths gap where users and planners will find it
+## 12. Record the confined-`%TEMP%`/writable-paths gap where users and planners will find it — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): the README caveat is three sentences rather than the item's literal one — the
+bare claim ("workspace-scoped writes only") reads as a scoping nicety without the reason a Low
+process cannot write to an unmarked directory at all, which is what makes `go build` / `pip` /
+`npm` fail outright rather than degrade. It is appended to the existing "**On Windows the fence is
+a token…**" paragraph, after its "two things worth knowing" list, and names `TODO.md` as the
+follow-on's home. No other doc touched.
 
 **What:** (Review: Medium "no `%TEMP%` story, `ConfineWritablePaths` has no writer" — docs only,
 per Settled design.) Add a named, dated `TODO.md` follow-on: *"Windows Auto: box-local `%TEMP%` /
