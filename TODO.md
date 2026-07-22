@@ -436,6 +436,38 @@ strictly easier to reason about.
 
 ---
 
+## Validated-set twin ladders — probe and startup ask the same question twice
+
+**Status:** recorded 2026-07-22 (Phase 5 review fixes,
+`docs/plans/2026-07-22 - 02 - phase5-review-fixes-plan.md` item 8). Flagged for
+**`/improve-codebase-architecture`** — a consolidation, not a defect: the divergence the review
+found is fixed, this entry is about the shape that allowed it.
+
+Two functions in `cmd/apogee` answer "would this Validated-set entry apply for this model?":
+
+- `resolveValidatedSet` (`cmd/apogee/validatedsets.go`) — the startup decision that actually
+  folds the set into `Config.EnableMechanisms`.
+- `autoApplyKeys` (`cmd/apogee/probemodel.go`) — the same ladder run twice by
+  `apogee probe model` (once at the confidence the record will carry, once without it) so the
+  report can name the promotion it just performed.
+
+They walk the same rungs in the same order — off-switches, `validated.Match`, the explicit
+`mechanisms:` precedence, `validated.Validate` against `mechanisms.Descriptors()` — but as two
+hand-maintained copies. The review found them already diverged: the probe half was missing the
+catalogue-validation rung entirely, so `probe model` could claim an auto-apply the next session
+start would refuse. Item 8 added the missing rung; nothing prevents the next one from drifting.
+
+**The shape when picked up:** one shared "would this entry apply, and why not" function returning
+a decision value (applied / offered / suppressed-with-reason), with both call sites rendering that
+value in their own voice — the startup notices (`appliedNotice` / `offerNotice` /
+`suppressedNotice`) and the probe report's `SaveOutcome.Suppressed` line. The two call sites'
+genuine differences must survive it: startup returns an error for the dangling alias (loud by
+design) where the probe stays silent, and the probe needs the SAME question answered at two
+confidences to compute the promotion. Sources: ADR 0016 §5 + its 2026-07-19 realisation,
+ADR 0021 §4.
+
+---
+
 ## Phase-5 verification leftovers — the owner-run passes this machine cannot perform
 
 **Status:** carried forward 2026-07-22 at the Phase-5 close-out, out of the "Owner-run checklist"

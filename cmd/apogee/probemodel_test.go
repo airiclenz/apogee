@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/probe"
 )
@@ -275,6 +276,102 @@ func TestProbeModelKeepsAnAliasedSetApplying(t *testing.T) {
 	if len(after) != len(before) {
 		t.Errorf("probing changed the aliased set from %d mechanisms to %d; it must change nothing",
 			len(before), len(after))
+	}
+}
+
+// An entry the live catalogue cannot assemble does not auto-apply at startup — resolveValidatedSet
+// skips it whole — so `probe model` must not claim it will. The report names the skip instead,
+// which is the only way this command's promise and the next session's behaviour can be the same
+// answer about the same entry.
+func TestProbeModelDoesNotClaimAnEntryStartupWillSkip(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstream(t)
+	configHome := t.TempDir()
+	const key = "ghost-set-model"
+
+	roots, err := resolveRoots(configHome, t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve roots: %v", err)
+	}
+	writeUserValidatedEntry(t, roots.validated, key,
+		`{"version":1,"key":"`+key+`","set":["ghost_mechanism"],"evidence":{"campaign":"c"}}`)
+
+	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--model", key)
+
+	if strings.Contains(report, "AUTO-APPLIES") {
+		t.Errorf("the report claims an auto-apply startup will refuse:\n%s", report)
+	}
+	for _, want := range []string{
+		"skips validated-set entry " + strconv.Quote(key),
+		"ghost_mechanism",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report does not name the invalid entry (%q missing):\n%s", want, report)
+		}
+	}
+
+	// The claim itself, at the seam that makes it: nothing applied, nothing promoted, the skip named.
+	opts := baseOpts(key)
+	opts.endpoint = srv.URL
+	keys, promoted, suppressed := autoApplyKeys(probe.Model{
+		Endpoint:    srv.URL,
+		Model:       key,
+		Fingerprint: domain.ModelFingerprint{Label: key, Confidence: domain.ConfidenceMedium},
+	}, opts, roots.validated)
+	if len(keys) != 0 || promoted {
+		t.Errorf("autoApplyKeys claimed keys=%v promoted=%v for an entry startup skips", keys, promoted)
+	}
+	if !strings.Contains(suppressed, "ghost_mechanism") {
+		t.Errorf("suppressed = %q; want the catalogue defect named", suppressed)
+	}
+}
+
+// The startup half of the same promise: with a probe record stored for this endpoint + label, the
+// identity resolves at medium confidence and the shipped set that is merely OFFERED without one
+// APPLIES — the rung `probe model` sells, proven at the startup path that has to deliver it.
+func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
+	t.Parallel()
+	const endpoint = "http://127.0.0.1:65535"
+	configHome := t.TempDir()
+	roots, err := resolveRoots(configHome, t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve roots: %v", err)
+	}
+	opts := baseOpts(gemmaKey)
+	opts.endpoint = endpoint
+
+	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
+		Endpoint:   endpoint,
+		ModelLabel: gemmaKey,
+		ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
+		Behavior:   "probe:1:tools+json+chain",
+	}); err != nil {
+		t.Fatalf("save probe record: %v", err)
+	}
+
+	set, notices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
+	if err != nil {
+		t.Fatalf("resolveValidatedSet: %v", err)
+	}
+	if len(set) == 0 {
+		t.Fatalf("the stored record must promote the offered set to applied; notices=%v", notices)
+	}
+	if !noticeContains(notices, "Validated set for "+gemmaKey+" applied") {
+		t.Errorf("want the applying notice, got %v", notices)
+	}
+	if noticeContains(notices, "To apply it") {
+		t.Errorf("the offer notice must be gone once a record exists: %v", notices)
+	}
+}
+
+// writeUserValidatedEntry seeds one user-local Validated-set entry in a hermetic apogee home.
+func writeUserValidatedEntry(t *testing.T, validatedDir, name, body string) {
+	t.Helper()
+	if err := os.MkdirAll(validatedDir, 0o700); err != nil {
+		t.Fatalf("mkdir validated dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(validatedDir, name+".json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write validated entry: %v", err)
 	}
 }
 

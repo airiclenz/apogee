@@ -348,7 +348,19 @@ is invoked when (a) `Confine` fails (inject a failing confiner via `domain.Confi
 **Acceptance:** no path through `runSubprocess` exits without `release` having run.
 **Commit:** `fix(tools): release the Job Object on confine- and start-failure paths`
 
-## 8. `probe model`'s auto-apply claim passes catalogue validation; startup promotion proven
+## 8. `probe model`'s auto-apply claim passes catalogue validation; startup promotion proven — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): three points of detail. (a) The `suppressed` line mirrors
+`resolveValidatedSet`'s warning by carrying the catalogue's own reason verbatim (`validated.Validate`'s
+error), not the warning's literal `apogee: skipping validated-set entry …` prefix — `Suppressed` is
+rendered mid-sentence by `probe.Model.effectLine` ("this model now resolves at medium confidence,
+but …"), where a second `apogee:` prefix would read as a stray notice. The rendered line is "…but
+the next session start skips validated-set entry "k": <reason>; it is not applied". (b) Test (a) is
+end-to-end through `runProbeModel` (which is what stores the record) AND asserts at the
+`autoApplyKeys` seam; it was mutation-checked against the pre-fix code, where the report claims
+`AUTO-APPLIES`. (c) Test (b) needs `opts.endpoint` set beside `baseOpts(gemmaKey)` — a probe record
+is keyed on endpoint + label, so `resolveValidatedSet` cannot find it from the model id alone.
+Both tests live in `probemodel_test.go`, next to the promotion tests they complete.
 
 **What:** (Review: Medium "diverged duplicate of the startup ladder" + Medium test gap "startup
 half untested".) In `cmd/apogee/probemodel.go` (`autoApplyKeys`, `:200`), add the missing

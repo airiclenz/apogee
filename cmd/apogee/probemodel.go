@@ -11,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/validated"
@@ -195,8 +196,9 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 // the record will carry and once at the confidence this model resolves to WITHOUT it. The
 // difference between the two answers is the promotion, and computing it rather than assuming it
 // is what keeps the report's effect line true on a machine where an alias was already applying
-// the set. Every data defect is silent here: this is a courtesy line in a report, and a broken
-// user entry is already loud at the startup path that owns it.
+// the set. A LOADING defect stays silent here: this is a courtesy line in a report, and a broken
+// user file is already loud at the startup path that owns it. A catalogue defect in the entry
+// that would otherwise apply is named instead of dropped, because that one changes the answer.
 func autoApplyKeys(m probe.Model, opts options, validatedDir string) (keys []string, promoted bool, suppressed string) {
 	// The session-level off-switches resolveValidatedSet checks first. They hold whatever the
 	// record says, so the report must name them rather than promising an effect startup will
@@ -219,6 +221,18 @@ func autoApplyKeys(m probe.Model, opts options, validatedDir string) (keys []str
 	if len(opts.mechanisms) > 0 {
 		return nil, false, fmt.Sprintf("Validated set %s matches, but your explicit mechanisms: config takes "+
 			"precedence (whole-set-or-nothing), so it is not applied", withRecord.Entry.Key)
+	}
+
+	// The catalogue check startup runs as its last rung (resolveValidatedSet's Validate call).
+	// Asking it HERE too is what keeps this report and the next session start from disagreeing
+	// about the same entry: a set this build cannot assemble — an unknown ID after the catalogue
+	// evolved, a now-invalid stacking — is skipped whole at startup, so claiming it auto-applies
+	// would promise an effect that never arrives. Named rather than silent, and carrying the
+	// catalogue's own reason — the text startup's skip notice prints — so the two surfaces read
+	// as one answer about one entry.
+	if verr := validated.Validate(withRecord.Entry, mechanisms.Descriptors()); verr != nil {
+		return nil, false, fmt.Sprintf("the next session start skips validated-set entry %q: %v; it is not applied",
+			withRecord.Entry.Key, verr)
 	}
 
 	// The counterfactual: the same label at the tier it would resolve to with no record stored.
