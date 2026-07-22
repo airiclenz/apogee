@@ -97,26 +97,59 @@ type tokenConfiner struct {
 
 // NewConfiner returns the host's real Confiner backend for this OS
 // (confinement-execution-contract §2.6/§9): the Windows restricted-low-integrity-token
-// backend. Below the version floor it returns denyConfiner instead, so a below-floor Windows
-// host is exactly today's Windows host — {false, false}, the subprocess surface gated, and
-// the existing degradation notice firing unchanged, with no new wording and no special case
-// (ADR 0020 §5).
+// backend, constructed for a SESSION. Below the version floor it returns denyConfiner
+// instead, so a below-floor Windows host is exactly today's Windows host — {false, false},
+// the subprocess surface gated, and the existing degradation notice firing unchanged, with
+// no new wording and no special case (ADR 0020 §5).
 //
 // Construction performs no disk I/O beyond finishing an interrupted PREVIOUS run's restore:
-// `apogee probe host` constructs a real backend and ADR 0021 §1 pins it free, offline and
-// read-only, so labelling belongs to Confine and never to the constructor. The recovery path
-// reads one directory that normally does not exist and writes only when a crashed run
-// actually left labels behind — the state ADR 0020 §2 requires the next NewConfiner to
-// finish cleaning up.
-func NewConfiner() domain.Confiner {
-	if _, _, build := windows.RtlGetNtVersionNumbers(); build < windowsFloorBuild {
-		return NewDenyConfiner()
-	}
-	return newTokenConfiner(confinementJournalHome())
+// labelling belongs to Confine and never to the constructor. The recovery path reads one
+// directory that normally does not exist and writes only when a crashed run actually left
+// labels behind — the state ADR 0020 §2 requires the next NewConfiner to finish cleaning up.
+// A caller that must not write at all asks for NewReportConfiner instead.
+func NewConfiner() domain.Confiner { return selectWindowsConfiner(newTokenConfiner) }
+
+// NewReportConfiner returns the backend `apogee probe host` DESCRIBES — the same selection
+// NewConfiner makes, minus the crash-recovery pass (ADR 0021 §1).
+//
+// The host report is pinned free, offline and read-only on three surfaces (ADR 0021 §1, the
+// README, the command's own Long text) and that pledge is absolute: no exception is carved
+// for Windows. Recovering here would also destroy the very thing the report exists to state
+// — ADR 0020 §2 promises the report SURFACES an outstanding journal, and a constructor that
+// reverted and deleted it first would make that line unreachable for exactly the interrupted
+// run it was written for. Nothing is lost by waiting: the journal survives until a real
+// session's constructor finishes the restore.
+func NewReportConfiner() domain.Confiner {
+	return selectWindowsConfiner(newTokenConfinerWithoutRecovery)
 }
 
-// newTokenConfiner builds the backend against a given apogee home (the journal's location),
-// mints the token, and finishes any outstanding restore.
+// selectWindowsConfiner applies the version floor and hands the surviving hosts to build,
+// which is the caller's choice of session (recovering) or report (recovery-free)
+// construction. The floor decision lives in ONE place so the two selectors cannot disagree
+// about which hosts get the token backend.
+func selectWindowsConfiner(build func(home string) *tokenConfiner) domain.Confiner {
+	if _, _, buildNumber := windows.RtlGetNtVersionNumbers(); buildNumber < windowsFloorBuild {
+		return NewDenyConfiner()
+	}
+	return build(confinementJournalHome())
+}
+
+// newTokenConfiner builds the SESSION backend against a given apogee home (the journal's
+// location), mints the token, and finishes any outstanding restore — ADR 0020 §2's
+// interrupted-cleanup remedy, which is a write and therefore belongs to a session and not to
+// a report (NewReportConfiner).
+func newTokenConfiner(home string) *tokenConfiner {
+	c := newTokenConfinerWithoutRecovery(home)
+	if home != "" {
+		recoverLabelJournals(home)
+	}
+	return c
+}
+
+// newTokenConfinerWithoutRecovery builds the backend and mints the token, touching the disk
+// NOWHERE: it resolves the journal's path without reading, writing or removing anything under
+// it. It is what the probe path constructs, so the host report can read the journal directory
+// and report what it finds rather than consuming it.
 //
 // home may be "" — os.UserHomeDir failed, so there is no user profile to write a journal
 // under, or a test deliberately withholds one. Construction and Capabilities are unaffected:
@@ -126,7 +159,7 @@ func NewConfiner() domain.Confiner {
 // contract §4 demotes to a forced Gate. The invariant is ADR 0020 §2's — the one disk mutation
 // apogee performs is only ever made against a record of how to undo it, so no journal means no
 // label rather than an unrevertable one.
-func newTokenConfiner(home string) *tokenConfiner {
+func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 	rules := currentRules()
 	c := &tokenConfiner{
 		rules:     rules,
@@ -135,7 +168,6 @@ func newTokenConfiner(home string) *tokenConfiner {
 	}
 	if home != "" {
 		c.journalPath = labelJournalPath(home, os.Getpid())
-		recoverLabelJournals(home)
 	}
 
 	token, err := mintRestrictedLowToken()

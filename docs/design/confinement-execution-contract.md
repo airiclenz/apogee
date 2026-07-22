@@ -619,8 +619,13 @@ verbatim below the floor — no new wording, no new surface.
   optional-interface assertion. A **journal** written under the apogee home *before* the first label
   makes an interrupted cleanup recoverable by the next `NewConfiner()` and visible to
   `apogee probe host`.
-- **Construction performs no disk I/O.** `apogee probe host` constructs a real backend
-  (`cmd/apogee/probe.go:79`) and is pinned free/offline/read-only by ADR 0021 §1.
+- **Construction performs no disk I/O**, with the single exception of the recovery pass above —
+  which is why the selector has two spellings. `NewConfiner()` is the SESSION constructor and
+  finishes an outstanding restore; `NewReportConfiner()` is what `cmd/apogee/probe.go` builds, and
+  it skips recovery so the host report stays free/offline/read-only as ADR 0021 §1 pins it, and so
+  the residue line reports the outstanding journal instead of consuming it (ADR 0020 §2). The
+  other three backends define `NewReportConfiner()` as `NewConfiner()` verbatim: nothing about
+  constructing them touches the user's disk.
 - **`NetworkEgress` is false and a network-deny box fails closed** — a non-empty `NetworkAllow`
   yields `ErrConfinementUnavailable`, mirroring `landlock_linux.go`'s `networkDenyDecision`.
 - **Teardown of the process tree is §2.4's Windows half** (the Job Object, owned by the execution

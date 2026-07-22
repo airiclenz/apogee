@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,61 @@ func TestProbeHostChildMatchesTheParent(t *testing.T) {
 	}
 	if !strings.Contains(parent, "no endpoint is configured") {
 		t.Errorf("with no endpoint set anywhere, the report should say so:\n%s", parent)
+	}
+}
+
+// An interrupted Windows run leaves mandatory labels on the disk and a journal describing how
+// to undo them, and ADR 0020 §2 makes the host report the surface that says so off-session. The
+// report must therefore READ that state and leave it exactly where it found it: constructing
+// the backend through the recovery path would revert the labels and delete the journal before
+// the residue line could be composed, so the one line written for an interrupted run could
+// never fire — and `probe`'s read-only pledge (ADR 0021 §1, the README, the command's own Long
+// text) would be false besides.
+//
+// The journal home is deliberately independent of --config (a crashed run's record must be
+// findable without one), so redirecting the user profile is the only way to plant one; the
+// layout below mirrors platform's confinementJournalHome/labelJournalPath.
+func TestProbeReportsConfinementResidueWithoutHealingIt(t *testing.T) {
+	// Not parallel: it redirects the process environment os.UserHomeDir reads.
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // POSIX
+	t.Setenv("USERPROFILE", home) // Windows
+
+	labelled := filepath.Join(home, "crashed-workspace")
+	journal := filepath.Join(home, ".apogee", "confinement", "labels-0.json")
+	if err := os.MkdirAll(filepath.Dir(journal), 0o700); err != nil {
+		t.Fatalf("create the journal directory: %v", err)
+	}
+	// PID 0 owns no process on any OS, so recovery would certainly treat this as an
+	// interrupted run's journal and consume it — which is what makes the assertions below a
+	// real distinction rather than an accident of whichever PID happened to be free.
+	raw, err := json.Marshal(map[string]any{
+		"pid":     0,
+		"entries": []map[string]any{{"path": labelled, "root": true}},
+	})
+	if err != nil {
+		t.Fatalf("encode the planted journal: %v", err)
+	}
+	if err := os.WriteFile(journal, raw, 0o600); err != nil {
+		t.Fatalf("plant a journal: %v", err)
+	}
+
+	// Both spellings of the host report, because both build their probe.Inputs in the same
+	// place: the second invocation seeing the same residue is itself proof the first did not
+	// consume it.
+	for _, args := range [][]string{nil, {"host"}} {
+		report := runProbe(t, newProbeCommand(), t.TempDir(), t.TempDir(), args...)
+		if !strings.Contains(report, "labels:") || !strings.Contains(report, labelled) {
+			t.Errorf("`apogee probe %s` does not report the outstanding label journal:\n%s", strings.Join(args, " "), report)
+		}
+	}
+
+	got, err := os.ReadFile(journal)
+	if err != nil {
+		t.Fatalf("the host report consumed the label journal it exists to report: %v", err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Errorf("the journal changed under the host report:\n got %s\nwant %s", got, raw)
 	}
 }
 

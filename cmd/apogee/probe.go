@@ -71,24 +71,32 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				return err
 			}
 
+			// Mandatory labels an interrupted Windows run left on the disk — "" on every
+			// other OS and on the normal Windows path. It is read HERE, before the backend
+			// below is constructed, and it resolves the journal's own home rather than
+			// roots.config: the backend writes there under any --config, so reading the
+			// resolved root instead would let a non-default --config report a clean disk that
+			// is not. Reading the journal directory is a directory listing, so the host half
+			// stays read-only (ADR 0020 §2 / 0021 §1).
+			residue := platform.ConfinementResidue()
+
 			host := probe.GatherHost(cmd.Context(), probe.Inputs{
 				GOOS:   runtime.GOOS,
 				GOARCH: runtime.GOARCH,
-				// The host's real backend for this OS — the same constructor runRoot wires into
-				// the Agent, so the report cannot describe a backend the session would not use.
-				Confiner:           platform.NewConfiner(),
+				// The host's real backend for this OS, selected exactly as runRoot selects the
+				// one it wires into the Agent, so the report cannot describe a backend the
+				// session would not use — but built through the REPORT constructor, which
+				// performs no crash recovery. A session's constructor finishes an interrupted
+				// run's restore; doing that here would both break ADR 0021 §1's read-only
+				// pledge and revert-and-delete the journal the residue line above exists to
+				// report (ADR 0020 §2).
+				Confiner:           platform.NewReportConfiner(),
 				HostID:             platform.HostID(),
 				Workspace:          roots.workspace,
 				ConfigHome:         roots.config,
 				Endpoint:           opts.endpoint,
 				ConfineToWorkspace: opts.confineToWorkspace,
-				// Mandatory labels an interrupted Windows run left on the disk — "" on every
-				// other OS and on the normal Windows path. It resolves the journal's own home
-				// rather than roots.config: the backend writes there under any --config, so
-				// reading the resolved root instead would let a non-default --config report a
-				// clean disk that is not. Reading the journal directory is a directory listing,
-				// so the host half stays read-only (ADR 0020 §2 / 0021 §1).
-				Residue: platform.ConfinementResidue(),
+				Residue:            residue,
 			})
 			cmd.Println(host.Report())
 			return nil

@@ -348,6 +348,55 @@ func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	}
 }
 
+func TestWindowsReportConstructionLeavesAnOutstandingJournalAlone(t *testing.T) {
+	// The constructor half of ADR 0021 §1's read-only pledge. `apogee probe host` builds a real
+	// backend to describe this machine, and on Windows the SESSION constructor finishes an
+	// interrupted run's restore — a revert and a delete. Doing that on the report path would
+	// break the pledge and, worse, destroy the state the report exists to state: ADR 0020 §2
+	// promises the host report surfaces an outstanding journal, which is unreachable if the
+	// backend consumed it first. The report constructor therefore skips recovery, and its
+	// session twin still performs it (TestWindowsInterruptedRunIsRecoveredFromTheJournal), which
+	// is what makes this a real distinction rather than a no-op.
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	crashed := newTokenConfiner(home)
+	if !crashed.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to journal")
+	}
+	if err := crashed.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	journals := listLabelJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals = %v, want exactly one written BEFORE the labels", journals)
+	}
+	// Dropped on the floor (no Close) and re-owned by a dead PID: an interrupted run, which is
+	// precisely the state recovery would act on.
+	rewriteJournalPID(t, home, journals[0])
+
+	report := newTokenConfinerWithoutRecovery(home)
+	t.Cleanup(func() { _ = report.Close() })
+
+	if left := listLabelJournals(home); len(left) != 1 {
+		t.Errorf("journals = %v after the report backend was constructed, want the outstanding one untouched", left)
+	}
+	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
+		t.Errorf("the report constructor reverted %q (label = %q); the host half writes nothing", ws, label)
+	}
+	if got := confinementResidue(home); !strings.Contains(got, ws) {
+		t.Errorf("confinementResidue = %q; want the interrupted run still reportable after the report backend exists", got)
+	}
+
+	// And the deferral costs nothing: the next SESSION constructor finishes the restore, which
+	// also leaves this test's disk clean.
+	session := newTokenConfiner(home)
+	t.Cleanup(func() { _ = session.Close() })
+	if label, _ := readLabelSDDL(ws); label != "" {
+		t.Errorf("%q still labelled %q; a session constructor must finish the restore the report deferred", ws, label)
+	}
+}
+
 func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
 	// The other side of recovery: a journal owned by a process that is still running belongs
 	// to a concurrently running apogee whose labels are in use. Reverting them would un-fence

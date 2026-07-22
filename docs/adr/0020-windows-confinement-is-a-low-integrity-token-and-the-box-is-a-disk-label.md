@@ -106,7 +106,12 @@ label ACE, object- and container-inheritable, `NO_WRITE_UP`, Low — via
 - **Interrupted cleanup.** A **journal** is written under the apogee home *before* any label is
   applied, recording each path and whether it previously carried a label. A later `NewConfiner()`
   finishes an outstanding restore, and `apogee probe host` reports an outstanding journal so the
-  state is visible off-session (ADR 0021's host report is exactly the right surface). The
+  state is visible off-session (ADR 0021's host report is exactly the right surface). Those are
+  two different constructors, and deliberately so: **the report path builds the backend through
+  `NewReportConfiner()`, which skips the recovery pass** — a report that recovered would revert
+  and delete the journal before it could name it, so the very line written for an interrupted run
+  could never fire, and ADR 0021 §1's read-only pledge would be false besides. Nothing is lost by
+  deferring: the journal survives until a real session's constructor finishes the restore. The
   documented manual remedy is `icacls <root> /setintegritylevel (OI)(CI)M /T /C` — an explicit
   Medium label is behaviourally identical to no label at all.
 - **Accepted, recorded cost: a Low-labelled directory is writable by every Low-integrity process
@@ -127,9 +132,12 @@ Linux/macOS.**
   shape): at or above the version floor (§5 below) **and** the restricted Low token minted ⇒
   `{FSWrite: true, NetworkEgress: false}`. A mint failure ⇒ `{false, false}`.
 - **Construction must not touch the disk.** ADR 0021 §1 makes `apogee probe host` free, offline
-  and read-only, item 3 pinned that with a test, and `cmd/apogee/probe.go:79` constructs a real
-  `platform.NewConfiner()`. Labelling therefore belongs to `Confine` and never to the
-  constructor.
+  and read-only, item 3 pinned that with a test, and `cmd/apogee/probe.go` constructs a real
+  backend to describe the host. Labelling therefore belongs to `Confine` and never to the
+  constructor. The **one** thing a constructor does write — finishing an interrupted run's
+  restore (§2) — is why the selector has two spellings: `NewConfiner()` for a session, which
+  recovers, and `NewReportConfiner()` for the host report, which does not. **No exception to the
+  read-only pledge is carved for Windows**, on this or any other surface.
 - **A per-run labelling failure returns `ErrConfinementUnavailable` from `Confine`**, which
   contract §4's precomputed fallback demotes to a forced `Gate`. On Linux/macOS that path is
   nearly unreachable (an argv rewrite can only fail on `os.Executable()`); on Windows it is a

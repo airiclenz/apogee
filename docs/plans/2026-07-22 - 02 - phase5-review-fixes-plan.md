@@ -244,7 +244,25 @@ so `MkdirAll` fails ⇒ `Confine` returns `ErrConfinementUnavailable` AND `readL
 residue both ignore; the fail-closed flush path is pinned by a test.
 **Commit:** `fix(confine): atomic journal writes and unreadable-journal residue`
 
-## 5. DESIGN-CALL — `probe` reads residue before constructing the backend; reconcile the read-only pledge
+## 5. DESIGN-CALL — `probe` reads residue before constructing the backend; reconcile the read-only pledge — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): the owner chose the recommended option — probe-path construction performs NO
+recovery, the read-only pledge stays absolute, and no exception is added to ADR 0021, the README
+or the command's Long text. Four deviations from the item's literal text. (a) The variant is
+reachable from `cmd/apogee`, so the SELECTOR is exported — `platform.NewReportConfiner()`, defined
+in all four `confiner_*.go` files (`NewConfiner()` verbatim on the three OSes whose construction
+touches no disk); the recovery-free CONSTRUCTION it selects is the unexported
+`newTokenConfinerWithoutRecovery`, which `newTokenConfiner` now wraps with the recovery pass.
+(b) The Windows floor check moved into a shared `selectWindowsConfiner(build)` so the two
+selectors cannot disagree about which hosts get the token backend — item 10's seam extraction
+lands there instead of in `NewConfiner` itself. (c) The doc amendment landed in ADR 0020 §2/§3 and
+`confinement-execution-contract.md` §9.2, not in ADR 0021: 0021's pledge is unchanged, and the
+claims that had gone stale ("construction must not touch the disk", cited against
+`platform.NewConfiner()`) live in the other two. (d) The "windows-tagged probe host path" proof is
+an UNTAGGED `cmd/apogee` test (`TestProbeReportsConfinementResidueWithoutHealingIt`) — the probe
+path is there, it redirects `%USERPROFILE%`/`$HOME` to plant a dead-PID journal, and it runs
+natively on Windows, where it fails if the report constructor is swapped back (verified). A
+windows-tagged constructor-level test pins the same rule at the backend seam.
 
 **What:** (Review: High "`probe host` heals/destroys the residue it promises to report".) The
 mechanical half is settled: in `cmd/apogee/probe.go`, capture
