@@ -433,3 +433,43 @@ per-request or per-session (a mid-session change of tool descriptions is a histo
 question), and whether the tier or the individual battery findings (native tool calls vs. JSON
 vs. multi-step) are the better gate — the findings are strictly more informative, the tier is
 strictly easier to reason about.
+
+---
+
+## Phase-5 verification leftovers — the owner-run passes this machine cannot perform
+
+**Status:** carried forward 2026-07-22 at the Phase-5 close-out, out of the "Owner-run checklist"
+of the now-archived
+[`docs/plans/archived/2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`](docs/plans/archived/2026-07-22%20-%2000%20-%20phase5-cross-platform-hardening-plan.md)
+— read it for the full context (the ground truth, the settled design, and every work item's
+NOTES). Phase 5 is **implemented**: all ten items shipped, the whole-plan gate is green (build,
+vet on all three GOOSes, six cross targets, tests, `--help`). What is parked here is the
+**verification** the Windows execution machine physically cannot do, plus one measurement that
+wants an owner decision. Logged here rather than left in the archive so it isn't buried.
+
+- **Closeout Linux pass — `make check` on the Linux devbox.** The linux-tagged landlock tests
+  cannot run on the Windows execution machine, so that gate has only ever been proven there
+  through the cross-compile, never by running the build-tagged Linux code paths.
+- **Live Auto-confined deliverable run on Windows**, if an LLM endpoint is reachable from that
+  machine. The ADR 0020 backend itself is proven natively (escape battery + the real `Terminal`
+  tool under `platform.NewConfiner()`, item 8's live evidence); an end-to-end deliverable
+  session under Auto is what remains.
+- **Degradation notice on a below-minimum-version Windows host** (below build 17763). Recorded
+  **UNTESTED** in
+  [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)'s
+  consequences — no such host exists here, and it is only verifiable if one turns up.
+- **macOS cross-binary smoke:** `--help` plus a trivial session. Linux and Windows are each
+  covered by an execution machine; the macOS binary is cross-built and never run.
+- **OWNER CALL — whether to prune the Windows disk-label walk.** Item 8 measured what ADR 0020
+  accepted but never quantified: the label pass costs **~1 ms per object**, so a synthetic
+  5,051-object tree took **5.2 s to label and 2.2 s to revert**. It is paid once per box per
+  session (first confined command, then shutdown), but a workspace with a large `.git` or
+  `node_modules` will make that first `Confine` visibly block. It was recorded rather than tuned,
+  because pruning the walk changes the ratified box semantics; the cheap remedies are a startup
+  notice while it runs, or excluding ignored trees from it. No decision to defer to — this is the
+  owner's call.
+
+**Not repeated here:** the same checklist carried a "pre-existing, NOT Phase 5 scope" group
+(Linux landlock live enforcement on a landlock-enabled kernel; the Linux/macOS live Auto-confined
+runs). Those live in the CHANGELOG's **"Known post-release verification (owner-run / CI)"** note
+and stay there — that note, not this file, is their tracking home.
