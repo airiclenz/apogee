@@ -408,7 +408,15 @@ outcome.
 the two refusal branches show as covered paths (a failing mutation of either branch is caught).
 **Commit:** `test(probe): cover the pre-spend refusal gates`
 
-## 10. The below-floor selection gets a seam and a table test
+## 10. The below-floor selection gets a seam and a table test — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): the caller is `selectWindowsConfiner` (`confiner_windows.go:131`), not
+`NewConfiner` — item 5 moved the floor check there so the session and report selectors cannot
+disagree, and its NOTES already assign this item's extraction to that spot. The production diff is
+the one line the acceptance criterion describes: the inline `buildNumber < windowsFloorBuild`
+becomes `belowWindowsFloor(buildNumber)`. The table rows use the literal builds the item names
+(17762/17763/26200) rather than expressions over `windowsFloorBuild`, so the floor's VALUE is
+pinned too and a silent edit of the constant fails the test.
 
 **What:** (Review: Medium "floor gate has no seam".) Extract the decision at
 `confiner_windows.go:112` into an untagged pure predicate in `winconfine.go` — e.g.

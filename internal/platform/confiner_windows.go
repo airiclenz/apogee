@@ -128,7 +128,7 @@ func NewReportConfiner() domain.Confiner {
 // construction. The floor decision lives in ONE place so the two selectors cannot disagree
 // about which hosts get the token backend.
 func selectWindowsConfiner(build func(home string) *tokenConfiner) domain.Confiner {
-	if _, _, buildNumber := windows.RtlGetNtVersionNumbers(); buildNumber < windowsFloorBuild {
+	if _, _, buildNumber := windows.RtlGetNtVersionNumbers(); belowWindowsFloor(buildNumber) {
 		return NewDenyConfiner()
 	}
 	return build(confinementJournalHome())

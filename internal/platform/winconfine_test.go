@@ -751,3 +751,31 @@ func TestIsLowLabelSDDL(t *testing.T) {
 		})
 	}
 }
+
+func TestBelowWindowsFloor(t *testing.T) {
+	t.Parallel()
+
+	// The deny-vs-token selection (ADR 0020 §5): below the floor a Windows host gets
+	// denyConfiner and today's degradation notice, at or above it the token backend. The
+	// below-floor branch is the one no development machine can be on, which is why the
+	// decision is a pure predicate rather than an inline read of the host's own build.
+	tests := []struct {
+		name  string
+		build uint32
+		want  bool
+	}{
+		{name: "one_below_the_floor", build: 17762, want: true},
+		{name: "the_floor_itself", build: 17763},
+		{name: "a_current_windows_11_build", build: 26200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := belowWindowsFloor(tt.build); got != tt.want {
+				t.Errorf("belowWindowsFloor(%d) = %v, want %v", tt.build, got, tt.want)
+			}
+		})
+	}
+}

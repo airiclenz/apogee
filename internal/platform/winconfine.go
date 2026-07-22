@@ -27,6 +27,13 @@ import (
 // and the existing degradation notice fires unchanged.
 const windowsFloorBuild = 17763
 
+// belowWindowsFloor reports whether a host build number is under the floor — the deny-vs-token
+// half of selectWindowsConfiner's decision, split out so it is provable on every OS. The
+// ambient read (windows.RtlGetNtVersionNumbers) stays Windows-tagged; a windows-tagged test can
+// only ever observe the branch its own host is on, and the branch that matters most is the one
+// the development machine is never on.
+func belowWindowsFloor(build uint32) bool { return build < windowsFloorBuild }
+
 // The mandatory-label SDDL strings the backend writes (ADR 0020 §2).
 //
 //   - windowsDirLabelSDDL labels a DIRECTORY Low with NO_WRITE_UP, object- and
