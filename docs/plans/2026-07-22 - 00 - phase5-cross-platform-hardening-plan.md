@@ -97,7 +97,7 @@ and `doc.go` conventions are load-bearing. ADR 0010: `internal/*` may depend onl
 `internal/domain` downward, never the root facade. Any authorized deviation from item text lands
 as a dated `NOTES (YYYY-MM-DD):` line under the item.
 
-- [ ] **1. CLI subcommand skeleton.** Restructure `cmd/apogee` so the Cobra root accepts
+- [x] **1. CLI subcommand skeleton. — ✅ DONE (2026-07-22)** Restructure `cmd/apogee` so the Cobra root accepts
   subcommands while bare `apogee` (and every existing flag/env path) behaves byte-identically.
   Read `cmd/apogee/main.go`, `root.go`, `wire.go` first; `maybeDispatchConfinedExec` must remain
   the first thing `main` does, before Cobra parses anything. No subcommand is added here beyond
@@ -106,6 +106,17 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   (a Commands section may appear); all existing `cmd/apogee` tests pass unmodified except any
   that assert the exact `--help` byte string (update those minimally, noting why); `make check`
   green.
+  NOTES (2026-07-22): no existing test needed changing — the seam ships EMPTY, so Cobra adds
+  neither its `help` nor its `completion` child and `--help` is byte-identical (no Commands
+  section yet; the first real subcommand is what makes one appear). `make` is absent on the
+  Windows execution machine, so the gate ran as the commands the Makefile wraps: `go vet ./...`,
+  `go build ./...`, `go test -count=1 ./...`, all six cross targets, `--help` exit 0, and gofmt
+  over LF copies of the changed files (the checkout is `core.autocrlf=true`, so `gofmt -l .`
+  flags every file in the repo on this machine — an environment artefact, not a formatting
+  defect). Four test failures are pre-existing on this host and untouched by this item —
+  `TestSaveHostAcknowledgement_PreservesTheFileMode` (POSIX file modes), `TestAutofix…`,
+  the two `TestDiagnostics_…GoVet…`, `TestFoldActivityClockRunsPerPhrase` — confirmed by
+  re-running them on a stashed (clean) tree.
 
 - [ ] **2. DESIGN-CALL — `apogee probe` scope → ADR 0021.** Reconcile the two probe stories into
   one command design and write `docs/adr/0021-*.md` (house style; read 0019 and 0016 for form)

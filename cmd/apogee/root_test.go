@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -136,4 +138,115 @@ func TestRootCommandExecuteCleanQuit(t *testing.T) {
 	if !rec.called {
 		t.Fatal("launcher was not invoked through the command tree")
 	}
+}
+
+// fakeSubcommand is a stand-in for a real subcommand (probe, later headless): it records
+// that it ran, so a test can tell dispatch from a root invocation.
+func fakeSubcommand(ran *bool) *cobra.Command {
+	return &cobra.Command{
+		Use:   "fake",
+		Short: "stand-in subcommand used by the registration-seam tests",
+		RunE: func(*cobra.Command, []string) error {
+			*ran = true
+			return nil
+		},
+	}
+}
+
+// TestRootCommandDispatchesSubcommand proves the registration seam works: a command handed
+// to newRootCommand is reachable by name and runs INSTEAD of the TUI launch, not after it.
+func TestRootCommandDispatchesSubcommand(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	var ran bool
+	cmd := newRootCommand(rec.launch, fakeSubcommand(&ran))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"fake"})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("Execute fake: %v\n%s", err, out.String())
+	}
+	if !ran {
+		t.Error("the registered subcommand did not run")
+	}
+	if rec.called {
+		t.Error("the TUI launcher ran for a subcommand invocation")
+	}
+}
+
+// TestRootCommandBareInvocationSurvivesSubcommands is the guarantee the seam is judged on:
+// registering children changes nothing about bare `apogee`. With a subcommand present the
+// no-args run still launches the TUI, --help still carries every root flag, and an
+// unrecognised word still fails as an unknown command (Args: cobra.NoArgs retained).
+func TestRootCommandBareInvocationSurvivesSubcommands(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no args still launches the TUI", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingLauncher{}
+		var ran bool
+		cmd := newRootCommand(rec.launch, fakeSubcommand(&ran))
+		cmd.SetArgs([]string{
+			"--endpoint", "http://127.0.0.1:1111",
+			"--model", "fake",
+			"--workspace", t.TempDir(),
+			"--config", t.TempDir(), // hermetic: no real ~/.apogee/config.yaml in the loop
+		})
+
+		if err := cmd.ExecuteContext(context.Background()); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if !rec.called {
+			t.Error("bare invocation stopped launching the TUI once a subcommand was registered")
+		}
+		if ran {
+			t.Error("the subcommand ran for a bare invocation")
+		}
+	})
+
+	t.Run("help keeps the flags and gains the command", func(t *testing.T) {
+		t.Parallel()
+		var ran bool
+		cmd := newRootCommand((&recordingLauncher{}).launch, fakeSubcommand(&ran))
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs([]string{"--help"})
+
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("--help returned an error: %v", err)
+		}
+		help := out.String()
+		for _, want := range []string{
+			"--endpoint", "--model", "--mode", "--workspace", "--bypass", "--resume", "--config", "fake",
+		} {
+			if !strings.Contains(help, want) {
+				t.Errorf("--help output missing %q\n%s", want, help)
+			}
+		}
+	})
+
+	t.Run("an unknown word is still an unknown command", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingLauncher{}
+		var ran bool
+		cmd := newRootCommand(rec.launch, fakeSubcommand(&ran))
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs([]string{"bogus"})
+
+		err := cmd.ExecuteContext(context.Background())
+		if err == nil {
+			t.Fatal("Execute bogus: want an error, got nil")
+		}
+		if !strings.Contains(err.Error(), `unknown command "bogus"`) {
+			t.Errorf("Execute bogus: err = %v; want an unknown-command error", err)
+		}
+		if rec.called || ran {
+			t.Error("an unknown word must run neither the TUI nor a subcommand")
+		}
+	})
 }

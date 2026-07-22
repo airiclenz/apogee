@@ -99,9 +99,13 @@ type options struct {
 type launcher func(ctx context.Context, eng tui.Engine, br *tui.Bridge, opts tui.Options) error
 
 // newRootCommand builds the apogee root command. The root launches the TUI; it carries
-// the minimal, reviewable flag set (phase-2 detail plan P2.0). Subcommands (headless,
-// probe) are deferred (§6) — the tree shape leaves room for them.
-func newRootCommand(launch launcher) *cobra.Command {
+// the minimal, reviewable flag set (phase-2 detail plan P2.0).
+//
+// subs are the subcommands to register — main passes the shipped set (subcommands()),
+// tests pass fakes. Registering children never changes the bare invocation: the root
+// keeps its own RunE and `Args: cobra.NoArgs`, so `apogee` with no arguments opens the
+// TUI exactly as before and an unrecognised word still fails as an unknown command.
+func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 	var opts options
 
 	cmd := &cobra.Command{
@@ -178,6 +182,10 @@ func newRootCommand(launch launcher) *cobra.Command {
 	flags.StringVar(&opts.resume, "resume", "", "resume a saved session file")
 	flags.StringVar(&opts.configDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
+
+	// The root's flags are its own, not persistent: a subcommand declares what it needs
+	// rather than inheriting the TUI session's surface.
+	cmd.AddCommand(subs...)
 
 	return cmd
 }
