@@ -476,17 +476,22 @@ func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 // restoreLabels puts the disk back: every journalled root's tree is cleared of the mandatory
 // label — minus any root a LIVE sibling session's journal still names (revertibleRoots),
 // which stays fenced for that session — then the paths that carried an explicit label before
-// the run get theirs back verbatim, and the journal file is removed — but ONLY if all of
-// that succeeded (retireLabelJournal). A failed revert keeps both the file and the in-memory
-// record, so the labels it describes are still recoverable: the next NewConfiner retries
-// them and ConfinementResidue reports them meanwhile. Callers hold c.mu.
+// the run get theirs back verbatim — minus any prior under a root a sibling journal still
+// claims, which is handed off rather than restored into the sibling's live box and lost to
+// its later clear (restorablePriors) — and the journal file is removed, but ONLY if nothing
+// failed and nothing was handed off (retireLabelJournal). A failed revert keeps both the
+// file and the in-memory record, so the labels it describes are still recoverable: the next
+// NewConfiner retries them and ConfinementResidue reports them meanwhile. A handoff is not a
+// failure — Close returns nil — but the surviving entries stay in memory too, so a repeated
+// Close converges instead of deleting the handoff record. Callers hold c.mu.
 func (c *tokenConfiner) restoreLabels() error {
 	revert := revertSparingLiveSiblings(c.journalHome, c.journalPath)
-	if err := retireLabelJournal(c.journalPath, c.journal, revert); err != nil {
+	remaining, err := retireLabelJournal(c.journalPath, c.journal, revert)
+	if err != nil {
 		return fmt.Errorf("apogee: confine: could not revert every mandatory label; the journal %q is kept so the next run retries: %w",
 			c.journalPath, err)
 	}
-	c.journal = labelJournal{}
+	c.journal = labelJournal{Entries: remaining}
 	c.labelled = make(map[string]bool)
 	return nil
 }
@@ -504,13 +509,21 @@ func (c *tokenConfiner) flushJournal() error {
 
 // revertSparingLiveSiblings returns the production revert for the journal at own under
 // home: revertLabelJournal over the journal's roots MINUS every root a sibling journal with
-// a live owning process still names (revertibleRoots). Teardown and recovery both revert
-// through this closure, so neither ever clears a root out from under a concurrently running
-// session — the sibling read and the exclusion happen at revert time, when liveness is
+// a live owning process still names (revertibleRoots), restoring only the priors no sibling
+// journal still claims the tree of — the rest are handed back as the journal's remains
+// (restorablePriors, retireLabelJournal). Teardown and recovery both revert through this
+// closure, so neither ever clears a root out from under a concurrently running session, and
+// neither restores a foreign prior a sibling's pending clear would destroy — the sibling
+// read and both exclusions happen at revert time, when liveness and the claim set are
 // current, not at construction.
-func revertSparingLiveSiblings(home, own string) func(labelJournal) error {
-	return func(j labelJournal) error {
-		return revertLabelJournal(j, revertibleRoots(j, siblingLabelJournals(home, own), processAlive))
+func revertSparingLiveSiblings(home, own string) func(labelJournal) ([]labelJournalEntry, error) {
+	return func(j labelJournal) ([]labelJournalEntry, error) {
+		siblings := siblingLabelJournals(home, own)
+		restore, handoff := restorablePriors(j, siblings)
+		if err := revertLabelJournal(revertibleRoots(j, siblings, processAlive), restore); err != nil {
+			return nil, err
+		}
+		return handoff, nil
 	}
 }
 
@@ -518,9 +531,11 @@ func revertSparingLiveSiblings(home, own string) func(labelJournal) error {
 // under each of roots, then restore the prior descriptors. roots is the journal's root set
 // minus what a live sibling session still claims (revertibleRoots) — a spared root is not a
 // failure, because the sibling's own journal carries the Root entry and with it the clear
-// obligation, so this journal may still retire. Clearing first and restoring second is the
-// order that matters — a prior label inside a root would otherwise be wiped by the walk
-// that follows it.
+// obligation, so this journal may still retire. priors is likewise the journal's restorable
+// subset (restorablePriors): a prior under a sibling-claimed root is handed off rather than
+// restored here, because the sibling's pending clear would wipe it. Clearing first and
+// restoring second is the order that matters — a prior label inside a root would otherwise
+// be wiped by the walk that follows it.
 //
 // A prior-labelled path that no longer exists is a completed revert, not a failure: the
 // agent deleting or renaming a workspace file is routine activity, and an object that is
@@ -528,14 +543,14 @@ func revertSparingLiveSiblings(home, own string) func(labelJournal) error {
 // clearLabelTree's root already takes). Failing on it instead would wedge the lifecycle
 // permanently: Close would warn every session and recovery would retry and fail every
 // startup, over a label that stopped existing.
-func revertLabelJournal(j labelJournal, roots []string) error {
+func revertLabelJournal(roots []string, priors map[string]string) error {
 	var firstErr error
 	for _, root := range roots {
 		if err := clearLabelTree(root); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	for path, sddl := range j.priorLabels() {
+	for path, sddl := range priors {
 		if err := setLabelSDDL(path, sddl); err != nil && !os.IsNotExist(err) && firstErr == nil {
 			firstErr = fmt.Errorf("apogee: confine: restore the prior label of %q: %w", path, err)
 		}
@@ -612,17 +627,33 @@ func clearLabelTree(root string) error {
 // and no owner to check, so acting on it is impossible and deleting it would throw away the
 // only trace of whatever it described. It is not silent, though — ConfinementResidue reports
 // it, which is the only way that state ever reaches a human.
+//
+// The pass repeats until no journal retires: a journal whose prior restore was handed off
+// because a sibling journal still claimed the root (restorablePriors) becomes completable
+// the moment that sibling retires later in the same sweep, and which order the two are
+// visited in is an accident of their PIDs' spellings — one more sweep finishes the restore
+// now rather than deferring it to the next session. Each continuing sweep removes at least
+// one file, so the loop is bounded by the journal count.
 func recoverLabelJournals(home string) {
 	self := os.Getpid()
-	for _, path := range listLabelJournals(home) {
-		j, err := readLabelJournal(path)
-		if err != nil {
-			continue
+	for {
+		retiredAny := false
+		for _, path := range listLabelJournals(home) {
+			j, err := readLabelJournal(path)
+			if err != nil {
+				continue
+			}
+			if j.PID != self && processAlive(j.PID) {
+				continue
+			}
+			remaining, err := retireLabelJournal(path, j, revertSparingLiveSiblings(home, path))
+			if err == nil && len(remaining) == 0 {
+				retiredAny = true
+			}
 		}
-		if j.PID != self && processAlive(j.PID) {
-			continue
+		if !retiredAny {
+			return
 		}
-		_ = retireLabelJournal(path, j, revertSparingLiveSiblings(home, path))
 	}
 }
 

@@ -411,9 +411,9 @@ func TestRetireLabelJournalKeepsTheFileWhenTheRevertFails(t *testing.T) {
 			}
 
 			var seen labelJournal
-			err := retireLabelJournal(path, journal, func(j labelJournal) error {
+			_, err := retireLabelJournal(path, journal, func(j labelJournal) ([]labelJournalEntry, error) {
 				seen = j
-				return tt.revertErr
+				return nil, tt.revertErr
 			})
 			if !errors.Is(err, tt.wantErrIs) {
 				t.Fatalf("retireLabelJournal err = %v, want %v", err, tt.wantErrIs)
@@ -438,19 +438,186 @@ func TestRetireLabelJournalWithoutAJournalFile(t *testing.T) {
 
 	// A backend with no journal location (no resolvable user profile) has nothing to remove,
 	// so the revert outcome passes straight through — in both directions.
-	if err := retireLabelJournal("", labelJournal{}, func(labelJournal) error { return nil }); err != nil {
+	if _, err := retireLabelJournal("", labelJournal{}, func(labelJournal) ([]labelJournalEntry, error) { return nil, nil }); err != nil {
 		t.Errorf("retireLabelJournal(\"\") = %v, want nil", err)
 	}
 	sentinel := errors.New("revert failed")
-	if err := retireLabelJournal("", labelJournal{}, func(labelJournal) error { return sentinel }); !errors.Is(err, sentinel) {
+	if _, err := retireLabelJournal("", labelJournal{}, func(labelJournal) ([]labelJournalEntry, error) { return nil, sentinel }); !errors.Is(err, sentinel) {
 		t.Errorf("retireLabelJournal(\"\") = %v, want the revert error", err)
 	}
 
 	// An already-absent journal file is not a failure: recovery may run twice over the same
 	// home, and the second pass must not invent an error out of work already done.
 	gone := labelJournalPath(t.TempDir(), 7)
-	if err := retireLabelJournal(gone, labelJournal{}, func(labelJournal) error { return nil }); err != nil {
+	if _, err := retireLabelJournal(gone, labelJournal{}, func(labelJournal) ([]labelJournalEntry, error) { return nil, nil }); err != nil {
 		t.Errorf("retireLabelJournal on a missing file = %v, want nil", err)
+	}
+}
+
+func TestRetireLabelJournalRewritesTheFileToTheHandedOffEntries(t *testing.T) {
+	t.Parallel()
+
+	// The third fate a journal can meet, beside "retired" and "kept whole": the revert
+	// succeeded but handed entries off — a foreign prior under a root a sibling journal still
+	// claims. Those entries are undischarged instructions, so the file must survive REWRITTEN
+	// to exactly them under its original owner: removing it would lose the only record of the
+	// foreign label (the previously-lost handoff), and keeping it whole would re-clear roots
+	// whose obligation already transferred. The remains are also returned, so a session
+	// backend keeps its in-memory journal in step and a repeated Close converges instead of
+	// deleting the handoff record.
+	home := t.TempDir()
+	path := labelJournalPath(home, 4321)
+	journal := labelJournal{PID: 4321, Entries: []labelJournalEntry{
+		{Path: `C:\work`, Root: true, PriorSDDL: "S:AI(ML;OICI;NW;;;ME)"},
+		{Path: `C:\scratch`, Root: true},
+	}}
+	if err := writeLabelJournal(path, journal); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+
+	handoff := []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: "S:AI(ML;OICI;NW;;;ME)"}}
+	remaining, err := retireLabelJournal(path, journal, func(labelJournal) ([]labelJournalEntry, error) {
+		return handoff, nil
+	})
+	if err != nil {
+		t.Fatalf("retireLabelJournal = %v, want nil — a handoff is not a failed revert", err)
+	}
+	if len(remaining) != 1 || remaining[0] != handoff[0] {
+		t.Fatalf("remaining = %+v, want the handed-off entry back verbatim", remaining)
+	}
+
+	kept, err := readLabelJournal(path)
+	if err != nil {
+		t.Fatalf("the journal did not survive the handoff: %v", err)
+	}
+	if kept.PID != journal.PID {
+		t.Errorf("rewritten journal PID = %d, want the original owner %d", kept.PID, journal.PID)
+	}
+	if len(kept.Entries) != 1 || kept.Entries[0] != handoff[0] {
+		t.Errorf("rewritten journal entries = %+v, want only the handed-off entry — the discharged root must not be re-cleared later", kept.Entries)
+	}
+
+	// With nothing handed off the same journal retires fully — the handoff is the ONLY thing
+	// that keeps a successfully reverted journal alive.
+	if remaining, err := retireLabelJournal(path, kept, func(labelJournal) ([]labelJournalEntry, error) {
+		return nil, nil
+	}); err != nil || len(remaining) != 0 {
+		t.Fatalf("retireLabelJournal (final) = %+v, %v; want a full retirement", remaining, err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("the journal survived a revert that handed nothing off; a stale journal reports residue that is not there")
+	}
+}
+
+func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
+	t.Parallel()
+
+	// The split that preserves a foreign prior under sibling concurrency, decided purely so it
+	// is provable on every OS. A prior at or under a root ANY sibling journal still names as a
+	// Root entry is handed off, not restored: the sibling's pending clear — at its own
+	// teardown, or at recovery once it is dead — would wipe a label restored now, and the
+	// sibling journalled no prior of its own (it saw only apogee's Low label), so the record
+	// would be lost with it. Liveness is deliberately absent from the signature: the sibling
+	// FILE is the undischarged claim either way.
+	const (
+		foreignMedium = "S:AI(ML;OICI;NW;;;ME)"
+		foreignHigh   = "S:(ML;;NW;;;HI)"
+	)
+	journal := labelJournal{PID: 100, Entries: []labelJournalEntry{
+		{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
+		{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
+		{Path: `C:\scratch`, Root: true},
+	}}
+
+	tests := []struct {
+		name        string
+		siblings    []labelJournal
+		wantRestore map[string]string
+		wantHandoff []labelJournalEntry
+	}{
+		{
+			name: "no_siblings_restores_everything",
+			wantRestore: map[string]string{
+				`C:\work`:                foreignMedium,
+				`C:\work\vendor\lib.dll`: foreignHigh,
+			},
+		},
+		{
+			name: "sibling_claim_on_the_shared_root_hands_off_the_root_prior_and_its_descendants",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
+			},
+			wantRestore: map[string]string{},
+			wantHandoff: []labelJournalEntry{
+				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
+				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
+			},
+		},
+		{
+			name: "case_folded_claim_names_the_same_tree",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `c:\WORK`, Root: true}}},
+			},
+			wantRestore: map[string]string{},
+			wantHandoff: []labelJournalEntry{
+				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
+				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
+			},
+		},
+		{
+			name: "claim_on_an_unrelated_root_hands_off_nothing",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\scratch`, Root: true}}},
+			},
+			wantRestore: map[string]string{
+				`C:\work`:                foreignMedium,
+				`C:\work\vendor\lib.dll`: foreignHigh,
+			},
+		},
+		{
+			name: "a_sibling_prefix_root_is_not_a_containing_root",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\wo`, Root: true}}},
+			},
+			wantRestore: map[string]string{
+				`C:\work`:                foreignMedium,
+				`C:\work\vendor\lib.dll`: foreignHigh,
+			},
+		},
+		{
+			name: "a_siblings_prior_only_entry_claims_no_tree",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, PriorSDDL: foreignMedium}}},
+			},
+			wantRestore: map[string]string{
+				`C:\work`:                foreignMedium,
+				`C:\work\vendor\lib.dll`: foreignHigh,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			restore, handoff := restorablePriors(journal, tt.siblings)
+			if len(restore) != len(tt.wantRestore) {
+				t.Fatalf("restore = %v, want %v", restore, tt.wantRestore)
+			}
+			for path, want := range tt.wantRestore {
+				if restore[path] != want {
+					t.Errorf("restore[%q] = %q, want %q", path, restore[path], want)
+				}
+			}
+			if len(handoff) != len(tt.wantHandoff) {
+				t.Fatalf("handoff = %+v, want %+v", handoff, tt.wantHandoff)
+			}
+			for i, want := range tt.wantHandoff {
+				if handoff[i] != want {
+					t.Errorf("handoff[%d] = %+v, want %+v — the entry must survive verbatim, Root flag included", i, handoff[i], want)
+				}
+			}
+		})
 	}
 }
 

@@ -260,6 +260,21 @@ fixed below (`docs/plans/2026-07-22 - 03 - phase5-second-review-fixes-plan.md`).
   pinned natively and verified by negative control against both silent regressions (prior-restore
   loop deleted; clear/restore order swapped), alongside a construction test proving session
   recovery never deletes a journal it cannot decode.
+- **A foreign prior label on a shared root now survives concurrent sibling sessions.** Follow-on
+  to (e) above, found by its own implementation pass: when session A's teardown spared the shared
+  root for live session B, A still *restored* the root's foreign prior — overwriting the Low
+  label B was fenced by — retired its journal, and B's later clear wiped the restored label; the
+  only record of the foreign prior was destroyed. A prior at or under a root ANY sibling journal
+  still claims (live or dead — the file is the undischarged claim either way) is now **handed
+  off** instead of restored: the retiring journal survives, rewritten to exactly the deferred
+  prior entries under its original owner (`restorablePriors`, untagged and table-tested;
+  `retireLabelJournal` grew the third fate beside "retired" and "kept whole"), and the first
+  construction after the claiming journals are gone completes the restore — recovery now sweeps
+  until no journal retires, so a handoff whose claimant died is finished in the same pass rather
+  than the next session. The A-Close-then-B-Close sequence is pinned natively end-to-end and
+  verified by negative control against both regressions (the pre-fix restore-now revert; the
+  handoff record dropped at retirement).
+  (`internal/platform/{winconfine.go,confiner_windows.go}`.)
 - **`probe model` and startup no longer run twin identity ladders — the claim IS startup's
   decision.** The defect class closed for catalogue validation recurred at two more rungs:
   with no `model:` pinned, the report claimed `AUTO-APPLIES` for a record startup's empty model

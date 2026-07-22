@@ -478,28 +478,44 @@ func writeAndSync(f *os.File, raw []byte) error {
 }
 
 // retireLabelJournal reverts one journal's disk mutation through revert and then decides the
-// journal FILE's fate: it is removed only when the revert succeeded. A failed revert leaves the
-// file exactly where it is, because the journal is the only record of the labels still sitting
-// on the disk — deleting it would strand them permanently, whereas keeping it means the next
-// NewConfiner retries the restore and, until one does, ConfinementResidue reports it (ADR 0020
-// §2).
+// journal FILE's fate: it is removed only when the revert succeeded AND left nothing behind. A
+// failed revert leaves the file exactly where it is, because the journal is the only record of
+// the labels still sitting on the disk — deleting it would strand them permanently, whereas
+// keeping it means the next NewConfiner retries the restore and, until one does,
+// ConfinementResidue reports it (ADR 0020 §2).
+//
+// A revert may also succeed while HANDING OFF entries it deliberately did not act on — a
+// foreign prior under a root a sibling journal still claims (restorablePriors). Those are not
+// failures, but they are still undischarged instructions, so the journal is REWRITTEN to carry
+// exactly them (under its original owner) rather than removed: the record of the foreign label
+// survives sibling teardown ordering, and the first construction after the claiming journals
+// are gone completes the restore. The remaining entries are returned so a session backend can
+// keep its in-memory journal in step; nil means the journal is fully retired. On a revert
+// error the return is nil and the file keeps everything it had.
 //
 // revert is injected — revertSparingLiveSiblings' closure over revertLabelJournal in
 // production, which is Windows-tagged — so the
 // retention rule itself is table-testable on any OS, the same seam every other decision in this
 // file is behind. path may be "" for a backend that keeps no journal file: there is then nothing
-// to remove and the revert outcome passes through unchanged.
-func retireLabelJournal(path string, j labelJournal, revert func(labelJournal) error) error {
-	if err := revert(j); err != nil {
-		return err
+// to remove or rewrite and the revert outcome passes through unchanged.
+func retireLabelJournal(path string, j labelJournal, revert func(labelJournal) ([]labelJournalEntry, error)) ([]labelJournalEntry, error) {
+	remaining, err := revert(j)
+	if err != nil {
+		return nil, err
 	}
 	if path == "" {
-		return nil
+		return remaining, nil
+	}
+	if len(remaining) > 0 {
+		if err := writeLabelJournal(path, labelJournal{PID: j.PID, Entries: remaining}); err != nil {
+			return nil, err
+		}
+		return remaining, nil
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("apogee: confine: remove the label journal %q: %w", path, err)
+		return nil, fmt.Errorf("apogee: confine: remove the label journal %q: %w", path, err)
 	}
-	return nil
+	return nil, nil
 }
 
 // clearTreeOutcome is clearLabelTree's below-root verdict: nil when failures is zero —
@@ -613,6 +629,60 @@ func revertibleRoots(j labelJournal, siblings []labelJournal, alive func(int) bo
 		out = append(out, root)
 	}
 	return out
+}
+
+// restorablePriors splits j's prior-label restores into what may be restored NOW and what
+// must be HANDED OFF to a later run: a prior sitting at or under a root any sibling journal
+// still names as a Root entry is deferred, everything else is restored by this revert.
+//
+// The deferral is what keeps a foreign prior on a shared root from being lost to sibling
+// teardown ordering. Restoring it while the sibling journal's clear obligation is
+// undischarged would first overwrite the Low label the sibling's session may still be fenced
+// by, and then be wiped anyway by that sibling's clearLabelTree — at its own teardown, or at
+// recovery once it is dead — with no record left anywhere, because the sibling saw only
+// apogee's own Low label and journalled no prior. Liveness is deliberately NOT consulted
+// here, unlike revertibleRoots: a sibling journal FILE is the undischarged claim whether its
+// owner is alive (its Close will clear) or dead (recovery will), and either clear destroys a
+// label restored now. The handed-off entries are returned VERBATIM — Root flag included, so
+// the surviving journal still anchors the residue report and the eventual re-clear — and
+// retireLabelJournal persists them as the journal's remains; the restore then happens at the
+// first construction after the claiming journals are gone (ADR 0020 §2's "the journal
+// survives until a real session's constructor finishes the restore").
+//
+// Containment is the case-folded whole-path prefix: a descendant's journalled path is the
+// label walk's own spelling — the root plus its relative path — so the lexical test is exact
+// here and nothing needs re-resolution.
+func restorablePriors(j labelJournal, siblings []labelJournal) (restore map[string]string, handoff []labelJournalEntry) {
+	var claimed []string
+	for _, sibling := range siblings {
+		for _, root := range sibling.roots() {
+			claimed = append(claimed, foldLabelPath(root))
+		}
+	}
+	if len(claimed) == 0 {
+		return j.priorLabels(), nil
+	}
+	underClaim := func(path string) bool {
+		folded := foldLabelPath(path)
+		for _, root := range claimed {
+			if folded == root || strings.HasPrefix(folded, root+`\`) {
+				return true
+			}
+		}
+		return false
+	}
+	restore = make(map[string]string, len(j.Entries))
+	for _, entry := range j.Entries {
+		if entry.PriorSDDL == "" {
+			continue
+		}
+		if underClaim(entry.Path) {
+			handoff = append(handoff, entry)
+			continue
+		}
+		restore[entry.Path] = entry.PriorSDDL
+	}
+	return restore, handoff
 }
 
 // ConfinementResidue reports mandatory-label journals left by a run that did not get to

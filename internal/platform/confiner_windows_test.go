@@ -1105,6 +1105,103 @@ func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 	}
 }
 
+func TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown(t *testing.T) {
+	// Foreign-prior fidelity under concurrent sibling sessions — the A-Close-then-B-Close
+	// sequence that used to LOSE the record. Session A confines a workspace that carried a
+	// foreign explicit Medium label; session B (a planted journal owned by a live child, the
+	// TestWindowsTeardownSparesALiveSiblingsRoot idiom) confines the same root and journals no
+	// prior of its own, because all it can see is apogee's Low label. Before the fix, A's Close
+	// restored the foreign prior onto the SPARED root — overwriting the Low label B was still
+	// fenced by — retired A's journal, and B's later clearLabelTree wiped the restored label:
+	// the only record of the foreign prior was gone. Now A's Close hands the prior off instead
+	// — its journal survives, trimmed to exactly the prior-carrying entry — and the first
+	// construction after both sessions end completes the restore.
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	// The foreign prior sits on the shared ROOT itself, planted with the same helper the
+	// backend labels with and captured in the OS's own rendering — the verbatim the restore
+	// must eventually reproduce.
+	if err := setLabelSDDL(ws, "S:(ML;OICI;NW;;;ME)"); err != nil {
+		t.Fatalf("apply the foreign Medium label to %q: %v", ws, err)
+	}
+	foreignPrior, err := readLabelSDDL(ws)
+	if err != nil {
+		t.Fatalf("read the planted label of %q: %v", ws, err)
+	}
+	if foreignPrior == "" || isLowLabelSDDL(foreignPrior) {
+		t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low prior", foreignPrior)
+	}
+
+	first := newTokenConfiner(home)
+	if !first.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = first.Close()
+		}
+	})
+	if err := first.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	if prior, found := first.journal.priorLabels()[ws]; !found || prior != foreignPrior {
+		t.Fatalf("journalled prior = %q (found %v), want the planted descriptor %q verbatim", prior, found, foreignPrior)
+	}
+
+	pid, kill := liveChildPID(t)
+	siblingPath := labelJournalPath(home, pid)
+	if err := writeLabelJournal(siblingPath, labelJournal{PID: pid, Entries: []labelJournalEntry{{Path: ws, Root: true}}}); err != nil {
+		t.Fatalf("plant the sibling journal: %v", err)
+	}
+
+	// A's Close: not a failure — but not a full retirement either. The root stays Low for the
+	// live sibling (NOT overwritten with the Medium prior, which would un-fence B's box root),
+	// and A's journal survives trimmed to the handed-off prior entry: that file IS the record
+	// the pre-fix teardown destroyed.
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close = %v, want nil; a handed-off prior must not fail the revert", err)
+	}
+	closed = true
+	if label, _ := readLabelSDDL(ws); !isLowLabelSDDL(label) {
+		t.Fatalf("shared root label = %q after the first session's Close, want the sibling's Low fence untouched", label)
+	}
+	ownPath := labelJournalPath(home, os.Getpid())
+	kept, err := readLabelJournal(ownPath)
+	if err != nil {
+		t.Fatalf("the first session's journal did not survive the handoff: %v", err)
+	}
+	if len(kept.Entries) != 1 || !strings.EqualFold(kept.Entries[0].Path, ws) || kept.Entries[0].PriorSDDL != foreignPrior {
+		t.Fatalf("handed-off journal entries = %+v, want exactly the foreign-prior entry for %q", kept.Entries, ws)
+	}
+
+	// Both sessions are now gone: the sibling dies (its journal is the interrupted run whose
+	// clearLabelTree recovery performs — the very clear that used to wipe the restored prior),
+	// and the next construction finishes both obligations in one pass: B's root is cleared,
+	// then A's handed-off prior is restored onto it.
+	kill()
+	recovered := newTokenConfiner(home)
+	t.Cleanup(func() { _ = recovered.Close() })
+
+	restored, err := readLabelSDDL(ws)
+	if err != nil {
+		t.Fatalf("read label of %q after recovery: %v", ws, err)
+	}
+	if restored == "" {
+		t.Fatal("the foreign Medium label is gone after both sessions ended; the handed-off record was lost to the sibling's clear")
+	}
+	if restored != foreignPrior {
+		t.Errorf("label after recovery = %q, want the prior %q back verbatim", restored, foreignPrior)
+	}
+	if left := listLabelJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after recovery, want both retired — the handoff must not linger once discharged", left)
+	}
+	if got := confinementResidue(home); got != "" {
+		t.Errorf("confinementResidue = %q after recovery, want nothing outstanding", got)
+	}
+}
+
 func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 	// The self-perpetuating-residue scenario, on a real SACL. Both triggers are exercised: a
 	// box labelled a SECOND time by the same backend (a partial pass, or the once-per-box memo
