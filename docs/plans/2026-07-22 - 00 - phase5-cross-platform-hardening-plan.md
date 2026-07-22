@@ -118,7 +118,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   the two `TestDiagnostics_…GoVet…`, `TestFoldActivityClockRunsPerPhrase` — confirmed by
   re-running them on a stashed (clean) tree.
 
-- [ ] **2. DESIGN-CALL — `apogee probe` scope → ADR 0021.** Reconcile the two probe stories into
+- [x] **2. DESIGN-CALL — `apogee probe` scope → ADR 0021. — ✅ DONE (2026-07-22)** Reconcile the two probe stories into
   one command design and write `docs/adr/0021-*.md` (house style; read 0019 and 0016 for form)
   plus CONTEXT.md vocabulary (*Probe*, *capability tier*, *behavioral fingerprint*). Sources to
   reconcile: `TODO.md:370` (host/confinement diagnosis "without running an agent"),
@@ -134,6 +134,24 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   validated-not-assumed.) Acceptance: ADR answers all three with the owner's decisions;
   cross-references 0012 (host half reports the confinement matrix), 0016 (Medium-confidence
   consequences) and ADR 0009 (why complexity adaptation is bench-gated).
+  NOTES (2026-07-22): the pinned source `../apogee-sim/mission.md` was read directly (it is
+  reachable now) and its items 2–3 agree with this plan's paraphrase — nothing to reconcile
+  against. Owner's answers, recorded in ADR 0021: **Q1** `probe` parent whose own RunE prints
+  the host report, plus `probe host` (scriptability) and `probe model` children — the host half
+  is free/offline/read-only, the model half costs live calls AND writes, so it is an explicit
+  act. **Q2** the model probe DOES persist a versioned, owner-private (0700/0600) probe record
+  at `ConfidenceMedium`, soft-degrading on any defect, keyed on endpoint + advertised label +
+  timestamp; print-only was rejected because identity resolves through a pure offline call
+  (`cmd/apogee/validatedsets.go:38`), so a Medium tier that is never written down could never be
+  observed — ADR 0016's 2026-07-19 defect. Suggested `model-profile` knobs are PRINTED as
+  paste-ready YAML (the `offerNotice` precedent), never written to config; the ADR states
+  explicitly that writing a Medium fingerprint promotes a model from "offer" to auto-apply
+  (ADR 0016 §5) and mandates `--no-save`. **Q3** adaptive complexity is NOT built — only the
+  `capabilityTier` signal ships. Two scope notes: (a) TODO.md gained the *adaptive prompt
+  complexity* follow-on section here, because recording it is Q3's own answer — item 10's TODO
+  edits (the `:370` residue and the degradation block) are untouched; (b) no CHANGELOG entry —
+  the Phase-5 roll-up is item 10's, and this item changes no behaviour. Sanity check:
+  `go build ./... && go vet ./...` (docs-only change; `make` is absent on this host).
 
 - [ ] **3. `apogee probe` — the host half.** (DEPENDS: 1, 2.) The subcommand reports, without
   running an agent: OS/arch, confinement backend name + capability matrix + `AutoEligible`

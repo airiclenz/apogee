@@ -521,6 +521,52 @@ presentation. There is deliberately **no host back-channel** anywhere in this pa
 _Avoid_: "web server" / "file server" (both suggest a served tree; this serves an allowlist of
 individually granted files), "preview server".
 
+### Probing and model identity
+
+**Probe** (`apogee probe`):
+The **diagnosis command** — what this machine and this model can actually do, answered **without
+running an agent**. Two halves with deliberately asymmetric cost
+([ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)):
+the **host report** (`apogee probe`, and `apogee probe host` for scripts) is free, offline and
+read-only — OS/arch, the Confiner backend and its capability matrix, the `AutoEligible()` verdict,
+the effective [`confine-to-workspace`](#safety-and-autonomy) after the Host acknowledgement,
+workspace root, config home, endpoint reachability and model discovery — *reporting* ADR 0012's
+verdict, never re-deciding it, and sharing its logic with `/confine status` so the two cannot
+drift. The **model battery** (`apogee probe model`) is an **explicit act**: it spends live model
+calls (native tool call, JSON/structured output, multi-step tool chain) and **writes** a probe
+record, so it never fires as a side effect of the bare noun. It prints suggested **model
+profile** knobs as paste-ready YAML and never edits the user's config; `--no-save` runs the
+battery and writes nothing.
+_Avoid_: "benchmark" (the battery measures capability, not quality — scoring is [the
+bench](#validation-and-the-bench)'s job), "health check" (it diagnoses, it does not monitor),
+"auto-configure" (nothing is written into config).
+
+**Behavioral fingerprint**:
+The model identity the **model battery** produces — a **fuzzy feature match over battery
+outcomes** (which capabilities were observed; logprobs preferred where the Upstream exposes
+them), **never a hash of response text**, so sampling noise or a re-worded prompt does not mint a
+new identity. It is the middle rung of the [Library](#self-regulation)'s best-available ladder —
+weights-hash (**high**) → behavioral fingerprint (**medium**) → metadata label (**low**) — and it
+is the *only* source of `ConfidenceMedium`, because identity is resolved offline at startup: it
+reaches later sessions **through a persisted probe record** (versioned, owner-private, keyed on
+endpoint + advertised label + probe timestamp, so a swapped model behind an unchanged label is
+detectable; any defect is skipped with a warning, never a blocked startup). Consequence worth
+knowing before running it: at medium confidence a matching [Validated set](#validation-and-the-bench)
+**auto-applies** instead of being offered (ADR 0016 §5) — so probing is the act that switches
+that automatism on, and deleting the record (or `--no-save`) is the off-switch.
+_Avoid_: "response hash" / "output signature" (explicitly rejected — noise, not identity),
+"model detection" (it identifies the model *behind* a label, it does not name it).
+
+**Capability tier**:
+The ordinal summary of a battery run — what the model can be **asked** to do (native tool calls,
+structured output, multi-step chaining). Today it is a **reported signal only**: it carries no
+automatism, gates nothing, and changes no request. The *adaptive prompt complexity* idea it
+exists for — slimming tool descriptions and system prompts for a lower tier — is a parked
+follow-on (`TODO.md`), because that is a model-facing **Mechanism** and a Mechanism ships on the
+non-inferiority gate, not on plausibility ([ADR 0009](docs/adr/0009-the-ab-decision-rule.md)).
+_Avoid_: "model tier" / "model size" (it describes observed behaviour, not parameters or
+quality), treating it as a config knob (it is an observation).
+
 ### Validation and the bench
 
 **The bench** (apogee-sim):

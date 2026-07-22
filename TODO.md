@@ -387,3 +387,34 @@ after it. Not presentation-specific: any depth-0 entry between two nested blocks
 (a `· cancelled` note already can). The fix is to carry the Step's depth on `PresentRequest` and
 render the entry at it, which is a domain-seam change and wants its own decision — the loop's
 depth is not currently exposed to a host delegate at all (`domain.AskRequest` has the same gap).
+
+---
+
+## Adaptive prompt complexity — request slimming driven by the capability tier
+
+**Status:** parked 2026-07-22 by decision, not by omission
+([ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)
+Q3; `../apogee-sim/mission.md` item 2). Phase 5 ships the **capability tier** as a reported
+`apogee probe model` field and stops there.
+
+The idea: a pre-request transform that shapes the outgoing request to what the model can
+actually digest — stripping tool descriptions down to names and one line, shortening the system
+prompt, simplifying output formatting — selected by the tier the probe observed. It is the
+mission's "prompt complexity tier" and aims squarely at the smallest models, the ones this
+project exists for.
+
+Why it is not built with the probe: this is model-facing behaviour inside the loop, i.e. a
+**Mechanism** by definition, and a Mechanism earns its place on the non-inferiority gate against
+Bypass, per model, with a catalogue row and a Table B bench-validation entry
+([ADR 0009](docs/adr/0009-the-ab-decision-rule.md); the Phase-5 settled design: nothing
+model-facing ships default-on without bench evidence). Shipping it alongside the probe would
+mean either an unvalidated default-on transform or a catalogue row with a placeholder where its
+evidence belongs. The tier signal costs nothing and is already there when the evidence is.
+
+When picked up: catalogue it as a **pre-request** Mechanism, **default-off**, gated on a stored
+probe record's tier (so it no-ops entirely for an un-probed model), and bench it on at least one
+small model before any default flips. Open design questions kept warm: whether slimming applies
+per-request or per-session (a mid-session change of tool descriptions is a history-consistency
+question), and whether the tier or the individual battery findings (native tool calls vs. JSON
+vs. multi-step) are the better gate — the findings are strictly more informative, the tier is
+strictly easier to reason about.
