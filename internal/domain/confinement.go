@@ -34,8 +34,10 @@ type Confiner interface {
 	// Confine prepares cmd to execute confined to box, then RETURNS — it does not run
 	// cmd (confinement-execution-contract §2.2). It rewrites cmd to launch under the
 	// host OS confinement facility (macOS: exec under sandbox-exec -p <profile>; Linux:
-	// interpose the landlock re-exec wrapper) and sets cmd.SysProcAttr so the caller's
-	// process-group kill reaches the wrapped child. The caller has already wired
+	// interpose the landlock re-exec wrapper; Windows: hand CreateProcessAsUser a
+	// restricted low-integrity token, leaving the argv untouched — ADR 0020) and sets
+	// cmd.SysProcAttr so the caller's process-group kill reaches the wrapped child, or,
+	// on Windows, so the child starts under that token. The caller has already wired
 	// Stdin/Stdout/Stderr/Dir/Env and afterwards invokes cmd.Run()/Output(). The PARENT
 	// process is never restricted.
 	//

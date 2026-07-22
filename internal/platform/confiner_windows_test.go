@@ -1,0 +1,363 @@
+//go:build windows
+
+package platform
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"testing"
+
+	"golang.org/x/sys/windows"
+
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform/confinetest"
+)
+
+// The Windows counterpart of landlock_linux_test.go / seatbelt_darwin_test.go. Unlike those
+// two it runs NATIVELY in this project's development loop (Phase 5 is executed on a Windows
+// machine), so the escape battery here is not a deferred CI promise: a confined child really
+// is minted a restricted Low-integrity token, really does write inside the box, and really is
+// denied by the kernel's mandatory integrity check outside it.
+//
+// Rows #9 and #10 (contract §6.2, added by ADR 0020) are Windows-only and live here rather
+// than in the shared harness, because they are about what this backend ADDS to the model: a
+// disk mutation that must be undone, and a capability it must refuse to fake.
+
+// newProbeConfiner builds a backend whose journal lives in a temp home and whose teardown
+// runs at the end of the test, so a failure never leaves labels on the developer's disk.
+func newProbeConfiner(t *testing.T) *tokenConfiner {
+	t.Helper()
+	c := newTokenConfiner(t.TempDir())
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+func TestWindowsTokenProbe(t *testing.T) {
+	// Not parallel: the confined children are real subprocesses, and the harness labels the
+	// box roots on the real filesystem.
+	confinetest.Probe(t, newProbeConfiner(t), Current())
+}
+
+func TestWindowsTokenProbeNetwork(t *testing.T) {
+	// Skips by construction: the token backend reports NetworkEgress=false (ADR 0020 §4), so
+	// rows #7/#8 go unproven on Windows — acceptable, because nothing is being enforced.
+	confinetest.ProbeNetwork(t, newProbeConfiner(t), Current())
+}
+
+func TestWindowsTokenCapabilitiesHonest(t *testing.T) {
+	// The facility probe: on a host at or above the floor with the token minted, fs-write is
+	// enforceable and network egress is not — and that combination is Auto-eligible, because
+	// AutoEligible() is FSWrite-only (ADR 0012), which is what makes the degradation notice
+	// vanish here.
+	c := newProbeConfiner(t)
+	caps := c.Capabilities()
+	if !caps.FSWrite {
+		t.Fatalf("FSWrite = false on this host; the restricted token could not be minted (build floor is %d)", windowsFloorBuild)
+	}
+	if caps.NetworkEgress {
+		t.Error("NetworkEgress = true; no token or integrity facility can express per-host egress (ADR 0020 §4)")
+	}
+	if !caps.AutoEligible() {
+		t.Error("AutoEligible() = false; fs-write confinement alone must satisfy the Auto gate (ADR 0012)")
+	}
+
+	// The version floor is a fact about this host, asserted so a below-floor machine reports
+	// the reason rather than a mysterious failure.
+	if _, _, build := windows.RtlGetNtVersionNumbers(); build < windowsFloorBuild {
+		t.Errorf("this host is build %d, below the %d floor; NewConfiner must return denyConfiner here", build, windowsFloorBuild)
+	}
+}
+
+func TestWindowsNewConfinerSelectsTheTokenBackend(t *testing.T) {
+	// The wiring assertion behind the acceptance criterion: on a capable Windows host the
+	// per-OS selector must hand back the real backend, not denyConfiner — that is precisely
+	// what makes probe.DegradedNotice return "" and the startup notice disappear.
+	c := NewConfiner()
+	if closer, ok := c.(interface{ Close() error }); ok {
+		t.Cleanup(func() { _ = closer.Close() })
+	}
+	if _, ok := c.(*tokenConfiner); !ok {
+		t.Fatalf("NewConfiner() = %T, want *tokenConfiner on a host at or above build %d", c, windowsFloorBuild)
+	}
+	if !c.Capabilities().AutoEligible() {
+		t.Error("the backend NewConfiner selected is not Auto-eligible; the degradation notice would still fire")
+	}
+}
+
+func TestWindowsConfineSetsOnlyTheToken(t *testing.T) {
+	// Contract §9.2: Confine sets SysProcAttr.Token and NOTHING else on the cmd. There is no
+	// argv sentinel and no re-exec — the Linux 42-liner has no Windows counterpart — so a
+	// rewritten cmd.Path or cmd.Args would mean the design had drifted from ADR 0020 §1.
+	c := newProbeConfiner(t)
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+	cmd := exec.Command("cmd", "/c", "echo hi")
+	wantPath, wantArgs := cmd.Path, append([]string(nil), cmd.Args...)
+
+	// The teardown wires cmd.Cancel and the raw command line BEFORE Confine; both must
+	// survive it, since each side only ever appends to SysProcAttr.
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: "cmd /c echo hi"}
+
+	if err := c.Confine(context.Background(), box, cmd); err != nil {
+		t.Fatalf("Confine: %v", err)
+	}
+	if cmd.Path != wantPath {
+		t.Errorf("cmd.Path = %q, want it untouched (%q)", cmd.Path, wantPath)
+	}
+	if strings.Join(cmd.Args, " ") != strings.Join(wantArgs, " ") {
+		t.Errorf("cmd.Args = %v, want them untouched (%v)", cmd.Args, wantArgs)
+	}
+	if cmd.SysProcAttr == nil || cmd.SysProcAttr.Token == 0 {
+		t.Fatal("Confine did not set SysProcAttr.Token — nothing would be confined")
+	}
+	if cmd.SysProcAttr.CmdLine != "cmd /c echo hi" {
+		t.Errorf("Confine clobbered SysProcAttr.CmdLine = %q", cmd.SysProcAttr.CmdLine)
+	}
+}
+
+func TestWindowsConfineRefusesNetworkDenyBox(t *testing.T) {
+	// Contract §6.2 row #10. A box asking for a network tightening the backend cannot enforce
+	// is refused outright; it never runs network-open behind the user's back.
+	c := newProbeConfiner(t)
+	box := domain.ConfinementBox{
+		WorkspaceRoot: t.TempDir(),
+		NetworkAllow:  []string{"example.com:443"},
+	}
+	cmd := exec.Command("cmd", "/c", "echo hi")
+
+	err := c.Confine(context.Background(), box, cmd)
+	if err == nil {
+		t.Fatal("Confine accepted a network-deny box; want ErrConfinementUnavailable")
+	}
+	if !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Errorf("err = %v; want ErrConfinementUnavailable so dispatch demotes to a forced Gate", err)
+	}
+	if cmd.SysProcAttr != nil && cmd.SysProcAttr.Token != 0 {
+		t.Error("a refused Confine still handed the cmd a token")
+	}
+}
+
+func TestWindowsConfineRefusesAGuardrailedRoot(t *testing.T) {
+	// The guardrails are not merely a pure-function property: they must fire through the real
+	// Confine, on this machine's real %SystemRoot%, and leave the disk untouched.
+	c := newProbeConfiner(t)
+	systemRoot := os.Getenv("SystemRoot")
+	if systemRoot == "" {
+		t.Skip("%SystemRoot% is unset; cannot exercise the guardrail on this host")
+	}
+	cmd := exec.Command("cmd", "/c", "echo hi")
+
+	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: systemRoot}, cmd)
+	if err == nil || !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Fatalf("Confine(%q) = %v; want an ErrConfinementUnavailable refusal", systemRoot, err)
+	}
+	if label, readErr := readLabelSDDL(systemRoot); readErr == nil && strings.Contains(label, ";LW)") {
+		t.Fatalf("%%SystemRoot%% carries a Low label (%q) — the guardrail did not hold", label)
+	}
+}
+
+func TestWindowsLabelsAreRevertedOnTeardown(t *testing.T) {
+	// Contract §6.2 row #9: the disk mutation is undone. The assertion is behavioural as well
+	// as descriptive — after Close a confined child must be denied the very write that
+	// succeeded while the box was up, which is what "back to their prior state" MEANS.
+	c := newTokenConfiner(t.TempDir())
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to revert")
+	}
+
+	ws := t.TempDir()
+	existing := filepath.Join(ws, "existing.txt")
+	if err := os.WriteFile(existing, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed existing file: %v", err)
+	}
+	before, err := readLabelSDDL(ws)
+	if err != nil {
+		t.Fatalf("read label of %q: %v", ws, err)
+	}
+	if before != "" {
+		t.Fatalf("the fresh temp dir already carries a label (%q); the test cannot tell a revert from a no-op", before)
+	}
+
+	box := domain.ConfinementBox{WorkspaceRoot: ws}
+	if err := runConfinedLine(t, c, box, filepath.Join(ws, "inbox.txt")); err != nil {
+		t.Fatalf("an in-box write failed while the box was up: %v", err)
+	}
+
+	// While the box is up, the root and its pre-existing contents are labelled Low — the
+	// second half is the one that matters, since inheritance covers new objects only.
+	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
+		t.Fatalf("box root label = %q, want a Low mandatory label while the box is up", label)
+	}
+	if label, _ := readLabelSDDL(existing); !strings.Contains(label, ";LW)") {
+		t.Fatalf("pre-existing file label = %q; the walk must reach files that predate the box", label)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close (teardown): %v", err)
+	}
+
+	for _, path := range []string{ws, existing, filepath.Join(ws, "inbox.txt")} {
+		label, err := readLabelSDDL(path)
+		if err != nil {
+			t.Fatalf("read label of %q after teardown: %v", path, err)
+		}
+		if label != "" {
+			t.Errorf("%q still carries a mandatory label after teardown: %q", path, label)
+		}
+	}
+
+	// The behavioural half: a fresh backend's confined child, aimed at the now-unlabelled
+	// directory, is denied — the box is genuinely gone, not merely described as gone.
+	after := newTokenConfiner(t.TempDir())
+	t.Cleanup(func() { _ = after.Close() })
+	elsewhere := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+	target := filepath.Join(ws, "after-teardown.txt")
+	if err := runConfinedLine(t, after, elsewhere, target); err == nil {
+		t.Error("a confined write into the reverted directory succeeded; the label was not really removed")
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Error("the reverted directory accepted a Low write; teardown left it writable")
+	}
+}
+
+func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
+	// ADR 0020 §2's interrupted-cleanup remedy. A process killed mid-run leaves labels and a
+	// journal; the next NewConfiner finishes the restore. It is simulated by dropping the
+	// backend on the floor (no Close) and constructing a second one against the same home.
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	crashed := newTokenConfiner(home)
+	if !crashed.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to journal")
+	}
+	if err := crashed.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
+		t.Fatalf("box root label = %q, want Low before the simulated crash", label)
+	}
+	journals := listLabelJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals = %v, want exactly one written BEFORE the labels", journals)
+	}
+	// Hand the journal to a dead PID: recovery must never revert a LIVE apogee's labels, so
+	// a journal still owned by this process is deliberately left alone.
+	rewriteJournalPID(t, home, journals[0])
+
+	recovered := newTokenConfiner(home)
+	t.Cleanup(func() { _ = recovered.Close() })
+
+	if label, _ := readLabelSDDL(ws); label != "" {
+		t.Errorf("%q still labelled %q after recovery; the next NewConfiner must finish the restore", ws, label)
+	}
+	if left := listLabelJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after recovery, want the recovered one removed", left)
+	}
+	if got := ConfinementResidue(home); got != "" {
+		t.Errorf("ConfinementResidue = %q after recovery, want nothing outstanding", got)
+	}
+}
+
+func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
+	// The other side of recovery: a journal owned by a process that is still running belongs
+	// to a concurrently running apogee whose labels are in use. Reverting them would un-fence
+	// that session, so recovery must skip it — and the host report must still surface it.
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	live := newTokenConfiner(home)
+	if !live.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to journal")
+	}
+	t.Cleanup(func() { _ = live.Close() })
+	if err := live.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	// Re-own the journal by a different but definitely-alive PID (this process's parent
+	// stand-in: our own PID is skipped by identity, so use the live-process branch instead).
+	rewriteJournalOwner(t, home, listLabelJournals(home)[0], liveForeignPID(t))
+
+	second := newTokenConfiner(home) // a second apogee starting up
+	t.Cleanup(func() { _ = second.Close() })
+	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
+		t.Errorf("a second apogee reverted a LIVE run's label (%q); its session would be un-fenced", label)
+	}
+	if got := ConfinementResidue(home); !strings.Contains(got, ws) {
+		t.Errorf("ConfinementResidue = %q; want the outstanding journal reported off-session", got)
+	}
+}
+
+// runConfinedLine runs a confined `cmd /c echo x> "<target>"` and returns the run error.
+func runConfinedLine(t *testing.T, c domain.Confiner, box domain.ConfinementBox, target string) error {
+	t.Helper()
+	sh := Current()
+	line := "echo x> " + sh.Quote(target)
+	argv := sh.Command(line)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: sh.CommandLine(line)}
+	if err := c.Confine(context.Background(), box, cmd); err != nil {
+		return err
+	}
+	return cmd.Run()
+}
+
+// rewriteJournalPID re-owns a journal by a PID that is certainly gone, so the recovery path
+// treats it as an interrupted run.
+func rewriteJournalPID(t *testing.T, home, path string) {
+	t.Helper()
+	rewriteJournalOwner(t, home, path, deadPID(t))
+}
+
+// rewriteJournalOwner rewrites a journal under the PID-named file its new owner would use.
+func rewriteJournalOwner(t *testing.T, home, path string, pid int) {
+	t.Helper()
+	journal, err := readLabelJournal(path)
+	if err != nil {
+		t.Fatalf("read journal %q: %v", path, err)
+	}
+	journal.PID = pid
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove journal %q: %v", path, err)
+	}
+	if err := writeLabelJournal(labelJournalPath(home, pid), journal); err != nil {
+		t.Fatalf("rewrite journal: %v", err)
+	}
+}
+
+// deadPID returns a PID that is not running, by starting a process and waiting for it to exit.
+func deadPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("cmd", "/c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("start a throwaway process: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if processAlive(pid) {
+		t.Skipf("pid %d is still reported alive after exiting; cannot synthesise a dead owner", pid)
+	}
+	return pid
+}
+
+// liveForeignPID returns the PID of a process that is running and is not this one. It must
+// outlive the assertion without needing input — a `pause` with no console reads EOF and exits
+// immediately, which would make the test assert against a dead PID.
+func liveForeignPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("cmd", "/c", "ping -n 60 127.0.0.1 >nul")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start a long-running process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	if !processAlive(cmd.Process.Pid) {
+		t.Skipf("pid %d is not reported alive; cannot synthesise a live owner", cmd.Process.Pid)
+	}
+	return cmd.Process.Pid
+}

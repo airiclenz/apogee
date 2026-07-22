@@ -82,6 +82,10 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				ConfigHome:         roots.config,
 				Endpoint:           opts.endpoint,
 				ConfineToWorkspace: opts.confineToWorkspace,
+				// Mandatory labels an interrupted Windows run left on the disk — "" on every
+				// other OS and on the normal Windows path. Reading the journal directory is a
+				// directory listing, so the host half stays read-only (ADR 0020 §2 / 0021 §1).
+				Residue: platform.ConfinementResidue(roots.config),
 			})
 			cmd.Println(host.Report())
 			return nil

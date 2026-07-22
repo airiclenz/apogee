@@ -1,0 +1,502 @@
+//go:build windows
+
+package platform
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
+
+// ----------------------------------------------------------------------------
+// Windows token Confiner backend (Phase 5 item 8 — ADR 0020;
+// confinement-execution-contract §9)
+// ----------------------------------------------------------------------------
+//
+// The two shipped backends fence by PATH POLICY: landlock is handed a ruleset of
+// path-beneath allow rules, seatbelt a profile with `allow file-write*` under the box's
+// roots, and neither touches the user's disk. Windows has no facility of that shape.
+// Mandatory integrity control fences by IDENTITY — a token carries an integrity level, an
+// object may carry a mandatory label, and the kernel's mandatory check runs BEFORE the
+// DACL — and nothing in that model takes "these paths are writable" as an argument. The
+// whole design follows from that one asymmetry (ADR 0020):
+//
+//   - The FENCE is a restricted, Low-integrity primary token handed to
+//     SysProcAttr.Token. The child runs at Low; every object carrying no explicit label is
+//     implicitly Medium with NO_WRITE_UP, so every write outside the box is denied by the
+//     kernel. A process the child creates inherits the token, so the denial covers the whole
+//     descendant tree — the Windows equivalent of "the domain survives execve".
+//   - The BOX is a label on the DISK. Because the token cannot carry path policy, the
+//     writable half of a ConfinementBox can only be expressed on the objects themselves:
+//     WorkspaceRoot ∪ WritablePaths are labelled Low for the run and REVERTED on teardown.
+//     This is a side effect on the user's disk that landlock and seatbelt do not have; it is
+//     journalled against a crash and it is the headline consequence of this backend.
+//   - There is NO helper process, NO argv sentinel and NO argv rewrite. Linux needs its
+//     42-line helper because the only CGO-free way to run code between fork and execve is to
+//     BE a separate process that restricts itself; Windows has no "restrict myself" API to
+//     mirror — the restriction is a token handed to the process-creation call, which is
+//     exactly what SysProcAttr exposes. cmd/apogee's maybeDispatchConfinedExec gains no
+//     Windows arm and confined_exec_windows.go is not written (ADR 0020 §1).
+
+// createRestrictedToken is CreateRestrictedToken, which golang.org/x/sys/windows v0.45.0
+// does not bind — one advapi32 LazyProc, the same shape landlock takes with raw
+// unix.Syscall for the landlock_* numbers x/sys has no wrapper for.
+var createRestrictedToken = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateRestrictedToken")
+
+// disableMaxPrivilege is CreateRestrictedToken's DISABLE_MAX_PRIVILEGE flag: the new token
+// drops every privilege but SeChangeNotifyPrivilege. It is DEFENCE IN DEPTH, not the fence
+// — it strips SeBackup/SeRestore/SeTakeOwnership/SeDebug, with which a child could otherwise
+// walk around a mandatory label. No restricting SIDs and no deny-only SIDs are used: they
+// force a double access check that breaks ordinary programs (which must still read system
+// DLLs) and buy nothing the integrity level does not already give under ADR 0012's threat
+// model.
+const disableMaxPrivilege = 0x1
+
+// tokenConfiner is the Windows Confiner backend. Its capabilities are probed ONCE at
+// construction (contract §5): the host is at or above the version floor and the restricted
+// Low token minted. Capability honesty splits in two here, the one structural difference
+// from Linux and macOS — Capabilities answers for the FACILITY, while a per-run failure to
+// label a box's roots is a Confine-time ErrConfinementUnavailable that contract §4 demotes
+// to a forced Gate (ADR 0020 §3).
+//
+// The token is minted once and reused for every confined command: it carries no path policy,
+// so it is box-independent, which also settles who owns the handle given that Confine
+// returns before Start. The label pass IS per box and is memoised, so the first confined
+// command of a session pays it and the rest are free.
+type tokenConfiner struct {
+	caps domain.ConfinementCaps
+	// token is the restricted Low-integrity primary token, or 0 when minting failed (in
+	// which case caps is {false, false} and Confine refuses).
+	token windows.Token
+	// rules is the Windows path rule set with the OS long-path resolver wired in — the same
+	// value Current returns — used to collapse the box's roots and evaluate the guardrails.
+	rules hostRules
+	// protected are the locations the backend refuses to label (ADR 0020 §2).
+	protected []string
+	// journalPath is this process's label journal under the apogee home.
+	journalPath string
+
+	// mu guards the memoised label state and the journal, which Confine mutates from
+	// whichever goroutine is driving a tool call and Close reads at shutdown.
+	mu sync.Mutex
+	// labelled records the box roots whose trees have already been labelled this session,
+	// so the once-per-box cost is not paid once per command.
+	labelled map[string]bool
+	// journal is the in-memory twin of journalPath.
+	journal labelJournal
+}
+
+// NewConfiner returns the host's real Confiner backend for this OS
+// (confinement-execution-contract §2.6/§9): the Windows restricted-low-integrity-token
+// backend. Below the version floor it returns denyConfiner instead, so a below-floor Windows
+// host is exactly today's Windows host — {false, false}, the subprocess surface gated, and
+// the existing degradation notice firing unchanged, with no new wording and no special case
+// (ADR 0020 §5).
+//
+// Construction performs no disk I/O beyond finishing an interrupted PREVIOUS run's restore:
+// `apogee probe host` constructs a real backend and ADR 0021 §1 pins it free, offline and
+// read-only, so labelling belongs to Confine and never to the constructor. The recovery path
+// reads one directory that normally does not exist and writes only when a crashed run
+// actually left labels behind — the state ADR 0020 §2 requires the next NewConfiner to
+// finish cleaning up.
+func NewConfiner() domain.Confiner {
+	if _, _, build := windows.RtlGetNtVersionNumbers(); build < windowsFloorBuild {
+		return NewDenyConfiner()
+	}
+	return newTokenConfiner(defaultApogeeHome())
+}
+
+// newTokenConfiner builds the backend against a given apogee home (the journal's location),
+// mints the token, and finishes any outstanding restore. home may be "" in a test that does
+// not exercise the journal; the backend then keeps no journal and cannot recover one.
+func newTokenConfiner(home string) *tokenConfiner {
+	rules := currentRules()
+	c := &tokenConfiner{
+		rules:     rules,
+		protected: windowsProtectedRoots(os.LookupEnv, userProfileRoot()),
+		labelled:  make(map[string]bool),
+	}
+	if home != "" {
+		c.journalPath = labelJournalPath(home, os.Getpid())
+		recoverLabelJournals(home)
+	}
+
+	token, err := mintRestrictedLowToken()
+	if err != nil {
+		// A mint failure is honest incapacity, not a crash: caps stay {false, false}, the
+		// disposition gates the subprocess surface, and the degradation notice explains it.
+		return c
+	}
+	c.token = token
+	c.caps = domain.ConfinementCaps{FSWrite: true, NetworkEgress: false}
+	return c
+}
+
+// Capabilities reports what this backend can enforce on this host, probed once at
+// construction (contract §5). FSWrite is true once the restricted Low token is minted at or
+// above the floor. NetworkEgress is FALSE always and by construction: ConfinementBox's
+// NetworkAllow is a per-host tightening list, no token or integrity facility can express
+// per-host egress, and the Windows facilities that can (WFP, firewall rules) are
+// machine-scoped and admin-requiring. The backend is Auto-eligible anyway, because
+// AutoEligible() is FSWrite-only (ADR 0012) — the same position a 5.13–6.6 Linux kernel
+// occupies.
+func (c *tokenConfiner) Capabilities() domain.ConfinementCaps { return c.caps }
+
+// Confine prepares cmd to execute confined to box, then returns — it does not run cmd
+// (contract §2.2). It sets cmd.SysProcAttr.Token and NOTHING ELSE on the cmd: cmd.Path and
+// cmd.Args are untouched, and the §2.4 process-tree teardown's Job Object (which the
+// execution tools own, and which is teardown, never a fence) composes with it because each
+// side only ever appends to SysProcAttr.
+//
+// Before that it labels the box's roots, once per box. Contract §2.2's "performs no I/O" is
+// amended for this backend (§9): the label pass is bounded, idempotent, once-per-box disk
+// I/O — it still never runs the command and never blocks on it. Every way the box cannot be
+// expressed on this disk — a network-deny box, a guardrailed root, a read-only root, a
+// filesystem with no SACL support (FAT32/exFAT, many network shares) — returns
+// ErrConfinementUnavailable, which contract §4's precomputed fallback demotes to a forced
+// Gate. On Linux and macOS that path is nearly unreachable; here it is routine.
+//
+// One failure lands in neither Capabilities nor here, by construction: a CreateProcessAsUser
+// refusal happens at cmd.Start(), after Confine has returned, so it surfaces as the tool's
+// own run error. The command FAILS; it does not run unconfined.
+func (c *tokenConfiner) Confine(_ context.Context, box domain.ConfinementBox, cmd *exec.Cmd) error {
+	if !c.caps.FSWrite || c.token == 0 {
+		return fmt.Errorf("%w: the Windows token backend could not mint a restricted token on this host", domain.ErrConfinementUnavailable)
+	}
+	if err := windowsNetworkDenyDecision(box); err != nil {
+		return err
+	}
+	if err := c.labelBox(box); err != nil {
+		return err
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Token = syscall.Token(c.token)
+	return nil
+}
+
+// Close reverts every label this session applied and releases the token. The backend is an
+// io.Closer rather than a Confiner method on purpose: domain.Confiner is a public interface
+// (ADR 0010) and must not sprout a lifecycle hook for one OS, so the composition root
+// asserts the optional interface and defers it beside its other Close calls (ADR 0020 §2).
+func (c *tokenConfiner) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	err := c.restoreLabels()
+	if c.token != 0 {
+		_ = c.token.Close()
+		c.token = 0
+	}
+	c.caps = domain.ConfinementCaps{}
+	return err
+}
+
+// labelBox labels the box's roots Low, once per root per session. The journal is written
+// BEFORE the first label so a process killed mid-pass still leaves a complete-enough record
+// to undo the mutation.
+func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
+	roots, err := windowsBoxRoots(c.rules, box, c.protected)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, root := range roots {
+		if c.labelled[root] {
+			continue
+		}
+		prior, err := readLabelSDDL(root)
+		if err != nil {
+			return fmt.Errorf("%w: cannot read the mandatory label of %q: %v", domain.ErrConfinementUnavailable, root, err)
+		}
+		c.journal.Entries = append(c.journal.Entries, labelJournalEntry{Path: root, Root: true, PriorSDDL: prior})
+		if err := c.flushJournal(); err != nil {
+			return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
+		}
+		if err := c.labelTree(root); err != nil {
+			return err
+		}
+		c.labelled[root] = true
+	}
+	return nil
+}
+
+// labelTree walks root and labels every directory and regular file Low. It must recurse:
+// inheritance applies to NEWLY CREATED objects only, so a file that predates the labelling
+// is implicitly Medium and a Low child editing an existing source file would be denied.
+//
+// Symlinks and other reparse points are skipped entirely — SetNamedSecurityInfo follows the
+// link, so labelling one would silently mutate a target outside the box. A failure on the
+// ROOT fails the box (the fence would be a box the agent cannot write to at all); a failure
+// on an individual descendant is tolerated, because a single locked or foreign-owned file
+// makes that ONE path read-only to the confined child, exactly as if it were read-only on
+// disk, and must not gate a whole session.
+func (c *tokenConfiner) labelTree(root string) error {
+	if err := setLabelSDDL(root, windowsDirLabelSDDL); err != nil {
+		return fmt.Errorf("%w: cannot label %q Low: %v", domain.ErrConfinementUnavailable, root, err)
+	}
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if path == root {
+				return fmt.Errorf("%w: cannot walk %q: %v", domain.ErrConfinementUnavailable, root, walkErr)
+			}
+			return nil // an unreadable sub-tree stays unlabelled rather than failing the box
+		}
+		if path == root {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if prior, err := readLabelSDDL(path); err == nil && prior != "" {
+			c.journal.Entries = append(c.journal.Entries, labelJournalEntry{Path: path, PriorSDDL: prior})
+			if err := c.flushJournal(); err != nil {
+				return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
+			}
+		}
+		sddl := windowsFileLabelSDDL
+		if entry.IsDir() {
+			sddl = windowsDirLabelSDDL
+		}
+		_ = setLabelSDDL(path, sddl)
+		return nil
+	})
+}
+
+// restoreLabels puts the disk back: every journalled root's tree is cleared of the mandatory
+// label, then the paths that carried an explicit label before the run get theirs back
+// verbatim, and the journal file is removed. Callers hold c.mu.
+func (c *tokenConfiner) restoreLabels() error {
+	err := revertLabelJournal(c.journal)
+	c.journal = labelJournal{}
+	c.labelled = make(map[string]bool)
+	if c.journalPath != "" {
+		_ = os.Remove(c.journalPath)
+	}
+	return err
+}
+
+// flushJournal persists the in-memory journal. Callers hold c.mu.
+func (c *tokenConfiner) flushJournal() error {
+	if c.journalPath == "" {
+		return nil
+	}
+	c.journal.PID = os.Getpid()
+	return writeLabelJournal(c.journalPath, c.journal)
+}
+
+// revertLabelJournal undoes one journal's disk mutation: clear the label from every object
+// under each journalled root, then restore the prior descriptors. Clearing first and
+// restoring second is the order that matters — a prior label inside a root would otherwise
+// be wiped by the walk that follows it.
+func revertLabelJournal(j labelJournal) error {
+	var firstErr error
+	for _, root := range j.roots() {
+		if err := clearLabelTree(root); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	for path, sddl := range j.priorLabels() {
+		if err := setLabelSDDL(path, sddl); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// clearLabelTree removes the mandatory label from root and everything beneath it, returning
+// it to the unlabelled (implicitly Medium) state it was in before the run. A path that has
+// since been deleted is not an error — the tree is being restored, not reconstructed.
+func clearLabelTree(root string) error {
+	if err := setLabelSDDL(root, windowsClearLabelSDDL); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("apogee: confine: clear the mandatory label of %q: %w", root, err)
+	}
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || path == root {
+			return nil
+		}
+		if info, err := entry.Info(); err == nil && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		_ = setLabelSDDL(path, windowsClearLabelSDDL)
+		return nil
+	})
+}
+
+// recoverLabelJournals finishes the restore for every journal under home whose owning
+// process is gone — ADR 0020 §2's interrupted-cleanup remedy. A journal belonging to a LIVE
+// process is left strictly alone: it belongs to a concurrently running apogee whose labels
+// are still in use, and reverting them would un-fence its session.
+func recoverLabelJournals(home string) {
+	self := os.Getpid()
+	for _, path := range listLabelJournals(home) {
+		j, err := readLabelJournal(path)
+		if err != nil {
+			continue
+		}
+		if j.PID != self && processAlive(j.PID) {
+			continue
+		}
+		_ = revertLabelJournal(j)
+		_ = os.Remove(path)
+	}
+}
+
+// processAlive reports whether pid names a running process, so recovery never reverts the
+// labels of a live apogee. A PID that cannot be opened is treated as gone.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	var code uint32
+	if err := windows.GetExitCodeProcess(handle, &code); err != nil {
+		return false
+	}
+	const stillActive = 259 // STILL_ACTIVE
+	return code == stillActive
+}
+
+// mintRestrictedLowToken mints the fence: a copy of this process's token with every
+// privilege stripped (CreateRestrictedToken + DISABLE_MAX_PRIVILEGE) and its integrity level
+// set to Low. CreateProcessAsUser accepts it without SeAssignPrimaryToken because it is a
+// restricted version of the caller's own token — which is what makes the whole design
+// reachable from an ordinary user account.
+func mintRestrictedLowToken() (windows.Token, error) {
+	var self windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(),
+		windows.TOKEN_DUPLICATE|windows.TOKEN_QUERY|windows.TOKEN_ASSIGN_PRIMARY|windows.TOKEN_ADJUST_DEFAULT,
+		&self); err != nil {
+		return 0, fmt.Errorf("apogee: confine: OpenProcessToken: %w", err)
+	}
+	defer func() { _ = self.Close() }()
+
+	var restricted windows.Token
+	if ret, _, err := createRestrictedToken.Call(
+		uintptr(self), disableMaxPrivilege,
+		0, 0, // no deny-only SIDs
+		0, 0, // no privileges to delete beyond DISABLE_MAX_PRIVILEGE
+		0, 0, // no restricting SIDs (ADR 0020 §1)
+		uintptr(unsafe.Pointer(&restricted)),
+	); ret == 0 {
+		return 0, fmt.Errorf("apogee: confine: CreateRestrictedToken: %w", err)
+	}
+	defer func() { _ = restricted.Close() }()
+
+	// CreateRestrictedToken's result is usable as-is only with the access rights it was
+	// granted; duplicating it produces the primary token with the access CreateProcessAsUser
+	// needs, and leaves the intermediate handle to be closed here.
+	var primary windows.Token
+	if err := windows.DuplicateTokenEx(restricted, windows.TOKEN_ALL_ACCESS, nil,
+		windows.SecurityImpersonation, windows.TokenPrimary, &primary); err != nil {
+		return 0, fmt.Errorf("apogee: confine: DuplicateTokenEx: %w", err)
+	}
+
+	sid, err := windows.CreateWellKnownSid(windows.WinLowLabelSid)
+	if err != nil {
+		_ = primary.Close()
+		return 0, fmt.Errorf("apogee: confine: CreateWellKnownSid(Low): %w", err)
+	}
+	label := windows.Tokenmandatorylabel{
+		Label: windows.SIDAndAttributes{Sid: sid, Attributes: windows.SE_GROUP_INTEGRITY},
+	}
+	if err := windows.SetTokenInformation(primary, windows.TokenIntegrityLevel,
+		(*byte)(unsafe.Pointer(&label)), label.Size()); err != nil {
+		_ = primary.Close()
+		return 0, fmt.Errorf("apogee: confine: SetTokenInformation(TokenIntegrityLevel=Low): %w", err)
+	}
+	return primary, nil
+}
+
+// readLabelSDDL returns the object's mandatory-label descriptor in SDDL form, or "" when it
+// carries no explicit label (the state teardown restores by clearing). Only a descriptor
+// actually containing a label ACE is reported, so the journal never records "S:" noise as
+// something to put back.
+func readLabelSDDL(path string) (string, error) {
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.LABEL_SECURITY_INFORMATION)
+	if err != nil {
+		return "", err
+	}
+	text := sd.String()
+	if !strings.Contains(text, windowsLabelACEPrefix) {
+		return "", nil
+	}
+	return text, nil
+}
+
+// setLabelSDDL writes sddl's SACL as the object's mandatory label. Only
+// LABEL_SECURITY_INFORMATION is requested, which needs WRITE_OWNER on the object and no
+// privilege — the caller owns its workspace, and asking for SACL_SECURITY_INFORMATION
+// instead would demand SeSecurityPrivilege and fail for an ordinary user.
+func setLabelSDDL(path, sddl string) error {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return fmt.Errorf("parse label %q: %w", sddl, err)
+	}
+	sacl, _, err := sd.SACL()
+	if err != nil {
+		return fmt.Errorf("read label SACL from %q: %w", sddl, err)
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.LABEL_SECURITY_INFORMATION, nil, nil, nil, sacl)
+}
+
+// defaultApogeeHome resolves the apogee home the journal lives under, matching the
+// composition root's default (~/.apogee). NewConfiner takes no arguments — it is the per-OS
+// selector every backend shares — so a --config override is deliberately not threaded here;
+// the journal is a crash-recovery aid whose location must be findable without one.
+func defaultApogeeHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".apogee")
+}
+
+// userProfileRoot returns the user-profile directory the labelling guardrails protect.
+func userProfileRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
+}
+
+// The backend must satisfy the Confiner contract, and the optional teardown interface the
+// composition root asserts, at compile time.
+var (
+	_ domain.Confiner            = (*tokenConfiner)(nil)
+	_ interface{ Close() error } = (*tokenConfiner)(nil)
+)

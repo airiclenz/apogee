@@ -412,7 +412,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   ./...`, `go test -count=1 ./...` (only the known pre-existing failures), all six cross targets,
   `--help` exit 0, the ADR-0010 grep, and gofmt over LF copies of the changed files.
 
-- [ ] **8. Windows Confiner implementation + wiring.** (DEPENDS: 5, 6, 7.) Implement ADR 0020:
+- [x] **8. Windows Confiner implementation + wiring. — ✅ DONE (2026-07-22)** (DEPENDS: 5, 6, 7.) Implement ADR 0020:
   `confiner_windows.go` (narrow `confiner_other.go`'s build tags so Windows selects the real
   backend), the re-exec helper (`confined_exec_windows.go` mirroring the Linux 42-liner + the
   `main.go` sentinel path), honest `Capabilities()`, prepare-in-place `Confine`. Wire
@@ -423,6 +423,71 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   Acceptance: `make cross` + `GOOS=windows go vet ./...` green; the native suite green
   **including the escape probes**; deny-backend behaviour on remaining OSes untouched
   (`confiner_other.go` still compiles for them; re-verified at the closeout Linux pass).
+
+  NOTES (2026-07-22): **the "re-exec helper" clause above is VOID** — ADR 0020 §1 (ratified
+  after this item was written) deletes it. Under the token design there is no helper process,
+  no `confined_exec_windows.go`, no argv sentinel and no argv rewrite: `Confine` mints nothing
+  per call, sets `cmd.SysProcAttr.Token` and returns, and `maybeDispatchConfinedExec` gains no
+  Windows arm (its `!linux` doc comment now says why). `confinerBackendName` likewise does not
+  exist — `probe.BackendName` derives the label from the concrete type, so `*tokenConfiner`
+  renders as "token" with no wiring at all; what wire.go DID need was the ADR 0020 §2 teardown
+  hook, an optional `io.Closer` assertion deferred beside `rungs.Docs.Close()`.
+  NOTES (2026-07-22): `internal/platform/confinetest` cannot import `internal/platform`
+  (`seatbelt_darwin_test.go` is `package platform` ⇒ import cycle), so of contract §9.3's two
+  routes the **shell is passed in from the caller**: `Probe`/`ProbeNetwork` gained a
+  `confinetest.Shell` parameter that `platform.Host` satisfies, and the three call sites hand
+  it `Current()`. The shell-DIALECT fragments the battery needs — the write line, the nested
+  line, the profile escape target and `SysProcAttr.CmdLine` — are build-tagged inside
+  confinetest (`lines_windows.go` / `lines_other.go`), because `platform.Host` models a
+  shell's invocation and deliberately not its built-ins.
+  NOTES (2026-07-22): correction #3 honoured as the fence's sharpest edge. The guardrail does
+  NOT read `Path.Contains`'s false as "outside": it asks `hostRules.split` whether the path is
+  comparable at all and REFUSES TO LABEL when it is not (unresolvable 8.3 short name, device
+  path, drive-relative `C:work`), and refuses equally when a *protected location* cannot be
+  resolved. `Current()` gained an unexported `currentRules()` twin so the backend can reach
+  the rule table rather than the `Host` interface.
+  NOTES (2026-07-22): correction #4 honoured. The battery now runs `cmd /c` natively via
+  `Current().Command`/`CommandLine`/`Quote` (the verbatim command line is mandatory — os/exec's
+  `EscapeArg` joining turns the redirect's quotes into "The filename, directory name, or volume
+  label syntax is incorrect"). Row #4 is renamed `write_under_user_profile_denied` and targets
+  the profile ROOT on Windows, not `%USERPROFILE%\.ssh`, whose missing parent would fail cmd
+  for the wrong reason. Row #6 is **asserted** under the token backend, not assumed: a nested
+  `cmd /c` is denied, proving descendants inherit the restricted token.
+  NOTES (2026-07-22): three implementation calls ADR 0020 leaves open. (a) The label journal
+  lives at `<apogee home>/confinement/labels-<pid>.json` — per-PID so two concurrent apogees
+  cannot overwrite each other's record — and the home is the DEFAULT `~/.apogee`, because
+  `NewConfiner()` is the no-arg per-OS selector every backend shares and threading `--config`
+  would ripple into Linux/macOS. (b) Construction's recovery reads one directory that normally
+  does not exist and writes only when a crashed run actually left labels, so `apogee probe
+  host` stays free/offline/read-only (ADR 0021 §1, verified live); a journal whose owning PID
+  is still ALIVE is skipped, or a second apogee would un-fence a running one. (c) Teardown
+  clears a label with a NULL SACL (`"S:"`) rather than `UNPROTECTED_SACL_SECURITY_INFORMATION`,
+  which trips the `SeSecurityPrivilege` check and fails for an ordinary user; the result is
+  behaviourally identical to the pre-run state and is asserted as such.
+  NOTES (2026-07-22): the label pass fails CLOSED on a box root (unreadable, unwritable,
+  SACL-less, guardrailed ⇒ `ErrConfinementUnavailable` ⇒ contract §4's forced Gate) and
+  TOLERATES a failure on an individual descendant — one locked file becomes read-only to the
+  confined child, which must not gate a whole session. Symlinks and reparse points are skipped:
+  `SetNamedSecurityInfo` follows them, so labelling one would mutate a target outside the box.
+  NOTES (2026-07-22): ADR 0020 §2's "`apogee probe host` reports an outstanding journal" is
+  implemented here (it is not item 10's doc roll-up): `platform.ConfinementResidue(home)` plus
+  an injected `probe.Inputs.Residue`, rendered as a `labels:` line under the confinement block.
+  NOTES (2026-07-22): MEASURED COST of the disk mutation, which ADR 0020 accepted but did not
+  quantify: ~1 ms per object, so a synthetic 5,051-object tree took **5.2 s to label and 2.2 s
+  to revert**. It is paid once per box (the first confined command of a session) and once at
+  shutdown, but a workspace with a large `.git`/`node_modules` will make that first `Confine`
+  visibly block. Recorded here rather than tuned, because pruning the walk is a change to the
+  ratified box semantics; if it needs a remedy the cheap ones are a startup notice or excluding
+  ignored trees, and that is an owner call, not this item's.
+  NOTES (2026-07-22): LIVE EVIDENCE on this host (windows/arm64, build 26200, go1.26.5).
+  Escape battery natively green — in-box and writable-path writes land, out-of-box, user-profile
+  and nested-exec writes all die with "Access is denied." and no file. The whole PRODUCT path
+  was proven too (a temporary `internal/tools` test, run and removed): the real `Terminal` tool
+  under `platform.NewConfiner()` wrote inside the box and was denied outside it with exit 1,
+  with the item-7 Job Object and the verbatim command line composing unchanged. The degradation
+  notice is GONE — `apogee probe host` now prints `backend: token (fs-write: available ·
+  network: unavailable)` / `auto: eligible` and no notice. The below-floor path stays UNTESTED
+  (no such host exists here), exactly as ADR 0020's consequences record.
 
 - [ ] **9. Proxy / OpenCode-bridge retirement record.** Confirm by grep that this repo's only
   proxy references are the `@pin` provenance comments (list them in the item's NOTES — they are

@@ -21,9 +21,9 @@ import (
 
 func TestSeatbeltProbe(t *testing.T) {
 	// Not parallel: the confined children are real subprocesses.
-	confinetest.Probe(t, newSeatbeltConfiner(sandboxExecPresent()))
+	confinetest.Probe(t, newSeatbeltConfiner(sandboxExecPresent()), Current())
 }
 
 func TestSeatbeltProbeNetwork(t *testing.T) {
-	confinetest.ProbeNetwork(t, newSeatbeltConfiner(sandboxExecPresent()))
+	confinetest.ProbeNetwork(t, newSeatbeltConfiner(sandboxExecPresent()), Current())
 }

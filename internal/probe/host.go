@@ -23,6 +23,11 @@ type Inputs struct {
 	ConfigHome         string
 	Endpoint           string
 	ConfineToWorkspace bool
+	// Residue is the backend's outstanding disk mutation, "" when there is none — today
+	// only the Windows token backend has one to report (mandatory labels a killed run did
+	// not revert; ADR 0020 §2). It is injected like every other fact here: the report
+	// states it, it never goes looking for it.
+	Residue string
 }
 
 // Host is the finished host report: the facts, resolved once, ready to render. It is a value
@@ -38,6 +43,7 @@ type Host struct {
 	HostID             string
 	Workspace          string
 	ConfigHome         string
+	Residue            string
 	Discovery          Discovery
 }
 
@@ -60,6 +66,7 @@ func GatherHost(ctx context.Context, in Inputs) Host {
 		HostID:             in.HostID,
 		Workspace:          in.Workspace,
 		ConfigHome:         in.ConfigHome,
+		Residue:            in.Residue,
 		Discovery:          Discover(ctx, in.Endpoint),
 	}
 }
@@ -87,9 +94,14 @@ func (h Host) Report() string {
 		field("backend", CapabilityLine(h.Backend, h.Caps)),
 		field("auto", h.autoLine()),
 		field("confined", h.confinedLine()),
-		"",
-		"upstream",
 	}
+	// The one backend-specific line the report carries: a Windows run that was killed before
+	// it could revert its mandatory labels leaves them on the user's disk, and off-session is
+	// exactly where that has to be visible (ADR 0020 §2, ADR 0021's host report).
+	if h.Residue != "" {
+		lines = append(lines, field("labels", h.Residue))
+	}
+	lines = append(lines, "", "upstream")
 	lines = append(lines, h.upstreamLines()...)
 
 	report := strings.Join(lines, "\n")

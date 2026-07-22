@@ -128,6 +128,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// here for the degradation notice below — the backend probes once at construction, so this
 	// is the same value the engine's dispatch disposition will consult.
 	confiner := platform.NewConfiner()
+	// A backend that mutated the machine to build its box has to put it back. Only the
+	// Windows token backend does: it expresses the box's writable half as a mandatory label
+	// on the disk and reverts it here (ADR 0020 §2). domain.Confiner deliberately does NOT
+	// grow a teardown method for one OS — it is a public interface (ADR 0010) — so the hook
+	// is an optional-interface assertion at the composition root, beside the other Closes.
+	if closer, ok := confiner.(interface{ Close() error }); ok {
+		defer func() { _ = closer.Close() }()
+	}
 
 	cfg := apogee.Config{
 		Endpoint:     opts.endpoint,

@@ -58,11 +58,11 @@ func newTestConfiner(t *testing.T) *landlockConfiner {
 
 func TestLandlockProbe(t *testing.T) {
 	// Not parallel: the confined children are real subprocesses of this binary.
-	confinetest.Probe(t, newTestConfiner(t))
+	confinetest.Probe(t, newTestConfiner(t), Current())
 }
 
 func TestLandlockProbeNetwork(t *testing.T) {
-	confinetest.ProbeNetwork(t, newTestConfiner(t))
+	confinetest.ProbeNetwork(t, newTestConfiner(t), Current())
 }
 
 func TestLandlockCapabilitiesHonest(t *testing.T) {

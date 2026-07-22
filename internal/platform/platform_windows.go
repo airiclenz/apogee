@@ -13,7 +13,13 @@ import (
 // name instead of refusing to compare it. Everything else about the rules is pure data and
 // is exercised on every OS by the shared table tests; this file is the only part that
 // needs a real Windows host, and Phase 5 runs its tests there natively.
-func Current() Host {
+func Current() Host { return currentRules() }
+
+// currentRules is Current's concrete return, for the callers inside this package that need
+// the rule TABLE rather than the Host interface: the token Confiner evaluates its labelling
+// guardrails against split's "can this path be compared at all" answer, which Contains
+// deliberately collapses into a plain false.
+func currentRules() hostRules {
 	rules := windowsRules()
 	rules.longPath = longPathName
 	return rules
