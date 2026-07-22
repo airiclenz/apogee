@@ -1,7 +1,8 @@
 # Implementation plan — merge-plan Phase 5: cross-platform hardening & retirement
 
 **Date:** 2026-07-22. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
-session, forwarding skills: `coding-standards` (merge-plan Standing Requirement 1 — mandatory for
+session **on the owner's Windows machine** (decided 2026-07-22 — see the dated NOTES under Ground
+truth), forwarding skills: `coding-standards` (merge-plan Standing Requirement 1 — mandatory for
 any new Go). One sub-agent per numbered work item below, verifier before commit, mark items done
 in this file.
 
@@ -31,6 +32,15 @@ Win/Mac/Linux, Auto confined on all three.
   (GOOS strings, env funcs, case-fold flags — the `internal/present` pattern) plus `make cross`
   (six-target `GOOS=… go build ./...`). Real-Windows behaviour goes on the owner-run checklist at
   the bottom, never silently assumed.
+  NOTES (2026-07-22): superseded before execution — the owner decided to run this plan on a
+  **real Windows machine** (native toolchain, **NOT WSL** — WSL is a Linux kernel and would
+  defeat the point; `make` needs a POSIX shell such as Git Bash, else fall back to the
+  underlying `go` commands the Makefile wraps). Consequences: (a) the Windows-tagged tests and
+  the confinetest escape probes RUN natively as part of items 6–8's acceptance instead of
+  deferring to the checklist; (b) the injected seams stay — they keep the logic table-testable
+  on every OS, native execution is additional proof, not a replacement; (c) linux-tagged tests
+  (landlock) cannot run there, so a final `make check` on the Linux devbox is REQUIRED before
+  item 10 closes the plan — see the re-scoped checklist at the bottom.
 - The widening TODOs: `internal/platform/platform.go:16` (Shell: environment-scoped execution,
   LookPath semantics, argument quoting) and `:32` (Path: case-folded containment for
   `ConfinementBox.WritablePaths`, PATH lookup). `internal/platform/platform_windows.go:10`
@@ -158,14 +168,17 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   function, GOOS as a parameter — the `internal/present` pattern). Acceptance: table tests for
   both hosts including case-fold containment edges (`C:\Work` vs `c:\work`, short/long case
   collisions); `make cross`; existing callers compile unchanged or are adopted in this item.
+  Per the Ground-truth NOTES, the Windows-tagged tests also run natively on the execution
+  machine, not just compile.
 
 - [ ] **7. Windows process-tree teardown (Job Objects).** (DEPENDS: 5.) Replace the leader-only
   stub in `internal/tools/exec_pgroup_other.go` (its `:16` TODO) with real job-object teardown
   killing the whole tree, honouring the same §2.4 contract `exec_pgroup_unix.go` implements
   (Cancel + WaitDelay so Wait can never wedge on a held pipe). Extract any decision logic into
-  platform-neutral functions with unit tests; the syscall layer is compile-verified via
-  `make cross` and validated on the owner checklist. Acceptance: `make cross` green; linux
-  suite green; the §2.4 contract comment updated to describe both backends.
+  platform-neutral functions with unit tests; the syscall layer is exercised natively on the
+  execution machine (Ground-truth NOTES) — a test that cancels a shell command spawning a child
+  and asserts the whole tree died. Acceptance: `make cross` green; the native suite green; the
+  §2.4 contract comment updated to describe both backends.
 
 - [ ] **8. Windows Confiner implementation + wiring.** (DEPENDS: 5, 6, 7.) Implement ADR 0020:
   `confiner_windows.go` (narrow `confiner_other.go`'s build tags so Windows selects the real
@@ -173,10 +186,11 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   `main.go` sentinel path), honest `Capabilities()`, prepare-in-place `Confine`. Wire
   `confinerBackendName` in `cmd/apogee/wire.go`; the degradation notice must vanish on a capable
   Windows host and persist below the minimum version. Add build-tagged escape-probe acceptance
-  tests through `internal/platform/confinetest` (compile-checked here via `make cross`; executed
-  on the owner checklist). Acceptance: `make cross` + `GOOS=windows go vet ./...` green; linux
-  suite green; deny-backend behaviour on other OSes untouched (`confiner_other.go` tests still
-  pass).
+  tests through `internal/platform/confinetest` — **executed natively in this item** (Ground-truth
+  NOTES), the Windows counterpart of `landlock_linux_test.go`/`seatbelt_darwin_test.go`.
+  Acceptance: `make cross` + `GOOS=windows go vet ./...` green; the native suite green
+  **including the escape probes**; deny-backend behaviour on remaining OSes untouched
+  (`confiner_other.go` still compiles for them; re-verified at the closeout Linux pass).
 
 - [ ] **9. Proxy / OpenCode-bridge retirement record.** Confirm by grep that this repo's only
   proxy references are the `@pin` provenance comments (list them in the item's NOTES — they are
@@ -211,10 +225,18 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
 
 ## Owner-run checklist (after implementation — the plan is not "done done" until these)
 
-- **Real Windows target** (`platform_windows.go:10`'s TODO): shell/path behaviour, job-object
-  tree kill under cancel/timeout, the confinetest escape probes, a live Auto-confined
-  deliverable run, and the degradation notice on a below-minimum-version host.
-- **Cross binaries smoke:** `make cross`, then run `--help` + a trivial session on each OS.
+Re-scoped 2026-07-22 (Ground-truth NOTES): native execution on the Windows machine folds the
+former "real Windows target" validation — shell/path behaviour, job-object tree kill, the
+escape probes, `platform_windows.go:10`'s TODO — into items 6–8's acceptance. Still outstanding:
+
+- **Closeout Linux pass — REQUIRED, gates item 10:** `make check` on the Linux devbox; the
+  linux-tagged landlock tests cannot run on the Windows machine.
+- **Live Auto-confined deliverable run on Windows** — during or after item 8 if an LLM endpoint
+  is reachable from that machine; otherwise it stays here as owner-run.
+- **Degradation notice on a below-minimum-version Windows host** — only if such a host exists;
+  otherwise record as untested in ADR 0020's consequences.
+- **macOS cross-binary smoke:** `--help` + a trivial session (Linux and Windows are covered by
+  the two execution machines).
 - **Pre-existing, NOT Phase 5 scope** (CHANGELOG "known post-release verification", carried for
   visibility): Linux landlock live enforcement on a landlock-enabled kernel; the Linux/macOS
   live Auto-confined runs.
