@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // fakeConfiner is a caps-injected Confiner for the execution-tool tests. It records each
@@ -117,13 +118,99 @@ func TestTerminal_EmptyAndUnparseableCommand(t *testing.T) {
 	}
 
 	// An unbalanced quote is not POSIX-parseable; shlex rejects it before the shell runs.
+	// cmd.exe has no such grammar, so on Windows the same line reaches the shell instead
+	// (the pre-flight matches the target shell — preflightCommandLine).
 	res, err = term.Execute(context.Background(), terminalCall("c2", `echo "unterminated`))
 	if err != nil {
 		t.Fatalf("Execute err = %v", err)
 	}
-	if !res.IsError || !strings.Contains(res.Content, "could not parse") {
-		t.Errorf("unparseable command: got %q, want a parse-error result", res.Content)
+	if hostShellIsPOSIX() {
+		if !res.IsError || !strings.Contains(res.Content, "could not parse") {
+			t.Errorf("unparseable command: got %q, want a parse-error result", res.Content)
+		}
+	} else if strings.Contains(res.Content, "could not parse") {
+		t.Errorf("cmd.exe line: got %q, want no POSIX pre-flight rejection", res.Content)
 	}
+}
+
+// hostShellIsPOSIX reports whether this host's shell takes a real argv (sh -c) rather than a
+// verbatim command line (cmd.exe) — the same convention Execute derives its pre-flight from.
+func hostShellIsPOSIX() bool { return shellHost.CommandLine("probe") == "" }
+
+// TestTerminal_PreflightMatchesTheTargetShell is the table proof that the pre-flight is a
+// POSIX-sh gate and not a universal one: every row is a line cmd.exe reads without
+// complaint, and the POSIX splitter's verdict on it must not decide a cmd run.
+func TestTerminal_PreflightMatchesTheTargetShell(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		command   string
+		posixFail bool
+	}{
+		{name: "apostrophe in a word", command: `echo don't panic`, posixFail: true},
+		{name: "quoted path with a trailing backslash", command: `dir "C:\Program Files\"`, posixFail: true},
+		{name: "unbalanced double quote", command: `echo "unterminated`, posixFail: true},
+		{name: "ordinary line", command: `echo hello`, posixFail: false},
+		{name: "balanced quotes", command: `git commit -m "a message"`, posixFail: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := preflightCommandLine(tc.command, false); err != nil {
+				t.Errorf("preflightCommandLine(%q, posix=false) = %v, want nil (cmd.exe is not pre-parsed)", tc.command, err)
+			}
+			err := preflightCommandLine(tc.command, true)
+			if tc.posixFail && err == nil {
+				t.Errorf("preflightCommandLine(%q, posix=true) = nil, want the POSIX splitter's error", tc.command)
+			}
+			if !tc.posixFail && err != nil {
+				t.Errorf("preflightCommandLine(%q, posix=true) = %v, want nil", tc.command, err)
+			}
+		})
+	}
+}
+
+// rawCmdlineHost is platform.Current() with one difference: CommandLine always reports a
+// raw command line — the convention that marks a shell the line is delivered to verbatim
+// (cmd.exe). It is the injected-Windows-rules seam for the pre-flight, and only for it: the
+// argv still comes from the real host, so the command runs in whatever shell the test host
+// has, and on POSIX the raw line is never used (setRawCommandLine is a no-op there).
+type rawCmdlineHost struct{ platform.Host }
+
+func (h rawCmdlineHost) CommandLine(line string) string {
+	if raw := h.Host.CommandLine(line); raw != "" {
+		return raw
+	}
+	return "cmd /c " + line
+}
+
+// TestTerminal_CmdLinesAreNotGatedByThePOSIXSplitter drives Execute with the Windows
+// raw-command-line convention in force and asserts the two lines the POSIX splitter rejects
+// get past the gate and reach spec construction — whatever the shell then makes of them.
+//
+// It is deliberately NOT parallel: it substitutes the package-level shellHost, and Go
+// resumes parallel tests only after the sequential pass over the top-level tests is done.
+func TestTerminal_CmdLinesAreNotGatedByThePOSIXSplitter(t *testing.T) {
+	saved := shellHost
+	shellHost = rawCmdlineHost{Host: saved}
+	t.Cleanup(func() { shellHost = saved })
+
+	for _, command := range []string{`echo don't panic`, `dir "C:\Program Files\"`} {
+		res, err := executeTerminalLine(t, command)
+		if err != nil {
+			t.Fatalf("Execute(%q) err = %v, want nil", command, err)
+		}
+		if strings.Contains(res.Content, "could not parse command line") {
+			t.Errorf("Execute(%q) = %q, want no POSIX pre-flight rejection under Windows rules", command, res.Content)
+		}
+	}
+}
+
+// executeTerminalLine runs one command line through a fresh terminal tool rooted at a temp dir.
+func executeTerminalLine(t *testing.T, command string) (domain.ToolResult, error) {
+	t.Helper()
+	return NewTerminal(t.TempDir()).Execute(context.Background(), terminalCall("c1", command))
 }
 
 func TestTerminal_WorkdirEscapeRejected(t *testing.T) {

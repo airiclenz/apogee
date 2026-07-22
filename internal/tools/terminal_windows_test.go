@@ -62,6 +62,50 @@ func TestTerminal_WindowsRedirectToAQuotedSpacedPath(t *testing.T) {
 	}
 }
 
+// TestTerminal_WindowsCmdLinesThePOSIXSplitterRejects is the native end-to-end proof of the
+// pre-flight fix: two ordinary cmd.exe lines that the POSIX splitter refuses — an apostrophe
+// in a word, and a quoted directory path ending in a backslash — must run, not be rejected
+// by a parser for a different shell.
+func TestTerminal_WindowsCmdLinesThePOSIXSplitterRejects(t *testing.T) {
+	t.Parallel()
+
+	// A quoted path with a space AND a trailing backslash: the shape %USERPROFILE% paths
+	// take, and the one shlex reads as an escaped quote that never closes.
+	root := t.TempDir()
+	dir := filepath.Join(root, "pro be")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir %q: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "marker.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	term := NewTerminal(root)
+	tests := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{name: "apostrophe in a word", command: `echo don't panic`, want: "don't panic"},
+		{name: "quoted path with a trailing backslash", command: `dir "` + dir + `\"`, want: "marker.txt"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := term.Execute(context.Background(), terminalCall("c1", tc.command))
+			if err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if res.IsError {
+				t.Fatalf("a valid cmd line produced an error result: %q", res.Content)
+			}
+			if !strings.Contains(res.Content, tc.want) {
+				t.Errorf("output = %q, want it to contain %q", res.Content, tc.want)
+			}
+		})
+	}
+}
+
 // TestTerminal_WindowsCancelKillsTheProcessTree is the Windows counterpart of
 // TestTerminal_CancelKillsChildProcessGroup and the behavioural proof of the §2.4 job-object
 // teardown: a ctx-cancelled command must take its whole process tree with it, not just the

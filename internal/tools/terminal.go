@@ -56,9 +56,10 @@ func (t *Terminal) ReadOnly() bool { return false }
 func (t *Terminal) Subprocess() bool { return true }
 
 // Execute runs the command line through the platform shell, honouring ctx cancellation and
-// the confinement handle the disposition installed (if any). An unparseable command line, a
-// working directory that escapes the root, or a non-zero exit are surfaced to the model as
-// results; only ctx cancellation or a confinement-unavailable demotion is a Go error.
+// the confinement handle the disposition installed (if any). A command line the target shell
+// could not parse (preflightCommandLine — POSIX sh only), a working directory that escapes
+// the root, or a non-zero exit are surfaced to the model as results; only ctx cancellation
+// or a confinement-unavailable demotion is a Go error.
 func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -71,10 +72,12 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if strings.TrimSpace(args.Command) == "" {
 		return errorResult(call.ID, "command is required"), nil
 	}
-	// Validate the command line is POSIX-parseable (balanced quotes, etc.) before handing
-	// it to the shell, so an obviously malformed command fails with a clear message rather
-	// than a confusing shell error. shlex is the POSIX command-line splitter (plan §3a).
-	if _, err := shlex.Split(args.Command); err != nil {
+	// The line is handed to the shell verbatim where the platform needs it (Windows:
+	// os/exec's argv joining would escape the model's quotes into cmd.exe's face). That
+	// raw command line is also what says WHICH shell is about to read the line, so the
+	// pre-flight below is derived from it rather than from a second OS switch.
+	cmdline := shellHost.CommandLine(args.Command)
+	if err := preflightCommandLine(args.Command, cmdline == ""); err != nil {
 		return errorResult(call.ID, "could not parse command line: "+err.Error()), nil
 	}
 
@@ -84,10 +87,8 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 
 	spec := subprocessSpec{
-		argv: shellHost.Command(args.Command),
-		// The line is handed to the shell verbatim where the platform needs it (Windows:
-		// os/exec's argv joining would escape the model's quotes into cmd.exe's face).
-		cmdline: shellHost.CommandLine(args.Command),
+		argv:    shellHost.Command(args.Command),
+		cmdline: cmdline,
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 	}
@@ -96,6 +97,27 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return domain.ToolResult{}, err
 	}
 	return subprocessToolResult(call.ID, res), nil
+}
+
+// preflightCommandLine reports why the target shell could not parse command, so an
+// obviously malformed line fails with a clear message rather than a confusing shell error.
+//
+// The gate is POSIX-only, and posix says which shell the line is bound for: it is derived
+// from platform.Shell.CommandLine, which is empty exactly where the platform hands the
+// shell a real argv (sh -c) and non-empty where the line is delivered verbatim to cmd.exe
+// (exec_cmdline_other.go). shlex is the POSIX splitter — it is a parser for a DIFFERENT
+// language than cmd's, and running it over a cmd line rejects ordinary, valid input:
+// `echo don't panic` reads as an unterminated single quote, and `dir "C:\Program Files\"`
+// as an escaped quote that never closes. cmd.exe has no stable quoting grammar worth
+// pre-parsing (its rules differ per built-in, and a trailing backslash, a caret, a `%VAR%`
+// and an unbalanced quote are all legal), so there is deliberately no cmd pre-flight: cmd
+// reports its own errors, which is strictly better than a wrong second opinion.
+func preflightCommandLine(command string, posix bool) error {
+	if !posix {
+		return nil
+	}
+	_, err := shlex.Split(command)
+	return err
 }
 
 // resolveWorkdir resolves the optional working directory within the root (path-safe), or

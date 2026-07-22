@@ -288,7 +288,25 @@ Long text and the code agree on whether the probe may write; no surface claims r
 recovery runs.
 **Commit:** `fix(probe): report confinement residue before the backend can heal it`
 
-## 6. The terminal pre-flight matches the target shell
+## 6. The terminal pre-flight matches the target shell — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): the branch is the established raw-command-line convention —
+`shellHost.CommandLine(line) == ""` means the platform hands the shell a real argv (POSIX sh),
+non-empty means the line is delivered verbatim to cmd.exe (`exec_cmdline_*.go`) — so no Host
+predicate was added and there is no second OS switch; `Execute` computes the raw line ONCE and
+uses it for both the gate and `subprocessSpec.cmdline`. No cmd-side balanced-quote check: no
+malformed-input class survives honestly (a trailing backslash, a caret, `%VAR%` and an
+unbalanced quote are all legal to cmd). Two deviations. (a) "Existing terminal tests unchanged"
+could not hold for `TestTerminal_EmptyAndUnparseableCommand`: it is UNTAGGED and asserted the
+POSIX rejection on every host, so it failed natively on Windows once the gate stopped firing
+there. Its unparseable half now asserts per shell family (POSIX ⇒ still rejected byte-identically;
+cmd ⇒ no pre-flight rejection), which makes it a proof of the fix rather than a casualty; every
+other terminal test is untouched. (b) The untagged "injected Windows rules" test injects only the
+raw-command-line convention (a `platform.Host` wrapper overriding `CommandLine`) rather than a
+whole Windows rule set: `windowsRules()` is unexported in `internal/platform`, and a full Windows
+host would also swap the argv for `cmd /c`, which no Linux runner can execute — leaving the argv
+real is what lets the two lines genuinely reach spec construction and the shell. That test is
+deliberately not `t.Parallel()` because it substitutes the package-level `shellHost`.
 
 **What:** (Review: High "POSIX splitter gates cmd.exe lines".) In
 `internal/tools/terminal.go:74–80`, apply the `shlex.Split` gate only when the platform shell is
