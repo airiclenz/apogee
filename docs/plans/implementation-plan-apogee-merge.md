@@ -20,8 +20,10 @@ deliberately *broad* — each phase will get its own detailed plan as we reach i
 > - **0002** — tools are an open extension point; the Mechanism catalogue is curated.
 > - **0003** — Mechanisms are a constraint-declared registry with a **deterministic total
 >   order** (bench detects order-sensitivity).
-> - **0004** — **Auto mode requires OS-level Confinement** as a **capability matrix** (Auto
->   needs fs-write *and* network confinement; no confinement ⇒ no Auto).
+> - **0004** — *(superseded by **0012**)* confinement attaches to **blast radius**: Auto
+>   needs fs-write confinement only, network is open by default, and on an incapable host
+>   Auto **runs and gates** the unfenceable surface ("confine if you can, gate if you
+>   can't") — it is not refused.
 > - **0005** — sub-agent privileges are bounded by the parent (≤ parent).
 > - **0006** — **Bypass mode** is the honest Mechanisms-off floor (= the bench's control arm).
 > - **0007** — **Step/Turn** + the **quiescent boundary** (cancellation + recover-at-boundary).
@@ -57,11 +59,13 @@ deliberately *broad* — each phase will get its own detailed plan as we reach i
 >    function. Keep the Go module graph lean too (see §3a). Distinguish *inherent*
 >    deps the user explicitly invokes (the `terminal` tool's shell, `python-exec`'s
 >    interpreter) from *convenience* deps we should avoid hard-wiring.
-> 3. **One deliberate exception: Auto-mode Confinement (ADR 0004).** OS-level confinement
->    is OS-specific and partly external (macOS `sandbox-exec`), which tensions the
->    single-binary promise. Accepted and bounded: the core loop + Plan + Ask-Before run
->    with zero external deps; only **Auto** depends on a confinement facility, and when
->    that facility is absent, **Auto is refused, never run unconfined.**
+> 3. **One deliberate exception: Auto-mode Confinement (ADR 0012, superseding 0004).**
+>    OS-level confinement is OS-specific and partly external (macOS `sandbox-exec`), which
+>    tensions the single-binary promise. Accepted and bounded: the core loop + Plan +
+>    Ask-Before run with zero external deps; only **Auto** leans on a confinement
+>    facility, and when that facility is absent, **Auto still runs and gates the
+>    unfenceable surface per call** ("confine if you can, gate if you can't"), announced
+>    by a startup notice with an optional per-host acknowledgement.
 
 ---
 
@@ -427,6 +431,10 @@ before keeping it on**:
   an A/B, not by faith.
 
 ### Phase 5 — Cross-platform hardening & retirement
+
+> **Execution plan (2026-07-22):** `2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`
+> is the numbered work-item breakdown for `/implement-plan`. This section stays the scope
+> authority; that plan carries the anchors, design-call gates and verification hooks.
 - Implement the **Windows** shell/path backend **and the Windows `Confiner`**
   (AppContainer / Job Objects / restricted tokens) behind `platform/`; test the matrix
   (the real cross-platform risk). The interfaces were designed in Phase 0, so this is
@@ -454,7 +462,7 @@ before keeping it on**:
 |---|---|---|
 | `processing/` port | fiddly string logic (harmony channels, fenced/native parsing), currently TS-tested | keep TS as oracle; port test vectors; validate parity via the bench |
 | Windows shell exec **+ Confiner** | shell is POSIX-shaped; Windows OS confinement (AppContainer) is a different model and genuine new work | `platform/` shell/path **and `Confiner`** interfaces from Phase 0; Windows backend in Phase 5 |
-| **Auto-mode Confinement** | OS confinement is OS-specific + partly external; must not become a silent hard dep | ADR 0004: landlock (Linux, in-kernel) / seatbelt (mac) for v1; **Auto refused, not unconfined, when unavailable**; own design session |
+| **Auto-mode Confinement** | OS confinement is OS-specific + partly external; must not become a silent hard dep | ADR 0012 (supersedes 0004): landlock (Linux, in-kernel) / seatbelt (mac) for v1; **when unavailable, Auto runs and gates the unfenceable surface ("confine if you can, gate if you can't")**; own design session |
 | Mechanism re-validation | proxy-era effects may not transfer to in-loop firing | bench A/Bs each one (Phase 4); never carry forward on faith |
 | **Public Go API stability** | the bench *and* third-party embedders depend on it; costly to change later (ADR 0001) | design first (Phase 0); minimal guarded surface; **semver**; typed Events; everything else `internal/` |
 | **Library pollution** | bench drives the *real* loop, so the real Library mechanism could flood production with sim data | ADR 0001: Config-injected state roots; **bench isolation by default**; opt-in bleed only if proven |
@@ -493,7 +501,9 @@ Resolved in the 2026-06-22 grilling session (see ADRs):
    / post-tool-result / history-rewrite) and live in a **constraint-declared registry**
    (ADR 0003). The detailed catalogue mapping is a dedicated sim-data session before Phase 4.
 8. **Tools are an open extension point; the Mechanism catalogue is curated** (ADR 0002).
-9. **Auto mode requires OS-level Confinement** (ADR 0004); unavailable ⇒ Auto refused.
+9. **Auto's blast radius is bounded by OS-level Confinement** (decided as ADR 0004, since
+   superseded by ADR 0012): unavailable ⇒ Auto runs and gates the unfenceable surface
+   ("confine if you can, gate if you can't"), never silently unconfined.
    **Sub-agent privileges ≤ parent** (ADR 0005).
 10. **Context reduction is a four-way split** — Budget / Tool-result capping / **Compaction
     (generative, default)** / History truncation (mechanical, off by default).
