@@ -480,7 +480,7 @@ trailing-dot spelling of a protected root ⇒ refused; an ordinary root still la
 unaffected.
 **Commit:** `fix(confine): refuse reparse-point roots; fold trailing dots in the rule table`
 
-## 10. Session recovery provably preserves an undecodable journal
+## 10. Session recovery provably preserves an undecodable journal — ✅ DONE (2026-07-22)
 
 **What:** (Review: Medium "preservation of the unreadable journal untested" — tests only.) The
 code promises `recoverLabelJournals` never deletes what it cannot decode

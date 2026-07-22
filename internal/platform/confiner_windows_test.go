@@ -1006,6 +1006,44 @@ func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
 	}
 }
 
+func TestWindowsRecoveryLeavesAnUndecodableJournalInPlace(t *testing.T) {
+	// The worst journal state, at the constructor that acts on journals. A file that IS a
+	// journal by name but cannot be decoded names no roots to revert and no owner to check, so
+	// recovery cannot act on it — and deleting it would throw away the only trace of whatever
+	// mutation it once described. The SESSION constructor is the one code path that removes
+	// journals at construction time, so it is the constructor under test (the report variant
+	// touches nothing by design): the file must survive construction byte-for-byte, and
+	// confinementResidue must still name it afterwards — that report is the only path by which
+	// this state ever reaches a human, and a plausible "clean up what we can't decode" refactor
+	// would make it permanently unreachable while passing every decode-path test.
+	home := t.TempDir()
+	// A dead PID in the file name; the shield under test is the undecodability alone, since
+	// recovery never gets far enough to consult liveness for a journal it cannot read.
+	garbage := labelJournalPath(home, 909)
+	if err := os.MkdirAll(labelJournalDir(home), 0o700); err != nil {
+		t.Fatalf("create journal dir: %v", err)
+	}
+	seed := []byte(`{"pid":909,"entries":[{"path":"C:\\wo`)
+	if err := os.WriteFile(garbage, seed, 0o600); err != nil {
+		t.Fatalf("seed a half-written journal: %v", err)
+	}
+
+	session := newTokenConfiner(home) // the RECOVERING constructor, not the report variant
+	t.Cleanup(func() { _ = session.Close() })
+
+	kept, err := os.ReadFile(garbage)
+	if err != nil {
+		t.Fatalf("the undecodable journal did not survive session construction: %v", err)
+	}
+	if string(kept) != string(seed) {
+		t.Errorf("the undecodable journal was rewritten to %q; recovery must leave what it cannot decode untouched", kept)
+	}
+	got := confinementResidue(home)
+	if !strings.Contains(got, "unreadable") || !strings.Contains(got, garbage) {
+		t.Errorf("confinementResidue = %q; want the unreadable journal %q still reportable after construction", got, garbage)
+	}
+}
+
 func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 	// Two sessions confine one workspace and the first one leaves. Its Close must not strip
 	// the shared root's label out from under the survivor: the survivor's memoised label pass
