@@ -658,6 +658,80 @@ func TestWindowsDeletedPriorLabelledPathDoesNotWedgeTheRevert(t *testing.T) {
 	}
 }
 
+func TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry(t *testing.T) {
+	// The phantom-entry path, closed at its source. Journal-before-label means a root whose
+	// label write FAILS — here a DACL withholding WRITE_OWNER, the access the write needs —
+	// already has a journal entry when the box is refused, though nothing on the disk was
+	// mutated. Left in place, that entry wedged the lifecycle: every Close and recovery failed
+	// clearing a label that was never there (the same root is just as unwritable to the
+	// clear), so the journal was never retired and ConfinementResidue alarmed forever over a
+	// clean disk — a persistent false alarm that trains the user to ignore the real one. The
+	// refusal must instead leave NO journal debris.
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	c := newTokenConfiner(home)
+	t.Cleanup(func() { _ = c.Close() })
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+	if prior, err := readLabelSDDL(ws); err != nil || prior != "" {
+		t.Fatalf("fresh temp dir prior = %q (err %v); the unwind under test only covers a no-prior root", prior, err)
+	}
+
+	// Withhold WRITE_OWNER while keeping READ_CONTROL and the rights the restore and cleanup
+	// need (READ_CONTROL|WRITE_DAC|DELETE|SYNCHRONIZE|FILE_READ_ATTRIBUTES = 0x170080), so
+	// the prior read succeeds — the entry really IS journalled first — and the label write
+	// that follows is denied by the kernel. The kept READ_CONTROL|WRITE_DAC is also what lets
+	// the named-object API put the DACL back afterwards.
+	setFileDACL(t, ws, "D:P(A;;0x170080;;;OW)")
+	t.Cleanup(func() { setFileDACL(t, ws, "D:(A;;FA;;;WD)") })
+
+	cmd := exec.Command("cmd", "/c", "echo hi")
+	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ws}, cmd)
+	if err == nil {
+		t.Fatal("Confine labelled a box whose root label write must be denied; the rung under test was not exercised")
+	}
+	if !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Errorf("err = %v; want ErrConfinementUnavailable so dispatch demotes to a forced Gate", err)
+	}
+
+	// No journal debris, in memory or on disk: the refused box mutated nothing, so nothing
+	// may be recorded as needing an undo.
+	for _, entry := range c.journal.Entries {
+		if strings.EqualFold(entry.Path, ws) {
+			t.Errorf("in-memory journal entry %+v survives the refused box; a phantom entry alarms forever", entry)
+		}
+	}
+	journals := listLabelJournals(home)
+	for _, path := range journals {
+		onDisk, readErr := readLabelJournal(path)
+		if readErr != nil {
+			t.Fatalf("read journal %q: %v", path, readErr)
+		}
+		for _, entry := range onDisk.Entries {
+			if strings.EqualFold(entry.Path, ws) {
+				t.Errorf("on-disk journal entry %+v survives the refused box; recovery would fail on it every startup", entry)
+			}
+		}
+	}
+
+	// The disk really is clean — the refusal happened before any label landed.
+	if label, readErr := readLabelSDDL(ws); readErr != nil || label != "" {
+		t.Errorf("root label = %q (err %v) after the refusal, want the disk untouched", label, readErr)
+	}
+
+	// Residue is reported only for labels that exist: even once this process is gone (the
+	// journal re-owned by a dead PID, exactly as a crash right after the refusal would leave
+	// it), the report has nothing to alarm about.
+	for _, path := range journals {
+		rewriteJournalPID(t, home, path)
+	}
+	if got := confinementResidue(home); got != "" {
+		t.Errorf("confinementResidue = %q, want nothing — the refused box left no label behind", got)
+	}
+}
+
 func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	// ADR 0020 §2's interrupted-cleanup remedy. A process killed mid-run leaves labels and a
 	// journal; the next NewConfiner finishes the restore. It is simulated by dropping the

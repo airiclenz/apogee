@@ -245,7 +245,17 @@ retired, disk clean. Item 1's restore test still green.
 verifiably gone or restored; a vanished path no longer wedges the lifecycle.
 **Commit:** `fix(confine): verify the revert below the root; tolerate deleted priors`
 
-## 4. A failed root label write unwinds its own journal entry
+## 4. A failed root label write unwinds its own journal entry — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): The unwind decision is the untagged pure helper `unwindLabelEntry`
+(`winconfine.go`, table-tested by `TestUnwindLabelEntry`); the root-write-vs-later-failure
+split is `labelTree`'s new `rootLabelled` return, and the unwind fires only for an entry
+`journalLabel` newly added — the item's "just-journalled", so an entry predating the attempt
+(whose root label may really be on the disk from an earlier partial pass) is never removed.
+Mutation check demonstrated natively: with labelBox's unwind call disabled (the pre-fix
+behaviour), `TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry` FAILED on all three
+fronts — phantom entry in memory, on disk, and `confinementResidue` alarming over the
+never-labelled root; mutation reverted, full platform suite green after the revert.
 
 **What:** (Review: Medium "phantom journal entry alarms forever".) In `labelBox`
 (`internal/platform/confiner_windows.go:276-287`): when `labelTree(root)` fails on the ROOT

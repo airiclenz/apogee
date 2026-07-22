@@ -245,7 +245,10 @@ func (c *tokenConfiner) Close() error {
 // labelBox labels the box's roots Low, once per root per session. The journal is written
 // BEFORE the first label so a process killed mid-pass still leaves a complete-enough record
 // to undo the mutation, and what it may say about a root is journalLabelEntry's decision —
-// never apogee's own label as the state to restore.
+// never apogee's own label as the state to restore. The order's one debris case is unwound at
+// the source: a root whose label write then fails has refused the box with nothing mutated,
+// so its just-journalled no-prior entry is removed again (unwindRootLabel) rather than left
+// to alarm forever as residue for a label that never landed.
 //
 // A backend with nowhere to write its journal refuses the box outright, before any label is
 // read or written: an unrevertable Low label on the user's disk is a worse outcome than a
@@ -277,10 +280,24 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 		if err != nil {
 			return fmt.Errorf("%w: cannot read the mandatory label of %q: %v", domain.ErrConfinementUnavailable, root, err)
 		}
-		if err := c.journalLabel(labelJournalEntry{Path: root, Root: true, PriorSDDL: prior}); err != nil {
+		journalled, err := c.journalLabel(labelJournalEntry{Path: root, Root: true, PriorSDDL: prior})
+		if err != nil {
 			return err
 		}
-		if err := c.labelTree(root); err != nil {
+		rootLabelled, err := c.labelTree(root)
+		if err != nil {
+			// A root label write that failed refused the box with NOTHING mutated, and the
+			// entry just journalled for it describes a mutation that never happened. Left in
+			// place it is a phantom: every later Close and recovery fails clearing a label
+			// that is not there (the same root is just as unwritable to the clear), the
+			// journal is never retired, and ConfinementResidue alarms forever over a disk
+			// carrying no label — so the entry is unwound at its source. Only a JUST-ADDED
+			// entry qualifies: one that predates this attempt records an earlier pass whose
+			// root label may really be on the disk. What the unwind may remove is
+			// unwindLabelEntry's decision — an entry with a foreign prior is kept.
+			if journalled && !rootLabelled {
+				c.unwindRootLabel(root)
+			}
 			return err
 		}
 		c.labelled[key] = true
@@ -290,17 +307,34 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 
 // journalLabel records one about-to-be-labelled path and persists the journal when the record
 // changed, wrapping a flush failure as ErrConfinementUnavailable — nothing is ever labelled
-// without a journal on disk describing how to undo it. Callers hold c.mu.
-func (c *tokenConfiner) journalLabel(entry labelJournalEntry) error {
+// without a journal on disk describing how to undo it. It reports whether the entry newly
+// changed the journal, which is what entitles labelBox to unwind it should the label write
+// that follows fail. Callers hold c.mu.
+func (c *tokenConfiner) journalLabel(entry labelJournalEntry) (bool, error) {
 	entries, changed := journalLabelEntry(c.journal.Entries, entry, foldLabelPath)
 	c.journal.Entries = entries
 	if !changed {
-		return nil
+		return false, nil
 	}
 	if err := c.flushJournal(); err != nil {
-		return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
+		return false, fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
 	}
-	return nil
+	return true, nil
+}
+
+// unwindRootLabel removes root's just-journalled entry after its label write failed — the
+// phantom-entry undo, decided by unwindLabelEntry (an entry recording a foreign prior stays).
+// The re-flush is best-effort: the caller is already returning the label failure, which is the
+// error that matters, and a stale on-disk entry costs at worst the pre-unwind behaviour —
+// Close retires the whole file on success, and only a crash before that resurrects the
+// phantom. Callers hold c.mu.
+func (c *tokenConfiner) unwindRootLabel(root string) {
+	entries, removed := unwindLabelEntry(c.journal.Entries, root, foldLabelPath)
+	if !removed {
+		return
+	}
+	c.journal.Entries = entries
+	_ = c.flushJournal()
 }
 
 // labelTree walks root and labels every directory and regular file Low. It must recurse:
@@ -316,11 +350,16 @@ func (c *tokenConfiner) journalLabel(entry labelJournalEntry) error {
 // takes the same tolerated rung, but before anything is written: no journal entry can
 // describe what the read did not deliver, so the path is left exactly as it is
 // (descendantLabelDecision) rather than labelled with no record of how to undo it.
-func (c *tokenConfiner) labelTree(root string) error {
+//
+// rootLabelled reports whether the root's own label landed, distinguishing the one failure
+// under which NOTHING was mutated — the root write itself — from the failures after it (an
+// unwalkable root, a descendant's journal flush), under which the root's label is really on
+// the disk. labelBox unwinds the root's journal entry only in the first case.
+func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 	if err := setLabelSDDL(root, windowsDirLabelSDDL); err != nil {
-		return fmt.Errorf("%w: cannot label %q Low: %v", domain.ErrConfinementUnavailable, root, err)
+		return false, fmt.Errorf("%w: cannot label %q Low: %v", domain.ErrConfinementUnavailable, root, err)
 	}
-	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	return true, filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if path == root {
 				return fmt.Errorf("%w: cannot walk %q: %v", domain.ErrConfinementUnavailable, root, walkErr)
@@ -353,7 +392,7 @@ func (c *tokenConfiner) labelTree(root string) error {
 			// A Low prior here is apogee's own label — a tree being re-walked, or one a
 			// concurrent session labelled — and journalLabel drops it rather than recording
 			// an instruction to put it back.
-			if err := c.journalLabel(labelJournalEntry{Path: path, PriorSDDL: prior}); err != nil {
+			if _, err := c.journalLabel(labelJournalEntry{Path: path, PriorSDDL: prior}); err != nil {
 				return err
 			}
 		}

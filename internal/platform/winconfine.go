@@ -211,6 +211,36 @@ func journalLabelEntry(entries []labelJournalEntry, entry labelJournalEntry, fol
 	return append(entries, entry), true
 }
 
+// unwindLabelEntry removes the entry for path when it records NO prior, returning the
+// surviving entries and whether anything was removed. It is labelBox's undo for a root whose
+// label write FAILED right after the entry was journalled: journal-before-label is the correct
+// order and stays, but the failure means the entry now describes a mutation that never
+// happened, and keeping it turns every later Close and recovery into a failing no-op —
+// clearing a label that is not there fails on the same unwritable root, so the journal is
+// never retired and ConfinementResidue alarms forever over a disk carrying no label.
+//
+// An entry that DOES record a prior is kept even then: whether that prior still sits on the
+// path is not knowable from here, and ambiguity resolves toward keeping the record — a
+// spurious restore attempt is recoverable, a destroyed record is not.
+//
+// fold is injected (nil ⇒ foldLabelPath) so the decision is table-testable on any OS.
+func unwindLabelEntry(entries []labelJournalEntry, path string, fold func(string) string) ([]labelJournalEntry, bool) {
+	if fold == nil {
+		fold = foldLabelPath
+	}
+	key := fold(path)
+	for i := range entries {
+		if fold(entries[i].Path) != key {
+			continue
+		}
+		if entries[i].PriorSDDL != "" {
+			return entries, false
+		}
+		return append(entries[:i], entries[i+1:]...), true
+	}
+	return entries, false
+}
+
 // descendantLabelDecision is the label walk's three-way decision for one descendant, from
 // the outcome of reading its prior mandatory label: shouldJournal reports whether the prior
 // must be journalled before any label lands, shouldLabel whether the path may be labelled at

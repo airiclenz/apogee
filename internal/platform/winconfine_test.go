@@ -750,6 +750,103 @@ func TestJournalLabelEntryUsesTheInjectedFold(t *testing.T) {
 	}
 }
 
+func TestUnwindLabelEntry(t *testing.T) {
+	t.Parallel()
+
+	// labelBox's phantom-entry undo, proven on every OS: a root entry journalled ahead of a
+	// label write that then FAILED describes a mutation that never happened, and it must come
+	// out again — left in place, every later Close and recovery fails clearing a label that is
+	// not there, the journal is never retired, and ConfinementResidue alarms forever over a
+	// clean disk. The one exception is an entry recording a foreign prior, which is kept:
+	// ambiguity resolves toward keeping the record.
+	const foreignMedium = "S:AI(ML;;NW;;;ME)"
+
+	tests := []struct {
+		name        string
+		entries     []labelJournalEntry
+		path        string
+		wantRemoved bool
+		wantEntries []labelJournalEntry
+	}{
+		{
+			name:        "no_prior_root_entry_is_removed",
+			entries:     []labelJournalEntry{{Path: `C:\work`, Root: true}},
+			path:        `C:\work`,
+			wantRemoved: true,
+		},
+		{
+			name:        "foreign_prior_entry_is_kept",
+			entries:     []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
+			path:        `C:\work`,
+			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
+		},
+		{
+			name:        "unknown_path_removes_nothing",
+			entries:     []labelJournalEntry{{Path: `C:\other`, Root: true}},
+			path:        `C:\work`,
+			wantEntries: []labelJournalEntry{{Path: `C:\other`, Root: true}},
+		},
+		{
+			name:        "case_varied_spelling_is_the_same_path",
+			entries:     []labelJournalEntry{{Path: `C:\Work`, Root: true}},
+			path:        `c:\WORK`,
+			wantRemoved: true,
+		},
+		{
+			name: "only_the_named_entry_is_removed",
+			entries: []labelJournalEntry{
+				{Path: `C:\keep`, Root: true},
+				{Path: `C:\work`, Root: true},
+				{Path: `C:\keep\vendor`, PriorSDDL: foreignMedium},
+			},
+			path:        `C:\work`,
+			wantRemoved: true,
+			wantEntries: []labelJournalEntry{
+				{Path: `C:\keep`, Root: true},
+				{Path: `C:\keep\vendor`, PriorSDDL: foreignMedium},
+			},
+		},
+		{
+			name: "empty_journal_removes_nothing",
+			path: `C:\work`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, removed := unwindLabelEntry(tt.entries, tt.path, foldLabelPath)
+			if removed != tt.wantRemoved {
+				t.Errorf("removed = %v, want %v (it decides whether the journal is re-flushed)", removed, tt.wantRemoved)
+			}
+			if len(got) != len(tt.wantEntries) {
+				t.Fatalf("entries = %+v, want %+v", got, tt.wantEntries)
+			}
+			for i, want := range tt.wantEntries {
+				if got[i] != want {
+					t.Errorf("entries[%d] = %+v, want %+v", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
+func TestUnwindLabelEntryUsesTheInjectedFold(t *testing.T) {
+	t.Parallel()
+
+	// The fold is a parameter so the rule is provable off Windows: under the default fold two
+	// case spellings are one path; under an injected identity fold they are two.
+	entries := []labelJournalEntry{{Path: `C:\Work`, Root: true}}
+	if _, removed := unwindLabelEntry(entries, `c:\WORK`, nil); !removed {
+		t.Error("the default fold treated two case spellings of one path as two paths")
+	}
+	identity := func(p string) string { return p }
+	if _, removed := unwindLabelEntry(entries, `c:\WORK`, identity); removed {
+		t.Error("the injected fold was ignored; the helper is not honouring its seam")
+	}
+}
+
 func TestDescendantLabelDecision(t *testing.T) {
 	t.Parallel()
 
