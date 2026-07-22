@@ -312,7 +312,10 @@ func (c *tokenConfiner) journalLabel(entry labelJournalEntry) error {
 // ROOT fails the box (the fence would be a box the agent cannot write to at all); a failure
 // on an individual descendant is tolerated, because a single locked or foreign-owned file
 // makes that ONE path read-only to the confined child, exactly as if it were read-only on
-// disk, and must not gate a whole session.
+// disk, and must not gate a whole session. A descendant whose PRIOR label cannot be read
+// takes the same tolerated rung, but before anything is written: no journal entry can
+// describe what the read did not deliver, so the path is left exactly as it is
+// (descendantLabelDecision) rather than labelled with no record of how to undo it.
 func (c *tokenConfiner) labelTree(root string) error {
 	if err := setLabelSDDL(root, windowsDirLabelSDDL); err != nil {
 		return fmt.Errorf("%w: cannot label %q Low: %v", domain.ErrConfinementUnavailable, root, err)
@@ -337,7 +340,16 @@ func (c *tokenConfiner) labelTree(root string) error {
 			}
 			return nil
 		}
-		if prior, err := readLabelSDDL(path); err == nil && prior != "" {
+		prior, priorErr := readLabelSDDL(path)
+		shouldJournal, shouldLabel := descendantLabelDecision(prior, priorErr)
+		if !shouldLabel {
+			// The prior could not be read, so labelling would destroy a possibly-foreign
+			// label with no journalled record to restore it from. The path takes the
+			// tolerated-descendant rung instead (descendantLabelDecision): it stays
+			// unlabelled, and only that one path is opaque to the confined child.
+			return nil
+		}
+		if shouldJournal {
 			// A Low prior here is apogee's own label — a tree being re-walked, or one a
 			// concurrent session labelled — and journalLabel drops it rather than recording
 			// an instruction to put it back.

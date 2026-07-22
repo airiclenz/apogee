@@ -170,7 +170,21 @@ entire suite.
 demonstrated in the item's NOTES.
 **Commit:** `test(confine): pin the foreign-prior label restore end-to-end`
 
-## 2. A descendant whose prior label cannot be read is not labelled
+## 2. A descendant whose prior label cannot be read is not labelled — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): Mutation check demonstrated on the untagged table: with
+`descendantLabelDecision`'s read-error rung reverted to "label anyway" (the pre-fix
+behaviour), `TestDescendantLabelDecision`'s two error rows FAIL; reverted, all green. One
+finding on the windows-tagged test (`TestWindowsUnreadablePriorDescendantIsNotLabelled`,
+implemented as specified and passing natively): on this host `SetNamedSecurityInfo` demands
+READ_CONTROL even for the LABEL write, so under the deny-READ_CONTROL DACL the OLD code's
+label write would have failed silently too — the tagged test pins the wiring and the
+no-label/no-entry outcome, while the skip-vs-attempt distinction is pinned by the untagged
+table. The child's DACL grants 0x1d0080
+(WRITE_DAC|WRITE_OWNER|DELETE|SYNCHRONIZE|FILE_READ_ATTRIBUTES) via an OWNER_RIGHTS ACE —
+CreateFile implicitly requests the last two — and the test restores the DACL through a
+WRITE_DAC handle (`SetKernelObjectSecurity`), because the named-object API cannot write back
+a DACL it is not allowed to read.
 
 **What:** (Review: Medium "unreadable prior ⇒ labelled unjournalled".) In `labelTree`
 (`internal/platform/confiner_windows.go:340-352`), a `readLabelSDDL(path)` ERROR must take the

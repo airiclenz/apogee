@@ -211,6 +211,29 @@ func journalLabelEntry(entries []labelJournalEntry, entry labelJournalEntry, fol
 	return append(entries, entry), true
 }
 
+// descendantLabelDecision is the label walk's three-way decision for one descendant, from
+// the outcome of reading its prior mandatory label: shouldJournal reports whether the prior
+// must be journalled before any label lands, shouldLabel whether the path may be labelled at
+// all.
+//
+//   - A read ERROR skips the path entirely — no journal entry, no label. Labelling anyway
+//     would destroy a possibly-foreign label with no record of how to put it back, which is
+//     the one thing ADR 0020 §2's journal-first invariant forbids; the cost is labelTree's
+//     tolerated-descendant one — that single path stays opaque to the confined child and
+//     never gates the box.
+//   - A non-empty prior is journalled and then labelled; what the entry may SAY about the
+//     prior remains journalLabelEntry's decision.
+//   - No prior (the overwhelmingly common case) is labelled with nothing to journal.
+//
+// It is pure so the decision is table-testable on any OS — the retireLabelJournal seam
+// pattern.
+func descendantLabelDecision(prior string, readErr error) (shouldJournal, shouldLabel bool) {
+	if readErr != nil {
+		return false, false
+	}
+	return prior != "", true
+}
+
 // windowsProtectedRoots lists the locations the backend refuses to label, resolved from the
 // environment (ADR 0020 §2's guardrails). Labelling any of them Low would be a catastrophic
 // and near-unrevertable mutation of the machine, so a box root that IS one — or that

@@ -417,6 +417,130 @@ func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
 	}
 }
 
+func TestWindowsUnreadablePriorDescendantIsNotLabelled(t *testing.T) {
+	// The unreadable-prior rung of descendantLabelDecision, on a real DACL. The child's DACL
+	// withholds READ_CONTROL from the current user (an OWNER_RIGHTS ACE displaces the owner's
+	// implicit grant) while keeping WRITE_OWNER, so the walk's prior read is denied by the
+	// kernel — the split under which the walk used to fall through to the label write with no
+	// journalled prior, a possibly-foreign label destroyed with no record. The path must
+	// instead be skipped entirely: no Low label, no journal entry, and the rest of the box
+	// labelled as normal. (The skip-versus-attempt distinction itself is pinned by the
+	// untagged TestDescendantLabelDecision; this proves the wiring against a real deny.)
+	home := t.TempDir()
+	ws := t.TempDir()
+	child := filepath.Join(ws, "opaque.txt")
+	sibling := filepath.Join(ws, "sibling.txt")
+	for _, path := range []string{child, sibling} {
+		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatalf("seed %q: %v", path, err)
+		}
+	}
+
+	c := newTokenConfiner(home)
+	t.Cleanup(func() { _ = c.Close() })
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+
+	// Replace the child's DACL with a protected one granting the owner
+	// WRITE_DAC|WRITE_OWNER|DELETE|SYNCHRONIZE|FILE_READ_ATTRIBUTES (0x1d0080) and nothing
+	// else — everything the restore below and the temp-dir cleanup need, minus READ_CONTROL.
+	// SYNCHRONIZE and FILE_READ_ATTRIBUTES must be granted because CreateFile implicitly
+	// requests them on top of the WRITE_DAC the restore handle asks for.
+	setFileDACL(t, child, "D:P(A;;0x1d0080;;;OW)")
+	t.Cleanup(func() { restoreFileDACL(t, child, "D:(A;;FA;;;WD)") })
+	if _, err := readLabelSDDL(child); err == nil {
+		t.Skip("this host can read a label through a deny-READ_CONTROL DACL (elevated?); the rung cannot be exercised")
+	}
+
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+
+	// The journal — in memory and the on-disk record a crash recovery would replay — carries
+	// NO entry for the child: an entry could only describe a prior the read never delivered.
+	journals := listLabelJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals = %v, want exactly one", journals)
+	}
+	onDisk, err := readLabelJournal(journals[0])
+	if err != nil {
+		t.Fatalf("read journal %q: %v", journals[0], err)
+	}
+	for _, j := range []labelJournal{onDisk, c.journal} {
+		for _, entry := range j.Entries {
+			if strings.EqualFold(entry.Path, child) {
+				t.Errorf("journal entry %+v names the unreadable-prior child; nothing may be journalled for a path the walk skipped", entry)
+			}
+		}
+	}
+
+	// Restore the DACL to read the child back: it carries NO Low label — the walk skipped
+	// it — while the root and the sibling are labelled as normal, so the one opaque path did
+	// not gate the box.
+	restoreFileDACL(t, child, "D:(A;;FA;;;WD)")
+	label, err := readLabelSDDL(child)
+	if err != nil {
+		t.Fatalf("read label of %q after restoring its DACL: %v", child, err)
+	}
+	if label != "" {
+		t.Errorf("the unreadable-prior child carries the label %q; a path whose prior could not be read must not be labelled", label)
+	}
+	for _, path := range []string{ws, sibling} {
+		if got, _ := readLabelSDDL(path); !isLowLabelSDDL(got) {
+			t.Errorf("label of %q = %q, want apogee's Low label — one opaque descendant must not gate the box", path, got)
+		}
+	}
+}
+
+// setFileDACL replaces path's DACL from sddl via the named-object API, protecting it from
+// inherited ACEs so the grants written there are the only ones in force. That API needs
+// READ_CONTROL as well as WRITE_DAC (it reads the current descriptor to propagate
+// inheritance), so it can RESTRICT a readable file but cannot put back the DACL of one this
+// test has made unreadable — restoreFileDACL is the way back.
+func setFileDACL(t *testing.T, path, sddl string) {
+	t.Helper()
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		t.Fatalf("parse DACL %q: %v", sddl, err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatalf("read DACL from %q: %v", sddl, err)
+	}
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil); err != nil {
+		t.Fatalf("set DACL of %q: %v", path, err)
+	}
+}
+
+// restoreFileDACL replaces path's DACL through a WRITE_DAC handle — the one access the
+// restricted DACL still grants. The handle-based kernel API performs no inheritance
+// propagation, so unlike SetNamedSecurityInfo it never needs to READ the descriptor it is
+// replacing.
+func restoreFileDACL(t *testing.T, path, sddl string) {
+	t.Helper()
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		t.Fatalf("parse DACL %q: %v", sddl, err)
+	}
+	pathW, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatalf("encode %q: %v", path, err)
+	}
+	handle, err := windows.CreateFile(pathW, windows.WRITE_DAC,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatalf("open %q for WRITE_DAC: %v", path, err)
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	if err := windows.SetKernelObjectSecurity(handle, windows.DACL_SECURITY_INFORMATION, sd); err != nil {
+		t.Fatalf("restore DACL of %q: %v", path, err)
+	}
+}
+
 func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	// ADR 0020 §2's interrupted-cleanup remedy. A process killed mid-run leaves labels and a
 	// journal; the next NewConfiner finishes the restore. It is simulated by dropping the
