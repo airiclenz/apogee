@@ -281,6 +281,30 @@ func writeLabelJournal(path string, j labelJournal) error {
 	return nil
 }
 
+// retireLabelJournal reverts one journal's disk mutation through revert and then decides the
+// journal FILE's fate: it is removed only when the revert succeeded. A failed revert leaves the
+// file exactly where it is, because the journal is the only record of the labels still sitting
+// on the disk — deleting it would strand them permanently, whereas keeping it means the next
+// NewConfiner retries the restore and, until one does, ConfinementResidue reports it (ADR 0020
+// §2).
+//
+// revert is injected — revertLabelJournal in production, which is Windows-tagged — so the
+// retention rule itself is table-testable on any OS, the same seam every other decision in this
+// file is behind. path may be "" for a backend that keeps no journal file: there is then nothing
+// to remove and the revert outcome passes through unchanged.
+func retireLabelJournal(path string, j labelJournal, revert func(labelJournal) error) error {
+	if err := revert(j); err != nil {
+		return err
+	}
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("apogee: confine: remove the label journal %q: %w", path, err)
+	}
+	return nil
+}
+
 // readLabelJournal loads one journal file.
 func readLabelJournal(path string) (labelJournal, error) {
 	raw, err := os.ReadFile(path)
@@ -346,6 +370,12 @@ func confinementResidue(home string) string {
 	return windowsResidueNotice(roots)
 }
 
+// windowsLabelRemedy is ADR 0020 §2's manual undo — an explicit Medium label is behaviourally
+// identical to no label at all. Every surface that reports outstanding labels quotes THIS
+// string, so the off-session host report and the end-of-session teardown warning hand the user
+// one remedy rather than two spellings of it.
+const windowsLabelRemedy = "icacls <path> /setintegritylevel (OI)(CI)M /T /C"
+
 // windowsResidueNotice words the outstanding-journal finding, or "" when there is none. It
 // is pure so the wording is table-testable on any host, and it names ADR 0020's manual
 // remedy — an explicit Medium label is behaviourally identical to no label at all.
@@ -355,6 +385,22 @@ func windowsResidueNotice(roots []string) string {
 	}
 	return fmt.Sprintf("%d path(s) may still carry apogee's Low integrity label: %s\n"+
 		"                 (a run was interrupted, or another apogee holds them now; a new session\n"+
-		"                 reverts them automatically, or: icacls <path> /setintegritylevel (OI)(CI)M /T /C)",
-		len(roots), strings.Join(roots, ", "))
+		"                 reverts them automatically, or: %s)",
+		len(roots), strings.Join(roots, ", "), windowsLabelRemedy)
+}
+
+// ConfinementTeardownNotice words a confinement teardown that could not put the disk back, for
+// the composition root to print on stderr at shutdown — the one moment the user can still act
+// on it. It returns "" when err is nil, so the caller can state it unconditionally, exactly as
+// it does with ConfinementResidue and the degradation notice.
+//
+// err is the backend's Close error; on Windows it already names the journal that SURVIVED the
+// failed revert, which is what makes the labels recoverable. The remedy is windowsResidueNotice's
+// verbatim, because this is the same situation seen from inside the session that caused it.
+func ConfinementTeardownNotice(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("apogee: WARNING — confinement teardown did not put every path back: %v; "+
+		"a new session reverts them automatically, or: %s", err, windowsLabelRemedy)
 }

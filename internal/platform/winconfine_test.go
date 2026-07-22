@@ -297,6 +297,112 @@ func TestLabelJournalRoundTripAndAccessors(t *testing.T) {
 	}
 }
 
+func TestRetireLabelJournalKeepsTheFileWhenTheRevertFails(t *testing.T) {
+	t.Parallel()
+
+	// The journal is the ONLY record of the labels apogee put on the disk, so the retention
+	// rule is a safety property, not bookkeeping: removing it after a failed revert would
+	// strand those labels with nothing left to describe them. The revert itself is Windows-only
+	// (it calls SetNamedSecurityInfo), so it is injected here and the DECISION is proven on
+	// every OS.
+	revertFailed := errors.New("clear the mandatory label of \"C:\\\\work\": access is denied")
+
+	tests := []struct {
+		name       string
+		revertErr  error
+		wantKept   bool
+		wantErrIs  error
+		wantNoFile bool
+	}{
+		{
+			name:       "successful_revert_removes_the_journal",
+			wantNoFile: true,
+		},
+		{
+			name:      "failed_revert_keeps_the_journal_for_the_next_run",
+			revertErr: revertFailed,
+			wantKept:  true,
+			wantErrIs: revertFailed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			path := labelJournalPath(home, 1234)
+			journal := labelJournal{PID: 1234, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}}
+			if err := writeLabelJournal(path, journal); err != nil {
+				t.Fatalf("seed journal: %v", err)
+			}
+
+			var seen labelJournal
+			err := retireLabelJournal(path, journal, func(j labelJournal) error {
+				seen = j
+				return tt.revertErr
+			})
+			if !errors.Is(err, tt.wantErrIs) {
+				t.Fatalf("retireLabelJournal err = %v, want %v", err, tt.wantErrIs)
+			}
+			if len(seen.Entries) != 1 || seen.Entries[0].Path != `C:\work` {
+				t.Errorf("the revert was handed %+v, want the journal itself", seen)
+			}
+
+			_, statErr := os.Stat(path)
+			if tt.wantKept && statErr != nil {
+				t.Errorf("the journal was removed after a FAILED revert (%v); the labels it describes would be stranded", statErr)
+			}
+			if tt.wantNoFile && statErr == nil {
+				t.Error("the journal survived a successful revert; a stale journal reports residue that is not there")
+			}
+		})
+	}
+}
+
+func TestRetireLabelJournalWithoutAJournalFile(t *testing.T) {
+	t.Parallel()
+
+	// A backend with no journal location (no resolvable user profile) has nothing to remove,
+	// so the revert outcome passes straight through — in both directions.
+	if err := retireLabelJournal("", labelJournal{}, func(labelJournal) error { return nil }); err != nil {
+		t.Errorf("retireLabelJournal(\"\") = %v, want nil", err)
+	}
+	sentinel := errors.New("revert failed")
+	if err := retireLabelJournal("", labelJournal{}, func(labelJournal) error { return sentinel }); !errors.Is(err, sentinel) {
+		t.Errorf("retireLabelJournal(\"\") = %v, want the revert error", err)
+	}
+
+	// An already-absent journal file is not a failure: recovery may run twice over the same
+	// home, and the second pass must not invent an error out of work already done.
+	gone := labelJournalPath(t.TempDir(), 7)
+	if err := retireLabelJournal(gone, labelJournal{}, func(labelJournal) error { return nil }); err != nil {
+		t.Errorf("retireLabelJournal on a missing file = %v, want nil", err)
+	}
+}
+
+func TestConfinementTeardownNoticeWordsTheFailure(t *testing.T) {
+	t.Parallel()
+
+	if got := ConfinementTeardownNotice(nil); got != "" {
+		t.Errorf("ConfinementTeardownNotice(nil) = %q, want \"\" so the caller can state it unconditionally", got)
+	}
+
+	got := ConfinementTeardownNotice(errors.New(`the journal "C:\Users\dev\.apogee\confinement\labels-9.json" is kept`))
+	if strings.Contains(got, "\n") {
+		t.Errorf("notice = %q; want a single stderr line", got)
+	}
+	if !strings.Contains(got, `labels-9.json`) {
+		t.Errorf("notice = %q; want it to name the journal that survived the failure", got)
+	}
+	if !strings.Contains(got, windowsLabelRemedy) {
+		t.Errorf("notice = %q; want the same manual remedy the host report names", got)
+	}
+	if !strings.Contains(windowsResidueNotice([]string{`C:\work`}), windowsLabelRemedy) {
+		t.Error("the host report no longer quotes the shared remedy; the two surfaces have drifted")
+	}
+}
+
 func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
 	t.Parallel()
 

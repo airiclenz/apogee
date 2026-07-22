@@ -133,8 +133,17 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// on the disk and reverts it here (ADR 0020 §2). domain.Confiner deliberately does NOT
 	// grow a teardown method for one OS — it is a public interface (ADR 0010) — so the hook
 	// is an optional-interface assertion at the composition root, beside the other Closes.
+	// A teardown that could not put the disk back is the ONE confinement failure with no other
+	// surface: the session is ending, the TUI is gone, and the labels are still there. Discarding
+	// it would leave the user with a silently mutated disk, so it goes to stderr naming the
+	// journal that survived the failure and ADR 0020 §2's manual remedy (the wording lives in
+	// internal/platform beside the host report's, so both read the same).
 	if closer, ok := confiner.(interface{ Close() error }); ok {
-		defer func() { _ = closer.Close() }()
+		defer func() {
+			if notice := platform.ConfinementTeardownNotice(closer.Close()); notice != "" {
+				fmt.Fprintln(os.Stderr, notice)
+			}
+		}()
 	}
 
 	cfg := apogee.Config{

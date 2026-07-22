@@ -285,15 +285,18 @@ func (c *tokenConfiner) labelTree(root string) error {
 
 // restoreLabels puts the disk back: every journalled root's tree is cleared of the mandatory
 // label, then the paths that carried an explicit label before the run get theirs back
-// verbatim, and the journal file is removed. Callers hold c.mu.
+// verbatim, and the journal file is removed — but ONLY if all of that succeeded
+// (retireLabelJournal). A failed revert keeps both the file and the in-memory record, so the
+// labels it describes are still recoverable: the next NewConfiner retries them and
+// ConfinementResidue reports them meanwhile. Callers hold c.mu.
 func (c *tokenConfiner) restoreLabels() error {
-	err := revertLabelJournal(c.journal)
+	if err := retireLabelJournal(c.journalPath, c.journal, revertLabelJournal); err != nil {
+		return fmt.Errorf("apogee: confine: could not revert every mandatory label; the journal %q is kept so the next run retries: %w",
+			c.journalPath, err)
+	}
 	c.journal = labelJournal{}
 	c.labelled = make(map[string]bool)
-	if c.journalPath != "" {
-		_ = os.Remove(c.journalPath)
-	}
-	return err
+	return nil
 }
 
 // flushJournal persists the in-memory journal. Callers hold c.mu.
@@ -353,6 +356,10 @@ func clearLabelTree(root string) error {
 // process is gone — ADR 0020 §2's interrupted-cleanup remedy. A journal belonging to a LIVE
 // process is left strictly alone: it belongs to a concurrently running apogee whose labels
 // are still in use, and reverting them would un-fence its session.
+//
+// A journal whose revert fails survives this pass (retireLabelJournal): recovery is
+// best-effort — there is no user to tell at construction time — but it must never destroy the
+// record of labels it did not manage to remove, so a later run gets another attempt.
 func recoverLabelJournals(home string) {
 	self := os.Getpid()
 	for _, path := range listLabelJournals(home) {
@@ -363,8 +370,7 @@ func recoverLabelJournals(home string) {
 		if j.PID != self && processAlive(j.PID) {
 			continue
 		}
-		_ = revertLabelJournal(j)
-		_ = os.Remove(path)
+		_ = retireLabelJournal(path, j, revertLabelJournal)
 	}
 }
 

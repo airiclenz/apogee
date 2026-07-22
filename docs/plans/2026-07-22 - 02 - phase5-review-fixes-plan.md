@@ -130,7 +130,16 @@ package tests, then mark the item done here. Any authorized deviation from item 
 dated `NOTES (YYYY-MM-DD):` line under the item. Review finding IDs refer to
 `docs/reviews/code-review-2026-07-22.md`.
 
-## 1. The journal survives a failed revert; the composition root surfaces the Close error
+## 1. The journal survives a failed revert; the composition root surfaces the Close error — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): the stderr line is worded by a new exported pure helper
+`platform.ConfinementTeardownNotice(err)` in `winconfine.go` (the `probe.DegradedNotice` /
+`ConfinementResidue` idiom) rather than inline in `wire.go`, so the wording stays table-testable;
+it quotes the `icacls` remedy through a new shared const `windowsLabelRemedy` that
+`windowsResidueNotice` now also uses — the rendered wording of the residue notice is byte-identical.
+The journal PATH reaches that line through `restoreLabels`, which wraps a failed revert in an error
+naming `c.journalPath`. `restoreLabels` also keeps the IN-MEMORY journal (not just the file) on
+failure, so the object still describes what is outstanding.
 
 **What:** (Review: High "journal destroyed on failed revert".) In
 `internal/platform/confiner_windows.go`, `restoreLabels` and `recoverLabelJournals` remove the
