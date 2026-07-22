@@ -31,6 +31,14 @@ type ModelInfo struct {
 	AvailableModels []DiscoveredModel
 	ActiveModel     string
 	ContextWindow   int
+
+	// RuntimeContextWindow is the window llama.cpp's GET /props reported, and 0 when that
+	// probe found none — a server without /props, or one that did not report n_ctx. It is
+	// the same number ContextWindow then carries (the /props value overrides the advertised
+	// one); it is reported separately because WHICH probe answered is itself an observation:
+	// `apogee probe` states the /v1/models and /props outcomes independently, and a
+	// non-zero value here is what makes a server identifiable as llama.cpp-shaped.
+	RuntimeContextWindow int
 }
 
 // Discover resolves the active model and its context window from the Upstream. It runs two
@@ -129,9 +137,11 @@ type propsResponse struct {
 
 // setRuntimeContextWindow overrides the active model's window with the authoritative runtime
 // value from /props, updating both the top-level ContextWindow and the matching
-// AvailableModels entry so a later model-switch reads the same number.
+// AvailableModels entry so a later model-switch reads the same number. It also records the
+// value as the runtime one, so a caller can tell WHICH probe supplied the window.
 func (info *ModelInfo) setRuntimeContextWindow(n int) {
 	info.ContextWindow = n
+	info.RuntimeContextWindow = n
 	for i := range info.AvailableModels {
 		if info.AvailableModels[i].ID == info.ActiveModel {
 			info.AvailableModels[i].ContextWindow = n

@@ -38,6 +38,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -79,7 +80,7 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	// 1. Auto on an incapable backend: the terminal call gates, and the notice is produced.
 	// ------------------------------------------------------------------
 
-	notice := confinementDegradedNotice(confinerBackendName(confiner), confiner.Capabilities(), modeAuto, true)
+	notice := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), modeAuto, true)
 	if notice == "" {
 		t.Fatal("no degradation notice for auto + confine-to-workspace on a backend that cannot fence; " +
 			"the silence this whole plan exists to fix is back")
@@ -193,7 +194,7 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	if len(notices) != 0 {
 		t.Errorf("resolution notices = %v; want none (the writer produced a well-formed entry)", notices)
 	}
-	if got := confinementDegradedNotice(confinerBackendName(confiner), confiner.Capabilities(), modeAuto, here.confineToWorkspace); got != "" {
+	if got := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), modeAuto, here.confineToWorkspace); got != "" {
 		t.Errorf("the degradation notice still fires on the acknowledged host:\n%s", got)
 	}
 
@@ -204,7 +205,7 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 		t.Error("the acknowledgement written on this host also unconfines a different host id; " +
 			"it must not travel with the config file")
 	}
-	if got := confinementDegradedNotice(confinerBackendName(confiner), confiner.Capabilities(), modeAuto, elsewhere.confineToWorkspace); got == "" {
+	if got := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), modeAuto, elsewhere.confineToWorkspace); got == "" {
 		t.Error("no degradation notice on the unacknowledged host; the other machine would be silently gated again")
 	}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/present"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
@@ -66,47 +67,10 @@ func contextWindowNotice(maxContextTokens int, compactionEnabled bool) string {
 		"set context-window: in config.yaml or let discovery run"
 }
 
-// confinementDegradedNotice returns the one-line-plus-remedy startup notice to print when Auto
-// is entered with confinement asked for (the default) on a host whose Confiner backend cannot
-// fence the filesystem — caps.FSWrite == false. That is not a malfunction: the ladder is doing
-// exactly what ADR 0012 says ("confine if you can, gate if you can't"), so every terminal command
-// takes the Approval path. Nothing said so, which is why Auto read as broken on containers where
-// landlock_create_ruleset returns ENOSYS (ISSUES.md, 2026-07-21). The notice states the blast
-// radius plainly and names the sanctioned route to the user's OWN decision — it never loosens
-// anything by itself.
-//
-// It returns "" (no notice) in every other cell: the three lower modes make no confinement
-// promise, an already-unconfined Auto has its own louder warning at the call site, and a backend
-// that CAN fence needs no explanation. Pure so the wording is table-testable without capturing
-// os.Stderr (the contextWindowNotice / appliedNotice pattern).
-func confinementDegradedNotice(backendName string, caps apogee.ConfinementCaps, mode apogee.Mode, confineToWorkspace bool) string {
-	if mode != modeAuto || !confineToWorkspace || caps.FSWrite {
-		return ""
-	}
-	return fmt.Sprintf(
-		"apogee: auto mode is gating terminal commands — the %s backend on this host reports no\n"+
-			"  filesystem confinement, so commands cannot be fenced and fall back to approval.\n"+
-			"  To run unconfined instead (safe ONLY on a disposable machine):\n"+
-			"    /confine off          — this session\n"+
-			"    /confine off --save   — and remember this host in ~/.apogee/config.yaml",
-		backendName)
-}
-
-// confinerBackendName renders the human label for a Confiner backend that the degradation
-// notice names ("landlock", "seatbelt", "deny"). domain.Confiner deliberately carries no name —
-// it reports capabilities, not identity — so the label is derived from the concrete type
-// ("*platform.landlockConfiner" → "landlock"). A shape it does not recognise degrades to the
-// bare type name, which still tells the user which backend answered.
-func confinerBackendName(c apogee.Confiner) string {
-	name := strings.TrimPrefix(fmt.Sprintf("%T", c), "*")
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
-	if trimmed := strings.TrimSuffix(name, "Confiner"); trimmed != "" {
-		name = trimmed
-	}
-	return name
-}
+// The confinement backend label and the Auto-degradation notice used below live in
+// internal/probe: `apogee probe` reports the same verdict off-session and the TUI's
+// /confine status renders it in-session, so the wording is extracted rather than copied —
+// three surfaces, one sentence (Phase-5 item 3 / ADR 0021).
 
 // ----------------------------------------------------------------------------
 // Root command body
@@ -210,7 +174,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// enforce it. The ladder gates every terminal command instead — correct, but silent until
 	// now, which is what made Auto look broken (ISSUES.md, 2026-07-21). Say it once, name the
 	// backend, and point at /confine.
-	if notice := confinementDegradedNotice(confinerBackendName(confiner), confiner.Capabilities(), mode, opts.confineToWorkspace); notice != "" {
+	if notice := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), mode, opts.confineToWorkspace); notice != "" {
 		fmt.Fprintln(os.Stderr, notice)
 	}
 
@@ -292,7 +256,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// from, so /confine status inside the TUI reports the host's real situation rather than
 		// re-deriving it. internal/platform is the binary's dependency, not the renderer's.
 		Confinement: tui.ConfinementInfo{
-			Backend: confinerBackendName(confiner),
+			Backend: probe.BackendName(confiner),
 			Caps:    confiner.Capabilities(),
 			HostID:  platform.HostID(),
 		},

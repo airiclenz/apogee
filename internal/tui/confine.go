@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/probe"
 )
 
 // ----------------------------------------------------------------------------
@@ -157,12 +158,11 @@ func confineOnNote(info ConfinementInfo, mode domain.Mode, was bool) string {
 }
 
 // confineBackendLine renders the backend and its capability matrix for the status report, e.g.
-// "landlock (fs-write: unavailable · network: unavailable)". fs-write is the load-bearing one
-// (it is what Auto's subprocess disposition keys on); network egress is reported beside it
-// because a Confiner answers for both.
+// "landlock (fs-write: unavailable · network: unavailable)". The wording comes from
+// internal/probe because `apogee probe` states the same matrix off-session (ADR 0021): one
+// verdict rendered in two places must not become two verdicts.
 func confineBackendLine(info ConfinementInfo) string {
-	return fmt.Sprintf("%s (fs-write: %s · network: %s)",
-		confineBackendName(info), confineAvailability(info.Caps.FSWrite), confineAvailability(info.Caps.NetworkEgress))
+	return probe.CapabilityLine(confineBackendName(info), info.Caps)
 }
 
 // confineBackendName is the backend's label, or "unknown backend" when the binary wired none
@@ -181,12 +181,4 @@ func confineHostLabel(info ConfinementInfo) string {
 		return "unknown"
 	}
 	return info.HostID
-}
-
-// confineAvailability words one capability bit for the report.
-func confineAvailability(ok bool) string {
-	if ok {
-		return "available"
-	}
-	return "unavailable"
 }

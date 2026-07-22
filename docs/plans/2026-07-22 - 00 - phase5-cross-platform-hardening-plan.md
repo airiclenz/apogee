@@ -153,7 +153,7 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   the Phase-5 roll-up is item 10's, and this item changes no behaviour. Sanity check:
   `go build ./... && go vet ./...` (docs-only change; `make` is absent on this host).
 
-- [ ] **3. `apogee probe` — the host half.** (DEPENDS: 1, 2.) The subcommand reports, without
+- [x] **3. `apogee probe` — the host half. — ✅ DONE (2026-07-22)** (DEPENDS: 1, 2.) The subcommand reports, without
   running an agent: OS/arch, confinement backend name + capability matrix + `AutoEligible`
   verdict, effective `confine-to-workspace` after host acknowledgement (`hostid`), workspace
   root, config home, endpoint reachability, `/v1/models` + llama.cpp `/props` discovery outcome.
@@ -162,6 +162,27 @@ as a dated `NOTES (YYYY-MM-DD):` line under the item.
   `TODO.md:370` residue (the TODO.md edit itself belongs to item 10). Acceptance: unit tests
   drive the report through a fake Confiner + `httptest` endpoint (reachable, unreachable,
   llama.cpp-shaped, bare-OpenAI-shaped); `make check` green.
+  NOTES (2026-07-22): the "extraction, not duplication" clause was read at its word and cost
+  three touches outside `cmd/apogee`, all recorded here: (a) BOTH `confinerBackendName` and
+  `confinementDegradedNotice` MOVED out of `wire.go` into the new `internal/probe`
+  (`probe.BackendName` / `probe.DegradedNotice`), taking their two unit tests with them —
+  `wire.go`, `wire_test.go` and `confinement_e2e_test.go` now call the extracted functions;
+  (b) `internal/tui`'s `/confine status` renders its capability-matrix line through
+  `probe.CapabilityLine` (its local `confineAvailability` is gone), so the CLI and the TUI
+  cannot word the matrix differently — wording is byte-identical, so the existing tui tests
+  pass unchanged; (c) `provider.ModelInfo` gained `RuntimeContextWindow`, because the report
+  must state the `/v1/models` and llama.cpp `/props` outcomes SEPARATELY and `Discover`
+  previously folded the /props window into `ContextWindow` with no way to tell which probe
+  answered — that field is what distinguishes the llama.cpp-shaped server from the
+  bare-OpenAI-shaped one in the acceptance tests. Two report choices worth naming: the host
+  report closes with the startup degradation notice VERBATIM (keyed on `domain.ModeAuto`,
+  since the probe answers "what would auto do here?"), and the probe deliberately does NOT
+  seed a starter config the way the root's RunE does — the host half writes nothing, pinned
+  by a test. No CHANGELOG/TODO.md/README edits: the Phase-5 roll-up is item 10's. Sanity
+  check on this host (`make` absent): `go build ./...`, `go vet ./...`, `go test -count=1
+  ./...` (only the 5 known pre-existing failures), all six cross targets, `--help` exit 0
+  (a Commands section now appears — the permitted delta), the ADR-0010 grep, and gofmt over
+  LF copies of the changed files.
 
 - [ ] **4. `apogee probe` — model battery + behavioral fingerprint.** (DEPENDS: 2, 3.) The
   capability battery per `mission.md` item 3 — native tool call, JSON/structured output,
