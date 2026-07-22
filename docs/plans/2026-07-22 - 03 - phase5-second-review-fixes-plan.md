@@ -278,7 +278,7 @@ was the only entry), and `ConfinementResidue` reports nothing.
 exist.
 **Commit:** `fix(confine): unwind the journal entry when the root label write fails`
 
-## 5. Teardown never clears a root a live sibling session still uses
+## 5. Teardown never clears a root a live sibling session still uses — ✅ DONE (2026-07-22)
 
 **What:** (Review: Medium "two concurrent sessions un-fence each other".) When session A and
 session B confine the same workspace, B correctly journals no restore for A's own-label priors

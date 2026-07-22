@@ -82,6 +82,10 @@ type tokenConfiner struct {
 	rules hostRules
 	// protected are the locations the backend refuses to label (ADR 0020 §2).
 	protected []string
+	// journalHome is the apogee home the label journals live under, "" when no user profile
+	// resolved. It is kept beside journalPath so teardown can read the SIBLING journals — the
+	// concurrently running sessions whose live roots the revert must leave in place.
+	journalHome string
 	// journalPath is this process's label journal under the apogee home.
 	journalPath string
 
@@ -167,6 +171,7 @@ func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 		labelled:  make(map[string]bool),
 	}
 	if home != "" {
+		c.journalHome = home
 		c.journalPath = labelJournalPath(home, os.Getpid())
 	}
 
@@ -406,13 +411,15 @@ func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 }
 
 // restoreLabels puts the disk back: every journalled root's tree is cleared of the mandatory
-// label, then the paths that carried an explicit label before the run get theirs back
-// verbatim, and the journal file is removed — but ONLY if all of that succeeded
-// (retireLabelJournal). A failed revert keeps both the file and the in-memory record, so the
-// labels it describes are still recoverable: the next NewConfiner retries them and
-// ConfinementResidue reports them meanwhile. Callers hold c.mu.
+// label — minus any root a LIVE sibling session's journal still names (revertibleRoots),
+// which stays fenced for that session — then the paths that carried an explicit label before
+// the run get theirs back verbatim, and the journal file is removed — but ONLY if all of
+// that succeeded (retireLabelJournal). A failed revert keeps both the file and the in-memory
+// record, so the labels it describes are still recoverable: the next NewConfiner retries
+// them and ConfinementResidue reports them meanwhile. Callers hold c.mu.
 func (c *tokenConfiner) restoreLabels() error {
-	if err := retireLabelJournal(c.journalPath, c.journal, revertLabelJournal); err != nil {
+	revert := revertSparingLiveSiblings(c.journalHome, c.journalPath)
+	if err := retireLabelJournal(c.journalPath, c.journal, revert); err != nil {
 		return fmt.Errorf("apogee: confine: could not revert every mandatory label; the journal %q is kept so the next run retries: %w",
 			c.journalPath, err)
 	}
@@ -432,10 +439,25 @@ func (c *tokenConfiner) flushJournal() error {
 	return writeLabelJournal(c.journalPath, c.journal)
 }
 
+// revertSparingLiveSiblings returns the production revert for the journal at own under
+// home: revertLabelJournal over the journal's roots MINUS every root a sibling journal with
+// a live owning process still names (revertibleRoots). Teardown and recovery both revert
+// through this closure, so neither ever clears a root out from under a concurrently running
+// session — the sibling read and the exclusion happen at revert time, when liveness is
+// current, not at construction.
+func revertSparingLiveSiblings(home, own string) func(labelJournal) error {
+	return func(j labelJournal) error {
+		return revertLabelJournal(j, revertibleRoots(j, siblingLabelJournals(home, own), processAlive))
+	}
+}
+
 // revertLabelJournal undoes one journal's disk mutation: clear the label from every object
-// under each journalled root, then restore the prior descriptors. Clearing first and
-// restoring second is the order that matters — a prior label inside a root would otherwise
-// be wiped by the walk that follows it.
+// under each of roots, then restore the prior descriptors. roots is the journal's root set
+// minus what a live sibling session still claims (revertibleRoots) — a spared root is not a
+// failure, because the sibling's own journal carries the Root entry and with it the clear
+// obligation, so this journal may still retire. Clearing first and restoring second is the
+// order that matters — a prior label inside a root would otherwise be wiped by the walk
+// that follows it.
 //
 // A prior-labelled path that no longer exists is a completed revert, not a failure: the
 // agent deleting or renaming a workspace file is routine activity, and an object that is
@@ -443,9 +465,9 @@ func (c *tokenConfiner) flushJournal() error {
 // clearLabelTree's root already takes). Failing on it instead would wedge the lifecycle
 // permanently: Close would warn every session and recovery would retry and fail every
 // startup, over a label that stopped existing.
-func revertLabelJournal(j labelJournal) error {
+func revertLabelJournal(j labelJournal, roots []string) error {
 	var firstErr error
-	for _, root := range j.roots() {
+	for _, root := range roots {
 		if err := clearLabelTree(root); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -513,7 +535,11 @@ func clearLabelTree(root string) error {
 // recoverLabelJournals finishes the restore for every journal under home whose owning
 // process is gone — ADR 0020 §2's interrupted-cleanup remedy. A journal belonging to a LIVE
 // process is left strictly alone: it belongs to a concurrently running apogee whose labels
-// are still in use, and reverting them would un-fence its session.
+// are still in use, and reverting them would un-fence its session. The same respect extends
+// to root OVERLAP: a dead journal's root that a live journal also names stays labelled
+// (revertSparingLiveSiblings), because the live session is using that very tree — its own
+// journal keeps the clear obligation, and recovery gets the root once that session too is
+// gone.
 //
 // A journal whose revert fails survives this pass (retireLabelJournal): recovery is
 // best-effort — there is no user to tell at construction time — but it must never destroy the
@@ -533,7 +559,7 @@ func recoverLabelJournals(home string) {
 		if j.PID != self && processAlive(j.PID) {
 			continue
 		}
-		_ = retireLabelJournal(path, j, revertLabelJournal)
+		_ = retireLabelJournal(path, j, revertSparingLiveSiblings(home, path))
 	}
 }
 

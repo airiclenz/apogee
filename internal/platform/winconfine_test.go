@@ -463,6 +463,125 @@ func TestClearTreeOutcome(t *testing.T) {
 	}
 }
 
+func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
+	t.Parallel()
+
+	// Two sessions confining one workspace journal the same root, and the first to tear down
+	// must not strip the label out from under the survivor — its memoised label pass would
+	// never re-label, and every later confined write in that session would be denied. The
+	// exclusion is decided here, purely: this journal's roots minus every root a LIVE sibling
+	// journal also names. A spared root is not a failed revert — the sibling's own Root entry
+	// carries the clear obligation, so this journal may still retire — and a DEAD sibling
+	// spares nothing, because its roots are an interrupted run recovery clears anyway.
+	journal := labelJournal{PID: 100, Entries: []labelJournalEntry{
+		{Path: `C:\work`, Root: true},
+		{Path: `C:\scratch`, Root: true},
+	}}
+
+	tests := []struct {
+		name     string
+		siblings []labelJournal
+		live     map[int]bool
+		want     []string
+	}{
+		{
+			name: "no_siblings_keeps_every_root",
+			want: []string{`C:\work`, `C:\scratch`},
+		},
+		{
+			name: "live_sibling_spares_the_shared_root_only",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
+			},
+			live: map[int]bool{200: true},
+			want: []string{`C:\scratch`},
+		},
+		{
+			name: "dead_sibling_spares_nothing",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
+			},
+			want: []string{`C:\work`, `C:\scratch`},
+		},
+		{
+			name: "case_folded_spelling_names_the_same_root",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `c:\WORK`, Root: true}}},
+			},
+			live: map[int]bool{200: true},
+			want: []string{`C:\scratch`},
+		},
+		{
+			name: "a_live_siblings_prior_only_entry_claims_no_root",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, PriorSDDL: "S:(ML;;NW;;;ME)"}}},
+			},
+			live: map[int]bool{200: true},
+			want: []string{`C:\work`, `C:\scratch`},
+		},
+		{
+			name: "both_roots_claimed_by_live_siblings_spares_everything",
+			siblings: []labelJournal{
+				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
+				{PID: 300, Entries: []labelJournalEntry{{Path: `C:\scratch`, Root: true}}},
+			},
+			live: map[int]bool{200: true, 300: true},
+			want: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			alive := func(pid int) bool { return tt.live[pid] }
+			got := revertibleRoots(journal, tt.siblings, alive)
+			if len(got) != len(tt.want) {
+				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("revertibleRoots[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSiblingLabelJournalsExcludesOwnAndUndecodable(t *testing.T) {
+	t.Parallel()
+
+	// The revert's view of the OTHER sessions in the same home: everything but its own file,
+	// with an undecodable journal skipped — it names no owner to check and no roots to spare,
+	// and erring toward clearing is the safe direction (less privilege, never more).
+	home := t.TempDir()
+	own := labelJournalPath(home, 100)
+	if err := writeLabelJournal(own, labelJournal{PID: 100, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}}); err != nil {
+		t.Fatalf("seed own journal: %v", err)
+	}
+	if err := writeLabelJournal(labelJournalPath(home, 200), labelJournal{PID: 200, Entries: []labelJournalEntry{{Path: `C:\other`, Root: true}}}); err != nil {
+		t.Fatalf("seed sibling journal: %v", err)
+	}
+	if err := os.WriteFile(labelJournalPath(home, 300), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("seed undecodable journal: %v", err)
+	}
+
+	got := siblingLabelJournals(home, own)
+	if len(got) != 1 || got[0].PID != 200 {
+		t.Fatalf("siblingLabelJournals = %+v, want only the decodable sibling (PID 200)", got)
+	}
+
+	// Windows paths are case-insensitive, so a differently-cased spelling of own is still own.
+	if got := siblingLabelJournals(home, strings.ToUpper(own)); len(got) != 1 || got[0].PID != 200 {
+		t.Errorf("siblingLabelJournals with upper-cased own = %+v, want the own journal still excluded", got)
+	}
+
+	// No home means no journals — the no-user-profile backend must not read a relative path.
+	if got := siblingLabelJournals("", own); got != nil {
+		t.Errorf("siblingLabelJournals(\"\") = %+v, want nil", got)
+	}
+}
+
 func TestConfinementTeardownNoticeWordsTheFailure(t *testing.T) {
 	t.Parallel()
 

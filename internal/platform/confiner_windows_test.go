@@ -849,6 +849,67 @@ func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
 	}
 }
 
+func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
+	// Two sessions confine one workspace and the first one leaves. Its Close must not strip
+	// the shared root's label out from under the survivor: the survivor's memoised label pass
+	// would never re-label, so every later confined write in that session would be denied for
+	// its remaining lifetime. The survivor is simulated by a planted journal naming the same
+	// root, owned by a long-lived child process — a genuinely live PID that is not this one.
+	home := t.TempDir()
+	ws := t.TempDir()
+
+	first := newTokenConfiner(home)
+	if !first.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = first.Close()
+		}
+	})
+	if err := first.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
+		t.Fatalf("box root label = %q, want Low before the first session's teardown", label)
+	}
+
+	pid, kill := liveChildPID(t)
+	siblingPath := labelJournalPath(home, pid)
+	sibling := labelJournal{PID: pid, Entries: []labelJournalEntry{{Path: ws, Root: true}}}
+	if err := writeLabelJournal(siblingPath, sibling); err != nil {
+		t.Fatalf("plant the sibling journal: %v", err)
+	}
+
+	// A spared root is not a failed revert: the sibling's own Root entry carries the clear
+	// obligation, so the first session's journal must still retire cleanly.
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close = %v, want nil; a root spared for a live sibling must not fail the revert", err)
+	}
+	closed = true
+
+	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
+		t.Errorf("shared root label = %q after the first session's Close; the live sibling's box was un-fenced", label)
+	}
+	left := listLabelJournals(home)
+	if len(left) != 1 || !strings.EqualFold(left[0], siblingPath) {
+		t.Errorf("journals = %v after Close, want only the live sibling's %q — the first session's own journal still retires", left, siblingPath)
+	}
+
+	// Once the sibling dies its journal is an interrupted run, and recovery owns the root
+	// again: nothing may stay stranded after both sessions are gone.
+	kill()
+	recovered := newTokenConfiner(home)
+	t.Cleanup(func() { _ = recovered.Close() })
+	if label, _ := readLabelSDDL(ws); label != "" {
+		t.Errorf("%q still labelled %q after the sibling died; recovery must clear a root no live session claims", ws, label)
+	}
+	if left := listLabelJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after recovery, want none outstanding", left)
+	}
+}
+
 func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 	// The self-perpetuating-residue scenario, on a real SACL. Both triggers are exercised: a
 	// box labelled a SECOND time by the same backend (a partial pass, or the once-per-box memo
@@ -994,21 +1055,32 @@ func deadPID(t *testing.T) int {
 	return pid
 }
 
-// liveForeignPID returns the PID of a process that is running and is not this one. It must
-// outlive the assertion without needing input — a `pause` with no console reads EOF and exits
-// immediately, which would make the test assert against a dead PID.
+// liveForeignPID returns the PID of a process that is running and is not this one.
 func liveForeignPID(t *testing.T) int {
+	t.Helper()
+	pid, _ := liveChildPID(t)
+	return pid
+}
+
+// liveChildPID starts a long-lived child and returns its PID plus a kill that ends it
+// deterministically, for tests that must observe the moment a live sibling dies. The child
+// must outlive the assertions without needing input — a `pause` with no console reads EOF
+// and exits immediately, which would hand back a dead PID.
+func liveChildPID(t *testing.T) (int, func()) {
 	t.Helper()
 	cmd := exec.Command("cmd", "/c", "ping -n 60 127.0.0.1 >nul")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start a long-running process: %v", err)
 	}
-	t.Cleanup(func() {
+	// Kill then Wait reaps the child, so processAlive reads its real exit code afterwards;
+	// running it again from the Cleanup is a harmless no-op on an already-reaped process.
+	kill := func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-	})
+	}
+	t.Cleanup(kill)
 	if !processAlive(cmd.Process.Pid) {
 		t.Skipf("pid %d is not reported alive; cannot synthesise a live owner", cmd.Process.Pid)
 	}
-	return cmd.Process.Pid
+	return cmd.Process.Pid, kill
 }

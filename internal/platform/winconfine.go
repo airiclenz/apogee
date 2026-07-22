@@ -484,7 +484,8 @@ func writeAndSync(f *os.File, raw []byte) error {
 // NewConfiner retries the restore and, until one does, ConfinementResidue reports it (ADR 0020
 // §2).
 //
-// revert is injected — revertLabelJournal in production, which is Windows-tagged — so the
+// revert is injected — revertSparingLiveSiblings' closure over revertLabelJournal in
+// production, which is Windows-tagged — so the
 // retention rule itself is table-testable on any OS, the same seam every other decision in this
 // file is behind. path may be "" for a backend that keeps no journal file: there is then nothing
 // to remove and the revert outcome passes through unchanged.
@@ -547,6 +548,70 @@ func listLabelJournals(home string) []string {
 		out = append(out, filepath.Join(labelJournalDir(home), name))
 	}
 	sort.Strings(out)
+	return out
+}
+
+// siblingLabelJournals reads every journal under home EXCEPT the one at own — the other
+// sessions whose journals may still claim a root the caller is about to clear. An
+// undecodable sibling is skipped: it names no owner to check alive and no roots to spare,
+// and erring toward clearing is the safe direction — a cleared label is less privilege,
+// never more (the posture recoverLabelJournals takes with the same file). home may be ""
+// (no resolvable user profile), where no journal exists and there is nothing to read.
+func siblingLabelJournals(home, own string) []labelJournal {
+	if home == "" {
+		return nil
+	}
+	var out []labelJournal
+	for _, path := range listLabelJournals(home) {
+		if strings.EqualFold(path, own) {
+			continue
+		}
+		j, err := readLabelJournal(path)
+		if err != nil {
+			continue
+		}
+		out = append(out, j)
+	}
+	return out
+}
+
+// revertibleRoots returns the journalled roots a revert may clear: j's roots minus every
+// root also named (Root == true) by a sibling journal whose owning process is still ALIVE.
+// Two sessions confining one workspace journal the same root, and the first to tear down
+// must not strip the label out from under the survivor — its memoised label pass would never
+// re-label, and every later confined write in that session would be denied.
+//
+// A spared root is NOT a failed revert and must not keep this journal: the live sibling's
+// own journal names the root as a Root entry, so the clear obligation lives on in THAT
+// journal — its teardown or, after a crash, recovery clears the root once no live session
+// claims it — and this journal may still retire. A DEAD sibling spares nothing: its journal
+// is an interrupted run whose roots recovery will clear anyway, and clearing them here first
+// is the same idempotent operation.
+//
+// Roots are compared case-folded (foldLabelPath): C:\Work and c:\work name one location.
+// alive is injected (processAlive in production, which is Windows-tagged) so the decision is
+// table-testable on any OS — the retireLabelJournal seam pattern.
+func revertibleRoots(j labelJournal, siblings []labelJournal, alive func(int) bool) []string {
+	claimed := make(map[string]bool)
+	for _, sibling := range siblings {
+		if !alive(sibling.PID) {
+			continue
+		}
+		for _, root := range sibling.roots() {
+			claimed[foldLabelPath(root)] = true
+		}
+	}
+	roots := j.roots()
+	if len(claimed) == 0 {
+		return roots
+	}
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if claimed[foldLabelPath(root)] {
+			continue
+		}
+		out = append(out, root)
+	}
 	return out
 }
 
