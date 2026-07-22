@@ -202,6 +202,49 @@ func TestWindowsNoJournalHomeRefusesToLabel(t *testing.T) {
 	}
 }
 
+func TestWindowsUnwritableJournalRefusesToLabel(t *testing.T) {
+	// The other half of ADR 0020 §2's invariant, and the one a pure test cannot reach: the
+	// journal location EXISTS but cannot be written. It is simulated by occupying the journal
+	// directory's path with a file, so MkdirAll — and with it every journal write — fails. What
+	// must follow is a refusal, not a labelled box: the flush failure happens between reading
+	// the root's prior label and writing the first new one, so this pins the ordering ("journal
+	// first, label second") as well as the fail-closed outcome.
+	home := t.TempDir()
+	if err := os.WriteFile(labelJournalDir(home), []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("occupy the journal directory's path with a file: %v", err)
+	}
+
+	c := newTokenConfiner(home)
+	t.Cleanup(func() { _ = c.Close() })
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; the flush refusal cannot be told apart from the mint failure")
+	}
+
+	ws := t.TempDir()
+	cmd := exec.Command("cmd", "/c", "echo hi")
+
+	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ws}, cmd)
+	if err == nil {
+		t.Fatal("Confine labelled a box whose journal could not be written; want ErrConfinementUnavailable")
+	}
+	if !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Errorf("err = %v; want ErrConfinementUnavailable so dispatch demotes to a forced Gate", err)
+	}
+	if !strings.Contains(err.Error(), "label journal") {
+		t.Errorf("err = %v; want the refusal to name the journal, so this pins the FLUSH failure and not some other guardrail", err)
+	}
+	label, readErr := readLabelSDDL(ws)
+	if readErr != nil {
+		t.Fatalf("read label of %q: %v", ws, readErr)
+	}
+	if label != "" {
+		t.Errorf("%q carries the mandatory label %q; no label may precede the journal that undoes it", ws, label)
+	}
+	if cmd.SysProcAttr != nil && cmd.SysProcAttr.Token != 0 {
+		t.Error("a refused Confine still handed the cmd a token")
+	}
+}
+
 func TestWindowsLabelsAreRevertedOnTeardown(t *testing.T) {
 	// Contract §6.2 row #9: the disk mutation is undone. The assertion is behavioural as well
 	// as descriptive — after Close a confined child must be denied the very write that

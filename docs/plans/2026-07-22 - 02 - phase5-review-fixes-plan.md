@@ -213,7 +213,20 @@ Update any existing windows-tagged test that constructs with `""` and expected l
 bypass: with no writable journal location, nothing is ever labelled.
 **Commit:** `fix(confine): refuse to label when no journal can be written`
 
-## 4. Atomic journal writes; unreadable journals are reportable residue; flush-failure proven fail-closed
+## 4. Atomic journal writes; unreadable journals are reportable residue; flush-failure proven fail-closed — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): three points beyond the item's literal text. (a) The temp file is flushed
+(`Sync`) before the rename, so the guarantee covers a machine crash and not only a killed
+process; a flush error refuses the box, which is the fail-closed direction. The temp file is
+named `writing-*.tmp`, matching neither `labelJournalPrefix` nor `labelJournalSuffix`, so debris
+a crash leaves behind can never be listed, read or reported as a journal. (b) An unreadable
+journal is reported even though its owner cannot be identified — it might in principle be this
+process's own file — because journals are now published atomically, so a live session's own
+journal is never mid-write and an undecodable one is a genuine finding whoever wrote it. (c) The
+unreadable finding carries its OWN trailer rather than extending the existing one: "a new session
+reverts them automatically" is false for a journal no run can decode, so the manual remedy is
+stated as the only one. The labels-half wording is byte-identical to before and a test pins it,
+because `internal/probe` renders it verbatim.
 
 **What:** (Review: Medium "truncate-in-place / invisible corruption" + High test gap "fail-closed
 flush untested".) In `winconfine.go`: `writeLabelJournal` writes to a temp file in the journal

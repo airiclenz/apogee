@@ -401,6 +401,11 @@ func clearLabelTree(root string) error {
 // A journal whose revert fails survives this pass (retireLabelJournal): recovery is
 // best-effort — there is no user to tell at construction time — but it must never destroy the
 // record of labels it did not manage to remove, so a later run gets another attempt.
+//
+// A journal that cannot be DECODED is likewise left where it is: it names no roots to revert
+// and no owner to check, so acting on it is impossible and deleting it would throw away the
+// only trace of whatever it described. It is not silent, though — ConfinementResidue reports
+// it, which is the only way that state ever reaches a human.
 func recoverLabelJournals(home string) {
 	self := os.Getpid()
 	for _, path := range listLabelJournals(home) {

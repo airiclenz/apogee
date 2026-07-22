@@ -297,6 +297,59 @@ func TestLabelJournalRoundTripAndAccessors(t *testing.T) {
 	}
 }
 
+func TestWriteLabelJournalPublishesAtomically(t *testing.T) {
+	t.Parallel()
+
+	// The journal is rewritten every time the label pass discovers something new, so an
+	// in-place truncate would leave a window in which the file on disk describes neither the
+	// old set of labels nor the new one. The write therefore goes to a temp file and is
+	// renamed over the journal: the round trip below reads back the SECOND write whole, and
+	// the directory holds exactly one file afterwards — no temp debris a reader could trip on.
+	home := t.TempDir()
+	path := labelJournalPath(home, 77)
+
+	first := labelJournal{PID: 77, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}}
+	if err := writeLabelJournal(path, first); err != nil {
+		t.Fatalf("writeLabelJournal (create): %v", err)
+	}
+	second := labelJournal{PID: 77, Entries: []labelJournalEntry{
+		{Path: `C:\work`, Root: true},
+		{Path: `C:\work\vendor`, PriorSDDL: "S:AI(ML;;NW;;;ME)"},
+	}}
+	if err := writeLabelJournal(path, second); err != nil {
+		t.Fatalf("writeLabelJournal (replace): %v", err)
+	}
+
+	got, err := readLabelJournal(path)
+	if err != nil {
+		t.Fatalf("readLabelJournal after the replacing write: %v", err)
+	}
+	if len(got.Entries) != 2 || got.Entries[1].Path != `C:\work\vendor` {
+		t.Errorf("journal = %+v, want the second write's entries whole", got)
+	}
+
+	entries, err := os.ReadDir(labelJournalDir(home))
+	if err != nil {
+		t.Fatalf("read the journal dir: %v", err)
+	}
+	if len(entries) != 1 || filepath.Join(labelJournalDir(home), entries[0].Name()) != path {
+		t.Errorf("journal dir holds %v, want only %q — a temp file left behind is debris", entries, path)
+	}
+
+	// Even if debris DID survive a crash, it is not a journal: the name matches neither half
+	// of the journal naming rule, so nothing lists, reads or reports it.
+	debris := filepath.Join(labelJournalDir(home), labelJournalTempPrefix+"1234"+labelJournalTempSuffix)
+	if err := os.WriteFile(debris, []byte("half a journal"), 0o600); err != nil {
+		t.Fatalf("seed temp debris: %v", err)
+	}
+	if found := listLabelJournals(home); len(found) != 1 || found[0] != path {
+		t.Errorf("listLabelJournals = %v, want just %q", found, path)
+	}
+	if got := confinementResidue(home); strings.Contains(got, "unreadable") || strings.Contains(got, debris) {
+		t.Errorf("confinementResidue = %q; temp debris must not be reported as an unreadable journal", got)
+	}
+}
+
 func TestRetireLabelJournalKeepsTheFileWhenTheRevertFails(t *testing.T) {
 	t.Parallel()
 
@@ -398,7 +451,7 @@ func TestConfinementTeardownNoticeWordsTheFailure(t *testing.T) {
 	if !strings.Contains(got, windowsLabelRemedy) {
 		t.Errorf("notice = %q; want the same manual remedy the host report names", got)
 	}
-	if !strings.Contains(windowsResidueNotice([]string{`C:\work`}), windowsLabelRemedy) {
+	if !strings.Contains(windowsResidueNotice([]string{`C:\work`}, nil), windowsLabelRemedy) {
 		t.Error("the host report no longer quotes the shared remedy; the two surfaces have drifted")
 	}
 }
@@ -437,6 +490,114 @@ func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
 	}
 	if !strings.Contains(got, "icacls") {
 		t.Errorf("residue = %q; want it to name the manual remedy", got)
+	}
+}
+
+func TestConfinementResidueReportsAnUnreadableJournal(t *testing.T) {
+	t.Parallel()
+
+	// The worst state the journal directory can be in: a file that IS a journal by name but
+	// cannot be decoded. Recovery skips it — it has no roots to revert and no PID to check —
+	// so it sits on the disk forever, possibly describing labels that are really there. Before
+	// this, the residue report skipped it too, which made the one surface that could tell the
+	// user silent about precisely the case it exists for.
+	home := t.TempDir()
+	garbage := labelJournalPath(home, 909)
+	if err := os.MkdirAll(labelJournalDir(home), 0o700); err != nil {
+		t.Fatalf("create journal dir: %v", err)
+	}
+	if err := os.WriteFile(garbage, []byte(`{"pid":909,"entries":[{"path":"C:\\wo`), 0o600); err != nil {
+		t.Fatalf("seed a half-written journal: %v", err)
+	}
+
+	got := confinementResidue(home)
+	if !strings.Contains(got, "unreadable") || !strings.Contains(got, garbage) {
+		t.Fatalf("residue = %q; want it to name the unreadable journal %q", got, garbage)
+	}
+	if !strings.Contains(got, windowsLabelRemedy) {
+		t.Errorf("residue = %q; want the manual remedy, which is the ONLY one for a journal no run can decode", got)
+	}
+
+	// A readable journal alongside it is still reported on its own terms: one finding must not
+	// swallow the other.
+	if err := writeLabelJournal(labelJournalPath(home, os.Getpid()+1), labelJournal{
+		PID:     os.Getpid() + 1,
+		Entries: []labelJournalEntry{{Path: `C:\work\proj`, Root: true}},
+	}); err != nil {
+		t.Fatalf("write foreign journal: %v", err)
+	}
+	got = confinementResidue(home)
+	if !strings.Contains(got, garbage) || !strings.Contains(got, `C:\work\proj`) {
+		t.Errorf("residue = %q; want both the unreadable journal and the still-labelled path", got)
+	}
+}
+
+func TestWindowsResidueNoticeWordsBothFindings(t *testing.T) {
+	t.Parallel()
+
+	const journal = `C:\Users\dev\.apogee\confinement\labels-9.json`
+
+	tests := []struct {
+		name       string
+		roots      []string
+		unreadable []string
+		want       []string // substrings the notice must carry
+		wantEmpty  bool
+	}{
+		{
+			name:      "nothing_outstanding",
+			wantEmpty: true,
+		},
+		{
+			name:  "outstanding_labels",
+			roots: []string{`C:\work`, `D:\cache`},
+			want:  []string{"2 path(s)", `C:\work, D:\cache`, "reverts them automatically", windowsLabelRemedy},
+		},
+		{
+			name:       "unreadable_journal",
+			unreadable: []string{journal},
+			want:       []string{"journal present but unreadable: " + journal, "undecodable", windowsLabelRemedy},
+		},
+		{
+			name:       "both_findings_are_stated",
+			roots:      []string{`C:\work`},
+			unreadable: []string{journal},
+			want:       []string{`C:\work`, "journal present but unreadable: " + journal},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := windowsResidueNotice(tt.roots, tt.unreadable)
+			if tt.wantEmpty {
+				if got != "" {
+					t.Fatalf("notice = %q, want \"\" so the caller can state it unconditionally", got)
+				}
+				return
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("notice = %q; want it to carry %q", got, want)
+				}
+			}
+			// Every continuation line stays aligned under the host report's "labels:" field.
+			for _, line := range strings.Split(got, "\n")[1:] {
+				if !strings.HasPrefix(line, windowsResidueIndent) {
+					t.Errorf("continuation line %q is not indented under the labels field", line)
+				}
+			}
+		})
+	}
+
+	// The labels half is worded exactly as it was before the unreadable finding joined it: the
+	// host report renders this verbatim and its wording is pinned by internal/probe's tests.
+	want := "1 path(s) may still carry apogee's Low integrity label: C:\\work\n" +
+		windowsResidueIndent + "(a run was interrupted, or another apogee holds them now; a new session\n" +
+		windowsResidueIndent + "reverts them automatically, or: " + windowsLabelRemedy + ")"
+	if got := windowsResidueNotice([]string{`C:\work`}, nil); got != want {
+		t.Errorf("the outstanding-labels wording drifted:\n got %q\nwant %q", got, want)
 	}
 }
 

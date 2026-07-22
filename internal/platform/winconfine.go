@@ -55,10 +55,16 @@ const windowsLabelACEPrefix = "(ML;"
 // and labelJournalPrefix/Suffix name one run's file. The journal is per-PID rather than
 // shared so two concurrent apogee processes cannot overwrite each other's record of what
 // they labelled — the file name IS the ownership claim.
+//
+// labelJournalTempPattern names the file an atomic write lands in before it is renamed into
+// place. It deliberately matches NEITHER the prefix NOR the suffix, so a temp file left by a
+// crash is invisible to listLabelJournals and can never be read — or reported — as a journal.
 const (
-	labelJournalDirName = "confinement"
-	labelJournalPrefix  = "labels-"
-	labelJournalSuffix  = ".json"
+	labelJournalDirName    = "confinement"
+	labelJournalPrefix     = "labels-"
+	labelJournalSuffix     = ".json"
+	labelJournalTempPrefix = "writing-"
+	labelJournalTempSuffix = ".tmp"
 )
 
 // labelJournal is the on-disk record written BEFORE the first mandatory label is applied
@@ -357,18 +363,58 @@ func labelJournalPath(home string, pid int) string {
 // writeLabelJournal persists j to path, creating the journal directory. It is called BEFORE
 // the first label of a box is applied and again whenever a pre-existing label is discovered,
 // so a crash at any point leaves a journal describing at least everything already mutated.
+//
+// That promise only holds if the file is never observed HALF-written, which a truncate-in-place
+// write cannot offer: the process is killed between the truncate and the last byte, and what
+// survives is a journal neither recovery nor ConfinementResidue can decode, describing labels
+// that are really on the disk. So the write is atomic — the JSON goes to a temp file in the
+// journal directory itself (same volume, so the rename is a metadata operation), is flushed,
+// and os.Rename replaces the previous journal in one step. A crash mid-flush therefore leaves
+// either the PREVIOUS complete journal or, on the very first write, no journal at all, and the
+// caller has not labelled anything yet in that case.
+//
+// A failure anywhere here is the caller's cue to refuse the box (labelBox): no journal on disk
+// means no label on the disk either.
 func writeLabelJournal(path string, j labelJournal) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("apogee: confine: create label journal dir: %w", err)
 	}
 	raw, err := json.Marshal(j)
 	if err != nil {
 		return fmt.Errorf("apogee: confine: encode label journal: %w", err)
 	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		return fmt.Errorf("apogee: confine: write label journal: %w", err)
+	temp, err := os.CreateTemp(dir, labelJournalTempPrefix+"*"+labelJournalTempSuffix)
+	if err != nil {
+		return fmt.Errorf("apogee: confine: create the label journal temp file: %w", err)
+	}
+	tempPath := temp.Name()
+	// A no-op once the rename has consumed the temp file; on every failure below it is what
+	// keeps a partial write from being left behind next to the journal.
+	defer func() { _ = os.Remove(tempPath) }()
+
+	if err := writeAndSync(temp, raw); err != nil {
+		return fmt.Errorf("apogee: confine: write the label journal %q: %w", tempPath, err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("apogee: confine: replace the label journal %q: %w", path, err)
 	}
 	return nil
+}
+
+// writeAndSync writes raw to f, flushes it to the disk and closes it, so the rename that
+// follows can only ever publish a complete file. os.CreateTemp already creates f 0600, the
+// mode the journal has always carried.
+func writeAndSync(f *os.File, raw []byte) error {
+	if _, err := f.Write(raw); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // retireLabelJournal reverts one journal's disk mutation through revert and then decides the
@@ -445,19 +491,30 @@ func ConfinementResidue() string { return confinementResidue(confinementJournalH
 // session's own live labels as residue. A journal belonging to another live apogee is still
 // listed, because from the reader's point of view "there are Low labels on your disk right
 // now" is the fact worth stating, and the wording names both causes.
+//
+// A journal that cannot be READ is reported rather than skipped. It is the worst state on this
+// list — recoverLabelJournals cannot revert what it cannot decode, so it stays on the disk
+// forever — and skipping it made the one surface that could tell the user silent about it.
+// Its owner cannot be identified either, so it is reported even though it MIGHT be this
+// process's own: since journals are written atomically, a live session's own file is never
+// mid-write, and an unreadable one is a genuine finding whoever wrote it.
 func confinementResidue(home string) string {
 	if home == "" {
 		return ""
 	}
-	var roots []string
+	var roots, unreadable []string
 	for _, path := range listLabelJournals(home) {
 		j, err := readLabelJournal(path)
-		if err != nil || j.PID == os.Getpid() {
+		if err != nil {
+			unreadable = append(unreadable, path)
+			continue
+		}
+		if j.PID == os.Getpid() {
 			continue
 		}
 		roots = append(roots, j.roots()...)
 	}
-	return windowsResidueNotice(roots)
+	return windowsResidueNotice(roots, unreadable)
 }
 
 // windowsLabelRemedy is ADR 0020 §2's manual undo — an explicit Medium label is behaviourally
@@ -466,17 +523,38 @@ func confinementResidue(home string) string {
 // one remedy rather than two spellings of it.
 const windowsLabelRemedy = "icacls <path> /setintegritylevel (OI)(CI)M /T /C"
 
-// windowsResidueNotice words the outstanding-journal finding, or "" when there is none. It
+// windowsResidueIndent aligns a continuation line under the host report's "labels:" field,
+// which renders the notice verbatim (probe.Host.Report).
+const windowsResidueIndent = "                 "
+
+// windowsResidueNotice words the outstanding-journal findings, or "" when there are none. It
 // is pure so the wording is table-testable on any host, and it names ADR 0020's manual
 // remedy — an explicit Medium label is behaviourally identical to no label at all.
-func windowsResidueNotice(roots []string) string {
-	if len(roots) == 0 {
+//
+// The two findings are worded separately because their remedies genuinely differ: labels a
+// readable journal describes are reverted by the next session automatically, whereas an
+// UNREADABLE journal is a dead end for every automatic path — recovery skips what it cannot
+// decode — so the manual undo is the only remedy there is.
+func windowsResidueNotice(roots, unreadable []string) string {
+	var lines []string
+	if len(roots) > 0 {
+		lines = append(lines,
+			fmt.Sprintf("%d path(s) may still carry apogee's Low integrity label: %s", len(roots), strings.Join(roots, ", ")),
+			"(a run was interrupted, or another apogee holds them now; a new session",
+			fmt.Sprintf("reverts them automatically, or: %s)", windowsLabelRemedy))
+	}
+	if len(unreadable) > 0 {
+		for _, path := range unreadable {
+			lines = append(lines, fmt.Sprintf("journal present but unreadable: %s", path))
+		}
+		lines = append(lines,
+			"(a crash or an edit left it undecodable, so no run can revert what it names;",
+			fmt.Sprintf("delete it once the paths it covered are back to: %s)", windowsLabelRemedy))
+	}
+	if len(lines) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d path(s) may still carry apogee's Low integrity label: %s\n"+
-		"                 (a run was interrupted, or another apogee holds them now; a new session\n"+
-		"                 reverts them automatically, or: %s)",
-		len(roots), strings.Join(roots, ", "), windowsLabelRemedy)
+	return strings.Join(lines, "\n"+windowsResidueIndent)
 }
 
 // ConfinementTeardownNotice words a confinement teardown that could not put the disk back, for
