@@ -116,8 +116,16 @@ func NewConfiner() domain.Confiner {
 }
 
 // newTokenConfiner builds the backend against a given apogee home (the journal's location),
-// mints the token, and finishes any outstanding restore. home may be "" in a test that does
-// not exercise the journal; the backend then keeps no journal and cannot recover one.
+// mints the token, and finishes any outstanding restore.
+//
+// home may be "" — os.UserHomeDir failed, so there is no user profile to write a journal
+// under, or a test deliberately withholds one. Construction and Capabilities are unaffected:
+// caps still answer for the FACILITY, which is present (the token mints, the kernel enforces),
+// and the backend simply keeps no journal and cannot recover one. What it can no longer do is
+// LABEL: Confine refuses with ErrConfinementUnavailable, the routine per-run failure kind
+// contract §4 demotes to a forced Gate. The invariant is ADR 0020 §2's — the one disk mutation
+// apogee performs is only ever made against a record of how to undo it, so no journal means no
+// label rather than an unrevertable one.
 func newTokenConfiner(home string) *tokenConfiner {
 	rules := currentRules()
 	c := &tokenConfiner{
@@ -207,9 +215,19 @@ func (c *tokenConfiner) Close() error {
 // to undo the mutation, and what it may say about a root is journalLabelEntry's decision —
 // never apogee's own label as the state to restore.
 //
+// A backend with nowhere to write its journal refuses the box outright, before any label is
+// read or written: an unrevertable Low label on the user's disk is a worse outcome than a
+// forced Gate, and refusing here is what leaves the "journal first, label second" invariant
+// with no bypass at all (ADR 0020 §2).
+//
 // The memo is keyed by the folded path for the same reason the journal is: C:\Work and
 // c:\work are one root, and labelling it twice would journal it twice.
 func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
+	if c.journalPath == "" {
+		return fmt.Errorf("%w: no user profile could be resolved, so there is nowhere to write the label journal; refusing to label %q rather than leave a mandatory label with no record of how to undo it",
+			domain.ErrConfinementUnavailable, box.WorkspaceRoot)
+	}
+
 	roots, err := windowsBoxRoots(c.rules, box, c.protected)
 	if err != nil {
 		return err
@@ -320,7 +338,9 @@ func (c *tokenConfiner) restoreLabels() error {
 	return nil
 }
 
-// flushJournal persists the in-memory journal. Callers hold c.mu.
+// flushJournal persists the in-memory journal. Callers hold c.mu. The journal-less case is a
+// belt on labelBox's braces — it refuses a box before anything is journalled or labelled, so a
+// flush with no path can no longer accompany a disk mutation.
 func (c *tokenConfiner) flushJournal() error {
 	if c.journalPath == "" {
 		return nil

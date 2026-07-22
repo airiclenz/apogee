@@ -193,7 +193,12 @@ and `Close()` leaves the root unlabelled.
 written by this build can instruct a revert to apply a Low label that apogee itself minted.
 **Commit:** `fix(confine): never record apogee's own Low label as prior state`
 
-## 3. No journal home ⇒ refuse to confine
+## 3. No journal home ⇒ refuse to confine — ✅ DONE (2026-07-22)
+
+NOTES (2026-07-22): no existing windows-tagged test constructed with `""`, so none needed
+updating — the new refusal test is the only test change. `flushJournal`'s `journalPath == ""`
+early return is left in place as a belt (labelBox now refuses first, so it can no longer
+accompany a disk mutation); only its doc comment says so.
 
 **What:** (Review: Medium "labelling proceeds journal-less".) In `labelBox`
 (`confiner_windows.go`), return `ErrConfinementUnavailable` (with a message naming the missing

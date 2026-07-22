@@ -160,6 +160,48 @@ func TestWindowsConfineRefusesAGuardrailedRoot(t *testing.T) {
 	}
 }
 
+func TestWindowsNoJournalHomeRefusesToLabel(t *testing.T) {
+	// ADR 0020 §2's invariant with its last bypass closed: the journal is the ONLY record of
+	// the disk mutation this backend makes, so a backend that has nowhere to write one must
+	// label nothing at all. The trigger in the wild is os.UserHomeDir failing, which reaches
+	// the backend as an empty home.
+	c := newTokenConfiner("")
+	t.Cleanup(func() { _ = c.Close() })
+
+	// Capabilities answer for the FACILITY, which is present and untouched by the missing
+	// profile — the refusal is the routine per-run kind contract §4 demotes to a forced Gate,
+	// not an incapable host. (A host that cannot mint the token refuses for the other reason,
+	// which would make the assertions below vacuous.)
+	caps := c.Capabilities()
+	if !caps.FSWrite {
+		t.Skip("no restricted token on this host; the refusal under test cannot be told apart from the mint failure")
+	}
+	if !caps.AutoEligible() {
+		t.Error("a journal-less backend reports itself Auto-ineligible; the facility is present and construction must be unaffected")
+	}
+
+	ws := t.TempDir()
+	cmd := exec.Command("cmd", "/c", "echo hi")
+
+	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ws}, cmd)
+	if err == nil {
+		t.Fatal("Confine labelled a box with no journal to undo it; want ErrConfinementUnavailable")
+	}
+	if !errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Errorf("err = %v; want ErrConfinementUnavailable so dispatch demotes to a forced Gate", err)
+	}
+	label, readErr := readLabelSDDL(ws)
+	if readErr != nil {
+		t.Fatalf("read label of %q: %v", ws, readErr)
+	}
+	if label != "" {
+		t.Errorf("%q carries the mandatory label %q; the refusal must precede every label read and write", ws, label)
+	}
+	if cmd.SysProcAttr != nil && cmd.SysProcAttr.Token != 0 {
+		t.Error("a refused Confine still handed the cmd a token")
+	}
+}
+
 func TestWindowsLabelsAreRevertedOnTeardown(t *testing.T) {
 	// Contract §6.2 row #9: the disk mutation is undone. The assertion is behavioural as well
 	// as descriptive — after Close a confined child must be denied the very write that
