@@ -1,14 +1,16 @@
 # Implementation plan — Phase 5 review fixes (journal lifecycle, probe ordering, terminal gate)
 
-**Date:** 2026-07-22. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
-session **on the owner's Windows machine** (native toolchain, NOT WSL — most items carry
-windows-tagged tests that must run natively), forwarding skills: `coding-standards` (mandatory for
-all new Go). One sub-agent per numbered work item, verifier before commit, mark items done with a
-✅ in the item heading of this file. A final `make check` on the Linux devbox is required before
-item 14 closes the plan (linux-tagged landlock tests cannot run on Windows).
+**Date:** 2026-07-22. **Status: IMPLEMENTED — all 13 items done and verified 2026-07-22.** Executed
+with `/implement-plan` **on the owner's Windows machine** (native toolchain, NOT WSL — most items
+carry windows-tagged tests that must run natively), forwarding skills: `coding-standards` (mandatory
+for all new Go). One sub-agent per numbered work item, verifier before commit, items marked done
+with a ✅ in the item heading of this file. Item 13's roll-up closed the plan; the `make check` on
+the Linux devbox it also asked for was **not** run — the devbox is unreachable from this host, and
+the owner ratified closing on the Windows gate plus `GOOS=linux`/`GOOS=darwin go vet` as the proxy,
+with the outstanding Linux pass tracked in `TODO.md` (*Phase-5 verification leftovers*).
 
-**Scope source:** `docs/reviews/code-review-2026-07-22.md` — the Phase 5 code review (4 High,
-10 Medium). Item text below is self-contained; the review is the finding record, not an authority.
+**Scope source:** `docs/reviews/code-review-2026-07-22.md` — the Phase 5 code review (5 High,
+11 Medium). Item text below is self-contained; the review is the finding record, not an authority.
 **Precedence for design questions:** ADR 0012, [ADR 0020](../adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md),
 [ADR 0021](../adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)
 (incl. the 2026-07-22 Amendment) and `docs/design/confinement-execution-contract.md` govern

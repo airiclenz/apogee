@@ -203,20 +203,19 @@ look broken.
 facility takes "these paths are writable" as an argument, so the command runs under a
 restricted, *low-integrity* token — the kernel then denies it any write to an object
 that is not explicitly marked low, and the denial is inherited by every process it
-spawns. The workspace (plus any configured writable paths) carries that mark for the
-session and it is reverted on exit; an interrupted run leaves a journal behind, which
-`apogee probe` reports. Two things worth knowing before you use it: network egress is
-**not** claimed on Windows (the network is open there exactly as elsewhere, and a box
-that asks for network *deny* is refused rather than silently ignored), and the marking
-pass costs roughly a millisecond per file or directory — with a large `.git` or
-`node_modules` in the workspace, the first confined command of a session visibly
-pauses while it runs (measured: ~5 s to mark a 5,000-object tree, ~2 s to revert it),
-after which every later command in that session pays nothing. And one limit: what the
-Windows fence covers is workspace-scoped writes. A low-integrity process cannot write
-to an unmarked directory at all, so a confined `go build`, `pip install` or `npm ci`
-fails when it reaches its cache or `%TEMP%` outside the workspace — giving the
-toolchain a box-local temp and cache directory is a recorded follow-on (`TODO.md`),
-not something Apogee does yet.
+spawns. The workspace is what carries that mark for the session, and it is reverted on
+exit; an interrupted run leaves a journal behind, which `apogee probe` reports. Two
+things worth knowing before you use it: network egress is **not** claimed on Windows
+(the network is open there exactly as elsewhere, and a box that asks for network *deny*
+is refused rather than silently ignored), and the marking pass costs roughly a
+millisecond per file or directory — with a large `.git` or `node_modules` in the
+workspace, the first confined command of a session visibly pauses while it runs
+(measured: ~5 s to mark a 5,000-object tree, ~2 s to revert it), after which every later
+command in that session pays nothing. And one limit: what the Windows fence covers is
+workspace-scoped writes. A low-integrity process cannot write to an unmarked directory
+at all, so a confined `go build`, `pip install` or `npm ci` fails when it reaches its
+cache or `%TEMP%` outside the workspace — giving the toolchain a box-local temp and
+cache directory is a recorded follow-on (`TODO.md`), not something Apogee does yet.
 
 If the machine is disposable and you would rather have Auto unfenced there, `/confine`
 is the route. `/confine` (or `/confine status`) reports the backend, what it can

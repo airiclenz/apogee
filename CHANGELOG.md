@@ -157,7 +157,7 @@ that is now true.*
 
 ### Fixed
 
-*The Phase 5 code review (`docs/reviews/code-review-2026-07-22.md` — 4 High, 10 Medium) found the
+*The Phase 5 code review (`docs/reviews/code-review-2026-07-22.md` — 5 High, 11 Medium) found the
 implementation faithful to its ADRs on the happy path and concentrated its defects in the paths
 that had never run live. All of them are fixed below, before the owner's live-enforcement proofs
 (`docs/plans/2026-07-22 - 02 - phase5-review-fixes-plan.md`).*

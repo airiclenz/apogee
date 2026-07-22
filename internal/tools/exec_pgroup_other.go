@@ -148,7 +148,9 @@ func (t *jobTeardown) cancel(cmd *exec.Cmd) error {
 	return nil
 }
 
-// release drops the job handle once Wait has returned. The KILL_ON_JOB_CLOSE limit is cleared
+// release drops the job handle when the run is over — after Wait on the normal path, and also
+// on the confine-refusal and Start-failure paths, which never reach Wait but own the handle
+// from the moment setProcessGroupTeardown created it. The KILL_ON_JOB_CLOSE limit is cleared
 // first: on a clean completion a process the command deliberately left running must outlive
 // the call, exactly as a backgrounded process outlives its POSIX process-group leader. The
 // limit exists for the crash path, and the cancel path has already terminated the job

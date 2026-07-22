@@ -553,3 +553,34 @@ plus box construction, **not** a `Confine` responsibility — so the work lands 
 the execution tools, and the `Confine` contract (§2) is unaffected. Whichever way it goes, it also
 decides whether cache dirs are *probed* per toolchain or named in config, and it is the natural
 moment to give `ConfineWritablePaths` its first writer.
+
+---
+
+## `internal/platform`'s two Windows confinement files exceed the file-size guideline
+
+**Status:** recorded 2026-07-22 (Phase 5 review-fixes follow-up). Flagged for
+**`/improve-codebase-architecture`** — a shape observation, not a defect: both files are
+correct, tested and idiomatic; they are simply past the size at which a file stops being
+navigable in one pass.
+
+The coding standards keep files under **~400 lines**. The two files that carry the Windows
+confinement backend are over it, and grew further during the Phase 5 review fixes (journal
+retention helper, own-label guard, atomic writes, unreadable-journal residue, the
+recovery-free report constructor, the build-floor predicate):
+
+- `internal/platform/winconfine.go` — **581 lines** (untagged: the label journal's
+  read/write/list/revert-decision half, SDDL and fold helpers, guardrails, residue and
+  teardown notice wording, `belowWindowsFloor`).
+- `internal/platform/confiner_windows.go` — **572 lines** (`//go:build windows`: token
+  construction and the two selectors, the label/clear tree walks, `labelBox`, journal flush,
+  crash recovery).
+
+**The shape when picked up:** the split is by build tag today, not by concern, so each file
+holds two or three of them. The obvious seams are the *journal* (record type, atomic
+read/write/list, retention decision, revert) as its own unit, the *label walk* (read/set/clear
+SDDL over a tree, reparse-point skipping, per-descendant tolerance) as another, and the
+*notice wording* (`windowsResidueNotice`, `ConfinementTeardownNotice`, the shared `icacls`
+remedy) as a third — leaving the confiner itself as the thing that composes them. Any such
+move must keep the untagged/table-testable-on-Linux property the Phase 5 work deliberately
+bought: the decision logic stays out of `//go:build windows` files so it can be tested on
+every OS.

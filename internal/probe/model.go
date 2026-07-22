@@ -73,9 +73,12 @@ type SaveOutcome struct {
 	// direct. Saying "it was previously only offered" in the second case would be a false claim
 	// about the user's machine.
 	Promoted bool
-	// Suppressed names a session-level off-switch (Bypass, validated-sets: enable: false, an
-	// explicit mechanisms: block) that holds whatever this record says. It exists so the report
-	// never announces an effect the next startup will decline to deliver.
+	// Suppressed names the reason the next session start will NOT apply what this record would
+	// otherwise unlock: a session-level off-switch (Bypass, validated-sets: enable: false, an
+	// explicit mechanisms: block), or the matched entry failing the catalogue validation startup
+	// runs as its last rung — an unknown mechanism ID or an invalid stacking makes startup skip
+	// the entry whole, carrying that check's own reason. It exists so the report never announces
+	// an effect the next startup will decline to deliver.
 	Suppressed string
 }
 

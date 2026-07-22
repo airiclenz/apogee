@@ -53,8 +53,12 @@ type processTeardown interface {
 	// kill (planTreeKill), never an error the tool surfaces — teardown is a safety net, not
 	// the confinement fence (ADR 0020).
 	contain(cmd *exec.Cmd)
-	// release drops any OS resource the containment holds. It runs after Wait has returned,
-	// exactly once per run.
+	// release drops any OS resource the containment holds. The resource exists from the
+	// moment the teardown was built, which is before the process does, so release runs on
+	// every exit from the run — after Wait has returned on the normal path, and equally on
+	// the confine-refusal and Start-failure paths that never reach Wait. It is deferred once
+	// by the caller that built the teardown (runSubprocess), and stays idempotent so a second
+	// call could never double-free.
 	release()
 }
 
