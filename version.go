@@ -47,7 +47,7 @@ var buildCount string
 // binary was built outside a VCS tree (or with -buildvcs=false). The CLI --version flag, the
 // in-TUI /version command, and the start-up box all display this one value.
 func Version() string {
-	base := baseVersion()
+	base := BaseVersion()
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return base
@@ -58,9 +58,10 @@ func Version() string {
 	return base
 }
 
-// baseVersion is the release version: the trimmed VERSION file, or "dev" if it is empty or
-// whitespace-only so a broken checkout still reports something. The file is the only real source.
-func baseVersion() string {
+// BaseVersion is the release version alone: the trimmed VERSION file (or "dev" if it is empty
+// or whitespace-only), with NONE of the "+<count>.g<rev>[.dirty]" build provenance Version()
+// appends. It is what the start-up box displays; --version and /version show Version().
+func BaseVersion() string {
 	if v := strings.TrimSpace(versionFile); v != "" {
 		return v
 	}

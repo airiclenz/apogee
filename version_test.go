@@ -24,11 +24,38 @@ func TestVersionMatchesVERSIONFile(t *testing.T) {
 	if want == "" {
 		t.Fatal("the VERSION file is empty; it is the single source of truth and must carry a version")
 	}
+	// BaseVersion() reads the same embedded file, so a mis-pointed embed directive fails here too.
+	if got := apogee.BaseVersion(); got != want {
+		t.Errorf("apogee.BaseVersion() = %q; want the VERSION file contents %q", got, want)
+	}
 	// The test binary is a repo build, so Version() typically carries a "+[<count>.]g<commit>[.dirty]"
-	// provenance suffix; the release number is the part before the first "+".
+	// provenance suffix; the release number is the part before the first "+", which must agree.
 	base, _, _ := strings.Cut(apogee.Version(), "+")
 	if base != want {
 		t.Errorf("apogee.Version() base = %q; want the VERSION file contents %q (full: %q)", base, want, apogee.Version())
+	}
+}
+
+// TestBaseVersion checks the release version alone: it equals the trimmed VERSION file and
+// carries none of the "+<count>.g<rev>[.dirty]" build provenance that Version() appends — it is
+// the value the start-up box displays, whereas --version and /version show the full Version().
+func TestBaseVersion(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile("VERSION")
+	if err != nil {
+		t.Fatalf("read VERSION: %v", err)
+	}
+	want := strings.TrimSpace(string(raw))
+	if want == "" {
+		t.Fatal("the VERSION file is empty; it is the single source of truth and must carry a version")
+	}
+	got := apogee.BaseVersion()
+	if got != want {
+		t.Errorf("apogee.BaseVersion() = %q; want the VERSION file contents %q", got, want)
+	}
+	if strings.Contains(got, "+") {
+		t.Errorf("apogee.BaseVersion() = %q carries a build-provenance suffix; it must be the release version alone", got)
 	}
 }
 
