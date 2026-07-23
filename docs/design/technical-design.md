@@ -42,7 +42,7 @@ prioritized worklist.
 |---|---|---|
 | `CONTEXT.md` | Glossary — the domain language (authoritative for terms) | [`../../CONTEXT.md`](../../CONTEXT.md) |
 | ADRs 0001–0010 | Point decisions + rationale (authoritative for *why*) | [`../adr/`](../adr/) |
-| Implementation plan | Phased build sequence (authoritative for *order*) | [`../plans/implementation-plan-apogee-merge.md`](../plans/implementation-plan-apogee-merge.md) |
+| Implementation plan | Phased build sequence (authoritative for *order*) | [`../plans/archived/implementation-plan-apogee-merge.md`](../plans/archived/implementation-plan-apogee-merge.md) |
 | `apogee.go` | Public API **signature sketch** (Phase-0 keystone; builds + vets, panic-stub bodies) | [`../../apogee.go`](../../apogee.go) |
 | **This TDD** | Consolidated design + gap register | you are here |
 

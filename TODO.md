@@ -467,24 +467,18 @@ vet on all three GOOSes, six cross targets, tests, `--help`). What is parked her
 **verification** the Windows execution machine physically cannot do, plus one measurement that
 wants an owner decision. Logged here rather than left in the archive so it isn't buried.
 
-- **Closeout Linux pass — `make check` on the Linux devbox.** The linux-tagged landlock tests
-  cannot run on the Windows execution machine, so that gate has only ever been proven there
-  through the cross-compile, never by running the build-tagged Linux code paths.
-  **STILL OUTSTANDING as of 2026-07-22**, and now it also covers the Phase-5 *review fixes* plan
-  (`docs/plans/2026-07-22 - 02 - phase5-review-fixes-plan.md`), whose item 13 the owner ratified
-  closing without it — the devbox is unreachable from the Windows host (no WSL, no container
-  runtime, no sanctioned network path) — **and the Phase-5 *second* review-fixes plan**
-  (`docs/plans/2026-07-22 - 03 - phase5-second-review-fixes-plan.md`), which changed the untagged
-  platform tests `internal/platform/winconfine_test.go` and `internal/platform/host_test.go`
-  (plus untagged rule/decision code in `winconfine.go` and `host.go`); those tables run in any
-  `go test` and passed natively on Windows, but their Linux execution belongs to the same devbox
-  pass. What stood in for it there: the native Windows gate (vet,
-  build, `go test -count=1 ./...` modulo the three known host failures, ADR-0010 import check,
-  `apogee --help`), plus `GOOS=linux go vet ./...`, `GOOS=darwin go vet ./...` and all six
-  cross-compile targets. That proxy proves the landlock- and seatbelt-tagged code and its test
-  files **compile and vet**; it does not run a single landlock-tagged test. Until `make check` is
-  green on the devbox, the Linux execution paths of Phases 5 and 5-review-fixes are unproven —
-  this is the owner action that closes that gap.
+- **✅ DONE (2026-07-23) — Closeout Linux pass — `make check` on the Linux devbox.** Ran green,
+  exit 0, on an Ubuntu devbox (kernel **7.0.0-28-generic** aarch64) with the race detector on
+  (cgo enabled, gcc 15.2): gofmt, `go vet`, `go build`, `go test -race ./...` across all 24
+  packages, the ADR-0010 import invariant, all six cross-compile targets, and `apogee --help`.
+  This is the first run of the build-tagged Linux code paths (previously only cross-compiled from
+  the Windows host), so it closes the Linux execution gap for Phase 5, the Phase-5 *review fixes*
+  plan (`docs/plans/archived/2026-07-22 - 02 - phase5-review-fixes-plan.md`, item 13), and the
+  Phase-5 *second* review-fixes plan (`.../2026-07-22 - 03 - ...`, whose untagged platform tables
+  in `winconfine_test.go`/`host_test.go` now also run natively on Linux). Bonus: this box has
+  `landlock` live, so the landlock-tagged enforcement battery ran live rather than self-skipping —
+  see the CHANGELOG "Known post-release verification" note, "Linux landlock live enforcement",
+  now also closed.
 - **Live Auto-confined deliverable run on Windows**, if an LLM endpoint is reachable from that
   machine. The ADR 0020 backend itself is proven natively (escape battery + the real `Terminal`
   tool under `platform.NewConfiner()`, item 8's live evidence); an end-to-end deliverable

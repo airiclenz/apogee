@@ -87,7 +87,7 @@ for real delegation while making a runaway tower structurally impossible.
 
 **5 — Stepping is top-level-only; a sub-agent runs atomically within the parent Turn.** The
 driver runs the nested `Agent` to its Exchange boundary in one shot
-([broad plan #15](../plans/implementation-plan-apogee-merge.md)). While it runs, the parent is
+([broad plan #15](../plans/archived/implementation-plan-apogee-merge.md)). While it runs, the parent is
 mid-tool-dispatch — **not** at a quiescent boundary — so (a) **no snapshot lands mid-sub-agent**
 (the parent's next boundary is *after* `sub_agent` returns; the snapshot schema's "suspended
 sub-agent" slot stays **reserved-but-always-empty in v1**, forward-compat only); (b) **cancel

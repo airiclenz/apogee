@@ -2300,17 +2300,23 @@ honesty, generated profile strings, command rewriting, fail-closed paths) run
 on every host and pass, and the live escape-probe batteries **self-skip loudly**
 where the OS cannot enforce:
 
-- **Linux landlock live enforcement** — the dev-host kernel has
-  `CONFIG_SECURITY_LANDLOCK` **off**, so `confinetest.Probe` self-skips here.
-  Confirm on a landlock-enabled kernel (≥5.13 fs, ≥6.7 net) that a confined
-  subprocess's out-of-workspace write and non-allowlisted connect are OS-denied
-  while the parent stays unrestricted.
+- **Linux landlock live enforcement** — ✅ **confirmed on a landlock-enabled
+  kernel (2026-07-23).** Ran on an Ubuntu devbox, kernel **7.0.0-28-generic**
+  aarch64 with `landlock` live in `/sys/kernel/security/lsm`; `apogee probe`
+  reports `backend: landlock (fs-write: available · network: available)`, so
+  `confinetest.Probe` runs live instead of self-skipping. Under a full
+  `make check` (race detector on, cgo enabled) the landlock-tagged battery
+  passes live: a confined subprocess's out-of-workspace and `~/`-profile writes
+  are OS-denied, a non-allowlisted connect is denied while network-open connects,
+  the domain is inherited across `exec`, and the parent stays unrestricted. The
+  earlier caveat (dev-host kernel had `CONFIG_SECURITY_LANDLOCK` off) no longer
+  applies to this box.
 - **macOS seatbelt live enforcement** — ✅ **confirmed on macOS hardware
   (2026-07-02).** `confinetest.Probe` now runs under live `sandbox-exec` on a real
   Mac: a confined subprocess is fenced to the workspace, out-of-box and `~/.ssh`
   writes are OS-denied, the parent stays unrestricted, and network-deny tightens
   while network-open connects. (This surfaced and fixed the box-root canonicalization
-  bug below.) The Linux landlock arm above is still open.
+  bug below.) The Linux landlock arm above is now closed too (2026-07-23).
 - **Live Auto-confined deliverable run** — the opt-in `APOGEE_LIVE_ENDPOINT`
   end-to-end run (a real coding conversation in Auto, a shell write outside the
   workspace OS-denied, an MCP tool still raising Approval, a sub-agent delegated
