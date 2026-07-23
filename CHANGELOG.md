@@ -2321,7 +2321,14 @@ where the OS cannot enforce:
   end-to-end run (a real coding conversation in Auto, a shell write outside the
   workspace OS-denied, an MCP tool still raising Approval, a sub-agent delegated
   and its nested work rendered) is owner-run on Linux (landlock) and macOS
-  (seatbelt). *(Still open.)*
+  (seatbelt). **Linux (landlock) arm ✅ confirmed (2026-07-23)** on an Ubuntu
+  devbox (kernel 7.0.0-28-generic aarch64, landlock backend) against a real
+  gemma-4-E4B endpoint: in `--mode auto`, step-1 out-of-workspace write
+  (`echo … > ~/apogee-escape-test.txt`) was OS-denied with **no** approval prompt
+  while the in-workspace write succeeded, the `demo__ping` MCP tool **still raised
+  Approval**, and a delegated sub-agent's nested `NOTES.md` write **rendered** in
+  the transcript; afterwards `~/apogee-escape-test.txt` was confirmed absent.
+  macOS (seatbelt) arm still open.
 - **Box-root canonicalization** — ✅ **resolved (2026-07-02).** Was a real bug, not
   just a verification gap: seatbelt embedded box roots verbatim and denied every
   in-workspace write when the root passed through a symlink (macOS `/var`, `/tmp`).

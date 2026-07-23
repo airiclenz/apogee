@@ -487,7 +487,11 @@ wants an owner decision. Logged here rather than left in the archive so it isn't
   (b) `TestSmokeLiveProfileSeam` passed under `-race` against the same endpoint: all three
   subtests (thinking-delimiter strip, native control, fenced tool-call parse+dispatch) green.
   Remaining from that trio: the **manual, owner-run live Auto-confined deliverable run** —
-  tracked in the CHANGELOG "Known post-release verification" note (*still open*).
+  tracked in the CHANGELOG "Known post-release verification" note. **Linux (landlock) arm
+  ✅ done (2026-07-23)** on the Ubuntu devbox (kernel 7.0.0-28-generic aarch64): out-of-workspace
+  write OS-denied with no prompt, in-workspace write succeeded, `demo__ping` MCP tool still
+  raised Approval, delegated sub-agent's `NOTES.md` write rendered, escape file confirmed
+  absent afterwards. Only the macOS (seatbelt) and Windows arms remain.
 - **Live Auto-confined deliverable run on Windows**, if an LLM endpoint is reachable from that
   machine. The ADR 0020 backend itself is proven natively (escape battery + the real `Terminal`
   tool under `platform.NewConfiner()`, item 8's live evidence); an end-to-end deliverable
