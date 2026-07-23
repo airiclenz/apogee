@@ -852,22 +852,49 @@ func TestFooterViewThinRules(t *testing.T) {
 	}
 }
 
-// TestInputViewTopEdgeRow proves inputView prepends the top-edge hairline (item 2 of the
-// prompt-box chrome plan): the first rendered line is exactly m.width ▔ runes — the marked top
-// of the extended black region — and layout budgets the extra row so the viewport shrinks by
-// it. Styling is stripped first so the assertions are over the runes, not the black-field
-// escapes.
-func TestInputViewTopEdgeRow(t *testing.T) {
+// TestTopRuleHairlineRow proves the ▔ top-edge hairline is a standalone full-width row (topRule)
+// that caps the bottom chrome ABOVE the status line — the input box no longer carries it — so
+// the status line sits directly above the input box (the owner's requested ordering). It also
+// checks layout budgets the row so the viewport shrinks by it. Styling is stripped first so the
+// assertions are over the runes, not the black-field escapes.
+func TestTopRuleHairlineRow(t *testing.T) {
 	m := newTestModel(t)
 
-	first := strings.Split(ansi.Strip(m.inputView()), "\n")[0]
-	if want := strings.Repeat("▔", m.width); first != want {
-		t.Errorf("top-edge row = %q, want %d ▔ runes spanning the window", first, m.width)
+	if got, want := ansi.Strip(m.topRule()), strings.Repeat("▔", m.width); got != want {
+		t.Errorf("top rule = %q, want %d ▔ runes spanning the window", got, m.width)
+	}
+	// The hairline moved out of the input box; the box's own render must no longer contain it.
+	if strings.Contains(ansi.Strip(m.inputView()), "▔") {
+		t.Errorf("input box still contains a ▔ hairline; it must live in topRule above the status line")
 	}
 
-	want := m.height - statusHeight - gapHeight - (m.inputRows() + 2) - footerHeight
+	// Full-view ordering: the ▔ rule, then the status line, then the input box's top border — so
+	// the rule is one row above the status line and the status line hugs the box.
+	lines := strings.Split(plain(m.View()), "\n")
+	ruleRow := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "▔") {
+			ruleRow = i
+			break
+		}
+	}
+	if ruleRow < 0 {
+		t.Fatalf("no ▔ top-edge hairline found in the rendered view")
+	}
+	boxTop := -1
+	for i := ruleRow + 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], "╭") {
+			boxTop = i
+			break
+		}
+	}
+	if boxTop != ruleRow+2 {
+		t.Errorf("input box top border at row %d, want %d (▔ rule, then the status line, then the box)", boxTop, ruleRow+2)
+	}
+
+	want := m.height - ruleHeight - statusHeight - gapHeight - (m.inputRows() + 1) - footerHeight
 	if got := m.viewport.Height(); got != want {
-		t.Errorf("viewport height = %d, want %d (window less status, gap, input box incl. top-edge row, footer)", got, want)
+		t.Errorf("viewport height = %d, want %d (window less rule, status, gap, input box, footer)", got, want)
 	}
 }
 

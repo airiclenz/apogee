@@ -725,11 +725,12 @@ func (m Model) busy() bool {
 // Layout
 // ----------------------------------------------------------------------------
 
-// The fixed chrome heights below the transcript. The status line is one row; one blank gap
-// row separates the transcript from the chrome (layout.md); the footer is three rows (its
-// top divider, its content line, its bottom rule). The input box and the viewport take what
-// remains — the box grows with its content, the viewport gets the rest.
+// The fixed chrome heights below the transcript. One blank gap row separates the transcript
+// from the chrome (layout.md); the ▔ top-edge hairline is one row; the status line is one row;
+// the footer is three rows (its top divider, its content line, its bottom rule). The input box
+// and the viewport take what remains — the box grows with its content, the viewport gets the rest.
 const (
+	ruleHeight   = 1 // the ▔ top-edge hairline that caps the bottom chrome, above the status line
 	statusHeight = 1
 	gapHeight    = 1
 	footerHeight = 3 // divider + content + bottom rule
@@ -743,8 +744,8 @@ const (
 )
 
 // layout sizes the viewport and input box to the current window. The input box auto-grows
-// with its content (clamped), and the viewport gets the height left after the status row, the
-// gap row, the input box (its content rows plus a top-edge hairline row and a top border — the
+// with its content (clamped), and the viewport gets the height left after the gap row, the
+// ▔ top-edge hairline, the status row, the input box (its content rows plus a top border — the
 // divider below it belongs to the footer), and the footer. A floor of one row keeps the
 // viewport valid on a tiny window.
 func (m *Model) layout() {
@@ -756,8 +757,8 @@ func (m *Model) layout() {
 		m.reseatInput() // the box grew/shrank: re-clamp a scroll offset SetHeight left stale (ISSUES #2)
 	}
 
-	inputBoxHeight := m.input.Height() + 2 // content rows + top-edge hairline row + top border (no bottom — it is the footer's divider)
-	vpHeight := m.height - statusHeight - gapHeight - inputBoxHeight - footerHeight
+	inputBoxHeight := m.input.Height() + 1 // content rows + top border (no bottom — it is the footer's divider)
+	vpHeight := m.height - ruleHeight - statusHeight - gapHeight - inputBoxHeight - footerHeight
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
@@ -824,9 +825,9 @@ func (m *Model) refreshViewport() {
 // View
 // ----------------------------------------------------------------------------
 
-// View stacks the transcript, a single blank line, the status line, the bordered input box,
-// and the footer bar, filling the alternate screen (layout.md). Before the first
-// WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
+// View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
+// the bordered input box, and the footer bar, filling the alternate screen (layout.md). Before
+// the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
 // approval prompt, when one is pending, sits between the transcript and the blank line; the
 // viewport is shrunk on this local copy to make room (View has a value receiver, so the
 // stored layout is untouched).
@@ -877,8 +878,9 @@ func (m Model) View() tea.View {
 		rows = append(rows, prompt)
 	}
 	// The single blank line between chat content and the bottom chrome (layout.md), then the
-	// status line, the autocomplete overlay (when open), the input box, and the footer.
-	rows = append(rows, "", m.statusLine())
+	// ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay (when
+	// open), the input box, and the footer.
+	rows = append(rows, "", m.topRule(), m.statusLine())
 	if dropdown != "" {
 		rows = append(rows, dropdown)
 	}
@@ -965,14 +967,21 @@ func (m Model) renderScrollbar(h int) string {
 }
 
 // inputView renders the textarea inside the rounded, dark-gray, black-bg border (no bottom
-// edge — the footer's top rule is the shared divider), prefixed by a full-width top-edge row: a
-// dark-gray ▔ hairline on a black field that marks the exact top of the extended black region
-// (layout.md). lipgloss.Width sets the box's total width including the border and padding, so
-// the box always spans the window and the footer below it aligns.
+// edge — the footer's top rule is the shared divider). lipgloss.Width sets the box's total
+// width including the border and padding, so the box always spans the window and the footer
+// below it aligns. The ▔ top-edge hairline that caps the bottom chrome is a separate row above
+// the status line (topRule), not part of this box, so the status line reads as sitting directly
+// above the input box.
 func (m Model) inputView() string {
-	topEdge := m.th.chromeRule.Render(strings.Repeat("▔", m.width))
-	box := m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.input.View()))
-	return lipgloss.JoinVertical(lipgloss.Left, topEdge, box)
+	return m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.input.View()))
+}
+
+// topRule renders the full-width ▔ hairline that marks the top edge of the bottom chrome: a
+// dark-gray hairline on a black field. It sits directly below the transcript's one blank gap
+// row and above the status line (layout.md), capping the whole bottom section while the status
+// line stays directly above the input box.
+func (m Model) topRule() string {
+	return m.th.chromeRule.Render(strings.Repeat("▔", m.width))
 }
 
 // footerView renders the footer bar: a thin top divider (the shared border with the input box
