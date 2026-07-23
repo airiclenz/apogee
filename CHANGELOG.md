@@ -8,6 +8,16 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-23
+
+*Release version **reset from the `1.x` line to `0.8.0`.** The `1.x` numbering overstated
+maturity for a pre-production tool, so the human-facing release version now sits in the `0.x`
+range — initial development, and under SemVer `0.x` makes no stability promise. The reset changed
+no code behaviour; `--version` and `/version` still carry the full build provenance. The
+`v1.0.0`–`v1.7.0` git tags and their GitHub releases were removed. Note: `proxy.golang.org`
+retains the old `v1.x` module versions immutably, so `go install …@latest` still resolves to
+`v1.7.0` — this line is distributed from source / GitHub Releases, not `go install`.*
+
 *Merge-plan **Phase 5 — cross-platform hardening & retirement** — the last open phase — closed
 2026-07-22 (`docs/plans/2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`). Its
 deliverable was "cross-compiled binaries for Win/Mac/Linux, **Auto confined on all three**", and
