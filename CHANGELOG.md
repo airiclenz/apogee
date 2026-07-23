@@ -15,6 +15,14 @@ that is now true.*
 
 ### Added
 
+- **`apogee --version`, from a single build-version source.** The binary now reports its version.
+  A new `internal/version` package resolves one string — the `-ldflags -X` value a release build
+  injects (the `Makefile` passes `git describe --tags --always --dirty`), else the module version
+  `go install pkg@tag` embeds, else the short VCS revision `go build` embeds in a checkout
+  (`+dirty` on a modified tree), else `"dev"` — so the version is honest in a release build, a
+  `go install`, and a bare `go run` alike. Cobra's `--version` flag reads it via `cmd.Version`, and
+  the same string is threaded to the TUI through a new `Options.Version` seam (the renderer never
+  imports the version package), where the in-TUI `/version` command and the start-up box read it.
 - **Auto mode is confined on Windows: the fence is a restricted low-integrity token, and the box
   is a label on the disk.** Windows was the last Phase-0 stub — `denyConfiner`, so `--mode auto`
   reported `{FSWrite:false, NetworkEgress:false}`, every terminal/`python_exec` call took the

@@ -98,6 +98,11 @@ type Options struct {
 	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
+	// Version is the resolved build version (internal/version.String()), the single value the
+	// binary resolves and the TUI displays — the /version command and the start-up box both
+	// read it from here so the TUI never imports the version package. Empty ⇒ unwired.
+	Version string
+
 	// Confinement is the host's confinement situation as the composition root resolved it, for
 	// the /confine status report to name. The TUI never derives it — internal/platform is the
 	// binary's dependency, not the renderer's — so an unwired zero value simply reports

@@ -9,6 +9,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/tui"
+	"github.com/airiclenz/apogee/internal/version"
 )
 
 // options holds the parsed root-command flags. It is a plain value bound to the
@@ -111,6 +112,10 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apogee",
 		Short: "Terminal coding agent for small local LLMs",
+		// Cobra auto-adds the --version flag and its print template from this field,
+		// reading the single build-version source (internal/version). The in-TUI
+		// /version command and the start-up box read the same value via Options.Version.
+		Version: version.String(),
 		Long: "apogee is a terminal coding agent for small local LLMs. The root command\n" +
 			"opens an interactive session against a local OpenAI-compatible model:\n" +
 			"hold a coding conversation, watch tools run, and approve writes.\n\n" +
