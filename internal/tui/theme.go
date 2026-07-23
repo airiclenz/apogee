@@ -121,7 +121,7 @@ type theme struct {
 	statusFaint lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar   lipgloss.Style // status-line segments: faint on black
 	statusError lipgloss.Style // status-line "error" token: red bold on black
-	footerRule  lipgloss.Style // the footer's border runes and corners (dark gray)
+	chromeRule  lipgloss.Style // the bottom-chrome hairlines (dark gray on black): the input box's top-edge row and the footer's border runes, corners, and │ bars
 	footerText  lipgloss.Style // the footer's content (faint on black)
 	scrollThumb lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
@@ -165,7 +165,7 @@ func newTheme() theme {
 		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
 		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
-		footerRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
+		chromeRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
 		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		scrollThumb: lipgloss.NewStyle().Foreground(colFaint),
 		scrollTrack: lipgloss.NewStyle().Foreground(colDarkGray),

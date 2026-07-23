@@ -852,6 +852,25 @@ func TestFooterViewThinRules(t *testing.T) {
 	}
 }
 
+// TestInputViewTopEdgeRow proves inputView prepends the top-edge hairline (item 2 of the
+// prompt-box chrome plan): the first rendered line is exactly m.width ▔ runes — the marked top
+// of the extended black region — and layout budgets the extra row so the viewport shrinks by
+// it. Styling is stripped first so the assertions are over the runes, not the black-field
+// escapes.
+func TestInputViewTopEdgeRow(t *testing.T) {
+	m := newTestModel(t)
+
+	first := strings.Split(ansi.Strip(m.inputView()), "\n")[0]
+	if want := strings.Repeat("▔", m.width); first != want {
+		t.Errorf("top-edge row = %q, want %d ▔ runes spanning the window", first, m.width)
+	}
+
+	want := m.height - statusHeight - gapHeight - (m.inputRows() + 2) - footerHeight
+	if got := m.viewport.Height(); got != want {
+		t.Errorf("viewport height = %d, want %d (window less status, gap, input box incl. top-edge row, footer)", got, want)
+	}
+}
+
 // elapsedPattern matches the clock the status line hangs off the activity phrase
 // ("· 0s", "· 1m 04s").
 var elapsedPattern = regexp.MustCompile(`· (\d+m )?\d+s`)

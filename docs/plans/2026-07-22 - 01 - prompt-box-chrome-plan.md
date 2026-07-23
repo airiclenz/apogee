@@ -85,7 +85,11 @@ Update the `layout.md` sketch (~lines 44-52): both rules become uniform `─`.
 
 ---
 
-## 2. Top-edge hairline row above the input box
+## 2. Top-edge hairline row above the input box — ✅ DONE (2026-07-23)
+
+NOTES (2026-07-23): Besides the inline `inputBoxHeight` comment the item names, also refreshed
+`layout()`'s doc comment (it likewise described the input box as "content rows plus a top
+border") so it stays truthful about the new top-edge row. No behaviour change.
 
 **What:** (depends on item 1.) Rename `footerRule` → `chromeRule` (struct field + comment
 `internal/tui/theme.go:124`, `newTheme` `theme.go:168`, call sites `model.go:985` and

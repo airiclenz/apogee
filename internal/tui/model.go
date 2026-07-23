@@ -744,8 +744,9 @@ const (
 
 // layout sizes the viewport and input box to the current window. The input box auto-grows
 // with its content (clamped), and the viewport gets the height left after the status row, the
-// gap row, the input box (its content rows plus a top border — the divider below it belongs to
-// the footer), and the footer. A floor of one row keeps the viewport valid on a tiny window.
+// gap row, the input box (its content rows plus a top-edge hairline row and a top border — the
+// divider below it belongs to the footer), and the footer. A floor of one row keeps the
+// viewport valid on a tiny window.
 func (m *Model) layout() {
 	m.viewport.SetWidth(max(1, m.width-scrollbarWidth)) // reserve the scroll-bar gutter column
 	m.input.SetWidth(m.inputInnerWidth())
@@ -755,7 +756,7 @@ func (m *Model) layout() {
 		m.reseatInput() // the box grew/shrank: re-clamp a scroll offset SetHeight left stale (ISSUES #2)
 	}
 
-	inputBoxHeight := m.input.Height() + 1 // content rows + top border (no bottom — it is the footer's divider)
+	inputBoxHeight := m.input.Height() + 2 // content rows + top-edge hairline row + top border (no bottom — it is the footer's divider)
 	vpHeight := m.height - statusHeight - gapHeight - inputBoxHeight - footerHeight
 	if vpHeight < 1 {
 		vpHeight = 1
@@ -964,11 +965,14 @@ func (m Model) renderScrollbar(h int) string {
 }
 
 // inputView renders the textarea inside the rounded, dark-gray, black-bg border (no bottom
-// edge — the footer's top rule is the shared divider). lipgloss.Width sets the box's total
-// width including the border and padding, so the box always spans the window and the footer
-// below it aligns.
+// edge — the footer's top rule is the shared divider), prefixed by a full-width top-edge row: a
+// dark-gray ▔ hairline on a black field that marks the exact top of the extended black region
+// (layout.md). lipgloss.Width sets the box's total width including the border and padding, so
+// the box always spans the window and the footer below it aligns.
 func (m Model) inputView() string {
-	return m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.input.View()))
+	topEdge := m.th.chromeRule.Render(strings.Repeat("▔", m.width))
+	box := m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.input.View()))
+	return lipgloss.JoinVertical(lipgloss.Left, topEdge, box)
 }
 
 // footerView renders the footer bar: a thin top divider (the shared border with the input box
@@ -982,7 +986,7 @@ func (m Model) footerView() string {
 		return ""
 	}
 	rule := func(left, right string) string {
-		return m.th.footerRule.Render(left + strings.Repeat("─", w-2) + right)
+		return m.th.chromeRule.Render(left + strings.Repeat("─", w-2) + right)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		rule("├", "┤"),
@@ -1004,7 +1008,7 @@ func (m Model) footerContent(w int) string {
 	}
 	info := strings.Join(nonEmpty(host, displayModel(m.opts.Model), formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
 	mode := modeLabel(m.opts.Mode)
-	bar := m.th.footerRule.Render("│")
+	bar := m.th.chromeRule.Render("│")
 	field := w - 2 // content columns between the two │ borders (footerView guards w >= 3)
 
 	// One-column margins inside the borders; a black-bg gap justifies the mode marker right.
