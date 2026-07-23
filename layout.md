@@ -47,9 +47,9 @@
 │ accomodate the bigger message. Clicking into this field should position the cursor  │
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
-├━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────────────━━━━━━━━━━━━━━━━━━━━━━┤
+├─────────────────────────────────────────────────────────────────────────────────────┤
 │ host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ 32k                               ask-before │
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────────────━━━━━━━━━━━━━━━━━━━╯
+╰─────────────────────────────────────────────────────────────────────────────────────╯
 
 ---
 

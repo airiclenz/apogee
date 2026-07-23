@@ -971,18 +971,18 @@ func (m Model) inputView() string {
 	return m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.input.View()))
 }
 
-// footerView renders the footer bar: a decorative top divider (the shared border with the
-// input box above), the content line, and a decorative bottom rule. The content shows the
-// host alias, model, and static context window on the left and the autonomy mode on the
-// right — string(Mode), so a later rung (ModeAllowEdits, P3.4) appears for free. A window too
-// narrow for a bordered bar renders nothing rather than overflowing.
+// footerView renders the footer bar: a thin top divider (the shared border with the input box
+// above), the content line, and a thin bottom rule. The content shows the host alias, model,
+// and static context window on the left and the autonomy mode on the right — string(Mode), so a
+// later rung (ModeAllowEdits, P3.4) appears for free. A window too narrow for a bordered bar
+// renders nothing rather than overflowing.
 func (m Model) footerView() string {
 	w := m.width
 	if w < 3 {
 		return ""
 	}
 	rule := func(left, right string) string {
-		return m.th.footerRule.Render(left + ruleMix(w-2) + right)
+		return m.th.footerRule.Render(left + strings.Repeat("─", w-2) + right)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		rule("├", "┤"),

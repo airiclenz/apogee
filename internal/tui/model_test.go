@@ -838,6 +838,20 @@ func TestModelStatusLine(t *testing.T) {
 	}
 }
 
+// TestFooterViewThinRules proves the footer's divider and bottom rule are drawn with the thin
+// light rune only — no heavy box-drawing rune survives from the old mixed-weight rule
+// composition (item 1 of the prompt-box chrome plan). The heavy rune is built from its code
+// point so this source file stays clear of the literal glyph. Styling is stripped first so the
+// assertion is over the runes, not the black-field escapes.
+func TestFooterViewThinRules(t *testing.T) {
+	heavyHorizontal := string(rune(0x2501)) // U+2501 HEAVY HORIZONTAL, the retired mixed-rule glyph
+	m := newTestModel(t)
+	got := ansiPattern.ReplaceAllString(m.footerView(), "")
+	if strings.Contains(got, heavyHorizontal) {
+		t.Errorf("footer rules contain a heavy horizontal rune; want the thin light rune only:\n%s", got)
+	}
+}
+
 // elapsedPattern matches the clock the status line hangs off the activity phrase
 // ("· 0s", "· 1m 04s").
 var elapsedPattern = regexp.MustCompile(`· (\d+m )?\d+s`)

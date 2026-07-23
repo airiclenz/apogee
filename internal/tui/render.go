@@ -510,19 +510,6 @@ func clampInt(n, lo, hi int) int {
 	return n
 }
 
-// ruleMix composes one of the footer's decorative rules: a heavy ━ bar with a lighter ─
-// inset toward the right, echoing layout.md. The counts always sum to exactly n so the rule
-// spans the full width between its corners.
-func ruleMix(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	light := n / 4
-	rightHeavy := n / 8
-	leftHeavy := n - light - rightHeavy
-	return strings.Repeat("━", leftHeavy) + strings.Repeat("─", light) + strings.Repeat("━", rightHeavy)
-}
-
 // wrappedOffset returns the virtual (soft-wrapped) row at which the line after linesAbove
 // begins — the Y offset that pins that line to the top of the viewport. It mirrors the
 // viewport's calculateLine exactly: each physical line occupies max(1, ceil(width/vpWidth))

@@ -135,8 +135,8 @@ type theme struct {
 
 // newTheme builds the styles from the palette. The input border drops its bottom edge: the
 // footer's top rule is the shared divider, so the input box and footer read as one connected
-// unit (layout.md), and a single lipgloss.Border rune cannot vary per column the way the
-// footer's decorative ━/─ rules do — those are composed by hand in render.go.
+// unit (layout.md), and a single lipgloss.Border cannot produce the ├/┤ junction corners where
+// that divider meets the box — those rules are composed by hand in footerView.
 func newTheme() theme {
 	return theme{
 		userBlock:    lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),

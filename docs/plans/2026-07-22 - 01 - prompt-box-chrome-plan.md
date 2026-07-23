@@ -61,7 +61,13 @@ Target look:
 - **`footerRule` is renamed `chromeRule`** — it now styles the input's top-edge row as well as
   the footer's rules and bars, so the old name would lie.
 
-## 1. Uniform thin rules in the bottom-chrome frame
+## 1. Uniform thin rules in the bottom-chrome frame — ✅ DONE (2026-07-23)
+
+NOTES (2026-07-23): The new `TestFooterViewThinRules` builds the heavy rune it asserts against
+from its code point (`string(rune(0x2501))`) rather than embedding the literal `━`. The two
+acceptance criteria otherwise contradict — a test asserting "output contains no `━`" would put
+the literal `━` in the test source, making the `grep -rn "ruleMix\|━" … returns nothing` check
+fail. Building it from the code point keeps both criteria satisfied. No behaviour change.
 
 **What:** in `footerView()` (`internal/tui/model.go:984-986`), replace `ruleMix(w-2)` with
 `strings.Repeat("─", w-2)`. Delete the now-unused `ruleMix` (`internal/tui/render.go:513-524`).
