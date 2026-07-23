@@ -496,20 +496,26 @@ wants an owner decision. Logged here rather than left in the archive so it isn't
   machine. The ADR 0020 backend itself is proven natively (escape battery + the real `Terminal`
   tool under `platform.NewConfiner()`, item 8's live evidence); an end-to-end deliverable
   session under Auto is what remains.
-- **Degradation notice on a below-minimum-version Windows host** (below build 17763). Recorded
-  **UNTESTED** in
-  [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)'s
-  consequences — no such host exists here, and it is only verifiable if one turns up.
-- **macOS cross-binary smoke:** `--help` plus a trivial session. Linux and Windows are each
-  covered by an execution machine; the macOS binary is cross-built and never run.
-- **OWNER CALL — whether to prune the Windows disk-label walk.** Item 8 measured what ADR 0020
-  accepted but never quantified: the label pass costs **~1 ms per object**, so a synthetic
-  5,051-object tree took **5.2 s to label and 2.2 s to revert**. It is paid once per box per
-  session (first confined command, then shutdown), but a workspace with a large `.git` or
-  `node_modules` will make that first `Confine` visibly block. It was recorded rather than tuned,
-  because pruning the walk changes the ratified box semantics; the cheap remedies are a startup
-  notice while it runs, or excluding ignored trees from it. No decision to defer to — this is the
-  owner's call.
+- **Degradation notice on a below-minimum-version Windows host** (below build 17763). The
+  **deny-vs-token decision itself is proven**: the untagged `belowWindowsFloor` predicate
+  (`winconfine.go:35`) has table coverage (`TestBelowWindowsFloor` — 17762⇒deny, 17763⇒token,
+  26200⇒token), verified green on the Linux devbox 2026-07-23. What stays **UNTESTED** (recorded so
+  in [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)'s
+  consequences) is only the on-host UX observation of the notice — no such host exists here, and it
+  is verifiable only if one turns up.
+- **macOS cross-binary smoke:** `--help` plus a trivial session. The darwin binary **cross-builds
+  clean** (`GOOS=darwin` amd64+arm64, re-verified 2026-07-23); Linux and Windows are each covered by
+  an execution machine, so only the runtime `--help`+session observation on a Mac remains.
+- **✅ DECIDED (2026-07-23) — the Windows disk-label walk is NOT pruned; a progress notice is added
+  instead.** Item 8 measured what ADR 0020 accepted but never quantified: the label pass costs
+  **~1 ms per object**, so a synthetic 5,051-object tree took **5.2 s to label and 2.2 s to revert**
+  — paid once per box per session (first confined command, then shutdown), and a large `.git`/
+  `node_modules` makes that first `Confine` visibly block. Owner call: **keep the ratified full-tree
+  labelling** (pruning would dissolve the fence for excluded trees — a confined child could no
+  longer `git commit`/`npm ci` — and belongs with the parked box-local-`%TEMP%`/toolchain-caches
+  session), and **add a user-visible progress notice** so the one-time walk stops being a silent
+  hang. Implementation plan: `docs/plans/2026-07-23 - 00 - windows-label-walk-progress-notice-plan.md`
+  (2 items; Item 2 carries a startup-pre-warm-vs-transcript-delegate design call for the owner).
 
 **Not repeated here:** the same checklist carried a "pre-existing, NOT Phase 5 scope" group
 (Linux landlock live enforcement on a landlock-enabled kernel; the Linux/macOS live Auto-confined
