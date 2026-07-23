@@ -768,6 +768,25 @@ func windowsResidueNotice(roots, unreadable []string) string {
 	return strings.Join(lines, "\n"+windowsResidueIndent)
 }
 
+// WindowsLabelProgressNotice words the "please wait" line the composition root prints on stderr
+// before the first Low-labelling walk of root, so the one-time pass (ADR 0020 §2) stops being a
+// silent hang on a workspace with a large .git or node_modules — the click-through-frustration
+// trap the auto-confinement work was built to avoid.
+//
+// It takes NO object count on purpose: labelTree streams via filepath.WalkDir, so a pre-count is
+// a second full walk that doubles the ~1 ms/object cost, and an after-the-fact summary prints
+// after the wait it was meant to explain. So the notice is indeterminate and upfront. It is
+// worded as the fence doing its job, never as a malfunction, matching probe.DegradedNotice's
+// tone, and it quotes windowsLabelRemedy verbatim where it names the manual undo, so the wait
+// notice, the teardown warning and the host report all hand the user ONE spelling of the remedy
+// rather than three. Pure, so the wording is table-testable on any host.
+func WindowsLabelProgressNotice(root string) string {
+	return fmt.Sprintf(
+		"apogee: labelling the workspace %s Low so the confined child can write in it; "+
+			"a large .git or node_modules may take several seconds (undo manually: %s)",
+		root, windowsLabelRemedy)
+}
+
 // ConfinementTeardownNotice words a confinement teardown that could not put the disk back, for
 // the composition root to print on stderr at shutdown — the one moment the user can still act
 // on it. It returns "" when err is nil, so the caller can state it unconditionally, exactly as

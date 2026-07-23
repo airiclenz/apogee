@@ -791,6 +791,29 @@ func TestConfinementTeardownNoticeWordsTheFailure(t *testing.T) {
 	}
 }
 
+func TestWindowsLabelProgressNoticeNamesRootAndFence(t *testing.T) {
+	t.Parallel()
+
+	const root = `C:\work\proj`
+	got := WindowsLabelProgressNotice(root)
+
+	if got == "" {
+		t.Fatal("WindowsLabelProgressNotice returned \"\"; a wait notice with no words explains nothing")
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("notice = %q; want a single pre-alt-screen stderr line", got)
+	}
+	if !strings.Contains(got, root) {
+		t.Errorf("notice = %q; want it to name the workspace root being labelled", got)
+	}
+	// The fence wording is the shared remedy verbatim, so this surface never invents a third
+	// spelling of the manual undo the teardown warning and host report already quote — the
+	// windowsResidueNotice byte-identity assertion pattern.
+	if !strings.Contains(got, windowsLabelRemedy) {
+		t.Errorf("notice = %q; want the shared remedy %q so the surfaces cannot drift", got, windowsLabelRemedy)
+	}
+}
+
 func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
 	t.Parallel()
 

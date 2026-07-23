@@ -68,7 +68,7 @@ happening while it happens.
   construction parameter, not an interface change (`domain.Confiner` must not sprout an OS-specific
   hook — ADR 0010, the reason `Close` is an optional-interface assertion at the composition root).
 
-## 1. Untagged progress-notice wording helper + emit threshold
+## 1. Untagged progress-notice wording helper + emit threshold — ✅ DONE (2026-07-23)
 
 **What:** In `internal/platform/winconfine.go`, add a pure, exported wording helper mirroring
 `ConfinementTeardownNotice` / `windowsResidueNotice` — e.g.
