@@ -139,7 +139,7 @@ is non-empty (add to the existing Options-population assertions).
 
 ---
 
-## 2. `/version` command in the TUI
+## 2. `/version` command in the TUI — ✅ DONE (2026-07-23)
 
 **What:** (depends on item 1 for `Options.Version`.) Register the verb in the parser —
 `internal/tui/command.go:52`:

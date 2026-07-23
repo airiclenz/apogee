@@ -49,7 +49,7 @@ type parsedInput struct {
 // /skill, which attaches via the picker and is deliberately not parsed as a command (see
 // commandMenu in autocomplete.go). /server is deferred (it needs a swappable provider seam) and
 // so is absent here.
-var knownCommands = []string{"clear", "new", "compact", "continue", "confine"}
+var knownCommands = []string{"clear", "new", "compact", "continue", "confine", "version"}
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text
 // (the caller ignores it).

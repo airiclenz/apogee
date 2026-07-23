@@ -86,6 +86,42 @@ func cmdMsg(cmd tea.Cmd) tea.Msg {
 }
 
 // ----------------------------------------------------------------------------
+// /version routing
+// ----------------------------------------------------------------------------
+
+// /version is synchronous like /clear: it records the resolved build version (Options.Version)
+// as a transcript note and launches no worker.
+func TestVersionCommandPrintsVersionNote(t *testing.T) {
+	opts := testOpts
+	opts.Version = "v1.2.3"
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m.input.SetValue("/version")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want idle (/version must not launch a worker)", m.state)
+	}
+	if cmd != nil {
+		t.Error("/version returned a Cmd; it should not launch a worker")
+	}
+	if v := m.input.Value(); v != "" {
+		t.Errorf("input not cleared: %q", v)
+	}
+	var note string
+	for _, e := range m.transcript.entries {
+		if e.kind == entryNote && strings.Contains(e.text, "v1.2.3") {
+			note = e.text
+		}
+	}
+	if note == "" {
+		t.Errorf("no entryNote carries the version %q; entries = %+v", "v1.2.3", m.transcript.entries)
+	}
+	if want := "apogee v1.2.3"; note != want {
+		t.Errorf("version note = %q, want %q", note, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The exchange lifecycle: submit → stream → message → done
 // ----------------------------------------------------------------------------
 

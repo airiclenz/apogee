@@ -536,7 +536,8 @@ func (m Model) skillDisplayNames(ids []string) []string {
 // runCommand handles a recognised local /command from the idle state. /continue and /compact
 // open a worker: /continue a canned "Please continue" turn, /compact a generative summary
 // call; /clear (and its alias /new) acts on the engine's context synchronously and stays idle,
-// recording a transcript note, and /confine reports or swaps Auto's blast radius the same
+// recording a transcript note, /version records the build version as a note the same
+// synchronous way, and /confine reports or swaps Auto's blast radius the same
 // synchronous way (confine.go). The input box and the autocomplete overlay are cleared either way. Reached
 // only from submit (stateIdle), so the engine is quiescent — no worker owns it — and
 // ClearContext/Compact are safe to launch here.
@@ -584,6 +585,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			m.tokPerSec = 0
 			m.transcript.addNote("context cleared — the model's memory of this session is reset")
 		}
+		m.layout()
+		return m, nil
+
+	case "version":
+		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
+		// seam) as a transcript note and stay idle — no upstream call, no worker.
+		m.transcript.addNote("apogee " + m.opts.Version)
 		m.layout()
 		return m, nil
 

@@ -20,6 +20,8 @@ func TestParseInputCommands(t *testing.T) {
 		{"/compact", "compact"},
 		{"/continue", "continue"},
 		{"/confine", "confine"},
+		{"/version", "version"},
+		{"/version now", "version"},    // surplus args ignored, like /clear
 		{"  /clear  ", "clear"},        // surrounding whitespace is trimmed
 		{"/clear extra args", "clear"}, // trailing args ignored (these commands take none)
 	}
