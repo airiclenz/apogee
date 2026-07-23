@@ -4,6 +4,13 @@ Date: 2026-07-23
 Session type: read-only workspace review (`/refocus`). **No code changes.** The only edits are
 the two owner-approved ADR date-stamps recorded below, committed together with this handoff.
 
+**Update (2026-07-23, later the same day):** the prompt-box chrome plan (Open-work item 3) has
+since been implemented and archived in a separate session — commits `1000db5`, `2db57e6`,
+`0aee84e`. The forward-looking sections below (Repo state, Open work, Suggested skills) are
+updated to match; the Linux closeout pass (item 1) remains the headline next step, and still
+needs a landlock-capable box — this devbox kernel has landlock off, so a green `make check` here
+self-skips the live-enforcement checks and does not count as the pass.
+
 ## What this session did
 
 Full-repo state review: three parallel read-only surveys (documentation inventory, code map,
@@ -13,8 +20,9 @@ handoff — referenced, not duplicated.
 
 ## Repo state (verified 2026-07-23)
 
-- `main` clean, **level with `origin/main`** (the prior handoff's "13 commits ahead, unpushed"
-  is resolved — everything is pushed). No stashes, no other branches.
+- `main` clean. It was level with `origin/main` at the /refocus session; the later prompt-box
+  work then left **local commits unpushed again** (`1000db5`, `2db57e6`, `0aee84e`, plus this
+  doc update) — push when convenient. No stashes, no other branches.
 - Tags `v1.0.0` … `v1.7.0` exist; Phase 5 sits in CHANGELOG `[Unreleased]`.
 - GitHub: zero open issues, zero open PRs (gh authenticated, remote `airiclenz/apogee`).
   All tracking is in-repo (`TODO.md`, `ISSUES.md`, `docs/plans/`).
@@ -73,9 +81,11 @@ Nothing else was proposed; discrepancies 3–5 above were deliberately left unto
    24.04 LTS, Fedora, Debian 13 also fine; avoid container images for the proof — seccomp
    can mask the landlock syscalls). Check on the new box: `apogee probe` should report
    landlock `{FSWrite:true, NetworkEgress:true}`, then `make check`.
-3. **Active not-started plan:** `docs/plans/2026-07-22 - 01 - prompt-box-chrome-plan.md`
-   (two TUI bottom-chrome items, decisions locked) — execute with `/implement-plan`
-   forwarding `coding-standards`.
+3. **✅ DONE (2026-07-23):** the prompt-box chrome plan (two TUI bottom-chrome items,
+   decisions locked) is implemented and archived — commits `1000db5` (uniform thin rules in
+   the bottom-chrome frame), `2db57e6` (top-edge hairline row above the input box), `0aee84e`
+   (plan `git mv`'d to `docs/plans/archived/`). Executed via `/implement-plan` forwarding
+   `coding-standards`; `make check` green.
 4. **Open owner call (decide, don't code):** prune the Windows disk-label walk or not
    (~1 ms/object; details in TODO.md item and the 2026-07-22 handoff).
 5. Remaining verification residue, ISSUES.md bugs, parity P1s (`/server`, session UI),
@@ -84,7 +94,8 @@ Nothing else was proposed; discrepancies 3–5 above were deliberately left unto
 
 ## Suggested skills
 
-- `/implement-plan` (forwarding `coding-standards`) — for the prompt-box chrome plan (item 3).
+- `/implement-plan` (forwarding `coding-standards`) — done for the prompt-box chrome plan
+  (item 3, 2026-07-23); reach for it again when the next multi-item plan lands.
 - `/coding-standards` — mandatory for any new Go code.
 - `/archive-handoffs` — after the Linux pass closes, the 2026-07-22 handoff (and this one)
   become archivable; also move the merge plan to `docs/plans/archived/`.
