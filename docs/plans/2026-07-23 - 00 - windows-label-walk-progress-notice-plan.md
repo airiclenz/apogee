@@ -89,7 +89,22 @@ its input with no I/O and no OS calls.
 
 **Commit:** `feat(confine): add the Windows label-walk progress-notice wording`
 
-## 2. Emit the notice around the first label walk — DESIGN CALL (master must stop here)
+## 2. Emit the notice around the first label walk — ✅ DONE (2026-07-23)
+
+NOTES (2026-07-23): Implemented approach (A) per the owner's confirmed decision. Two literal-text
+deviations, both forced by the fact that the untagged trigger (`Auto ∧ confine-asked ∧ FSWrite`) is
+ALSO true on landlock/seatbelt, which report `FSWrite: true` under Auto+confine: (1) the
+`fmt.Fprintln(os.Stderr, platform.WindowsLabelProgressNotice(root))` print lives INSIDE a new
+Windows-tagged seam `platform.PrewarmLabelWalk(confiner, workspaceRoot, os.Stderr)` (with a
+`//go:build !windows` empty twin), not inline in `wire.go` — printing inline would emit on
+Linux/macOS. The seam still writes the exact notice to `os.Stderr` pre-alt-screen. (2) The pure
+`shouldPrewarmLabelWalk` predicate therefore returns TRUE on Linux/macOS (matching this item's
+Tests bullet, `Auto ∧ confine-asked ∧ FSWrite`), not false as the Acceptance bullet's wording
+implies; startup stays byte-identical off Windows because `PrewarmLabelWalk` is the no-op seam, not
+because the predicate is false. `labelBox`/`labelTree` untouched; the seam type-asserts `*tokenConfiner`
+and calls `labelBox` on `{WorkspaceRoot: root}` only. CHANGELOG updated. Windows-tagged runtime
+tests (memo-hit after pre-warm) not added — cannot run on this Linux devbox; untagged predicate
+test added and passes.
 
 **⚠️ needs-design-call — do not let a sub-agent pick the seam. Stop and confirm with the owner.**
 The walk is lazy and mid-session; all existing notices are pre-alt-screen stderr. Two coherent

@@ -74,6 +74,20 @@ func contextWindowNotice(maxContextTokens int, compactionEnabled bool) string {
 // /confine status renders it in-session, so the wording is extracted rather than copied —
 // three surfaces, one sentence (Phase-5 item 3 / ADR 0021).
 
+// shouldPrewarmLabelWalk reports whether startup should eagerly run the confinement backend's
+// one-time label walk (ADR 0020 §2) rather than let the first confined command pay it mid-session.
+// It is the MIRROR of probe.DegradedNotice's gate — the same three inputs, FSWrite inverted: the
+// degradation notice fires when Auto asks for confinement a host CANNOT enforce (FSWrite false),
+// this fires when it CAN (FSWrite true), which on the Windows token backend is the disk-label pass
+// worth pre-warming behind a progress notice. It returns true on the Linux and macOS backends too
+// (they also report FSWrite under Auto+confine), where PrewarmLabelWalk is a genuine no-op — only
+// the Windows-tagged labelBox pays a walk — so the Windows-vs-not distinction lives in that seam,
+// not here. Pure so the decision is table-testable off Windows (the contextWindowNotice /
+// DegradedNotice seam pattern).
+func shouldPrewarmLabelWalk(mode apogee.Mode, confineToWorkspace, fsWrite bool) bool {
+	return mode == modeAuto && confineToWorkspace && fsWrite
+}
+
 // ----------------------------------------------------------------------------
 // Root command body
 // ----------------------------------------------------------------------------
@@ -202,6 +216,21 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// against — both silently do nothing. Say so once, and name the fix (item 3 / S3).
 	if notice := contextWindowNotice(cfg.Context.MaxContextTokens, cfg.Context.CompactionEnabled); notice != "" {
 		fmt.Fprintln(os.Stderr, notice)
+	}
+
+	// Eager pre-warm of the confinement label walk (ADR 0020 §2, the plan's approach A). On the
+	// Windows token backend the box is a mandatory Low label on the workspace tree, and labelling a
+	// large .git or node_modules costs ~1 ms/object; a FIRST confined command that silently blocks
+	// for seconds mid-session is the click-through-frustration trap Auto was built to avoid. Under
+	// Auto+confine a confined command is effectively certain, so the walk is hoisted to startup —
+	// pre-alt-screen, behind WindowsLabelProgressNotice — where a raw stderr write is safe and the
+	// first in-session Confine then hits the memo and no-ops. This moves only the TIMING of the
+	// already-ratified label pass, never WHAT is labelled (Close still reverts at shutdown),
+	// consistent with the owner's "keep semantics". It is a genuine no-op on every other host:
+	// PrewarmLabelWalk is empty off Windows, and the Windows backend refuses when FSWrite is false —
+	// the same host probe.DegradedNotice above speaks for.
+	if shouldPrewarmLabelWalk(mode, opts.confineToWorkspace, confiner.Capabilities().FSWrite) {
+		platform.PrewarmLabelWalk(confiner, roots.workspace, os.Stderr)
 	}
 
 	// Connect the configured external MCP servers (P3.15) and surface their tools into the

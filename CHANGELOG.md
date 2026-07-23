@@ -77,6 +77,18 @@ that is now true.*
   read-only to the child must not gate a whole session; symlinks and reparse points are skipped,
   since `SetNamedSecurityInfo` follows them and labelling one would mutate a target outside the
   box.
+- **The Windows label walk no longer looks like a hang: a startup progress notice, and the walk is
+  pre-warmed.** Labelling the workspace Low costs ~1 ms/object (ADR 0020 §2), so the *first*
+  confined command in a workspace with a large `.git` or `node_modules` used to block visibly with
+  no explanation — the click-through-frustration trap Auto was built to avoid. Under **Auto +
+  confine-to-workspace on the Windows token backend**, launch now runs that one-time walk eagerly
+  at startup, pre-alt-screen, after printing a one-line notice to stderr ("labelling the workspace
+  … Low … a large .git or node_modules may take several seconds"); the first in-session `Confine`
+  then hits the memo and no-ops. It is a pure **timing** change — *what* is labelled and the
+  teardown revert are unchanged (semantics kept; pruning the walk was deliberately rejected) — and
+  a genuine no-op everywhere else: the notice and walk fire only on Windows with `FSWrite: true`,
+  so Linux/macOS startup is byte-identical. Real pruning of `.git`/`node_modules` is deferred to
+  the parked box-local `%TEMP%`/toolchain-cache design.
 - **`apogee probe` — the diagnosis command, in two halves with deliberately asymmetric cost.**
   Promised twice (as the confinement-diagnosis subcommand and as model capability probing) and
   blocked on a CLI that had no subcommands at all. `apogee probe` now prints the **host report**

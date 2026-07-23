@@ -96,6 +96,39 @@ func TestContextWindowNotice(t *testing.T) {
 	}
 }
 
+// The label-walk pre-warm trigger is the mirror of the degradation gate: it fires exactly when
+// Auto asks for confinement a host CAN enforce (Auto ∧ confine-asked ∧ FSWrite), so the Windows
+// token backend's disk-label walk is paid at startup behind a progress notice rather than silently
+// mid-session. Every other mode, an unconfined Auto, and a backend that reports no FSWrite leave it
+// off. FSWrite is true on landlock/seatbelt too, so a true verdict there is expected — PrewarmLabelWalk
+// is the no-op seam that keeps their startup byte-unchanged, not this predicate.
+func TestShouldPrewarmLabelWalk(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		mode        apogee.Mode
+		confine     bool
+		fsWrite     bool
+		wantPrewarm bool
+	}{
+		{name: "auto + confine + fs-write → pre-warm", mode: modeAuto, confine: true, fsWrite: true, wantPrewarm: true},
+		{name: "auto + confine + no fs-write → off (degradation's territory)", mode: modeAuto, confine: true, fsWrite: false, wantPrewarm: false},
+		{name: "auto UNCONFINED → off", mode: modeAuto, confine: false, fsWrite: true, wantPrewarm: false},
+		{name: "ask-before + confine + fs-write → off (not Auto)", mode: modeAskBefore, confine: true, fsWrite: true, wantPrewarm: false},
+		{name: "allow-edits + confine + fs-write → off (not Auto)", mode: modeAllowEdits, confine: true, fsWrite: true, wantPrewarm: false},
+		{name: "plan + confine + fs-write → off (not Auto)", mode: modePlan, confine: true, fsWrite: true, wantPrewarm: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shouldPrewarmLabelWalk(tt.mode, tt.confine, tt.fsWrite); got != tt.wantPrewarm {
+				t.Errorf("shouldPrewarmLabelWalk(%q, %v, %v) = %v; want %v",
+					tt.mode, tt.confine, tt.fsWrite, got, tt.wantPrewarm)
+			}
+		})
+	}
+}
+
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
 // stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only
 // race-free during the sequential test phase (parallel tests are paused until it finishes).
