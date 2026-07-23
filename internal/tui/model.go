@@ -121,7 +121,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 	sp := newBrailleSpinner()
 	sp.Style = lipgloss.NewStyle().Background(colBlack) // match the status bar's black field
 
-	return Model{
+	m := Model{
 		parent:       parent,
 		eng:          eng,
 		opts:         opts,
@@ -132,6 +132,18 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 		th:           th,
 		state:        stateIdle,
 	}
+
+	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
+	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
+	// every repaint, so it reflows on resize with no "already shown" guard, and it survives
+	// /clear (which resets the engine's memory but never the transcript scrollback).
+	m.transcript.addStartup(startupView{
+		Logo:    strings.TrimRight(apogeeLogo, "\n"),
+		Host:    hostDisplay(opts),
+		Model:   displayModel(opts.Model),
+		Version: opts.Version,
+	})
+	return m
 }
 
 // blackenInput gives the textarea the black interior the layout calls for: the base, text,
@@ -705,12 +717,13 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 }
 
 // saveSession best-effort persists a snapshot of the conversation through the host saver.
-// It is a no-op without a saver or with an empty transcript (nothing worth resuming).
-// Both Snapshot and the save are best-effort: a quit must never fail, so an error is
-// swallowed rather than blocking the exit. The caller guarantees no worker is running, so
-// calling Snapshot here respects the Agent's single-goroutine contract (C1).
+// It is a no-op without a saver or when the transcript holds no conversation (only the seeded
+// start-up box, or nothing at all) — nothing worth resuming. Both Snapshot and the save are
+// best-effort: a quit must never fail, so an error is swallowed rather than blocking the exit.
+// The caller guarantees no worker is running, so calling Snapshot here respects the Agent's
+// single-goroutine contract (C1).
 func (m Model) saveSession() {
-	if m.save == nil || len(m.transcript.entries) == 0 {
+	if m.save == nil || !m.transcript.hasConversation() {
 		return
 	}
 	sess, err := m.eng.Snapshot()
@@ -1020,11 +1033,7 @@ func (m Model) footerView() string {
 // colour reset bleed the black field. The host falls back to the endpoint when no alias is
 // configured, and the context window is omitted when unknown (0).
 func (m Model) footerContent(w int) string {
-	host := m.opts.HostAlias
-	if host == "" {
-		host = m.opts.Endpoint
-	}
-	info := strings.Join(nonEmpty(host, displayModel(m.opts.Model), formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
+	info := strings.Join(nonEmpty(hostDisplay(m.opts), displayModel(m.opts.Model), formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
 	mode := modeLabel(m.opts.Mode)
 	bar := m.th.chromeRule.Render("│")
 	field := w - 2 // content columns between the two │ borders (footerView guards w >= 3)
@@ -1042,6 +1051,17 @@ func (m Model) footerContent(w int) string {
 	// footerText keeps the black background; only the foreground swaps to the mode's colour.
 	right := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(mode) + m.th.footerText.Render(" ")
 	return bar + left + fill + right + bar
+}
+
+// hostDisplay is the upstream host label the footer and the start-up box both show: the
+// configured HostAlias, or the raw endpoint URL when no alias is set. It is the single source of
+// that fallback so the box's host and the footer's host can never diverge (they read one function
+// of the same Options).
+func hostDisplay(opts Options) string {
+	if opts.HostAlias != "" {
+		return opts.HostAlias
+	}
+	return opts.Endpoint
 }
 
 // modelWeightExt is the set of weight-file extensions displayModel strips. It is a fixed

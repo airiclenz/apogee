@@ -23,6 +23,13 @@ that is now true.*
   `go install`, and a bare `go run` alike. Cobra's `--version` flag reads it via `cmd.Version`, and
   the same string is threaded to the TUI through a new `Options.Version` seam (the renderer never
   imports the version package), where the in-TUI `/version` command and the start-up box read it.
+- **A one-time start-up box.** Launch now opens with a rounded card at the top of the transcript
+  carrying the block-art `APOGEE` wordmark and the session's `host` / `model` / `version`. It
+  reuses the prompt box's rounded border glyphs (`lipgloss.RoundedBorder()`) but drops the black
+  fill — the same characters, a transparent self-closing card — and is seeded once as the first
+  transcript entry, so it reflows on resize, survives `/clear`, and never redraws. Its `host`,
+  `model`, and `version` come from the same `Options` seam the footer and `/version` read
+  (`host` through a shared `hostDisplay` helper), so the box and the footer can never drift.
 - **Auto mode is confined on Windows: the fence is a restricted low-integrity token, and the box
   is a label on the disk.** Windows was the last Phase-0 stub — `denyConfiner`, so `--mode auto`
   reported `{FSWrite:false, NetworkEgress:false}`, every terminal/`python_exec` call took the

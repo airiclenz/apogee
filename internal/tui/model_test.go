@@ -122,6 +122,55 @@ func TestVersionCommandPrintsVersionNote(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The one-time start-up box (version-command-and-startup-box plan, item 3)
+// ----------------------------------------------------------------------------
+
+// newModel seeds exactly one entry — the start-up box at entries[0] — carrying the resolved
+// host / model / version from Options (the same seam the footer and /version read), and it is not
+// a user block (so the sticky header never treats it as a prompt).
+func TestNewModelSeedsStartupBox(t *testing.T) {
+	opts := Options{
+		Model:     "/models/gpt-oss-20b.gguf", // displayModel strips the path + weight extension
+		Endpoint:  "http://localhost:1234",
+		HostAlias: "test-host",
+		Version:   "v9.9.9-test",
+	}
+	m := newModel(context.Background(), &fakeEngine{}, opts)
+
+	if n := len(m.transcript.entries); n != 1 {
+		t.Fatalf("newModel seeded %d entries, want exactly 1 (the start-up box)", n)
+	}
+	e := m.transcript.entries[0]
+	if e.kind != entryStartup {
+		t.Fatalf("entries[0].kind = %v, want entryStartup", e.kind)
+	}
+	if got, want := e.startup.Host, hostDisplay(opts); got != want {
+		t.Errorf("startup host = %q, want %q (hostDisplay of Options)", got, want)
+	}
+	if got, want := e.startup.Model, displayModel(opts.Model); got != want {
+		t.Errorf("startup model = %q, want %q (displayModel of Options.Model)", got, want)
+	}
+	if got, want := e.startup.Version, opts.Version; got != want {
+		t.Errorf("startup version = %q, want %q (Options.Version)", got, want)
+	}
+	if e.startup.Logo == "" || strings.HasSuffix(e.startup.Logo, "\n") {
+		t.Errorf("startup logo = %q, want the embedded art with its trailing newline trimmed", e.startup.Logo)
+	}
+}
+
+// The start-up box is printed once and survives a /clear: clearing resets the engine's memory and
+// records a note, but the transcript scrollback — including the box at entries[0] — is untouched.
+func TestStartupBoxSurvivesClear(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	m.input.SetValue("/clear")
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if m.transcript.entries[0].kind != entryStartup {
+		t.Errorf("entries[0].kind = %v after /clear, want the start-up box still present at the top", m.transcript.entries[0].kind)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The exchange lifecycle: submit → stream → message → done
 // ----------------------------------------------------------------------------
 
@@ -166,8 +215,8 @@ func TestModelExchangeLifecycle(t *testing.T) {
 	if m.transcript.streaming {
 		t.Error("transcript still streaming after MessageEvent finalised the buffer")
 	}
-	if n := len(m.transcript.entries); n != 2 { // user + assistant
-		t.Errorf("transcript has %d entries, want 2 (user + assistant)", n)
+	if n := len(m.transcript.entries); n != 3 { // start-up box + user + assistant
+		t.Errorf("transcript has %d entries, want 3 (start-up box + user + assistant)", n)
 	}
 
 	// The terminal Msg returns the model to idle and clears the CancelFunc.
@@ -1301,12 +1350,14 @@ func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 		m.transcript.commitAssistant("two reply "+strings.Repeat("y", 10), 0)
 	}
 	m.refreshViewport()
+	one := m.userBlocks[0]                   // section one's user-block range (below the seeded start-up box)
 	two := m.userBlocks[len(m.userBlocks)-1] // section two's user-block range in the stashed lines
 
-	// Scrolled into the middle of section one's reply: its prompt is above the top, so it is
-	// drawn as the sticky header.
+	// Scrolled a few rows past section one's prompt, into its reply: its prompt is above the top,
+	// so it is drawn as the sticky header. The offset is relative to the block (not an absolute
+	// row) because the one-time start-up box seeded at entries[0] sits above section one.
 	m.userScrolled = true
-	m.viewport.SetYOffset(3)
+	m.viewport.SetYOffset(one.start + 3)
 	if top := firstViewLine(m); !strings.Contains(top, "PROMPT-ONE") {
 		t.Errorf("scrolled into section one: top line = %q; want PROMPT-ONE stuck to the top", top)
 	}

@@ -41,6 +41,7 @@ const (
 	entryError
 	entryNote
 	entryPresented
+	entryStartup
 )
 
 // entry is one committed line-block in the transcript. text is the body (for the text
@@ -58,6 +59,7 @@ type entry struct {
 	done      bool
 	skills    []string // entryUser only: display names of the skills attached to this send
 	presented presentedView
+	startup   startupView // entryStartup only: the one-time start-up box's logo + session facts
 }
 
 // presentedView is the presentation model of a shown document (entryPresented only): the
@@ -73,6 +75,23 @@ type presentedView struct {
 	Location string               // the served URL (rung 2); empty on every other rung
 	Method   domain.PresentMethod // the rung reached, which the closing status line words
 	Reason   string               // why a tried rung did not deliver; empty when none was
+}
+
+// startupView is the presentation model of the one-time start-up box (entryStartup only): the
+// embedded logo art plus the three session facts the box shows. Like [presentedView] the entry
+// holds the facts and render.go composes the card, so the box's shape and wording stay
+// table-testable without a Model (ADR 0019 §2, rung 0). The box is seeded once as entries[0]
+// (newModel) and rendered fresh at the live width on every repaint, so it reflows on resize and
+// survives /clear.
+//
+// Host and Model trace to config / the CLI, so addStartup escape-strips them as addPresented does
+// its untrusted halves — defence in depth even though they are not model output. Logo (this
+// program's own embedded asset) and Version (its own build value) are trusted and pass through.
+type startupView struct {
+	Logo    string // the embedded block-art "APOGEE" wordmark
+	Host    string // the upstream host label (HostAlias, or the endpoint when none)
+	Model   string // the display model id (displayModel-ed)
+	Version string // the resolved build version (Options.Version)
 }
 
 // addUser appends a user message — the text the human submitted to open or continue the
@@ -108,6 +127,31 @@ func (t *transcript) addPresented(msg presentedMsg) {
 		Method:   msg.Method,
 		Reason:   clipDetail(stripEscapes(msg.Reason)),
 	}})
+}
+
+// addStartup appends the one-time start-up box — the logo and the session's host / model /
+// version (startupView). It is seeded once by newModel as entries[0], not folded from an engine
+// Event: the box is the HOST's opening frame, like addPresented's record of a host act. Host and
+// Model are escape-stripped (they trace to config / the CLI) so a control sequence can never
+// reach the terminal through them; the logo and version are this program's own values and pass
+// through untouched.
+func (t *transcript) addStartup(v startupView) {
+	v.Host = stripEscapes(v.Host)
+	v.Model = stripEscapes(v.Model)
+	t.entries = append(t.entries, entry{kind: entryStartup, startup: v})
+}
+
+// hasConversation reports whether the transcript holds anything the human would want resumed —
+// any entry beyond the one-time start-up box seeded at construction. The box is opening chrome,
+// not conversation, so a session that only ever showed it is still "empty" for the save decision
+// (saveSession): seeding entries[0] must not on its own turn every quit into a snapshot file.
+func (t *transcript) hasConversation() bool {
+	for i := range t.entries {
+		if t.entries[i].kind != entryStartup {
+			return true
+		}
+	}
+	return false
 }
 
 // presentedStatus is the short line that closes a presentation entry. A rung that was tried and

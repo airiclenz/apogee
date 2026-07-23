@@ -114,19 +114,20 @@ type theme struct {
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
 	// as bold white, `inline code` and ``` fenced blocks ``` in orange.
-	mdBold      lipgloss.Style // **bold** span
-	mdHeading   lipgloss.Style // # … ###### heading line (bold white)
-	mdCode      lipgloss.Style // `inline code` span (orange)
-	mdCodeBlock lipgloss.Style // a ``` fenced ``` code-block line (orange)
-	inputBorder lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
-	statusFaint lipgloss.Style // dim status text, bg-free (approval/ask prompts)
-	statusBar   lipgloss.Style // status-line segments: faint on black
-	statusError lipgloss.Style // status-line "error" token: red bold on black
-	chromeRule  lipgloss.Style // the footer's border hairlines (dark gray on black): its runes, corners, and │ bars
-	topDivider  lipgloss.Style // the ▔ top-edge hairline above the status line — a dimmer rule (colDimGray) so it recedes
-	footerText  lipgloss.Style // the footer's content (faint on black)
-	scrollThumb lipgloss.Style // the transcript scroll-bar thumb (the position marker)
-	scrollTrack lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
+	mdBold        lipgloss.Style // **bold** span
+	mdHeading     lipgloss.Style // # … ###### heading line (bold white)
+	mdCode        lipgloss.Style // `inline code` span (orange)
+	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (orange)
+	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
+	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing)
+	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
+	statusBar     lipgloss.Style // status-line segments: faint on black
+	statusError   lipgloss.Style // status-line "error" token: red bold on black
+	chromeRule    lipgloss.Style // the footer's border hairlines (dark gray on black): its runes, corners, and │ bars
+	topDivider    lipgloss.Style // the ▔ top-edge hairline above the status line — a dimmer rule (colDimGray) so it recedes
+	footerText    lipgloss.Style // the footer's content (faint on black)
+	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
+	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 
 	// Context-fill gauge (statusLine). The bar is a solid two-tone strip in the
 	// llama-launcher style: gaugeFill paints the filled portion (full blocks + an eighth-block
@@ -164,6 +165,10 @@ func newTheme() theme {
 			BorderBackground(colBlack).
 			Background(colBlack).
 			Padding(0, 1),
+		startupBorder: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()). // same glyphs as the prompt box: ╭ ╮ ╰ ╯ ─ │
+			BorderForeground(colDarkGray).    // same border tone
+			Padding(0, 1),                    // no Background / no BorderBackground → transparent, self-closing card
 		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
 		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),

@@ -177,7 +177,22 @@ include `version`.
 
 ---
 
-## 3. One-time start-up box (logo + host / model / version)
+## 3. One-time start-up box (logo + host / model / version) — ✅ DONE (2026-07-23)
+
+NOTES (2026-07-23): Logo path — the plan's repo-root `logo.md` never existed. Per the owner
+design decision the art was COPIED (byte-identical) from the untracked `graphics/apogee-logo.md`
+into the embedded `internal/tui/logo.txt`, and `graphics/apogee-logo.md` was `git add`-ed and
+LEFT in place as a tracked branding asset (not moved/deleted); the acceptance "`git ls-files
+logo.md` returns nothing" holds trivially since that path never existed. The `//go:embed`
+directive lives in a new `internal/tui/logo.go`.
+NOTES (2026-07-23): Beyond the item's literal text — `saveSession` (model.go) gated on
+`len(transcript.entries) == 0`, so the always-present seeded box would have turned every quit into
+a snapshot file. Added `transcript.hasConversation()` (true iff any entry is not the start-up box)
+and switched the empty-conversation check to it; updated the two existing tests the seed shifted
+(`TestModelExchangeLifecycle` entry count 2→3; `TestStickyHeaderHandoffOnScroll` now scrolls
+relative to `userBlocks[0].start` instead of the absolute row 3). The box is content-sized (item
+3's explicit "do **not** set `.Width()`"), which supersedes the intro's line-14 "span the complete
+allowed width".
 
 **What:** (depends on item 1 for `Options.Version`.)
 

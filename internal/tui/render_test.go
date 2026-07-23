@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/viewport"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -633,5 +634,54 @@ func TestInputContentRows(t *testing.T) {
 func TestInputContentRowsZeroWidth(t *testing.T) {
 	if got := inputContentRows("ab", 0); got < 1 {
 		t.Errorf("inputContentRows with zero width = %d, want >= 1 (width floored to one)", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The one-time start-up box (version-command-and-startup-box plan, item 3)
+// ----------------------------------------------------------------------------
+
+// The start-up box renders the logo and the host / model / version rows inside a rounded card
+// that reuses the prompt box's border glyphs but drops its black fill. The four assertions are
+// the item's acceptance made mechanical: (a) the logo art is present, (b) the three session facts
+// are present, (c) the rounded corner runes match the prompt box, and (d) the card carries none of
+// the black-background SGR the input box emits — the "same characters, no black background".
+func TestRenderStartupBox(t *testing.T) {
+	th := newTheme()
+	v := startupView{
+		Logo:    strings.TrimRight(apogeeLogo, "\n"),
+		Host:    "test-host:1111",
+		Model:   "gpt-oss-20b",
+		Version: "v9.9.9-test",
+	}
+	raw := strings.Join(renderStartupBox(th, v, 80), "\n")
+	plain := ansi.Strip(raw)
+
+	// (a) a distinctive fragment of the block-art wordmark survives into the card.
+	if !strings.Contains(plain, "████▄ ▄███▄") {
+		t.Errorf("startup box does not carry the logo art:\n%s", plain)
+	}
+	// (b) the three session facts, each with its dim label, are present.
+	for _, want := range []string{"host", v.Host, "model", v.Model, "version", v.Version} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("startup box missing %q:\n%s", want, plain)
+		}
+	}
+	// (c) the rounded corners match the prompt box's RoundedBorder glyphs.
+	for _, corner := range []string{"╭", "╮", "╰", "╯"} {
+		if !strings.Contains(plain, corner) {
+			t.Errorf("startup box missing rounded corner %q:\n%s", corner, plain)
+		}
+	}
+	// (d) none of the black-background SGR the input box paints. Extract it from a real inputBorder
+	// render (its leading SGR sets the black background), so the check tracks whatever colour
+	// profile lipgloss uses rather than a hard-coded escape.
+	probe := lipgloss.NewStyle().Background(colBlack).Render("x")
+	if !strings.Contains(probe, "\x1b") {
+		t.Fatal("the black-background probe rendered no escape; the colour profile hides the SGR this test relies on")
+	}
+	blackBG := probe[:strings.IndexByte(probe, 'm')+1] // the leading SGR, up to and including its 'm'
+	if strings.Contains(raw, blackBG) {
+		t.Errorf("startup box carries the input box's black-background SGR %q — it must be transparent", blackBG)
 	}
 }

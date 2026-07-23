@@ -124,6 +124,8 @@ func renderEntryLines(th theme, e entry, width int) []string {
 		return railLines(th, hangingWrap(th.noteText, "· ", e.text, inner), e.depth)
 	case entryPresented:
 		return railLines(th, renderPresentedBlock(th, e.presented, inner), e.depth)
+	case entryStartup:
+		return railLines(th, renderStartupBox(th, e.startup, inner), e.depth)
 	default:
 		return nil
 	}
@@ -217,6 +219,39 @@ func renderPresentedBlock(th theme, v presentedView, width int) []string {
 		out = append(out, bodyIndent+v.Location)
 	}
 	return append(out, hangingWrap(th.noteText, bodyIndent, presentedStatus(v), width)...)
+}
+
+// startupRows are the start-up box's info-row labels, in display order — the three session facts
+// the owner named (host / model / version). The values come from the startupView beside them.
+var startupRows = []string{"host", "model", "version"}
+
+// renderStartupBox renders the one-time start-up card: the logo art, a blank line, then the
+// host / model / version rows with dim labels aligned in a column and plain values. It is
+// [renderPresentedBlock]'s sibling — the entry holds the facts, this composes the lines — and it
+// reuses the prompt box's rounded border glyphs through th.startupBorder while dropping the black
+// fill, so the card reads as the same chrome without the input box's solid field.
+//
+// width is deliberately unused: the card sizes to its widest content line (the ~37-col logo), not
+// the window. On a window narrower than the logo the viewport soft-wraps the whole card (which
+// wrappedOffset already mirrors) rather than the card being hard-wrapped here — acceptable for a
+// fixed-width wordmark, and the reason the box does not set .Width().
+func renderStartupBox(th theme, v startupView, width int) []string {
+	_ = width // see the doc comment: the card is content-sized, not window-sized
+
+	content := strings.Split(v.Logo, "\n")
+	content = append(content, "") // one blank line between the logo and the info rows
+
+	labelW := 0
+	for _, label := range startupRows {
+		labelW = max(labelW, lipgloss.Width(label))
+	}
+	values := []string{v.Host, v.Model, v.Version}
+	for i, label := range startupRows {
+		padded := label + strings.Repeat(" ", labelW-lipgloss.Width(label))
+		content = append(content, th.noteText.Render(padded)+"  "+values[i])
+	}
+
+	return strings.Split(th.startupBorder.Render(strings.Join(content, "\n")), "\n")
 }
 
 // renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the
