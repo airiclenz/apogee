@@ -648,7 +648,7 @@ func lineWithLogoAnd(lines []string, sub string) bool {
 	t := false
 	for _, ln := range lines {
 		p := ansi.Strip(ln)
-		if strings.Contains(p, "████▄ ▄███▄") && strings.Contains(p, sub) {
+		if strings.Contains(p, "▗▄▄▖▗▄▄") && strings.Contains(p, sub) {
 			t = true
 		}
 	}
@@ -679,7 +679,7 @@ func TestRenderStartupBox(t *testing.T) {
 	plain := ansi.Strip(raw)
 
 	// (a) a distinctive fragment of the block-art wordmark survives into the card.
-	if !strings.Contains(plain, "████▄ ▄███▄") {
+	if !strings.Contains(plain, "▗▄▄▖▗▄▄") {
 		t.Errorf("startup box does not carry the logo art:\n%s", plain)
 	}
 	// (b) all four session facts, each with its dim label, are present.
