@@ -29,9 +29,14 @@ ARGS ?=
 # Set APOGEE_LIVE_MODEL in the environment to pin the model (and bust the result cache on a swap).
 LIVE_ENDPOINT ?= http://192.168.64.1:1111
 
-# Where `install` drops the binary so it is on PATH everywhere. Must be a
-# writable directory that is on $PATH; override with `make install PREFIX=...`.
-PREFIX ?= /usr/local/bin
+# Where `install` drops the binary. Leave empty to let `install` auto-pick the
+# first candidate dir that is already on $PATH *and* writable without sudo,
+# trying, in order: /usr/local/bin (Intel macOS + most Linux), /opt/homebrew/bin
+# (Apple Silicon), ~/.local/bin, ~/bin. If none qualifies it creates and uses
+# ~/.local/bin and warns if that is not on PATH. Override with
+# `make install PREFIX=/some/dir` (use sudo if the dir needs root).
+PREFIX ?=
+INSTALL_CANDIDATES := /usr/local/bin /opt/homebrew/bin $$HOME/.local/bin $$HOME/bin
 
 .DEFAULT_GOAL := help
 
@@ -51,11 +56,30 @@ build:
 run:
 	go run $(PKG) $(ARGS)
 
-## install: build (version-stamped) and copy the binary to $(PREFIX), a dir on PATH
+## install: build (version-stamped) and copy the binary to a writable dir on PATH (auto-detected; override with PREFIX=...)
 .PHONY: install
 install: build
-	cp $(BINARY) $(PREFIX)/$(BINARY)
-	@echo "installed $(BINARY) -> $(PREFIX)/$(BINARY)"
+	@dir='$(PREFIX)'; \
+	if [ -n "$$dir" ]; then \
+		mkdir -p "$$dir" || { echo "error: cannot create $$dir" >&2; exit 1; }; \
+	else \
+		for d in $(INSTALL_CANDIDATES); do \
+			case ":$$PATH:" in *":$$d:"*) ;; *) continue ;; esac; \
+			if [ -d "$$d" ] && [ -w "$$d" ]; then dir="$$d"; break; fi; \
+		done; \
+		if [ -z "$$dir" ]; then dir="$$HOME/.local/bin"; mkdir -p "$$dir"; fi; \
+	fi; \
+	if [ ! -w "$$dir" ]; then \
+		echo "error: $$dir is not writable — re-run with sudo, or 'make install PREFIX=<writable dir on PATH>'." >&2; \
+		exit 1; \
+	fi; \
+	rm -f "$$dir/$(BINARY)"; \
+	cp "$(BINARY)" "$$dir/$(BINARY)" || exit 1; \
+	echo "installed $(BINARY) -> $$dir/$(BINARY)"; \
+	case ":$$PATH:" in \
+		*":$$dir:"*) ;; \
+		*) echo "warning: $$dir is not on your PATH — add it (e.g. 'export PATH=\"$$dir:\$$PATH\"') to run '$(BINARY)' by name." ;; \
+	esac
 
 ## test: run the full test suite with the race detector
 .PHONY: test
