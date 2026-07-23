@@ -338,11 +338,12 @@ Resume *continues* an Exchange), and **P1.7 re-armed the bench** (apogee-sim's
 proven under `-race` by a hermetic OpenAI-compatible `httptest` model). The `Responder` seam is
 streaming-only; §6 #6 (stream-then-gate) and §6 #3 (synchronous in-order emit) are settled.
 The latest state lives in the handoffs.
-**Two immediate next actions:** (1) the **live-model eval** — point
-`coreagent.RunConfig.Endpoint` at the local server `http://192.168.64.1:1111` (MCP control
-`http://192.168.64.1:7331/mcp`) and run the file-edit task against a real model from the host
-(the build container does not route there); (2) **Phase 2 — the TUI**, a consumer of the
-Phase-1 Events. The only throwaway P0.6 internal still standing is the cycle-check-only Mechanism
+**Two immediate next actions:** (1) the **live-model eval** — ✅ **done 2026-07-23**: the
+file-edit task ran against a real model (`make live-eval` → `TestE2ELiveModel`, endpoint
+`http://192.168.64.1:1111`, gemma-4-E4B-it-QAT) under `-race` and passed — the model streamed,
+requested `write_file`, the write cleared Approval, and the file landed in the workspace,
+closing the open Phase-1 live-eval step through the product UI; (2) **Phase 2 — the TUI**, a
+consumer of the Phase-1 Events — long since shipped (see Phase 2–5 in the CHANGELOG). The only throwaway P0.6 internal still standing is the cycle-check-only Mechanism
 registry (Phase 4 replaces it); the minimal `conversation` is gone (P1.2 adopted
 `domain.Conversation`, P1.6 wrapped it in the Session envelope).
 

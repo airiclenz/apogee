@@ -479,6 +479,15 @@ wants an owner decision. Logged here rather than left in the archive so it isn't
   `landlock` live, so the landlock-tagged enforcement battery ran live rather than self-skipping —
   see the CHANGELOG "Known post-release verification" note, "Linux landlock live enforcement",
   now also closed.
+- **✅ DONE (2026-07-23) — Both automated live checks against the real endpoint.**
+  (a) `make live-eval` (`TestE2ELiveModel`) passed under `-race` against
+  `http://192.168.64.1:1111` (gemma-4-E4B-it-QAT): streamed, requested `write_file`, cleared
+  Approval, file landed in the temp workspace — closes the open Phase-1 live eval (also flipped
+  in `docs/design/technical-design.md` §"Suggested next-session entry point").
+  (b) `TestSmokeLiveProfileSeam` passed under `-race` against the same endpoint: all three
+  subtests (thinking-delimiter strip, native control, fenced tool-call parse+dispatch) green.
+  Remaining from that trio: the **manual, owner-run live Auto-confined deliverable run** —
+  tracked in the CHANGELOG "Known post-release verification" note (*still open*).
 - **Live Auto-confined deliverable run on Windows**, if an LLM endpoint is reachable from that
   machine. The ADR 0020 backend itself is proven natively (escape battery + the real `Terminal`
   tool under `platform.NewConfiner()`, item 8's live evidence); an end-to-end deliverable
