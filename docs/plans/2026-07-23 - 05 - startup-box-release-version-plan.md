@@ -96,7 +96,13 @@ directly instead of the `strings.Cut`.
 confined to `version.go` + `version_test.go`. Commit:
 `refactor(version): export BaseVersion — the release version without build provenance`.
 
-## 2. Thread the base to the start-up box; leave `--version` / `/version` on the full string
+## 2. Thread the base to the start-up box; leave `--version` / `/version` on the full string — ✅ DONE (2026-07-23)
+
+NOTES (2026-07-23): `root.go:118`'s `Version: apogee.Version()` is the **Cobra command's**
+`Version` field (the `--version` flag), not a `tui.Options` field — `cobra.Command` has no
+`BaseVersion` field, and `--version` must stay full — so no `BaseVersion` was (or could be) added
+there; only its stale comment was corrected. The `BaseVersion: apogee.BaseVersion()` seam is set in
+the single `tui.Options` literal, which lives only in `wire.go` (as the plan's own line 44 notes).
 
 **What:**
 

@@ -299,9 +299,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Workspace:     roots.workspace,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
-		// The single source of truth (the embedded top-level VERSION file, via apogee.Version),
-		// so the footer, the /version command, and the start-up box all display one value.
-		Version: apogee.Version(),
+		// The single source of truth (the embedded top-level VERSION file). Version carries the
+		// full string (provenance included) that /version prints and --version mirrors; BaseVersion
+		// is the release version alone (no provenance), the clean value the start-up box displays.
+		Version:     apogee.Version(),
+		BaseVersion: apogee.BaseVersion(),
 		// The same backend, capabilities, and host id the degradation notice above was built
 		// from, so /confine status inside the TUI reports the host's real situation rather than
 		// re-deriving it. internal/platform is the binary's dependency, not the renderer's.

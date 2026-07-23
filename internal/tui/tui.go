@@ -98,10 +98,17 @@ type Options struct {
 	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
-	// Version is the resolved build version (apogee.Version, read from the embedded VERSION
-	// file), the single value the binary resolves and the TUI displays — the /version command
-	// and the start-up box both read it from here so the TUI never imports the source. Empty ⇒ unwired.
+	// Version is the resolved FULL build version (apogee.Version, read from the embedded VERSION
+	// file plus build provenance), read only by the /version command — it mirrors what --version
+	// prints. The start-up box reads BaseVersion instead, so the TUI never imports the source.
+	// Empty ⇒ unwired.
 	Version string
+
+	// BaseVersion is the release version WITHOUT build provenance (apogee.BaseVersion — the
+	// trimmed VERSION file, e.g. "v1.8.0"), the value the start-up box displays. It is a separate
+	// seam from Version so the box reads clean while /version and --version keep the full string;
+	// the TUI stays format-agnostic (cmd/apogee resolves both). Empty ⇒ unwired.
+	BaseVersion string
 
 	// Confinement is the host's confinement situation as the composition root resolved it, for
 	// the /confine status report to name. The TUI never derives it — internal/platform is the

@@ -113,8 +113,8 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 		Short: "Terminal coding agent for small local LLMs",
 		// Cobra auto-adds the --version flag and its print template from this field,
 		// reading the single source of truth (the embedded top-level VERSION file, via
-		// apogee.Version). The in-TUI /version command and the start-up box read the same
-		// value via Options.Version.
+		// apogee.Version). The in-TUI /version command reads the same full value via
+		// Options.Version; the start-up box shows the shorter Options.BaseVersion instead.
 		Version: apogee.Version(),
 		Long: "apogee is a terminal coding agent for small local LLMs. The root command\n" +
 			"opens an interactive session against a local OpenAI-compatible model:\n" +

@@ -126,15 +126,17 @@ func TestVersionCommandPrintsVersionNote(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // newModel seeds exactly one entry — the start-up box at entries[0] — carrying the resolved
-// host / model / context / version from Options (the same seam the footer and /version read), and it
-// is not a user block (so the sticky header never treats it as a prompt).
+// host / model / context from Options and the CLEAN release version (Options.BaseVersion, no build
+// provenance), and it is not a user block (so the sticky header never treats it as a prompt). The
+// box reads BaseVersion, never the full Version that /version and --version show.
 func TestNewModelSeedsStartupBox(t *testing.T) {
 	opts := Options{
 		Model:         "/models/gpt-oss-20b.gguf", // displayModel strips the path + weight extension
 		Endpoint:      "http://localhost:1234",
 		HostAlias:     "test-host",
-		ContextWindow: 32768, // formatTokens → "32k"
-		Version:       "v9.9.9-test",
+		ContextWindow: 32768,                   // formatTokens → "32k"
+		Version:       "v1.2.3+45.gdeadbeef01", // the full string /version shows — the box must NOT use it
+		BaseVersion:   "v1.2.3",                // the clean release version the box displays
 	}
 	m := newModel(context.Background(), &fakeEngine{}, opts)
 
@@ -154,8 +156,11 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 	if got, want := e.startup.Context, formatTokens(opts.ContextWindow); got != want {
 		t.Errorf("startup context = %q, want %q (formatTokens of Options.ContextWindow)", got, want)
 	}
-	if got, want := e.startup.Version, opts.Version; got != want {
-		t.Errorf("startup version = %q, want %q (Options.Version)", got, want)
+	if got, want := e.startup.Version, opts.BaseVersion; got != want {
+		t.Errorf("startup version = %q, want %q (Options.BaseVersion, the clean release version)", got, want)
+	}
+	if e.startup.Version == opts.Version {
+		t.Errorf("startup version = %q equals the full Options.Version; the box must drop the build provenance", e.startup.Version)
 	}
 	if e.startup.Logo == "" || strings.HasSuffix(e.startup.Logo, "\n") {
 		t.Errorf("startup logo = %q, want the embedded art with its trailing newline trimmed", e.startup.Logo)

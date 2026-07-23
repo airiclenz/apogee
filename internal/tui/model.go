@@ -142,7 +142,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 		Host:    hostDisplay(opts),
 		Model:   displayModel(opts.Model),
 		Context: formatTokens(opts.ContextWindow),
-		Version: opts.Version,
+		Version: opts.BaseVersion,
 	})
 	return m
 }
