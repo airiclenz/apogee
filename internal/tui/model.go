@@ -977,11 +977,12 @@ func (m Model) inputView() string {
 }
 
 // topRule renders the full-width ▔ hairline that marks the top edge of the bottom chrome: a
-// dark-gray hairline on a black field. It sits directly below the transcript's one blank gap
-// row and above the status line (layout.md), capping the whole bottom section while the status
-// line stays directly above the input box.
+// dim-gray hairline on a black field (topDivider, dimmer than the footer's chromeRule so it
+// recedes). It sits directly below the transcript's one blank gap row and above the status line
+// (layout.md), capping the whole bottom section while the status line stays directly above the
+// input box.
 func (m Model) topRule() string {
-	return m.th.chromeRule.Render(strings.Repeat("▔", m.width))
+	return m.th.topDivider.Render(strings.Repeat("▔", m.width))
 }
 
 // footerView renders the footer bar: a thin top divider (the shared border with the input box

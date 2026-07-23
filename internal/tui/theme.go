@@ -24,6 +24,7 @@ import (
 var (
 	colWhite    = lipgloss.Color("#ffffff") // user-prompt text
 	colDarkGray = lipgloss.Color("#4a4a4a") // user-block background + input/footer borders
+	colDimGray  = lipgloss.Color("#333333") // top-edge divider hairline — dimmer than the chrome border so it recedes
 	colBlack    = lipgloss.Color("#000000") // input-box interior
 	colFaint    = lipgloss.Color("#8a8a8a") // status/footer/tool-detail dim
 	colDiffAdd  = lipgloss.Color("#3fb950") // diff "+" lines (reserved — no producer yet)
@@ -121,7 +122,8 @@ type theme struct {
 	statusFaint lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar   lipgloss.Style // status-line segments: faint on black
 	statusError lipgloss.Style // status-line "error" token: red bold on black
-	chromeRule  lipgloss.Style // the bottom-chrome hairlines (dark gray on black): the input box's top-edge row and the footer's border runes, corners, and │ bars
+	chromeRule  lipgloss.Style // the footer's border hairlines (dark gray on black): its runes, corners, and │ bars
+	topDivider  lipgloss.Style // the ▔ top-edge hairline above the status line — a dimmer rule (colDimGray) so it recedes
 	footerText  lipgloss.Style // the footer's content (faint on black)
 	scrollThumb lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
@@ -166,6 +168,7 @@ func newTheme() theme {
 		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
 		chromeRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
+		topDivider:  lipgloss.NewStyle().Foreground(colDimGray).Background(colBlack),
 		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		scrollThumb: lipgloss.NewStyle().Foreground(colFaint),
 		scrollTrack: lipgloss.NewStyle().Foreground(colDarkGray),
