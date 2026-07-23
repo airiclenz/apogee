@@ -57,14 +57,34 @@ skip — macOS-only; already confirmed on Mac hardware 2026-07-02.)
 
 ## Open work (what's left — none of it blocked on this pass anymore)
 
-1. **Live Auto-confined *deliverable* run** — the opt-in `APOGEE_LIVE_ENDPOINT` end-to-end run
-   (a real coding conversation in Auto: a shell write outside the workspace OS-denied, an MCP
-   tool still raising Approval, a sub-agent delegated and its nested work rendered). Still open,
-   tracked in the CHANGELOG "Known post-release verification" note. **Newly practical from this
-   box:** `apogee probe` shows the upstream endpoint (`http://192.168.64.1:1111`,
-   `gemma-4-e4b-it-qat`) **reachable** here, and landlock is live — so the Linux arm of this
-   run is doable on this machine now. `make live-eval` (or set `APOGEE_LIVE_ENDPOINT`) is the
-   entry point.
+1. **Live checks newly practical from this box.** All three were previously blocked (no
+   reachable endpoint AND, for the automated ones, no cgo for `-race`); this box now clears
+   both — `apogee probe` shows the endpoint (`http://192.168.64.1:1111`, `gemma-4-e4b-it-qat`)
+   **reachable**, landlock is live, and gcc 15.2 is installed. **These are three DIFFERENT
+   things — do not conflate them (an earlier draft of this handoff did):**
+   - **(a) Live-model file-edit eval — `make live-eval`** (`TestE2ELiveModel`, `internal/tui/
+     live_test.go`). Automated. Drives the real model through a file-edit conversation: it
+     streams, requests `write_file`, the write clears the approval rendezvous (auto-allowed as
+     the headless stand-in for a human pressing "a"), a file lands in a temp workspace. This is
+     the code's "open Phase-1 live eval." It does **NOT** exercise confinement/MCP/sub-agents.
+     Fastest to knock out. Note `-count=1` is load-bearing; if you swap the server's loaded
+     model, also set `APOGEE_LIVE_MODEL` or the result caches a stale PASS.
+   - **(b) Live profile-seam smoke — `TestSmokeLiveProfileSeam`** (`internal/tui/
+     smoke_live_test.go`): `APOGEE_LIVE_ENDPOINT=http://192.168.64.1:1111 go test -race
+     -count=1 -run TestSmokeLiveProfileSeam -v ./internal/tui/`. Automated. Verifies the
+     inline-think delimiter strip against a real model (gemma-4-e4b-it-qat emits
+     `<|channel>…<channel|>`, not `<think>` — override via the marker env vars if needed).
+   - **(c) Live Auto-confined *deliverable* run — the CHANGELOG "Known post-release
+     verification" item. This is the still-open one, and it is MANUAL / owner-run — there is no
+     automated test for it.** Launch an interactive Auto session against the endpoint:
+     `./apogee --mode auto --endpoint http://192.168.64.1:1111` (endpoint is already in
+     `~/.apogee/config.yaml`, so bare `./apogee --mode auto` also works; auto requires the
+     filesystem confinement this box has). Then, in a real coding conversation, drive and
+     **observe all three** behaviors the CHANGELOG names: (i) a shell command writing **outside
+     the workspace** is OS-denied by landlock while an in-workspace write succeeds; (ii) an MCP
+     tool still **raises Approval** (Auto fences fs-write but gates the unfenceable surface);
+     (iii) a **sub-agent** is delegated and its nested work renders. Only after observing all
+     three, flip the CHANGELOG bullet's Linux arm to ✅ (macOS arm is already owner-run there).
 2. **OWNER CALL — prune the Windows disk-label walk or not** (~1 ms/object; a 5,051-object tree
    = 5.2 s label / 2.2 s revert on first confined command). Decide, don't code. Details in
    TODO.md and the 2026-07-22 handoff.
