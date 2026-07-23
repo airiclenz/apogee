@@ -44,8 +44,9 @@ var buildCount string
 //
 // Examples: "1.7.1+436.g28b6f838e6e1" (make build), "1.7.1+436.g28b6f838e6e1.dirty" (dirty
 // tree), "1.7.1+g28b6f838e6e1" (a bare `go build`, no build number), or bare "1.7.1" when the
-// binary was built outside a VCS tree (or with -buildvcs=false). The CLI --version flag, the
-// in-TUI /version command, and the start-up box all display this one value.
+// binary was built outside a VCS tree (or with -buildvcs=false). Only the CLI --version flag
+// and the in-TUI /version command display this full value; the start-up box shows the release
+// version alone (see BaseVersion).
 func Version() string {
 	base := BaseVersion()
 	info, ok := debug.ReadBuildInfo()
