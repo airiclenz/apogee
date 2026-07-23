@@ -10,10 +10,14 @@ PKG     := ./cmd/apogee
 MODULE  := github.com/airiclenz/apogee
 
 # The release version is the single source of truth in the top-level VERSION file,
-# embedded into the binary at build time (see version.go / apogee.Version). Build
-# provenance (short commit + dirty flag) is appended at runtime from Go's own VCS stamp
-# (debug.ReadBuildInfo) — so there is no -ldflags stamp here and nothing to keep in sync.
-# Every build path reports the same. To release, edit VERSION.
+# embedded into the binary at build time (see version.go / apogee.Version), so the version
+# NUMBER is identical on every build path and cannot drift. Build provenance is appended to it:
+# the short commit + dirty flag come from Go's own VCS stamp at runtime (debug.ReadBuildInfo),
+# and the build number — the repository's commit count — is the one field the runtime cannot
+# derive, so it is injected here via -ldflags. A bare `go build` omits the number and reports
+# just `+g<rev>`; the make targets below stamp it. To release, edit VERSION.
+BUILD_COUNT := $(shell git rev-list --count HEAD 2>/dev/null)
+GO_LDFLAGS  := $(if $(BUILD_COUNT),-X $(MODULE).buildCount=$(BUILD_COUNT))
 
 # The 6 release targets the Phase-2 cross-build invariant must stay green on.
 CROSS_TARGETS := \
@@ -48,12 +52,12 @@ help:
 ## build: compile the binary to ./apogee
 .PHONY: build
 build:
-	go build -o $(BINARY) $(PKG)
+	go build -ldflags "$(GO_LDFLAGS)" -o $(BINARY) $(PKG)
 
 ## run: build-and-run the binary (pass flags via ARGS="...")
 .PHONY: run
 run:
-	go run $(PKG) $(ARGS)
+	go run -ldflags "$(GO_LDFLAGS)" $(PKG) $(ARGS)
 
 ## install: build and copy the binary to a writable dir on PATH (auto-detected; override with PREFIX=...)
 .PHONY: install
@@ -106,7 +110,7 @@ cross:
 	@for t in $(CROSS_TARGETS); do \
 		os=$${t%/*}; arch=$${t#*/}; \
 		printf '  -> %s/%s\n' "$$os" "$$arch"; \
-		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -o /dev/null ./... || exit 1; \
+		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o /dev/null ./... || exit 1; \
 	done
 	@echo "cross-build OK ($(words $(CROSS_TARGETS)) targets)"
 

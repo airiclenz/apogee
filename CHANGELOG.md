@@ -15,14 +15,19 @@ that is now true.*
 
 ### Added
 
-- **`apogee --version`, from a single build-version source.** The binary now reports its version.
-  A new `internal/version` package resolves one string — the `-ldflags -X` value a release build
-  injects (the `Makefile` passes `git describe --tags --always --dirty`), else the module version
-  `go install pkg@tag` embeds, else the short VCS revision `go build` embeds in a checkout
-  (`+dirty` on a modified tree), else `"dev"` — so the version is honest in a release build, a
-  `go install`, and a bare `go run` alike. Cobra's `--version` flag reads it via `cmd.Version`, and
-  the same string is threaded to the TUI through a new `Options.Version` seam (the renderer never
-  imports the version package), where the in-TUI `/version` command and the start-up box read it.
+- **`apogee --version`, from a single build-version source, now with a build number.** The binary
+  reports its version from the top-level `VERSION` file, embedded verbatim via `go:embed` — the
+  single source of truth for the release number, identical on every build path (`make build`,
+  `go build`, `go run`, `go install`) with no `-ldflags` override that could drift. A
+  build-provenance suffix is appended, rendered as `vX.Y.Z+<count>.g<rev>[.dirty]`: the short
+  commit id and `.dirty` marker come from Go's own VCS stamp at runtime (`debug.ReadBuildInfo`),
+  and the **build number** — the repository's commit count (`git rev-list --count HEAD`) — is the
+  one field the runtime cannot derive, so a release build injects it via `-ldflags -X` (the
+  `Makefile` computes it). A bare `go build` omits the number and reports just `+g<rev>`; the
+  version *number* itself is always the embedded `VERSION` file. Cobra's `--version` flag reads the
+  string via `cmd.Version`, and the same value is threaded to the TUI through the `Options.Version`
+  seam (the renderer never imports the version facade), where the in-TUI `/version` command and the
+  start-up box read it.
 - **A one-time start-up box.** Launch now opens with a rounded card at the top of the transcript
   carrying the block-art `APOGEE` wordmark and the session's `host` / `model` / `version`. It
   reuses the prompt box's rounded border glyphs (`lipgloss.RoundedBorder()`) but drops the black

@@ -24,7 +24,7 @@ func TestVersionMatchesVERSIONFile(t *testing.T) {
 	if want == "" {
 		t.Fatal("the VERSION file is empty; it is the single source of truth and must carry a version")
 	}
-	// The test binary is a repo build, so Version() typically carries a "+g<commit>[.dirty]"
+	// The test binary is a repo build, so Version() typically carries a "+[<count>.]g<commit>[.dirty]"
 	// provenance suffix; the release number is the part before the first "+".
 	base, _, _ := strings.Cut(apogee.Version(), "+")
 	if base != want {

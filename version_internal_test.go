@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// TestBuildMetadata covers the pure VCS-provenance composer with synthetic build settings, so
-// the "+g<commit>[.dirty]" suffix logic is verified independent of the machine's real build stamp.
+// TestBuildMetadata covers the pure provenance composer with synthetic build settings and an
+// injected build number, so the "+[<count>.]g<commit>[.dirty]" suffix logic is verified
+// independent of the machine's real build stamp.
 func TestBuildMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -14,6 +15,7 @@ func TestBuildMetadata(t *testing.T) {
 
 	tests := []struct {
 		name     string
+		count    string
 		settings []debug.BuildSetting
 		want     string
 	}{
@@ -42,13 +44,37 @@ func TestBuildMetadata(t *testing.T) {
 			settings: nil,
 			want:     "",
 		},
+		{
+			name:     "build number prefixes a clean commit",
+			count:    "436",
+			settings: []debug.BuildSetting{{Key: "vcs.revision", Value: fullRev}, {Key: "vcs.modified", Value: "false"}},
+			want:     "436.g28b6f838e6e1",
+		},
+		{
+			name:     "build number prefixes and dirty still trails",
+			count:    "436",
+			settings: []debug.BuildSetting{{Key: "vcs.revision", Value: fullRev}, {Key: "vcs.modified", Value: "true"}},
+			want:     "436.g28b6f838e6e1.dirty",
+		},
+		{
+			name:     "surrounding whitespace on the count is trimmed",
+			count:    "  436\n",
+			settings: []debug.BuildSetting{{Key: "vcs.revision", Value: fullRev}},
+			want:     "436.g28b6f838e6e1",
+		},
+		{
+			name:     "a build number without a revision is dropped with the empty suffix",
+			count:    "436",
+			settings: []debug.BuildSetting{{Key: "vcs.modified", Value: "true"}},
+			want:     "",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := buildMetadata(tt.settings); got != tt.want {
-				t.Errorf("buildMetadata() = %q; want %q", got, tt.want)
+			if got := buildMetadata(tt.count, tt.settings); got != tt.want {
+				t.Errorf("buildMetadata(%q, …) = %q; want %q", tt.count, got, tt.want)
 			}
 		})
 	}
