@@ -231,13 +231,13 @@ var startupRows = []string{"host", "model", "version"}
 // reuses the prompt box's rounded border glyphs through th.startupBorder while dropping the black
 // fill, so the card reads as the same chrome without the input box's solid field.
 //
-// width is deliberately unused: the card sizes to its widest content line (the ~37-col logo), not
-// the window. On a window narrower than the logo the viewport soft-wraps the whole card (which
-// wrappedOffset already mirrors) rather than the card being hard-wrapped here — acceptable for a
-// fixed-width wordmark, and the reason the box does not set .Width().
+// The card spans the full content width: width is the same railed inner budget every other
+// transcript entry is laid out to (the window less the scroll-bar gutter and the right gutter —
+// transcriptWidth), so th.startupBorder.Width(width) makes the box's right border land on the exact
+// column the rest of the transcript's content ends at. lipgloss folds the border and padding into
+// that width, so the rendered lines (border runes included) are exactly width columns; the logo
+// stays left-aligned and its short lines pad out to the right border rather than sizing the card.
 func renderStartupBox(th theme, v startupView, width int) []string {
-	_ = width // see the doc comment: the card is content-sized, not window-sized
-
 	content := strings.Split(v.Logo, "\n")
 	content = append(content, "") // one blank line between the logo and the info rows
 
@@ -251,7 +251,7 @@ func renderStartupBox(th theme, v startupView, width int) []string {
 		content = append(content, th.noteText.Render(padded)+"  "+values[i])
 	}
 
-	return strings.Split(th.startupBorder.Render(strings.Join(content, "\n")), "\n")
+	return strings.Split(th.startupBorder.Width(width).Render(strings.Join(content, "\n")), "\n")
 }
 
 // renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the

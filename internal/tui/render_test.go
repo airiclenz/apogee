@@ -642,10 +642,12 @@ func TestInputContentRowsZeroWidth(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // The start-up box renders the logo and the host / model / version rows inside a rounded card
-// that reuses the prompt box's border glyphs but drops its black fill. The four assertions are
+// that reuses the prompt box's border glyphs but drops its black fill. The five assertions are
 // the item's acceptance made mechanical: (a) the logo art is present, (b) the three session facts
-// are present, (c) the rounded corner runes match the prompt box, and (d) the card carries none of
-// the black-background SGR the input box emits — the "same characters, no black background".
+// are present, (c) the rounded corner runes match the prompt box, (d) the card carries none of
+// the black-background SGR the input box emits — the "same characters, no black background" — and
+// (e) the card spans the full content width it is handed (its right border lands on the content
+// edge) rather than sizing down to the ~40-col logo.
 func TestRenderStartupBox(t *testing.T) {
 	th := newTheme()
 	v := startupView{
@@ -654,7 +656,9 @@ func TestRenderStartupBox(t *testing.T) {
 		Model:   "gpt-oss-20b",
 		Version: "v9.9.9-test",
 	}
-	raw := strings.Join(renderStartupBox(th, v, 80), "\n")
+	const width = 80 // wider than the ~40-col logo, so a content-sized box would fall short
+	lines := renderStartupBox(th, v, width)
+	raw := strings.Join(lines, "\n")
 	plain := ansi.Strip(raw)
 
 	// (a) a distinctive fragment of the block-art wordmark survives into the card.
@@ -683,5 +687,19 @@ func TestRenderStartupBox(t *testing.T) {
 	blackBG := probe[:strings.IndexByte(probe, 'm')+1] // the leading SGR, up to and including its 'm'
 	if strings.Contains(raw, blackBG) {
 		t.Errorf("startup box carries the input box's black-background SGR %q — it must be transparent", blackBG)
+	}
+	// (e) every rendered line — border runes included — is exactly the content width it was handed,
+	// so the right border aligns to the same column the rest of the transcript's content ends at
+	// instead of hugging the logo. The top and bottom rows close on the rounded corner at that edge.
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("startup box line %d is %d cols, want the full content width %d: %q", i, w, width, ansi.Strip(ln))
+		}
+	}
+	if top := ansi.Strip(lines[0]); !strings.HasSuffix(top, "╮") {
+		t.Errorf("top row does not close on ╮ at the content edge: %q", top)
+	}
+	if bot := ansi.Strip(lines[len(lines)-1]); !strings.HasSuffix(bot, "╯") {
+		t.Errorf("bottom row does not close on ╯ at the content edge: %q", bot)
 	}
 }
