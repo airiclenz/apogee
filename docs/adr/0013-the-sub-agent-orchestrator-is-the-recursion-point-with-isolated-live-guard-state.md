@@ -125,7 +125,8 @@ behind the same single-shot driver seam.
   an `Agent` emits carries its nesting level. Top-level events stay `Depth == 0`; sub-agent
   events are `Depth == 1`. **P3.14** turns this from *tolerate* into *render* (the TUI frames a
   `Depth > 0` block); it needs only the `Depth` on events, which this ADR establishes.
-- **The default tool set gains `sub_agent`** (`DefaultTools` is now ~19 built-ins). It is
+- **The default tool set gains `sub_agent`** (`DefaultTools` is now ~19 built-ins; 2026-07-23:
+  21 with the host-gated `ask_user`/`present_document` — ADR 0019). It is
   offered in every mode **including Plan** (it is the recursion point, bounded one level down —
   a Plan sub-agent inherits Plan, so its children are read-only), and is **withheld at the depth
   bound**.

@@ -166,4 +166,5 @@ All of these were rejected; the ladder above is what survived.
   primary topology.
 - **The Windows opener ships unexercised** until the merge plan's Phase 5 (Windows shell/path
   backend) provides a real Windows harness — the same posture as `internal/platform`'s Windows
-  stub, and stated rather than hidden.
+  stub, and stated rather than hidden. (2026-07-22: Phase 5 shipped; the live opener check is
+  folded into the owner-run smoke passes.)
