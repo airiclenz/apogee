@@ -29,6 +29,10 @@ ARGS ?=
 # Set APOGEE_LIVE_MODEL in the environment to pin the model (and bust the result cache on a swap).
 LIVE_ENDPOINT ?= http://192.168.64.1:1111
 
+# Where `install` drops the binary so it is on PATH everywhere. Must be a
+# writable directory that is on $PATH; override with `make install PREFIX=...`.
+PREFIX ?= /usr/local/bin
+
 .DEFAULT_GOAL := help
 
 ## help: list the available targets
@@ -47,10 +51,11 @@ build:
 run:
 	go run $(PKG) $(ARGS)
 
-## install: install the binary into $GOPATH/bin
+## install: build (version-stamped) and copy the binary to $(PREFIX), a dir on PATH
 .PHONY: install
-install:
-	go install -ldflags "$(LDFLAGS)" $(PKG)
+install: build
+	cp $(BINARY) $(PREFIX)/$(BINARY)
+	@echo "installed $(BINARY) -> $(PREFIX)/$(BINARY)"
 
 ## test: run the full test suite with the race detector
 .PHONY: test
