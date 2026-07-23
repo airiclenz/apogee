@@ -1096,7 +1096,7 @@ func transcriptRows(t *testing.T, m Model) []string {
 
 // TestTranscriptBodyLeavesRightGutter proves the chat body wraps short of its right edge: no
 // rendered body line comes within bodyRightGutter columns of the scroll-bar column beside it, so
-// there are two free columns next to a painted bar and three to the window edge while the gutter
+// there is one free column next to a painted bar and two to the window edge while the gutter
 // is blank. Measured on the really-composed View (not on the renderer alone) so the wrap width
 // and the reserved scroll-bar column are pinned together, mirroring bodyIndent on the left.
 func TestTranscriptBodyLeavesRightGutter(t *testing.T) {
