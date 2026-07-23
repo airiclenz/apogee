@@ -221,37 +221,124 @@ func renderPresentedBlock(th theme, v presentedView, width int) []string {
 	return append(out, hangingWrap(th.noteText, bodyIndent, presentedStatus(v), width)...)
 }
 
-// startupRows are the start-up box's info-row labels, in display order — the three session facts
-// the owner named (host / model / version). The values come from the startupView beside them.
-var startupRows = []string{"host", "model", "version"}
+// startupWideMinGap is the smallest gap, in columns, the wide start-up layout keeps between the logo
+// and the right-aligned info block. When the content cannot fit the logo, this gap, and the info
+// block side by side, renderStartupBox falls back to the stacked layout instead. It is the switch's
+// only tuning knob — raise it if the two-column layout engages while still looking cramped.
+const startupWideMinGap = 4
 
-// renderStartupBox renders the one-time start-up card: the logo art, a blank line, then the
-// host / model / version rows with dim labels aligned in a column and plain values. It is
-// [renderPresentedBlock]'s sibling — the entry holds the facts, this composes the lines — and it
-// reuses the prompt box's rounded border glyphs through th.startupBorder while dropping the black
-// fill, so the card reads as the same chrome without the input box's solid field.
+// startupInfoRow is one label/value pair of the start-up box's info block (host / model / context /
+// version). An empty value drops the row.
+type startupInfoRow struct{ label, value string }
+
+// renderStartupBox renders the one-time start-up card, choosing a layout by the width it is handed.
+// It reuses the prompt box's rounded border glyphs through th.startupBorder while dropping the black
+// fill, so the card reads as the same chrome without the input box's solid field. It is
+// [renderPresentedBlock]'s sibling — the entry holds the facts, this composes the lines.
 //
-// The card spans the full content width: width is the same railed inner budget every other
-// transcript entry is laid out to (the window less the scroll-bar gutter and the right gutter —
-// transcriptWidth), so th.startupBorder.Width(width) makes the box's right border land on the exact
-// column the rest of the transcript's content ends at. lipgloss folds the border and padding into
-// that width, so the rendered lines (border runes included) are exactly width columns; the logo
-// stays left-aligned and its short lines pad out to the right border rather than sizing the card.
+// When there is room, the WIDE layout paints the logo on the left and a right-aligned
+// host / model / context / version block on the right (renderStartupWide). When the width does not
+// allow it, the STACKED fallback paints the original card — logo, a blank line, then host / model /
+// version below it, no context (renderStartupStacked).
+//
+// Either way the card spans the full content width: width is the same railed inner budget every
+// other transcript entry is laid out to (transcriptWidth), so th.startupBorder.Width(width) lands
+// the box's right border on the exact column the rest of the transcript's content ends at. lipgloss
+// folds the border and padding into that width, so the rendered lines are exactly width columns.
 func renderStartupBox(th theme, v startupView, width int) []string {
+	// inner is the content-column budget inside the rounded border and its padding — the room the
+	// two layouts actually lay out to. GetHorizontalFrameSize tracks the border + padding, so the
+	// arithmetic follows the style rather than a hard-coded 4.
+	inner := width - th.startupBorder.GetHorizontalFrameSize()
+
+	rows := make([]startupInfoRow, 0, 4)
+	for _, r := range []startupInfoRow{
+		{"host", v.Host}, {"model", v.Model}, {"context", v.Context}, {"version", v.Version},
+	} {
+		if r.value != "" { // an unknown fact (context 0) drops its row, mirroring the footer's nonEmpty
+			rows = append(rows, r)
+		}
+	}
+
+	logo := strings.Split(v.Logo, "\n")
+	logoW := 0
+	for _, ln := range logo {
+		logoW = max(logoW, lipgloss.Width(ln))
+	}
+	labelW := startupLabelWidth(rows)
+	infoW := startupInfoWidth(rows, labelW)
+
+	if inner >= logoW+startupWideMinGap+infoW {
+		return renderStartupWide(th, logo, rows, labelW, infoW, width, inner)
+	}
+	return renderStartupStacked(th, v, width)
+}
+
+// renderStartupWide paints the wide start-up card: the logo on the left, the info block right-
+// aligned against the right content edge (left column inner-infoW), so the widest info row sits
+// flush against the right padding and shorter rows trail off toward it. Logo line i pairs with info
+// row i (top-aligned) and whichever side is shorter blank-fills — the four logo lines pair directly
+// with the four info rows, so there is no blank spacer. lipgloss pads every line to the full width
+// (renderStartupBox's contract). The caller guarantees inner ≥ logoW + startupWideMinGap + infoW, so
+// the per-line pad count is at least startupWideMinGap.
+func renderStartupWide(th theme, logo []string, rows []startupInfoRow, labelW, infoW, width, inner int) []string {
+	left := inner - infoW // the info block's left column
+	n := max(len(logo), len(rows))
+	lines := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		logoLine := ""
+		if i < len(logo) {
+			logoLine = logo[i]
+		}
+		line := logoLine + strings.Repeat(" ", max(0, left-lipgloss.Width(logoLine)))
+		if i < len(rows) {
+			line += startupInfoLine(th, rows[i], labelW)
+		}
+		lines = append(lines, line)
+	}
+	return strings.Split(th.startupBorder.Width(width).Render(strings.Join(lines, "\n")), "\n")
+}
+
+// renderStartupStacked paints the narrow fallback: the logo, one blank line, then the host / model /
+// version rows stacked below it (no context), dim labels aligned in a column and plain values. This
+// is the card's original layout, kept for widths too narrow for the two-column wide layout.
+func renderStartupStacked(th theme, v startupView, width int) []string {
 	content := strings.Split(v.Logo, "\n")
 	content = append(content, "") // one blank line between the logo and the info rows
 
-	labelW := 0
-	for _, label := range startupRows {
-		labelW = max(labelW, lipgloss.Width(label))
+	rows := []startupInfoRow{{"host", v.Host}, {"model", v.Model}, {"version", v.Version}}
+	labelW := startupLabelWidth(rows)
+	for _, r := range rows {
+		content = append(content, startupInfoLine(th, r, labelW))
 	}
-	values := []string{v.Host, v.Model, v.Version}
-	for i, label := range startupRows {
-		padded := label + strings.Repeat(" ", labelW-lipgloss.Width(label))
-		content = append(content, th.noteText.Render(padded)+"  "+values[i])
-	}
-
 	return strings.Split(th.startupBorder.Width(width).Render(strings.Join(content, "\n")), "\n")
+}
+
+// startupInfoLine renders one info row — the dim label padded to the block's label column, two
+// spaces, then the plain value — shared by both start-up layouts so their rows never drift.
+func startupInfoLine(th theme, r startupInfoRow, labelW int) string {
+	padded := r.label + strings.Repeat(" ", max(0, labelW-lipgloss.Width(r.label)))
+	return th.noteText.Render(padded) + "  " + r.value
+}
+
+// startupLabelWidth is the widest label among the info rows — the column every value aligns past.
+func startupLabelWidth(rows []startupInfoRow) int {
+	w := 0
+	for _, r := range rows {
+		w = max(w, lipgloss.Width(r.label))
+	}
+	return w
+}
+
+// startupInfoWidth is the info block's rendered width: the widest label-padded row (labelW, two
+// spaces, then the value). It is the block the wide layout right-aligns and the term the width
+// switch measures against.
+func startupInfoWidth(rows []startupInfoRow, labelW int) int {
+	w := 0
+	for _, r := range rows {
+		w = max(w, labelW+2+lipgloss.Width(r.value))
+	}
+	return w
 }
 
 // renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the

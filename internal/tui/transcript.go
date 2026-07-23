@@ -78,19 +78,20 @@ type presentedView struct {
 }
 
 // startupView is the presentation model of the one-time start-up box (entryStartup only): the
-// embedded logo art plus the three session facts the box shows. Like [presentedView] the entry
-// holds the facts and render.go composes the card, so the box's shape and wording stay
-// table-testable without a Model (ADR 0019 §2, rung 0). The box is seeded once as entries[0]
-// (newModel) and rendered fresh at the live width on every repaint, so it reflows on resize and
-// survives /clear.
+// embedded logo art plus the session facts the box shows. Like [presentedView] the entry holds the
+// facts and render.go composes the card, so the box's shape and wording stay table-testable without
+// a Model (ADR 0019 §2, rung 0). The box is seeded once as entries[0] (newModel) and rendered fresh
+// at the live width on every repaint, so it reflows on resize and survives /clear.
 //
 // Host and Model trace to config / the CLI, so addStartup escape-strips them as addPresented does
 // its untrusted halves — defence in depth even though they are not model output. Logo (this
-// program's own embedded asset) and Version (its own build value) are trusted and pass through.
+// program's own embedded asset), Context (formatTokens of an int), and Version (its own build value)
+// are trusted and pass through.
 type startupView struct {
 	Logo    string // the embedded block-art "APOGEE" wordmark
 	Host    string // the upstream host label (HostAlias, or the endpoint when none)
 	Model   string // the display model id (displayModel-ed)
+	Context string // the formatted context-window size (formatTokens, e.g. "32k"); "" when unknown
 	Version string // the resolved build version (Options.Version)
 }
 
@@ -130,11 +131,11 @@ func (t *transcript) addPresented(msg presentedMsg) {
 }
 
 // addStartup appends the one-time start-up box — the logo and the session's host / model /
-// version (startupView). It is seeded once by newModel as entries[0], not folded from an engine
-// Event: the box is the HOST's opening frame, like addPresented's record of a host act. Host and
-// Model are escape-stripped (they trace to config / the CLI) so a control sequence can never
-// reach the terminal through them; the logo and version are this program's own values and pass
-// through untouched.
+// context / version (startupView). It is seeded once by newModel as entries[0], not folded from an
+// engine Event: the box is the HOST's opening frame, like addPresented's record of a host act. Host
+// and Model are escape-stripped (they trace to config / the CLI) so a control sequence can never
+// reach the terminal through them; the logo, context (formatTokens of an int), and version are this
+// program's own values and pass through untouched.
 func (t *transcript) addStartup(v startupView) {
 	v.Host = stripEscapes(v.Host)
 	v.Model = stripEscapes(v.Model)

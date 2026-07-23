@@ -126,14 +126,15 @@ func TestVersionCommandPrintsVersionNote(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // newModel seeds exactly one entry — the start-up box at entries[0] — carrying the resolved
-// host / model / version from Options (the same seam the footer and /version read), and it is not
-// a user block (so the sticky header never treats it as a prompt).
+// host / model / context / version from Options (the same seam the footer and /version read), and it
+// is not a user block (so the sticky header never treats it as a prompt).
 func TestNewModelSeedsStartupBox(t *testing.T) {
 	opts := Options{
-		Model:     "/models/gpt-oss-20b.gguf", // displayModel strips the path + weight extension
-		Endpoint:  "http://localhost:1234",
-		HostAlias: "test-host",
-		Version:   "v9.9.9-test",
+		Model:         "/models/gpt-oss-20b.gguf", // displayModel strips the path + weight extension
+		Endpoint:      "http://localhost:1234",
+		HostAlias:     "test-host",
+		ContextWindow: 32768, // formatTokens → "32k"
+		Version:       "v9.9.9-test",
 	}
 	m := newModel(context.Background(), &fakeEngine{}, opts)
 
@@ -149,6 +150,9 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 	}
 	if got, want := e.startup.Model, displayModel(opts.Model); got != want {
 		t.Errorf("startup model = %q, want %q (displayModel of Options.Model)", got, want)
+	}
+	if got, want := e.startup.Context, formatTokens(opts.ContextWindow); got != want {
+		t.Errorf("startup context = %q, want %q (formatTokens of Options.ContextWindow)", got, want)
 	}
 	if got, want := e.startup.Version, opts.Version; got != want {
 		t.Errorf("startup version = %q, want %q (Options.Version)", got, want)

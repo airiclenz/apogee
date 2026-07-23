@@ -141,6 +141,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 		Logo:    strings.TrimRight(apogeeLogo, "\n"),
 		Host:    hostDisplay(opts),
 		Model:   displayModel(opts.Model),
+		Context: formatTokens(opts.ContextWindow),
 		Version: opts.Version,
 	})
 	return m
