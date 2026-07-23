@@ -1,0 +1,4 @@
+# Block art embedded via go:embed and its markdown source must stay LF byte-for-byte on
+# every platform — a CRLF checkout would bake \r into the binary and break TUI rendering.
+internal/tui/logo.txt text eol=lf
+graphics/apogee-logo.md text eol=lf
