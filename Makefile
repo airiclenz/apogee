@@ -9,12 +9,11 @@ BINARY  := apogee
 PKG     := ./cmd/apogee
 MODULE  := github.com/airiclenz/apogee
 
-# The single build-version source: injected into internal/version via -ldflags -X
-# so a release build reports the tag while a plain `go build`/`go run` falls back
-# to debug.ReadBuildInfo (see internal/version). `--always --dirty` keeps it honest
-# off-tag and on a modified tree; `|| echo dev` covers a checkout with no git.
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION)
+# The release version is the single source of truth in the top-level VERSION file,
+# embedded into the binary at build time (see version.go / apogee.Version). Build
+# provenance (short commit + dirty flag) is appended at runtime from Go's own VCS stamp
+# (debug.ReadBuildInfo) — so there is no -ldflags stamp here and nothing to keep in sync.
+# Every build path reports the same. To release, edit VERSION.
 
 # The 6 release targets the Phase-2 cross-build invariant must stay green on.
 CROSS_TARGETS := \
@@ -49,14 +48,14 @@ help:
 ## build: compile the binary to ./apogee
 .PHONY: build
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
+	go build -o $(BINARY) $(PKG)
 
 ## run: build-and-run the binary (pass flags via ARGS="...")
 .PHONY: run
 run:
 	go run $(PKG) $(ARGS)
 
-## install: build (version-stamped) and copy the binary to a writable dir on PATH (auto-detected; override with PREFIX=...)
+## install: build and copy the binary to a writable dir on PATH (auto-detected; override with PREFIX=...)
 .PHONY: install
 install: build
 	@dir='$(PREFIX)'; \

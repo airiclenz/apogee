@@ -122,13 +122,14 @@ func TestRootCommandHelp(t *testing.T) {
 }
 
 // TestRootCommandVersionWired proves the CLI --version is wired: cmd.Version carries the
-// single build-version source, so Cobra exposes --version. The value is never empty
-// (internal/version falls back to a revision or "dev"), so an accidental blank is caught.
+// single source of truth (the embedded VERSION file, via apogee.Version), so Cobra exposes
+// --version. The value is never empty (a blank file degenerates to "dev"), so an accidental
+// blank is caught.
 func TestRootCommandVersionWired(t *testing.T) {
 	t.Parallel()
 	cmd := newRootCommand((&recordingLauncher{}).launch)
 	if cmd.Version == "" {
-		t.Error("newRootCommand().Version is empty; the CLI --version is not wired to internal/version")
+		t.Error("newRootCommand().Version is empty; the CLI --version is not wired to apogee.Version")
 	}
 }
 

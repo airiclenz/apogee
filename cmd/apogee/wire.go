@@ -24,7 +24,6 @@ import (
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
-	"github.com/airiclenz/apogee/internal/version"
 )
 
 // Compile-time proof that the public Agent satisfies the TUI's narrow engine seam
@@ -300,9 +299,9 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Workspace:     roots.workspace,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
-		// The single build-version source (internal/version), so the footer, the /version
-		// command, and the start-up box all display one value the binary resolved once.
-		Version: version.String(),
+		// The single source of truth (the embedded top-level VERSION file, via apogee.Version),
+		// so the footer, the /version command, and the start-up box all display one value.
+		Version: apogee.Version(),
 		// The same backend, capabilities, and host id the degradation notice above was built
 		// from, so /confine status inside the TUI reports the host's real situation rather than
 		// re-deriving it. internal/platform is the binary's dependency, not the renderer's.

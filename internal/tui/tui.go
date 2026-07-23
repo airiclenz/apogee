@@ -98,9 +98,9 @@ type Options struct {
 	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
-	// Version is the resolved build version (internal/version.String()), the single value the
-	// binary resolves and the TUI displays — the /version command and the start-up box both
-	// read it from here so the TUI never imports the version package. Empty ⇒ unwired.
+	// Version is the resolved build version (apogee.Version, read from the embedded VERSION
+	// file), the single value the binary resolves and the TUI displays — the /version command
+	// and the start-up box both read it from here so the TUI never imports the source. Empty ⇒ unwired.
 	Version string
 
 	// Confinement is the host's confinement situation as the composition root resolved it, for

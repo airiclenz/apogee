@@ -176,6 +176,9 @@ var (
 	_ = apogee.ErrInputPending
 	_ = apogee.ErrDuplicateTool
 	_ = apogee.ErrInvalidTool
+
+	// Version is the single-source-of-truth accessor for the embedded VERSION file.
+	_ = apogee.Version
 )
 
 // discardSink is a no-op EventSink so the Examples construct an Agent hermetically — construction

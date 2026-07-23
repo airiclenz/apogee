@@ -200,10 +200,10 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 			if rec.opts.ContextWindow != tt.contextWindow {
 				t.Errorf("tui.Options.ContextWindow = %d; want the threaded %d", rec.opts.ContextWindow, tt.contextWindow)
 			}
-			// The build version is threaded into Options from the single source (internal/version),
-			// which never resolves empty (falls back to a revision or "dev").
+			// The build version is threaded into Options from the single source (the embedded
+			// VERSION file, via apogee.Version), which never resolves empty (blank ⇒ "dev").
 			if rec.opts.Version == "" {
-				t.Error("tui.Options.Version is empty; the build version was not threaded from internal/version")
+				t.Error("tui.Options.Version is empty; the build version was not threaded from apogee.Version")
 			}
 		})
 	}
