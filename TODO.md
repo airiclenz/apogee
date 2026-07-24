@@ -77,8 +77,17 @@ resolves skill bodies + file contents into context.
     Guidance only: skills stay **user-authored** (ADR 0002), apogee ships none, and nothing in the
     `present_document` work edits a builtin skill.
 
-- **[P1] Session management UI** — in-TUI *new session* (reset without relaunch) and a *history
-  browser* overlay. Today only `--resume <path>` exists; reuse `internal/session/Store`.
+- **[P1] Session management UI** — **SHIPPED 2026-07-24**
+  (`docs/plans/2026-07-24 - 02 - session-system-plan.md`,
+  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)). Sessions
+  now persist **continuously** (per-Turn autosave, not quit-only) as id-addressed dual-representation
+  records (engine envelope + TUI scrollback blob) under `~/.apogee/sessions/`. `/clear` and `/new`
+  close the current session into history and rotate to a fresh one; the **`/sessions`** browser
+  overlay lists · resumes · deletes · renames (workspace-scoped, with an `a` toggle to all
+  workspaces); `--continue` resumes this workspace's most recent, `--resume` now takes an **id or a
+  path** (legacy bare-envelope files still load); resume **replays the scrollback**; and an
+  interrupted mid-task session resumes with a step-only `/continue` drive. Follow-ons (retention,
+  cross-instance lock) recorded below.
 
 - **[P1] Server / model switching** — `/server` live endpoint switch (re-probe `/v1/models`,
   rebind the `provider` seam; today fixed at startup); a switchable **model-profile** abstraction
@@ -108,6 +117,31 @@ resolves skill bodies + file contents into context.
 **Related (already parked below):** per-tool approval overrides (`toolApprovalOverrides`:
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
 disposition table but no user-facing override. See *Configurable tool × mode security matrix*.
+
+---
+
+## Session system follow-ons — deliberately deferred from the 2026-07-24 session-system plan
+
+**Status:** recorded 2026-07-24 at the session-system close-out
+([ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)). The
+session system shipped with per-Turn autosave, the `/sessions` browser, `--continue`, id-or-path
+`--resume`, scrollback replay, and interrupted-task `/continue` (see the parity item above). These
+were named out of scope in the plan and left for later — none is a live gap.
+
+- **[P2] Retention / pruning policy** — today the store never prunes: `~/.apogee/sessions/`
+  grows unbounded and the only discard is the browser's `d` (manual delete). A retention policy
+  (age- or count-based, opt-in via config) is deferred; the design intent is that pruning stays
+  manual until there is a real need, so any auto-prune ships default-off.
+- **[P2] Cross-instance file lock** — concurrent apogee instances are **last-write-wins per
+  file**. Ids are per-instance unique, so a clobber requires the *same* session resumed into two
+  instances at once; documented and accepted, not locked. A cross-instance lock (or a
+  resumed-elsewhere detection) is the follow-on if that narrow case ever bites.
+
+Explicitly **not** deferred TODOs (deliberate non-goals, recorded so they are not re-opened as
+gaps): LLM-generated titles, session search, session export, sub-agent session persistence, and
+serializing mode/approvals/confinement/MCP into the record — all named out of scope in the plan,
+the last per ADR 0008. The bench stays unchanged and keeps composing `Snapshot`/`Encode` directly
+(ADR 0001), so there is no bench-side session-store TODO.
 
 ---
 

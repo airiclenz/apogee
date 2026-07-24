@@ -552,7 +552,17 @@ stays the canned submit).
 
 ---
 
-## 9. Docs: ADR, CONTEXT, TODO, CHANGELOG
+## 9. Docs: ADR, CONTEXT, TODO, CHANGELOG — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Two item-scoped calls. (1) The listed TODO follow-up "`Snapshot`-mid-run for the
+bench" was NOT added — the plan conditions it on "only if genuinely deferred", and the "Explicitly
+NOT in this plan" section records the bench as a deliberate non-goal ("No bench changes … keeps
+composing `Snapshot`/`Encode` directly (ADR 0001)"), i.e. not a deferral. Only retention/pruning and
+the cross-instance lock (both named as recorded TODOs) were added, in a new `## Session system
+follow-ons` section; the non-goals (incl. the bench) are listed there as explicit non-TODOs so they
+are not re-opened. (2) CONTEXT gained a combined **Session / Session record** entry (the bare Session
+was never defined) placed right after the Sub-agent entry per the plan's "near the Sub-agent entry's
+Session mention". CHANGELOG entry went under a new `### Added` block (Keep-a-Changelog order).
 
 **What:** Record the ratified design.
 

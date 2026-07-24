@@ -2,7 +2,7 @@
 
 - [ ] I cannot select text in apogee when the model is working. I'd like to be able to select text at any point in time.
 
-- [ ] Functionality that exists in apogee-code has not been fully ported to apogee (`@file`, `/clear`, `/continue`, `/skill` now done; `/server`, session-management UI, inspector still pending). Verified + list collected → see **TODO.md → "apogee-code feature parity — user-facing affordances not yet ported"**. Porting still in progress.
+- [ ] Functionality that exists in apogee-code has not been fully ported to apogee (`@file`, `/clear`, `/continue`, `/skill`, session-management UI now done; `/server`, inspector still pending). Verified + list collected → see **TODO.md → "apogee-code feature parity — user-facing affordances not yet ported"**. Porting still in progress.
 
 - [ ] model-, context and server information need to be updated at least when a prompt is sent. Currently there are situations where the model was changed in the background and apogee does not pick up the new model and context size. There is also a bug where the contect size is not displayed correclty - this also affects the context usage gauge - these might be related.
 

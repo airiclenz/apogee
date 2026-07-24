@@ -8,6 +8,37 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **Sessions now persist continuously, are browsable, and resume with their scrollback intact — the
+  session system.** Previously a conversation was saved **only on a clean quit** and `--resume
+  <path>` reopened it into an empty-looking view (the engine remembered, but nothing replayed). Now:
+  - **Per-Turn autosave.** The active session is written to `~/.apogee/sessions/` after **every
+    completed Turn**, so a crash or `kill -9` loses at most the last Turn, not the whole session.
+    Saving is asynchronous and best-effort — a save failure is noted once and the conversation keeps
+    running (recovery is noted too). Empty sessions are never written.
+  - **Dual-representation records.** Each session is stored as an id-addressed record wrapping the
+    engine's conversation **and** the TUI scrollback (user/assistant text, tool cards, notes,
+    sub-agent depth), so resuming **repaints the full scrollback** and relights the context-usage
+    gauge — the view no longer starts blank over a model that still remembers.
+  - **`/sessions` history browser** — an in-TUI overlay that lists your saved sessions (title ·
+    relative time · message count, newest first), with `enter` to resume, `d` to delete (with a
+    `y/n` confirm), `r` to rename inline, and `a` to toggle between this workspace and all
+    workspaces. Titles default to the first user message and can be renamed.
+  - **`/clear` and `/new` now close the current session into history and start a fresh one** (both
+    verbs are kept). Neither deletes — the old session stays in the browser; discarding is `d`.
+  - **`apogee --continue`** resumes this workspace's most recent session without naming it, and
+    **`--resume`** now accepts a **session id (from `/sessions`) or a file path**. Old pre-existing
+    timestamp session files still load and resume (without scrollback replay — the model still
+    remembers).
+  - **Interrupted tasks resume.** A session killed mid-task resumes to the last completed Turn with
+    a note; **`/continue`** then picks up the unfinished work where it stopped (sending a new message
+    instead discards it and continues fresh).
+
+  Agent mode, tool approvals, confinement, and MCP connections are deliberately **not** part of a
+  saved session — they are re-established or re-confirmed on resume. See
+  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
+
 ### Changed
 
 - **`/clear` and `/new` now start a fresh session: they wipe the scrollback and reprint the start-up

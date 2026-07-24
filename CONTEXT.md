@@ -58,6 +58,23 @@ dangerous-action floor** (unloosenable one level down), and recursion is depth-b
 Bare "agent" means the **top-level** agent unless qualified as "sub-agent".
 _Avoid_: "child agent" (says nothing about the privilege bound), "worker".
 
+**Session** / **Session record**:
+A **Session** is one conversation the engine holds — the versioned `domain.Session` envelope
+`{Version, State}`, opaque to everything outside the engine. A **Session record** is how that
+Session is *persisted*: the on-disk `session.Record` wrapper (`internal/session`) around **two
+opaque payloads** — the untouched engine Session **and** the TUI's own versioned **transcript
+blob** (the scrollback: user/assistant text, tool cards, notes, sub-agent `Depth`) — plus
+browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). The
+record is saved **per-Turn** (at each quiescent boundary, so a crash loses at most one Turn),
+listed and resumed from inside the TUI through the `/sessions` **browser**, and replayed on
+resume so the view repaints instead of showing a bare box over a remembering engine. Each of the
+three schema versions is rejected/degraded only by its owning layer (store / TUI / engine). Agent
+mode, approvals, Confinement, and MCP connections are **not** in the record — live host state,
+re-confirmed on resume (ADR [0008](docs/adr/0008-stateless-tools-and-non-forkable-external-effects.md)).
+See [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
+_Avoid_: "session file" for the Session itself (the *record* is the file; the Session is its
+engine payload), "history" (that is the browser's list of records, not one Session).
+
 **The loop** (the agent loop):
 Apogee's core control flow: build request → call Upstream → parse response → dispatch
 tools → repeat, emitting typed events at each step. The loop owns tool execution and
