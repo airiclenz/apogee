@@ -44,8 +44,8 @@ func seedSizedOpenTurn(t *testing.T, a *Agent, chars int) {
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{
 		{ID: "c1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"main.go"}`)},
 	}})
-	a.inExchange = true
-	a.exchangeStart = 0
+	a.turns.inExchange = true
+	a.turns.exchangeStart = 0
 	pad := chars - domain.PromptChars(a.conv.Messages(), a.toolMenu())
 	if pad < 0 {
 		t.Fatalf("test setup: the seeded shape already measures more than the %d chars asked for", chars)

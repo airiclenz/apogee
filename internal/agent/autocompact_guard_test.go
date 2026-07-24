@@ -279,8 +279,8 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 		a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: id, Tool: "probe"}}})
 		a.conv.Append(domain.Message{Role: domain.RoleTool, ToolCallID: id, Content: "result " + string(rune('a'+i))})
 	}
-	a.inExchange = true
-	a.exchangeStart = 6 // where PENDING QUESTION was appended — the un-repaired opening value
+	a.turns.inExchange = true
+	a.turns.exchangeStart = 6 // where PENDING QUESTION was appended — the un-repaired opening value
 
 	res, err := a.Step(context.Background())
 	if err != nil {

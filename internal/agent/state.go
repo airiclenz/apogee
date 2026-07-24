@@ -51,8 +51,8 @@ type agentState struct {
 func (a *Agent) encodeState() (json.RawMessage, error) {
 	state, err := json.Marshal(agentState{
 		Conversation:  &a.conv,
-		TurnIndex:     a.turnIndex,
-		InExchange:    a.inExchange,
+		TurnIndex:     a.turns.index,
+		InExchange:    a.turns.inExchange,
 		ExchangeStart: a.exchangeBoundary(),
 		PendingInput:  a.pendingInput,
 	})
@@ -75,9 +75,9 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 	if st.Conversation != nil {
 		a.conv = *st.Conversation
 	}
-	a.turnIndex = st.TurnIndex
-	a.inExchange = st.InExchange
-	a.exchangeStart = st.ExchangeStart
+	a.turns.index = st.TurnIndex
+	a.turns.inExchange = st.InExchange
+	a.turns.exchangeStart = st.ExchangeStart
 	a.pendingInput = st.PendingInput
 	return nil
 }

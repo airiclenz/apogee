@@ -109,7 +109,18 @@ review's seven candidates, and the target shape already exists in the same packa
   and records the cached-boundary exception (ADR 0017 §2). No existing term names the Turn's
   *exits*; item 6 adds the minimal wording.
 
-## 1. `turn.go` — introduce `turnLifecycle` and relocate the lifecycle fields
+## 1. `turn.go` — introduce `turnLifecycle` and relocate the lifecycle fields — ✅ DONE (2026-07-24)
+
+**NOTES (2026-07-24):** Applied the mechanical test reach-in renames (`a.turnIndex`→`a.turns.index`,
+`a.inExchange`→`a.turns.inExchange`, `a.exchangeStart`→`a.turns.exchangeStart`) across 5 test files
+(`autocompact_guard_test.go`, `minilang_test.go`, `emergencyfold_test.go`,
+`overflowrecovery_test.go`, `predictiveguard_test.go`) exactly as this item's Acceptance authorizes —
+the field relocation does not compile otherwise. No test logic, assertion, or expectation changed,
+so this is consistent with the plan-wide "existing test suite stays green unedited" (which governs
+behavioral test edits). Also added `TestAgentState_EncodesStableKeyNames` to `state_test.go`: only
+`exchangeStart`'s JSON key was previously pinned (via `TestSnapshot_RoundTripsExchangeBoundaryForAbort`),
+`turnIndex`/`inExchange` key names were not — the item's conditional "add one small marshal-and-assert-keys
+test" therefore applied.
 
 **What:** Create `internal/agent/turn.go` with the owner type, and move the three lifecycle
 fields off `Agent` into it — a mechanical relocation, no semantics change:

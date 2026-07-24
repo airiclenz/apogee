@@ -78,15 +78,13 @@ type Agent struct {
 	// Mechanism, so it stays live under Bypass (D5/D6).
 	tokens *apogeectx.TokenEstimator
 
-	conv          domain.Conversation // serializable conversation state (ADR 0001)
-	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
-	inExchange    bool                // true between Submit and the Step that completes the Exchange
-	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
-	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
-	exchangeStart int                 // cached rollback boundary of the open Exchange — read via exchangeBoundary (ADR 0017 §2's recorded fallback); maintained by step()'s opening, the S2 repair, emergencyFold's mid-Exchange re-anchor, and restoreState
-	turnIndex     int                 // 0-based index of the next Turn
-	approved      map[string]bool     // tools the human allowed for the rest of this Session
-	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
+	conv         domain.Conversation // serializable conversation state (ADR 0001)
+	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step
+	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state (index, inExchange, exchangeStart) and, from item 2 on, the exits — internal/agent/turn.go
+	compacting   bool                // guards the automatic Compaction trigger against re-entry (item 9)
+	compactSat   bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
+	approved     map[string]bool     // tools the human allowed for the rest of this Session
+	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
 }
 
 // New constructs an Agent from cfg. It validates the configuration — including the
@@ -120,7 +118,7 @@ func (a *Agent) Close() error { return nil }
 // Submit enqueues user input to begin (or continue) an Exchange. It does not run
 // the loop; the next Step/Run consumes it. Submitting mid-Exchange is an error.
 func (a *Agent) Submit(in domain.UserInput) error {
-	if a.pendingInput != nil || a.inExchange {
+	if a.pendingInput != nil || a.turns.inExchange {
 		return domain.ErrInputPending
 	}
 	a.pendingInput = &in
@@ -171,7 +169,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 // boundary: no worker may be driving the Agent when it is called (the host calls it only after
 // the worker has returned its cancellation), preserving the single-goroutine contract.
 func (a *Agent) AbortExchange() {
-	if !a.inExchange {
+	if !a.turns.inExchange {
 		return
 	}
 	a.conv.DropRange(a.exchangeBoundary(), a.conv.Len())
@@ -184,7 +182,7 @@ func (a *Agent) AbortExchange() {
 
 // exchangeBoundary returns the conversation index the open Exchange began at — the rollback
 // target AbortExchange drops from and the boundary the snapshot round-trips. It is the ONE
-// reader seam over the cached a.exchangeStart (ADR 0017 §2's recorded fallback): the boundary
+// reader seam over the cached a.turns.exchangeStart (ADR 0017 §2's recorded fallback): the boundary
 // canNOT be re-derived as "the index of the last user message" (domain.CurrentExchange),
 // because a mid-Exchange truncate_history fold drops the open Exchange's opening user message
 // whenever the Exchange already holds keepLastTurns or more assistant messages — the inserted
@@ -193,7 +191,7 @@ func (a *Agent) AbortExchange() {
 // written at step()'s Exchange opening, re-anchored by the S2 repair after a history rewrite
 // (loop.go), and restored by restoreState — and every consumer reads it here, so a future
 // swap to the derivation has exactly one seam.
-func (a *Agent) exchangeBoundary() int { return a.exchangeStart }
+func (a *Agent) exchangeBoundary() int { return a.turns.exchangeStart }
 
 // Mode reports the Agent's current autonomy mode. It reads the live mode under the lock, so a
 // concurrent SetMode (Shift+Tab from the UI) is observed safely from the worker goroutine.
@@ -277,7 +275,7 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 // calling it mid-Exchange is refused (ErrInputPending) so a half-streamed Turn is never
 // orphaned. The Agent stays snapshot-safe after it returns.
 func (a *Agent) ClearContext() error {
-	if a.inExchange {
+	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
 	a.conv = *domain.NewConversation(nil)

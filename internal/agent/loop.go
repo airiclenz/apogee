@@ -97,7 +97,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, err
 	}
 
-	return &Agent{
+	a := &Agent{
 		cfg:                cfg,
 		upstream:           up,
 		registry:           registry,
@@ -109,7 +109,11 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),
 		tokens:             apogeectx.NewTokenEstimator(),
-	}, nil
+	}
+	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
+	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
+	a.turns = &turnLifecycle{conv: &a.conv, tracker: a.tracker}
+	return a, nil
 }
 
 // libraryMechanismID is the one catalogued ID whose presence in Config.EnableMechanisms makes the
@@ -264,7 +268,7 @@ func validateConfig(cfg domain.Config) error {
 // per Turn.
 func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	start := time.Now()
-	turn := a.turnIndex
+	turn := a.turns.index
 
 	// Automatic Compaction (structural, on by default — item 9): fold the conversation before this
 	// Turn's request is built when the history has outgrown its Budget allocation. It runs BEFORE
@@ -278,7 +282,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// message), so AbortExchange can roll a cancelled Exchange all the way back to a clean,
 		// submittable boundary. It is set once per Exchange: pendingInput is non-nil only on the
 		// opening Turn (Submit is refused mid-Exchange), so a continuation Turn never resets it.
-		a.exchangeStart = a.conv.Len()
+		a.turns.exchangeStart = a.conv.Len()
 		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
 		// per-turn instructions, so prepending them scopes them to this one message (the right
 		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).
@@ -286,7 +290,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		refs := a.resolveFileRefs(turn, a.pendingInput.FileRefs)
 		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + a.pendingInput.Text})
 		a.pendingInput = nil
-		a.inExchange = true
+		a.turns.inExchange = true
 	}
 
 	// History-rewrite hooks edit conversation state before it is projected (truncation,
@@ -306,8 +310,8 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// user message. The cache + this repair are deliberate (ADR 0017 §2's recorded fallback): this
 	// very rewrite can drop the open Exchange's opening user message, so the boundary cannot be
 	// re-derived from the conversation — readers go through exchangeBoundary (agent.go).
-	if dropped := beforeRewrite - a.conv.Len(); dropped > 0 && a.inExchange {
-		a.exchangeStart = min(max(a.exchangeStart-dropped, a.conv.PrefixEnd()+1), a.conv.Len())
+	if dropped := beforeRewrite - a.conv.Len(); dropped > 0 && a.turns.inExchange {
+		a.turns.exchangeStart = min(max(a.turns.exchangeStart-dropped, a.conv.PrefixEnd()+1), a.conv.Len())
 	}
 
 	// rollback marks the boundary a cancellation restores to: this Turn's assistant
@@ -752,7 +756,7 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 // cancelTurn is deliberately NOT one — a cancelled Turn leaves the Exchange open for the
 // resume re-attempt and truncates-then-restores the deferred queue instead (F6(b)).
 func (a *Agent) closeExchange() {
-	a.inExchange = false
+	a.turns.inExchange = false
 	a.conv.ClearDeferred()
 }
 
@@ -770,7 +774,7 @@ func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus
 		// Exchange and F2 never re-defers there — so closeExchange's clear is the F6 backstop.
 		a.closeExchange()
 	}
-	a.turnIndex++
+	a.turns.index++
 	return domain.StepResult{Status: status, TurnIndex: turn, Elapsed: time.Since(start)}
 }
 
@@ -788,7 +792,7 @@ func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
 	// The fault path re-queued the drained corrections just above, but a deferral is a decision
 	// about the SAME flow's next request — closeExchange expires it with the faulted Exchange (F6).
 	a.closeExchange()
-	a.turnIndex++
+	a.turns.index++
 	return domain.StepResult{Status: domain.StatusExchangeComplete, TurnIndex: turn, Elapsed: time.Since(start)}
 }
 

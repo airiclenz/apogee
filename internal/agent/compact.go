@@ -40,7 +40,7 @@ const (
 // compact" and leave the context gauge alone rather than falsely claiming a compaction. It is
 // always false on error (a fault is not a skip).
 func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
-	if a.inExchange {
+	if a.turns.inExchange {
 		return false, domain.ErrInputPending
 	}
 	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
@@ -127,7 +127,7 @@ func (a *Agent) shouldAutoCompact() bool {
 	// the request mid-Exchange, and emergencyFold rescues it once the window is actually blown
 	// (ADR 0018). Folding on THIS estimate mid-Exchange would leave the request ending in an
 	// assistant summary; the emergency fold pays for the exception with its user bridge.
-	if a.inExchange {
+	if a.turns.inExchange {
 		return false
 	}
 	if !a.historyExceedsAllocation() {
@@ -222,8 +222,8 @@ func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
 	}
 
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: overflowBridge})
-	if a.inExchange {
-		a.exchangeStart = a.conv.Len() - 1
+	if a.turns.inExchange {
+		a.turns.exchangeStart = a.conv.Len() - 1
 	}
 	return true
 }
@@ -258,7 +258,7 @@ type compactCompleter struct{ a *Agent }
 
 func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (string, error) {
 	// The summarizer request runs no hooks, so it carries no fire ledger (Fired ⇒ 0 throughout).
-	req := domain.NewRequest(c.a.cfg.Model, msgs, nil, c.a.budget(), c.a.turnIndex, nil)
+	req := domain.NewRequest(c.a.cfg.Model, msgs, nil, c.a.budget(), c.a.turns.index, nil)
 	temp, maxTok := compactTemperature, compactMaxTokens
 	req.SetSampling(domain.SamplingParams{Temperature: &temp, MaxTokens: &maxTok})
 

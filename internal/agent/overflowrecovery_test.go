@@ -331,8 +331,8 @@ func seedOpenToolTurn(a *Agent) {
 		{ID: "c2", Tool: "read_file", Arguments: json.RawMessage(`{"path":"main_test.go"}`)},
 	}})
 	a.conv.Append(domain.Message{Role: domain.RoleTool, ToolCallID: "c2", Content: strings.Repeat("huge file body ", 200)})
-	a.inExchange = true
-	a.exchangeStart = 1
+	a.turns.inExchange = true
+	a.turns.exchangeStart = 1
 }
 
 // TestOverflowRecoveryOnToolContinuationIsTemplateLegal drives the real failure mode: a whole-file
@@ -384,8 +384,8 @@ func TestOverflowRecoveryOnToolContinuationIsTemplateLegal(t *testing.T) {
 	}
 	// The mid-Exchange fold re-anchored the Exchange boundary, so the Exchange the recovery carried
 	// to completion left a conversation a later Exchange can be aborted out of cleanly.
-	if a.exchangeStart != 2 {
-		t.Errorf("exchangeStart = %d after the mid-Exchange fold, want 2 (the bridge's index)", a.exchangeStart)
+	if a.turns.exchangeStart != 2 {
+		t.Errorf("exchangeStart = %d after the mid-Exchange fold, want 2 (the bridge's index)", a.turns.exchangeStart)
 	}
 }
 

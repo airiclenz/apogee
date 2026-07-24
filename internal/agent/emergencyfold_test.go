@@ -48,8 +48,8 @@ func TestEmergencyFoldRunsMidExchangeAndBridges(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedToolCallConv(a) // 8 messages of paired tool calls/results past a 1-message protected prefix
-	a.inExchange = true
-	a.exchangeStart = 4 // "now add tests" opened the Exchange still in flight
+	a.turns.inExchange = true
+	a.turns.exchangeStart = 4 // "now add tests" opened the Exchange still in flight
 
 	if !a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = false mid-Exchange; the overflow path must fold there (S2 is amended for it)")
@@ -77,8 +77,8 @@ func TestEmergencyFoldRunsMidExchangeAndBridges(t *testing.T) {
 
 	// The re-anchor: exchangeStart points at the bridge, so the Exchange's rollback boundary is the
 	// folded prefix + summary — not a stale index into (or past) the protected prefix.
-	if a.exchangeStart != a.conv.Len()-1 {
-		t.Errorf("exchangeStart = %d after the fold, want %d (the bridge's index)", a.exchangeStart, a.conv.Len()-1)
+	if a.turns.exchangeStart != a.conv.Len()-1 {
+		t.Errorf("exchangeStart = %d after the fold, want %d (the bridge's index)", a.turns.exchangeStart, a.conv.Len()-1)
 	}
 	a.AbortExchange()
 	if a.conv.Len() != 2 {
@@ -99,8 +99,8 @@ func TestEmergencyFoldSkipsWhenNothingToFold(t *testing.T) {
 	}
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the overarching goal"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: strings.Repeat("x", 25000)})
-	a.inExchange = true
-	a.exchangeStart = 1
+	a.turns.inExchange = true
+	a.turns.exchangeStart = 1
 
 	if a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = true on a skipped fold; nothing was folded, so a retry cannot help")
@@ -112,8 +112,8 @@ func TestEmergencyFoldSkipsWhenNothingToFold(t *testing.T) {
 	if a.conv.Len() != 2 {
 		t.Errorf("conv.Len() = %d, want 2 — a skipped fold must not touch the conversation", a.conv.Len())
 	}
-	if a.exchangeStart != 1 {
-		t.Errorf("exchangeStart = %d, want 1 — a skipped fold re-anchors nothing", a.exchangeStart)
+	if a.turns.exchangeStart != 1 {
+		t.Errorf("exchangeStart = %d, want 1 — a skipped fold re-anchors nothing", a.turns.exchangeStart)
 	}
 	if hasEvent[domain.ErrorEvent](sink.events) {
 		t.Errorf("a skipped fold emitted an ErrorEvent: %v", errorEvents(sink.events))
@@ -133,7 +133,7 @@ func TestEmergencyFoldRespectsCompactionOptOut(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedFoldable(a)
-	a.inExchange = true
+	a.turns.inExchange = true
 
 	if a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = true with auto-compact off; the opt-out covers recovery too")
@@ -161,8 +161,8 @@ func TestEmergencyFoldFaultSurfacesOnceAndKeepsHistory(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedFoldable(a)
-	a.inExchange = true
-	a.exchangeStart = 2
+	a.turns.inExchange = true
+	a.turns.exchangeStart = 2
 
 	if a.emergencyFold(context.Background(), 0) {
 		t.Fatal("emergencyFold = true despite the summary call failing")
@@ -181,8 +181,8 @@ func TestEmergencyFoldFaultSurfacesOnceAndKeepsHistory(t *testing.T) {
 	if a.conv.Len() != 4 {
 		t.Errorf("conv.Len() = %d, want 4 — a faulted fold must leave history untouched", a.conv.Len())
 	}
-	if a.exchangeStart != 2 {
-		t.Errorf("exchangeStart = %d, want 2 — a faulted fold re-anchors nothing", a.exchangeStart)
+	if a.turns.exchangeStart != 2 {
+		t.Errorf("exchangeStart = %d, want 2 — a faulted fold re-anchors nothing", a.turns.exchangeStart)
 	}
 }
 
@@ -197,7 +197,7 @@ func TestEmergencyFoldCancelIsQuiet(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	seedFoldable(a)
-	a.inExchange = true
+	a.turns.inExchange = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	folded := make(chan bool, 1)

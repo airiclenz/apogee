@@ -215,6 +215,32 @@ func TestSnapshot_RoundTripsExchangeBoundaryForAbort(t *testing.T) {
 	}
 }
 
+// TestAgentState_EncodesStableKeyNames pins the serialized key names of the v1 session-state
+// schema so a field relocation (e.g. onto turnLifecycle) cannot silently rename the JSON the
+// version gate (domain.SessionVersion) assumes stable. It marshals a fully-populated agentState
+// — every omitempty field non-zero — and asserts each documented key is present under its name.
+func TestAgentState_EncodesStableKeyNames(t *testing.T) {
+	raw, err := json.Marshal(agentState{
+		Conversation:  domain.NewConversation(nil),
+		TurnIndex:     3,
+		InExchange:    true,
+		ExchangeStart: 2,
+		PendingInput:  &domain.UserInput{Text: "queued"},
+	})
+	if err != nil {
+		t.Fatalf("marshal agentState: %v", err)
+	}
+	var keyed map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keyed); err != nil {
+		t.Fatalf("unmarshal encoded state to keys: %v", err)
+	}
+	for _, key := range []string{"conversation", "turnIndex", "inExchange", "exchangeStart", "pendingInput"} {
+		if _, ok := keyed[key]; !ok {
+			t.Errorf("encoded session state missing key %q (the schema is version-gated and must stay byte-compatible)", key)
+		}
+	}
+}
+
 // TestResume_RejectsFutureVersion proves the engine refuses a snapshot newer than this build
 // understands before touching its state.
 func TestResume_RejectsFutureVersion(t *testing.T) {

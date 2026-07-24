@@ -29,7 +29,7 @@ func TestClearContextEmptiesConversationKeepsTurnIndex(t *testing.T) {
 	if a.conv.Len() == 0 {
 		t.Fatal("conversation empty after a turn; nothing to clear")
 	}
-	turnBefore := a.turnIndex
+	turnBefore := a.turns.index
 
 	if err := a.ClearContext(); err != nil {
 		t.Fatalf("ClearContext: %v", err)
@@ -37,8 +37,8 @@ func TestClearContextEmptiesConversationKeepsTurnIndex(t *testing.T) {
 	if a.conv.Len() != 0 {
 		t.Errorf("conversation not cleared: Len = %d", a.conv.Len())
 	}
-	if a.turnIndex != turnBefore {
-		t.Errorf("turnIndex changed by clear: %d → %d (the counter must keep advancing)", turnBefore, a.turnIndex)
+	if a.turns.index != turnBefore {
+		t.Errorf("turnIndex changed by clear: %d → %d (the counter must keep advancing)", turnBefore, a.turns.index)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestClearContextRefusedMidExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	a.inExchange = true // a mid-Exchange boundary — clearing here would orphan a half-run turn
+	a.turns.inExchange = true // a mid-Exchange boundary — clearing here would orphan a half-run turn
 	if err := a.ClearContext(); !errors.Is(err, domain.ErrInputPending) {
 		t.Errorf("ClearContext mid-exchange err = %v, want ErrInputPending", err)
 	}
@@ -107,7 +107,7 @@ func TestCompactRefusedMidExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	a.inExchange = true // a mid-Exchange boundary — compacting here would orphan a half-run turn
+	a.turns.inExchange = true // a mid-Exchange boundary — compacting here would orphan a half-run turn
 	if _, err := a.Compact(context.Background()); !errors.Is(err, domain.ErrInputPending) {
 		t.Errorf("Compact mid-exchange err = %v, want ErrInputPending", err)
 	}
