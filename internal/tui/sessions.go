@@ -40,7 +40,7 @@ type sessionBrowser struct {
 }
 
 // maxSessionRows caps how many session rows the overlay shows at once; a longer list scrolls a
-// window around the selection (sessionRowWindow) so the pane never crowds the transcript off a
+// window around the selection (popupRowWindow) so the pane never crowds the transcript off a
 // short terminal.
 const maxSessionRows = 8
 
@@ -372,7 +372,7 @@ func (m Model) renderSessionBrowser() string {
 	if len(visible) == 0 {
 		rows = append(rows, m.th.statusFaint.Render("  no sessions in this workspace — press a to see all"))
 	} else {
-		start, end := sessionRowWindow(b.selected, len(visible), maxSessionRows)
+		start, end := popupRowWindow(b.selected, len(visible), maxSessionRows)
 		for i := start; i < end; i++ {
 			rows = append(rows, m.sessionRow(b, visible[i], i == b.selected, inner, now))
 		}
@@ -460,21 +460,4 @@ func relativeTime(t, now time.Time) string {
 	default:
 		return fmt.Sprintf("%dw ago", int(d/(7*24*time.Hour)))
 	}
-}
-
-// sessionRowWindow returns the [start, end) slice of a list of total rows to show at once, capped
-// at capRows and scrolled to keep the selection roughly centred so a long history never overflows
-// the pane.
-func sessionRowWindow(selected, total, capRows int) (int, int) {
-	if total <= capRows {
-		return 0, total
-	}
-	start := selected - capRows/2
-	if start < 0 {
-		start = 0
-	}
-	if start+capRows > total {
-		start = total - capRows
-	}
-	return start, start + capRows
 }

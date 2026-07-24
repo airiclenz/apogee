@@ -119,7 +119,8 @@ type theme struct {
 	mdCode        lipgloss.Style // `inline code` span (orange)
 	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (orange)
 	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
-	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing)
+	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
+	popupBorder   lipgloss.Style // selector-popup chrome (renderPopup): startupBorder's exact shape under its own name so the two can diverge later
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
@@ -169,6 +170,10 @@ func newTheme() theme {
 			Border(lipgloss.RoundedBorder()). // same glyphs as the prompt box: ╭ ╮ ╰ ╯ ─ │
 			BorderForeground(colDarkGray).    // same border tone
 			Padding(0, 1),                    // no Background / no BorderBackground → transparent, self-closing card
+		popupBorder: lipgloss.NewStyle(). // selector-popup chrome — startupBorder's shape under its own name (renderPopup)
+							Border(lipgloss.RoundedBorder()).
+							BorderForeground(colDarkGray).
+							Padding(0, 1),
 		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
 		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
