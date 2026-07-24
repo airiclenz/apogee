@@ -16,8 +16,9 @@ import (
 // ----------------------------------------------------------------------------
 //
 // A modal list of saved sessions the human opens with /sessions: browse, resume, rename, or
-// delete. It renders like the approval/ask prompts — a boxed pane above the input — and, while
-// open, claims every keypress (handleKey routes to sessionBrowserKey first). All persistence I/O
+// delete. It renders as a bordered popup pane above the input through the shared popup module
+// (renderPopup) and, while open, claims every keypress (handleKey routes to sessionBrowserKey
+// first). All persistence I/O
 // (List/Load/Delete/Rename) runs off the Update loop through a tea.Cmd against the [SessionHost],
 // so a slow disk never stalls the UI; the results fold back as sessionListMsg / sessionLoadedMsg.
 // The engine restore itself happens on the Update loop at idle, where the Model owns the Engine.

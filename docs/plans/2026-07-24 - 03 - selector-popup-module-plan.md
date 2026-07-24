@@ -214,7 +214,20 @@ All in `internal/tui/autocomplete.go` (+ view-level tests). This is D1 — full 
 
 ---
 
-## 4. Closeout — CHANGELOG + stale-look sweep
+## 4. Closeout — CHANGELOG + stale-look sweep — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): the acceptance grep
+(`'mirrors the approval-prompt overlay\|min(m.width-4, 72)'`) already returned nothing (items
+1–3). The broader sweep caught one more stale look-description the plan bullet did not name
+explicitly: the sessions.go **file-head** overlay comment (`sessions.go:19`) still read "It
+renders like the approval/ask prompts — a boxed pane above the input" — inaccurate now (the
+approval/ask prompts render as plain bold+faint text, not boxes; the browser renders through the
+shared popup module). Item 2 owned only the §Rendering block, so this file-head line is the
+sweep's territory; rewritten to "a bordered popup pane above the input through the shared popup
+module (renderPopup)", matching renderSessionBrowser's doc. doc.go's / autocomplete.go's
+"…like the approval-prompt slot" lines were left as-is: they describe the SLOT (position, D4-unchanged),
+not the look. CHANGELOG entry lives under `## [Unreleased] → Changed` as one lead bullet with two
+sub-bullets (one per visible change).
 
 - CHANGELOG: one entry per visible change — the /sessions popup spans the chat area; the
   command/file/skill dropdowns share the same boxed popup chrome (title + ❯ rows + hint).
