@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -348,64 +347,56 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // Rendering
 // ----------------------------------------------------------------------------
 
-// renderSessionBrowser draws the overlay pane shown above the input while the browser is open: a
-// titled, bordered box holding the (scrolled) session rows and a key legend. The selected row is
-// highlighted; an inline delete confirm or rename edit is drawn on that row. It returns "" when the
-// browser is closed, so View treats it like the approval-prompt slot.
+// renderSessionBrowser paints the /sessions overlay through the shared popup module (renderPopup):
+// a titled, bordered pane spanning the chat-area width (transcriptWidth, the startup card's right
+// edge) holding the session rows and a key legend, the selected row highlighted. Row composition —
+// including the inline delete-confirm or rename-edit decoration — stays caller-side in sessionRows,
+// while the module owns the marker, highlight, truncation, and scroll windowing. An empty view is a
+// single unselectable note row. It returns "" when the browser is closed, so View treats it like
+// the approval-prompt slot.
 func (m Model) renderSessionBrowser() string {
 	b := m.sessionBrowser
 	if !b.open {
 		return ""
 	}
-	inner := max(20, min(m.width-4, 72)) // content width inside the border + padding
-	now := time.Now()
-
 	scope := "this workspace"
 	if b.allWorkspaces {
 		scope = "all workspaces"
 	}
-	// Truncate the title to the inner width so a very narrow terminal never overflows the box (the
-	// rows and hint are clipped the same way).
-	rows := []string{m.th.presentTitle.Render(truncateLabel("saved sessions  ("+scope+")", inner))}
-
-	visible := b.visible(m.opts.Workspace)
-	if len(visible) == 0 {
-		rows = append(rows, m.th.statusFaint.Render("  no sessions in this workspace — press a to see all"))
-	} else {
-		start, end := popupRowWindow(b.selected, len(visible), maxSessionRows)
-		for i := start; i < end; i++ {
-			rows = append(rows, m.sessionRow(b, visible[i], i == b.selected, inner, now))
-		}
+	spec := popupSpec{
+		title:   "saved sessions  (" + scope + ")",
+		hint:    sessionBrowserHint,
+		maxRows: maxSessionRows,
 	}
-	rows = append(rows, m.th.statusFaint.Render(truncateLabel(sessionBrowserHint, inner)))
-
-	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	return m.th.startupBorder.Width(inner).Render(content)
+	if len(b.visible(m.opts.Workspace)) == 0 {
+		spec.rows = []string{"no sessions in this workspace — press a to see all"}
+		spec.selected = -1
+	} else {
+		spec.rows = sessionRows(b, m.opts.Workspace, time.Now())
+		spec.selected = b.selected
+	}
+	return renderPopup(m.th, spec, m.transcriptWidth())
 }
 
-// sessionRow renders one session row. The normal form is "❯ title · relative · N msgs", with a
-// foreign workspace's base name appended in the all-workspaces view; the selected row carries the
-// full-width user-block highlight. When the selected row is being renamed or delete-confirmed, its
-// label is replaced by the edit buffer or the "delete? y/n" prompt.
-func (m Model) sessionRow(b sessionBrowser, meta session.Meta, selected bool, width int, now time.Time) string {
-	marker := "  "
-	if selected {
-		marker = glyphUser + " "
+// sessionRows composes the FULL filtered row list the popup module paints: the plain
+// sessionRowLabel ("title · relative · N msgs") for every visible session, newest first. On the
+// selected row an armed rename replaces the label with the edit buffer and an armed delete appends
+// the "delete? y/n" confirm; every other row is its plain label. The module adds the marker,
+// highlight, and truncation.
+func sessionRows(b sessionBrowser, workspace string, now time.Time) []string {
+	visible := b.visible(workspace)
+	rows := make([]string, 0, len(visible))
+	for i, meta := range visible {
+		label := sessionRowLabel(meta, workspace, b.allWorkspaces, now)
+		switch {
+		case i == b.selected && b.renaming:
+			label = "rename: " + b.renameBuf + "▏"
+		case i == b.selected && b.confirming:
+			label += "   delete? y/n"
+		}
+		rows = append(rows, label)
 	}
-	var label string
-	switch {
-	case selected && b.renaming:
-		label = "rename: " + b.renameBuf + "▏"
-	case selected && b.confirming:
-		label = sessionRowLabel(meta, m.opts.Workspace, b.allWorkspaces, now) + "   delete? y/n"
-	default:
-		label = sessionRowLabel(meta, m.opts.Workspace, b.allWorkspaces, now)
-	}
-	row := truncateLabel(marker+label, width)
-	if selected {
-		return m.th.userBlock.Width(width).Render(row)
-	}
-	return m.th.statusFaint.Render(row)
+	return rows
 }
 
 // sessionRowLabel is one row's plain text: "title · relative time · N msgs", with "· <workspace

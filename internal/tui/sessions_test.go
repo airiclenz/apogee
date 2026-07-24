@@ -3,11 +3,13 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
@@ -360,6 +362,70 @@ func TestSessionBrowserRefusesToOpenWhileBusy(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("a busy /sessions dispatched a Cmd; enter must be a no-op while running")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The overlay pane spans the chat-area width (selector-popup plan §2)
+// ----------------------------------------------------------------------------
+
+// Every physical line of the open browser pane is exactly transcriptWidth (98 at the 100×30
+// harness window: m.width − scrollbarWidth − bodyRightGutter) — the startup card's right edge — so
+// the box spans the chat area rather than stopping at the old 72-column ceiling.
+func TestSessionBrowserPaneSpansChatWidth(t *testing.T) {
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", "render me", "/ws/a", time.Now().Add(-5*time.Minute), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m)
+
+	const wantWidth = 98 // 100 − scrollbarWidth(1) − bodyRightGutter(1)
+	if got := m.transcriptWidth(); got != wantWidth {
+		t.Fatalf("transcriptWidth = %d, want %d at the 100×30 harness window", got, wantWidth)
+	}
+	for i, ln := range popupLines(m.renderSessionBrowser()) {
+		if w := lipgloss.Width(ln); w != wantWidth {
+			t.Errorf("pane line %d is %d cells, want %d: %q", i, w, wantWidth, strip(ln))
+		}
+	}
+}
+
+// A session title wider than the box is truncated, not wrapped: the pane keeps exactly
+// 2 borders + title + one session row + hint physical lines, and the over-wide row ends in an
+// ellipsis.
+func TestSessionBrowserLongTitleDoesNotWrap(t *testing.T) {
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", strings.Repeat("verylongtitle ", 12), "/ws/a", time.Now(), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m)
+
+	pane := m.renderSessionBrowser()
+	const wantLines = 2 + 1 + 1 + 1 // borders + title + one session row + hint
+	if got := len(popupLines(pane)); got != wantLines {
+		t.Fatalf("pane has %d lines, want %d (a wide title must truncate, not wrap):\n%s",
+			got, wantLines, strip(pane))
+	}
+	if !strings.Contains(strip(pane), "…") {
+		t.Errorf("the over-wide title row was not truncated to an ellipsis:\n%s", strip(pane))
+	}
+}
+
+// With more than maxSessionRows sessions the pane still scrolls a window around the selection: its
+// physical line count is capped at 2 borders + title + maxSessionRows + hint, never the full list.
+func TestSessionBrowserWindowsLongList(t *testing.T) {
+	host := &fakeSessionHost{}
+	now := time.Now()
+	for i := 0; i < maxSessionRows+5; i++ {
+		storeMeta(host, fmt.Sprintf("sess-%02d", i), fmt.Sprintf("session %d", i), "/ws/a",
+			now.Add(-time.Duration(i)*time.Minute), 0, nil)
+	}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m)
+
+	pane := m.renderSessionBrowser()
+	const wantLines = 2 + 1 + maxSessionRows + 1 // borders + title + capped rows + hint
+	if got := len(popupLines(pane)); got != wantLines {
+		t.Errorf("pane has %d lines, want %d (a long list must window to maxSessionRows):\n%s",
+			got, wantLines, strip(pane))
 	}
 }
 

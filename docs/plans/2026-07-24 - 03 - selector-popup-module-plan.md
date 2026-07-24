@@ -130,7 +130,7 @@ reverse). Commit: `feat(tui): shared selector-popup painter`.
 
 ---
 
-## 2. /sessions browser onto the painter, full chat-area width
+## 2. /sessions browser onto the painter, full chat-area width — ✅ DONE (2026-07-24)
 
 All in `internal/tui/sessions.go` (+ its tests):
 
