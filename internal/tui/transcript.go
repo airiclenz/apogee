@@ -80,8 +80,9 @@ type presentedView struct {
 // startupView is the presentation model of the one-time start-up box (entryStartup only): the
 // embedded logo art plus the session facts the box shows. Like [presentedView] the entry holds the
 // facts and render.go composes the card, so the box's shape and wording stay table-testable without
-// a Model (ADR 0019 §2, rung 0). The box is seeded once as entries[0] (newModel) and rendered fresh
-// at the live width on every repaint, so it reflows on resize and survives /clear.
+// a Model (ADR 0019 §2, rung 0). The box is seeded as entries[0] (newModel, and re-seeded by
+// startNewSession on /clear) and rendered fresh at the live width on every repaint, so it reflows on
+// resize and reprints on a session reset.
 //
 // Host and Model trace to config / the CLI, so addStartup escape-strips them as addPresented does
 // its untrusted halves — defence in depth even though they are not model output. Logo (this
@@ -131,8 +132,9 @@ func (t *transcript) addPresented(msg presentedMsg) {
 }
 
 // addStartup appends the one-time start-up box — the logo and the session's host / model /
-// context / version (startupView). It is seeded once by newModel as entries[0], not folded from an
-// engine Event: the box is the HOST's opening frame, like addPresented's record of a host act. Host
+// context / version (startupView). It is seeded by newModel as entries[0] (and re-seeded by
+// startNewSession when /clear starts a fresh session), not folded from an engine Event: the box is
+// the HOST's opening frame, like addPresented's record of a host act. Host
 // and Model are escape-stripped (they trace to config / the CLI) so a control sequence can never
 // reach the terminal through them; the logo, context (formatTokens of an int), and version are this
 // program's own values and pass through untouched.

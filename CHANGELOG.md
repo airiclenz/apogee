@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`/clear` and `/new` now start a fresh session: they wipe the scrollback and reprint the start-up
+  box.** Previously the two verbs reset the engine's memory but left the transcript untouched, adding
+  a `context cleared …` note while the start-up box stayed put. The owner now wants them to "basically
+  start a new session": the whole view is cleared and the start-up box is re-seeded, so it is
+  byte-identical to a fresh launch at the same window size — no prior messages, and no note (the
+  reprinted box is itself the signal). The live context-usage gauge and tok/s readout fall back to
+  empty with the discarded conversation. The reset funnels through one new seam, `startNewSession()`,
+  which the forthcoming session system will wrap to persist the outgoing conversation before the
+  reset; on a `ClearContext` error the view is left intact and the failure is noted, so a
+  fresh-looking view never lies about an engine that still remembers. This reverses the earlier
+  "the box survives `/clear`" behaviour deliberately.
 - **The agent loop's Turn lifecycle is consolidated into one `turnLifecycle` module — an internal
   refactor with no behaviour or public-API change.** The Turn's four exits (complete /
   Exchange-complete / abandoned / cancelled), its one-permitted overflow fold-and-rebuild, and its

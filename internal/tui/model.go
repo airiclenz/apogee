@@ -135,8 +135,8 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 
 	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
 	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
-	// every repaint, so it reflows on resize with no "already shown" guard, and it survives
-	// /clear (which resets the engine's memory but never the transcript scrollback).
+	// every repaint, so it reflows on resize with no "already shown" guard, and /clear re-seeds it
+	// through the same helper (startNewSession) to reprint a fresh-launch view.
 	m.transcript.addStartup(newStartupView(opts))
 	return m
 }
@@ -540,10 +540,40 @@ func (m Model) skillDisplayNames(ids []string) []string {
 	return names
 }
 
+// startNewSession resets the TUI to a fresh session: it drops the engine's conversation memory
+// (ClearContext), wipes the transcript scrollback, and re-seeds the one-time start-up box so the view
+// is byte-identical to a fresh launch at this window size. /clear and its alias /new both route here —
+// "start a new session" is exactly what they mean.
+//
+// This is the single seam the forthcoming session system extends: saving the outgoing conversation and
+// allocating a new session id will wrap THIS call, so the view/state reset lives in one place and
+// nothing here writes to a session store or assumes a session model.
+//
+// Reached only from runCommand at stateIdle (no worker owns the engine), so ClearContext is safe. On a
+// ClearContext error the view is left untouched and the failure is noted — a fresh-looking view must
+// never lie about an engine that still remembers the old conversation.
+func (m Model) startNewSession() (tea.Model, tea.Cmd) {
+	if err := m.eng.ClearContext(); err != nil {
+		m.transcript.addNote("could not clear context: " + err.Error())
+		m.layout()
+		return m, nil
+	}
+	m.transcript.reset()
+	m.transcript.addStartup(newStartupView(m.opts))
+	m.pendingSkills = nil  // the staged chips belonged to the abandoned session
+	m.userScrolled = false // re-arm sticky-to-top: the fresh box pins to the top like a launch
+	m.ctxUsed = 0          // the gauge and throughput fall with the discarded conversation…
+	m.tokPerSec = 0        // …the same reason compactDoneMsg zeroes them on a fold
+	m.genStart = time.Time{}
+	m.flash = "" // drop any transient copy note; a new session shows nothing stale
+	m.layout()
+	return m, nil
+}
+
 // runCommand handles a recognised local /command from the idle state. /continue and /compact
 // open a worker: /continue a canned "Please continue" turn, /compact a generative summary
-// call; /clear (and its alias /new) acts on the engine's context synchronously and stays idle,
-// recording a transcript note, /version records the build version as a note the same
+// call; /clear (and its alias /new) resets the session view and reprints the start-up box
+// synchronously and stays idle (startNewSession), /version records the build version as a note the same
 // synchronous way, and /confine reports or swaps Auto's blast radius the same
 // synchronous way (confine.go). The input box and the autocomplete overlay are cleared either way. Reached
 // only from submit (stateIdle), so the engine is quiescent — no worker owns it — and
@@ -579,21 +609,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, m.spinner.Tick)
 
 	case "clear", "new":
-		// /new is an alias of /clear: both reset the engine's context here. Clearing the model's
-		// memory also drops the staged chips — they belonged to the turn being abandoned.
-		m.pendingSkills = nil
-		if err := m.eng.ClearContext(); err != nil {
-			m.transcript.addNote("could not clear context: " + err.Error())
-		} else {
-			// The conversation is empty again, so the live gauge and throughput readout must fall
-			// with it — otherwise they stay lit from the discarded session (the next Turn re-measures
-			// from zero), the same reason compactDoneMsg zeroes the gauge on a fold.
-			m.ctxUsed = 0
-			m.tokPerSec = 0
-			m.transcript.addNote("context cleared — the model's memory of this session is reset")
-		}
-		m.layout()
-		return m, nil
+		// /new is an alias of /clear: both start a fresh session — wipe the view, reset the engine's
+		// memory, and reprint the start-up box (startNewSession).
+		return m.startNewSession()
 
 	case "version":
 		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's

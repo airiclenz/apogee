@@ -196,15 +196,24 @@ func TestNewStartupViewMatchesSeed(t *testing.T) {
 	}
 }
 
-// The start-up box is printed once and survives a /clear: clearing resets the engine's memory and
-// records a note, but the transcript scrollback — including the box at entries[0] — is untouched.
-func TestStartupBoxSurvivesClear(t *testing.T) {
+// A /clear starts a fresh session: it wipes the scrollback down to only the re-seeded start-up box,
+// so the view is identical to a fresh launch. This inverts the prior "the box survives /clear"
+// contract — the owner now wants /clear (and /new) to reprint the box and drop everything else.
+func TestClearResetsToStartupBox(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
+	seedConversation(&m)
+
 	m.input.SetValue("/clear")
 	m, _ = stepCmd(t, m, keyEnter())
 
-	if m.transcript.entries[0].kind != entryStartup {
-		t.Errorf("entries[0].kind = %v after /clear, want the start-up box still present at the top", m.transcript.entries[0].kind)
+	if n := len(m.transcript.entries); n != 1 {
+		t.Fatalf("transcript has %d entries after /clear, want exactly 1 (only the re-seeded start-up box)", n)
+	}
+	if k := m.transcript.entries[0].kind; k != entryStartup {
+		t.Errorf("entries[0].kind = %v after /clear, want entryStartup", k)
+	}
+	if got := plain(m.View()); strings.Contains(got, seededAssistantText) {
+		t.Errorf("prior conversation still shown after /clear:\n%s", got)
 	}
 }
 

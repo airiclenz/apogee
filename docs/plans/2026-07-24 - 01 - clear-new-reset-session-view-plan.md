@@ -178,7 +178,15 @@ existing `/clear` and start-up-box tests still pass). Commit:
 
 ---
 
-## 2. `/clear` and `/new` start a new session (view wipe + box re-seed)
+## 2. `/clear` and `/new` start a new session (view wipe + box re-seed) — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Also updated three doc comments the reversal makes stale — `newModel`'s seed
+comment (it no longer "survives /clear … never the transcript scrollback"; now "/clear re-seeds it
+through startNewSession"), and the `addStartup` + `startupView` doc comments in transcript.go that
+said the box is "seeded once by newModel" / "survives /clear" (now note the startNewSession re-seed).
+Item 1 had said "leave the surrounding comment in place", but that predated the behaviour change;
+leaving them would assert the opposite of item 2's code. Tests use a shared `seedConversation` helper
++ `seededAssistantText` const (in minilang_test.go) rather than inlining the seed in each test.
 
 **What:** (depends on item 1.) Add the seam method and route both verbs through it.
 

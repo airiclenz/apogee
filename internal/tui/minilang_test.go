@@ -38,9 +38,14 @@ func keyRune(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: str
 // /command routing
 // ----------------------------------------------------------------------------
 
-func TestClearCommandClearsEngineKeepsTranscript(t *testing.T) {
+// /clear starts a fresh session: it clears the engine's memory and wipes the scrollback down to
+// only the re-seeded start-up box, with NO "context cleared" note — the reprinted box is the signal.
+// It stays idle (no worker) and clears the input. Seeded conversation proves the wipe.
+func TestClearResetsSessionView(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
+	seedConversation(&m)
+
 	m.input.SetValue("/clear")
 	m, cmd := stepCmd(t, m, keyEnter())
 
@@ -56,14 +61,28 @@ func TestClearCommandClearsEngineKeepsTranscript(t *testing.T) {
 	if v := m.input.Value(); v != "" {
 		t.Errorf("input not cleared: %q", v)
 	}
-	if got := plain(m.View()); !strings.Contains(got, "context cleared") {
-		t.Errorf("transcript missing the cleared note:\n%s", got)
+	if n := len(m.transcript.entries); n != 1 {
+		t.Fatalf("transcript has %d entries after /clear, want exactly 1 (only the re-seeded start-up box)", n)
+	}
+	if k := m.transcript.entries[0].kind; k != entryStartup {
+		t.Errorf("entries[0].kind = %v after /clear, want entryStartup", k)
+	}
+	got := plain(m.View())
+	if strings.Contains(got, "context cleared") {
+		t.Errorf("/clear left a 'context cleared' note; the reprinted box is the signal:\n%s", got)
+	}
+	if strings.Contains(got, seededAssistantText) {
+		t.Errorf("/clear left the prior conversation in the view:\n%s", got)
 	}
 }
 
+// /new aliases /clear: it shares the startNewSession seam, so it clears the engine and resets the
+// view down to the re-seeded start-up box exactly as /clear does.
 func TestNewCommandAliasesClear(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
+	seedConversation(&m)
+
 	m.input.SetValue("/new")
 	m, cmd := stepCmd(t, m, keyEnter())
 
@@ -79,19 +98,47 @@ func TestNewCommandAliasesClear(t *testing.T) {
 	if v := m.input.Value(); v != "" {
 		t.Errorf("input not cleared: %q", v)
 	}
-	if got := plain(m.View()); !strings.Contains(got, "context cleared") {
-		t.Errorf("transcript missing the cleared note:\n%s", got)
+	if n := len(m.transcript.entries); n != 1 {
+		t.Fatalf("transcript has %d entries after /new, want exactly 1 (proves /new shares the reset seam)", n)
+	}
+	if k := m.transcript.entries[0].kind; k != entryStartup {
+		t.Errorf("entries[0].kind = %v after /new, want entryStartup", k)
 	}
 }
 
+// On a ClearContext error the view is NOT reset: the seeded conversation survives and the failure is
+// noted, so a fresh-looking view can never lie about an engine that still remembers.
 func TestClearCommandSurfacesEngineError(t *testing.T) {
 	eng := &fakeEngine{clearFn: func() error { return domain.ErrInputPending }}
 	m := newTestModelEng(t, eng, testOpts)
+	seedConversation(&m)
+	before := len(m.transcript.entries)
+
 	m.input.SetValue("/clear")
 	m = step(t, m, keyEnter())
+
 	if got := plain(m.View()); !strings.Contains(got, "could not clear context") {
 		t.Errorf("transcript missing the clear-failure note:\n%s", got)
 	}
+	// The error note is appended to the intact scrollback, so the count grows by exactly one.
+	if got := len(m.transcript.entries); got != before+1 {
+		t.Errorf("transcript entries = %d after a failed /clear, want %d (the seeded conversation survives, plus the error note)", got, before+1)
+	}
+	if got := plain(m.View()); !strings.Contains(got, seededAssistantText) {
+		t.Errorf("a failed /clear wrongly wiped the prior conversation:\n%s", got)
+	}
+}
+
+// seededAssistantText is the assistant reply seedConversation folds in, so the reset tests can assert
+// on a distinctive string that must vanish (or survive) with the scrollback.
+const seededAssistantText = "the number is 7"
+
+// seedConversation folds a user message and an assistant reply into the model's transcript so a
+// reset test starts with more than the lone start-up box. It takes *Model so the mutation lands on
+// the caller's value.
+func seedConversation(m *Model) {
+	m.transcript.addUser("remember the number 7", nil)
+	m.transcript.apply(domain.MessageEvent{Text: seededAssistantText})
 }
 
 func TestCompactCommandLaunchesWorker(t *testing.T) {
