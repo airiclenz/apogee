@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -18,6 +19,34 @@ import (
 type SkillCatalog interface {
 	List() []skills.Skill
 	Get(id string) (skills.Skill, bool)
+}
+
+// SessionHost is the session-persistence seam the TUI drives: it persists the active session
+// every Turn (and on quit), rotates to a fresh session on /clear|/new, and backs the /sessions
+// browser's list/load/delete/rename. It is defined here — like [SkillCatalog] — and typed against
+// internal/session (the Meta/Record the browser renders), so the renderer stays unit-testable with
+// a fake and the composition root (cmd/apogee) owns the store, the id minting, and the on-disk
+// format. A nil host means persistence is unwired; every caller guards for it exactly as it does
+// for [Options.Skills].
+type SessionHost interface {
+	// Save persists the active session's current state, minting its ID on the first call and
+	// updating that same file thereafter. transcript is the TUI's opaque scrollback blob
+	// (transcriptcodec.go); title, userMsgs, and ctxUsed populate the browsable metadata.
+	Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int) error
+	// Rotate closes the active session so the next Save mints a fresh ID — the /clear|/new and
+	// load-a-different-session boundary. It is idempotent on an already-inactive session.
+	Rotate()
+	// List returns every stored session's browsable metadata, newest first.
+	List() ([]session.Meta, error)
+	// Load returns a stored record AND makes it the active session, so subsequent Saves update
+	// the loaded session's file rather than forking a new one.
+	Load(id string) (session.Record, error)
+	// Delete removes a stored session's file.
+	Delete(id string) error
+	// Rename sets a stored session's title.
+	Rename(id, title string) error
+	// ActiveID reports the active session's ID, or "" before the first Save has minted one.
+	ActiveID() string
 }
 
 // ----------------------------------------------------------------------------
@@ -148,12 +177,13 @@ type Options struct {
 	// triggers it on open, not per keystroke; every caller guards for nil.
 	ReloadSkills func()
 
-	// Save persists a snapshot of the conversation; nil disables session saving. The
-	// binary supplies a store-backed saver (it owns the path and on-disk format — phase-2
-	// detail plan §3 C5). The model calls it only at a quiescent boundary (a clean quit),
-	// passing the snapshot it took itself, so the file I/O stays out of the renderer while
-	// the "is it safe to snapshot" decision stays with the model that owns the Engine.
-	Save func(domain.Session) error
+	// Sessions is the session-persistence host (the store-backed [SessionHost] the binary
+	// wires); nil disables all persistence. The Model drives it: a per-Turn save through the
+	// worker's snapshot, a final save at each idle boundary, and a synchronous flush on a clean
+	// quit — each best-effort, so a save failure never interrupts the conversation. The binary
+	// owns the path, id minting, and on-disk format, keeping the file I/O out of the renderer
+	// while the "is it safe to snapshot" decision stays with the Model that owns the Engine.
+	Sessions SessionHost
 }
 
 // ConfinementInfo is the host's confinement situation, resolved once by the composition root
@@ -181,7 +211,11 @@ type ConfinementInfo struct {
 // the moment the first worker emits (phase-2 detail plan §3 C2/C3; ADR 0011). The program
 // context is ctx, so a program-wide shutdown also cancels an in-flight Exchange (C4).
 func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
-	program := tea.NewProgram(newModel(ctx, eng, opts), tea.WithContext(ctx))
+	// The per-Turn snapshot notify: the worker sends turnSnapshotMsg through the Bridge's
+	// late-bound program sender (the same programRef the Sink pushes Events through), so the
+	// Model persists between Steps without any exported API. Bind (below) resolves it to the
+	// live program before the first worker can fire.
+	program := tea.NewProgram(newModel(ctx, eng, opts, br.prog.send), tea.WithContext(ctx))
 	// Bind before Run: the program exists now, and the first Send cannot occur until a
 	// worker is launched, which only happens after the user submits into the running loop.
 	br.Bind(program)

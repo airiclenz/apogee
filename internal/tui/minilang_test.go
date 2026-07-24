@@ -23,7 +23,7 @@ import (
 // test can inspect the engine (clear/compact/submit calls) the commands drive.
 func newTestModelEng(t *testing.T, eng Engine, opts Options) Model {
 	t.Helper()
-	m := newModel(context.Background(), eng, opts)
+	m := newModel(context.Background(), eng, opts, nil)
 	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 }
 

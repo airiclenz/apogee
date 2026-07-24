@@ -22,7 +22,7 @@ func newModeModel(t *testing.T, start domain.Mode) (Model, *fakeEngine) {
 	eng := &fakeEngine{}
 	opts := testOpts
 	opts.Mode = start
-	m := step(t, newModel(context.Background(), eng, opts), tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := step(t, newModel(context.Background(), eng, opts, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
 	return m, eng
 }
 

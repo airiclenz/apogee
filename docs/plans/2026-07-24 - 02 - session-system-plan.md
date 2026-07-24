@@ -263,7 +263,23 @@ stripped on decode; golden JSON for one mixed transcript (pins the wire shape v1
 
 ---
 
-## 4. Per-Turn saves through the new `SessionHost` seam (TUI side)
+## 4. Per-Turn saves through the new `SessionHost` seam (TUI side) — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Three item-scoped deviations, all forced by deleting `Options.Save` while
+keeping the build green (item 5 still owns the store-backed host). (1) `cmd/apogee/wire.go` got a
+minimal touch: the `Save: saver.save` Options field was removed and `Sessions` left nil (persistence
+unwired until item 5); the quit-only `sessionSaver`/`SaveEnvelope` and the resume-hint print are
+retained untouched for item 5 to rewrite. (2) `internal/tui/e2e_test.go`'s
+`TestE2ESnapshotResumeContinues` no longer round-trips through a disk file (that path was
+`Options.Save`→`SaveEnvelope`, both item-5 territory); it now captures the quit-flush snapshot in
+memory via the new fake host and resumes from it — same assertion (resumed Exchange continues at
+turn 2) — and its now-unused `internal/session` import was dropped. (3) The idle final save lives in
+`finishWorker`, gated on `next == stateIdle`, so it fires for exchangeDoneMsg / the cancel path /
+compactDoneMsg (all → stateIdle) but NOT the errMsg path (→ stateErrored) — matching the plan's
+"final saves *at idle*". The truncation ellipsis is the single rune "…" per the plan's literal text
+(apogee-code uses "..."). Title fallback date is `time.Now().Format("2006-01-02")`; the pure
+`sessionTitle(text)` signature is kept (no clock injected), so the date-fallback test asserts the
+"Session " prefix rather than an exact date.
 
 **What:** Replace the quit-only `Options.Save` func with the session-system seam and the
 per-Turn save pipeline. (Depends on 1–3.)

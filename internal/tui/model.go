@@ -43,10 +43,20 @@ const (
 // every Update, per the framework's idiom.
 type Model struct {
 	// Wiring resolved by the composition root and handed in at construction.
-	parent context.Context // the program's context; the worker derives from it (C4)
-	eng    Engine
-	opts   Options
-	save   func(domain.Session) error // persists a snapshot on a clean quit; nil ⇒ off
+	parent   context.Context // the program's context; the worker derives from it (C4)
+	eng      Engine
+	opts     Options
+	sessions SessionHost   // persists the session per-Turn, at idle, and on quit; nil ⇒ off
+	notify   func(tea.Msg) // sends a Msg into the running program from the worker goroutine (the per-Turn snapshot)
+
+	// Session-save single-flight (the per-Turn pipeline). A save runs off the Update loop on a
+	// Cmd goroutine; saveBusy marks one in flight so a later snapshot coalesces into pendingSave
+	// (latest-wins) rather than overlapping. saveFailing tracks the last save's success so only
+	// the ok→fail and fail→ok transitions are noted — a save failure must never spam the
+	// transcript or interrupt the conversation.
+	saveBusy    bool
+	saveFailing bool
+	pendingSave *savePayload
 
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
 	// skillRegion edge-trigger), the staged-skill chips, the workspace file cache, and the prompt
@@ -112,7 +122,7 @@ type Model struct {
 // Exchange — C4). The input box is focused here, not in Init, because Init returns only a
 // Cmd: the focus *state* must be set on the stored widget, while Init returns the cursor's
 // blink Cmd.
-func newModel(parent context.Context, eng Engine, opts Options) Model {
+func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.Msg)) Model {
 	th := newTheme()
 
 	vp := viewport.New()
@@ -125,7 +135,8 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 		parent:       parent,
 		eng:          eng,
 		opts:         opts,
-		save:         opts.Save,
+		sessions:     opts.Sessions,
+		notify:       notify,
 		promptEditor: newPromptEditor(),
 		viewport:     vp,
 		spinner:      sp,
@@ -294,6 +305,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.finishWorker(stateIdle)
 		m.refreshViewport()
 		return m, cmd
+
+	case turnSnapshotMsg:
+		// The worker snapshotted the engine after a completed Turn (driveExchange). Persist it
+		// asynchronously through the SessionHost; the worker keeps stepping, so this never stalls
+		// the conversation, and the transcript is consistent with the snapshot (the Turn's Events
+		// were delivered before this Msg — see turnSnapshotMsg's doc).
+		return m, m.persist(msg.Sess)
+
+	case saveDoneMsg:
+		// An async save returned. Clear the single-flight flag, note the ok↔fail transition once,
+		// and dispatch any save that coalesced while this one ran (saveComplete).
+		return m, m.saveComplete(msg.Err)
 
 	case spinner.TickMsg:
 		// Keep the chain alive only while running; dropping the tick when idle lets it
@@ -508,7 +531,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 
 	cmd, cancel := startExchange(m.parent, m.eng,
-		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached})
+		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached}, m.notify)
 	m.cancel = cancel
 	m.state = stateRunning
 	// The request is away and nothing has come back yet: the honest phrase is "thinking" until
@@ -602,7 +625,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.transcript.addUser("/continue", m.skillDisplayNames(attached))
 		m.layout()
 		cmd, cancel := startExchange(m.parent, m.eng,
-			domain.UserInput{Text: "Please continue", SkillIDs: attached})
+			domain.UserInput{Text: "Please continue", SkillIDs: attached}, m.notify)
 		m.cancel = cancel
 		m.state = stateRunning
 		m.setActivity(actThinking, "", 0) // a canned turn is still a request in flight (as in submit)
@@ -679,7 +702,9 @@ func (m *Model) stopWorker() {
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
 // arrives: it cancels and clears the CancelFunc and any pending Approval or ask_user
 // question. The new state is idle for a completed or cancelled Exchange, errored for a loop
-// fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit), else nil.
+// fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit); otherwise, when
+// the Exchange settled at idle, it is the final per-session save (saveAtIdle) — the Model owns
+// the engine again at this boundary, so it takes its own Snapshot — else nil.
 //
 // It CALLS the CancelFunc before clearing it: a completed Exchange leaves its worker's
 // cancellable child context un-cancelled otherwise, leaking one context (and its goroutine's
@@ -707,6 +732,12 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 		// returned its terminal Msg, so its goroutine has unwound and the teardown cannot race it.
 		return tea.Quit
 	}
+	if next == stateIdle {
+		// A completed or cancelled Exchange settled at idle: persist the final conversation state
+		// (the per-Turn saves captured each Turn; this catches the closing boundary, including a
+		// cancel's post-AbortExchange rollback and any note the terminal handler just added).
+		return m.saveAtIdle()
+	}
 	return nil
 }
 
@@ -729,21 +760,169 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// saveSession best-effort persists a snapshot of the conversation through the host saver.
-// It is a no-op without a saver or when the transcript holds no conversation (only the seeded
-// start-up box, or nothing at all) — nothing worth resuming. Both Snapshot and the save are
-// best-effort: a quit must never fail, so an error is swallowed rather than blocking the exit.
-// The caller guarantees no worker is running, so calling Snapshot here respects the Agent's
-// single-goroutine contract (C1).
+// saveSession best-effort persists the conversation through the SessionHost on a clean quit —
+// the synchronous flush that captures any post-last-turn transcript changes (notes, /confine
+// output) the per-Turn saves did not. It is a no-op without a wired host or when the transcript
+// holds no conversation (only the seeded start-up box, or nothing at all) — nothing worth
+// resuming. Both Snapshot and the Save are best-effort: a quit must never fail, so an error is
+// swallowed rather than blocking the exit. The caller guarantees no worker is running, so calling
+// Snapshot here respects the Agent's single-goroutine contract (C1). Unlike the per-Turn path
+// this is synchronous — the program is exiting, so there is no Update loop left to deliver a
+// saveDoneMsg to.
 func (m Model) saveSession() {
-	if m.save == nil || !m.transcript.hasConversation() {
+	if m.sessions == nil || !m.transcript.hasConversation() {
 		return
 	}
 	sess, err := m.eng.Snapshot()
 	if err != nil {
 		return
 	}
-	_ = m.save(sess)
+	p, ok := m.snapshotPayload(sess)
+	if !ok {
+		return
+	}
+	_ = m.sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed)
+}
+
+// ----------------------------------------------------------------------------
+// Per-Turn session save pipeline (session-system plan §4)
+// ----------------------------------------------------------------------------
+
+// savePayload is one assembled save: the engine snapshot plus the derived metadata and the
+// encoded transcript blob the SessionHost persists. It is built at a boundary the Model owns
+// (a per-Turn snapshot or an idle boundary) and then either dispatched immediately or coalesced
+// (pendingSave) behind an in-flight save.
+type savePayload struct {
+	sess       domain.Session
+	transcript []byte
+	title      string
+	userMsgs   int
+	ctxUsed    int
+}
+
+// snapshotPayload assembles a savePayload around a captured engine snapshot: it encodes the
+// current transcript (transcriptcodec.go), derives the browsable title from the first user
+// message, counts the user messages, and reads the live context fill. A transcript that fails to
+// encode yields ok=false so the caller drops the save rather than persisting a half-record.
+func (m Model) snapshotPayload(sess domain.Session) (savePayload, bool) {
+	blob, err := encodeTranscript(&m.transcript)
+	if err != nil {
+		return savePayload{}, false
+	}
+	return savePayload{
+		sess:       sess,
+		transcript: blob,
+		title:      sessionTitle(m.transcript.firstUserText()),
+		userMsgs:   m.transcript.userMessageCount(),
+		ctxUsed:    m.ctxUsed,
+	}, true
+}
+
+// persist builds a savePayload around sess and schedules it, gated on there being a wired host
+// and a conversation worth resuming. It is the entry the per-Turn snapshot (turnSnapshotMsg) and
+// the idle finishers both funnel through, so the "worth saving?" gate lives in one place. It
+// returns the Cmd to run (nil when nothing was scheduled).
+func (m *Model) persist(sess domain.Session) tea.Cmd {
+	if m.sessions == nil || !m.transcript.hasConversation() {
+		return nil
+	}
+	p, ok := m.snapshotPayload(sess)
+	if !ok {
+		return nil
+	}
+	return m.scheduleSave(p)
+}
+
+// saveAtIdle persists the current conversation taking the Model's OWN engine Snapshot — valid
+// because every caller is a terminal boundary at which the worker has returned and the Update
+// loop owns the engine again (C1). Best-effort like persist: a Snapshot error, an unwired host,
+// or an empty transcript simply schedules nothing.
+func (m *Model) saveAtIdle() tea.Cmd {
+	if m.sessions == nil || !m.transcript.hasConversation() {
+		return nil
+	}
+	sess, err := m.eng.Snapshot()
+	if err != nil {
+		return nil
+	}
+	return m.persist(sess)
+}
+
+// scheduleSave dispatches p through the SessionHost, coalescing when a save is already in flight:
+// the newest payload replaces any waiting one (latest-wins — an older intermediate Turn is
+// superseded by the newer snapshot) and is dispatched when the in-flight save's saveDoneMsg
+// lands. The persistence I/O runs off the Update loop on the returned Cmd's goroutine, so a
+// per-Turn save never stalls the conversation. Returns nil when the save was coalesced.
+func (m *Model) scheduleSave(p savePayload) tea.Cmd {
+	if m.saveBusy {
+		m.pendingSave = &p
+		return nil
+	}
+	m.saveBusy = true
+	return m.saveCmd(p)
+}
+
+// saveCmd builds the Cmd that persists one payload and reports back as saveDoneMsg. It captures
+// the SessionHost and the payload by value, so the closure holds no pointer into the value-copied
+// Model.
+func (m Model) saveCmd(p savePayload) tea.Cmd {
+	sessions := m.sessions
+	return func() tea.Msg {
+		return saveDoneMsg{Err: sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed)}
+	}
+}
+
+// saveComplete folds a finished save: it clears the in-flight flag, notes the ok↔fail transition
+// exactly once (on the ok→fail edge and the fail→ok recovery edge, then swallows the error — a
+// save failure must never interrupt the conversation), and dispatches any payload that coalesced
+// while the save ran (latest-wins single-flight).
+func (m *Model) saveComplete(err error) tea.Cmd {
+	m.saveBusy = false
+	switch {
+	case err != nil && !m.saveFailing:
+		m.saveFailing = true
+		m.transcript.addNote("session save failed: " + err.Error() + " — will keep retrying")
+		m.refreshViewport()
+	case err == nil && m.saveFailing:
+		m.saveFailing = false
+		m.transcript.addNote("session saving recovered")
+		m.refreshViewport()
+	}
+	if m.pendingSave != nil {
+		p := *m.pendingSave
+		m.pendingSave = nil
+		return m.scheduleSave(p)
+	}
+	return nil
+}
+
+// sessionTitleMax is the longest a derived session title runs before word-boundary truncation
+// (apogee-code's MAX_TITLE_LENGTH).
+const sessionTitleMax = 50
+
+// sessionTitle derives a browsable one-line title from the first user message's text, ported from
+// apogee-code's generateTitle: the first line, returned as-is when it fits, otherwise truncated to
+// sessionTitleMax runes at the last word boundary past 60% (falling back to a hard cut) and closed
+// with an ellipsis. A message that is empty or opens a code fence has no useful title, so it falls
+// back to a dated "Session <date>" — every stored session still gets a human label.
+func sessionTitle(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || strings.HasPrefix(trimmed, "```") {
+		return "Session " + time.Now().Format("2006-01-02")
+	}
+	firstLine := trimmed
+	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {
+		firstLine = trimmed[:i]
+	}
+	runes := []rune(firstLine)
+	if len(runes) <= sessionTitleMax {
+		return firstLine
+	}
+	truncated := string(runes[:sessionTitleMax])
+	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > sessionTitleMax*6/10 {
+		truncated = truncated[:lastSpace]
+	}
+	return truncated + "…"
 }
 
 // busy reports whether a worker is in flight (running, blocked on an Approval, or blocked on

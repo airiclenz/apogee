@@ -67,7 +67,7 @@ func TestE2ELiveModel(t *testing.T) {
 	bridge.Bind(h)
 	eng := newE2EEngine(t, endpoint, model, workspace, bridge.Sink(), bridge.Approver())
 
-	m := step(t, newModel(ctx, eng, e2eOptions(endpoint, workspace)), tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := step(t, newModel(ctx, eng, e2eOptions(endpoint, workspace), nil), tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	m, term := h.runExchange(t, ctx, m, eng,
 		"Use the write_file tool to create a file named greeting.txt containing exactly: Hello, Apogee!")

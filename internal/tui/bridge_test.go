@@ -112,7 +112,7 @@ func TestSeamConcurrentEmitApproveCancel(t *testing.T) {
 		},
 	}
 
-	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"})
+	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil)
 
 	var wg sync.WaitGroup
 	var workerMsg tea.Msg

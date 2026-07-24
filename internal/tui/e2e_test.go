@@ -16,7 +16,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -199,7 +198,7 @@ func (h *uiHarness) runExchange(t *testing.T, ctx context.Context, m Model, eng 
 	t.Helper()
 
 	m.transcript.addUser(text, nil)
-	cmd, cancel := startExchange(ctx, eng, domain.UserInput{Text: text})
+	cmd, cancel := startExchange(ctx, eng, domain.UserInput{Text: text}, nil)
 	defer cancel()
 	m.cancel = cancel
 	m.state = stateRunning
@@ -297,7 +296,7 @@ func TestE2EConversationThroughTUI(t *testing.T) {
 	bridge.Bind(h)
 	eng := newE2EEngine(t, srv.URL, "test-model", workspace, bridge.Sink(), bridge.Approver())
 
-	m := step(t, newModel(ctx, eng, e2eOptions(srv.URL, workspace)), tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := step(t, newModel(ctx, eng, e2eOptions(srv.URL, workspace), nil), tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	m, term := h.runExchange(t, ctx, m, eng, "create a greeting file")
 
@@ -352,51 +351,39 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	defer srv.Close()
 
 	workspace := t.TempDir()
-	sessionsDir := filepath.Join(t.TempDir(), "sessions")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// --- Exchange 1: run the file-edit conversation, then snapshot on a clean quit ---
+	// --- Exchange 1: run the file-edit conversation, then flush on a clean quit ---
 	bridge1 := NewBridge()
 	h1 := newUIHarness()
 	bridge1.Bind(h1)
 	eng1 := newE2EEngine(t, srv.URL, "test-model", workspace, bridge1.Sink(), bridge1.Approver())
 
-	store := session.NewStore(sessionsDir)
-	var savedPath string
-	save := func(s domain.Session) error {
-		path, err := store.SaveEnvelope(s)
-		savedPath = path
-		return err
-	}
+	// The quit-time flush hands the conversation snapshot to the SessionHost seam. Capture it in
+	// memory (the store-backed host and its on-disk Record are item 5) and resume the Agent from
+	// it, proving the resumed Exchange continues at the Turn the snapshot left off at.
+	host := &fakeSessionHost{}
 	opts1 := e2eOptions(srv.URL, workspace)
-	opts1.Save = save
-	m1 := step(t, newModel(ctx, eng1, opts1), tea.WindowSizeMsg{Width: 100, Height: 30})
+	opts1.Sessions = host
+	m1 := step(t, newModel(ctx, eng1, opts1, nil), tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	m1, term1 := h1.runExchange(t, ctx, m1, eng1, "create a greeting file")
 	if r := terminalResult(term1); r.Status != domain.StatusExchangeComplete {
 		t.Fatalf("exchange 1 status = %q, want %q", r.Status, domain.StatusExchangeComplete)
 	}
 
-	// A clean quit (idle, non-empty transcript) snapshots through the saver seam and exits.
+	// A clean quit (idle, non-empty transcript) flushes the snapshot through the seam and exits.
 	// The quit gesture is Ctrl+C twice within the window; Esc no longer ends the program.
 	_, quitCmd := ctrlCQuit(t, m1)
 	if _, isQuit := cmdMsg(quitCmd).(tea.QuitMsg); !isQuit {
 		t.Fatal("ctrl+c×2 at idle did not quit")
 	}
-	if savedPath == "" {
-		t.Fatal("a clean quit wrote no snapshot")
+	calls := host.savedCalls()
+	if len(calls) == 0 {
+		t.Fatal("a clean quit flushed no snapshot")
 	}
-
-	// --- Resume from the written snapshot and continue the conversation ---
-	data, err := os.ReadFile(savedPath)
-	if err != nil {
-		t.Fatalf("read snapshot: %v", err)
-	}
-	snap, err := domain.DecodeSession(data)
-	if err != nil {
-		t.Fatalf("decode snapshot: %v", err)
-	}
+	snap := calls[len(calls)-1].sess // the quit flush is the last save; it carries the final boundary
 
 	bridge2 := NewBridge()
 	h2 := newUIHarness()
@@ -415,7 +402,7 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = eng2.Close() })
 
-	m2 := step(t, newModel(ctx, eng2, e2eOptions(srv.URL, workspace)), tea.WindowSizeMsg{Width: 100, Height: 30})
+	m2 := step(t, newModel(ctx, eng2, e2eOptions(srv.URL, workspace), nil), tea.WindowSizeMsg{Width: 100, Height: 30})
 	m2, term2 := h2.runExchange(t, ctx, m2, eng2, "thanks!")
 
 	// The resumed Exchange continues at turn 2 — the turnIndex the snapshot carried — not at

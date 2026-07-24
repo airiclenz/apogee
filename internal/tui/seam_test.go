@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // ----------------------------------------------------------------------------
@@ -267,6 +268,60 @@ func (f *fakeEngine) steps() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.stepCalls
+}
+
+// ----------------------------------------------------------------------------
+// A recording SessionHost
+// ----------------------------------------------------------------------------
+
+// savedCall records one SessionHost.Save the Model made, so a test can assert the payload it
+// persisted per Turn (the snapshot, the encoded transcript blob, and the derived metadata).
+type savedCall struct {
+	sess       domain.Session
+	transcript []byte
+	title      string
+	userMsgs   int
+	ctxUsed    int
+}
+
+// fakeSessionHost is a recording SessionHost for the save-pipeline tests: it captures every Save,
+// counts Rotates, and can be scripted to fail Saves (saveErr) so the ok↔fail note transitions are
+// provable without a store. It is concurrency-safe because a save Cmd runs on its own goroutine.
+type fakeSessionHost struct {
+	mu       sync.Mutex
+	saves    []savedCall
+	rotates  int
+	activeID string
+	saveErr  error // when non-nil, every Save fails with it (the ok→fail transition)
+}
+
+// fakeSessionHost satisfies the persistence seam the Model drives.
+var _ SessionHost = (*fakeSessionHost)(nil)
+
+func (h *fakeSessionHost) Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.saves = append(h.saves, savedCall{sess: sess, transcript: transcript, title: title, userMsgs: userMsgs, ctxUsed: ctxUsed})
+	return h.saveErr
+}
+
+func (h *fakeSessionHost) Rotate() {
+	h.mu.Lock()
+	h.rotates++
+	h.mu.Unlock()
+}
+
+func (h *fakeSessionHost) List() ([]session.Meta, error)       { return nil, nil }
+func (h *fakeSessionHost) Load(string) (session.Record, error) { return session.Record{}, nil }
+func (h *fakeSessionHost) Delete(string) error                 { return nil }
+func (h *fakeSessionHost) Rename(string, string) error         { return nil }
+func (h *fakeSessionHost) ActiveID() string                    { return h.activeID }
+
+// savedCalls returns a copy of the recorded Saves in order.
+func (h *fakeSessionHost) savedCalls() []savedCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]savedCall(nil), h.saves...)
 }
 
 // stepResult is one scripted Step outcome.

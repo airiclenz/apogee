@@ -324,7 +324,9 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
 		// unusable), so it is dropped.
 		ReloadSkills: func() { _ = skillProvider.Reload() },
-		Save:         saver.save,
+		// Sessions (the store-backed SessionHost) is wired in item 5; until then persistence is
+		// unwired (nil) and the Model guards for it. The quit-only sessionSaver below is retained
+		// for the resume-hint print and is deleted when item 5 lands the host.
 	})
 	if path := saver.saved(); path != "" {
 		fmt.Fprintf(os.Stdout, "Session saved · resume with: apogee --resume %s\n", path)

@@ -26,6 +26,8 @@ var (
 	_ tea.Msg = cancelledMsg{}
 	_ tea.Msg = errMsg{}
 	_ tea.Msg = compactDoneMsg{}
+	_ tea.Msg = turnSnapshotMsg{}
+	_ tea.Msg = saveDoneMsg{}
 )
 
 // eventMsg carries one engine Event into the Update loop. The teaSink wraps every Event
@@ -106,4 +108,23 @@ type errMsg struct {
 type compactDoneMsg struct {
 	Skipped bool
 	Err     error
+}
+
+// turnSnapshotMsg carries one per-Turn engine snapshot from the worker to the Update loop. The
+// worker sends it after each StatusTurnComplete (driveExchange), snapshotting the engine between
+// Steps — the single-driver boundary at which Snapshot is valid mid-Exchange (agent.go) — so the
+// Model can persist per-Turn and a crash loses at most one Turn. It is sent AFTER that Turn's
+// Events: the teaSink delivered them synchronously inside Step before it returned, so the
+// transcript the Model holds when this folds is consistent with the snapshot it carries.
+type turnSnapshotMsg struct {
+	Sess domain.Session
+}
+
+// saveDoneMsg reports the outcome of one asynchronous SessionHost.Save (the per-Turn and idle
+// save Cmds). Err is nil on success; a failure is noted once on the ok→fail transition and then
+// swallowed — a save failure must never interrupt the conversation. The Model clears its
+// single-flight busy flag on this Msg and dispatches any save that coalesced while it was in
+// flight (latest-wins).
+type saveDoneMsg struct {
+	Err error
 }

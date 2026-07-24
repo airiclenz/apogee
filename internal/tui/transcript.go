@@ -169,6 +169,30 @@ func (t *transcript) hasConversation() bool {
 	return false
 }
 
+// userMessageCount reports how many committed user messages the transcript holds — the browsable
+// "N msgs" count the session record carries (session.Meta.UserMsgs).
+func (t *transcript) userMessageCount() int {
+	n := 0
+	for i := range t.entries {
+		if t.entries[i].kind == entryUser {
+			n++
+		}
+	}
+	return n
+}
+
+// firstUserText returns the text of the first committed user message, or "" when none has been
+// sent yet. The session title is derived from it (sessionTitle) — the first thing the human asked
+// is the most recognisable label for the session in the history browser.
+func (t *transcript) firstUserText() string {
+	for i := range t.entries {
+		if t.entries[i].kind == entryUser {
+			return t.entries[i].text
+		}
+	}
+	return ""
+}
+
 // presentedStatus is the short line that closes a presentation entry. A rung that was tried and
 // did not deliver says so and states that the path still stands — the entry is the one thing the
 // ladder can always promise, so the wording never leaves the user wondering whether anything

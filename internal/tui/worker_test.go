@@ -24,7 +24,7 @@ func TestDriveExchangeRunsToExchangeBoundary(t *testing.T) {
 		),
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"})
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil)
 
 	done, ok := msg.(exchangeDoneMsg)
 	if !ok {
@@ -44,6 +44,45 @@ func TestDriveExchangeRunsToExchangeBoundary(t *testing.T) {
 	}
 }
 
+// TestDriveExchangeNotifiesPerTurn proves the per-Turn save cadence: the worker snapshots the
+// engine after each StatusTurnComplete and hands the snapshot to notify — one turnSnapshotMsg per
+// completed Turn, and none on the terminal StatusExchangeComplete (the Model saves at idle itself).
+func TestDriveExchangeNotifiesPerTurn(t *testing.T) {
+	t.Parallel()
+	snaps := []domain.Session{
+		{State: []byte(`{"turn":0}`)},
+		{State: []byte(`{"turn":1}`)},
+	}
+	var i int
+	eng := &fakeEngine{
+		stepFn: scriptedSteps(
+			stepResult{res: domain.StepResult{Status: domain.StatusTurnComplete}},
+			stepResult{res: domain.StepResult{Status: domain.StatusTurnComplete}},
+			stepResult{res: domain.StepResult{Status: domain.StatusExchangeComplete}},
+		),
+		snapshotFn: func() (domain.Session, error) { s := snaps[i]; i++; return s, nil },
+	}
+
+	var got []domain.Session
+	notify := func(msg tea.Msg) {
+		if ts, ok := msg.(turnSnapshotMsg); ok {
+			got = append(got, ts.Sess)
+		}
+	}
+
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, notify)
+
+	if _, ok := msg.(exchangeDoneMsg); !ok {
+		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
+	}
+	if len(got) != 2 {
+		t.Fatalf("per-Turn notifications = %d; want one per completed Turn (2)", len(got))
+	}
+	if string(got[0].State) != `{"turn":0}` || string(got[1].State) != `{"turn":1}` {
+		t.Errorf("per-Turn snapshots = %q,%q; want turn 0 then turn 1", got[0].State, got[1].State)
+	}
+}
+
 // TestDriveExchangeSubmitError proves a Submit failure short-circuits to errMsg and never
 // steps the loop.
 func TestDriveExchangeSubmitError(t *testing.T) {
@@ -57,7 +96,7 @@ func TestDriveExchangeSubmitError(t *testing.T) {
 		},
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{})
+	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil)
 
 	e, ok := msg.(errMsg)
 	if !ok {
@@ -81,7 +120,7 @@ func TestDriveExchangeStepError(t *testing.T) {
 		},
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{})
+	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil)
 
 	e, ok := msg.(errMsg)
 	if !ok {
@@ -106,7 +145,7 @@ func TestStartExchangeCancelYieldsCancelledMsg(t *testing.T) {
 		},
 	}
 
-	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"})
+	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil)
 
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()

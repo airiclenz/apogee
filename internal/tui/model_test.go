@@ -38,7 +38,7 @@ var testOpts = Options{
 // newTestModel builds a ready, idle model sized to a standard window.
 func newTestModel(t *testing.T) Model {
 	t.Helper()
-	m := newModel(context.Background(), &fakeEngine{}, testOpts)
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 }
 
@@ -138,7 +138,7 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 		Version:       "v1.2.3+45.gdeadbeef01", // the full string /version shows — the box must NOT use it
 		BaseVersion:   "v1.2.3",                // the clean release version the box displays
 	}
-	m := newModel(context.Background(), &fakeEngine{}, opts)
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 
 	if n := len(m.transcript.entries); n != 1 {
 		t.Fatalf("newModel seeded %d entries, want exactly 1 (the start-up box)", n)
@@ -182,7 +182,7 @@ func TestNewStartupViewMatchesSeed(t *testing.T) {
 		Version:       "v1.2.3+45.gdeadbeef01", // the full string /version shows — the box must NOT use it
 		BaseVersion:   "v1.2.3",                // the clean release version the box displays
 	}
-	m := newModel(context.Background(), &fakeEngine{}, opts)
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 
 	seeded := m.transcript.entries[0].startup
 	if got := newStartupView(opts); got != seeded {
@@ -424,7 +424,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		// Exchange, otherwise the engine stays inExchange and the next /clear or message is
 		// rejected with ErrInputPending.
 		eng := &fakeEngine{}
-		m := newModel(context.Background(), eng, testOpts)
+		m := newModel(context.Background(), eng, testOpts, nil)
 		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		m.cancel = func() {} // stand in for a live worker
 		m.state = stateRunning
@@ -458,7 +458,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		// inExchange and the next /clear or message would be rejected with ErrInputPending. Latent
 		// today (Step surfaces faults as an ErrorEvent at a boundary), so this pins the guard.
 		eng := &fakeEngine{}
-		m := newModel(context.Background(), eng, testOpts)
+		m := newModel(context.Background(), eng, testOpts, nil)
 		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		m.cancel = func() {} // stand in for a live worker
 		m.state = stateRunning
@@ -846,58 +846,76 @@ func TestModelAskCancelClearsPrompt(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Snapshot-on-quit (phase-2 detail plan §4 P2.5; §6.1)
+// Per-Turn session saves through the SessionHost seam (session-system plan §4)
 // ----------------------------------------------------------------------------
 
-// recordingSaver captures the snapshot the model hands the saver seam.
-type recordingSaver struct {
-	called bool
-	sess   domain.Session
-	err    error // injected to simulate a save failure
-}
-
-func (r *recordingSaver) save(s domain.Session) error {
-	r.called = true
-	r.sess = s
-	return r.err
-}
-
-// newSavingModel builds a ready, idle model wired to the given saver.
-func newSavingModel(t *testing.T, eng Engine, save func(domain.Session) error) Model {
+// newSessionModel builds a ready, idle model wired to a persistence host.
+func newSessionModel(t *testing.T, eng Engine, host SessionHost) Model {
 	t.Helper()
-	m := newModel(context.Background(), eng, Options{Save: save})
+	m := newModel(context.Background(), eng, Options{Sessions: host}, nil)
 	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 }
 
-// A clean quit (idle, with a non-empty conversation) snapshots the Engine and hands the
-// result to the saver, then quits.
-func TestModelSavesOnCleanQuit(t *testing.T) {
+// driveOneSave runs one full async save round-trip: a per-Turn snapshot schedules the save, the
+// Cmd persists it, and the saveDoneMsg folds back (where a note transition, if any, lands).
+func driveOneSave(t *testing.T, m Model, sess domain.Session) Model {
+	t.Helper()
+	m, cmd := stepCmd(t, m, turnSnapshotMsg{Sess: sess})
+	if cmd == nil {
+		t.Fatal("a per-Turn snapshot scheduled no save")
+	}
+	return step(t, m, cmdMsg(cmd)) // fold the saveDoneMsg
+}
+
+// saveNotes collects the transcript's save-pipeline notes (ok→fail failures and fail→ok
+// recoveries), so a test can assert exactly which transitions were surfaced.
+func saveNotes(m Model) []string {
+	var out []string
+	for _, e := range m.transcript.entries {
+		if e.kind == entryNote && (strings.HasPrefix(e.text, "session save failed") || e.text == "session saving recovered") {
+			out = append(out, e.text)
+		}
+	}
+	return out
+}
+
+// A clean quit (idle, with a non-empty conversation) flushes the Engine snapshot and the derived
+// metadata through the SessionHost seam, then quits.
+func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {
 	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"saved":true}`)}
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
-	rec := &recordingSaver{}
-	m := newSavingModel(t, eng, rec.save)
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, eng, host)
 	m.transcript.addUser("hello", nil) // give it content worth saving
 
 	_, cmd := ctrlCQuit(t, m)
-	if !rec.called {
-		t.Fatal("a clean quit did not save the session")
+	calls := host.savedCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Save calls on a clean quit = %d; want 1", len(calls))
 	}
-	if string(rec.sess.State) != string(marker.State) {
-		t.Errorf("saved snapshot = %q; want the Engine's snapshot %q", rec.sess.State, marker.State)
+	if string(calls[0].sess.State) != string(marker.State) {
+		t.Errorf("flushed snapshot = %q; want the Engine's snapshot %q", calls[0].sess.State, marker.State)
+	}
+	if calls[0].title != "hello" {
+		t.Errorf("flushed title = %q; want the first user message", calls[0].title)
 	}
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
 		t.Error("a clean quit did not quit the program")
 	}
 }
 
-// An empty conversation is not worth a snapshot file — quit without saving.
-func TestModelDoesNotSaveEmptyConversation(t *testing.T) {
-	rec := &recordingSaver{}
-	m := newSavingModel(t, &fakeEngine{}, rec.save)
+// An empty conversation is not worth a record — a per-Turn snapshot and a clean quit both save
+// nothing when the transcript holds only the seeded start-up box.
+func TestModelEmptyTranscriptNeverSaves(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
 
+	if _, cmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{}}); cmd != nil {
+		t.Error("a per-Turn snapshot scheduled a save for a transcript holding only the start-up box")
+	}
 	_, cmd := ctrlCQuit(t, m)
-	if rec.called {
-		t.Error("an empty conversation was saved on quit")
+	if n := len(host.savedCalls()); n != 0 {
+		t.Errorf("Save calls for an empty conversation = %d; want 0", n)
 	}
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
 		t.Error("quit did not exit")
@@ -913,14 +931,14 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 		snapshotted = true
 		return domain.Session{}, nil
 	}}
-	rec := &recordingSaver{}
-	m := newSavingModel(t, eng, rec.save)
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, eng, host)
 	m.transcript.addUser("hi", nil)
 	m.state = stateRunning
 	m.cancel = func() {}
 
 	next, cmd := ctrlCQuit(t, m)
-	if snapshotted || rec.called {
+	if snapshotted || len(host.savedCalls()) != 0 {
 		t.Error("snapshotted while a worker was running (would race the single-goroutine Agent)")
 	}
 	// The exit is DEFERRED while busy: an immediate tea.Quit would race runRoot's Close()
@@ -928,10 +946,11 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
 		t.Error("ctrl+c×2 while busy quit immediately instead of waiting for the worker")
 	}
-	// The worker's terminal Msg fires the deferred quit — and still saves nothing (the busy
-	// path never armed a save; the last boundary stays unsaved this phase).
+	// The worker's terminal Msg fires the deferred quit — and still saves nothing: finishWorker's
+	// quitting branch short-circuits before the idle finisher, so the deferred exit never
+	// snapshots the cancelled boundary (the per-Turn saves already captured every completed Turn).
 	_, doneCmd := stepCmd(t, next, cancelledMsg{})
-	if snapshotted || rec.called {
+	if snapshotted || len(host.savedCalls()) != 0 {
 		t.Error("the deferred quit snapshotted the cancelled boundary; the busy path must not save")
 	}
 	if _, isQuit := cmdMsg(doneCmd).(tea.QuitMsg); !isQuit {
@@ -939,13 +958,179 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	}
 }
 
-// A nil saver (session saving disabled) must not break the quit path.
+// A nil host (session saving disabled) must not break the quit path.
 func TestModelQuitWithoutSaver(t *testing.T) {
-	m := newTestModel(t) // testOpts carries no Save
+	m := newTestModel(t) // testOpts carries no Sessions
 	m.transcript.addUser("hi", nil)
 	_, cmd := ctrlCQuit(t, m)
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
 		t.Error("quit with no saver did not exit")
+	}
+}
+
+// A completed per-Turn snapshot persists the engine snapshot, the encoded scrollback, and the
+// derived metadata through the seam.
+func TestModelPerTurnSaveEncodesTranscript(t *testing.T) {
+	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"turn":1}`)}
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+	m.transcript.addUser("summarise the plan", nil)
+	m.ctxUsed = 4096
+
+	m, cmd := stepCmd(t, m, turnSnapshotMsg{Sess: marker})
+	if cmd == nil {
+		t.Fatal("a per-Turn snapshot scheduled no save")
+	}
+	done, ok := cmdMsg(cmd).(saveDoneMsg)
+	if !ok || done.Err != nil {
+		t.Fatalf("save Cmd yielded %T (err %v); want a clean saveDoneMsg", done, done.Err)
+	}
+
+	calls := host.savedCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Save calls = %d; want 1 per Turn", len(calls))
+	}
+	got := calls[0]
+	if string(got.sess.State) != string(marker.State) {
+		t.Errorf("saved snapshot = %q; want the worker's snapshot %q", got.sess.State, marker.State)
+	}
+	if got.title != "summarise the plan" {
+		t.Errorf("title = %q; want the first user message", got.title)
+	}
+	if got.userMsgs != 1 {
+		t.Errorf("userMsgs = %d; want 1", got.userMsgs)
+	}
+	if got.ctxUsed != 4096 {
+		t.Errorf("ctxUsed = %d; want the live context fill 4096", got.ctxUsed)
+	}
+	entries, err := decodeTranscript(got.transcript)
+	if err != nil {
+		t.Fatalf("decode persisted transcript: %v", err)
+	}
+	if len(entries) != 1 || entries[0].kind != entryUser || entries[0].text != "summarise the plan" {
+		t.Errorf("persisted transcript = %+v; want the single user entry", entries)
+	}
+}
+
+// A completed Exchange takes the Model's OWN snapshot at idle (finishWorker → saveAtIdle) and
+// persists it — the closing-boundary save that catches state after the last per-Turn snapshot.
+func TestModelSavesAtIdleOnExchangeDone(t *testing.T) {
+	marker := domain.Session{State: json.RawMessage(`{"idle":true}`)}
+	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, eng, host)
+	m.transcript.addUser("hello", nil)
+	m.state = stateRunning
+	m.cancel = func() {}
+
+	_, cmd := stepCmd(t, m, exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete}})
+	if cmd == nil {
+		t.Fatal("the idle finisher scheduled no save")
+	}
+	cmdMsg(cmd)
+	calls := host.savedCalls()
+	if len(calls) != 1 || string(calls[0].sess.State) != string(marker.State) {
+		t.Fatalf("idle save = %+v; want one save of the Model's own snapshot", calls)
+	}
+}
+
+// Single-flight: snapshots that arrive while a save is in flight coalesce (latest-wins), so
+// exactly one is dispatched when the running save reports back — the older intermediate is dropped.
+func TestModelSaveSingleFlightCoalesces(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+	m.transcript.addUser("hi", nil)
+
+	s1 := domain.Session{State: json.RawMessage(`{"n":1}`)}
+	s2 := domain.Session{State: json.RawMessage(`{"n":2}`)}
+	s3 := domain.Session{State: json.RawMessage(`{"n":3}`)}
+
+	// The first snapshot schedules a save (busy); leave its Cmd unrun so the next two coalesce.
+	m, cmd1 := stepCmd(t, m, turnSnapshotMsg{Sess: s1})
+	if cmd1 == nil {
+		t.Fatal("the first snapshot scheduled no save")
+	}
+	m, cmd2 := stepCmd(t, m, turnSnapshotMsg{Sess: s2})
+	m, cmd3 := stepCmd(t, m, turnSnapshotMsg{Sess: s3})
+	if cmd2 != nil || cmd3 != nil {
+		t.Fatal("a snapshot while a save was in flight dispatched instead of coalescing")
+	}
+
+	// Finish the in-flight save, then fold its saveDoneMsg: the latest coalesced payload (s3)
+	// dispatches; s2 was superseded.
+	m, cmd4 := stepCmd(t, m, cmdMsg(cmd1)) // cmdMsg(cmd1) runs Save(s1) and yields its saveDoneMsg
+	if cmd4 == nil {
+		t.Fatal("the coalesced save was not dispatched after saveDoneMsg")
+	}
+	cmdMsg(cmd4) // runs Save(s3)
+
+	calls := host.savedCalls()
+	if len(calls) != 2 {
+		t.Fatalf("Save calls = %d; want 2 (s1, then the coalesced s3)", len(calls))
+	}
+	if string(calls[0].sess.State) != `{"n":1}` {
+		t.Errorf("first save = %q; want s1", calls[0].sess.State)
+	}
+	if string(calls[1].sess.State) != `{"n":3}` {
+		t.Errorf("second save = %q; want the latest coalesced s3 (s2 dropped)", calls[1].sess.State)
+	}
+}
+
+// A save failure is soft: the ok→fail edge and the fail→ok recovery each note exactly once, and
+// nothing else interrupts the conversation.
+func TestModelSaveFailureNotesTransitions(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+	m.transcript.addUser("hi", nil)
+	sess := domain.Session{State: json.RawMessage(`{}`)}
+
+	m = driveOneSave(t, m, sess) // save 1 succeeds — no note
+	host.saveErr = errors.New("disk full")
+	m = driveOneSave(t, m, sess) // save 2 fails — ok→fail note
+	m = driveOneSave(t, m, sess) // save 3 fails again — no second failure note
+	host.saveErr = nil
+	m = driveOneSave(t, m, sess) // save 4 succeeds — fail→ok note
+
+	notes := saveNotes(m)
+	if len(notes) != 2 {
+		t.Fatalf("save notes = %d %q; want exactly two (ok→fail, fail→ok)", len(notes), notes)
+	}
+	if !strings.Contains(notes[0], "session save failed: disk full") {
+		t.Errorf("first note = %q; want the ok→fail failure note", notes[0])
+	}
+	if notes[1] != "session saving recovered" {
+		t.Errorf("second note = %q; want the fail→ok recovery note", notes[1])
+	}
+}
+
+// The session-title heuristic mirrors apogee-code: the first line kept when it fits, truncated at
+// a word boundary with an ellipsis when it does not, and a dated fallback for an empty message or
+// one that opens a code fence.
+func TestSessionTitle(t *testing.T) {
+	long := "The quick brown fox jumps over the lazy dog and then keeps running"
+	cases := []struct {
+		name, in, want string
+		prefix         bool // want is a prefix match (the dated fallback carries today's date)
+	}{
+		{name: "short line kept", in: "fix the login bug", want: "fix the login bug"},
+		{name: "first line only", in: "rename the store\nand add tests", want: "rename the store"},
+		{name: "word-boundary truncate", in: long, want: "The quick brown fox jumps over the lazy dog and…"},
+		{name: "code fence falls back", in: "```go\nfunc main() {}\n```", want: "Session ", prefix: true},
+		{name: "empty falls back", in: "   ", want: "Session ", prefix: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sessionTitle(tc.in)
+			if tc.prefix {
+				if !strings.HasPrefix(got, tc.want) {
+					t.Errorf("sessionTitle(%q) = %q; want a %q… fallback", tc.in, got, tc.want)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Errorf("sessionTitle(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1217,7 +1402,7 @@ func TestModelResizeDoesNotPanic(t *testing.T) {
 
 // Before the first WindowSizeMsg the view is a placeholder, not a panic.
 func TestModelViewBeforeReady(t *testing.T) {
-	m := newModel(context.Background(), &fakeEngine{}, testOpts)
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 	if m.ready {
 		t.Fatal("model ready before any WindowSizeMsg")
 	}

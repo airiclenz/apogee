@@ -21,10 +21,12 @@ import (
 // Agent's single-goroutine contract holds by construction (C1).
 //
 // parent is the program's context; deriving the worker ctx from it means a program-wide
-// shutdown also cancels an in-flight Exchange.
-func startExchange(parent context.Context, eng Engine, input domain.UserInput) (tea.Cmd, context.CancelFunc) {
+// shutdown also cancels an in-flight Exchange. notify sends a per-Turn snapshot into the running
+// program (Run wires it to the Bridge's late-bound sender); a nil notify disables per-Turn saves,
+// which is exactly what the seam tests that drive driveExchange in isolation pass.
+func startExchange(parent context.Context, eng Engine, input domain.UserInput, notify func(tea.Msg)) (tea.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
-	cmd := func() tea.Msg { return driveExchange(ctx, eng, input) }
+	cmd := func() tea.Msg { return driveExchange(ctx, eng, input, notify) }
 	return cmd, cancel
 }
 
@@ -62,7 +64,15 @@ func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFu
 // It is the only caller of eng's drive methods, which is what preserves the single-goroutine
 // contract (C1). The StepStatus set is open; only StatusTurnComplete continues, and any other
 // terminal status returns the model to idle (treated as an Exchange end) rather than looping.
-func driveExchange(ctx context.Context, eng Engine, input domain.UserInput) tea.Msg {
+//
+// After each committed Turn it snapshots the engine and hands the snapshot to notify for a
+// per-Turn save (the session system's every-Turn cadence). The snapshot is valid here because
+// between Steps this worker is the engine's single driver (agent.go). It is sent AFTER the Turn's
+// Events — the teaSink delivered them synchronously inside the Step that just returned — so the
+// Model folds it into a transcript consistent with the snapshot (the events-before-notify
+// ordering the existing exchangeDoneMsg path already relies on). A Snapshot error simply skips
+// that Turn's save; the loop keeps stepping.
+func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, notify func(tea.Msg)) tea.Msg {
 	if err := eng.Submit(input); err != nil {
 		return errMsg{Err: err}
 	}
@@ -73,6 +83,11 @@ func driveExchange(ctx context.Context, eng Engine, input domain.UserInput) tea.
 		}
 		switch res.Status {
 		case domain.StatusTurnComplete:
+			if notify != nil {
+				if snap, snapErr := eng.Snapshot(); snapErr == nil {
+					notify(turnSnapshotMsg{Sess: snap})
+				}
+			}
 			continue
 		case domain.StatusCancelled:
 			return cancelledMsg{Result: res}

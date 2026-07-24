@@ -110,7 +110,7 @@ func saveHostAcknowledgement(path, hostID string, now time.Time) (string, unconf
 
 // hostAcknowledgementSaver adapts the writer to the TUI's Options.SaveHostAcknowledgement seam.
 // The renderer learns only which file now records this host — it already knows the id from
-// Options.Confinement, and the on-disk format stays the binary's business (the Options.Save
+// Options.Confinement, and the on-disk format stays the binary's business (the Options.Sessions
 // precedent).
 func hostAcknowledgementSaver(path, hostID string) func() (string, error) {
 	return func() (string, error) {
