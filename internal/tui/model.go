@@ -82,6 +82,7 @@ type Model struct {
 	cancel     context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
 	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
 	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
+	askSel     int                // the highlighted ask_user choice index while awaitingAsk (D5); bare int, no no-copy type (ADR 0011)
 	lastErr    error              // the error behind stateErrored, shown in the status line
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
 	quitting   bool               // a quit requested while busy; the exit waits for the worker's terminal Msg (C4)
@@ -279,6 +280,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the question; submitAnswer replies on msg.Reply when the human submits (P3.11).
 		m.state = stateAwaitingAsk
 		m.pendingAsk = &msg
+		m.askSel = 0 // first choice pre-selected while the input is empty (D5); no-op when there are no choices
 		m.input.Reset()
 		m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
 		m.layout()
@@ -499,6 +501,27 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// fall-through below, which would otherwise swallow a/d/s as viewport scroll keys.
 	if m.state == stateAwaitingApproval {
 		return m.handleApprovalKey(msg)
+	}
+
+	// While awaiting an ask_user answer that offers choices, ↑/↓ move the choice highlight — but
+	// ONLY while the input box is empty (D5). The moment the human types, this guard fails and the
+	// arrows fall through to the textarea below (cursor duty), so multi-line free-text editing is
+	// never stolen; deleting back to empty restores the highlight. Non-wrapping, clamped to the
+	// choice range.
+	if m.state == stateAwaitingAsk && m.pendingAsk != nil &&
+		len(m.pendingAsk.Request.Choices) > 0 && m.input.Value() == "" {
+		switch msg.String() {
+		case "up":
+			if m.askSel > 0 {
+				m.askSel--
+			}
+			return m, nil
+		case "down":
+			if m.askSel < len(m.pendingAsk.Request.Choices)-1 {
+				m.askSel++
+			}
+			return m, nil
+		}
 	}
 
 	// While awaiting an ask_user answer the input box is live so the human types the reply —
@@ -774,7 +797,17 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	if m.pendingAsk == nil {
 		return m, nil
 	}
-	answer := strings.TrimSpace(m.input.Value())
+	// With choices offered and an empty input the answer is the highlighted choice — the SAME
+	// escape-stripped label the popup showed, not the raw domain string (D5/D9). Otherwise it is
+	// the trimmed typed text (an empty free-text answer stays allowed when no choices are offered).
+	choices := m.pendingAsk.Request.Choices
+	var answer string
+	if len(choices) > 0 && m.input.Value() == "" {
+		sel := min(max(m.askSel, 0), len(choices)-1) // defensive clamp; routing keeps it in range
+		answer = stripEscapes(choices[sel])
+	} else {
+		answer = strings.TrimSpace(m.input.Value())
+	}
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
 	m.pendingAsk = nil
 	m.input.Reset()
@@ -1674,13 +1707,47 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	return body
 }
 
-// askPrompt renders the pending ask_user question above the input box: the question on a
-// bold lead line and a one-line hint that the input below is the answer field (P3.11). The
-// human types into the (borrowed) input box and presses enter to submit, or esc to cancel —
-// the same chrome as a normal message, with the question framing it.
+// maxAskChoiceRows caps how many ask_user choice rows the popup shows at once (the
+// maxAutocompleteItems convention); a longer set scrolls its window around the selection.
+const maxAskChoiceRows = 8
+
+// askPrompt renders the pending ask_user question as a bordered popup pane above the input box
+// (the shared popup module): the title, the wrapped question body, then any offered choices as
+// selectable rows, and a one-line key hint (P3.11; D5/D6/D8). While the input box is empty and
+// choices are offered, ↑/↓ move the highlight and ⏎ sends the highlighted label; the moment the
+// human types, the highlight drops (selected −1) and ⏎ sends the typed text — so the answer mode
+// is always visible in the chrome. Every model-authored string (question, choices) is
+// escape-stripped at this call site. The screen budget is derived from the live layout so a long
+// question or a long choice set never pushes the input box off-screen: rows get priority (they
+// are what the human acts on), the body keeps ≥ 1 row and overflows into the explicit
+// "… (+N more lines)" marker (D2).
 func (m Model) askPrompt(req domain.AskRequest) string {
-	head := approvalStyle.Render("the assistant is asking:")
-	body := head + "\n" + m.th.toolDetail.Render(req.Question)
-	body += "\n" + m.th.statusFaint.Render("type your answer below · ⏎ send · ⇧⏎/⌥⏎ newline · esc cancel")
-	return body
+	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
+
+	selected := -1
+	hint := "type your answer below · ⏎ send · ⇧⏎/⌥⏎ newline · esc cancel"
+	if choicesShown {
+		selected = min(max(m.askSel, 0), len(req.Choices)-1) // clamp: routing keeps it in range, this is defensive
+		hint = "↑↓ select · ⏎ send · type for a custom answer · esc cancel"
+	}
+
+	// Budget against the live layout (D2). m.viewport.Height() here is the full, pre-shrink layout
+	// height: View shrinks a local copy AFTER this runs (verified model.go View slot), so this is
+	// the true screen budget. Keep ≥ 3 transcript rows visible; the chrome is the 2 borders + the
+	// title + the hint.
+	avail := max(6, m.viewport.Height()-3)
+	const chrome = 4
+	rowsShown := min(len(req.Choices), maxAskChoiceRows, max(0, avail-chrome-1))
+	maxBodyRows := max(1, avail-chrome-rowsShown)
+
+	spec := popupSpec{
+		title:       "the assistant is asking:",
+		body:        stripEscapes(req.Question),
+		maxBodyRows: maxBodyRows,
+		rows:        stripEscapesAll(req.Choices),
+		selected:    selected,
+		hint:        hint,
+		maxRows:     rowsShown,
+	}
+	return renderPopup(m.th, spec, m.width)
 }

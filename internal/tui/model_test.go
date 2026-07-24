@@ -845,6 +845,123 @@ func TestModelAskCancelClearsPrompt(t *testing.T) {
 	}
 }
 
+// takeAnswer reads the one reply the model sends on submit, failing if none was sent.
+func takeAnswer(t *testing.T, reply chan domain.AskAnswer) string {
+	t.Helper()
+	select {
+	case got := <-reply:
+		return got.Text
+	default:
+		t.Fatal("no answer sent on the reply channel")
+		return ""
+	}
+}
+
+// With choices offered, the popup renders the question body and every choice as a row with the
+// first pre-selected; ↓ moves the highlight and ⏎ sends the highlighted label (D5/D9).
+func TestModelAskChoicesRoundTrip(t *testing.T) {
+	m, reply := newAskModel(t, domain.AskRequest{
+		Question: "which one?",
+		Choices:  []string{"alpha", "beta", "gamma"},
+	})
+
+	view := plain(m.View())
+	for _, want := range []string{"which one?", "alpha", "beta", "gamma", "❯ alpha"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("ask popup missing %q:\n%s", want, view)
+		}
+	}
+
+	m = step(t, m, keyDown())
+	m, _ = stepCmd(t, m, keyEnter())
+	if got := takeAnswer(t, reply); got != "beta" {
+		t.Errorf("answer = %q, want %q (the second choice)", got, "beta")
+	}
+	if m.state != stateRunning {
+		t.Errorf("state = %v, want running after the pick", m.state)
+	}
+}
+
+// Typing a custom answer drops the choice highlight (selected −1) and ⏎ sends the typed text;
+// deleting back to empty restores the highlight and ⏎ then picks it (D5).
+func TestModelAskTypedTextOverridesChoices(t *testing.T) {
+	m, reply := newAskModel(t, domain.AskRequest{
+		Question: "which one?",
+		Choices:  []string{"alpha", "beta"},
+	})
+
+	typed := typeInput(t, m, "custom")
+	if v := plain(typed.View()); strings.Contains(v, "❯ alpha") {
+		t.Errorf("choice highlight still shown while typing a custom answer:\n%s", v)
+	}
+
+	back := typed
+	for range "custom" {
+		back = step(t, back, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	if v := plain(back.View()); !strings.Contains(v, "❯ alpha") {
+		t.Errorf("choice highlight not restored after deleting back to empty:\n%s", v)
+	}
+	_, _ = stepCmd(t, back, keyEnter())
+	if got := takeAnswer(t, reply); got != "alpha" {
+		t.Errorf("answer after restore = %q, want %q", got, "alpha")
+	}
+}
+
+// ↑/↓ with text in the input drive the textarea cursor, not the choice highlight — the multi-line
+// free-text answer must not be stolen from (D5).
+func TestModelAskArrowsWithTextKeepSelection(t *testing.T) {
+	m, _ := newAskModel(t, domain.AskRequest{
+		Question: "which one?",
+		Choices:  []string{"alpha", "beta", "gamma"},
+	})
+	m = typeInput(t, m, "x")
+	before := m.askSel
+	m = step(t, m, keyDown())
+	m = step(t, m, keyUp())
+	if m.askSel != before {
+		t.Errorf("askSel moved to %d while text was in the input; want unchanged %d", m.askSel, before)
+	}
+}
+
+// The question and choices are escape-stripped before rendering, so a model-authored ESC byte
+// never reaches the terminal (D8, hardening). stripEscapes removes only the ESC byte, leaving the
+// color code as INERT literal text ("[31mred"); had the ESC survived, plain() would have consumed
+// the whole "\x1b[31m" as a real SGR sequence and the literal would be gone — so its presence in
+// the stripped View is exactly the proof the strip happened at the call site.
+func TestModelAskEscapeStrips(t *testing.T) {
+	m, _ := newAskModel(t, domain.AskRequest{
+		Question: "pick\x1b[31mred",
+		Choices:  []string{"al\x1b[32mpha"},
+	})
+	view := plain(m.View())
+	if !strings.Contains(view, "pick[31mred") {
+		t.Errorf("question ESC not stripped at the source:\n%s", view)
+	}
+	if !strings.Contains(view, "[32mpha") {
+		t.Errorf("choice ESC not stripped at the source:\n%s", view)
+	}
+}
+
+// A question far taller than the screen caps its body with the explicit overflow marker and never
+// pushes the input box off-screen (D2, the never-clip guarantee).
+func TestModelAskLongQuestionCapsBody(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	reply := make(chan domain.AskAnswer, 1)
+	m = step(t, m, askReqMsg{
+		Request: domain.AskRequest{Question: strings.TrimSpace(strings.Repeat("word ", 400))},
+		Reply:   reply,
+	})
+
+	view := plain(m.View())
+	if !strings.Contains(view, "more lines)") {
+		t.Errorf("long question did not show the overflow marker:\n%s", view)
+	}
+	if !strings.Contains(view, "Send a message") {
+		t.Errorf("input box (placeholder) clipped from the View by the long question:\n%s", view)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Per-Turn session saves through the SessionHost seam (session-system plan §4)
 // ----------------------------------------------------------------------------

@@ -201,7 +201,7 @@ TUI adoption is item 3 — this item is engine/tool surface only). Commit:
 
 ---
 
-## 3. The ask prompt adopts the popup, with selectable choices — `internal/tui`
+## 3. The ask prompt adopts the popup, with selectable choices — `internal/tui` — ✅ DONE (2026-07-24)
 
 All in `model.go` (+ `model_test.go`, `asker_test.go` untouched unless noted):
 
