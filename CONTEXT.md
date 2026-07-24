@@ -104,7 +104,10 @@ one harmony sub-channel, not the whole concept).
 **Turn**:
 One iteration of the loop — a single *primary* Upstream call and the work that follows it
 (parse → dispatch tools → apply Mechanisms). Compaction's summarisation call is *internal*
-to a Turn, not a Turn of its own. The unit of self-regulation and of bench measurement.
+to a Turn, not a Turn of its own. The unit of self-regulation and of bench measurement. The
+Turn's lifecycle — its opening, its one permitted overflow fold, and its four exits (complete,
+Exchange-complete, abandoned, cancelled) — is owned by the loop's `turnLifecycle` module
+(`internal/agent/turn.go`), the way the Exchange anchors on `ExchangeView`.
 
 **Exchange**:
 One user input through to the final no-tool response — usually several Turns. The

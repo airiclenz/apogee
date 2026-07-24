@@ -382,7 +382,7 @@ comment, or import-graph change beyond what the move forces.
 diff is verifiably move-only (deletions in `loop.go` match insertions in the two new files).
 Commit: `refactor(agent): split loop.go construction and wire-translation clusters into their own files`.
 
-## 6. Docs — CONTEXT.md wording and the CHANGELOG entry
+## 6. Docs — CONTEXT.md wording and the CHANGELOG entry — ✅ DONE (2026-07-24)
 
 **What:** Two small edits:
 

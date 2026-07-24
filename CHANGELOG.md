@@ -8,6 +8,18 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Changed
+
+- **The agent loop's Turn lifecycle is consolidated into one `turnLifecycle` module — an internal
+  refactor with no behaviour or public-API change.** The Turn's four exits (complete /
+  Exchange-complete / abandoned / cancelled), its one-permitted overflow fold-and-rebuild, and its
+  Exchange-boundary maintenance — previously three exit helpers, a copy-pasted recovery ritual, and
+  scattered boundary-write sites in `loop.go` — now live behind a table-tested owner in
+  `internal/agent/turn.go`. The semantics are locked to the prior behaviour and the existing suite
+  is the pin; `agentState`'s session-JSON schema stays byte-compatible. Separately, `loop.go`'s
+  construction and domain→wire translation clusters moved verbatim into `construct.go` and
+  `wire.go`.
+
 ## [0.8.0] — 2026-07-23
 
 *Release version **reset from the `1.x` line to `0.8.0`.** The `1.x` numbering overstated

@@ -787,8 +787,9 @@ func (c *Conversation) TruncateDeferred(n int) {
 
 // ClearDeferred discards all pending deferred corrections. A Deferred Response Action is a decision
 // about the NEXT request of the SAME conversation flow, so the loop clears the queue whenever an
-// Exchange ends (completeTurn's Exchange-complete branch, abandonTurn, AbortExchange): a stale
-// fan-out directive must never survive a fault or abort into the next Exchange (F6).
+// Exchange ends — internal/agent's closeExchange, which runs on the end() dispositions that close
+// the Exchange (endExchangeDone, endAbandoned) and from AbortExchange: a stale fan-out directive
+// must never survive a fault or abort into the next Exchange (F6).
 func (c *Conversation) ClearDeferred() {
 	if len(c.deferred) == 0 {
 		return
