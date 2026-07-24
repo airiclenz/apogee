@@ -222,7 +222,17 @@ true for a mid-Exchange snapshot restored, false after `AbortExchange`.
 
 ---
 
-## 3. TUI transcript codec (versioned scrollback serialization)
+## 3. TUI transcript codec (versioned scrollback serialization) — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Two clarifications where the literal text was silent. (1) The forward-reject
+is a named sentinel `ErrTranscriptVersion` (not just "an error"), mirroring item 1's
+`ErrRecordVersion` and the engine's `ErrSessionVersion` — the layer-ownership-of-versions rule,
+so item 5/7 can `errors.Is` it. (2) The plan says "malformed → error" but does not address an
+UNKNOWN entry-kind STRING inside an otherwise valid, supported-version blob: `decodeTranscript`
+SKIPS such an entry (and keeps the rest) rather than failing the whole replay — symmetric with
+the encode side, which skips `entryStartup` because it has no wire name, and consistent with
+`transcript.apply`'s tolerate-unknown default. Genuinely malformed JSON and a future `version`
+still error, exactly as written.
 
 **What:** `internal/tui/transcriptcodec.go` — the TUI-owned, versioned wire form of the
 scrollback, the `Record.Transcript` blob.
