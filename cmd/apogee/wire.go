@@ -449,7 +449,7 @@ type sessionSaver struct {
 
 // save persists the snapshot and records its path on success.
 func (s *sessionSaver) save(sess apogee.Session) error {
-	path, err := s.store.Save(sess)
+	path, err := s.store.SaveEnvelope(sess)
 	if err != nil {
 		return err
 	}

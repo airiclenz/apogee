@@ -365,7 +365,7 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	store := session.NewStore(sessionsDir)
 	var savedPath string
 	save := func(s domain.Session) error {
-		path, err := store.Save(s)
+		path, err := store.SaveEnvelope(s)
 		savedPath = path
 		return err
 	}

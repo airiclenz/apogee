@@ -1,9 +1,16 @@
-// Package session persists and reloads Agent snapshots — the same primitive the bench
-// composes into forking and counterfactuals, which Apogee itself does not expose
-// (ADR 0001). Snapshots are copyable values with a versioned schema (internal/domain).
+// Package session persists conversations as id-addressed Records — the storage layer the
+// history browser lists, resumes, renames, and deletes, and the composition root writes to
+// after every Turn.
 //
-// The Store writes snapshots to a directory (SessionsDir) under sortable timestamp
-// filenames and owns the on-disk format, so callers never duplicate that knowledge.
-// Decoding a snapshot back into a Session is domain.DecodeSession (the read path the
-// binary's --resume uses directly).
+// A Record wraps two opaque payloads in browsable Meta: the engine's Session envelope
+// (internal/domain, versioned and resumed by the engine) and the TUI's Transcript blob
+// (versioned by internal/tui). Each layer owns and forward-rejects only its own version;
+// this package versions the wrapper (RecordVersion) and rejects a newer wrapper with
+// ErrRecordVersion.
+//
+// The Store owns the on-disk format and naming so its callers never duplicate that
+// knowledge. Ids from NewID are sortable UTC stamps with a random suffix; Save writes
+// atomically (temp file + rename) under <id>.json and updates in place; List/Load skip or
+// wrap files they cannot read as records, so pre-plan bare domain.Session files still list,
+// load, and resume, and one corrupt file never kills the browser.
 package session
