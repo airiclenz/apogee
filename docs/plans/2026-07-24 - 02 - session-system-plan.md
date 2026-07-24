@@ -459,7 +459,10 @@ untouched + notes the failure (the load-bearing half of the locked error rule), 
 the host's active id untouched: item 5's shipped `Load` (✅ done) activates the loaded session
 unconditionally before handing back the record, and the `SessionHost` interface exposes no setter to
 revert it. So the browser-resume error test asserts view+engine untouched + the note, not active-id
-untouched. See FOLLOW-UP. Also: `TestCommandDropdownOffersSkill` was retargeted from `/s` to `/sk`
+untouched. See FOLLOW-UP. [RESOLVED 2026-07-24 by follow-up fix: `Load` no longer activates — a new
+`SessionHost.Activate(Meta)` seam is called by the resume path only AFTER `RestoreSession` succeeds,
+so a failed restore now leaves the active id untouched; `TestSessionBrowserResumeErrorLeavesActiveSessionUntouched`
+pins it.] Also: `TestCommandDropdownOffersSkill` was retargeted from `/s` to `/sk`
 (now that `/sessions` shares the `s` prefix) — same intent, still asserts the `/skill` suggestion.
 
 **What:** The in-TUI list/resume/delete/rename surface. (Depends on 1–5.)

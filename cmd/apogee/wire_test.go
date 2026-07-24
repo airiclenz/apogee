@@ -657,8 +657,9 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 	}
 }
 
-// Rotate closes the active session so the next Save mints a fresh id; Load re-activates a stored
-// session so subsequent Saves update ITS file rather than forking a new one.
+// Rotate closes the active session so the next Save mints a fresh id; Load reads a stored session
+// without touching the active one, and Activate then makes it the target of subsequent Saves so
+// they update ITS file rather than forking a new one.
 func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
@@ -681,13 +682,21 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 		t.Errorf("Save after Rotate minted %q; want a fresh id different from %q", second, first)
 	}
 
-	// Loading the first session makes it active again; the next Save updates its file, not B's.
+	// Loading the first session reads it without activating; Activate then makes it current again,
+	// so the next Save updates its file, not B's.
 	rec, err := host.Load(first)
 	if err != nil {
 		t.Fatalf("Load(first): %v", err)
 	}
-	if rec.Meta.ID != first || host.ActiveID() != first {
-		t.Errorf("Load did not activate %q (rec id %q, active %q)", first, rec.Meta.ID, host.ActiveID())
+	if rec.Meta.ID != first {
+		t.Errorf("Load returned rec id %q, want %q", rec.Meta.ID, first)
+	}
+	if host.ActiveID() != second {
+		t.Errorf("Load changed the active session to %q; it must leave %q active until Activate", host.ActiveID(), second)
+	}
+	host.Activate(rec.Meta)
+	if host.ActiveID() != first {
+		t.Errorf("Activate did not make %q current (active %q)", first, host.ActiveID())
 	}
 	if err := host.Save(apogee.Session{}, nil, "ignored", 3, 0); err != nil {
 		t.Fatalf("Save after Load: %v", err)

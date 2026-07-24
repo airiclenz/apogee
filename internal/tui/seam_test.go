@@ -367,8 +367,13 @@ func (h *fakeSessionHost) Load(id string) (session.Record, error) {
 	if !ok {
 		return session.Record{}, fmt.Errorf("no session %q", id)
 	}
-	h.activeID = id // Load activates: later Saves update the loaded session's file
-	return rec, nil
+	return rec, nil // Load does not activate; Activate does, only after a confirmed restore
+}
+
+func (h *fakeSessionHost) Activate(meta session.Meta) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.activeID = meta.ID // later Saves update the activated session's file
 }
 
 func (h *fakeSessionHost) Delete(id string) error {

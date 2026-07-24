@@ -285,8 +285,9 @@ func (m Model) renameSession(id, title string) tea.Cmd {
 	}
 }
 
-// loadSession builds the Cmd that reads Sessions.Load(id) off the Update loop (which also makes it
-// the active session, so later saves target its file) and reports it as a sessionLoadedMsg.
+// loadSession builds the Cmd that reads Sessions.Load(id) off the Update loop and reports it as a
+// sessionLoadedMsg. Load does not activate the record — resumeLoaded switches the active session
+// only once the live restore has succeeded, so a failed restore keeps saving the outgoing session.
 func (m Model) loadSession(id string) tea.Cmd {
 	sessions := m.sessions
 	return func() tea.Msg {
@@ -296,9 +297,10 @@ func (m Model) loadSession(id string) tea.Cmd {
 }
 
 // resumeLoaded restores a loaded record into the live engine and repaints its scrollback. On a
-// restore error the view and the active session are left untouched (the locked "a fresh view must
-// never lie about the engine" rule) and the failure is noted. On success it resets the view like
-// startNewSession — reseed the start-up box, repaint the stored scrollback (a decode failure or a
+// restore error the view AND the host's active session are left untouched (the locked "a fresh view
+// must never lie about the engine" rule) and the failure is noted — because Load did not activate,
+// the outgoing conversation keeps saving to its own file. Only on success does it activate the
+// loaded session (redirecting future saves) and reset the view like startNewSession — reseed the start-up box, repaint the stored scrollback (a decode failure or a
 // legacy empty blob degrades to an honest no-scrollback note), relight the gauge from the stored
 // fill, and re-arm the same field set startNewSession resets. A session restored mid-task gets the
 // interrupted note (item 8 supplies the step-only /continue drive that finishes it).
@@ -312,6 +314,12 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 		m.transcript.addNote("could not restore session: " + err.Error())
 		m.refreshViewport()
 		return nil
+	}
+	// The restore succeeded, so it is now safe to redirect saves at the loaded session's file
+	// (Load deliberately left the active session untouched — see resumeLoaded's doc). A failed
+	// RestoreSession above returns before this, leaving the outgoing conversation's file active.
+	if m.sessions != nil {
+		m.sessions.Activate(msg.rec.Meta)
 	}
 	title := msg.rec.Meta.Title
 	m.transcript.reset()

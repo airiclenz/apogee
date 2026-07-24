@@ -38,9 +38,16 @@ type SessionHost interface {
 	Rotate()
 	// List returns every stored session's browsable metadata, newest first.
 	List() ([]session.Meta, error)
-	// Load returns a stored record AND makes it the active session, so subsequent Saves update
-	// the loaded session's file rather than forking a new one.
+	// Load returns a stored record WITHOUT changing which session is active. Activation is
+	// deferred to Activate so the /sessions resume flow can switch which file Saves target only
+	// after the live RestoreSession has confirmed the switch — a restore that then fails must
+	// leave the current session untouched.
 	Load(id string) (session.Record, error)
+	// Activate makes meta's session the target of subsequent Saves, replacing the current active
+	// session (the loaded file continues in place rather than forking a new one). The resume flow
+	// calls it only once RestoreSession has succeeded, so a failed restore never redirects saves
+	// away from the live conversation.
+	Activate(meta session.Meta)
 	// Delete removes a stored session's file.
 	Delete(id string) error
 	// Rename sets a stored session's title.

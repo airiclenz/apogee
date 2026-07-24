@@ -167,7 +167,8 @@ func TestSessionBrowserResumeHappyPath(t *testing.T) {
 		t.Error("the start-up box was not re-seeded at the head of the resumed view")
 	}
 
-	// Load activated the record: a subsequent per-Turn save targets the loaded id, not a fresh one.
+	// The successful resume activated the loaded record: a subsequent per-Turn save targets the
+	// loaded id, not a fresh one.
 	m = driveOneSave(t, m, domain.Session{})
 	calls := host.savedCalls()
 	if len(calls) == 0 || calls[len(calls)-1].id != "sess-1" {
@@ -225,6 +226,33 @@ func TestSessionBrowserResumeErrorLeavesViewUntouched(t *testing.T) {
 	// The view only grew by the failure note — the scrollback was not reset and re-seeded.
 	if len(m.transcript.entries) != before+1 {
 		t.Errorf("transcript entries = %d, want %d (+1 failure note only)", len(m.transcript.entries), before+1)
+	}
+}
+
+// A browser resume whose RestoreSession fails must leave the host's ACTIVE session untouched, so
+// subsequent per-Turn saves keep targeting the original session's file rather than the just-loaded
+// one. Load reads the record without activating; only a confirmed restore activates it.
+func TestSessionBrowserResumeErrorLeavesActiveSessionUntouched(t *testing.T) {
+	host := &fakeSessionHost{}
+	host.activeID = "current" // the live conversation's file, the one saves must keep targeting
+	storeMeta(host, "sess-1", "corrupt one", "/ws/a", time.Now(), 0, nil)
+	eng := &fakeEngine{restoreFn: func(domain.Session) error { return errors.New("bad snapshot") }}
+	m := newBrowserModel(t, eng, host, "/ws/a")
+	seedConversation(&m)
+
+	m = openBrowser(t, m)
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = step(t, m, cmdMsg(cmd)) // fold sessionLoadedMsg → resumeLoaded, RestoreSession fails
+
+	if host.ActiveID() != "current" {
+		t.Errorf("active session after a failed restore = %q, want the untouched %q", host.ActiveID(), "current")
+	}
+
+	// A per-Turn save now still writes to the original session, not the loaded sess-1.
+	m = driveOneSave(t, m, domain.Session{})
+	calls := host.savedCalls()
+	if len(calls) == 0 || calls[len(calls)-1].id != "current" {
+		t.Errorf("post-failed-resume save id = %v, want the original 'current'", calls)
 	}
 }
 

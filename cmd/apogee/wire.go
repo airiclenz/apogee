@@ -545,17 +545,21 @@ func (h *sessionHost) Rotate() {
 // List returns every stored session's browsable metadata, newest first (the store's ordering).
 func (h *sessionHost) List() ([]session.Meta, error) { return h.store.List() }
 
-// Load returns a stored record AND makes it the active session, so subsequent Saves update the
-// loaded session's file rather than forking a new one — the /sessions resume flow.
+// Load returns a stored record; it does NOT change the active session. Activation is deferred to
+// Activate so the /sessions resume flow switches which file Saves target only after the live
+// RestoreSession has succeeded — a restore that then fails leaves the current session's file
+// untouched (subsequent Saves keep updating it, not the loaded one).
 func (h *sessionHost) Load(id string) (session.Record, error) {
-	rec, err := h.store.Load(id)
-	if err != nil {
-		return session.Record{}, err
-	}
+	return h.store.Load(id)
+}
+
+// Activate makes meta's session the one subsequent Saves update, replacing the current active
+// session rather than forking a new file — the /sessions resume flow calls it once RestoreSession
+// has confirmed the switch. Its id, Title, and CreatedAt carry over so a later Save preserves them.
+func (h *sessionHost) Activate(meta session.Meta) {
 	h.mu.Lock()
-	h.active = &activeSession{id: rec.Meta.ID, title: rec.Meta.Title, createdAt: rec.Meta.CreatedAt}
+	h.active = &activeSession{id: meta.ID, title: meta.Title, createdAt: meta.CreatedAt}
 	h.mu.Unlock()
-	return rec, nil
 }
 
 // Delete removes a stored session's file.
