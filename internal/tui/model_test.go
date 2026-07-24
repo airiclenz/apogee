@@ -763,6 +763,114 @@ func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 	}
 }
 
+// The rebuilt approval prompt paints through the popup module: the raw tool name in the title,
+// the decision legend in the hint, and the pretty-printed args in the body (item 4; D7).
+func TestModelApprovalPromptPopupChrome(t *testing.T) {
+	m, _ := newApprovalModel(t, domain.ApprovalRequest{
+		Tool:      "write_file",
+		Reason:    "write",
+		Arguments: json.RawMessage(`{"path":"notes.txt"}`),
+	})
+	got := plain(m.View())
+	for _, want := range []string{
+		"approve write_file?",                             // title carries the raw tool name
+		"a allow · d deny · s allow-session · esc cancel", // decision legend (the hint)
+		"reason: write",                                   // reason on the body's lead line
+		"notes.txt",                                       // pretty-printed args in the body
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("approval popup missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// A Reason far longer than the window width wraps across body lines IN FULL — no word is lost to
+// an ellipsis on this security surface (D7). Every word survives and no overflow marker appears.
+func TestModelApprovalReasonWrapsInFull(t *testing.T) {
+	words := []string{
+		"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
+		"juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo",
+		"sierra", "tango", "uniform", "victor", "whiskey", "xray", "yankee", "zulu",
+	}
+	reason := strings.Join(words, " ") // ~150 chars — wider than the window, so it must wrap
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", Reason: reason}, Reply: reply})
+
+	view := plain(m.View())
+	if strings.Contains(view, "more lines") {
+		t.Fatalf("reason overflowed into the cap marker; it must fit and wrap in full:\n%s", view)
+	}
+	for _, w := range words {
+		if !strings.Contains(view, w) {
+			t.Errorf("reason word %q missing — the reason was truncated, not wrapped:\n%s", w, view)
+		}
+	}
+}
+
+// Every model-authored string (tool name, reason, args) is escape-stripped before rendering, so a
+// model-authored ESC byte never reaches the terminal (D8, hardening). As in the ask case, the ESC
+// is removed and the color code survives as INERT literal text — its presence in the stripped View
+// is exactly the proof the strip happened at the call site (had the ESC survived, plain() would
+// have swallowed the whole SGR sequence and the literal would be gone).
+func TestModelApprovalEscapeStrips(t *testing.T) {
+	m, _ := newApprovalModel(t, domain.ApprovalRequest{
+		Tool:      "write\x1b[31mfile",
+		Reason:    "be\x1b[32mcareful",
+		Arguments: json.RawMessage("{\"path\":\"x\x1b[33my\"}"), // a real ESC byte inside the args string
+	})
+	view := plain(m.View())
+	for _, want := range []string{"write[31mfile", "be[32mcareful", "x[33my"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("ESC not stripped at the source, expected inert literal %q:\n%s", want, view)
+		}
+	}
+}
+
+// The pretty-printed args keep their two-space JSON indentation on the rendered body lines
+// (embedded-newline layout is preserved end to end, not collapsed by the wrap).
+func TestModelApprovalArgsKeepIndentation(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`{"path":"notes.txt"}`)},
+		Reply:   reply,
+	})
+	// prettyJSON indents the "path" line by two spaces; had the indent been collapsed, only the
+	// popup's one-space padding would precede the quote. The two-space run proves it survived.
+	if got := plain(m.View()); !strings.Contains(got, `  "path"`) {
+		t.Errorf("args lost their two-space JSON indentation:\n%s", got)
+	}
+}
+
+// An args body far taller than the screen caps with the explicit overflow marker and never pushes
+// the input box off-screen (D2, the never-clip guarantee — the same as the ask long-question case).
+func TestModelApprovalLongArgsCapsBody(t *testing.T) {
+	vals := make([]string, 200)
+	for i := range vals {
+		vals[i] = "value"
+	}
+	raw, err := json.Marshal(vals) // a 200-element array → ~202 pretty-printed lines
+	if err != nil {
+		t.Fatalf("marshalling the oversized args: %v", err)
+	}
+
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(raw)},
+		Reply:   reply,
+	})
+
+	view := plain(m.View())
+	if !strings.Contains(view, "more lines)") {
+		t.Errorf("oversized args did not show the overflow marker:\n%s", view)
+	}
+	if !strings.Contains(view, "Send a message") {
+		t.Errorf("input box (placeholder) clipped from the View by the oversized args:\n%s", view)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The ask-user UI (P3.11 — the free-text C3-style face)
 // ----------------------------------------------------------------------------

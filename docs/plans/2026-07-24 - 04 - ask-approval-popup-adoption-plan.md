@@ -264,7 +264,7 @@ usage. Commit: `feat(tui): ask prompt adopts the popup with selectable choices`.
 
 ---
 
-## 4. The approval prompt adopts the popup chrome — `internal/tui`
+## 4. The approval prompt adopts the popup chrome — `internal/tui` — ✅ DONE (2026-07-24)
 
 All in `model.go` (+ `model_test.go`):
 

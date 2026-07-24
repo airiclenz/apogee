@@ -1686,25 +1686,49 @@ func nonEmpty(parts ...string) []string {
 	return out
 }
 
-// approvalStyle weights the approval prompt's lead line so it stands out from the transcript
-// above it.
-var approvalStyle = lipgloss.NewStyle().Bold(true)
+// popupBudget derives the screen-budget caps a pending prompt hands renderPopup so the bordered
+// pane never pushes the input box off-screen (D2). rows is the number of selectable choices on
+// offer (0 for the choiceless approval prompt); maxRows caps the scrolled row window (≥ 0) and
+// maxBody caps the wrapped body block (≥ 1). m.viewport.Height() here is the full, pre-shrink
+// layout height — View shrinks a local copy AFTER the prompt renders (verified View slot) — so it
+// is the true screen budget: keep ≥ 3 transcript rows visible, spend the chrome (the 2 borders +
+// the title + the hint), give the rows priority (they are what the human acts on), and let the
+// body keep ≥ 1 row and overflow into the explicit "… (+N more lines)" marker.
+func (m Model) popupBudget(rows int) (maxBody, maxRows int) {
+	avail := max(6, m.viewport.Height()-3)
+	const chrome = 4 // the 2 borders + the title row + the hint row
+	maxRows = min(rows, maxAskChoiceRows, max(0, avail-chrome-1))
+	maxBody = max(1, avail-chrome-maxRows)
+	return maxBody, maxRows
+}
 
-// approvalPrompt renders the pending tool call the human must rule on: the RAW tool name (not
-// the friendly transcript label — the approval flow is a security surface, so the human sees
-// exactly the tool that will run) and its Reason on the lead line, the decision legend on the
-// next, then the pretty-printed Arguments. Empty/null arguments add no body. Only the
+// approvalPrompt renders the pending tool call the human must rule on as a bordered popup pane
+// above the input box (the shared popup module; D7/D8): the title carries the RAW tool name
+// verbatim (not the friendly transcript label — the approval flow is a security surface, so the
+// human sees exactly the tool that will run), the body carries a non-empty Reason then the
+// pretty-printed Arguments, and the hint carries the decision legend. Every model-authored string
+// (tool name, reason, args) is escape-stripped at this call site; stripEscapes removes only the
+// ESC byte, so the raw tool name is preserved verbatim. Empty/null arguments add no body, and the
+// module wraps the reason so it can never be silently truncated on this security surface. Only the
 // top-level (Depth == 0) prompt is rendered this phase.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
-	head := approvalStyle.Render("approve " + req.Tool + "?")
+	var parts []string
 	if req.Reason != "" {
-		head += "  " + m.th.statusFaint.Render("("+req.Reason+")")
+		parts = append(parts, "reason: "+stripEscapes(req.Reason))
 	}
-	body := head + "\n" + m.th.statusFaint.Render("a allow · d deny · s allow-session · esc cancel")
 	if args := prettyJSON(req.Arguments); args != "" {
-		body += "\n" + m.th.toolDetail.Render(args)
+		parts = append(parts, stripEscapes(args))
 	}
-	return body
+
+	maxBodyRows, _ := m.popupBudget(0)
+	spec := popupSpec{
+		title:       "approve " + stripEscapes(req.Tool) + "?",
+		body:        strings.Join(parts, "\n\n"), // reason and args separated by one blank line; no stray blanks when one is absent
+		maxBodyRows: maxBodyRows,
+		selected:    -1, // no rows on the approval prompt
+		hint:        "a allow · d deny · s allow-session · esc cancel",
+	}
+	return renderPopup(m.th, spec, m.width)
 }
 
 // maxAskChoiceRows caps how many ask_user choice rows the popup shows at once (the
@@ -1731,14 +1755,9 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 		hint = "↑↓ select · ⏎ send · type for a custom answer · esc cancel"
 	}
 
-	// Budget against the live layout (D2). m.viewport.Height() here is the full, pre-shrink layout
-	// height: View shrinks a local copy AFTER this runs (verified model.go View slot), so this is
-	// the true screen budget. Keep ≥ 3 transcript rows visible; the chrome is the 2 borders + the
-	// title + the hint.
-	avail := max(6, m.viewport.Height()-3)
-	const chrome = 4
-	rowsShown := min(len(req.Choices), maxAskChoiceRows, max(0, avail-chrome-1))
-	maxBodyRows := max(1, avail-chrome-rowsShown)
+	// Budget against the live layout so a long question or choice set never pushes the input box
+	// off-screen (D2); the rows get priority and the body keeps ≥ 1 row (see popupBudget).
+	maxBodyRows, rowsShown := m.popupBudget(len(req.Choices))
 
 	spec := popupSpec{
 		title:       "the assistant is asking:",
