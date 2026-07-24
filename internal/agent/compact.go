@@ -212,7 +212,7 @@ func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
 	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
 	if err != nil {
 		if ctx.Err() != nil {
-			return false // a cancel masquerades as a stream error; the caller routes the Turn to cancelTurn
+			return false // a cancel masquerades as a stream error; the caller routes the Turn to the cancel exit (end → endCancelled)
 		}
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "compaction", Err: err.Error()})
 		return false

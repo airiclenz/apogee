@@ -161,7 +161,21 @@ rename the schema.
 existing tests beyond the mechanical `a.turnIndex` → `a.turns.index` (etc.) reach-in renames.
 Commit: `refactor(agent): move the Turn/Exchange lifecycle state onto a turnLifecycle owner`.
 
-## 2. The exit table — `turnRun` + one `end()` replacing the three exit helpers
+## 2. The exit table — `turnRun` + one `end()` replacing the three exit helpers — ✅ DONE (2026-07-24)
+
+**NOTES (2026-07-24):** Implemented as written — `turnRun`/`turnEnd`/`end()` in `turn.go`,
+`closeExchange`+`restoreDeferred` moved onto the owner, the three exit helpers deleted, and the
+three dead `restoreDeferred`-before-abandon calls removed (verified dead: no observer runs between
+restore and the abandon path's `closeExchange`→`ClearDeferred`; `revision` bumps are runtime-only,
+unserialized). Minor consequential edits beyond the two named files, all forced by deleting the
+symbols: (a) two dangling comment references to `cancelTurn` updated — `AbortExchange`'s doc in
+`agent.go` and `emergencyFold`'s cancel comment in `compact.go` — now point at end()'s `endCancelled`
+row; (b) the comments at the three deleted-restore sites were rewritten so they no longer describe
+the removed re-queue (they now note the abandoned Exchange clears the queue via F6); (c)
+`restoreDeferred`'s doc narrowed "(cancelled or abandoned)" → "(cancelled)" since the abandon
+callers are gone. Left OUT OF SCOPE (internal/agent-only track): `domain/hooks.go`'s `ClearDeferred`
+doc still names `completeTurn`/`abandonTurn` as example call sites — cross-package doc rot for a
+later docs pass, not touched here.
 
 **What:** In `turn.go`, add the per-Turn working value and the single exit entry point; in
 `loop.go`, delete `completeTurn`, `abandonTurn`, `cancelTurn`, and move `closeExchange` and

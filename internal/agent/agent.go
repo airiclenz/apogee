@@ -163,7 +163,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 //
 // It is the interactive host's counterpart to the Step-driven resume path. After a cancel,
 // Step leaves the Exchange OPEN on purpose so a Step-driven host (the bench) re-Steps to
-// re-attempt the Turn (see cancelTurn). A host with no resume affordance — the TUI, where Esc
+// re-attempt the Turn (see end()'s endCancelled row, turn.go). A host with no resume affordance — the TUI, where Esc
 // means "stop, scrap it" — calls this instead, so the next /clear or message is accepted
 // rather than rejected with ErrInputPending. Like Snapshot, it is valid only at a quiescent
 // boundary: no worker may be driving the Agent when it is called (the host calls it only after
@@ -176,7 +176,7 @@ func (a *Agent) AbortExchange() {
 	// The Exchange is scrapped: closeExchange expires any deferred Response Action with it (F6) — a
 	// mid-fan-out abort must not leave a stale remaining-items directive queued for the next
 	// Exchange's request.
-	a.closeExchange()
+	a.turns.closeExchange()
 	a.pendingInput = nil
 }
 

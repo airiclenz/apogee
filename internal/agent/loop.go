@@ -267,8 +267,8 @@ func validateConfig(cfg domain.Config) error {
 // request is sent, when the estimate already says it cannot fit — and the two share one fold
 // per Turn.
 func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
-	start := time.Now()
 	turn := a.turns.index
+	t := &turnRun{turn: turn, start: time.Now()}
 
 	// Automatic Compaction (structural, on by default — item 9): fold the conversation before this
 	// Turn's request is built when the history has outgrown its Budget allocation. It runs BEFORE
@@ -297,7 +297,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// generative compaction). A recovered panic degrades the Turn with no Upstream call.
 	beforeRewrite := a.conv.Len()
 	if err := a.runHistoryRewriteHooks(ctx, turn); err != nil {
-		return a.abandonTurn(turn, start), nil
+		return a.turns.end(t, endAbandoned), nil
 	}
 	// exchangeStart repair (S2): a mid-Exchange history rewrite (truncate_history) drops the middle
 	// of the conversation, shifting the current Exchange's messages down. Re-anchor exchangeStart by
@@ -318,13 +318,13 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// message and tool results are dropped and the drained deferred corrections re-queued,
 	// so resume re-attempts the Turn from serializable state. The user message above is
 	// kept — the input is not lost to a cancel.
-	rollback := a.conv.Len()
+	t.rollback = a.conv.Len()
 
-	req, deferred := a.buildRequest(turn)
+	t.req, t.deferred = a.buildRequest(turn)
 	// deferredFloor is the deferred queue's length after this Turn's request drained it and BEFORE
-	// any post-response hook re-defers — the boundary cancelTurn truncates back to, so a cancelled
-	// Turn's own deferrals die with the Turn and only the drained injections are restored (F6).
-	deferredFloor := a.conv.DeferredLen()
+	// any post-response hook re-defers — the boundary the cancel exit truncates back to, so a
+	// cancelled Turn's own deferrals die with the Turn and only the drained injections are restored (F6).
+	t.deferredFloor = a.conv.DeferredLen()
 
 	// The PREDICTIVE half of overflow protection: when the calibrated estimate already says this
 	// request cannot fit, fold BEFORE spending the round-trip that would be rejected — and cover
@@ -336,36 +336,36 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// itself faulted) the request goes out exactly as it always did and the reactive path stays
 	// the backstop — the estimate is advisory, never a reason to abandon a Turn on its own.
 	recoveries := 0
-	if a.requestExceedsWindow(req) {
+	if a.requestExceedsWindow(t.req) {
 		// Same sequence the reactive recovery runs: re-queue the drained corrections first so the
 		// rebuilt request carries them, fold, then re-derive every local the fold invalidated.
-		a.restoreDeferred(deferred)
+		a.turns.restoreDeferred(t.deferred)
 		folded := a.emergencyFold(ctx, turn)
 		if ctx.Err() != nil {
 			// A cancel mid-summary masquerades as a stream error, so only ctx can tell them apart
 			// (the check emergencyFold delegates to its caller). Nothing was folded and no request
-			// was sent, so rollback still marks this Turn's pre-request boundary, and cancelTurn's
-			// truncate-then-restore leaves the corrections re-queued above exactly once.
-			return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+			// was sent, so t.rollback still marks this Turn's pre-request boundary, and the cancel
+			// exit's truncate-then-restore leaves the corrections re-queued above exactly once.
+			return a.turns.end(t, endCancelled), nil
 		}
 		if folded {
 			recoveries = maxOverflowRecoveries // the Turn's one fold is spent before the wire
 		}
-		// rollback moves PAST the fold (decision 6: the fold is history maintenance, not part of
+		// t.rollback moves PAST the fold (decision 6: the fold is history maintenance, not part of
 		// the Turn's attempt, so a later cancel keeps it), and the request, its freshly drained
 		// corrections, and the deferred floor are re-derived from the folded history. When nothing
 		// was folded the conversation is untouched, so all three re-derive to what they already
 		// were — the unfolded Turn proceeds bit-for-bit as before.
-		rollback = a.conv.Len()
-		req, deferred = a.buildRequest(turn)
-		deferredFloor = a.conv.DeferredLen()
+		t.rollback = a.conv.Len()
+		t.req, t.deferred = a.buildRequest(turn)
+		t.deferredFloor = a.conv.DeferredLen()
 	}
 
-	if err := a.runPreRequestHooks(ctx, turn, req); err != nil {
-		// The request was never sent: re-queue the drained corrections so they ride the
-		// next request, and degrade the Turn with no assistant message.
-		a.restoreDeferred(deferred)
-		return a.abandonTurn(turn, start), nil
+	if err := a.runPreRequestHooks(ctx, turn, t.req); err != nil {
+		// The request was never sent, so degrade the Turn with no assistant message. The drained
+		// corrections need no re-queue here: the abandoned Exchange clears the whole deferred queue
+		// regardless (end → closeExchange → F6), so re-queuing them would be dead motion.
+		return a.turns.end(t, endAbandoned), nil
 	}
 
 	// The respond phase is bounded by ONE recovery attempt (maxOverflowRecoveries): an overflow is
@@ -379,63 +379,63 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// this reactive path share the one-fold-per-Turn budget rather than each holding their own.
 	var resp *domain.Response
 	for attempt := recoveries; ; attempt++ {
-		reviewed, outcome, overflowMsg := a.respondAndReview(ctx, turn, req)
+		reviewed, outcome, overflowMsg := a.respondAndReview(ctx, turn, t.req)
 		if outcome == turnOK {
 			resp = reviewed
 			break
 		}
 		if outcome == turnCancelled {
-			return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+			return a.turns.end(t, endCancelled), nil
 		}
 		if outcome != turnOverflowed || attempt >= maxOverflowRecoveries {
 			// A plain Upstream fault (respondAndReview already surfaced it), or an overflow with
 			// this Turn's one recovery already spent. The overflow's ErrorEvent is withheld at the
 			// seam so a RECOVERED Turn can stay quiet, which makes this the give-up path that owns
 			// it: the carried message surfaces verbatim — same Source, same text, same ordering as
-			// a plain fault — and the Turn degrades to a clean boundary.
+			// a plain fault — and the Turn degrades to a clean boundary. No re-queue: the abandoned
+			// Exchange clears the deferred queue regardless (end → closeExchange → F6).
 			if outcome == turnOverflowed {
 				a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
 			}
-			a.restoreDeferred(deferred)
-			return a.abandonTurn(turn, start), nil
+			return a.turns.end(t, endAbandoned), nil
 		}
 
 		// The Turn's one recovery. The drained corrections are re-queued FIRST so the rebuilt
 		// request carries them (buildRequest drains the queue again below); then the emergency
 		// fold collapses the history to the protected prefix + summary + bridge.
-		a.restoreDeferred(deferred)
+		a.turns.restoreDeferred(t.deferred)
 		folded := a.emergencyFold(ctx, turn)
 		if ctx.Err() != nil {
 			// The fold declined silently because ctx was cancelled mid-summary (the cancel
 			// masquerades as a stream error, so only ctx can tell them apart — the check the fold
 			// delegates to its caller). A cancelled fold leaves the conversation untouched, so
-			// rollback still points at this Turn's pre-request boundary, and cancelTurn's
+			// t.rollback still points at this Turn's pre-request boundary, and the cancel exit's
 			// truncate-then-restore leaves the corrections re-queued above exactly once.
-			return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+			return a.turns.end(t, endCancelled), nil
 		}
 		if !folded {
 			// Nothing was folded — recovery is opted out (`auto-compact: false`), there was nothing
 			// left past the protected prefix to shed, or the summary call itself faulted (the fold
 			// surfaced that one from source "compaction") — so the same request would overflow
-			// identically. Give up exactly as above, WITHOUT restoring a second time: the
-			// corrections went back on the queue just before the fold.
+			// identically. Give up exactly as above; the corrections went back on the queue just
+			// before the fold, and the abandoned Exchange clears them (F6).
 			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
-			return a.abandonTurn(turn, start), nil
+			return a.turns.end(t, endAbandoned), nil
 		}
 
-		// The fold rewrote the conversation, so every local captured before it is stale. rollback
+		// The fold rewrote the conversation, so every local captured before it is stale. t.rollback
 		// moves PAST the fold (decision 6: the fold is history maintenance, not part of the Turn's
 		// attempt, so a later cancel keeps it and must never roll back into a pre-fold index); the
 		// request, its freshly drained corrections, and the deferred floor are all re-derived from
 		// the folded history. Pre-request hooks run per REQUEST, so they run again over the rebuilt
-		// one and keep their pre-request failure semantics: no assistant message, corrections
-		// re-queued, Turn degraded. exchangeStart is re-anchored by the fold itself (compact.go).
-		rollback = a.conv.Len()
-		req, deferred = a.buildRequest(turn)
-		deferredFloor = a.conv.DeferredLen()
-		if err := a.runPreRequestHooks(ctx, turn, req); err != nil {
-			a.restoreDeferred(deferred)
-			return a.abandonTurn(turn, start), nil
+		// one and keep their pre-request failure semantics: no assistant message, Turn degraded (the
+		// abandoned Exchange clears the deferred queue — F6). exchangeStart is re-anchored by the
+		// fold itself (compact.go).
+		t.rollback = a.conv.Len()
+		t.req, t.deferred = a.buildRequest(turn)
+		t.deferredFloor = a.conv.DeferredLen()
+		if err := a.runPreRequestHooks(ctx, turn, t.req); err != nil {
+			return a.turns.end(t, endAbandoned), nil
 		}
 	}
 
@@ -449,16 +449,16 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		}
 		a.conv.Append(assistantMessage(resp, nil))
 		a.cfg.Events.Emit(domain.MessageEvent{EventBase: a.base(turn), Text: resp.Text()})
-		return a.completeTurn(turn, start, domain.StatusExchangeComplete), nil
+		return a.turns.end(t, endExchangeDone), nil
 	}
 
 	// The model requested tools: commit the assistant tool-call message, then dispatch
 	// each call through Approval. A cancellation mid-tool rolls the whole Turn back.
 	a.conv.Append(assistantMessage(resp, calls))
 	if a.dispatchTools(ctx, turn, calls) == dispatchCancelled {
-		return a.cancelTurn(turn, rollback, deferred, deferredFloor, start), nil
+		return a.turns.end(t, endCancelled), nil
 	}
-	return a.completeTurn(turn, start, domain.StatusTurnComplete), nil
+	return a.turns.end(t, endTurnDone), nil
 }
 
 // turnOutcome classifies how the stream → parse → post-response phase ended.
@@ -745,93 +745,6 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 		}
 	}
 	return msg
-}
-
-// closeExchange ends the open Exchange — the ONE engine-side owner of Exchange end (ADR 0017
-// §3). It flips inExchange (re-opening Submit) and clears the deferred Response-Action queue,
-// owning the F6 invariant: a deferral dies with its Exchange — a directive deferred for this
-// flow's next request must never ride into a different Exchange's. Its callers are the three
-// Exchange ends: completeTurn's StatusExchangeComplete branch (a final no-tool reply),
-// abandonTurn (a faulted Turn), and AbortExchange (the host scrapping the Exchange).
-// cancelTurn is deliberately NOT one — a cancelled Turn leaves the Exchange open for the
-// resume re-attempt and truncates-then-restores the deferred queue instead (F6(b)).
-func (a *Agent) closeExchange() {
-	a.turns.inExchange = false
-	a.conv.ClearDeferred()
-}
-
-// completeTurn closes a Turn at the quiescent boundary and advances the Turn counter. A
-// final no-tool response ends the Exchange (StatusExchangeComplete — awaiting the next
-// Submit); a tool-call Turn leaves the Exchange open (StatusTurnComplete — the next Step
-// calls the Upstream again with the tool results in context).
-func (a *Agent) completeTurn(turn int, start time.Time, status domain.StepStatus) domain.StepResult {
-	// Resolve the completed Turn for self-regulation (R3, next-Turn judgment): this Turn's
-	// outcome judges the PREVIOUS Turn's fires — striking, freezing, or clearing — and this
-	// Turn's fires shift into the pending set the next Turn's outcome will judge.
-	a.tracker.endTurn()
-	if status == domain.StatusExchangeComplete {
-		// In practice the deferred queue is already empty here — a no-tool final answer ends the
-		// Exchange and F2 never re-defers there — so closeExchange's clear is the F6 backstop.
-		a.closeExchange()
-	}
-	a.turns.index++
-	return domain.StepResult{Status: status, TurnIndex: turn, Elapsed: time.Since(start)}
-}
-
-// abandonTurn ends a Turn that produced no usable assistant message — a recovered
-// pre-request / history-rewrite panic, or an Upstream fault — at a clean boundary. The
-// Exchange ends (there is nothing to continue from) and the counter advances so resume
-// does not re-run the failed Turn.
-func (a *Agent) abandonTurn(turn int, start time.Time) domain.StepResult {
-	// A faulted Turn (an Upstream fault or a recovered hook panic) produced no usable outcome, so
-	// self-regulation discards it WITHOUT judging — an infra fault neither strikes a Mechanism nor
-	// advances the Turn Budget, and this Turn's fires do not bleed into the next Turn's judgment.
-	// The pending set (the previous Turn's fires) stays in place for the next completed Turn to
-	// judge (R3).
-	a.tracker.discardTurn()
-	// The fault path re-queued the drained corrections just above, but a deferral is a decision
-	// about the SAME flow's next request — closeExchange expires it with the faulted Exchange (F6).
-	a.closeExchange()
-	a.turns.index++
-	return domain.StepResult{Status: domain.StatusExchangeComplete, TurnIndex: turn, Elapsed: time.Since(start)}
-}
-
-// cancelTurn rolls the conversation back to the boundary the Turn began at (dropping this
-// Turn's assistant message and any tool results), re-queues the deferred corrections it
-// drained, and returns StatusCancelled WITHOUT advancing the Turn counter — so the snapshot
-// taken here resumes and re-attempts the Turn from serializable state (ADR 0007).
-//
-// inExchange is deliberately left untouched (NOT cleared): a cancelled Turn does not END the
-// Exchange — the user input / tool results committed so far are still mid-flight — so the flag
-// must keep reflecting an open Exchange. On resume that makes the next Step re-attempt the Turn
-// and, crucially, makes Submit reject a new user message that would otherwise interleave into
-// the open Exchange (two consecutive user messages, or a user message wedged after a tool
-// result — both of which a strict chat template rejects). Clearing it here contradicted the
-// un-advanced turnIndex (which says "re-attempt"), opening that exact hole.
-func (a *Agent) cancelTurn(turn, rollback int, deferred []string, deferredFloor int, start time.Time) domain.StepResult {
-	// The Turn is rolled back and re-attempted on resume, so self-regulation discards it WITHOUT
-	// judging — the re-attempt repopulates the fired-this-Turn set and the proxy signals from
-	// scratch. The discard also rolls this Turn's novel-read keys back out of seenReads, so the
-	// mandated re-attempt regains its novelty credit; the pending set (the previous Turn's fires)
-	// stays in place for the re-attempt's outcome to judge (R3).
-	a.tracker.discardTurn()
-	a.conv.DropRange(rollback, a.conv.Len())
-	// Truncate the queue back to its pre-hooks floor before restoring: the cancelled Turn's own
-	// post-response deferrals (e.g. a shrunken directive built from a delegation that is now rolled
-	// back) die with the Turn, so restoreDeferred re-queues the drained injections exactly once and a
-	// re-attempt or snapshot never carries two contradictory directives (F6).
-	a.conv.TruncateDeferred(deferredFloor)
-	a.restoreDeferred(deferred)
-	return domain.StepResult{Status: domain.StatusCancelled, TurnIndex: turn, Elapsed: time.Since(start)}
-}
-
-// restoreDeferred re-queues deferred corrections drained by buildRequest when the Turn did
-// not commit (cancelled or abandoned), so a best-effort correction is consumed only when a
-// request is actually sent and processed to a committed boundary — never silently lost.
-func (a *Agent) restoreDeferred(deferred []string) {
-	for _, inject := range deferred {
-		a.conv.Defer(inject)
-	}
 }
 
 // buildRequest projects the conversation onto the hook-facing domain.Request the pre-
