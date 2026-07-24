@@ -17,6 +17,12 @@ func popupLines(out string) []string {
 	return strings.Split(out, "\n")
 }
 
+// popupInterior strips a rendered popup line of its ANSI styling and its border+padding chrome,
+// leaving just the content text — so an exact-match assertion sees "a" rather than "│ a       │".
+func popupInterior(line string) string {
+	return strings.Trim(strip(line), "│ ")
+}
+
 // Every rendered line — border runes included — is exactly the total width it was handed, with
 // and without the optional title / hint rows, so the pane's right border always lands on the
 // same column (the lipgloss v2 total-width contract renderStartupBox relies on).
@@ -264,6 +270,176 @@ func TestPopupRowWindow(t *testing.T) {
 				t.Errorf("window [%d,%d) exceeds cap %d", start, end, c.capRow)
 			}
 		})
+	}
+}
+
+// A body longer than the inner budget word-wraps to several rows — each still exactly the box
+// width, none wider than the pane — rather than truncating like a row. The body is the module's
+// one wrapping content block.
+func TestRenderPopupBodyWraps(t *testing.T) {
+	th := newTheme()
+	const width = 40
+	out := renderPopup(th, popupSpec{body: strings.Repeat("word ", 40)}, width)
+	lines := popupLines(out)
+	if len(lines) <= 2+1 { // 2 borders + more than one body row
+		t.Fatalf("body did not wrap to multiple rows: %d physical lines:\n%s", len(lines), strip(out))
+	}
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(ln))
+		}
+	}
+}
+
+// Embedded newlines in the body are layout, not text to reflow: a body "a\n\nb" renders three body
+// rows with a blank middle row — the approval reason/args separator case.
+func TestRenderPopupBodyPreservesNewlines(t *testing.T) {
+	th := newTheme()
+	lines := popupLines(renderPopup(th, popupSpec{body: "a\n\nb"}, 40))
+	if len(lines) != 2+3 { // 2 borders + 3 body rows
+		t.Fatalf("body \"a\\n\\nb\" produced %d physical lines, want 5:\n%s", len(lines), strip(strings.Join(lines, "\n")))
+	}
+	if got := popupInterior(lines[1]); got != "a" {
+		t.Errorf("first body row = %q, want \"a\"", got)
+	}
+	if got := popupInterior(lines[2]); got != "" {
+		t.Errorf("middle body row = %q, want blank", got)
+	}
+	if got := popupInterior(lines[3]); got != "b" {
+		t.Errorf("third body row = %q, want \"b\"", got)
+	}
+}
+
+// A single token wider than the inner budget hard-breaks across body rows (wrapText's guarantee),
+// so an unbroken blob can never blow past the pane's right edge.
+func TestRenderPopupBodyHardBreaksLongToken(t *testing.T) {
+	th := newTheme()
+	const width = 20
+	out := renderPopup(th, popupSpec{body: strings.Repeat("x", 100)}, width)
+	lines := popupLines(out)
+	if len(lines) <= 2+1 {
+		t.Fatalf("over-long token did not hard-break: %d physical lines:\n%s", len(lines), strip(out))
+	}
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(ln))
+		}
+	}
+}
+
+// maxBodyRows caps the wrapped block: past the cap it keeps maxBodyRows−1 lines plus a faint
+// "… (+N more lines)" marker (N = hidden lines) for exactly maxBodyRows body rows; a body at the cap
+// shows every line with no marker; maxBodyRows ≤ 0 shows everything.
+func TestRenderPopupBodyMaxRows(t *testing.T) {
+	th := newTheme()
+	const width = 40
+	tenLines := strings.Join([]string{"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"}, "\n")
+
+	capped := popupLines(renderPopup(th, popupSpec{body: tenLines, maxBodyRows: 4}, width))
+	if got := len(capped) - 2; got != 4 { // less the two borders
+		t.Fatalf("cap 4 rendered %d body rows, want 4:\n%s", got, strip(strings.Join(capped, "\n")))
+	}
+	if last := popupInterior(capped[len(capped)-2]); last != "… (+7 more lines)" {
+		t.Errorf("last body row = %q, want \"… (+7 more lines)\"", last)
+	}
+
+	atCap := popupLines(renderPopup(th, popupSpec{body: "a\nb\nc\nd", maxBodyRows: 4}, width))
+	if got := len(atCap) - 2; got != 4 {
+		t.Fatalf("body exactly at cap rendered %d body rows, want 4:\n%s", got, strip(strings.Join(atCap, "\n")))
+	}
+	if joined := strip(strings.Join(atCap, "\n")); strings.Contains(joined, "more lines") {
+		t.Errorf("body exactly at cap emitted an overflow marker:\n%s", joined)
+	}
+
+	uncapped := popupLines(renderPopup(th, popupSpec{body: tenLines, maxBodyRows: 0}, width))
+	if got := len(uncapped) - 2; got != 10 {
+		t.Errorf("maxBodyRows 0 rendered %d body rows, want all 10", got)
+	}
+}
+
+// Composition order is title / body / rows / hint: the body sits below the title and above the
+// rows, the rows still truncate (never wrap) and keep their selected-row highlight, and an empty
+// body adds no rows.
+func TestRenderPopupBodyComposition(t *testing.T) {
+	th := newTheme()
+	spec := popupSpec{
+		title:    "the assistant is asking:",
+		body:     "one line of body",
+		rows:     []string{"yes", strings.Repeat("verylongword ", 12)},
+		selected: 0,
+		hint:     "esc cancel",
+		maxRows:  8,
+	}
+	const width = 50
+	lines := popupLines(renderPopup(th, spec, width))
+	if len(lines) != 2+1+1+2+1 { // borders + title + body + 2 rows + hint
+		t.Fatalf("composed popup has %d physical lines, want 7:\n%s", len(lines), strip(strings.Join(lines, "\n")))
+	}
+	if !strings.Contains(strip(lines[1]), "the assistant is asking:") {
+		t.Errorf("title is not the first content row: %q", strip(lines[1]))
+	}
+	if !strings.Contains(strip(lines[2]), "one line of body") {
+		t.Errorf("body does not sit directly below the title: %q", strip(lines[2]))
+	}
+	if !strings.Contains(strip(lines[3]), glyphUser+" yes") {
+		t.Errorf("selected row does not follow the body with its marker: %q", strip(lines[3]))
+	}
+	if !strings.Contains(strip(lines[4]), "…") { // the long row truncated (only two row lines exist ⇒ no wrap)
+		t.Errorf("long row was not truncated: %q", strip(lines[4]))
+	}
+	if !strings.Contains(strip(lines[5]), "esc cancel") {
+		t.Errorf("hint is not the last content row: %q", strip(lines[5]))
+	}
+
+	noBody := spec
+	noBody.body = ""
+	if got := len(popupLines(renderPopup(th, noBody, width))); got != len(lines)-1 {
+		t.Errorf("empty body changed the row count by other than one: %d vs %d", got, len(lines)-1)
+	}
+}
+
+// The body renders in its own (non-faint) style: a body line does NOT carry the faint chrome SGR
+// the hint line does, so the two read as distinct tiers of the hierarchy (title bold / body normal
+// / chrome faint).
+func TestRenderPopupBodyIsNotFaint(t *testing.T) {
+	th := newTheme()
+	lines := popupLines(renderPopup(th, popupSpec{body: "body text here", hint: "esc cancel"}, 50))
+	bodyLine, hintLine := lines[1], lines[2] // borders + body + hint
+
+	faint := th.statusFaint.Render("x")
+	idx := strings.IndexByte(faint, 'm')
+	if idx < 0 {
+		t.Skip("no colour profile in this environment — the faint-SGR distinction is not observable")
+	}
+	faintSGR := faint[:idx+1]
+	if !strings.Contains(hintLine, faintSGR) {
+		t.Fatalf("hint line lacks the faint SGR %q — test premise broken", faintSGR)
+	}
+	if strings.Contains(bodyLine, faintSGR) {
+		t.Errorf("body line carries the hint's faint SGR %q; the body must render in a distinct style", faintSGR)
+	}
+}
+
+// With a body present, a degenerate width still degrades gracefully: a width ≤ the border frame
+// renders nothing, and an inner width of 1 neither panics nor produces a line wider than the box
+// (the wrapped body and the overflow marker both clip to the single inner cell).
+func TestRenderPopupBodyDegenerateWidth(t *testing.T) {
+	th := newTheme()
+	frame := th.popupBorder.GetHorizontalFrameSize()
+	spec := popupSpec{
+		title:       "approve run?",
+		body:        strings.Repeat("reason ", 30),
+		maxBodyRows: 4,
+		hint:        "esc cancel",
+	}
+	if out := renderPopup(th, spec, frame); out != "" {
+		t.Errorf("width == frame should render nothing, got %q", strip(out))
+	}
+	out := renderPopup(th, spec, frame+1) // inner width 1 — must not panic
+	for i, ln := range popupLines(out) {
+		if w := lipgloss.Width(ln); w > frame+1 {
+			t.Errorf("inner-width-1: line %d is %d cells, exceeds width %d: %q", i, w, frame+1, strip(ln))
+		}
 	}
 }
 

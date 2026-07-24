@@ -121,6 +121,7 @@ type theme struct {
 	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
 	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
 	popupBorder   lipgloss.Style // selector-popup chrome (renderPopup): startupBorder's rounded shape, filled solid black so the pane reads as a distinct overlay
+	popupBody     lipgloss.Style // a popup's wrapped body block (renderPopup): normal white on black — between presentTitle (bold) and statusFaint (chrome) in the hierarchy
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
@@ -176,6 +177,7 @@ func newTheme() theme {
 							BorderBackground(colBlack).
 							Background(colBlack).
 							Padding(0, 1),
+		popupBody:   lipgloss.NewStyle().Foreground(colWhite).Background(colBlack), // wrapped body prose: normal white, not bold (title) nor faint (chrome)
 		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
 		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
