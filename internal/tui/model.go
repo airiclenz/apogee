@@ -1175,7 +1175,7 @@ func (m *Model) refreshViewport() {
 // View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
 // the bordered input box, and the footer bar, filling the alternate screen (layout.md). Before
 // the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
-// approval prompt, when one is pending, sits between the transcript and the blank line; the
+// approval or ask prompt, when one is pending, sits between the transcript and the blank line; the
 // viewport is shrunk on this local copy to make room (View has a value receiver, so the
 // stored layout is untouched).
 func (m Model) View() tea.View {

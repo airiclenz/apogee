@@ -39,6 +39,11 @@ point is a **minor** bump, not a breaking change.
   saved session — they are re-established or re-confirmed on resume. See
   [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
 
+- **`ask_user` can offer multiple-choice answers.** When a question has a natural closed set, the
+  model may now pass an optional `choices` list of short answer options alongside it; the human
+  picks one with `↑`/`↓` and `⏎`, or ignores the list and types a custom free-text answer exactly as
+  before — the choices never gate the reply. Without `choices` the tool behaves as it always has.
+
 ### Changed
 
 - **Selector popups now share one look — a solid-black pane spanning the full window width.** A
@@ -76,6 +81,20 @@ point is a **minor** bump, not a breaking change.
   is the pin; `agentState`'s session-JSON schema stays byte-compatible. Separately, `loop.go`'s
   construction and domain→wire translation clusters moved verbatim into `construct.go` and
   `wire.go`.
+- **The ask and approval prompts now render as bordered popup panes.** Both overlays adopt the
+  shared popup module (`internal/tui/popup.go`) instead of their own bold+faint text: the ask
+  question, and the approval reason and pretty-printed arguments, word-wrap inside the pane rather
+  than losing their tail to an ellipsis; the pane spans the full window width, flush with the input
+  box; and an over-tall body is capped to the live screen budget with an explicit `… (+N more
+  lines)` marker, so the input box the answer is typed into is never pushed off-screen.
+
+### Security
+
+- **The ask and approval prompts escape-strip all model-authored text before rendering.** The ask
+  question and its choices, and the approval tool name, reason, and arguments, are stripped of the
+  terminal escape (`ESC`) byte at the point they enter the popup, closing a gap where untrusted
+  model output reached the screen raw. Stripping removes only the `ESC` byte, so the raw tool name
+  the human approves is still shown verbatim.
 
 ## [0.8.0] — 2026-07-23
 

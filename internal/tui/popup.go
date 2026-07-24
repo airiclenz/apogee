@@ -11,12 +11,13 @@ import (
 // The shared selector-popup painter (selector-popup plan §1)
 // ----------------------------------------------------------------------------
 //
-// renderPopup is the single place selector-popup chrome is painted: a titled, bordered pane
-// holding a scrolled row list with the selected row highlighted and a key-hint footer. The
-// /sessions history browser (sessions.go) and the command/file/skill autocomplete dropdown
-// (autocomplete.go) both compose their pane through it, so every boxed selector shares one look
-// and one right edge. The dependency points inward only — callers compose a popupSpec and hand
-// it here; renderPopup reaches back into neither overlay's state.
+// renderPopup is the single place overlay-pane chrome is painted: a titled, bordered pane holding
+// an optional wrapping body block, a scrolled row list with the selected row highlighted, and a
+// key-hint footer. The /sessions history browser (sessions.go), the command/file/skill autocomplete
+// dropdown (autocomplete.go), and the ask and approval prompts (model.go) all compose their pane
+// through it, so every overlay shares one look and one right edge. The dependency points inward
+// only — callers compose a popupSpec and hand it here; renderPopup reaches back into neither
+// overlay's state.
 //
 // Contract:
 //   - width is the TOTAL box width, in lipgloss v2 semantics: the rounded border and the padding
@@ -43,8 +44,9 @@ import (
 //     body never exceeds its cap and truncation is never silent. wrapText is ANSI-unaware, so body
 //     arrives PLAIN and escape-stripped — the module wraps first and styles after.
 //
-// The approval / ask prompts (model.go) keep their plain-text form for now; they are the
-// deliberate future adopters of this module (plan D2).
+// Every overlay pane — the /sessions browser, the command/file/skill dropdowns, and the ask and
+// approval prompts — now paints through this module; no boxed overlay renders its own chrome
+// (plan D3).
 
 // popupSpec describes one boxed selector popup. title and hint each drop their row when empty;
 // body is plain, escape-stripped prose the module word-wraps to the inner budget and caps at

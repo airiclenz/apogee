@@ -308,7 +308,16 @@ removal — implement 3 first).
 
 ---
 
-## 5. Closeout — contract note, doc sweep, CHANGELOG
+## 5. Closeout — contract note, doc sweep, CHANGELOG — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Doc sweep found no stale "plain text / bold+faint" look-descriptions of either
+prompt outside the popup.go head paragraph (removed). Beyond the literal "look references" check, the
+View comment's prompt-set was corrected too — "The approval prompt … sits between the transcript and
+the blank line" → "The approval or ask prompt …" (the ask prompt shares the slot; consistent with the
+already-"approval/ask prompt" wording at model.go:1194/1231). popup.go's opening paragraph also now
+names all four adopters (was "…both compose their pane through it"). CHANGELOG's "Fixed/Security"
+escape-strip entry landed under a new `### Security` heading. doc.go/layout.md had no prompt
+look-descriptions to sweep.
 
 - `popup.go` file-head comment: the "approval / ask prompts … deliberate future adopters"
   paragraph is REMOVED (all named adopters have landed, D3); in its place one line records
