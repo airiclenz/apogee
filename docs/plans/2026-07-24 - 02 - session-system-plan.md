@@ -403,7 +403,18 @@ repaints the scrollback and the model remembers. Commit:
 
 ---
 
-## 6. `/clear` + `/new` close into history and rotate
+## 6. `/clear` + `/new` close into history and rotate — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Rotate is placed AFTER the ClearContext success guard, not before the reset body
+as the prose "final Save → Rotate → the existing reset body (ClearContext → …)" reads literally —
+the item's own "`ClearContext`-error test: no Rotate" requires the rotate to be skipped when
+ClearContext refuses, which is only possible with the order Save → ClearContext(guard) → Rotate →
+rest-of-reset. The final Save reuses the existing synchronous `saveSession()` quit-flush (its doc was
+generalised to name both callers) — synchronous-before-Rotate is what guarantees the outgoing file is
+written under the old id before Rotate clears it. The nil-host `/clear`//`/new` view-reset tests are
+KEPT (they pin the degrade-to-today path); the host-wired assertions were ADDED alongside rather than
+rewriting them. The shared `fakeSessionHost` gained an id lifecycle (mint-on-first-Save/reuse,
+clear-on-Rotate) so "next Turn opens a fresh id" is provable. No CHANGELOG/doc edits — item 9 owns docs.
 
 **What:** Wrap the seam exactly as the previous plan's contract specified. (Depends on 4/5.)
 

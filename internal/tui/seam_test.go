@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
@@ -275,8 +276,11 @@ func (f *fakeEngine) steps() int {
 // ----------------------------------------------------------------------------
 
 // savedCall records one SessionHost.Save the Model made, so a test can assert the payload it
-// persisted per Turn (the snapshot, the encoded transcript blob, and the derived metadata).
+// persisted per Turn (the snapshot, the encoded transcript blob, and the derived metadata). id is
+// the active session id the fake host minted/reused for this Save, so a test can prove that a
+// Rotate opened a fresh session.
 type savedCall struct {
+	id         string
 	sess       domain.Session
 	transcript []byte
 	title      string
@@ -286,12 +290,16 @@ type savedCall struct {
 
 // fakeSessionHost is a recording SessionHost for the save-pipeline tests: it captures every Save,
 // counts Rotates, and can be scripted to fail Saves (saveErr) so the ok↔fail note transitions are
-// provable without a store. It is concurrency-safe because a save Cmd runs on its own goroutine.
+// provable without a store. It models the real host's id lifecycle — Save mints an id when the
+// session is inactive and reuses it thereafter, Rotate closes the session so the next Save mints a
+// fresh id — so the /clear|/new rotate contract is provable without the store. It is
+// concurrency-safe because a save Cmd runs on its own goroutine.
 type fakeSessionHost struct {
 	mu       sync.Mutex
 	saves    []savedCall
 	rotates  int
 	activeID string
+	minted   int   // ids handed out so far, so a rotated session gets a distinct one
 	saveErr  error // when non-nil, every Save fails with it (the ok→fail transition)
 }
 
@@ -301,13 +309,18 @@ var _ SessionHost = (*fakeSessionHost)(nil)
 func (h *fakeSessionHost) Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.saves = append(h.saves, savedCall{sess: sess, transcript: transcript, title: title, userMsgs: userMsgs, ctxUsed: ctxUsed})
+	if h.activeID == "" {
+		h.minted++
+		h.activeID = fmt.Sprintf("s%d", h.minted)
+	}
+	h.saves = append(h.saves, savedCall{id: h.activeID, sess: sess, transcript: transcript, title: title, userMsgs: userMsgs, ctxUsed: ctxUsed})
 	return h.saveErr
 }
 
 func (h *fakeSessionHost) Rotate() {
 	h.mu.Lock()
 	h.rotates++
+	h.activeID = "" // close the session; the next Save mints a fresh id
 	h.mu.Unlock()
 }
 
@@ -315,13 +328,26 @@ func (h *fakeSessionHost) List() ([]session.Meta, error)       { return nil, nil
 func (h *fakeSessionHost) Load(string) (session.Record, error) { return session.Record{}, nil }
 func (h *fakeSessionHost) Delete(string) error                 { return nil }
 func (h *fakeSessionHost) Rename(string, string) error         { return nil }
-func (h *fakeSessionHost) ActiveID() string                    { return h.activeID }
+
+func (h *fakeSessionHost) ActiveID() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.activeID
+}
 
 // savedCalls returns a copy of the recorded Saves in order.
 func (h *fakeSessionHost) savedCalls() []savedCall {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]savedCall(nil), h.saves...)
+}
+
+// rotateCount returns how many times the Model closed the active session (via /clear|/new or a
+// load switching the id).
+func (h *fakeSessionHost) rotateCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.rotates
 }
 
 // stepResult is one scripted Step outcome.

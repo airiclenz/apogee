@@ -587,23 +587,35 @@ func (m Model) skillDisplayNames(ids []string) []string {
 	return names
 }
 
-// startNewSession resets the TUI to a fresh session: it drops the engine's conversation memory
+// startNewSession closes the current session into history and resets the TUI to a fresh one. /clear and
+// its alias /new both route here — "start a new session" is exactly what they mean.
+//
+// It flushes the outgoing conversation through the SessionHost (its last state, post-turn notes and
+// all) so it lands in the history browser, then rotates the host so the next Turn's save mints a fresh
+// session id rather than clobbering the one just closed, then drops the engine's conversation memory
 // (ClearContext), wipes the transcript scrollback, and re-seeds the one-time start-up box so the view
-// is byte-identical to a fresh launch at this window size. /clear and its alias /new both route here —
-// "start a new session" is exactly what they mean.
+// is byte-identical to a fresh launch at this window size. This IS the session-system wrap the reset
+// seam was built for; without a wired host it degrades to the pure view/engine reset it always was.
 //
-// This is the single seam the forthcoming session system extends: saving the outgoing conversation and
-// allocating a new session id will wrap THIS call, so the view/state reset lives in one place and
-// nothing here writes to a session store or assumes a session model.
+// Ordering: the save runs BEFORE ClearContext so the snapshot reflects the conversation being closed,
+// not an emptied one. Rotate runs only AFTER ClearContext succeeds — a refused clear leaves the old
+// session open and its id live, so no rotate happens on the error path. On success Rotate is
+// unconditional and idempotent on an already-inactive session, so a stale active id can never leak into
+// the fresh conversation even when the outgoing view held nothing worth saving.
 //
-// Reached only from runCommand at stateIdle (no worker owns the engine), so ClearContext is safe. On a
-// ClearContext error the view is left untouched and the failure is noted — a fresh-looking view must
-// never lie about an engine that still remembers the old conversation.
+// Reached only from runCommand at stateIdle (no worker owns the engine), so ClearContext and the
+// Snapshot the flush takes are safe. On a ClearContext error the view is left untouched and the failure
+// is noted — a fresh-looking view must never lie about an engine that still remembers the old
+// conversation; the already-completed save is harmless (the session was closing anyway).
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
+	m.saveSession() // flush the outgoing session into history before it closes (best-effort, gated)
 	if err := m.eng.ClearContext(); err != nil {
 		m.transcript.addNote("could not clear context: " + err.Error())
 		m.layout()
 		return m, nil
+	}
+	if m.sessions != nil {
+		m.sessions.Rotate() // the next Turn's save mints a fresh id; a no-op when nothing was saved
 	}
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
@@ -784,15 +796,17 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// saveSession best-effort persists the conversation through the SessionHost on a clean quit —
-// the synchronous flush that captures any post-last-turn transcript changes (notes, /confine
-// output) the per-Turn saves did not. It is a no-op without a wired host or when the transcript
-// holds no conversation (only the seeded start-up box, or nothing at all) — nothing worth
-// resuming. Both Snapshot and the Save are best-effort: a quit must never fail, so an error is
-// swallowed rather than blocking the exit. The caller guarantees no worker is running, so calling
-// Snapshot here respects the Agent's single-goroutine contract (C1). Unlike the per-Turn path
-// this is synchronous — the program is exiting, so there is no Update loop left to deliver a
-// saveDoneMsg to.
+// saveSession best-effort persists the conversation through the SessionHost — the synchronous flush
+// that captures any post-last-turn transcript changes (notes, /confine output) the per-Turn saves did
+// not. Two callers use it: a clean quit, and startNewSession closing the outgoing session on /clear|
+// /new (which then Rotates so the next Turn opens a fresh id). It is a no-op without a wired host or
+// when the transcript holds no conversation (only the seeded start-up box, or nothing at all) — nothing
+// worth resuming. Both Snapshot and the Save are best-effort: a quit must never fail and a session
+// close must never block, so an error is swallowed rather than interrupting. Both callers guarantee no
+// worker is running, so calling Snapshot here respects the Agent's single-goroutine contract (C1).
+// Unlike the per-Turn path this is synchronous — the outgoing session must reach disk before the caller
+// Rotates or the program exits, and there is no Update loop left (or wanted) to deliver a saveDoneMsg
+// to.
 func (m Model) saveSession() {
 	if m.sessions == nil || !m.transcript.hasConversation() {
 		return

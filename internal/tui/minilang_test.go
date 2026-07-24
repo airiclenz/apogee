@@ -141,6 +141,100 @@ func seedConversation(m *Model) {
 	m.transcript.apply(domain.MessageEvent{Text: seededAssistantText})
 }
 
+const seededUserText = "remember the number 7"
+
+// transcriptHasUser reports whether decoded entries hold a user message with the given text.
+func transcriptHasUser(entries []entry, want string) bool {
+	for _, e := range entries {
+		if e.kind == entryUser && e.text == want {
+			return true
+		}
+	}
+	return false
+}
+
+// With a wired SessionHost, /clear closes the outgoing session into history: one final Save carrying
+// the outgoing conversation, then a Rotate so the NEXT Turn opens a fresh session id rather than
+// clobbering the one just closed (session-system plan §6).
+func TestClearClosesSessionIntoHistoryAndRotates(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+	seedConversation(&m)
+
+	m.input.SetValue("/clear")
+	m = step(t, m, keyEnter())
+
+	calls := host.savedCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Save calls on /clear = %d; want 1 (the outgoing session's final flush)", len(calls))
+	}
+	entries, err := decodeTranscript(calls[0].transcript)
+	if err != nil {
+		t.Fatalf("decode flushed transcript: %v", err)
+	}
+	if !transcriptHasUser(entries, seededUserText) {
+		t.Error("the flushed transcript did not carry the outgoing conversation")
+	}
+	if got := host.rotateCount(); got != 1 {
+		t.Errorf("Rotate calls = %d; want 1 (the closed session must not be reused)", got)
+	}
+	closedID := calls[0].id
+
+	// The next Turn's per-Turn save opens a FRESH session id, proving the rotate took effect.
+	seedConversation(&m)
+	m = driveOneSave(t, m, domain.Session{})
+	calls = host.savedCalls()
+	newID := calls[len(calls)-1].id
+	if newID == "" || newID == closedID {
+		t.Errorf("next Turn save id = %q; want a fresh id distinct from the closed %q", newID, closedID)
+	}
+}
+
+// /clear with nothing beyond the start-up box saves nothing (no conversation worth resuming) but STILL
+// rotates: Rotate is unconditional-on-success and idempotent on an inactive session, so a stale active
+// id can never leak into the next conversation.
+func TestClearWithoutConversationRotatesButDoesNotSave(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+
+	m.input.SetValue("/clear")
+	m = step(t, m, keyEnter())
+
+	if n := len(host.savedCalls()); n != 0 {
+		t.Errorf("Save calls with only the start-up box = %d; want 0", n)
+	}
+	if got := host.rotateCount(); got != 1 {
+		t.Errorf("Rotate calls = %d; want 1 (unconditional so no stale id leaks into the next session)", got)
+	}
+}
+
+// A failed ClearContext leaves the session OPEN: the view is untouched and — critically — no Rotate
+// fires, so the outgoing session's id stays live and later Turns keep updating its file. The final Save
+// runs before ClearContext, so it did happen; it is harmless (the session was closing anyway).
+func TestClearErrorDoesNotRotate(t *testing.T) {
+	eng := &fakeEngine{clearFn: func() error { return domain.ErrInputPending }}
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, eng, host)
+	seedConversation(&m)
+	before := len(m.transcript.entries)
+
+	m.input.SetValue("/clear")
+	m = step(t, m, keyEnter())
+
+	if got := host.rotateCount(); got != 0 {
+		t.Errorf("Rotate calls after a failed clear = %d; want 0 (the session stays open)", got)
+	}
+	if n := len(host.savedCalls()); n != 1 {
+		t.Errorf("Save calls on the error path = %d; want 1 (the harmless pre-ClearContext flush)", n)
+	}
+	if got := len(m.transcript.entries); got != before+1 {
+		t.Errorf("transcript entries after a failed /clear = %d; want %d (conversation survives + one note)", got, before+1)
+	}
+	if !hasEntry(m, entryUser, seededUserText) {
+		t.Error("a failed /clear wrongly wiped the outgoing conversation")
+	}
+}
+
 func TestCompactCommandLaunchesWorker(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
