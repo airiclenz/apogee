@@ -766,7 +766,7 @@ func TestResolveResumeLegacyPath(t *testing.T) {
 	if len(rec.Transcript) != 0 {
 		t.Errorf("legacy Transcript = %s; want empty (no scrollback recorded)", rec.Transcript)
 	}
-	if rs := resumedSession(rec); rs == nil || len(rs.Transcript) != 0 {
+	if rs := resumedSession(rec, false); rs == nil || len(rs.Transcript) != 0 {
 		t.Errorf("resumedSession(legacy) = %+v; want a non-nil payload with an empty transcript", rs)
 	}
 }
@@ -832,7 +832,7 @@ func TestResolveResumeFreshStart(t *testing.T) {
 	if rec != nil {
 		t.Errorf("resolveResume with neither flag = %+v; want nil", rec)
 	}
-	if got := resumedSession(nil); got != nil {
+	if got := resumedSession(nil, false); got != nil {
 		t.Errorf("resumedSession(nil) = %+v; want nil (a fresh start replays nothing)", got)
 	}
 }

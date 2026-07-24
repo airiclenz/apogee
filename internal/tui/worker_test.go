@@ -83,6 +83,74 @@ func TestDriveExchangeNotifiesPerTurn(t *testing.T) {
 	}
 }
 
+// TestDriveResumeStepsWithoutSubmit proves the interrupted-resume drive: driveResume Steps an
+// already-open Exchange to its StatusExchangeComplete boundary WITHOUT a Submit (the snapshot
+// round-tripped InExchange: true, so the Exchange is already open), notifying per completed Turn
+// exactly like driveExchange.
+func TestDriveResumeStepsWithoutSubmit(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{
+		stepFn: scriptedSteps(
+			stepResult{res: domain.StepResult{Status: domain.StatusTurnComplete}},
+			stepResult{res: domain.StepResult{Status: domain.StatusExchangeComplete}},
+		),
+	}
+
+	var turns int
+	notify := func(msg tea.Msg) {
+		if _, ok := msg.(turnSnapshotMsg); ok {
+			turns++
+		}
+	}
+
+	msg := driveResume(context.Background(), eng, notify)
+
+	if _, ok := msg.(exchangeDoneMsg); !ok {
+		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
+	}
+	if eng.submits() != 0 {
+		t.Errorf("Submit calls = %d; want 0 (a resume re-Steps an already-open Exchange)", eng.submits())
+	}
+	if eng.steps() != 2 {
+		t.Errorf("Step calls = %d; want 2", eng.steps())
+	}
+	if turns != 1 {
+		t.Errorf("per-Turn notifications = %d; want one for the single completed Turn", turns)
+	}
+}
+
+// TestStartResumeCancelYieldsCancelledMsg proves the resume worker honours a cancel the same way
+// startExchange does: the CancelFunc unblocks the in-flight Step, which returns StatusCancelled, and
+// the worker hands back a cancelledMsg — with no Submit ever made.
+func TestStartResumeCancelYieldsCancelledMsg(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{
+		stepFn: func(ctx context.Context, _ int) (domain.StepResult, error) {
+			<-ctx.Done()
+			return domain.StepResult{Status: domain.StatusCancelled}, nil
+		},
+	}
+
+	cmd, cancel := startResume(context.Background(), eng, nil)
+
+	out := make(chan tea.Msg, 1)
+	go func() { out <- cmd() }()
+
+	cancel()
+
+	select {
+	case msg := <-out:
+		if _, ok := msg.(cancelledMsg); !ok {
+			t.Fatalf("msg = %T; want cancelledMsg", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("resume worker did not return after cancel (deadlock)")
+	}
+	if eng.submits() != 0 {
+		t.Errorf("Submit calls = %d; want 0 (a resume never Submits)", eng.submits())
+	}
+}
+
 // TestDriveExchangeSubmitError proves a Submit failure short-circuits to errMsg and never
 // steps the loop.
 func TestDriveExchangeSubmitError(t *testing.T) {

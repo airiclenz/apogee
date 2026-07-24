@@ -501,7 +501,19 @@ active ID untouched; delete confirm + active-delete rotate; rename commits; `esc
 
 ---
 
-## 8. Interrupted-Exchange resume: the step-only drive
+## 8. Interrupted-Exchange resume: the step-only drive — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Three item-scoped deviations. (1) `driveResume` shares `driveExchange`'s loop via
+a new unexported `stepToBoundary(ctx, eng, notify)` helper rather than duplicating it — `driveExchange`
+now Submits then delegates to it, and `driveResume` calls it straight (DRY over two copies of the
+subtle events-before-notify ordering; behaviour-identical, existing worker tests unchanged). (2) The
+interrupted `/continue` path leaves `pendingSkills` AND `userScrolled` untouched (the literal
+"note-free transcript untouched" reading) — unlike the canned `/continue`/submit paths which clear
+them; a step-only resume has no Submit to carry staged skills into, and touching neither is the most
+faithful "untouched". (3) Test infra: the shared `fakeEngine.AbortExchange` now flips its `inExchange`
+to false (modelling the real Agent returning to a clean boundary), so the abort-then-submit /
+abort-then-clear / live-cancel-stays-canned tests read InExchange faithfully; no existing test relied
+on it staying true after an abort. No docs touched — item 9 owns CHANGELOG/ADR/CONTEXT.
 
 **What:** Make per-Turn saves actually pay off — a session that died mid-task continues.
 (Depends on 2, 5, 7.)

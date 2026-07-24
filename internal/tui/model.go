@@ -165,9 +165,12 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 // the context gauge from the stored fill, decodes the stored transcript blob, and appends its
 // committed entries closed by a "resumed: <title>" note. A decode error or a legacy record whose
 // blob is empty (no scrollback was recorded) is never fatal — the view is left fresh and an honest
-// note says the model still remembers even though the scrollback could not be repainted. A nil
-// payload (a fresh start) is a no-op. It runs at construction, before any WindowSizeMsg, so the
-// replayed entries are present the first time the viewport lays out.
+// note says the model still remembers even though the scrollback could not be repainted. A session
+// restored mid-task (r.InExchange, set by the binary from the resumed Agent) closes with the
+// interrupted note, telling the human /continue picks the work back up — the same note the /sessions
+// browser appends on a mid-Exchange resume. A nil payload (a fresh start) is a no-op. It runs at
+// construction, before any WindowSizeMsg, so the replayed entries are present the first time the
+// viewport lays out.
 func (m *Model) replayResumed(r *ResumedSession) {
 	if r == nil {
 		return
@@ -176,10 +179,13 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	entries, err := decodeTranscript(r.Transcript)
 	if err != nil || len(entries) == 0 {
 		m.transcript.addNote("resumed: " + r.Title + " (no scrollback recorded — the model still remembers)")
-		return
+	} else {
+		m.transcript.replay(entries)
+		m.transcript.addNote("resumed: " + r.Title)
 	}
-	m.transcript.replay(entries)
-	m.transcript.addNote("resumed: " + r.Title)
+	if r.InExchange {
+		m.transcript.addNote(interruptedNote)
+	}
 }
 
 // blackenInput gives the textarea the black interior the layout calls for: the base, text,
@@ -572,6 +578,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	if parsed.text == "" && len(attached) == 0 {
 		return m, nil
 	}
+	if m.eng.InExchange() {
+		// The session was restored mid-task and the human typed a fresh message instead of
+		// /continue: their new intent supersedes the stale half-Exchange (Esc-parity). Scrap the
+		// open Exchange so the Submit below is accepted — a Submit while InExchange is rejected with
+		// ErrInputPending — and note the discard so the dropped work is never a silent loss.
+		m.eng.AbortExchange()
+		m.transcript.addNote("discarded the interrupted work — continuing fresh from your message")
+	}
 	m.promptEditor.reset() // empties the textarea, closes the overlay, drops the staged chips
 	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
 	m.transcript.addUser(parsed.text, m.skillDisplayNames(attached))
@@ -621,10 +635,13 @@ func (m Model) skillDisplayNames(ids []string) []string {
 // seam was built for; without a wired host it degrades to the pure view/engine reset it always was.
 //
 // Ordering: the save runs BEFORE ClearContext so the snapshot reflects the conversation being closed,
-// not an emptied one. Rotate runs only AFTER ClearContext succeeds — a refused clear leaves the old
-// session open and its id live, so no rotate happens on the error path. On success Rotate is
-// unconditional and idempotent on an already-inactive session, so a stale active id can never leak into
-// the fresh conversation even when the outgoing view held nothing worth saving.
+// not an emptied one. An interrupted session (InExchange) is then aborted between the save and the
+// clear — ClearContext refuses mid-Exchange with ErrInputPending, so the save keeps its mid-task
+// state in history and the abort lets the clear accept the boundary. Rotate runs only AFTER
+// ClearContext succeeds — a refused clear leaves the old session open and its id live, so no rotate
+// happens on the error path. On success Rotate is unconditional and idempotent on an already-inactive
+// session, so a stale active id can never leak into the fresh conversation even when the outgoing view
+// held nothing worth saving.
 //
 // Reached only from runCommand at stateIdle (no worker owns the engine), so ClearContext and the
 // Snapshot the flush takes are safe. On a ClearContext error the view is left untouched and the failure
@@ -632,6 +649,13 @@ func (m Model) skillDisplayNames(ids []string) []string {
 // conversation; the already-completed save is harmless (the session was closing anyway).
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.saveSession() // flush the outgoing session into history before it closes (best-effort, gated)
+	if m.eng.InExchange() {
+		// A session interrupted mid-task cannot be cleared — ClearContext refuses mid-Exchange with
+		// ErrInputPending — so scrap the open Exchange first. The save above already captured its
+		// mid-task state into history (where it stays resumable); this only drops the live engine's
+		// copy, exactly as a plain submit on an interrupted session does.
+		m.eng.AbortExchange()
+	}
 	if err := m.eng.ClearContext(); err != nil {
 		m.transcript.addNote("could not clear context: " + err.Error())
 		m.layout()
@@ -676,6 +700,17 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 
 	switch parsed.command {
 	case "continue":
+		if m.eng.InExchange() {
+			// The session was restored mid-task (only ever true right after an interrupted resume —
+			// the TUI aborts on every live cancel): /continue resumes the OPEN Exchange rather than
+			// opening a new one. Drive Step-only from the boundary (startResume) — no Submit, no new
+			// user block; the interrupted note already stands, so the transcript is left untouched.
+			cmd, cancel := startResume(m.parent, m.eng, m.notify)
+			m.cancel = cancel
+			m.state = stateRunning
+			m.setActivity(actThinking, "", 0) // the resumed work is a request in flight (as in submit)
+			return m, tea.Batch(cmd, m.spinner.Tick)
+		}
 		// /continue carries any attached skills into the canned turn (the user lined them up
 		// before asking the model to keep going).
 		attached := m.pendingSkills

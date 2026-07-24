@@ -54,28 +54,60 @@ func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFu
 	return cmd, cancel
 }
 
-// driveExchange runs one Exchange from its Submit to the quiescent Exchange boundary and
-// returns the single terminal Msg the model folds. It mirrors the canonical drive loop
-// (Agent.Run / the bench's coreagent.Run): Submit the input, then Step to the boundary,
-// treating StatusTurnComplete as "keep stepping." All intermediate output — streamed tokens,
-// tool calls, approvals, results — reaches the UI as Events through the teaSink, never
-// through this return value (the Cmd yields exactly one Msg, at the end).
+// startResume builds the cancellable worker that resumes an interrupted Exchange in place — a
+// session restored mid-task whose open Exchange waits at a quiescent boundary (eng.InExchange() is
+// true right after such a restore). It is startExchange without the Submit: the Exchange is already
+// open — the restored snapshot round-tripped InExchange: true — so there is nothing new to enqueue
+// and the worker Steps straight on. It returns the tea.Cmd the model schedules and the CancelFunc it
+// stores exactly as startExchange does, and notify carries the same per-Turn snapshots. The model
+// launches this only from the /continue drive when eng.InExchange() (model.go); the single-worker
+// invariant keeps eng driven from one goroutine, so C1 still holds.
+func startResume(parent context.Context, eng Engine, notify func(tea.Msg)) (tea.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	cmd := func() tea.Msg { return driveResume(ctx, eng, notify) }
+	return cmd, cancel
+}
+
+// driveExchange runs one Exchange from its Submit to the quiescent Exchange boundary and returns
+// the single terminal Msg the model folds. It Submits the input, then hands off to stepToBoundary —
+// the canonical drive loop (Agent.Run / the bench's coreagent.Run). All intermediate output —
+// streamed tokens, tool calls, approvals, results — reaches the UI as Events through the teaSink,
+// never through this return value (the Cmd yields exactly one Msg, at the end).
 //
-// It is the only caller of eng's drive methods, which is what preserves the single-goroutine
-// contract (C1). The StepStatus set is open; only StatusTurnComplete continues, and any other
-// terminal status returns the model to idle (treated as an Exchange end) rather than looping.
-//
-// After each committed Turn it snapshots the engine and hands the snapshot to notify for a
-// per-Turn save (the session system's every-Turn cadence). The snapshot is valid here because
-// between Steps this worker is the engine's single driver (agent.go). It is sent AFTER the Turn's
-// Events — the teaSink delivered them synchronously inside the Step that just returned — so the
-// Model folds it into a transcript consistent with the snapshot (the events-before-notify
-// ordering the existing exchangeDoneMsg path already relies on). A Snapshot error simply skips
-// that Turn's save; the loop keeps stepping.
+// It is one of the two callers of eng's drive methods (driveResume is the other); only one worker
+// ever runs at a time, which is what preserves the single-goroutine contract (C1).
 func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, notify func(tea.Msg)) tea.Msg {
 	if err := eng.Submit(input); err != nil {
 		return errMsg{Err: err}
 	}
+	return stepToBoundary(ctx, eng, notify)
+}
+
+// driveResume Steps an already-open Exchange to its quiescent boundary and returns the single
+// terminal Msg the model folds — driveExchange minus the Submit. It is the TUI counterpart of the
+// bench's re-Step resume path (AbortExchange's doc contrasts the two: the bench re-Steps to
+// re-attempt a cancelled Turn; the TUI's /continue re-Steps to finish a session interrupted
+// mid-task). The restored engine is already inExchange, so re-Stepping continues the unfinished
+// Turn rather than opening a new one; per-Turn notify, cancel, and terminal handling are identical
+// to driveExchange because both run stepToBoundary.
+func driveResume(ctx context.Context, eng Engine, notify func(tea.Msg)) tea.Msg {
+	return stepToBoundary(ctx, eng, notify)
+}
+
+// stepToBoundary is the shared Step loop both drive paths run once the Exchange is open —
+// driveExchange after its Submit, driveResume straight away. It Steps to the quiescent Exchange
+// boundary, treating StatusTurnComplete as "keep stepping," and returns the single terminal Msg the
+// model folds: cancelledMsg on a user stop, exchangeDoneMsg on the final boundary (and on any
+// future terminal status). The StepStatus set is open; only StatusTurnComplete continues.
+//
+// After each committed Turn it snapshots the engine and hands the snapshot to notify for a per-Turn
+// save (the session system's every-Turn cadence). The snapshot is valid here because between Steps
+// this worker is the engine's single driver (agent.go). It is sent AFTER the Turn's Events — the
+// teaSink delivered them synchronously inside the Step that just returned — so the Model folds it
+// into a transcript consistent with the snapshot (the events-before-notify ordering the existing
+// exchangeDoneMsg path already relies on). A Snapshot error simply skips that Turn's save; the loop
+// keeps stepping.
+func stepToBoundary(ctx context.Context, eng Engine, notify func(tea.Msg)) tea.Msg {
 	for {
 		res, err := eng.Step(ctx)
 		if err != nil {

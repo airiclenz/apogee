@@ -176,6 +176,7 @@ func (f *fakeEngine) ClearContext() error {
 func (f *fakeEngine) AbortExchange() {
 	f.mu.Lock()
 	f.abortCalls++
+	f.inExchange = false // the real Agent returns to a clean boundary; InExchange reads false after
 	f.mu.Unlock()
 }
 

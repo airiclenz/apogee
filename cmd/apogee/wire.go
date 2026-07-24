@@ -341,7 +341,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// payload for a --resume/--continue start (nil on a fresh start), so newModel repaints the
 		// stored scrollback beneath the start-up box and relights the gauge.
 		Sessions: host,
-		Resumed:  resumedSession(resumed),
+		// agent.InExchange() reads the resumed Agent's open-Exchange state (false on a fresh start,
+		// or a cleanly-closed resume; true only when the stored snapshot died mid-task), so newModel
+		// appends the interrupted note and /continue picks the work back up.
+		Resumed: resumedSession(resumed, agent.InExchange()),
 	})
 	// Once the alternate screen is torn down, point the user at how to pick this session back up.
 	// ActiveID is non-empty exactly when there is a resumable session — a resumed one, or a fresh
@@ -645,8 +648,10 @@ func resolveContinue(store *session.Store, workspace string) (session.Record, er
 
 // resumedSession projects a resolved store record onto the TUI's startup-replay payload, or nil for
 // a fresh start. The renderer decodes the opaque transcript blob itself; the binary only carries it
-// across with the title, context fill, and message count the resume note and gauge need.
-func resumedSession(rec *session.Record) *tui.ResumedSession {
+// across with the title, context fill, and message count the resume note and gauge need, plus
+// inExchange — the resumed Agent's open-Exchange state (agent.InExchange()) — so newModel can append
+// the interrupted note when the session died mid-task.
+func resumedSession(rec *session.Record, inExchange bool) *tui.ResumedSession {
 	if rec == nil {
 		return nil
 	}
@@ -655,6 +660,7 @@ func resumedSession(rec *session.Record) *tui.ResumedSession {
 		Title:      rec.Meta.Title,
 		CtxUsed:    rec.Meta.CtxUsed,
 		UserMsgs:   rec.Meta.UserMsgs,
+		InExchange: inExchange,
 	}
 }
 

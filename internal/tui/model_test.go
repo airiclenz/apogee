@@ -941,6 +941,131 @@ func hasEntry(m Model, kind entryKind, want string) bool {
 	return false
 }
 
+// ----------------------------------------------------------------------------
+// Interrupted-Exchange resume (session-system plan §8)
+// ----------------------------------------------------------------------------
+
+// A session restored mid-task (the engine reports InExchange) resumes on /continue via the
+// step-only drive: it launches a worker but adds NO "/continue" user block — the interrupted note
+// already stands and the transcript is left untouched. Contrast the canned path in
+// TestContinueAfterLiveCancelStaysCanned, which DOES add the block.
+func TestContinueOnInterruptedResumesStepOnly(t *testing.T) {
+	eng := &fakeEngine{inExchange: true} // a snapshot restored mid-Exchange
+	m := newTestModelEng(t, eng, testOpts)
+
+	m.input.SetValue("/continue")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.state != stateRunning {
+		t.Fatalf("state = %v, want running (the resume worker launched)", m.state)
+	}
+	if cmd == nil {
+		t.Error("interrupted /continue launched no worker Cmd")
+	}
+	if m.cancel == nil {
+		t.Error("interrupted /continue did not store the worker CancelFunc")
+	}
+	if hasEntry(m, entryUser, "/continue") {
+		t.Error("interrupted /continue added a /continue user block; the resume drive leaves the transcript untouched")
+	}
+	if eng.submits() != 0 {
+		t.Errorf("Submit calls = %d, want 0 — a resume re-Steps the open Exchange, it never Submits", eng.submits())
+	}
+}
+
+// A fresh message typed on an interrupted session supersedes the stale half-Exchange: the Model
+// aborts the open Exchange first (synchronously, so a later Submit is accepted) and notes the
+// discard, then records the message and launches the normal worker.
+func TestSubmitOnInterruptedAbortsWithNote(t *testing.T) {
+	eng := &fakeEngine{inExchange: true}
+	m := newTestModelEng(t, eng, testOpts)
+
+	m.input.SetValue("do something else instead")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if eng.aborts() != 1 {
+		t.Fatalf("AbortExchange calls = %d, want 1 (a fresh message discards the interrupted work)", eng.aborts())
+	}
+	// The abort is synchronous; the Submit rides the worker Cmd (not run here), so it is still 0 —
+	// which is exactly what proves the abort precedes the Submit.
+	if eng.submits() != 0 {
+		t.Errorf("Submit calls = %d immediately after enter, want 0 (abort-then-submit ordering)", eng.submits())
+	}
+	if !hasEntry(m, entryNote, "discarded the interrupted work — continuing fresh from your message") {
+		t.Error("the discard was not surfaced as a note")
+	}
+	if !hasEntry(m, entryUser, "do something else instead") {
+		t.Error("the fresh message was not recorded as a user block")
+	}
+	if m.state != stateRunning || cmd == nil {
+		t.Error("the fresh message did not launch the normal exchange worker")
+	}
+}
+
+// /clear on an interrupted session scraps the open Exchange before clearing — ClearContext refuses
+// mid-Exchange, so startNewSession aborts first — then resets the view to the re-seeded start-up box.
+func TestClearOnInterruptedAbortsThenClears(t *testing.T) {
+	eng := &fakeEngine{inExchange: true}
+	m := newTestModelEng(t, eng, testOpts)
+	seedConversation(&m)
+
+	m.input.SetValue("/clear")
+	m = step(t, m, keyEnter())
+
+	if eng.aborts() != 1 {
+		t.Fatalf("AbortExchange calls = %d, want 1 (an interrupted session must be scrapped before it can clear)", eng.aborts())
+	}
+	if eng.clearCalls != 1 {
+		t.Fatalf("ClearContext calls = %d, want 1", eng.clearCalls)
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want idle after /clear", m.state)
+	}
+	if n := len(m.transcript.entries); n != 1 || m.transcript.entries[0].kind != entryStartup {
+		t.Errorf("transcript = %d entries after /clear, want just the re-seeded start-up box", n)
+	}
+}
+
+// A --resume/--continue start of a mid-task session (Options.Resumed.InExchange) appends the
+// interrupted note at construction, so the human sees how to pick the work back up; a cleanly-closed
+// resume gets no such note.
+func TestResumedMidExchangeShowsInterruptedNote(t *testing.T) {
+	opts := testOpts
+	opts.Resumed = &ResumedSession{Title: "big task", InExchange: true}
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	if !hasEntry(m, entryNote, interruptedNote) {
+		t.Error("a mid-Exchange resume at startup did not append the interrupted note")
+	}
+
+	clean := testOpts
+	clean.Resumed = &ResumedSession{Title: "finished task", InExchange: false}
+	cm := newTestModelEng(t, &fakeEngine{}, clean)
+	if hasEntry(cm, entryNote, interruptedNote) {
+		t.Error("a cleanly-closed resume wrongly showed the interrupted note")
+	}
+}
+
+// After a LIVE cancel (Esc, not an interrupted restore) the Model has already aborted the Exchange,
+// so InExchange is false and /continue stays the canned "Please continue" submit — it adds the
+// /continue user block, the tell-tale of the canned path the interrupted path omits.
+func TestContinueAfterLiveCancelStaysCanned(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.cancel = func() {} // stand in for a live worker
+	m.state = stateRunning
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+
+	if eng.InExchange() {
+		t.Fatal("engine still inExchange after a live cancel; /continue would wrongly take the resume path")
+	}
+
+	m.input.SetValue("/continue")
+	m = step(t, m, keyEnter())
+	if !hasEntry(m, entryUser, "/continue") {
+		t.Error("/continue after a live cancel did not take the canned-submit path (no /continue user block)")
+	}
+}
+
 // A clean quit (idle, with a non-empty conversation) flushes the Engine snapshot and the derived
 // metadata through the SessionHost seam, then quits.
 func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {

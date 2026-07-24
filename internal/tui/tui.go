@@ -205,6 +205,11 @@ type ResumedSession struct {
 	Title      string // the session's browsable title, shown in the resume note
 	CtxUsed    int    // the last observed context fill, relighting the gauge on resume
 	UserMsgs   int    // the stored user-message count (metadata parity; the transcript re-derives it)
+	// InExchange marks a session interrupted mid-task — the resumed Agent reports an open Exchange
+	// (the binary reads agent.InExchange() after building it). newModel then appends the interrupted
+	// note so the human knows /continue picks up the unfinished work; false for a cleanly-closed
+	// session, which resumes without one.
+	InExchange bool
 }
 
 // ConfinementInfo is the host's confinement situation, resolved once by the composition root
