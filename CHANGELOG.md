@@ -41,19 +41,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
-- **Selector popups now share one look, and both visible pickers span the full chat-area width.** A
+- **Selector popups now share one look — a solid-black pane spanning the full window width.** A
   single shared painter (`internal/tui/popup.go`) draws every boxed selector overlay — a title row,
   `❯`-marked rows with the selected row highlighted, and a key-hint footer — so the pickers line up
-  on the start-up card's right edge instead of each carrying its own chrome. Two user-visible changes
-  fall out of the unification:
-  - **The `/sessions` history browser spans the chat area.** Its box was capped at 72 columns and,
-    on any wider terminal, stopped short of the pane; it now fills the chat-area width (the window
-    minus the scroll-bar column and right gutter — the same budget the start-up card spans). Rows
-    wider than the box truncate with `…` inside it instead of wrapping and breaking the layout.
+  flush with the input box below instead of each carrying its own chrome. The pane is filled solid
+  black end to end: the border, the padding, and the gap after a row shorter than the box all sit on
+  black, so no strip is ever left on the terminal background. Two user-visible changes fall out of
+  the unification:
+  - **The `/sessions` history browser spans the full window width.** Its box was capped at 72 columns
+    and, on any wider terminal, stopped short of the pane; it now fills the whole terminal width,
+    flush with the input box. Rows wider than the box truncate with `…` inside it instead of wrapping
+    and breaking the layout.
   - **The `/command`, `@file`, and skill dropdowns adopt the boxed popup chrome.** They previously
     painted as borderless faint rows truncated to the raw window width; they now render as the same
     titled, bordered pane (`commands` / `files` / `skills`) with the `❯` selected-row highlight and a
-    `↑/↓ select · ⏎/tab accept · esc dismiss` key legend, also spanning the chat-area width.
+    `↑/↓ select · ⏎/tab accept · esc dismiss` key legend, also spanning the full window width.
 - **`/clear` and `/new` now start a fresh session: they wipe the scrollback and reprint the start-up
   box.** Previously the two verbs reset the engine's memory but left the transcript untouched, adding
   a `context cleared …` note while the start-up box stayed put. The owner now wants them to "basically

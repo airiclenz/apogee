@@ -18,8 +18,12 @@ import (
 // Contract:
 //   - width is the TOTAL box width, in lipgloss v2 semantics: the rounded border and the padding
 //     fold INTO width, so every rendered line is exactly width display cells (like
-//     renderStartupBox). Callers pass transcriptWidth() so the pane's right border lands on the
-//     same column the transcript's wrapped text ends at.
+//     renderStartupBox). Callers pass m.width — the full window width, the same value the input
+//     box spans — so the pane's right border lands on the terminal's last column, flush with the
+//     prompt box below it.
+//   - The pane is filled solid black: the border style paints its border and padding cells black,
+//     and renderPopup pads every content line to the full inner width on the same black field, so
+//     no interior cell (including the gap after a short row) is left on the terminal background.
 //   - The module owns the marker (glyphUser + a space on the selected row, two spaces
 //     otherwise), the selected-row highlight (th.userBlock's full bar), and the scroll windowing
 //     (popupRowWindow): callers hand over the FULL plain-text row list plus the global selected
@@ -57,9 +61,17 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	}
 	inner := max(1, width-frame)
 
+	// Every non-highlight line is padded to the full inner width on a solid-black field: the outer
+	// border style only paints its own border and padding cells, so a line shorter than inner would
+	// otherwise leave the gap between its text and the right border on the terminal's default
+	// background (a black-hole strip). blackFill closes that — title, plain rows, and hint all read
+	// as sitting on the same black pane. The selected row keeps th.userBlock's dark-gray highlight
+	// bar (already full-inner-width) as its deliberate selection cue.
+	blackFill := lipgloss.NewStyle().Background(colBlack).Width(inner)
+
 	lines := make([]string, 0, len(spec.rows)+2) //nolint:mnd // +2: the optional title and hint rows
 	if spec.title != "" {
-		lines = append(lines, th.presentTitle.Render(truncateLabel(spec.title, inner)))
+		lines = append(lines, blackFill.Render(th.presentTitle.Render(truncateLabel(spec.title, inner))))
 	}
 
 	capRows := spec.maxRows
@@ -77,12 +89,12 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 		if selected {
 			lines = append(lines, th.userBlock.Width(inner).Render(row))
 		} else {
-			lines = append(lines, th.statusFaint.Render(row))
+			lines = append(lines, blackFill.Render(th.statusFaint.Render(row)))
 		}
 	}
 
 	if spec.hint != "" {
-		lines = append(lines, th.statusFaint.Render(truncateLabel(spec.hint, inner)))
+		lines = append(lines, blackFill.Render(th.statusFaint.Render(truncateLabel(spec.hint, inner))))
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)

@@ -51,6 +51,85 @@ func TestRenderPopupLinesAreExactWidth(t *testing.T) {
 	}
 }
 
+// The pane is filled solid black end to end: every printable cell — border runes, the black
+// padding columns, title/row/hint text, and crucially the gap after a row shorter than the box —
+// carries an explicit background (black, or the selected row's dark-gray highlight bar), so no
+// cell is ever left on the terminal's default background. This is the regression guard for the
+// "black-hole strip after short rows" bug: a bg-free line would surface as a bare cell here.
+func TestRenderPopupIsFullyBlackFilled(t *testing.T) {
+	th := newTheme()
+	spec := popupSpec{
+		title:    "saved sessions",                                       // shorter than the box
+		rows:     []string{"x", "a much wider row label goes here", "y"}, // mix of short + wide
+		selected: 1,                                                      // the wide row is the dark-gray highlight bar
+		hint:     "esc close",                                            // shorter than the box
+		maxRows:  8,
+	}
+	for _, width := range []int{40, 60, 98} {
+		for i, ln := range popupLines(renderPopup(th, spec, width)) {
+			if col, ok := firstCellWithoutBackground(ln); !ok {
+				t.Errorf("width %d: line %d has a bare (no-background) cell at column %d: %q",
+					width, i, col, strip(ln))
+			}
+		}
+	}
+}
+
+// firstCellWithoutBackground walks a rendered line's SGR stream and reports the column of the
+// first printable cell whose background is unset (terminal default). ok is true when every cell
+// has a background. It tracks only the background attribute: 48;5;n / 48;2;r;g;b / the 40-47 and
+// 100-107 basics set it; 49 and a 0/empty reset (\e[m) clear it.
+func firstCellWithoutBackground(line string) (col int, ok bool) {
+	bgSet := false
+	runes := []rune(line)
+	for i := 0; i < len(runes); {
+		if runes[i] == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
+			j := i + 2
+			for j < len(runes) && !((runes[j] >= 'A' && runes[j] <= 'Z') || (runes[j] >= 'a' && runes[j] <= 'z')) {
+				j++
+			}
+			if j < len(runes) && runes[j] == 'm' {
+				bgSet = applySGRBackground(bgSet, string(runes[i+2:j]))
+			}
+			i = j + 1
+			continue
+		}
+		if !bgSet {
+			return col, false
+		}
+		col++
+		i++
+	}
+	return 0, true
+}
+
+// applySGRBackground folds one SGR parameter list into the running background-set state.
+func applySGRBackground(bgSet bool, params string) bool {
+	if params == "" {
+		return false // \e[m — full reset
+	}
+	fields := strings.Split(params, ";")
+	for k := 0; k < len(fields); k++ {
+		switch fields[k] {
+		case "0":
+			bgSet = false
+		case "49":
+			bgSet = false
+		case "48": // extended background: 48;5;n or 48;2;r;g;b — consume its arguments
+			bgSet = true
+			if k+1 < len(fields) && fields[k+1] == "5" {
+				k += 2
+			} else if k+1 < len(fields) && fields[k+1] == "2" {
+				k += 4
+			}
+		case "40", "41", "42", "43", "44", "45", "46", "47",
+			"100", "101", "102", "103", "104", "105", "106", "107":
+			bgSet = true
+		}
+	}
+	return bgSet
+}
+
 // A row wider than the inner budget is truncated, never wrapped: the pane's physical line count
 // is exactly 2 (borders) + title + shown rows + hint, and the long row ends in an ellipsis.
 func TestRenderPopupLongRowDoesNotWrap(t *testing.T) {

@@ -369,8 +369,8 @@ func autocompleteTitle(kind acKind) string {
 }
 
 // renderAutocomplete draws the suggestion dropdown shown above the input box, through the shared
-// popup module (renderPopup): a titled, bordered pane spanning the chat-area width
-// (transcriptWidth, the startup card's right edge) holding the suggestion rows and a key legend,
+// popup module (renderPopup): a titled, bordered pane spanning the full window width (m.width,
+// flush with the input box below) holding the suggestion rows and a key legend,
 // the selected row highlighted. The kind picks the title ("commands"/"files"/"skills"); row
 // composition (the acItem labels, verbatim) stays caller-side while the module owns the marker,
 // highlight, truncation, and scroll windowing. It returns "" when the overlay is inactive, so
@@ -391,7 +391,7 @@ func (m Model) renderAutocomplete() string {
 		hint:     autocompleteHint,
 		maxRows:  maxAutocompleteItems,
 	}
-	return renderPopup(m.th, spec, m.transcriptWidth())
+	return renderPopup(m.th, spec, m.width)
 }
 
 // renderSkillChips draws the attached-skill badges shown just above the input box, one chip per

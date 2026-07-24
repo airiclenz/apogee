@@ -366,22 +366,19 @@ func TestSessionBrowserRefusesToOpenWhileBusy(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The overlay pane spans the chat-area width (selector-popup plan §2)
+// The overlay pane spans the full window width (selector-popup plan §2)
 // ----------------------------------------------------------------------------
 
-// Every physical line of the open browser pane is exactly transcriptWidth (98 at the 100×30
-// harness window: m.width − scrollbarWidth − bodyRightGutter) — the startup card's right edge — so
-// the box spans the chat area rather than stopping at the old 72-column ceiling.
-func TestSessionBrowserPaneSpansChatWidth(t *testing.T) {
+// Every physical line of the open browser pane is exactly the full window width (m.width, 100 at
+// the 100×30 harness window) — flush with the input box below it — so the box spans the whole
+// terminal rather than stopping at the transcript's right edge or the old 72-column ceiling.
+func TestSessionBrowserPaneSpansFullWidth(t *testing.T) {
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "render me", "/ws/a", time.Now().Add(-5*time.Minute), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	m = openBrowser(t, m)
 
-	const wantWidth = 98 // 100 − scrollbarWidth(1) − bodyRightGutter(1)
-	if got := m.transcriptWidth(); got != wantWidth {
-		t.Fatalf("transcriptWidth = %d, want %d at the 100×30 harness window", got, wantWidth)
-	}
+	wantWidth := m.width // the full window width, matching the input box
 	for i, ln := range popupLines(m.renderSessionBrowser()) {
 		if w := lipgloss.Width(ln); w != wantWidth {
 			t.Errorf("pane line %d is %d cells, want %d: %q", i, w, wantWidth, strip(ln))

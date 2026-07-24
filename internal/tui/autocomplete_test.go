@@ -70,15 +70,12 @@ func TestAutocompleteCommandAndFileTitles(t *testing.T) {
 	}
 }
 
-// Every physical line of the dropdown pane spans exactly the chat-area width (98 at the 100×30
-// harness window: m.width − scrollbarWidth − bodyRightGutter) — the /sessions popup's right edge.
-func TestAutocompleteDropdownSpansChatWidth(t *testing.T) {
-	const wantWidth = 98 // 100 − scrollbarWidth(1) − bodyRightGutter(1)
-
+// Every physical line of the dropdown pane spans exactly the full window width (m.width, 100 at
+// the 100×30 harness window) — flush with the input box below it, the same width the /sessions
+// popup spans.
+func TestAutocompleteDropdownSpansFullWidth(t *testing.T) {
 	m := newDropdownModel(t, skillOpts())
-	if got := m.transcriptWidth(); got != wantWidth {
-		t.Fatalf("transcriptWidth = %d, want %d at the 100×30 harness window", got, wantWidth)
-	}
+	wantWidth := m.width // the full window width, matching the input box
 	m.input.SetValue("/skill ")
 	m.autocomplete = m.computeAutocomplete()
 	for i, ln := range popupLines(m.renderAutocomplete()) {

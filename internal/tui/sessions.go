@@ -349,8 +349,8 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // ----------------------------------------------------------------------------
 
 // renderSessionBrowser paints the /sessions overlay through the shared popup module (renderPopup):
-// a titled, bordered pane spanning the chat-area width (transcriptWidth, the startup card's right
-// edge) holding the session rows and a key legend, the selected row highlighted. Row composition —
+// a titled, bordered pane spanning the full window width (m.width, flush with the input box below)
+// holding the session rows and a key legend, the selected row highlighted. Row composition —
 // including the inline delete-confirm or rename-edit decoration — stays caller-side in sessionRows,
 // while the module owns the marker, highlight, truncation, and scroll windowing. An empty view is a
 // single unselectable note row. It returns "" when the browser is closed, so View treats it like
@@ -376,7 +376,7 @@ func (m Model) renderSessionBrowser() string {
 		spec.rows = sessionRows(b, m.opts.Workspace, time.Now())
 		spec.selected = b.selected
 	}
-	return renderPopup(m.th, spec, m.transcriptWidth())
+	return renderPopup(m.th, spec, m.width)
 }
 
 // sessionRows composes the FULL filtered row list the popup module paints: the plain
