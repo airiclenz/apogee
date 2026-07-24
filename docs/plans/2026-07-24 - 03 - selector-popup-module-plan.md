@@ -168,7 +168,19 @@ Commit: `feat(tui): /sessions popup spans the chat-area width`.
 
 ---
 
-## 3. Command/file/skill dropdowns adopt the popup chrome
+## 3. Command/file/skill dropdowns adopt the popup chrome — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): the three view-level tests live in a new co-located `autocomplete_test.go`
+(matching item 1's popup.go→popup_test.go and the coding-standards `{source}_test.go` rule)
+rather than being split across skill_test.go/minilang_test.go — the plan named those two files
+for STYLE (`plain(m.View())`), but the tests cut across all three dropdown kinds and read
+cleaner grouped. The "above the input box" ordering is asserted via the `"skills"` title index
+vs the `"/skill"` typed-value index (the latter appears only on the input-box line);
+`m.renderAutocomplete()` is not a raw substring of `View()` because `lipgloss.JoinVertical` pads
+the 98-wide pane to the 100-wide max. Removing the sole `lipgloss.JoinVertical` call orphaned the
+`lipgloss` import in autocomplete.go, so it was dropped; `truncateLabel` stays in autocomplete.go
+(still used by popup.go, per item 1's note). Added `autocompleteTitle(acKind)` as the title
+helper. CHANGELOG untouched (item 4's territory).
 
 All in `internal/tui/autocomplete.go` (+ view-level tests). This is D1 — full unification:
 

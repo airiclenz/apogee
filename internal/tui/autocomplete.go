@@ -5,7 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -14,10 +13,10 @@ import (
 // ----------------------------------------------------------------------------
 //
 // A suggestion popup that opens while the human types at idle: "/" lists the known
-// commands, and an "@" token lists workspace files. It mirrors the approval-prompt overlay
-// (model.go View): a slot rendered above the input box that shrinks the transcript viewport
-// to make room. The overlay completes the WORD AT THE END of the input (the common
-// forward-typing case), which keeps it cursor-position-free and robust.
+// commands, and an "@" token lists workspace files. It is painted by the shared selector-popup
+// module (popup.go) — a titled, bordered pane rendered above the input box, in a slot that
+// shrinks the transcript viewport to make room. The overlay completes the WORD AT THE END of the
+// input (the common forward-typing case), which keeps it cursor-position-free and robust.
 
 // maxAutocompleteItems caps how many suggestions the overlay shows (and how far the file
 // walk runs) — enough to be useful, small enough that the popup never crowds the transcript
@@ -350,9 +349,32 @@ func containsString(xs []string, s string) bool {
 	return false
 }
 
-// renderAutocomplete draws the suggestion popup shown above the input box. The selected row
-// gets the user-block highlight (white on dark gray); the rest are faint. It returns "" when
-// the overlay is inactive, so View can treat it like the approval-prompt slot.
+// autocompleteHint is the one-line key legend shown at the foot of the dropdown. It is coarse
+// like sessionBrowserHint — the exact-match-Enter-submits nuance (autocompleteExactMatch) stays
+// undocumented in the legend, as the session hint also elides its modes.
+const autocompleteHint = "↑/↓ select · ⏎/tab accept · esc dismiss"
+
+// autocompleteTitle names the dropdown by what it completes: the popup module's title row.
+func autocompleteTitle(kind acKind) string {
+	switch kind {
+	case acCommand:
+		return "commands"
+	case acFile:
+		return "files"
+	case acSkill:
+		return "skills"
+	default:
+		return ""
+	}
+}
+
+// renderAutocomplete draws the suggestion dropdown shown above the input box, through the shared
+// popup module (renderPopup): a titled, bordered pane spanning the chat-area width
+// (transcriptWidth, the startup card's right edge) holding the suggestion rows and a key legend,
+// the selected row highlighted. The kind picks the title ("commands"/"files"/"skills"); row
+// composition (the acItem labels, verbatim) stays caller-side while the module owns the marker,
+// highlight, truncation, and scroll windowing. It returns "" when the overlay is inactive, so
+// View treats it like the approval-prompt slot.
 func (m Model) renderAutocomplete() string {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 {
@@ -360,15 +382,16 @@ func (m Model) renderAutocomplete() string {
 	}
 	rows := make([]string, len(ac.items))
 	for i, it := range ac.items {
-		marker := "  "
-		style := m.th.statusFaint
-		if i == ac.selected {
-			marker = "❯ "
-			style = m.th.userBlock
-		}
-		rows[i] = style.Render(truncateLabel(marker+it.label, m.width))
+		rows[i] = it.label
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	spec := popupSpec{
+		title:    autocompleteTitle(ac.kind),
+		rows:     rows,
+		selected: ac.selected,
+		hint:     autocompleteHint,
+		maxRows:  maxAutocompleteItems,
+	}
+	return renderPopup(m.th, spec, m.transcriptWidth())
 }
 
 // renderSkillChips draws the attached-skill badges shown just above the input box, one chip per
