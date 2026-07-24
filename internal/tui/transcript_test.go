@@ -579,6 +579,32 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	}
 }
 
+// reset returns the transcript to its empty state — no committed entries, no in-progress buffer —
+// but preserves the debug flag (a hidden view toggle, not conversation). It is the /clear + /new
+// "start a new session" primitive; the caller re-seeds the start-up box afterwards.
+func TestTranscriptReset(t *testing.T) {
+	tr := &transcript{}
+	tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
+	tr.addUser("hello", nil)
+	tr.appendToken("streamed ") // sets streaming=true and grows pending
+	tr.debug = true
+
+	tr.reset()
+
+	if n := len(tr.entries); n != 0 {
+		t.Errorf("entries = %d after reset, want 0 (all committed entries dropped)", n)
+	}
+	if tr.pending != "" {
+		t.Errorf("pending = %q after reset, want empty", tr.pending)
+	}
+	if tr.streaming {
+		t.Error("streaming = true after reset, want false")
+	}
+	if !tr.debug {
+		t.Error("debug = false after reset, want it preserved as true")
+	}
+}
+
 // callEntry returns the tool-call entry with the given CallID, or nil.
 func callEntry(tr *transcript, id string) *entry {
 	for i := range tr.entries {

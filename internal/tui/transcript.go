@@ -142,6 +142,18 @@ func (t *transcript) addStartup(v startupView) {
 	t.entries = append(t.entries, entry{kind: entryStartup, startup: v})
 }
 
+// reset returns the transcript to its empty state — no committed entries and no in-progress
+// assistant buffer — while preserving the debug flag (a hidden view toggle, not conversation).
+// It is the /clear + /new "start a new session" primitive: the caller re-seeds the one-time
+// start-up box with addStartup so the fresh view matches a launch. It does NOT touch the engine's
+// memory (ClearContext) — that is the caller's separate, fallible step (model.startNewSession).
+func (t *transcript) reset() {
+	t.entries = nil
+	t.pending = ""
+	t.streaming = false
+	// t.debug is deliberately preserved across a session reset.
+}
+
 // hasConversation reports whether the transcript holds anything the human would want resumed —
 // any entry beyond the one-time start-up box seeded at construction. The box is opening chrome,
 // not conversation, so a session that only ever showed it is still "empty" for the save decision

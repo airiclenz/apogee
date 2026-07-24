@@ -167,6 +167,35 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 	}
 }
 
+// newStartupView is the single source both newModel's seed and /clear's re-seed read, so the
+// fresh-launch box and the post-/clear box can never drift. This pins the extraction: the value the
+// helper builds must equal the startupView newModel actually seeded at entries[0], and its Version
+// must be the clean BaseVersion — never the full provenance-tagged Options.Version the footer shows.
+// (testOpts leaves both version fields empty, so a local opts with distinct Version/BaseVersion is
+// used to prove the box drops the build provenance.)
+func TestNewStartupViewMatchesSeed(t *testing.T) {
+	opts := Options{
+		Model:         "/models/gpt-oss-20b.gguf",
+		Endpoint:      "http://localhost:1234",
+		HostAlias:     "test-host",
+		ContextWindow: 32768,
+		Version:       "v1.2.3+45.gdeadbeef01", // the full string /version shows — the box must NOT use it
+		BaseVersion:   "v1.2.3",                // the clean release version the box displays
+	}
+	m := newModel(context.Background(), &fakeEngine{}, opts)
+
+	seeded := m.transcript.entries[0].startup
+	if got := newStartupView(opts); got != seeded {
+		t.Errorf("newStartupView(opts) = %+v, want the seeded box %+v (extraction drifted)", got, seeded)
+	}
+	if got, want := newStartupView(opts).Version, opts.BaseVersion; got != want {
+		t.Errorf("newStartupView version = %q, want %q (Options.BaseVersion, the clean release version)", got, want)
+	}
+	if newStartupView(opts).Version == opts.Version {
+		t.Errorf("newStartupView version = %q equals the full Options.Version; the box must drop the build provenance", opts.Version)
+	}
+}
+
 // The start-up box is printed once and survives a /clear: clearing resets the engine's memory and
 // records a note, but the transcript scrollback — including the box at entries[0] — is untouched.
 func TestStartupBoxSurvivesClear(t *testing.T) {

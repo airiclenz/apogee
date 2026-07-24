@@ -137,13 +137,7 @@ func newModel(parent context.Context, eng Engine, opts Options) Model {
 	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
 	// every repaint, so it reflows on resize with no "already shown" guard, and it survives
 	// /clear (which resets the engine's memory but never the transcript scrollback).
-	m.transcript.addStartup(startupView{
-		Logo:    strings.TrimRight(apogeeLogo, "\n"),
-		Host:    hostDisplay(opts),
-		Model:   displayModel(opts.Model),
-		Context: formatTokens(opts.ContextWindow),
-		Version: opts.BaseVersion,
-	})
+	m.transcript.addStartup(newStartupView(opts))
 	return m
 }
 
@@ -1052,6 +1046,20 @@ func (m Model) footerContent(w int) string {
 	// footerText keeps the black background; only the foreground swaps to the mode's colour.
 	right := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(mode) + m.th.footerText.Render(" ")
 	return bar + left + fill + right + bar
+}
+
+// newStartupView builds the one-time start-up box's facts from the resolved display Options — the
+// single source both newModel's seed and /clear's re-seed (startNewSession) read, so the fresh-launch
+// box and the post-/clear box can never drift. Version is BaseVersion (the clean release version), not
+// the full provenance-tagged Options.Version the footer shows.
+func newStartupView(opts Options) startupView {
+	return startupView{
+		Logo:    strings.TrimRight(apogeeLogo, "\n"),
+		Host:    hostDisplay(opts),
+		Model:   displayModel(opts.Model),
+		Context: formatTokens(opts.ContextWindow),
+		Version: opts.BaseVersion,
+	}
 }
 
 // hostDisplay is the upstream host label the footer and the start-up box both show: the
