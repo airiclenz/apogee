@@ -139,3 +139,47 @@ func (l *turnLifecycle) restoreDeferred(deferred []string) {
 		l.conv.Defer(inject)
 	}
 }
+
+// openExchange marks the boundary a new Exchange opens at — the conversation length BEFORE its
+// first user message is appended — and flips inExchange, so AbortExchange can roll a cancelled
+// Exchange all the way back to a clean, submittable boundary. It is called once per Exchange:
+// pendingInput is non-nil only on the opening Turn (Submit is refused mid-Exchange), so a
+// continuation Turn never resets the boundary. The boundary is a CACHED value (ADR 0017 §2's
+// recorded fallback) precisely because a later mid-Exchange fold can drop the opening user
+// message, leaving nothing to re-derive it from — readers go through Agent.exchangeBoundary.
+func (l *turnLifecycle) openExchange() {
+	l.exchangeStart = l.conv.Len()
+	l.inExchange = true
+}
+
+// reanchorAfterShrink repairs the cached Exchange boundary (S2) after a mid-Exchange history
+// rewrite (truncate_history) dropped `dropped` messages, shifting the current Exchange's messages
+// down: it shifts exchangeStart down by the delta, clamped to [conv.PrefixEnd()+1, conv.Len()], so
+// AbortExchange still rolls back to this Exchange's boundary rather than over-dropping into the
+// protected prefix or leaving orphaned tool results. The floor is just past the protected prefix +
+// gap note (PrefixEnd()+1): after a truncation everything from there to Len is current-Exchange
+// tail, so exchangeStart validly sits anywhere in that span. Only a shrink is repaired — a grow (no
+// registered rewrite does this) would mis-shift, and on an Exchange-opening Turn a zero-drop clamp
+// could wrongly push exchangeStart past the just-appended user message — so a non-positive `dropped`
+// or an out-of-Exchange rewrite is a no-op. The cache + this repair are deliberate (ADR 0017 §2's
+// recorded fallback): this very rewrite can drop the open Exchange's opening user message, so the
+// boundary cannot be re-derived from the conversation — readers go through Agent.exchangeBoundary.
+func (l *turnLifecycle) reanchorAfterShrink(dropped int) {
+	if dropped <= 0 || !l.inExchange {
+		return
+	}
+	l.exchangeStart = min(max(l.exchangeStart-dropped, l.conv.PrefixEnd()+1), l.conv.Len())
+}
+
+// anchorAtBridge re-anchors the cached Exchange boundary to the just-appended overflow bridge after
+// a mid-Exchange emergency fold (ADR 0018), so AbortExchange rolls back to the folded prefix +
+// summary rather than into the protected prefix. That repair is required, not optional: the boundary
+// is a CACHED value (ADR 0017 §2's recorded fallback) precisely because a rewrite like the fold can
+// drop the Exchange's opening user message, leaving nothing to re-derive it from. It mirrors
+// reanchorAfterShrink, the S2 repair step() performs after a mid-Exchange truncate_history shrink.
+// No-op outside an Exchange.
+func (l *turnLifecycle) anchorAtBridge() {
+	if l.inExchange {
+		l.exchangeStart = l.conv.Len() - 1
+	}
+}

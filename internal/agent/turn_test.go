@@ -179,3 +179,99 @@ func TestTurnEnd_Table(t *testing.T) {
 		assertDiscarded(t, tracker)
 	})
 }
+
+// The Exchange-boundary mutations (item 4) are unit-testable in isolation: each drives a
+// turnLifecycle over a scripted Conversation with no fake responder and no scripted step() run.
+// reanchorAfterShrink's clamp — pinned end-to-end only through the
+// TestExchangeStartRepairedAfterMidExchangeTruncation integration test — is table-tested directly
+// here; openExchange and anchorAtBridge get one direct case each.
+
+// buildConv returns a Conversation of exactly n messages whose protected prefix is [system, user]
+// (PrefixEnd() == 2 for n >= 2), the rest filled with assistant/tool turns — enough shape to
+// exercise reanchorAfterShrink's [PrefixEnd()+1, Len()] clamp.
+func buildConv(n int) *domain.Conversation {
+	conv := domain.NewConversation(nil)
+	for i := 0; i < n; i++ {
+		role := domain.RoleAssistant
+		switch {
+		case i == 0:
+			role = domain.RoleSystem
+		case i == 1:
+			role = domain.RoleUser
+		case i%2 == 1:
+			role = domain.RoleTool
+		}
+		conv.Append(domain.Message{Role: role, Content: "m"})
+	}
+	return conv
+}
+
+func TestReanchorAfterShrink_Clamp(t *testing.T) {
+	// PrefixEnd() is 2 for every conv below (system + first user), so the clamp floor is 3.
+	cases := []struct {
+		name       string
+		convLen    int
+		inExchange bool
+		start      int
+		dropped    int
+		want       int
+	}{
+		{"shift within span", 10, true, 8, 2, 6},            // max(6,3)=6, min(6,10)=6
+		{"floor clamp at PrefixEnd()+1", 10, true, 4, 5, 3}, // max(-1,3)=3, min(3,10)=3
+		{"ceiling clamp at Len()", 5, true, 10, 2, 5},       // max(8,3)=8, min(8,5)=5
+		{"zero dropped is a no-op", 10, true, 8, 0, 8},
+		{"negative dropped is a no-op", 10, true, 8, -3, 8},
+		{"not in Exchange is a no-op", 10, false, 8, 4, 8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conv := buildConv(tc.convLen)
+			if conv.PrefixEnd() != 2 {
+				t.Fatalf("test setup: PrefixEnd() = %d, want 2", conv.PrefixEnd())
+			}
+			l := &turnLifecycle{conv: conv, tracker: newSelfRegulator(), inExchange: tc.inExchange, exchangeStart: tc.start}
+			l.reanchorAfterShrink(tc.dropped)
+			if l.exchangeStart != tc.want {
+				t.Errorf("exchangeStart = %d, want %d", l.exchangeStart, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenExchange(t *testing.T) {
+	conv := buildConv(3) // system, user, assistant — length 3
+	l := &turnLifecycle{conv: conv, tracker: newSelfRegulator()}
+
+	l.openExchange()
+
+	if l.exchangeStart != 3 {
+		t.Errorf("exchangeStart = %d, want 3 (conv.Len() before the user Append)", l.exchangeStart)
+	}
+	if !l.inExchange {
+		t.Error("inExchange not set; openExchange must flip it on")
+	}
+}
+
+func TestAnchorAtBridge(t *testing.T) {
+	t.Run("mid-Exchange re-anchors to the just-appended bridge", func(t *testing.T) {
+		conv := buildConv(4) // the bridge is the last message
+		l := &turnLifecycle{conv: conv, tracker: newSelfRegulator(), inExchange: true, exchangeStart: 1}
+
+		l.anchorAtBridge()
+
+		if l.exchangeStart != conv.Len()-1 {
+			t.Errorf("exchangeStart = %d, want %d (the bridge's index)", l.exchangeStart, conv.Len()-1)
+		}
+	})
+
+	t.Run("outside an Exchange it is a no-op", func(t *testing.T) {
+		conv := buildConv(4)
+		l := &turnLifecycle{conv: conv, tracker: newSelfRegulator(), inExchange: false, exchangeStart: 1}
+
+		l.anchorAtBridge()
+
+		if l.exchangeStart != 1 {
+			t.Errorf("exchangeStart = %d, want 1 (no-op outside an Exchange)", l.exchangeStart)
+		}
+	})
+}

@@ -294,7 +294,18 @@ conversation; folded re-derives against the folded conversation and latches `fol
 tests green unedited; the ritual appears exactly once. Commit:
 `refactor(agent): collapse the overflow fold-and-rebuild ritual into refold`.
 
-## 4. Lift the Exchange-boundary mutations onto the owner
+## 4. Lift the Exchange-boundary mutations onto the owner — ✅ DONE (2026-07-24)
+
+**NOTES (2026-07-24):** Implemented as written — `openExchange`/`reanchorAfterShrink`/`anchorAtBridge`
+added to `turn.go`, the three production write sites re-pointed (`step()` opening block, the S2 repair,
+`emergencyFold`), and each site's defensive comment migrated onto its method (`emergencyFold`'s doc now
+keeps a one-line pointer to `anchorAtBridge` for the full rationale). `Agent.exchangeBoundary()` is
+unchanged — it already forwards to `a.turns.exchangeStart`. Only production write outside `turn.go` is
+`restoreState`, as the Acceptance allows; test-setup writes to `a.turns.exchangeStart` (item-1 reach-ins)
+still compile and were left untouched. Tests: added `TestReanchorAfterShrink_Clamp` (6-row table),
+`TestOpenExchange`, and `TestAnchorAtBridge` to `turn_test.go`; `anchorAtBridge` got the specified direct
+case PLUS a cheap out-of-Exchange no-op sub-case pinning its `inExchange` guard (additive coverage, no
+behavior change). Existing suite unedited and green.
 
 **What:** The four `exchangeStart` write sites become three intention-named methods on
 `turnLifecycle` (the fourth, `restoreState`, already writes through the owner since item 1):

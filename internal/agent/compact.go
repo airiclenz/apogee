@@ -191,12 +191,10 @@ const overflowBridge = "The conversation above was compacted because the previou
 //
 // On success the conversation ends …first-user | assistant-summary | user-bridge: strict role
 // alternation holds and no dangling tool calls survive the Replace, so any chat template accepts
-// the retried request. When the fold ran mid-Exchange, exchangeStart is re-anchored to the
-// bridge's index so AbortExchange still rolls back to a clean boundary — the folded prefix +
-// summary — rather than into the protected prefix. That repair is required, not optional: the
-// boundary is a CACHED value (ADR 0017 §2's recorded fallback) precisely because a rewrite like
-// this one can drop the Exchange's opening user message, leaving nothing to re-derive it from. It
-// mirrors the S2 repair step() performs after a mid-Exchange truncate_history shrink.
+// the retried request. When the fold ran mid-Exchange, the cached Exchange boundary is re-anchored
+// to the bridge's index (a.turns.anchorAtBridge — turn.go) so AbortExchange still rolls back to a
+// clean boundary rather than into the protected prefix; that owner method carries the full
+// rationale and mirrors the S2 repair step() performs after a mid-Exchange truncate_history shrink.
 //
 // compactSat is deliberately untouched: that latch guards the estimate-driven trigger against
 // re-folding a history it already proved it cannot shrink, whereas this path is bounded by the
@@ -222,9 +220,7 @@ func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
 	}
 
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: overflowBridge})
-	if a.turns.inExchange {
-		a.turns.exchangeStart = a.conv.Len() - 1
-	}
+	a.turns.anchorAtBridge()
 	return true
 }
 

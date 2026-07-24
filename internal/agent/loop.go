@@ -270,11 +270,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	a.autoCompact(ctx, turn)
 
 	if a.pendingInput != nil {
-		// exchangeStart marks the boundary this Exchange opens at (before its first user
-		// message), so AbortExchange can roll a cancelled Exchange all the way back to a clean,
-		// submittable boundary. It is set once per Exchange: pendingInput is non-nil only on the
-		// opening Turn (Submit is refused mid-Exchange), so a continuation Turn never resets it.
-		a.turns.exchangeStart = a.conv.Len()
+		// Open the Exchange: cache the boundary it begins at (the current length, before the first
+		// user message is appended) and flip inExchange (turn.go). The reorder of inExchange ahead
+		// of the Append is inert — no reader runs between the two.
+		a.turns.openExchange()
 		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
 		// per-turn instructions, so prepending them scopes them to this one message (the right
 		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).
@@ -282,7 +281,6 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		refs := a.resolveFileRefs(turn, a.pendingInput.FileRefs)
 		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + a.pendingInput.Text})
 		a.pendingInput = nil
-		a.turns.inExchange = true
 	}
 
 	// History-rewrite hooks edit conversation state before it is projected (truncation,
@@ -291,20 +289,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	if err := a.runHistoryRewriteHooks(ctx, turn); err != nil {
 		return a.turns.end(t, endAbandoned), nil
 	}
-	// exchangeStart repair (S2): a mid-Exchange history rewrite (truncate_history) drops the middle
-	// of the conversation, shifting the current Exchange's messages down. Re-anchor exchangeStart by
-	// the drop delta so AbortExchange still rolls back to this Exchange's boundary rather than
-	// over-dropping into the protected prefix or leaving orphaned tool results. The floor is just
-	// past the protected prefix + gap note (PrefixEnd()+1): after a truncation everything from there
-	// to Len is current-Exchange tail, so exchangeStart validly sits anywhere in that span. Only a
-	// shrink is repaired — a grow (no registered rewrite does this) would mis-shift, and on an
-	// Exchange-opening Turn a zero-drop clamp could wrongly push exchangeStart past the just-appended
-	// user message. The cache + this repair are deliberate (ADR 0017 §2's recorded fallback): this
-	// very rewrite can drop the open Exchange's opening user message, so the boundary cannot be
-	// re-derived from the conversation — readers go through exchangeBoundary (agent.go).
-	if dropped := beforeRewrite - a.conv.Len(); dropped > 0 && a.turns.inExchange {
-		a.turns.exchangeStart = min(max(a.turns.exchangeStart-dropped, a.conv.PrefixEnd()+1), a.conv.Len())
-	}
+	// Repair the cached Exchange boundary after a mid-Exchange history rewrite shrank the
+	// conversation (S2): reanchorAfterShrink shifts exchangeStart down by the drop delta and owns the
+	// guard + clamp (turn.go). A grow or an out-of-Exchange rewrite is a no-op there.
+	a.turns.reanchorAfterShrink(beforeRewrite - a.conv.Len())
 
 	// Derive this Turn's request-scoped working values (rollback boundary, request, deferred
 	// floor) from the current conversation — the same trio refold re-derives after a fold.
