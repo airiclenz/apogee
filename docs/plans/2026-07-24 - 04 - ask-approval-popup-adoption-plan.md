@@ -162,7 +162,13 @@ All in `popup.go` + `popup_test.go` + `theme.go`:
 
 ---
 
-## 2. ask_user gains optional multiple-choice — `internal/domain/ask.go` + `internal/tools/ask_user.go`
+## 2. ask_user gains optional multiple-choice — `internal/domain/ask.go` + `internal/tools/ask_user.go` — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): The choice sanitisation (trim + drop whitespace-only, all-blank/absent ⇒ nil)
+is factored into a small unexported helper `sanitiseChoices` in `ask_user.go` that `Execute`
+calls — behaviour exactly as specified, only extracted to keep `Execute` small (coding-standards).
+Test helper `askCallWithChoices` and a `seenReq` capture on `scriptedAsker` added in
+`ask_user_test.go`.
 
 - `AskRequest` gains `Choices []string` — the optional short answer options put to the human
   alongside the free-text box; nil/empty means free-text only (today's behavior). The struct

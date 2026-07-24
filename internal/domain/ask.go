@@ -21,12 +21,20 @@ type Asker interface {
 	Ask(ctx context.Context, req AskRequest) (AskAnswer, error)
 }
 
-// AskRequest is the free-text question put to the human. It is a STRUCT (not a bare string)
-// for freeze-safety (D7): a post-v1 multiple-choice field (Choices) is then an additive,
-// non-breaking change to the v1.0.0 surface.
+// AskRequest is the question put to the human: a free-text prompt, optionally accompanied by a
+// short closed set of pickable answers. It is a STRUCT (not a bare string) for freeze-safety
+// (D7); Choices landed post-v1.0.0 as exactly the additive, non-breaking field that
+// freeze-safety anticipated, and a future refinement (say, a default-choice hint) stays an
+// additive change to this surface.
 type AskRequest struct {
 	// Question is the free-text prompt the human answers.
 	Question string
+
+	// Choices is the optional set of short, single-line answers offered to the human alongside
+	// the free-text box; nil/empty means free-text only (the original behaviour). The human may
+	// always type a custom answer instead, so Choices never gates the reply, and the chosen
+	// label travels back in AskAnswer.Text (D9) — no Choice index is returned.
+	Choices []string
 }
 
 // AskAnswer is the human's free-text reply. A STRUCT for the same freeze-safety reason

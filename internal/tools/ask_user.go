@@ -10,18 +10,20 @@ import (
 
 var askUserSpec = toolSpec{
 	name:        "ask_user",
-	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person.",
+	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few short answer options the human can pick from; they may still type a custom answer instead.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["question"],
   "properties": {
-    "question": {"type": "string", "description": "The question to ask the human. Use this when you need a clarification or a decision only the user can make."}
+    "question": {"type": "string", "description": "The question to ask the human. Use this when you need a clarification or a decision only the user can make."},
+    "choices": {"type": "array", "items": {"type": "string"}, "description": "Optional: 2-5 short, single-line answer options to offer when the question has a natural closed set. The human can always type a custom free-text answer instead, so choices never gate the reply."}
   }
 }`),
 }
 
 type askUserArgs struct {
-	Question string `json:"question"`
+	Question string   `json:"question"`
+	Choices  []string `json:"choices"`
 }
 
 // AskUser asks the human a free-text question mid-task and returns their typed answer. It
@@ -68,7 +70,8 @@ func (t *AskUser) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return errorResult(call.ID, "ask_user is unavailable: no Asker delegate is configured"), nil
 	}
 
-	answer, err := t.asker.Ask(ctx, domain.AskRequest{Question: args.Question})
+	req := domain.AskRequest{Question: args.Question, Choices: sanitiseChoices(args.Choices)}
+	answer, err := t.asker.Ask(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return domain.ToolResult{}, ctx.Err()
@@ -76,6 +79,26 @@ func (t *AskUser) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return errorResult(call.ID, "could not ask the user: "+err.Error()), nil
 	}
 	return okResult(call.ID, answer.Text), nil
+}
+
+// sanitiseChoices trims each choice and drops whitespace-only entries, returning nil when no
+// non-blank choice remains. A sloppy or absent array therefore degrades to free-text-only
+// rather than raising a result-level error — a malformed choices list never blocks the
+// question from reaching the human.
+func sanitiseChoices(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	cleaned := make([]string, 0, len(raw))
+	for _, choice := range raw {
+		if trimmed := strings.TrimSpace(choice); trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
 }
 
 var (
