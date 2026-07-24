@@ -345,7 +345,20 @@ the end-to-end pin. One direct case each for `openExchange` and `anchorAtBridge`
 `exchangeStart =` writes remain outside `turn.go` + `restoreState`. Commit:
 `refactor(agent): lift the Exchange-boundary mutations onto the lifecycle owner`.
 
-## 5. Split `loop.go` — construction and wire translation move out
+## 5. Split `loop.go` — construction and wire translation move out — ✅ DONE (2026-07-24)
+
+**NOTES (2026-07-24):** Move-only split as written — `newAgent`/`libraryMechanismID`/
+`buildEnabledMechanisms`/`resolveTools`/`hostTools`/`resumeAgent`/`validateConfig` + the three
+`errMissing*` vars → new `construct.go`; the six `toProvider*`/`toolInstructions`/
+`injectSystemInstructions` funcs → new `wire.go`. `errHookPanicked` KEPT in `loop.go` (not moved
+to hookrun.go): the Acceptance pins "deletions in `loop.go` match insertions in the two new files",
+so the only symbol leaving `loop.go` besides construction/wire is none — `errHookPanicked` stays,
+reading "stays beside its users (the hook-runner path)" as "does not follow the `errMissing*` vars
+into construct.go". The shared `var (…)` block (errMissing* + errHookPanicked) split as forced by
+the move: errMissing* became construct.go's var block, errHookPanicked a standalone `var` in
+loop.go. Per-file imports trimmed to what each file uses (loop.go dropped `os`/`slices`/`library`/
+`mechanisms`). No signature/comment/behavior change. `gofmt -l` empty on all three files; full
+`go build`/`go vet`/`go test ./...` green.
 
 **What:** After items 1–4, `loop.go` still opens with the construction cluster and closes
 with the domain→wire translation cluster — two deep, self-contained groups trapped in the
