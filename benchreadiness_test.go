@@ -462,14 +462,16 @@ func TestBenchReadinessContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot (Bypass): %v", err)
 	}
-	mechSessPath, err := session.NewStore(mechRoots.sessions).SaveEnvelope(snapMech)
-	if err != nil {
+	mechRec := session.Record{Meta: session.Meta{ID: "mechanisms-arm"}, Session: snapMech}
+	if err := session.NewStore(mechRoots.sessions).Save(mechRec); err != nil {
 		t.Fatalf("save mechanisms-on session: %v", err)
 	}
-	if filepath.Dir(mechSessPath) != mechRoots.sessions {
-		t.Errorf("mechanisms-on session written to %q, want inside %q", mechSessPath, mechRoots.sessions)
+	mechSessPath := filepath.Join(mechRoots.sessions, mechRec.Meta.ID+".json")
+	if _, err := os.Stat(mechSessPath); err != nil {
+		t.Errorf("mechanisms-on session not written under %q: %v", mechRoots.sessions, err)
 	}
-	if _, err := session.NewStore(bypassRoots.sessions).SaveEnvelope(snapBypass); err != nil {
+	bypassRec := session.Record{Meta: session.Meta{ID: "bypass-arm"}, Session: snapBypass}
+	if err := session.NewStore(bypassRoots.sessions).Save(bypassRec); err != nil {
 		t.Fatalf("save Bypass session: %v", err)
 	}
 

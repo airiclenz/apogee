@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/library"
@@ -279,17 +280,28 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		cfg.EnableMechanisms = vset
 	}
 
-	agent, err := buildAgent(cfg, opts.resume)
+	// The id-addressed session store under this run's SessionsDir, and the record a --resume or
+	// --continue start restores from (nil for a fresh start). Resolving it here lets the host begin
+	// ACTIVE on that record — continuing its file in place rather than forking a new session — and
+	// the Agent resume off rec.Session below.
+	store := session.NewStore(roots.sessions)
+	resumed, err := resolveResume(store, opts.resume, opts.continueSession, roots.workspace)
+	if err != nil {
+		return err
+	}
+
+	agent, err := buildAgent(cfg, resumed)
 	if err != nil {
 		return friendlyConstructErr(err)
 	}
 	defer agent.Close()
 
-	// The saver persists a snapshot to SessionsDir when the UI quits cleanly. It owns the
-	// path and on-disk format (internal/session); the TUI sees only the func(Session) error
-	// seam, keeping file I/O out of the renderer (phase-2 detail plan §3 C5). It records the
-	// last path written so a resume hint can be shown once the alternate screen is torn down.
-	saver := &sessionSaver{store: session.NewStore(roots.sessions)}
+	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
+	// quit) and backs the /sessions browser. It owns id minting and the metadata policy — the
+	// facts only the binary knows (workspace root, resolved model) — so the renderer stays free of
+	// file I/O (phase-2 detail plan §3 C5). Seeded active on a resumed record, it updates that
+	// session's file rather than starting a new one.
+	host := newSessionHost(store, roots.workspace, opts.model, resumed)
 
 	err = launch(ctx, agent, bridge, tui.Options{
 		Model:         opts.model,
@@ -324,12 +336,18 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
 		// unusable), so it is dropped.
 		ReloadSkills: func() { _ = skillProvider.Reload() },
-		// Sessions (the store-backed SessionHost) is wired in item 5; until then persistence is
-		// unwired (nil) and the Model guards for it. The quit-only sessionSaver below is retained
-		// for the resume-hint print and is deleted when item 5 lands the host.
+		// The store-backed session host drives all persistence (per-Turn saves, /sessions, quit
+		// flush); the renderer sees only the SessionHost seam. Resumed carries the startup-replay
+		// payload for a --resume/--continue start (nil on a fresh start), so newModel repaints the
+		// stored scrollback beneath the start-up box and relights the gauge.
+		Sessions: host,
+		Resumed:  resumedSession(resumed),
 	})
-	if path := saver.saved(); path != "" {
-		fmt.Fprintf(os.Stdout, "Session saved · resume with: apogee --resume %s\n", path)
+	// Once the alternate screen is torn down, point the user at how to pick this session back up.
+	// ActiveID is non-empty exactly when there is a resumable session — a resumed one, or a fresh
+	// one that reached at least one Turn (an empty conversation is never written).
+	if host.ActiveID() != "" {
+		fmt.Fprintln(os.Stdout, "Session saved · resume with: apogee --continue   (or /sessions inside apogee)")
 	}
 	return err
 }
@@ -438,34 +456,206 @@ func knownMechanismList(known []apogee.MechanismID) string {
 	return strings.Join(parts, ", ")
 }
 
-// sessionSaver adapts a session.Store to the TUI's func(Session) error saver seam and
-// records the last path written. save runs on the program goroutine (a clean quit);
-// saved is read after launch returns — the mutex makes that hand-off race-free regardless
-// of how the program loop synchronises its shutdown.
-type sessionSaver struct {
-	store *session.Store
+// sessionHost adapts a session.Store to the TUI's [tui.SessionHost] seam: it owns the active
+// session's id and the metadata policy the renderer must not, stamps the wiring facts only the
+// binary knows (workspace root, resolved model) onto every record, and delegates listing, loading,
+// deletion, and renaming to the store. It is the composition root's single owner of id minting and
+// metadata, keeping both out of the renderer (phase-2 detail plan §3 C5).
+//
+// The active-session fields are mutex-guarded: Save runs on a Bubble Tea Cmd goroutine while
+// ActiveID and the browser verbs are driven from the Update loop, so the two can race.
+type sessionHost struct {
+	store     *session.Store
+	workspace string
+	model     string
+	now       func() time.Time
 
-	mu   sync.Mutex
-	path string
+	mu     sync.Mutex
+	active *activeSession // nil ⇒ no active session; the next Save mints one
 }
 
-// save persists the snapshot and records its path on success.
-func (s *sessionSaver) save(sess apogee.Session) error {
-	path, err := s.store.SaveEnvelope(sess)
+// activeSession is the identity of the session Saves currently target: the id minted once (or
+// seeded by a resume), plus the CreatedAt and Title a later Save must preserve — only Rename
+// rewrites the title, and only Rotate/Load changes the id.
+type activeSession struct {
+	id        string
+	title     string
+	createdAt time.Time
+}
+
+// sessionHost satisfies the persistence seam the TUI drives.
+var _ tui.SessionHost = (*sessionHost)(nil)
+
+// newSessionHost builds the host over a store and the run's wiring facts. When resumed is non-nil
+// (a --resume/--continue start) the host begins ACTIVE on that record, so subsequent Saves update
+// its file in place — its id, CreatedAt, and Title carried over rather than a new session forked.
+func newSessionHost(store *session.Store, workspace, model string, resumed *session.Record) *sessionHost {
+	h := &sessionHost{store: store, workspace: workspace, model: model, now: time.Now}
+	if resumed != nil {
+		h.active = &activeSession{
+			id:        resumed.Meta.ID,
+			title:     resumed.Meta.Title,
+			createdAt: resumed.Meta.CreatedAt,
+		}
+	}
+	return h
+}
+
+// Save persists the active session, minting its id (and fixing its Title and CreatedAt) on the
+// first call and updating that same file thereafter. Title is set at create and never overwritten
+// by a later Save — Rename is the only writer that changes it, so a user rename sticks — while
+// UpdatedAt, the transcript blob, and the browsable counts refresh every Save. Workspace and Model
+// come from the wiring, the facts the renderer cannot know.
+func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string, userMsgs, ctxUsed int) error {
+	now := h.now().UTC()
+	h.mu.Lock()
+	if h.active == nil {
+		h.active = &activeSession{id: session.NewID(now), title: title, createdAt: now}
+	}
+	a := *h.active
+	h.mu.Unlock()
+
+	return h.store.Save(session.Record{
+		Meta: session.Meta{
+			ID:        a.id,
+			Title:     a.title,
+			CreatedAt: a.createdAt,
+			UpdatedAt: now,
+			Workspace: h.workspace,
+			Model:     h.model,
+			UserMsgs:  userMsgs,
+			CtxUsed:   ctxUsed,
+		},
+		Transcript: transcript,
+		Session:    sess,
+	})
+}
+
+// Rotate closes the active session so the next Save mints a fresh id (the /clear|/new boundary).
+// It is idempotent on an already-inactive host.
+func (h *sessionHost) Rotate() {
+	h.mu.Lock()
+	h.active = nil
+	h.mu.Unlock()
+}
+
+// List returns every stored session's browsable metadata, newest first (the store's ordering).
+func (h *sessionHost) List() ([]session.Meta, error) { return h.store.List() }
+
+// Load returns a stored record AND makes it the active session, so subsequent Saves update the
+// loaded session's file rather than forking a new one — the /sessions resume flow.
+func (h *sessionHost) Load(id string) (session.Record, error) {
+	rec, err := h.store.Load(id)
 	if err != nil {
+		return session.Record{}, err
+	}
+	h.mu.Lock()
+	h.active = &activeSession{id: rec.Meta.ID, title: rec.Meta.Title, createdAt: rec.Meta.CreatedAt}
+	h.mu.Unlock()
+	return rec, nil
+}
+
+// Delete removes a stored session's file.
+func (h *sessionHost) Delete(id string) error { return h.store.Delete(id) }
+
+// Rename sets a stored session's title. When the renamed session is the active one, the new title
+// is mirrored onto the active identity too, so the next Save preserves it rather than reverting to
+// the create-time title.
+func (h *sessionHost) Rename(id, title string) error {
+	if err := h.store.Rename(id, title); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.path = path
-	s.mu.Unlock()
+	h.mu.Lock()
+	if h.active != nil && h.active.id == id {
+		h.active.title = title
+	}
+	h.mu.Unlock()
 	return nil
 }
 
-// saved reports the last path written, or "" if nothing was saved.
-func (s *sessionSaver) saved() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.path
+// ActiveID reports the active session's id, or "" before the first Save has minted one (and after
+// a Rotate). The composition root reads it to decide whether to print the resume hint.
+func (h *sessionHost) ActiveID() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.active == nil {
+		return ""
+	}
+	return h.active.id
+}
+
+// resolveResume loads the session a start restores from, or returns nil when neither --resume nor
+// --continue is set. --resume tries its value as a store id first (the handle /sessions lists) and
+// falls back to a file path (which still reads a pre-plan bare envelope); --continue resumes this
+// workspace's most recent session. The two flags are mutually exclusive.
+func resolveResume(store *session.Store, resume string, continueSession bool, workspace string) (*session.Record, error) {
+	switch {
+	case resume != "" && continueSession:
+		return nil, errors.New("apogee: --resume and --continue are mutually exclusive; pass one or the other")
+	case resume != "":
+		rec, err := resolveResumeArg(store, resume)
+		if err != nil {
+			return nil, err
+		}
+		return &rec, nil
+	case continueSession:
+		rec, err := resolveContinue(store, workspace)
+		if err != nil {
+			return nil, err
+		}
+		return &rec, nil
+	default:
+		return nil, nil
+	}
+}
+
+// resolveResumeArg resolves a --resume value: a store id first (the common case — the id shown in
+// /sessions), else a file path (LoadPath, which also wraps a legacy bare envelope). A value that is
+// neither a known id nor a readable file is a friendly error naming both interpretations.
+func resolveResumeArg(store *session.Store, arg string) (session.Record, error) {
+	if rec, err := store.Load(arg); err == nil {
+		return rec, nil
+	}
+	rec, err := store.LoadPath(arg)
+	if err != nil {
+		return session.Record{}, fmt.Errorf(
+			"apogee: --resume %q: not a known session id (see /sessions) nor a readable session file", arg)
+	}
+	return rec, nil
+}
+
+// resolveContinue resumes the most recent session recorded for the resolved workspace — the
+// --continue convenience that needs no id. List returns metas newest-first, so the first record
+// whose Workspace matches is the newest; a workspace with none is a friendly error pointing at the
+// alternatives.
+func resolveContinue(store *session.Store, workspace string) (session.Record, error) {
+	metas, err := store.List()
+	if err != nil {
+		return session.Record{}, err
+	}
+	for _, m := range metas {
+		if m.Workspace == workspace {
+			return store.Load(m.ID)
+		}
+	}
+	return session.Record{}, fmt.Errorf(
+		"apogee: no saved sessions for this workspace (%s) — start one, or resume another with "+
+			"--resume <id> (see /sessions)", workspace)
+}
+
+// resumedSession projects a resolved store record onto the TUI's startup-replay payload, or nil for
+// a fresh start. The renderer decodes the opaque transcript blob itself; the binary only carries it
+// across with the title, context fill, and message count the resume note and gauge need.
+func resumedSession(rec *session.Record) *tui.ResumedSession {
+	if rec == nil {
+		return nil
+	}
+	return &tui.ResumedSession{
+		Transcript: rec.Transcript,
+		Title:      rec.Meta.Title,
+		CtxUsed:    rec.Meta.CtxUsed,
+		UserMsgs:   rec.Meta.UserMsgs,
+	}
 }
 
 // parseMode validates the --mode flag against the known autonomy modes (the ladder
@@ -553,22 +743,15 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 // Agent construction (dogfooding the public surface — C5)
 // ----------------------------------------------------------------------------
 
-// buildAgent constructs a fresh Agent, or resumes one from a saved session file when
-// --resume is set. Both go through the public apogee surface. The richer session UX
-// (snapshot-on-quit, a config file, flag/env/file precedence) lands in P2.5.
-func buildAgent(cfg apogee.Config, resumePath string) (*apogee.Agent, error) {
-	if resumePath == "" {
+// buildAgent constructs a fresh Agent, or resumes one from an already-loaded session record when
+// resumed is non-nil (a --resume/--continue start; resolveResume owns the id-or-path lookup and the
+// legacy-file wrapping). Both go through the public apogee surface. A future-version snapshot
+// surfaces apogee.ErrSessionVersion from Resume, which carries its own clear message.
+func buildAgent(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+	if resumed == nil {
 		return apogee.New(cfg)
 	}
-	data, err := os.ReadFile(resumePath)
-	if err != nil {
-		return nil, fmt.Errorf("apogee: read session %q: %w", resumePath, err)
-	}
-	session, err := apogee.DecodeSession(data)
-	if err != nil {
-		return nil, err // ErrSessionVersion already carries a clear message
-	}
-	return apogee.Resume(cfg, session)
+	return apogee.Resume(cfg, resumed.Session)
 }
 
 // errAutoUnavailable is the friendly framing of ErrAutoUnavailable: Auto needs

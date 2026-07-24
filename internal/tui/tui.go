@@ -184,6 +184,27 @@ type Options struct {
 	// owns the path, id minting, and on-disk format, keeping the file I/O out of the renderer
 	// while the "is it safe to snapshot" decision stays with the Model that owns the Engine.
 	Sessions SessionHost
+
+	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
+	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints
+	// the resumed scrollback beneath it and relights the context gauge from the stored fill — or,
+	// when no scrollback was recorded (a legacy session) or the blob will not decode, degrades to
+	// an honest note with the view otherwise fresh. The binary resolves the store record and
+	// projects it onto this small value, so the renderer never decodes the record itself.
+	Resumed *ResumedSession
+}
+
+// ResumedSession is the startup-replay payload the composition root hands the TUI when a run
+// resumes a stored session: the opaque transcript blob to repaint (the TUI's own wire form,
+// transcriptcodec.go), the browsable title for the "resumed: <title>" note, the last observed
+// context fill to relight the status-line gauge, and the stored user-message count. An empty or
+// undecodable Transcript degrades to a no-scrollback note rather than a fatal error — a resumed
+// legacy session still lists and resumes, it just has no scrollback to repaint.
+type ResumedSession struct {
+	Transcript []byte // the TUI's opaque scrollback blob; empty (a legacy record) ⇒ no replay
+	Title      string // the session's browsable title, shown in the resume note
+	CtxUsed    int    // the last observed context fill, relighting the gauge on resume
+	UserMsgs   int    // the stored user-message count (metadata parity; the transcript re-derives it)
 }
 
 // ConfinementInfo is the host's confinement situation, resolved once by the composition root

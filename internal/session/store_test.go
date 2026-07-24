@@ -165,21 +165,26 @@ func TestListMissingDirIsEmpty(t *testing.T) {
 	}
 }
 
-// A pre-plan bare domain.Session file (written by SaveEnvelope) is sniffed and wrapped: it
-// lists with synthetic metadata and loads into a resumable Record.Session.
+// A pre-plan bare domain.Session file (the {"Version":..,"State":..} shape written before this
+// plan) is sniffed and wrapped: it lists with synthetic metadata and loads into a resumable
+// Record.Session.
 func TestLegacyBareEnvelopeIsWrapped(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	st := NewStore(dir)
 
 	legacy := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"turnIndex":2}`)}
-	stamp := time.Date(2026, 6, 23, 18, 30, 5, 0, time.UTC)
-	st.now = func() time.Time { return stamp }
-	path, err := st.SaveEnvelope(legacy) // writes the pre-plan {"Version":..,"State":..} shape
+	data, err := legacy.Encode() // the pre-plan bare-envelope bytes, written under a chosen stem
 	if err != nil {
-		t.Fatalf("SaveEnvelope: %v", err)
+		t.Fatalf("encode legacy envelope: %v", err)
 	}
-	stem := strings.TrimSuffix(filepath.Base(path), ".json")
+	stem := "20260623T183005Z"
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, stem+".json"), data, filePerm); err != nil {
+		t.Fatalf("write legacy envelope: %v", err)
+	}
 
 	metas, err := st.List()
 	if err != nil {

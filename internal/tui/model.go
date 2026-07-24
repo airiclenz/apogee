@@ -149,7 +149,31 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// every repaint, so it reflows on resize with no "already shown" guard, and /clear re-seeds it
 	// through the same helper (startNewSession) to reprint a fresh-launch view.
 	m.transcript.addStartup(newStartupView(opts))
+	// A resumed run then repaints the stored scrollback beneath that box and relights the gauge
+	// (a no-op on a fresh start, when opts.Resumed is nil).
+	m.replayResumed(opts.Resumed)
 	return m
+}
+
+// replayResumed repaints a resumed session's scrollback beneath the fresh start-up box: it relights
+// the context gauge from the stored fill, decodes the stored transcript blob, and appends its
+// committed entries closed by a "resumed: <title>" note. A decode error or a legacy record whose
+// blob is empty (no scrollback was recorded) is never fatal — the view is left fresh and an honest
+// note says the model still remembers even though the scrollback could not be repainted. A nil
+// payload (a fresh start) is a no-op. It runs at construction, before any WindowSizeMsg, so the
+// replayed entries are present the first time the viewport lays out.
+func (m *Model) replayResumed(r *ResumedSession) {
+	if r == nil {
+		return
+	}
+	m.ctxUsed = r.CtxUsed // relight the gauge near the session's last observed fill
+	entries, err := decodeTranscript(r.Transcript)
+	if err != nil || len(entries) == 0 {
+		m.transcript.addNote("resumed: " + r.Title + " (no scrollback recorded — the model still remembers)")
+		return
+	}
+	m.transcript.replay(entries)
+	m.transcript.addNote("resumed: " + r.Title)
 }
 
 // blackenInput gives the textarea the black interior the layout calls for: the base, text,

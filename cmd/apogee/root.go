@@ -21,7 +21,10 @@ type options struct {
 	workspace string
 	bypass    bool
 	resume    string
-	configDir string
+	// continueSession resumes this workspace's most recent saved session without naming an id
+	// (the --continue flag). Mutually exclusive with resume.
+	continueSession bool
+	configDir       string
 
 	// Resolved display values handed to the TUI (not bound to flags). hostAlias is the
 	// footer's friendly host name (config key, else the endpoint host); contextWindow is the
@@ -123,8 +126,9 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 			"variable (APOGEE_ENDPOINT, APOGEE_MODEL, APOGEE_MODE, APOGEE_BYPASS), which\n" +
 			"overrides ~/.apogee/config.yaml, which overrides the built-in default. With no\n" +
 			"model set anywhere, apogee asks the server for its active model, so a single-\n" +
-			"model server (e.g. llama.cpp's llama-server) needs only --endpoint. A clean\n" +
-			"quit snapshots the conversation under ~/.apogee/sessions for --resume.",
+			"model server (e.g. llama.cpp's llama-server) needs only --endpoint. The\n" +
+			"session is saved continuously under ~/.apogee/sessions; resume the most\n" +
+			"recent with --continue, or browse and pick one with /sessions inside apogee.",
 		Args: cobra.NoArgs,
 		// On a runtime (RunE) error, print just the error — not the full usage dump,
 		// which is noise for a misconfiguration rather than a syntax mistake. main owns
@@ -184,9 +188,14 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 		"workspace root the file tools are scoped to (default: current directory)")
 	flags.BoolVar(&opts.bypass, "bypass", false,
 		"run with Mechanisms off; structural context reducers stay on (ADR 0006)")
-	flags.StringVar(&opts.resume, "resume", "", "resume a saved session file")
+	flags.StringVar(&opts.resume, "resume", "", "resume a saved session (id from /sessions, or a file path)")
+	flags.BoolVar(&opts.continueSession, "continue", false,
+		"resume this workspace's most recent saved session (mutually exclusive with --resume)")
 	flags.StringVar(&opts.configDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
+
+	// --resume names one session, --continue picks the newest; asking for both is a flag error.
+	cmd.MarkFlagsMutuallyExclusive("resume", "continue")
 
 	// The root's flags are its own, not persistent: a subcommand declares what it needs
 	// rather than inheriting the TUI session's surface.

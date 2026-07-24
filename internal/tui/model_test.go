@@ -879,6 +879,68 @@ func saveNotes(m Model) []string {
 	return out
 }
 
+// A resumed run repaints the stored scrollback beneath the fresh start-up box, closes it with a
+// "resumed: <title>" note, and relights the context gauge from the stored fill (item 5 startup
+// replay). The start-up box still leads the transcript, so the view reads as a fresh launch with
+// the history beneath it.
+func TestNewModelReplaysResumedScrollback(t *testing.T) {
+	t.Parallel()
+	var src transcript
+	src.addUser("first question", nil)
+	src.addNote("a recorded note")
+	blob, err := encodeTranscript(&src)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	m := newModel(context.Background(), &fakeEngine{}, Options{
+		Resumed: &ResumedSession{Transcript: blob, Title: "first question", CtxUsed: 4096},
+	}, nil)
+
+	if m.ctxUsed != 4096 {
+		t.Errorf("ctxUsed after resume = %d; want the stored 4096 (gauge relight)", m.ctxUsed)
+	}
+	if m.transcript.entries[0].kind != entryStartup {
+		t.Errorf("first entry kind = %v; want the start-up box still seeded first", m.transcript.entries[0].kind)
+	}
+	if !hasEntry(m, entryUser, "first question") {
+		t.Error("replayed user message not present in the resumed transcript")
+	}
+	last := m.transcript.entries[len(m.transcript.entries)-1]
+	if last.kind != entryNote || last.text != "resumed: first question" {
+		t.Errorf("last entry = {%v, %q}; want a 'resumed: first question' note", last.kind, last.text)
+	}
+}
+
+// A corrupt (undecodable) blob is never fatal: no replayed entries land, the view is left fresh,
+// and an honest degrade note says the model still remembers.
+func TestNewModelResumeCorruptBlobDegrades(t *testing.T) {
+	t.Parallel()
+	m := newModel(context.Background(), &fakeEngine{}, Options{
+		Resumed: &ResumedSession{Transcript: []byte("{ not json"), Title: "broken"},
+	}, nil)
+
+	if hasEntry(m, entryUser, "") {
+		t.Error("a corrupt blob replayed a user entry; want none")
+	}
+	last := m.transcript.entries[len(m.transcript.entries)-1]
+	want := "resumed: broken (no scrollback recorded — the model still remembers)"
+	if last.kind != entryNote || last.text != want {
+		t.Errorf("degrade note = {%v, %q}; want {note, %q}", last.kind, last.text, want)
+	}
+}
+
+// hasEntry reports whether the transcript holds an entry of the given kind; a non-empty want must
+// also match the entry text exactly.
+func hasEntry(m Model, kind entryKind, want string) bool {
+	for _, e := range m.transcript.entries {
+		if e.kind == kind && (want == "" || e.text == want) {
+			return true
+		}
+	}
+	return false
+}
+
 // A clean quit (idle, with a non-empty conversation) flushes the Engine snapshot and the derived
 // metadata through the SessionHost seam, then quits.
 func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {

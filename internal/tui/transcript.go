@@ -156,6 +156,15 @@ func (t *transcript) reset() {
 	// t.debug is deliberately preserved across a session reset.
 }
 
+// replay appends already-decoded committed entries after whatever the transcript already holds —
+// the resume path (decodeTranscript) repainting a stored scrollback beneath the freshly-seeded
+// start-up box. It is append-only and never touches the in-progress pending buffer: the entries
+// are committed history, while streaming state belongs to this fresh process. The entries were
+// escape-stripped on decode, so nothing untrusted from disk reaches the terminal unfiltered.
+func (t *transcript) replay(entries []entry) {
+	t.entries = append(t.entries, entries...)
+}
+
 // hasConversation reports whether the transcript holds anything the human would want resumed —
 // any entry beyond the one-time start-up box seeded at construction. The box is opening chrome,
 // not conversation, so a session that only ever showed it is still "empty" for the save decision

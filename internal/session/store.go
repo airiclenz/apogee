@@ -120,24 +120,6 @@ func (s *Store) Save(rec Record) error {
 	return nil
 }
 
-// SaveEnvelope writes a bare domain.Session under a timestamped filename — the pre-plan
-// write path, kept only until item 5 rewrites its callers (cmd/apogee's sessionSaver and
-// the internal/tui e2e harness) onto Save. New code must use Save.
-func (s *Store) SaveEnvelope(sess domain.Session) (string, error) {
-	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
-		return "", fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
-	}
-	data, err := sess.Encode()
-	if err != nil {
-		return "", fmt.Errorf("apogee: encode session: %w", err)
-	}
-	path := filepath.Join(s.dir, s.now().UTC().Format(fileLayout)+".json")
-	if err := os.WriteFile(path, data, filePerm); err != nil {
-		return "", fmt.Errorf("apogee: write session %q: %w", path, err)
-	}
-	return path, nil
-}
-
 // List reads every *.json in the store, decodes each to its Meta, and returns them sorted
 // UpdatedAt descending. A file that fails to decode — corrupt, or a foreign file that
 // wandered into the directory — is skipped, so one bad record never kills the browser. A

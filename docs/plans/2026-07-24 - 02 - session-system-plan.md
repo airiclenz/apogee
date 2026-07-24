@@ -347,7 +347,20 @@ seam; `driveExchange` with nil notify unchanged (existing worker tests keep pass
 
 ---
 
-## 5. Bind the binary: the store-backed host, `--resume` by id-or-path, `--continue`, startup replay
+## 5. Bind the binary: the store-backed host, `--resume` by id-or-path, `--continue`, startup replay — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Three interpretation calls where the literal text was silent. (1) `buildAgent`
+now takes `*session.Record` (nil ⇒ fresh start) rather than a bare record — the resume value has to
+carry the no-resume case, and `resolveResume` (the new id-or-path/`--continue` resolver) returns the
+same `*session.Record`. (2) Mutual exclusion is enforced in BOTH places: a cobra
+`MarkFlagsMutuallyExclusive("resume","continue")` marker for the real CLI flag error AND a guard in
+`resolveResume` for the direct-`runRoot` (test) path — the plan said "(flag error)" without saying
+which layer, so both are covered. (3) Deleting `SaveEnvelope` (item 1 deferred it here) forced two
+test rewrites beyond `cmd/apogee`: the root `benchreadiness_test.go` now builds a `session.Record`
+and calls `Save`, and `internal/session/store_test.go`'s legacy-sniff test writes the bare-envelope
+bytes directly (`Session.Encode` + `os.WriteFile`) instead of via `SaveEnvelope`. The two moved
+`buildAgent` file-read tests were renamed to `resolveResume`-named tests, since that logic left
+`buildAgent`. CHANGELOG/ADR/CONTEXT are left to item 9 (the docs item), as the plan assigns.
 
 **What:** cmd/apogee wiring onto items 1–4.
 

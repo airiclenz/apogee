@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mechanisms"
@@ -502,7 +503,7 @@ func validCfg(t *testing.T) apogee.Config {
 
 func TestBuildAgentNew(t *testing.T) {
 	t.Parallel()
-	agent, err := buildAgent(validCfg(t), "")
+	agent, err := buildAgent(validCfg(t), nil)
 	if err != nil {
 		t.Fatalf("buildAgent: %v", err)
 	}
@@ -514,27 +515,20 @@ func TestBuildAgentNew(t *testing.T) {
 
 func TestBuildAgentResumeRoundTrip(t *testing.T) {
 	t.Parallel()
-	// Snapshot a fresh Agent, persist it, and resume from the file.
+	// Snapshot a fresh Agent and resume off the record's Session (buildAgent no longer reads
+	// files — resolveResume owns the id-or-path lookup, exercised separately below).
 	original, err := apogee.New(validCfg(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = original.Close() })
 
-	session, err := original.Snapshot()
+	snap, err := original.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	data, err := session.Encode()
-	if err != nil {
-		t.Fatalf("Encode: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "session.json")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write session: %v", err)
-	}
 
-	resumed, err := buildAgent(validCfg(t), path)
+	resumed, err := buildAgent(validCfg(t), &session.Record{Session: snap})
 	if err != nil {
 		t.Fatalf("buildAgent resume: %v", err)
 	}
@@ -544,10 +538,11 @@ func TestBuildAgentResumeRoundTrip(t *testing.T) {
 	t.Cleanup(func() { _ = resumed.Close() })
 }
 
-// The TUI-side save round-trips through --resume: a snapshot written by the same saver the
-// binary installs (sessionSaver over a session.Store) reconstructs an Agent via buildAgent
-// — the P2.5 save↔resume acceptance, exercised without a terminal (P2.6 drives it live).
-func TestSessionSaverRoundTripsThroughResume(t *testing.T) {
+// The TUI-side save round-trips through --resume: a record persisted by the same host the binary
+// installs (sessionHost over a session.Store) resolves back by its minted id and reconstructs an
+// Agent via buildAgent — the save↔resume acceptance, exercised without a terminal (P2.6 drives it
+// live).
+func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 	t.Parallel()
 	original, err := apogee.New(validCfg(t))
 	if err != nil {
@@ -560,16 +555,21 @@ func TestSessionSaverRoundTripsThroughResume(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	saver := &sessionSaver{store: session.NewStore(filepath.Join(t.TempDir(), "sessions"))}
-	if err := saver.save(snap); err != nil {
-		t.Fatalf("save: %v", err)
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	host := newSessionHost(store, t.TempDir(), "fake", nil)
+	if err := host.Save(snap, nil, "hi", 1, 0); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
-	path := saver.saved()
-	if path == "" {
-		t.Fatal("saver recorded no path after a successful save")
+	id := host.ActiveID()
+	if id == "" {
+		t.Fatal("host minted no id after a successful Save")
 	}
 
-	resumed, err := buildAgent(validCfg(t), path)
+	rec, err := resolveResume(store, id, false, "")
+	if err != nil {
+		t.Fatalf("resolveResume by id: %v", err)
+	}
+	resumed, err := buildAgent(validCfg(t), rec)
 	if err != nil {
 		t.Fatalf("buildAgent resume of the saved session: %v", err)
 	}
@@ -579,28 +579,261 @@ func TestSessionSaverRoundTripsThroughResume(t *testing.T) {
 	t.Cleanup(func() { _ = resumed.Close() })
 }
 
-func TestBuildAgentResumeMissingFile(t *testing.T) {
+func TestResolveResumeMissingArg(t *testing.T) {
 	t.Parallel()
-	_, err := buildAgent(validCfg(t), filepath.Join(t.TempDir(), "absent.json"))
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	_, err := resolveResume(store, filepath.Join(t.TempDir(), "absent.json"), false, "")
 	if err == nil {
-		t.Fatal("buildAgent resume of a missing file: want error, got nil")
+		t.Fatal("resolveResume of a value that is neither an id nor a file: want error, got nil")
 	}
 }
 
 func TestBuildAgentResumeFutureVersion(t *testing.T) {
 	t.Parallel()
 	// A session stamped with a version newer than this build understands must surface
-	// ErrSessionVersion (a clear message), not panic (P2.5 acceptance, laid here). The
-	// current schema is v1; any higher version is "from the future".
+	// ErrSessionVersion (a clear message), not panic. resolveResume wraps the legacy bare
+	// envelope happily; the version check bites at Resume, inside buildAgent.
 	path := filepath.Join(t.TempDir(), "future.json")
 	const futureVersionPayload = `{"Version":9999,"State":null}`
 	if err := os.WriteFile(path, []byte(futureVersionPayload), 0o600); err != nil {
 		t.Fatalf("write session: %v", err)
 	}
 
-	_, err := buildAgent(validCfg(t), path)
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	rec, err := resolveResume(store, path, false, "")
+	if err != nil {
+		t.Fatalf("resolveResume of a future-version file: %v", err)
+	}
+	_, err = buildAgent(validCfg(t), rec)
 	if !errors.Is(err, apogee.ErrSessionVersion) {
 		t.Fatalf("buildAgent resume of a future version: err = %v; want ErrSessionVersion", err)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The store-backed session host and the resume resolution (item 5)
+// ----------------------------------------------------------------------------
+
+// The host mints an id on the first Save and updates that same file thereafter, never overwriting
+// the create-time title, and stamps the wiring facts (workspace, model) the renderer cannot know.
+func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "model-x", nil)
+
+	if host.ActiveID() != "" {
+		t.Errorf("ActiveID before any Save = %q; want empty", host.ActiveID())
+	}
+	if err := host.Save(apogee.Session{}, nil, "first title", 1, 100); err != nil {
+		t.Fatalf("Save #1: %v", err)
+	}
+	id := host.ActiveID()
+	if id == "" {
+		t.Fatal("Save minted no id")
+	}
+	// A second Save keeps the same id (update-in-place) and never overwrites the create-time title.
+	if err := host.Save(apogee.Session{}, nil, "SECOND title", 2, 200); err != nil {
+		t.Fatalf("Save #2: %v", err)
+	}
+	if host.ActiveID() != id {
+		t.Errorf("ActiveID after the second Save = %q; want the same minted id %q", host.ActiveID(), id)
+	}
+	metas, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("two Saves produced %d files; want 1 (update-in-place)", len(metas))
+	}
+	m := metas[0]
+	if m.Title != "first title" {
+		t.Errorf("Title = %q; want the create-time title (a later Save must not overwrite it)", m.Title)
+	}
+	if m.Workspace != "/ws" || m.Model != "model-x" {
+		t.Errorf("Meta workspace/model = %q/%q; want /ws / model-x from the wiring", m.Workspace, m.Model)
+	}
+	if m.UserMsgs != 2 || m.CtxUsed != 200 {
+		t.Errorf("Meta counts = msgs %d, ctx %d; want the latest Save's 2 / 200", m.UserMsgs, m.CtxUsed)
+	}
+}
+
+// Rotate closes the active session so the next Save mints a fresh id; Load re-activates a stored
+// session so subsequent Saves update ITS file rather than forking a new one.
+func TestSessionHostRotateAndLoadActivate(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "m", nil)
+
+	if err := host.Save(apogee.Session{}, nil, "A", 1, 0); err != nil {
+		t.Fatalf("Save A: %v", err)
+	}
+	first := host.ActiveID()
+
+	host.Rotate()
+	if host.ActiveID() != "" {
+		t.Errorf("ActiveID after Rotate = %q; want empty", host.ActiveID())
+	}
+	if err := host.Save(apogee.Session{}, nil, "B", 1, 0); err != nil {
+		t.Fatalf("Save B: %v", err)
+	}
+	second := host.ActiveID()
+	if second == first || second == "" {
+		t.Errorf("Save after Rotate minted %q; want a fresh id different from %q", second, first)
+	}
+
+	// Loading the first session makes it active again; the next Save updates its file, not B's.
+	rec, err := host.Load(first)
+	if err != nil {
+		t.Fatalf("Load(first): %v", err)
+	}
+	if rec.Meta.ID != first || host.ActiveID() != first {
+		t.Errorf("Load did not activate %q (rec id %q, active %q)", first, rec.Meta.ID, host.ActiveID())
+	}
+	if err := host.Save(apogee.Session{}, nil, "ignored", 3, 0); err != nil {
+		t.Fatalf("Save after Load: %v", err)
+	}
+	if metas, _ := store.List(); len(metas) != 2 {
+		t.Fatalf("after Save/Rotate/Save/Load/Save there are %d sessions; want 2", len(metas))
+	}
+}
+
+// A rename of the ACTIVE session sticks: the next Save preserves the new title rather than
+// reverting to the create-time one.
+func TestSessionHostRenameActiveSticks(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "m", nil)
+	if err := host.Save(apogee.Session{}, nil, "original", 1, 0); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	id := host.ActiveID()
+	if err := host.Rename(id, "renamed"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if err := host.Save(apogee.Session{}, nil, "original", 2, 0); err != nil {
+		t.Fatalf("Save after Rename: %v", err)
+	}
+	rec, err := store.Load(id)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.Meta.Title != "renamed" {
+		t.Errorf("Title after rename+Save = %q; want the renamed title to stick", rec.Meta.Title)
+	}
+}
+
+// A host seeded from a resumed record begins ACTIVE on it — same id, preserved title — so the run
+// continues that file rather than forking a new session.
+func TestSessionHostResumeBeginsActive(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	seed := &session.Record{Meta: session.Meta{ID: "20260724T120000Z-abcd", Title: "kept"}}
+	host := newSessionHost(store, "/ws", "m", seed)
+
+	if host.ActiveID() != seed.Meta.ID {
+		t.Errorf("ActiveID of a resumed host = %q; want the resumed id %q", host.ActiveID(), seed.Meta.ID)
+	}
+	if err := host.Save(apogee.Session{}, nil, "derived", 1, 0); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	rec, err := store.Load(seed.Meta.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.Meta.Title != "kept" {
+		t.Errorf("Title after a resumed Save = %q; want the resumed title preserved", rec.Meta.Title)
+	}
+}
+
+// --resume accepts a raw file path (not only a store id), including a pre-plan bare envelope, which
+// resumes with no recorded scrollback — the replay payload carries the empty blob through so the
+// TUI degrades to an honest note.
+func TestResolveResumeLegacyPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	legacyPath := filepath.Join(dir, "old.json")
+	if err := os.WriteFile(legacyPath, []byte(`{"Version":1,"State":null}`), 0o600); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+	store := session.NewStore(filepath.Join(dir, "sessions"))
+	rec, err := resolveResume(store, legacyPath, false, "")
+	if err != nil {
+		t.Fatalf("resolveResume by path: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("resolveResume returned nil for a readable legacy file")
+	}
+	if len(rec.Transcript) != 0 {
+		t.Errorf("legacy Transcript = %s; want empty (no scrollback recorded)", rec.Transcript)
+	}
+	if rs := resumedSession(rec); rs == nil || len(rs.Transcript) != 0 {
+		t.Errorf("resumedSession(legacy) = %+v; want a non-nil payload with an empty transcript", rs)
+	}
+}
+
+// --continue resumes this workspace's most recent session (skipping newer sessions in other
+// workspaces) and errors helpfully when the workspace has none.
+func TestResolveContinuePicksWorkspaceNewest(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	base := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	saveAt(t, store, "/a", base, "a-old")
+	newestA := saveAt(t, store, "/a", base.Add(2*time.Hour), "a-new")
+	saveAt(t, store, "/b", base.Add(3*time.Hour), "b-newest") // newer overall, but wrong workspace
+
+	rec, err := resolveContinue(store, "/a")
+	if err != nil {
+		t.Fatalf("resolveContinue(/a): %v", err)
+	}
+	if rec.Meta.ID != newestA {
+		t.Errorf("continue picked %q (%q); want /a's newest %q", rec.Meta.Title, rec.Meta.ID, newestA)
+	}
+
+	// A workspace with no sessions of its own is a friendly error, even though the store is non-empty.
+	if _, err := resolveContinue(store, "/c"); err == nil {
+		t.Error("resolveContinue(/c) with no sessions for that workspace: want an error")
+	}
+}
+
+// saveAt persists one fresh session in workspace ws stamped at when (controlling both its id and
+// UpdatedAt), returning the minted id. Each call uses its own host so it mints a distinct session.
+func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title string) string {
+	t.Helper()
+	h := newSessionHost(store, ws, "m", nil)
+	h.now = func() time.Time { return when }
+	if err := h.Save(apogee.Session{}, nil, title, 1, 0); err != nil {
+		t.Fatalf("saveAt %q: %v", title, err)
+	}
+	return h.ActiveID()
+}
+
+// --resume and --continue are mutually exclusive at the resolution seam (the runRoot-testable
+// guard mirroring the cobra flag marker).
+func TestResolveResumeMutuallyExclusive(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	_, err := resolveResume(store, "some-id", true, "/ws")
+	if err == nil {
+		t.Fatal("resolveResume with both --resume and --continue: want a flag error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %q; want it to mention mutual exclusion", err)
+	}
+}
+
+// A fresh start (neither flag set) resolves to no record and projects to a nil replay payload.
+func TestResolveResumeFreshStart(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	rec, err := resolveResume(store, "", false, "/ws")
+	if err != nil {
+		t.Fatalf("resolveResume fresh: %v", err)
+	}
+	if rec != nil {
+		t.Errorf("resolveResume with neither flag = %+v; want nil", rec)
+	}
+	if got := resumedSession(nil); got != nil {
+		t.Errorf("resumedSession(nil) = %+v; want nil (a fresh start replays nothing)", got)
 	}
 }
 
