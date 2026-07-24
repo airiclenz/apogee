@@ -190,18 +190,16 @@ func hostTools(cfg domain.Config) tools.HostTools {
 	}
 }
 
-// resumeAgent rebuilds an Agent from snap, rejecting a snapshot newer than this build
-// understands (ErrSessionVersion) before restoring its conversation. cfg supplies the
-// live delegates afresh (ADR 0001); only the serializable conversation comes from snap.
+// resumeAgent rebuilds an Agent from snap, then restores its loop state through the shared
+// restoreSnapshot path — which rejects a snapshot newer than this build understands
+// (ErrSessionVersion) before decoding the conversation. cfg supplies the live delegates afresh
+// (ADR 0001); only the serializable conversation comes from snap.
 func resumeAgent(cfg domain.Config, snap domain.Session, up provider.Responder) (*Agent, error) {
-	if snap.Version > domain.SessionVersion {
-		return nil, domain.ErrSessionVersion
-	}
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		return nil, err
 	}
-	if err := a.restoreState(snap.State); err != nil {
+	if err := a.restoreSnapshot(snap); err != nil {
 		return nil, err
 	}
 	return a, nil

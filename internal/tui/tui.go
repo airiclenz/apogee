@@ -46,6 +46,16 @@ type Engine interface {
 	// cancelledMsg (no worker owns the engine), so the post-Esc /clear or message is not
 	// rejected with ErrInputPending.
 	AbortExchange()
+	// RestoreSession swaps a stored snapshot into the LIVE Agent without a rebuild, so tools,
+	// Mechanisms, and MCP wiring stand (the in-TUI resume primitive the /sessions browser drives).
+	// Like ClearContext it is called only at idle (no worker running) and refuses mid-Exchange
+	// (ErrInputPending); a corrupt or future-version snapshot returns an error and leaves the live
+	// conversation untouched. It does not touch the allow-for-session cache, mode, or confinement.
+	RestoreSession(domain.Session) error
+	// InExchange reports whether a multi-Turn Exchange is currently open — a boundary-only read the
+	// host makes after a restore (or at startup) to detect a session interrupted mid-task. Called
+	// only at idle.
+	InExchange() bool
 	// Compact triggers generative Compaction on demand (the /compact command): it summarizes
 	// the conversation and replaces the folded history with the summary. A real upstream call,
 	// so the TUI drives it on a worker goroutine. Called only at idle. skipped is true when the

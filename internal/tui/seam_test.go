@@ -119,10 +119,14 @@ type fakeEngine struct {
 	abortCalls   int           // records AbortExchange calls (discarding a cancelled Exchange)
 	compactCalls int           // records Compact calls (the /compact command)
 
+	restoreCalls []domain.Session // records RestoreSession calls (the in-TUI resume primitive), in order
+	inExchange   bool             // the value InExchange reports; a test sets it to model a mid-Exchange restore
+
 	submitFn   func(domain.UserInput) error
 	stepFn     func(ctx context.Context, call int) (domain.StepResult, error)
 	snapshotFn func() (domain.Session, error)
 	clearFn    func() error
+	restoreFn  func(domain.Session) error // scripted RestoreSession error (nil ⇒ success)
 	compactFn  func(context.Context) (skipped bool, err error)
 }
 
@@ -170,6 +174,31 @@ func (f *fakeEngine) AbortExchange() {
 	f.mu.Lock()
 	f.abortCalls++
 	f.mu.Unlock()
+}
+
+func (f *fakeEngine) RestoreSession(snap domain.Session) error {
+	f.mu.Lock()
+	f.restoreCalls = append(f.restoreCalls, snap)
+	fn := f.restoreFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(snap)
+	}
+	return nil
+}
+
+func (f *fakeEngine) InExchange() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inExchange
+}
+
+// restores reports the snapshots RestoreSession was handed, in order — empty when the UI never
+// drove a resume.
+func (f *fakeEngine) restores() []domain.Session {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.Session(nil), f.restoreCalls...)
 }
 
 func (f *fakeEngine) Compact(ctx context.Context) (bool, error) {

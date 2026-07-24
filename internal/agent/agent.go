@@ -282,5 +282,32 @@ func (a *Agent) ClearContext() error {
 	return nil
 }
 
+// RestoreSession swaps a prior Session snapshot into this LIVE Agent, replacing its conversation
+// and loop counters (turn index, in-Exchange flag, Exchange boundary, pending input) without a
+// rebuild — so the resolved tools, Mechanisms, and MCP wiring stand. It is the in-TUI resume
+// primitive: the live-restore counterpart to construction-time Resume, letting the host switch
+// sessions without relaunching (ADR 0001's snapshot/resume feature, live variant).
+//
+// Like ClearContext it is valid only at a quiescent boundary with no worker driving the Agent
+// (the TUI calls it at idle); calling it mid-Exchange is refused (ErrInputPending) so a
+// half-streamed Turn is never orphaned. A snapshot newer than this build understands is refused
+// (ErrSessionVersion) and a malformed payload returns a decode error; in EITHER failure the live
+// conversation is left untouched — restoreSnapshot decodes into a temporary and swaps only on
+// full success. It does NOT touch the allow-for-session approval cache, the autonomy mode, or the
+// confinement flag: those are live host state re-confirmed per ADR 0008, not part of the Session.
+func (a *Agent) RestoreSession(snap domain.Session) error {
+	if a.turns.inExchange {
+		return domain.ErrInputPending
+	}
+	return a.restoreSnapshot(snap)
+}
+
+// InExchange reports whether a multi-Turn Exchange is currently open (mid-flight). It is a
+// boundary-only read: the host calls it after a RestoreSession (or at startup after Resume) to
+// detect a Session snapshotted mid-task, so it can drive the step-only continue path rather than
+// waiting on a Submit the open Exchange would reject. It reads a.turns.inExchange directly and,
+// like Snapshot, is meant for use only at a quiescent boundary with no worker driving the Agent.
+func (a *Agent) InExchange() bool { return a.turns.inExchange }
+
 // Compact (the /compact command's engine half) lives in compact.go alongside its provider
 // adapter and the generative reducer it drives (internal/context.Compact).

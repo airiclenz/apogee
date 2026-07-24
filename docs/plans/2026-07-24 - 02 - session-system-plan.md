@@ -182,7 +182,17 @@ Delete; Rename persists; atomicity smoke (temp file never left behind on success
 
 ---
 
-## 2. Engine surface: `RestoreSession` + `InExchange`
+## 2. Engine surface: `RestoreSession` + `InExchange` — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): No facade delegators were added to `apogee.go`. `Agent` is a type ALIAS
+(`type Agent = agent.Agent`), so the new `RestoreSession`/`InExchange` methods are already part
+of the public surface exactly as `Snapshot`/`ClearContext`/`AbortExchange` are — none of those
+have delegators either, and Go forbids defining methods on an alias from another package. The
+completeness guard (`example_test.go`) names the `Agent` TYPE, not its methods, so it needs no
+change. The `restoreState` reuse was done by extracting a shared `(*Agent).restoreSnapshot`
+(version-check + `restoreState`) used by BOTH `resumeAgent` and `RestoreSession`; `resumeAgent`'s
+version check now runs after `newAgent` instead of before (behaviour-equivalent — the only
+observable path, a future-version snapshot, still returns `ErrSessionVersion` on any valid config).
 
 **What:** The in-TUI resume primitive — restore a snapshot into the LIVE Agent (no rebuild,
 so tools/mechanisms/MCP wiring stand), plus the probe the interrupted-resume UX needs.

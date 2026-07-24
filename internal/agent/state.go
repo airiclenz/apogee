@@ -62,8 +62,23 @@ func (a *Agent) encodeState() (json.RawMessage, error) {
 	return state, nil
 }
 
+// restoreSnapshot version-checks snap and swaps its payload into the Agent's loop state. It is
+// the shared core of the two restore paths — Resume (a fresh Agent, via resumeAgent) and
+// RestoreSession (a live one): a snapshot newer than this build understands is refused
+// (ErrSessionVersion) before any state is touched, then restoreState decodes the payload into a
+// temporary and applies it only on a clean decode. So a corrupt or future-version snapshot
+// returns an error and leaves the caller's live conversation untouched.
+func (a *Agent) restoreSnapshot(snap domain.Session) error {
+	if snap.Version > domain.SessionVersion {
+		return domain.ErrSessionVersion
+	}
+	return a.restoreState(snap.State)
+}
+
 // restoreState rebuilds the Agent's loop state from a Session.State payload. An empty payload
-// leaves the zero state (a freshly-snapshotted, never-stepped Agent).
+// leaves the zero state (a freshly-snapshotted, never-stepped Agent). It decodes into a
+// temporary agentState and mutates the Agent only after a clean unmarshal, so a malformed
+// payload returns an error with no partial swap — the atomicity restoreSnapshot relies on.
 func (a *Agent) restoreState(state json.RawMessage) error {
 	if len(state) == 0 {
 		return nil
