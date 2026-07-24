@@ -108,13 +108,13 @@ func TestComputeAutocompleteSkillDropdown(t *testing.T) {
 
 func TestCommandDropdownOffersSkill(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.input.SetValue("/s") // only "skill" begins with s
+	m.input.SetValue("/sk") // "sessions" also begins with s, so narrow to "sk" for skill alone
 	ac := m.computeAutocomplete()
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
 	}
 	if len(ac.items) != 1 || ac.items[0].value != "skill" {
-		t.Fatalf("'/s' suggestions = %+v, want [skill]", ac.items)
+		t.Fatalf("'/sk' suggestions = %+v, want [skill]", ac.items)
 	}
 	// The full "/" menu includes /skill alongside the three real commands.
 	m.input.SetValue("/")

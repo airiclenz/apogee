@@ -443,7 +443,24 @@ pinned error test).
 
 ---
 
-## 7. The `/sessions` history browser overlay
+## 7. The `/sessions` history browser overlay — ✅ DONE (2026-07-24)
+
+NOTES (2026-07-24): Four item-scoped calls where the literal text was silent or in tension with the
+shipped code. (1) The interrupted-note wording ("wording in item 8") is defined NOW as a shared
+package const `interruptedNote` in `sessions.go` (item 7 appends it on a mid-Exchange browser resume,
+per this item's own bullet); item 8 reuses the same const for its startup/`/continue` paths rather
+than redefining it. (2) The inline rename edit PRE-FILLS the current title (an edit/tweak) instead of
+starting empty — the plan says only "minimal line edit on the row: type/backspace"; enter with an
+empty/whitespace title is a no-op. (3) Opening is gated on the RAW `List()` result being non-empty,
+not the workspace-filtered view: a store holding sessions only in OTHER workspaces still opens (with a
+"press a to see all" placeholder row) so `a` is reachable — only a totally empty store degrades to the
+"no saved sessions" note. (4) The restore-ERROR path leaves the VIEW and the LIVE ENGINE conversation
+untouched + notes the failure (the load-bearing half of the locked error rule), but it CANNOT leave
+the host's active id untouched: item 5's shipped `Load` (✅ done) activates the loaded session
+unconditionally before handing back the record, and the `SessionHost` interface exposes no setter to
+revert it. So the browser-resume error test asserts view+engine untouched + the note, not active-id
+untouched. See FOLLOW-UP. Also: `TestCommandDropdownOffersSkill` was retargeted from `/s` to `/sk`
+(now that `/sessions` shares the `s` prefix) — same intent, still asserts the `/skill` suggestion.
 
 **What:** The in-TUI list/resume/delete/rename surface. (Depends on 1–5.)
 

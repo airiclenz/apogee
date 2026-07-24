@@ -58,6 +58,12 @@ type Model struct {
 	saveFailing bool
 	pendingSave *savePayload
 
+	// sessionBrowser is the /sessions history-browser overlay's state (sessions.go): the loaded
+	// session metas, the current selection, the current-workspace ⇄ all toggle, and any inline
+	// delete-confirm or rename edit. Its zero value is "closed", so it lives inline in the
+	// value-copied Model like autocompleteState (ADR 0011). It is driven only at idle.
+	sessionBrowser sessionBrowser
+
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
 	// skillRegion edge-trigger), the staged-skill chips, the workspace file cache, and the prompt
 	// drag-selection (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its
@@ -342,6 +348,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and dispatch any save that coalesced while this one ran (saveComplete).
 		return m, m.saveComplete(msg.Err)
 
+	case sessionListMsg:
+		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
+		// over the metas, or note the empty/error case with no overlay (sessions.go).
+		return m, m.foldSessionList(msg)
+
+	case sessionLoadedMsg:
+		// Sessions.Load(id) returned: restore the record into the live engine and repaint its
+		// scrollback, or note the failure with the view left untouched (sessions.go).
+		return m, m.resumeLoaded(msg)
+
 	case spinner.TickMsg:
 		// Keep the chain alive only while running; dropping the tick when idle lets it
 		// die naturally (the spinner's tag mechanism prevents a doubled chain on restart).
@@ -403,6 +419,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// move on from what was selected, and clearing here (before the value can change) keeps the
 	// selection's cached visual coordinates from ever going stale (mouse.go).
 	m.sel = promptSel{}
+
+	// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
+	// selection, resume, delete-confirm, rename edit, and esc to close (sessions.go) — before the
+	// normal input routing below, exactly as the autocomplete overlay claims its keys first.
+	if m.state == stateIdle && m.sessionBrowser.open {
+		return m.sessionBrowserKey(msg)
+	}
 
 	// While the autocomplete overlay is open (idle only), it claims the navigation, accept,
 	// and dismiss keys — including enter and tab — before the normal routing below. Any other
@@ -671,6 +694,11 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// /new is an alias of /clear: both start a fresh session — wipe the view, reset the engine's
 		// memory, and reprint the start-up box (startNewSession).
 		return m.startNewSession()
+
+	case "sessions":
+		// Open the history-browser overlay: list saved sessions off the Update loop and render the
+		// pane above the input (sessions.go). Synchronous and idle-safe like /clear — no worker.
+		return m.openSessionBrowser()
 
 	case "version":
 		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
@@ -1100,9 +1128,13 @@ func (m Model) View() tea.View {
 	// dropdown (attaching one skill while picking another); the prompt cannot (different states).
 	dropdown := m.renderAutocomplete()
 	chips := m.renderSkillChips()
+	browser := m.renderSessionBrowser()
 	shrink := 0
 	if prompt != "" {
 		shrink += lipgloss.Height(prompt)
+	}
+	if browser != "" {
+		shrink += lipgloss.Height(browser)
 	}
 	if dropdown != "" {
 		shrink += lipgloss.Height(dropdown)
@@ -1127,6 +1159,11 @@ func (m Model) View() tea.View {
 	rows := []string{body}
 	if prompt != "" {
 		rows = append(rows, prompt)
+	}
+	// The /sessions browser overlay sits in the same slot as the approval/ask prompt (they never
+	// co-occur — the browser is idle-only, the prompts belong to busy states).
+	if browser != "" {
+		rows = append(rows, browser)
 	}
 	// The single blank line between chat content and the bottom chrome (layout.md), then the
 	// ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay (when

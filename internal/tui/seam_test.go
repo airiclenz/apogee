@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
@@ -301,6 +302,23 @@ type fakeSessionHost struct {
 	activeID string
 	minted   int   // ids handed out so far, so a rotated session gets a distinct one
 	saveErr  error // when non-nil, every Save fails with it (the ok→fail transition)
+
+	// The browser-side store (item 7): the /sessions overlay lists/loads/deletes/renames these
+	// records. seed populates it; Load makes a record active, so a test can prove that resuming
+	// switches which file later Saves target. listErr/loadErr script the corresponding failures.
+	stored  map[string]session.Record
+	listErr error
+	loadErr error
+}
+
+// seed adds a record to the fake store so the /sessions browser can list/load it.
+func (h *fakeSessionHost) seed(rec session.Record) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stored == nil {
+		h.stored = map[string]session.Record{}
+	}
+	h.stored[rec.Meta.ID] = rec
 }
 
 // fakeSessionHost satisfies the persistence seam the Model drives.
@@ -324,10 +342,50 @@ func (h *fakeSessionHost) Rotate() {
 	h.mu.Unlock()
 }
 
-func (h *fakeSessionHost) List() ([]session.Meta, error)       { return nil, nil }
-func (h *fakeSessionHost) Load(string) (session.Record, error) { return session.Record{}, nil }
-func (h *fakeSessionHost) Delete(string) error                 { return nil }
-func (h *fakeSessionHost) Rename(string, string) error         { return nil }
+func (h *fakeSessionHost) List() ([]session.Meta, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.listErr != nil {
+		return nil, h.listErr
+	}
+	metas := make([]session.Meta, 0, len(h.stored))
+	for _, rec := range h.stored {
+		metas = append(metas, rec.Meta)
+	}
+	sort.Slice(metas, func(i, j int) bool { return metas[i].UpdatedAt.After(metas[j].UpdatedAt) })
+	return metas, nil
+}
+
+func (h *fakeSessionHost) Load(id string) (session.Record, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.loadErr != nil {
+		return session.Record{}, h.loadErr
+	}
+	rec, ok := h.stored[id]
+	if !ok {
+		return session.Record{}, fmt.Errorf("no session %q", id)
+	}
+	h.activeID = id // Load activates: later Saves update the loaded session's file
+	return rec, nil
+}
+
+func (h *fakeSessionHost) Delete(id string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.stored, id)
+	return nil
+}
+
+func (h *fakeSessionHost) Rename(id, title string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if rec, ok := h.stored[id]; ok {
+		rec.Meta.Title = title
+		h.stored[id] = rec
+	}
+	return nil
+}
 
 func (h *fakeSessionHost) ActiveID() string {
 	h.mu.Lock()

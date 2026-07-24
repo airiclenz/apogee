@@ -44,12 +44,13 @@ type parsedInput struct {
 // intercepts a line only when its first whitespace token is exactly "/<verb>" for a verb in
 // this set; any other slash-prefixed line is treated as an ordinary message (never silently
 // swallowed). /new is an alias of /clear — both verbs are recognised here and route to the same
-// context-reset logic in runCommand. /confine is the only verb that takes arguments (parseConfine
-// owns its grammar). The autocomplete overlay offers a superset: it also offers
-// /skill, which attaches via the picker and is deliberately not parsed as a command (see
+// context-reset logic in runCommand. /sessions opens the history-browser overlay (idle-only,
+// handled synchronously in runCommand like /clear). /confine is the only verb that takes
+// arguments (parseConfine owns its grammar). The autocomplete overlay offers a superset: it also
+// offers /skill, which attaches via the picker and is deliberately not parsed as a command (see
 // commandMenu in autocomplete.go). /server is deferred (it needs a swappable provider seam) and
 // so is absent here.
-var knownCommands = []string{"clear", "new", "compact", "continue", "confine", "version"}
+var knownCommands = []string{"clear", "new", "sessions", "compact", "continue", "confine", "version"}
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text
 // (the caller ignores it).

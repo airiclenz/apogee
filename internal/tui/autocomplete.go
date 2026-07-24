@@ -138,6 +138,7 @@ type commandMenuItem struct {
 var commandMenu = []commandMenuItem{
 	{name: "clear", summary: "reset the model's memory of this session"},
 	{name: "new", summary: "start a fresh conversation (same as /clear)"},
+	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "confine", summary: "report or change auto mode's blast radius"},
