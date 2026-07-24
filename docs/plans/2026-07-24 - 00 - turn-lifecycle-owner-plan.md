@@ -240,7 +240,7 @@ This is the deepening's testability payoff: these assertions previously required
 untouched and green; `completeTurn`/`abandonTurn`/`cancelTurn` no longer exist. Commit:
 `refactor(agent): unify the three Turn exits behind one table-tested end()`.
 
-## 3. `refold` — collapse the fold-and-rebuild ritual; retire the recovery counter
+## 3. `refold` — collapse the fold-and-rebuild ritual; retire the recovery counter — ✅ DONE (2026-07-24)
 
 **What:** In `loop.go` (beside `step()`), one function owning the ritual both overflow paths
 copy today, and a named helper for the re-derive trio:

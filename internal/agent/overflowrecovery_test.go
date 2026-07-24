@@ -451,3 +451,106 @@ func TestOverflowRecoveryCancelDuringFoldIsResumable(t *testing.T) {
 		t.Errorf("resumed Step status = %q, want %q", res.Status, domain.StatusExchangeComplete)
 	}
 }
+
+// TestRefoldOutcomeMapping drives refold() directly — the fold-and-rebuild ritual step()'s two
+// overflow paths share — and pins its outcome mapping and per-outcome mutation of the turnRun,
+// without a scripted step() run. It is the counterpart to the end-to-end overflow tests above:
+// those prove the paths route on the outcome; this proves refold produces the right one.
+func TestRefoldOutcomeMapping(t *testing.T) {
+	t.Run("folded: history rewritten, t re-derived against it, foldSpent latched", func(t *testing.T) {
+		up := &recoveryResponder{reply: "UNREACHED", summary: "EMERGENCY-SUMMARY"}
+		a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		seedToolCallConv(a) // 8 messages past a 1-message protected prefix
+		tr := &turnRun{turn: 0}
+		a.armRequest(tr) // establish the pre-fold working values, exactly as step() does
+
+		if got := a.refold(context.Background(), tr); got != foldFolded {
+			t.Fatalf("outcome = %v, want foldFolded", got)
+		}
+		if !tr.foldSpent {
+			t.Error("foldSpent was not latched on a fold that ran")
+		}
+		if up.summaries != 1 {
+			t.Errorf("summarizer calls = %d, want 1", up.summaries)
+		}
+		// The fold collapsed the tail to prefix | summary | bridge, and refold re-derived rollback
+		// against that folded conversation (not the pre-fold length).
+		if a.conv.Len() != 3 {
+			t.Fatalf("conv.Len() = %d (roles %s), want 3 (prefix + summary + bridge)", a.conv.Len(), convRoles(a))
+		}
+		if tr.rollback != a.conv.Len() {
+			t.Errorf("rollback = %d, want %d (re-derived past the fold)", tr.rollback, a.conv.Len())
+		}
+		if tr.req == nil {
+			t.Error("req was not rebuilt against the folded conversation")
+		}
+	})
+
+	t.Run("declined: conversation untouched, t re-derived unchanged, foldSpent stays clear", func(t *testing.T) {
+		up := &recoveryResponder{reply: "UNREACHED", summary: "UNREACHED"}
+		cfg := autoCompactConfig(&recordingSink{})
+		cfg.Context.CompactionEnabled = false // the fold declines before any Upstream call
+		a, err := newAgent(cfg, up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		seedToolCallConv(a)
+		tr := &turnRun{turn: 0}
+		a.armRequest(tr)
+		lenBefore, rollbackBefore := a.conv.Len(), tr.rollback
+
+		if got := a.refold(context.Background(), tr); got != foldDeclined {
+			t.Fatalf("outcome = %v, want foldDeclined", got)
+		}
+		if tr.foldSpent {
+			t.Error("foldSpent latched on a declined fold; the reactive path must still be free to fold")
+		}
+		if up.summaries != 0 {
+			t.Errorf("summarizer calls = %d, want 0 (the fold declined before the wire)", up.summaries)
+		}
+		if a.conv.Len() != lenBefore {
+			t.Errorf("conv.Len() = %d, want %d (a declined fold leaves history untouched)", a.conv.Len(), lenBefore)
+		}
+		if tr.rollback != rollbackBefore {
+			t.Errorf("rollback = %d, want %d (re-derived against the unchanged conversation)", tr.rollback, rollbackBefore)
+		}
+	})
+
+	t.Run("cancelled: conversation untouched, t left intact, queue re-queued once", func(t *testing.T) {
+		up := &recoveryResponder{reply: "UNREACHED", summary: "EMERGENCY-SUMMARY"}
+		a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		seedToolCallConv(a)
+		lenBefore := a.conv.Len()
+		// Pre-set the working values so their being LEFT UNTOUCHED is observable; a cancelled fold
+		// must not re-derive them (step() then routes to end(t, endCancelled) with pre-fold values).
+		tr := &turnRun{turn: 0, rollback: 99, deferred: []string{"drained-correction"}, deferredFloor: 3}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // a cancel in flight when the summary call runs
+
+		if got := a.refold(ctx, tr); got != foldCancelled {
+			t.Fatalf("outcome = %v, want foldCancelled", got)
+		}
+		if tr.foldSpent {
+			t.Error("foldSpent latched on a cancelled fold")
+		}
+		if tr.rollback != 99 || tr.deferredFloor != 3 {
+			t.Errorf("t mutated on cancel: rollback=%d deferredFloor=%d, want 99/3 (untouched)", tr.rollback, tr.deferredFloor)
+		}
+		if a.conv.Len() != lenBefore {
+			t.Errorf("conv.Len() = %d, want %d (a cancelled fold leaves history untouched)", a.conv.Len(), lenBefore)
+		}
+		// refold re-queued the drained correction before the cancelled fold, exactly once, so the
+		// cancel exit's truncate-then-restore carries it forward without duplication (F6).
+		got, ok := a.conv.TakeDeferred()
+		if !ok || len(got) != 1 || got[0] != "drained-correction" {
+			t.Errorf("deferred queue = %v (ok=%v), want exactly [drained-correction]", got, ok)
+		}
+	})
+}

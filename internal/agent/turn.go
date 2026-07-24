@@ -30,6 +30,15 @@ type turnRun struct {
 	req           *domain.Request // the request under attempt this Turn
 	deferred      []string        // corrections buildRequest drained; a cancel re-queues them
 	deferredFloor int             // queue length after the drain — the cancel truncation floor (F6)
+
+	// foldSpent is the one-fold-per-Turn latch: it flips once this Turn has folded its history and
+	// re-sent a request the model's context window rejected, and the predictive and reactive
+	// overflow paths share it (refold latches it on a fold that ran; the respond phase gives up
+	// once it is set). A fold is a lossy rewrite of the user's history, so a second overflow means
+	// folding is not the answer here — the protected prefix alone is over the window, or the
+	// server rejects even a minimal prompt — and the Turn gives up exactly as it did before
+	// recovery existed: the same sanitized ErrorEvent, the same abandoned Exchange.
+	foldSpent bool
 }
 
 // turnEnd names the four ways a Turn exits. One row per exit; end() is the whole table.
