@@ -2,7 +2,7 @@ package domain
 
 // White-box tests for the deterministic dispatch order (Ordered) and the incompatibility
 // gate (ValidateIncompatibilities) added in Phase-4 item 2. They live in package domain so a
-// minimal stub Mechanism can satisfy the hook interfaces directly.
+// minimal stub hook can satisfy the hook interfaces directly.
 
 import (
 	"context"
@@ -12,47 +12,66 @@ import (
 	"testing"
 )
 
-// preReqMech is a minimal catalogued Mechanism hooking at pre-request, carrying just the
-// descriptor + ordering fields the topo-sort and the gates read.
-type preReqMech struct {
-	id       MechanismID
-	before   []MechanismID
-	after    []MechanismID
-	incompat []MechanismID
-	requires []MechanismID
-}
+// preReqMech is a minimal pre-request hook — behaviour only. Its descriptor and ordering are
+// supplied by the row regd wraps it in, exactly as the catalogue supplies a real Mechanism's.
+type preReqMech struct{}
 
-func (m preReqMech) Descriptor() MechanismDescriptor {
-	return MechanismDescriptor{ID: m.id, IncompatibleWith: m.incompat, Requires: m.requires}
-}
-func (m preReqMech) Ordering() OrderingConstraints {
-	return OrderingConstraints{Before: m.before, After: m.after}
-}
 func (preReqMech) PreRequest(context.Context, *Request) error { return nil }
 
 // postRespMech hooks at post-response only — the fixture proving Ordered filters by hook point.
-type postRespMech struct{ id MechanismID }
+type postRespMech struct{}
 
-func (m postRespMech) Descriptor() MechanismDescriptor { return MechanismDescriptor{ID: m.id} }
-func (postRespMech) Ordering() OrderingConstraints     { return OrderingConstraints{} }
 func (postRespMech) PostResponse(context.Context, *Response) (PostResponseDecision, error) {
 	return PostResponseDecision{}, nil
 }
 
-func orderedIDs(mechs []Mechanism) []MechanismID {
+// regd builds the row the registry stores: a descriptor keyed by id, no ordering edges, and the
+// pre-request hook fixture. The options below set whatever a case needs, so each fixture stays
+// the one-liner it was when the metadata lived on the stub type.
+func regd(id MechanismID, opts ...func(*RegisteredMechanism)) RegisteredMechanism {
+	m := RegisteredMechanism{Descriptor: MechanismDescriptor{ID: id}, Hook: preReqMech{}}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	return m
+}
+
+// before / after declare the row's ordering edges (the topo-sort's input).
+func before(ids ...MechanismID) func(*RegisteredMechanism) {
+	return func(m *RegisteredMechanism) { m.Ordering.Before = ids }
+}
+
+func after(ids ...MechanismID) func(*RegisteredMechanism) {
+	return func(m *RegisteredMechanism) { m.Ordering.After = ids }
+}
+
+// incompatibleWith / requires declare the descriptor's stacking relations (the gates' input).
+func incompatibleWith(ids ...MechanismID) func(*RegisteredMechanism) {
+	return func(m *RegisteredMechanism) { m.Descriptor.IncompatibleWith = ids }
+}
+
+func requires(ids ...MechanismID) func(*RegisteredMechanism) {
+	return func(m *RegisteredMechanism) { m.Descriptor.Requires = ids }
+}
+
+// atPostResponse swaps in the post-response hook, so Ordered's hook-point filter has something
+// to filter out.
+func atPostResponse(m *RegisteredMechanism) { m.Hook = postRespMech{} }
+
+func orderedIDs(mechs []RegisteredMechanism) []MechanismID {
 	out := make([]MechanismID, len(mechs))
 	for i, m := range mechs {
-		out[i] = m.Descriptor().ID
+		out[i] = m.Descriptor.ID
 	}
 	return out
 }
 
-func registerAll(t *testing.T, mechs ...Mechanism) *MechanismRegistry {
+func registerAll(t *testing.T, mechs ...RegisteredMechanism) *MechanismRegistry {
 	t.Helper()
 	r := NewMechanismRegistry()
 	for _, m := range mechs {
 		if err := r.Add(m); err != nil {
-			t.Fatalf("Add(%s): %v", m.Descriptor().ID, err)
+			t.Fatalf("Add(%s): %v", m.Descriptor.ID, err)
 		}
 	}
 	return r
@@ -61,16 +80,16 @@ func registerAll(t *testing.T, mechs ...Mechanism) *MechanismRegistry {
 func TestOrdered_DeterministicUnderShuffle(t *testing.T) {
 	// Constraints: b before d, a after b (⇒ b before a). c and d are free.
 	// Expected Kahn order (lowest ready ID first): b, a, c, d.
-	build := func(order ...Mechanism) []MechanismID {
+	build := func(order ...RegisteredMechanism) []MechanismID {
 		return orderedIDs(registerAll(t, order...).Ordered(HookPreRequest))
 	}
-	a := preReqMech{id: "a", after: []MechanismID{"b"}}
-	b := preReqMech{id: "b", before: []MechanismID{"d"}}
-	c := preReqMech{id: "c"}
-	d := preReqMech{id: "d"}
+	a := regd("a", after("b"))
+	b := regd("b", before("d"))
+	c := regd("c")
+	d := regd("d")
 
 	want := []MechanismID{"b", "a", "c", "d"}
-	shuffles := [][]Mechanism{
+	shuffles := [][]RegisteredMechanism{
 		{a, b, c, d},
 		{d, c, b, a},
 		{c, a, d, b},
@@ -87,9 +106,9 @@ func TestOrdered_TiebreakByID(t *testing.T) {
 	// No constraints at all ⇒ pure lexicographic order by canonical ID, regardless of
 	// registration order.
 	r := registerAll(t,
-		preReqMech{id: "zebra"},
-		preReqMech{id: "alpha"},
-		preReqMech{id: "mike"},
+		regd("zebra"),
+		regd("alpha"),
+		regd("mike"),
 	)
 	want := []MechanismID{"alpha", "mike", "zebra"}
 	if got := orderedIDs(r.Ordered(HookPreRequest)); !reflect.DeepEqual(got, want) {
@@ -99,8 +118,8 @@ func TestOrdered_TiebreakByID(t *testing.T) {
 
 func TestOrdered_FiltersByHookPoint(t *testing.T) {
 	r := registerAll(t,
-		preReqMech{id: "pre"},
-		postRespMech{id: "post"},
+		regd("pre"),
+		regd("post", atPostResponse),
 	)
 	if got := orderedIDs(r.Ordered(HookPreRequest)); !reflect.DeepEqual(got, []MechanismID{"pre"}) {
 		t.Errorf("Ordered(pre-request) = %v, want [pre]", got)
@@ -117,8 +136,8 @@ func TestOrdered_IgnoresConstraintOnAbsentMechanism(t *testing.T) {
 	// b names a Before edge to an ID that is not registered at this hook point; it must be
 	// ignored, leaving the pure ID tiebreak (a, b).
 	r := registerAll(t,
-		preReqMech{id: "b", before: []MechanismID{"not-here"}},
-		preReqMech{id: "a"},
+		regd("b", before("not-here")),
+		regd("a"),
 	)
 	want := []MechanismID{"a", "b"}
 	if got := orderedIDs(r.Ordered(HookPreRequest)); !reflect.DeepEqual(got, want) {
@@ -129,8 +148,8 @@ func TestOrdered_IgnoresConstraintOnAbsentMechanism(t *testing.T) {
 func TestValidateIncompatibilities(t *testing.T) {
 	t.Run("both registered ⇒ error", func(t *testing.T) {
 		r := registerAll(t,
-			preReqMech{id: "read_loop", incompat: []MechanismID{"cached_content_intercept"}},
-			preReqMech{id: "cached_content_intercept"},
+			regd("read_loop", incompatibleWith("cached_content_intercept")),
+			regd("cached_content_intercept"),
 		)
 		if err := r.ValidateIncompatibilities(); !errors.Is(err, ErrIncompatibleMechanisms) {
 			t.Errorf("ValidateIncompatibilities = %v, want ErrIncompatibleMechanisms", err)
@@ -140,8 +159,8 @@ func TestValidateIncompatibilities(t *testing.T) {
 	t.Run("declaration is symmetric in effect", func(t *testing.T) {
 		// Only the SECOND mechanism declares the incompatibility; it must still trip.
 		r := registerAll(t,
-			preReqMech{id: "read_loop"},
-			preReqMech{id: "cached_content_intercept", incompat: []MechanismID{"read_loop"}},
+			regd("read_loop"),
+			regd("cached_content_intercept", incompatibleWith("read_loop")),
 		)
 		if err := r.ValidateIncompatibilities(); !errors.Is(err, ErrIncompatibleMechanisms) {
 			t.Errorf("ValidateIncompatibilities = %v, want ErrIncompatibleMechanisms", err)
@@ -150,7 +169,7 @@ func TestValidateIncompatibilities(t *testing.T) {
 
 	t.Run("only one side registered ⇒ ok", func(t *testing.T) {
 		r := registerAll(t,
-			preReqMech{id: "read_loop", incompat: []MechanismID{"cached_content_intercept"}},
+			regd("read_loop", incompatibleWith("cached_content_intercept")),
 		)
 		if err := r.ValidateIncompatibilities(); err != nil {
 			t.Errorf("ValidateIncompatibilities = %v, want nil (the peer is not registered)", err)
@@ -159,8 +178,8 @@ func TestValidateIncompatibilities(t *testing.T) {
 
 	t.Run("compatible set ⇒ ok", func(t *testing.T) {
 		r := registerAll(t,
-			preReqMech{id: "a"},
-			preReqMech{id: "b"},
+			regd("a"),
+			regd("b"),
 		)
 		if err := r.ValidateIncompatibilities(); err != nil {
 			t.Errorf("ValidateIncompatibilities = %v, want nil", err)
@@ -171,7 +190,7 @@ func TestValidateIncompatibilities(t *testing.T) {
 func TestValidateRequirements(t *testing.T) {
 	t.Run("required peer absent ⇒ error naming both IDs", func(t *testing.T) {
 		r := registerAll(t,
-			preReqMech{id: "guided_decomposition", requires: []MechanismID{"tool_result_cap"}},
+			regd("guided_decomposition", requires("tool_result_cap")),
 		)
 		err := r.ValidateRequirements()
 		if !errors.Is(err, ErrMissingRequirement) {
@@ -185,8 +204,8 @@ func TestValidateRequirements(t *testing.T) {
 
 	t.Run("required peer present ⇒ ok", func(t *testing.T) {
 		r := registerAll(t,
-			preReqMech{id: "guided_decomposition", requires: []MechanismID{"tool_result_cap"}},
-			preReqMech{id: "tool_result_cap"},
+			regd("guided_decomposition", requires("tool_result_cap")),
+			regd("tool_result_cap"),
 		)
 		if err := r.ValidateRequirements(); err != nil {
 			t.Errorf("ValidateRequirements = %v, want nil (the required peer is registered)", err)
@@ -195,8 +214,8 @@ func TestValidateRequirements(t *testing.T) {
 
 	t.Run("empty Requires ⇒ ok", func(t *testing.T) {
 		r := registerAll(t,
-			preReqMech{id: "a"},
-			preReqMech{id: "b"},
+			regd("a"),
+			regd("b"),
 		)
 		if err := r.ValidateRequirements(); err != nil {
 			t.Errorf("ValidateRequirements = %v, want nil (no requirements declared)", err)
@@ -205,9 +224,9 @@ func TestValidateRequirements(t *testing.T) {
 
 	t.Run("requirement chain A→B→C all present ⇒ ok (transitive by iteration)", func(t *testing.T) {
 		r := registerAll(t,
-			preReqMech{id: "a", requires: []MechanismID{"b"}},
-			preReqMech{id: "b", requires: []MechanismID{"c"}},
-			preReqMech{id: "c"},
+			regd("a", requires("b")),
+			regd("b", requires("c")),
+			regd("c"),
 		)
 		if err := r.ValidateRequirements(); err != nil {
 			t.Errorf("ValidateRequirements = %v, want nil (whole chain registered)", err)
@@ -218,8 +237,8 @@ func TestValidateRequirements(t *testing.T) {
 		// A→B→C but C is absent: iterating every Mechanism's direct requirements catches the
 		// B→C break independently of A, so no recursion is needed.
 		r := registerAll(t,
-			preReqMech{id: "a", requires: []MechanismID{"b"}},
-			preReqMech{id: "b", requires: []MechanismID{"c"}},
+			regd("a", requires("b")),
+			regd("b", requires("c")),
 		)
 		err := r.ValidateRequirements()
 		if !errors.Is(err, ErrMissingRequirement) {

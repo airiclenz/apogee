@@ -72,7 +72,7 @@ type toolFilterMechanism struct{}
 
 // newToolFilter builds the toolfilter Mechanism. It needs no injected Deps (D3): filtering reads
 // the tool menu and conversation off the Request it is handed.
-func newToolFilter(Deps) (domain.Mechanism, error) { return toolFilterMechanism{}, nil }
+func newToolFilter(Deps) (any, error) { return toolFilterMechanism{}, nil }
 
 // toolFilterDescriptor identifies toolfilter as a strikes-3 proactive-nudge Mechanism (catalogue
 // Table A): disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
@@ -86,7 +86,7 @@ var toolFilterDescriptor = domain.MechanismDescriptor{
 func (toolFilterMechanism) Descriptor() domain.MechanismDescriptor { return toolFilterDescriptor }
 
 // Ordering returns the edge toolfilter's catalogue row declares (see init) — the row is the source
-// of record; this method is the domain.Mechanism remnant the registry still reads.
+// of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (toolFilterMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{decomposeID}}
 }

@@ -91,7 +91,7 @@ type guidedDecompositionMechanism struct{}
 
 // newGuidedDecomposition builds the guided_decomposition Mechanism. It needs no injected Deps (D3):
 // the gate reads the conversation, tool menu, Budget, and nesting depth off the Request it is handed.
-func newGuidedDecomposition(Deps) (domain.Mechanism, error) {
+func newGuidedDecomposition(Deps) (any, error) {
 	return guidedDecompositionMechanism{}, nil
 }
 
@@ -118,7 +118,7 @@ func (guidedDecompositionMechanism) Descriptor() domain.MechanismDescriptor {
 }
 
 // Ordering returns the edge guided_decomposition's catalogue row declares (see init) — the row is
-// the source of record; this method is the domain.Mechanism remnant the registry still reads.
+// the source of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (guidedDecompositionMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}}
 }

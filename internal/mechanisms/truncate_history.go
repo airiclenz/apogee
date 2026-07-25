@@ -54,7 +54,7 @@ type truncateHistoryMechanism struct {
 
 // newTruncateHistory builds the truncate_history Mechanism with the built-in defaults. It needs no
 // injected Deps (D3): truncation reads and mutates only the Conversation it is handed.
-func newTruncateHistory(Deps) (domain.Mechanism, error) {
+func newTruncateHistory(Deps) (any, error) {
 	return truncateHistoryMechanism{keepLastTurns: defaultKeepLastTurns, gapNote: truncateGapNote}, nil
 }
 

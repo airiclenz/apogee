@@ -33,7 +33,7 @@ type toolUseEnforcerMechanism struct{}
 
 // newToolUseEnforcer builds the tool_use_enforcer Mechanism. It needs no injected Deps (D3): the
 // trigger reads only the response, the tool menu, and the conversation already on its LoopView.
-func newToolUseEnforcer(Deps) (domain.Mechanism, error) { return toolUseEnforcerMechanism{}, nil }
+func newToolUseEnforcer(Deps) (any, error) { return toolUseEnforcerMechanism{}, nil }
 
 // toolUseEnforcerDescriptor identifies tool_use_enforcer as an off-ramp exempt from suppression
 // (catalogue Table A) — it survives Bypass (ADR 0006 / D5) and is never withdrawn by self-regulation.

@@ -53,7 +53,7 @@ func buildAutofix(t *testing.T, look func(string) (string, error)) domain.PostRe
 	if err != nil {
 		t.Fatalf("Build(%q): %v", autofixID, err)
 	}
-	hook, ok := m.(domain.PostResponseHook)
+	hook, ok := m.Hook.(domain.PostResponseHook)
 	if !ok {
 		t.Fatalf("mechanism %q does not implement PostResponseHook", autofixID)
 	}

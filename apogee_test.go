@@ -20,21 +20,14 @@ type nopSink struct{}
 
 func (nopSink) Emit(apogee.Event) {}
 
-// orderingMech is a minimal catalogued Mechanism carrying only an ID and ordering
-// constraints — the trivial input the cycle gate needs. It implements PreRequestHook
-// so MechanismRegistry.Add accepts it (a Mechanism must hook somewhere, ADR 0002).
+// orderingMech is a minimal Mechanism hook carrying the ID and ordering constraints its
+// catalogue row is built from (mustAdd) — the trivial input the cycle gate needs. It
+// implements PreRequestHook so MechanismRegistry.Add accepts it (a Mechanism must hook
+// somewhere, ADR 0002).
 type orderingMech struct {
 	id     apogee.MechanismID
 	before []apogee.MechanismID
 	after  []apogee.MechanismID
-}
-
-func (m orderingMech) Descriptor() apogee.MechanismDescriptor {
-	return apogee.MechanismDescriptor{ID: m.id}
-}
-
-func (m orderingMech) Ordering() apogee.OrderingConstraints {
-	return apogee.OrderingConstraints{Before: m.before, After: m.after}
 }
 
 func (orderingMech) PreRequest(context.Context, *apogee.Request) error { return nil }
@@ -186,10 +179,15 @@ func TestResume_FutureVersion(t *testing.T) {
 	}
 }
 
-func mustAdd(t *testing.T, registry *apogee.MechanismRegistry, m apogee.Mechanism) {
+func mustAdd(t *testing.T, registry *apogee.MechanismRegistry, m orderingMech) {
 	t.Helper()
-	if err := registry.Add(m); err != nil {
-		t.Fatalf("Add(%s): %v", m.Descriptor().ID, err)
+	registered := apogee.RegisteredMechanism{
+		Descriptor: apogee.MechanismDescriptor{ID: m.id},
+		Ordering:   apogee.OrderingConstraints{Before: m.before, After: m.after},
+		Hook:       m,
+	}
+	if err := registry.Add(registered); err != nil {
+		t.Fatalf("Add(%s): %v", m.id, err)
 	}
 }
 

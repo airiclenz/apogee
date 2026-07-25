@@ -37,7 +37,7 @@ type toolLoopMechanism struct{}
 
 // newToolLoopInterceptor builds the tool_loop_interceptor Mechanism. It needs no injected Deps
 // (D3): the loop is detected from the response's tool calls and the conversation on its LoopView.
-func newToolLoopInterceptor(Deps) (domain.Mechanism, error) { return toolLoopMechanism{}, nil }
+func newToolLoopInterceptor(Deps) (any, error) { return toolLoopMechanism{}, nil }
 
 // toolLoopDescriptor identifies tool_loop_interceptor as a strikes-3 response-repair Mechanism
 // (catalogue Table A) — disabled under Bypass (D5), withdrawn after repeated non-help.
@@ -51,7 +51,7 @@ var toolLoopDescriptor = domain.MechanismDescriptor{
 func (toolLoopMechanism) Descriptor() domain.MechanismDescriptor { return toolLoopDescriptor }
 
 // Ordering returns the edge tool_loop_interceptor's catalogue row declares (see init) — the row is
-// the source of record; this method is the domain.Mechanism remnant the registry still reads.
+// the source of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (toolLoopMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{validateID}}
 }

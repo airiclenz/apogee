@@ -188,7 +188,7 @@ type decomposeMechanism struct{}
 
 // newDecompose builds the decompose Mechanism. It needs no injected Deps (D3): decomposition reads
 // the conversation and tool menu off the Request it is handed.
-func newDecompose(Deps) (domain.Mechanism, error) { return decomposeMechanism{}, nil }
+func newDecompose(Deps) (any, error) { return decomposeMechanism{}, nil }
 
 // decomposeDescriptor identifies decompose as a strikes-3 proactive-nudge Mechanism (catalogue
 // Table A): disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.
@@ -202,7 +202,7 @@ var decomposeDescriptor = domain.MechanismDescriptor{
 func (decomposeMechanism) Descriptor() domain.MechanismDescriptor { return decomposeDescriptor }
 
 // Ordering returns the edge decompose's catalogue row declares (see init) — the row is the source
-// of record; this method is the domain.Mechanism remnant the registry still reads.
+// of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (decomposeMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}}
 }

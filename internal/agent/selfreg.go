@@ -134,11 +134,11 @@ func (r *selfRegulator) recordFire(id domain.MechanismID) {
 // Mechanism struck out by Adaptive Suppression, or ANY non-exempt Mechanism while the global Turn
 // Budget is tripped. An exempt (off-ramp) Mechanism is never withdrawn — SuppressionPolicy ==
 // exempt bypasses both rules (CONTEXT: Off-ramp).
-func (r *selfRegulator) suppress(m domain.Mechanism) bool {
-	if m.Descriptor().Suppression == domain.SuppressExempt {
+func (r *selfRegulator) suppress(m domain.RegisteredMechanism) bool {
+	if m.Descriptor.Suppression == domain.SuppressExempt {
 		return false
 	}
-	return r.budgetTripped || r.suppressed[m.Descriptor().ID]
+	return r.budgetTripped || r.suppressed[m.Descriptor.ID]
 }
 
 // noteRead books a successful read-only tool call as a productive signal when its target is
@@ -241,7 +241,7 @@ func (r *selfRegulator) resetTurnScratch() {
 // Bypass gate switches it off (D5, skipUnderBypass), or self-regulation has withdrawn it (Adaptive
 // Suppression / the Turn Budget, D2). It governs only catalogued Mechanisms — an experimental hook
 // is the bench's own instrument and consults neither gate.
-func (a *Agent) skipMechanism(m domain.Mechanism) bool {
+func (a *Agent) skipMechanism(m domain.RegisteredMechanism) bool {
 	return a.skipUnderBypass(m) || a.tracker.suppress(m)
 }
 

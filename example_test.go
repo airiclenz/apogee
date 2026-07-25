@@ -75,7 +75,7 @@ var (
 	_ apogee.HistoryRewriter
 	_ apogee.PostResponseDecision
 	_ apogee.PostResponseAction
-	_ apogee.Mechanism
+	_ apogee.RegisteredMechanism
 	_ apogee.MechanismID
 	_ apogee.MechanismDescriptor
 	_ apogee.Capability

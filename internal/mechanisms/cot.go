@@ -118,7 +118,7 @@ var cotReadTools = toolSet(readSpellings)
 // tool use").
 type toolUseDirectiveMechanism struct{}
 
-func newToolUseDirective(Deps) (domain.Mechanism, error) { return toolUseDirectiveMechanism{}, nil }
+func newToolUseDirective(Deps) (any, error) { return toolUseDirectiveMechanism{}, nil }
 
 // toolUseDirectiveDescriptor identifies tool_use_directive as a strikes-3 proactive-nudge Mechanism
 // (catalogue Table A).
@@ -134,7 +134,7 @@ func (toolUseDirectiveMechanism) Descriptor() domain.MechanismDescriptor {
 }
 
 // Ordering returns the edge tool_use_directive's catalogue row declares (see init) — the row is
-// the source of record; this method is the domain.Mechanism remnant the registry still reads.
+// the source of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (toolUseDirectiveMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }
@@ -159,7 +159,7 @@ func (toolUseDirectiveMechanism) PreRequest(_ context.Context, req *domain.Reque
 // proceed with the modifications (catalogue Table A: threshold 4, 4-nudge cap).
 type stallNudgeMechanism struct{}
 
-func newStallNudge(Deps) (domain.Mechanism, error) { return stallNudgeMechanism{}, nil }
+func newStallNudge(Deps) (any, error) { return stallNudgeMechanism{}, nil }
 
 // stallNudgeDescriptor identifies stall_nudge as a strikes-3 proactive-nudge Mechanism (catalogue
 // Table A), incompatible with list_nudge (the two never co-fire — a startup gate).
@@ -174,7 +174,7 @@ var stallNudgeDescriptor = domain.MechanismDescriptor{
 func (stallNudgeMechanism) Descriptor() domain.MechanismDescriptor { return stallNudgeDescriptor }
 
 // Ordering returns the edge stall_nudge's catalogue row declares (see init) — the row is the
-// source of record; this method is the domain.Mechanism remnant the registry still reads.
+// source of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (stallNudgeMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }
@@ -201,7 +201,7 @@ func (stallNudgeMechanism) PreRequest(_ context.Context, req *domain.Request) er
 // it found (catalogue Table A: threshold 2, 3-nudge cap).
 type listNudgeMechanism struct{}
 
-func newListNudge(Deps) (domain.Mechanism, error) { return listNudgeMechanism{}, nil }
+func newListNudge(Deps) (any, error) { return listNudgeMechanism{}, nil }
 
 // listNudgeDescriptor identifies list_nudge as a strikes-3 proactive-nudge Mechanism (catalogue
 // Table A), incompatible with stall_nudge (the two never co-fire — a startup gate).
@@ -216,7 +216,7 @@ var listNudgeDescriptor = domain.MechanismDescriptor{
 func (listNudgeMechanism) Descriptor() domain.MechanismDescriptor { return listNudgeDescriptor }
 
 // Ordering returns the edge list_nudge's catalogue row declares (see init) — the row is the source
-// of record; this method is the domain.Mechanism remnant the registry still reads.
+// of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (listNudgeMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }

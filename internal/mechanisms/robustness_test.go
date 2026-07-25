@@ -31,8 +31,9 @@ func writeCall(id, path, content string) domain.ToolCall {
 	return domain.ToolCall{ID: id, Tool: "write_file", Arguments: args}
 }
 
-// mustBuild constructs a catalogued Mechanism from the production table, as the config surface does.
-func mustBuild(t *testing.T, id domain.MechanismID) domain.Mechanism {
+// mustBuild constructs a catalogued Mechanism row from the production table, as the config surface
+// does: the row's descriptor and ordering joined with the hook Build constructed.
+func mustBuild(t *testing.T, id domain.MechanismID) domain.RegisteredMechanism {
 	t.Helper()
 	m, err := Build(id, Deps{})
 	if err != nil {
@@ -44,7 +45,7 @@ func mustBuild(t *testing.T, id domain.MechanismID) domain.Mechanism {
 // postResponse fires a built Mechanism's post-response hook once against resp.
 func postResponse(t *testing.T, id domain.MechanismID, resp *domain.Response) domain.PostResponseDecision {
 	t.Helper()
-	hook, ok := mustBuild(t, id).(domain.PostResponseHook)
+	hook, ok := mustBuild(t, id).Hook.(domain.PostResponseHook)
 	if !ok {
 		t.Fatalf("mechanism %q does not implement PostResponseHook", id)
 	}
@@ -61,9 +62,9 @@ func TestWave1Descriptors(t *testing.T) {
 	t.Parallel()
 	for _, id := range []domain.MechanismID{validateID, syntaxID, autofixID} {
 		m := mustBuild(t, id)
-		d := m.Descriptor()
+		d := m.Descriptor
 		if d.ID != id {
-			t.Errorf("Descriptor().ID = %q, want %q", d.ID, id)
+			t.Errorf("Descriptor.ID = %q, want %q", d.ID, id)
 		}
 		if d.Capability != domain.CapResponseRepair {
 			t.Errorf("%q Capability = %q, want %q", id, d.Capability, domain.CapResponseRepair)
@@ -71,7 +72,7 @@ func TestWave1Descriptors(t *testing.T) {
 		if d.Suppression != domain.SuppressStrikesThree {
 			t.Errorf("%q Suppression = %q, want %q", id, d.Suppression, domain.SuppressStrikesThree)
 		}
-		if _, ok := m.(domain.PostResponseHook); !ok {
+		if _, ok := m.Hook.(domain.PostResponseHook); !ok {
 			t.Errorf("%q does not implement PostResponseHook", id)
 		}
 	}
@@ -99,7 +100,7 @@ func TestWave1DeterministicOrder(t *testing.T) {
 	ordered := registry.Ordered(domain.HookPostResponse)
 	got := make([]domain.MechanismID, len(ordered))
 	for i, m := range ordered {
-		got[i] = m.Descriptor().ID
+		got[i] = m.Descriptor.ID
 	}
 	want := []domain.MechanismID{validateID, autofixID, syntaxID}
 	if len(got) != len(want) {

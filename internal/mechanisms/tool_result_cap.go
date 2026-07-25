@@ -49,7 +49,7 @@ type toolResultCapMechanism struct{}
 
 // newToolResultCap builds the tool_result_cap Mechanism with the built-in defaults. It needs no
 // injected Deps (D3): capping reads the Budget and messages off the Request it is handed.
-func newToolResultCap(Deps) (domain.Mechanism, error) {
+func newToolResultCap(Deps) (any, error) {
 	return toolResultCapMechanism{}, nil
 }
 
@@ -67,7 +67,7 @@ var toolResultCapDescriptor = domain.MechanismDescriptor{
 func (toolResultCapMechanism) Descriptor() domain.MechanismDescriptor { return toolResultCapDescriptor }
 
 // Ordering returns the edge tool_result_cap's catalogue row declares (see init) — the row is the
-// source of record; this method is the domain.Mechanism remnant the registry still reads.
+// source of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (toolResultCapMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{After: []domain.MechanismID{decomposeID}}
 }

@@ -392,7 +392,7 @@ func TestTruncateHistoryDescriptorAndDefaultWindow(t *testing.T) {
 		t.Fatalf("Build(%q): %v", truncateHistoryID, err)
 	}
 
-	desc := built.Descriptor()
+	desc := built.Descriptor
 	if desc.ID != truncateHistoryID {
 		t.Errorf("ID = %q, want %q", desc.ID, truncateHistoryID)
 	}
@@ -402,13 +402,13 @@ func TestTruncateHistoryDescriptorAndDefaultWindow(t *testing.T) {
 	if desc.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want %q", desc.Suppression, domain.SuppressStrikesThree)
 	}
-	if ord := built.Ordering(); len(ord.Before) != 0 || len(ord.After) != 0 {
+	if ord := built.Ordering; len(ord.Before) != 0 || len(ord.After) != 0 {
 		t.Errorf("Ordering = %+v, want no constraints", ord)
 	}
 
-	rewriter, ok := built.(domain.HistoryRewriter)
+	rewriter, ok := built.Hook.(domain.HistoryRewriter)
 	if !ok {
-		t.Fatalf("built mechanism %T does not implement HistoryRewriter", built)
+		t.Fatalf("built mechanism hook %T does not implement HistoryRewriter", built.Hook)
 	}
 	// The default keeps the last defaultKeepLastTurns exchanges: build a history with one more
 	// exchange than the window and confirm exactly the oldest exchange is dropped.

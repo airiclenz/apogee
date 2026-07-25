@@ -274,12 +274,34 @@ if either needs editing, the rule was not moved faithfully and the item is wrong
 
 ---
 
-## 3. The registry holds rows — `domain.RegisteredMechanism`
+## 3. The registry holds rows — `domain.RegisteredMechanism` — ✅ DONE (2026-07-25)
 
 The one unavoidably cross-package item. It is now **mechanical**: the catalogue already holds
 descriptor + ordering (item 1), so `Build` just returns them alongside the hook. The 21 Mechanism
 files are **not edited** in this item — their `Descriptor()`/`Ordering()` methods simply stop being
 called (item 4 deletes them).
+
+NOTES (2026-07-25): owner call — `domain.Mechanism` is DELETED here, not deferred, so `constructor`
+became `func(Deps) (any, error)` and all 21 constructor signatures changed in this item (the branch
+the item's own text flags). Item 4 is now purely the deletion of the 42 dead methods; no compile
+error was left behind.
+NOTES (2026-07-25): consequence of the above — the 13 `Ordering()` doc comments item 1 left saying
+"this method is the `domain.Mechanism` remnant the registry still reads" now say "a remnant of the
+self-describing interface; nothing reads it". Both because the registry no longer reads them and
+because the item's own acceptance grep for `domain.Mechanism` must return nothing, comments included.
+NOTES (2026-07-25): `TestDescriptorsMatchCatalogue`'s instance-equality half is PRESERVED (the item
+forbids weakening an assertion) through an ad-hoc `m.Hook.(interface{ Descriptor()
+domain.MechanismDescriptor })` assertion, since no named interface declares it any more. It is the
+half item 4 deletes; a row-vs-row check on `m.Descriptor` was added beside it.
+NOTES (2026-07-25): the six `internal/mechanisms` descriptor/ordering tests that read the metadata
+off a RAW constructor result (`newDecompose`/`newFileHint`/`newGrammar`/`newGuidedDecomposition`/
+`newToolFilter`/`newToolResultCap`, plus `library_test.go`'s `newLibraryMech`) now build through
+`Build`, and `cot_test.go`'s `TestStallListIncompatible` through `mustBuild` — a raw constructor
+returns behaviour only. Every assertion is kept, unchanged in substance.
+NOTES (2026-07-25): fixture shapes the item did not spell out — `internal/agent`'s five dispatch
+fixtures each gained a `row()` helper (call sites unchanged bar `.row()`), `selfreg_test.go`'s
+hook-less `regMech` became a `regRow(id, pol…)` row builder, and `apogee_test.go`'s `mustAdd` takes
+the `orderingMech` fixture and builds the row from its fields.
 
 **`internal/domain/mechanism.go`:**
 

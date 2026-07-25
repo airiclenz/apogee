@@ -45,8 +45,11 @@ func observeResponse(history []domain.Message, tools []domain.ToolDef, calls ...
 // Capability is the lever item 2's Bypass gate skips on, so the Library is inert under Bypass.
 func TestLibraryDescriptorAndHooks(t *testing.T) {
 	t.Parallel()
-	m := newLibraryMech(library.NewStore(t.TempDir()), libFP("sha256:m", domain.ConfidenceHigh))
-	d := m.Descriptor()
+	m, err := Build(libraryID, Deps{Library: library.NewStore(t.TempDir()), Fingerprint: libFP("sha256:m", domain.ConfidenceHigh)})
+	if err != nil {
+		t.Fatalf("Build(%q): %v", libraryID, err)
+	}
+	d := m.Descriptor
 	if d.ID != libraryID {
 		t.Errorf("ID = %q, want %q", d.ID, libraryID)
 	}
@@ -56,13 +59,13 @@ func TestLibraryDescriptorAndHooks(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering(); len(o.After) != 0 || len(o.Before) != 1 || o.Before[0] != toolFilterID {
+	if o := m.Ordering; len(o.After) != 0 || len(o.Before) != 1 || o.Before[0] != toolFilterID {
 		t.Errorf("Ordering = %+v, want Before [toolfilter] (§Ordering seed, ratified into Table A 2026-07-04)", o)
 	}
-	if _, ok := domain.Mechanism(m).(domain.PreRequestHook); !ok {
+	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("library does not implement PreRequestHook (the inject half)")
 	}
-	if _, ok := domain.Mechanism(m).(domain.PostResponseHook); !ok {
+	if _, ok := m.Hook.(domain.PostResponseHook); !ok {
 		t.Error("library does not implement PostResponseHook (the observe half)")
 	}
 }
@@ -78,8 +81,8 @@ func TestLibraryBuildRequiresStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build(library, store): %v", err)
 	}
-	if m.Descriptor().ID != libraryID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor().ID, libraryID)
+	if m.Descriptor.ID != libraryID {
+		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, libraryID)
 	}
 }
 

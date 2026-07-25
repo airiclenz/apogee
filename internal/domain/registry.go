@@ -9,11 +9,12 @@ import (
 // delegate to: hook-interface assertions, the startup ordering-cycle check, the
 // deterministic per-hook-point total order, and the incompatibility gate (ADR 0003).
 
-// implementsAnyHook reports whether m satisfies at least one of the five hook
+// implementsAnyHook reports whether hook satisfies at least one of the five hook
 // interfaces. A Mechanism that hooks nowhere is a configuration error (ADR 0002 — a
-// Mechanism is a behaviour at a hook point), so Add rejects it.
-func implementsAnyHook(m Mechanism) bool {
-	switch m.(type) {
+// Mechanism is a behaviour at a hook point), so Add rejects it; a nil Hook matches no
+// case and is rejected the same way.
+func implementsAnyHook(hook any) bool {
+	switch hook.(type) {
 	case PreRequestHook, PostResponseHook, PreToolExecHook, PostToolResultHook, HistoryRewriter:
 		return true
 	default:
@@ -52,20 +53,20 @@ func hookImplements(at HookPoint, hook any) bool {
 // Y→X, a Before=[Z] on X is an edge X→Z — and runs a three-colour DFS; constraints
 // naming an unregistered ID are ignored (they cannot close a cycle here). This is the
 // whole of P0.6's ordering work; the deterministic total order is Phase 4.
-func detectOrderingCycle(mechanisms []Mechanism) error {
+func detectOrderingCycle(mechanisms []RegisteredMechanism) error {
 	if len(mechanisms) == 0 {
 		return nil
 	}
 
 	known := make(map[MechanismID]bool, len(mechanisms))
 	for _, m := range mechanisms {
-		known[m.Descriptor().ID] = true
+		known[m.Descriptor.ID] = true
 	}
 
 	adjacency := make(map[MechanismID][]MechanismID, len(mechanisms))
 	for _, m := range mechanisms {
-		id := m.Descriptor().ID
-		ordering := m.Ordering()
+		id := m.Descriptor.ID
+		ordering := m.Ordering
 		for _, before := range ordering.Before {
 			if known[before] {
 				adjacency[id] = append(adjacency[id], before)
@@ -118,15 +119,15 @@ func detectOrderingCycle(mechanisms []Mechanism) error {
 // validated acyclic at construction (detectOrderingCycle), so Kahn's algorithm below always
 // drains; a defensively-detected leftover cycle appends its members in ID order rather than
 // looping, keeping the result deterministic.
-func topoSort(mechs []Mechanism) []Mechanism {
+func topoSort(mechs []RegisteredMechanism) []RegisteredMechanism {
 	if len(mechs) <= 1 {
 		return mechs
 	}
 
-	byID := make(map[MechanismID]Mechanism, len(mechs))
+	byID := make(map[MechanismID]RegisteredMechanism, len(mechs))
 	ids := make([]MechanismID, 0, len(mechs))
 	for _, m := range mechs {
-		id := m.Descriptor().ID
+		id := m.Descriptor.ID
 		byID[id] = m
 		ids = append(ids, id)
 	}
@@ -143,7 +144,7 @@ func topoSort(mechs []Mechanism) []Mechanism {
 		indegree[after]++
 	}
 	for _, id := range ids {
-		ord := byID[id].Ordering()
+		ord := byID[id].Ordering
 		for _, b := range ord.Before {
 			if present[b] {
 				addEdge(id, b)
@@ -158,7 +159,7 @@ func topoSort(mechs []Mechanism) []Mechanism {
 
 	// Kahn's algorithm, always taking the lowest-ID ready node (ids is sorted, so the first
 	// non-emitted in-degree-0 id is the smallest available) — the stable tiebreak of D4.
-	out := make([]Mechanism, 0, len(ids))
+	out := make([]RegisteredMechanism, 0, len(ids))
 	emitted := make(map[MechanismID]bool, len(ids))
 	for len(out) < len(ids) {
 		next, found := MechanismID(""), false
@@ -191,10 +192,10 @@ func topoSort(mechs []Mechanism) []Mechanism {
 // descriptorsOf returns the registered Mechanisms' descriptors in registration order — the
 // input the shared stack-validity rule (CheckStack, stack.go) reads, so the two gates below
 // share the rule without sharing their wording.
-func descriptorsOf(mechanisms []Mechanism) []MechanismDescriptor {
+func descriptorsOf(mechanisms []RegisteredMechanism) []MechanismDescriptor {
 	descriptors := make([]MechanismDescriptor, 0, len(mechanisms))
 	for _, m := range mechanisms {
-		descriptors = append(descriptors, m.Descriptor())
+		descriptors = append(descriptors, m.Descriptor)
 	}
 	return descriptors
 }
@@ -207,7 +208,7 @@ func descriptorsOf(mechanisms []Mechanism) []MechanismDescriptor {
 // trips it), so it fails loudly at startup the same way an ordering cycle does (ADR 0003).
 // The rule is CheckStack's; this is the registry's post-build rendering of the first
 // incompatibility it finds in registration order.
-func detectIncompatibility(mechanisms []Mechanism) error {
+func detectIncompatibility(mechanisms []RegisteredMechanism) error {
 	if len(mechanisms) < 2 {
 		return nil // a lone Mechanism has no co-registered peer to conflict with
 	}
@@ -228,7 +229,7 @@ func detectIncompatibility(mechanisms []Mechanism) error {
 // at startup the same way an ordering cycle or an incompatibility does (ADR 0003; ADR 0014 §4).
 // The rule is CheckStack's; this is the registry's post-build rendering of the first missing
 // requirement it finds in registration order.
-func detectRequirements(mechanisms []Mechanism) error {
+func detectRequirements(mechanisms []RegisteredMechanism) error {
 	for _, defect := range CheckStack(descriptorsOf(mechanisms)) {
 		if defect.Kind == StackMissingRequirement {
 			return fmt.Errorf("apogee: mechanism %q requires %q — enable both or neither; they are benched as a stack: %w", defect.Mechanism, defect.Peer, ErrMissingRequirement)

@@ -44,7 +44,7 @@ type grammarMechanism struct {
 // newGrammar builds the grammar Mechanism, capturing the backend-capability gate from Deps (D3):
 // the capability is probed once at construction, never per fire. With Deps.GrammarConstraint false
 // (every current apogee backend) the built Mechanism registers but no-ops.
-func newGrammar(deps Deps) (domain.Mechanism, error) {
+func newGrammar(deps Deps) (any, error) {
 	return grammarMechanism{constrain: deps.GrammarConstraint}, nil
 }
 

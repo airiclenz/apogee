@@ -304,8 +304,10 @@ const (
 	ActionDefer     = domain.ActionDefer
 )
 
-// Mechanism is a catalogued unit of gated, self-regulating behaviour.
-type Mechanism = domain.Mechanism
+// RegisteredMechanism is a catalogued Mechanism as the registry holds it: its descriptor
+// and ordering constraints — catalogue data supplied at registration — joined with the hook
+// that carries the behaviour.
+type RegisteredMechanism = domain.RegisteredMechanism
 
 // MechanismID is the canonical, stable identifier of a Mechanism.
 type MechanismID = domain.MechanismID

@@ -18,17 +18,16 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// regMech is a bare Mechanism carrying only a descriptor — enough to exercise selfRegulator.suppress
-// (which reads only the descriptor). It implements no hook interface, so it is never registered.
-type regMech struct {
-	id  domain.MechanismID
-	pol domain.SuppressionPolicy
+// regRow is a bare catalogue row carrying only a descriptor — enough to exercise
+// selfRegulator.suppress, which reads only the descriptor. It carries no hook, so it is never
+// registered; pol defaults to the zero (non-exempt) SuppressionPolicy.
+func regRow(id domain.MechanismID, pol ...domain.SuppressionPolicy) domain.RegisteredMechanism {
+	d := domain.MechanismDescriptor{ID: id}
+	if len(pol) > 0 {
+		d.Suppression = pol[0]
+	}
+	return domain.RegisteredMechanism{Descriptor: d}
 }
-
-func (m regMech) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: m.id, Suppression: m.pol}
-}
-func (regMech) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
 
 // countingMech is a catalogued pre-request Mechanism with a configurable SuppressionPolicy that
 // counts how many times it was actually DISPATCHED (invoked) — the input for the loop-level
@@ -42,10 +41,12 @@ type countingMech struct {
 	fired       *int
 }
 
-func (m countingMech) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: m.id, Capability: m.cap, Suppression: m.pol}
+func (m countingMech) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{
+		Descriptor: domain.MechanismDescriptor{ID: m.id, Capability: m.cap, Suppression: m.pol},
+		Hook:       m,
+	}
 }
-func (countingMech) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
 func (m countingMech) PreRequest(_ context.Context, req *domain.Request) error {
 	*m.fired++
 	if !m.inspectOnly {
@@ -104,7 +105,7 @@ func TestSelfRegulatorFireJudgedByNextTurn(t *testing.T) {
 
 func TestSelfRegulatorStrikesThenSuppressed(t *testing.T) {
 	r := newSelfRegulator()
-	m := regMech{id: "x"}
+	m := regRow("x")
 	// x fires every Turn and every Turn is harmful. Turn i's fire is struck at Turn i+1's
 	// end (next-Turn judgment), so the strike limit is reached after strikes+1 Turns.
 	for i := 0; i < adaptiveSuppressStrikes+1; i++ {
@@ -122,7 +123,7 @@ func TestSelfRegulatorStrikesThenSuppressed(t *testing.T) {
 
 func TestSelfRegulatorClearPathReopens(t *testing.T) {
 	r := newSelfRegulator()
-	m := regMech{id: "x"}
+	m := regRow("x")
 	for i := 0; i < adaptiveSuppressStrikes+1; i++ {
 		r.recordFire("x")
 		r.noteToolError()
@@ -186,7 +187,7 @@ func TestSelfRegulatorProductiveWinsMixedSignals(t *testing.T) {
 
 func TestSelfRegulatorExemptNeverSuppressed(t *testing.T) {
 	r := newSelfRegulator()
-	m := regMech{id: "e", pol: domain.SuppressExempt}
+	m := regRow("e", domain.SuppressExempt)
 	// Enough harmful Turns to trip BOTH Adaptive Suppression and the Turn Budget.
 	for i := 0; i < turnBudgetLimit+adaptiveSuppressStrikes; i++ {
 		r.recordFire("e")
@@ -204,8 +205,8 @@ func TestSelfRegulatorExemptNeverSuppressed(t *testing.T) {
 func TestSelfRegulatorTurnBudgetTripsAndClears(t *testing.T) {
 	r := newSelfRegulator()
 	// y never fires, so it accrues no strikes — only the global Turn Budget can withdraw it.
-	y := regMech{id: "y"}
-	exempt := regMech{id: "e", pol: domain.SuppressExempt}
+	y := regRow("y")
+	exempt := regRow("e", domain.SuppressExempt)
 	for i := 0; i < turnBudgetLimit; i++ {
 		if r.budgetTripped {
 			t.Fatalf("Turn Budget tripped early after %d harmful Turns", i)
@@ -301,7 +302,7 @@ func TestSelfRegulationSuppressesAtDispatch(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	fired := 0
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &fired})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &fired}.row())
 
 	a, err := newAgent(cfg, echoResponder{reply: ""}) // an empty final reply ⇒ every Turn harmful
 	if err != nil {
@@ -323,7 +324,7 @@ func TestExemptFiresThroughSuppression(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	fired := 0
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "offramp", cap: domain.CapOffRamp, pol: domain.SuppressExempt, fired: &fired})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "offramp", cap: domain.CapOffRamp, pol: domain.SuppressExempt, fired: &fired}.row())
 
 	a, err := newAgent(cfg, echoResponder{reply: ""}) // every Turn harmful
 	if err != nil {
@@ -347,7 +348,7 @@ func TestPureQAndANeverStrikesNorTrips(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	fired := 0
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &fired})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &fired}.row())
 
 	a, err := newAgent(cfg, echoResponder{reply: "here is a substantive answer"})
 	if err != nil {
@@ -377,7 +378,7 @@ func TestNoOpInvocationNotBooked(t *testing.T) {
 	cfg := baseConfig(sink)
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	invoked := 0
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "watcher", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, inspectOnly: true, fired: &invoked})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "watcher", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, inspectOnly: true, fired: &invoked}.row())
 
 	a, err := newAgent(cfg, echoResponder{reply: ""}) // every Turn harmful
 	if err != nil {
@@ -411,7 +412,7 @@ func TestFiredCountsVisibleToHook(t *testing.T) {
 	cfg := baseConfig(sink)
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	greetFired := 0
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "greet", cap: domain.CapProactiveNudge, fired: &greetFired})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "greet", cap: domain.CapProactiveNudge, fired: &greetFired}.row())
 	seen := -1
 	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, firedReaderHook{id: "greet", seen: &seen}); err != nil {
 		t.Fatalf("AddExperimental: %v", err)
@@ -451,8 +452,8 @@ func TestToolErrorsTripBudgetAndWithdrawAtDispatch(t *testing.T) {
 	nudged, offed := 0, 0
 	// The non-exempt Mechanism is inspect-only, so it accrues NO strikes (R4) — its
 	// withdrawal below is attributable to the Turn Budget alone.
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, inspectOnly: true, fired: &nudged})
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "off", cap: domain.CapOffRamp, pol: domain.SuppressExempt, inspectOnly: true, fired: &offed})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, inspectOnly: true, fired: &nudged}.row())
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "off", cap: domain.CapOffRamp, pol: domain.SuppressExempt, inspectOnly: true, fired: &offed}.row())
 
 	// Each Exchange: one erroring tool Turn (harmful) + one text Turn (neutral — freezes).
 	var scripts [][]provider.Delta
@@ -504,7 +505,7 @@ func TestProductiveTurnClearsThroughDispatch(t *testing.T) {
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "data"})
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	fired := 0
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &fired})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &fired}.row())
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		toolCallScript("c1", "read_file", `{"path":"a.go"}`),
 		contentScript("done"),
@@ -624,7 +625,7 @@ func TestSelfRegulationResetsOnResume(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	firedA := 0
-	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &firedA})
+	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &firedA}.row())
 
 	a, err := newAgent(cfg, echoResponder{reply: ""}) // every Turn harmful
 	if err != nil {
@@ -647,7 +648,7 @@ func TestSelfRegulationResetsOnResume(t *testing.T) {
 	cfg2 := baseConfig(&recordingSink{})
 	cfg2.Mechanisms = domain.NewMechanismRegistry()
 	firedB := 0
-	mustAddMech(t, cfg2.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &firedB})
+	mustAddMech(t, cfg2.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &firedB}.row())
 	b, err := resumeAgent(cfg2, snap, echoResponder{reply: ""})
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)

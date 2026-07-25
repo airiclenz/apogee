@@ -40,11 +40,11 @@ func guidedRequest(msgs []domain.Message, menu []domain.ToolDef, budget domain.B
 
 func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 	t.Parallel()
-	m, err := newGuidedDecomposition(Deps{})
+	m, err := Build(guidedDecompositionID, Deps{})
 	if err != nil {
-		t.Fatalf("newGuidedDecomposition: %v", err)
+		t.Fatalf("Build(%q): %v", guidedDecompositionID, err)
 	}
-	d := m.Descriptor()
+	d := m.Descriptor
 	if d.ID != guidedDecompositionID {
 		t.Errorf("ID = %q, want %q", d.ID, guidedDecompositionID)
 	}
@@ -64,15 +64,15 @@ func TestGuidedDecompositionDescriptorAndOrdering(t *testing.T) {
 		t.Errorf("Requires = %v, want [%q]", d.Requires, toolResultCapID)
 	}
 	// After toolfilter — the sub_agent-presence gate must read the final (post-toolfilter) menu.
-	if o := m.Ordering(); len(o.After) != 1 || o.After[0] != toolFilterID {
+	if o := m.Ordering; len(o.After) != 1 || o.After[0] != toolFilterID {
 		t.Errorf("Ordering.After = %v, want [%q]", o.After, toolFilterID)
 	}
-	if _, ok := m.(domain.PreRequestHook); !ok {
+	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("guided_decomposition does not implement PreRequestHook")
 	}
 	// Both halves live on the one struct: the pre-request gate/steer and the post-response
 	// intercept + serialized follow-through. Suppressing the Mechanism disarms both as a unit.
-	if _, ok := m.(domain.PostResponseHook); !ok {
+	if _, ok := m.Hook.(domain.PostResponseHook); !ok {
 		t.Error("guided_decomposition does not implement PostResponseHook (the intercept half)")
 	}
 }
@@ -123,8 +123,8 @@ func TestGuidedDecompositionBuildsFromCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build(%q): %v", guidedDecompositionID, err)
 	}
-	if m.Descriptor().ID != guidedDecompositionID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor().ID, guidedDecompositionID)
+	if m.Descriptor.ID != guidedDecompositionID {
+		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, guidedDecompositionID)
 	}
 }
 

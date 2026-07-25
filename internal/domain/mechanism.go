@@ -22,11 +22,12 @@ const (
 	HookHistoryRewrite HookPoint = "history-rewrite"  // edit conversation state (may attach widely)
 )
 
-// The five hook interfaces. A Mechanism (or a bench experimental hook) implements
-// one or more of these in addition to — for a catalogued Mechanism — Mechanism.
-// Hooks are public so the bench can register experimental hooks (ADR 0002); an
-// embedder technically can too, but without a descriptor it does not join
-// self-regulation and carries no stability promise.
+// The five hook interfaces. A catalogued Mechanism's Hook — and a bench experimental
+// hook — implements one or more of these; a catalogued Mechanism's descriptor and
+// ordering come from its catalogue row, not from the hook value itself (ADR 0003 as
+// amended 2026-07-25). Hooks are public so the bench can register experimental hooks
+// (ADR 0002); an embedder technically can too, but without a descriptor it does not
+// join self-regulation and carries no stability promise.
 
 // PreRequestHook shapes the outgoing request before it is sent. It reads the
 // conversation, tool menu, and budget through req.View() and mutates the request in
@@ -91,13 +92,23 @@ const (
 	ActionDefer     PostResponseAction = "defer"     // schedule a correction into the next request
 )
 
-// Mechanism is a catalogued unit of gated, self-regulating behaviour (CONTEXT:
-// Mechanism). It supplies a descriptor and ordering constraints, and implements at
-// least one hook interface above; the registry type-asserts which. A hook without a
-// descriptor is an experimental hook (no self-regulation — ADR 0002).
-type Mechanism interface {
-	Descriptor() MechanismDescriptor
-	Ordering() OrderingConstraints
+// RegisteredMechanism is a catalogued Mechanism as the registry holds it (CONTEXT:
+// Mechanism — a catalogued unit of gated, self-regulating behaviour). Descriptor and
+// Ordering are catalogue DATA supplied at registration (ADR 0003 as amended
+// 2026-07-25), not something the value says about itself; Hook is the behaviour.
+// Metadata and behaviour are joined once, where the catalogue row is built, so a
+// Mechanism and the row describing it cannot disagree.
+type RegisteredMechanism struct {
+	// Descriptor is the Mechanism's static metadata (CONTEXT: Mechanism descriptor) —
+	// the single source for what Bypass turns off and what may co-fire.
+	Descriptor MechanismDescriptor
+	// Ordering is the Mechanism's declared position relative to its peers at the same
+	// hook point; the zero value declares no edge.
+	Ordering OrderingConstraints
+	// Hook is the behaviour: a value implementing at least one hook interface above;
+	// the registry type-asserts which. A hook carrying NO descriptor is an experimental
+	// hook instead — registered through AddExperimental, outside self-regulation (ADR 0002).
+	Hook any
 }
 
 // MechanismID is the canonical, stable identifier of a Mechanism — also the stable
@@ -168,8 +179,8 @@ var errNoHookInterface = errors.New("implements no hook interface")
 // slots (ADR 0002/0003). The built-in catalogue is curated; Add is how internal
 // Mechanisms join, AddExperimental is how the bench registers a candidate hook.
 type MechanismRegistry struct {
-	mechanisms   []Mechanism         // catalogued Mechanisms registered via Add
-	experimental map[HookPoint][]any // bench experimental hooks registered via AddExperimental
+	mechanisms   []RegisteredMechanism // catalogued Mechanism rows registered via Add
+	experimental map[HookPoint][]any   // bench experimental hooks registered via AddExperimental
 }
 
 // NewMechanismRegistry returns a registry seeded with the built-in catalogue. The
@@ -179,24 +190,25 @@ func NewMechanismRegistry() *MechanismRegistry {
 	return &MechanismRegistry{experimental: make(map[HookPoint][]any)}
 }
 
-// Add registers a catalogued Mechanism. It returns an error if the Mechanism claims
+// Add registers a catalogued Mechanism row — its descriptor, its ordering constraints and
+// its hook, joined by the catalogue that built it. It returns an error if the row claims
 // the reserved experimental sentinel ID, re-uses an already-registered MechanismID
 // (topoSort's byID map would otherwise silently drop one of the two — a loud failure
-// instead, phase-4-review-fixes item 5), or implements no hook interface. (The
-// constraint-cycle check is performed by New over the whole graph — a startup gate,
+// instead, phase-4-review-fixes item 5), or carries a Hook implementing no hook interface.
+// (The constraint-cycle check is performed by New over the whole graph — a startup gate,
 // ADR 0003 — so a registry under construction can hold constraints that only close a
 // cycle once every Mechanism is present.)
-func (r *MechanismRegistry) Add(m Mechanism) error {
-	id := m.Descriptor().ID
+func (r *MechanismRegistry) Add(m RegisteredMechanism) error {
+	id := m.Descriptor.ID
 	if id == ExperimentalMechanismID {
 		return fmt.Errorf("apogee: mechanism ID %q is reserved for experimental hooks", id)
 	}
 	for _, registered := range r.mechanisms {
-		if registered.Descriptor().ID == id {
+		if registered.Descriptor.ID == id {
 			return fmt.Errorf("apogee: mechanism ID %q is already registered", id)
 		}
 	}
-	if !implementsAnyHook(m) {
+	if !implementsAnyHook(m.Hook) {
 		return fmt.Errorf("apogee: mechanism %q: %w", id, errNoHookInterface)
 	}
 	r.mechanisms = append(r.mechanisms, m)
@@ -256,10 +268,10 @@ func (r *MechanismRegistry) ValidateRequirements() error {
 // Mechanism absent from at is ignored (ordering is relative to the co-located Mechanisms). It is
 // the read seam the engine dispatches catalogued Mechanisms through, the counterpart to
 // Experimental for the descriptor-carrying catalogue.
-func (r *MechanismRegistry) Ordered(at HookPoint) []Mechanism {
-	present := make([]Mechanism, 0, len(r.mechanisms))
+func (r *MechanismRegistry) Ordered(at HookPoint) []RegisteredMechanism {
+	present := make([]RegisteredMechanism, 0, len(r.mechanisms))
 	for _, m := range r.mechanisms {
-		if hookImplements(at, m) {
+		if hookImplements(at, m.Hook) {
 			present = append(present, m)
 		}
 	}

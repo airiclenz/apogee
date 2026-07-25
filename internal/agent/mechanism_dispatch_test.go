@@ -35,10 +35,9 @@ type recordingMech struct {
 	fired *int
 }
 
-func (m recordingMech) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: m.id, Capability: m.cap}
+func (m recordingMech) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, Capability: m.cap}, Hook: m}
 }
-func (recordingMech) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
 func (m recordingMech) PreRequest(_ context.Context, req *domain.Request) error {
 	*m.fired++
 	req.AppendToSystem("[dispatch-test "+string(m.id)+"]", "[dispatch-test "+string(m.id)+"] nudge")
@@ -87,10 +86,9 @@ type fivePointMech struct {
 	cap domain.Capability
 }
 
-func (m fivePointMech) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: m.id, Capability: m.cap}
+func (m fivePointMech) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, Capability: m.cap}, Hook: m}
 }
-func (fivePointMech) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
 
 // countsByPoint returns a per-hook-point invocation counter and the note func feeding it.
 func countsByPoint() (map[domain.HookPoint]int, func(domain.HookPoint)) {
@@ -105,10 +103,9 @@ type incompatMech struct {
 	incompat []domain.MechanismID
 }
 
-func (m incompatMech) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: m.id, IncompatibleWith: m.incompat}
+func (m incompatMech) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id, IncompatibleWith: m.incompat}, Hook: m}
 }
-func (incompatMech) Ordering() domain.OrderingConstraints              { return domain.OrderingConstraints{} }
 func (incompatMech) PreRequest(context.Context, *domain.Request) error { return nil }
 
 // driveToolExchange drives one full Exchange whose first Turn carries a tool call and whose
@@ -141,10 +138,9 @@ func driveToolExchange(t *testing.T, cfg domain.Config) {
 // recover-at-extension-boundary guarantee under the catalogued path.
 type panicMech struct{ id domain.MechanismID }
 
-func (m panicMech) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: m.id}
+func (m panicMech) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{Descriptor: domain.MechanismDescriptor{ID: m.id}, Hook: m}
 }
-func (panicMech) Ordering() domain.OrderingConstraints              { return domain.OrderingConstraints{} }
 func (panicMech) PreRequest(context.Context, *domain.Request) error { panic("catalogued boom") }
 
 func mechanismFires(events []domain.Event) []domain.MechanismFiredEvent {
@@ -157,10 +153,13 @@ func mechanismFires(events []domain.Event) []domain.MechanismFiredEvent {
 	return out
 }
 
-func mustAddMech(t *testing.T, r *domain.MechanismRegistry, m domain.Mechanism) {
+// mustAddMech registers one catalogue row. The registry no longer asks a Mechanism to describe
+// itself, so each fixture below names the row it would be catalogued under through its own row()
+// helper, and a real Mechanism arrives as the row mechanisms.Build already returned.
+func mustAddMech(t *testing.T, r *domain.MechanismRegistry, m domain.RegisteredMechanism) {
 	t.Helper()
 	if err := r.Add(m); err != nil {
-		t.Fatalf("Add(%s): %v", m.Descriptor().ID, err)
+		t.Fatalf("Add(%s): %v", m.Descriptor.ID, err)
 	}
 }
 
@@ -169,7 +168,7 @@ func TestCataloguedMechanismFiresUnderRealID(t *testing.T) {
 	cfg := baseConfig(sink)
 	cfg.Mechanisms = domain.NewMechanismRegistry()
 	fired := 0
-	mustAddMech(t, cfg.Mechanisms, recordingMech{id: "greet", cap: domain.CapProactiveNudge, fired: &fired})
+	mustAddMech(t, cfg.Mechanisms, recordingMech{id: "greet", cap: domain.CapProactiveNudge, fired: &fired}.row())
 
 	driveOneStep(t, cfg, echoResponder{reply: "ok"})
 
@@ -216,9 +215,9 @@ func TestBypassGate(t *testing.T) {
 			offCounts, noteOff := countsByPoint()
 			nudgeCounts, noteNudge := countsByPoint()
 			repairCounts, noteRepair := countsByPoint()
-			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteOff}, "off", domain.CapOffRamp})
-			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteNudge}, "nudge", domain.CapProactiveNudge})
-			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteRepair}, "repair", domain.CapResponseRepair})
+			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteOff}, "off", domain.CapOffRamp}.row())
+			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteNudge}, "nudge", domain.CapProactiveNudge}.row())
+			mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{noteRepair}, "repair", domain.CapResponseRepair}.row())
 
 			expCounts, noteExp := countsByPoint()
 			for _, at := range allHookPoints {
@@ -258,7 +257,7 @@ func TestCataloguedFireBeforeExperimental(t *testing.T) {
 	label := func(name string) func(domain.HookPoint) {
 		return func(at domain.HookPoint) { order[at] = append(order[at], name) }
 	}
-	mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{label("catalogued")}, "cat", domain.CapProactiveNudge})
+	mustAddMech(t, cfg.Mechanisms, fivePointMech{fivePointProbe{label("catalogued")}, "cat", domain.CapProactiveNudge}.row())
 	for _, at := range allHookPoints {
 		if err := cfg.Mechanisms.AddExperimental(at, fivePointProbe{label("experimental")}); err != nil {
 			t.Fatalf("AddExperimental(%s): %v", at, err)
@@ -292,8 +291,8 @@ func TestCataloguedFireBeforeExperimental(t *testing.T) {
 func TestNewSurfacesIncompatibleMechanismsAtConstruction(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Mechanisms = domain.NewMechanismRegistry()
-	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "read_loop", incompat: []domain.MechanismID{"cached_content_intercept"}})
-	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "cached_content_intercept"})
+	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "read_loop", incompat: []domain.MechanismID{"cached_content_intercept"}}.row())
+	mustAddMech(t, cfg.Mechanisms, incompatMech{id: "cached_content_intercept"}.row())
 
 	if _, err := New(cfg); !errors.Is(err, domain.ErrIncompatibleMechanisms) {
 		t.Errorf("New = %v, want ErrIncompatibleMechanisms", err)
@@ -307,7 +306,7 @@ func TestPanickingCataloguedMechanismContained(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.Mechanisms = domain.NewMechanismRegistry()
-	mustAddMech(t, cfg.Mechanisms, panicMech{id: "boom"})
+	mustAddMech(t, cfg.Mechanisms, panicMech{id: "boom"}.row())
 
 	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
 	if err != nil {

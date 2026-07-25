@@ -90,7 +90,7 @@ type errorEnrichmentMechanism struct{}
 
 // newErrorEnrichment builds the error_enrichment Mechanism. It needs no injected Deps (D3): it reads
 // only the failing result, its originating call, and the conversation on the LoopView it is handed.
-func newErrorEnrichment(Deps) (domain.Mechanism, error) { return errorEnrichmentMechanism{}, nil }
+func newErrorEnrichment(Deps) (any, error) { return errorEnrichmentMechanism{}, nil }
 
 // errorEnrichmentDescriptor identifies error_enrichment as a strikes-3 response-repair Mechanism
 // (catalogue Table A, C1) — disabled under Bypass (ADR 0006 / D5), withdrawn after repeated non-help.

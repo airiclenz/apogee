@@ -33,11 +33,11 @@ func buildRequest(msgs []domain.Message, b domain.Budget) *domain.Request {
 
 func TestToolResultCapDescriptorAndOrdering(t *testing.T) {
 	t.Parallel()
-	m, err := newToolResultCap(Deps{})
+	m, err := Build(toolResultCapID, Deps{})
 	if err != nil {
-		t.Fatalf("newToolResultCap: %v", err)
+		t.Fatalf("Build(%q): %v", toolResultCapID, err)
 	}
-	d := m.Descriptor()
+	d := m.Descriptor
 	if d.ID != toolResultCapID {
 		t.Errorf("ID = %q, want %q", d.ID, toolResultCapID)
 	}
@@ -47,10 +47,10 @@ func TestToolResultCapDescriptorAndOrdering(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering(); len(o.Before) != 0 || len(o.After) != 1 || o.After[0] != decomposeID {
+	if o := m.Ordering; len(o.Before) != 0 || len(o.After) != 1 || o.After[0] != decomposeID {
 		t.Errorf("Ordering = %+v, want After [decompose] (§Ordering seed, ratified into Table A 2026-07-04)", o)
 	}
-	if _, ok := m.(domain.PreRequestHook); !ok {
+	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("tool_result_cap does not implement PreRequestHook")
 	}
 }
@@ -154,8 +154,8 @@ func TestToolResultCapBuildsFromCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build(%q): %v", toolResultCapID, err)
 	}
-	if m.Descriptor().ID != toolResultCapID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor().ID, toolResultCapID)
+	if m.Descriptor.ID != toolResultCapID {
+		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, toolResultCapID)
 	}
 }
 

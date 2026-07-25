@@ -54,10 +54,13 @@ type Deps struct {
 	GrammarConstraint bool
 }
 
-// constructor builds one catalogued Mechanism from the injected Deps (D3). It returns an error so
-// a Mechanism that cannot be built with the given Deps (a missing required collaborator, an
-// invalid configuration) fails construction loudly rather than registering a half-built Mechanism.
-type constructor func(Deps) (domain.Mechanism, error)
+// constructor builds one catalogued Mechanism's HOOK from the injected Deps (D3) — the behaviour
+// only: a value implementing at least one of domain's five hook interfaces. Its metadata comes
+// from the row it sits in, so the constructor returns `any` rather than a self-describing type
+// (ADR 0003 as amended 2026-07-25). It returns an error so a Mechanism that cannot be built with
+// the given Deps (a missing required collaborator, an invalid configuration) fails construction
+// loudly rather than registering a half-built Mechanism.
+type constructor func(Deps) (any, error)
 
 // row is one catalogue entry — everything the engine needs to build and register one Mechanism.
 // The row is the single source of a Mechanism's metadata; the ID is descriptor.ID, never a
@@ -70,7 +73,7 @@ type row struct {
 	// (ADR 0003). The zero value declares no edge, which is what most rows want, so it is omitted
 	// from those rows' literals.
 	ordering domain.OrderingConstraints
-	// construct builds the Mechanism itself from the injected Deps (D3).
+	// construct builds the Mechanism's hook — its behaviour — from the injected Deps (D3).
 	construct constructor
 }
 
@@ -105,12 +108,14 @@ func registerIn(table map[domain.MechanismID]row, r row) {
 	table[r.descriptor.ID] = r
 }
 
-// Build constructs the catalogued Mechanism identified by id, injecting deps (D3). It is the seam
-// cmd/apogee/wire.go drives for each enabled `mechanisms:` ID. An id absent from the catalogue is
-// a loud error naming the known IDs and wrapping domain.ErrUnknownMechanism (so callers can match
-// it with errors.Is), so a typo'd config key fails startup rather than silently disabling a
-// Mechanism.
-func Build(id domain.MechanismID, deps Deps) (domain.Mechanism, error) {
+// Build constructs the catalogued Mechanism identified by id, injecting deps (D3), and returns it
+// as the registry holds it: the row's descriptor and ordering joined with the hook the row's
+// constructor built. This is the SINGLE place a Mechanism's metadata and its behaviour are joined,
+// so the two cannot drift. It is the seam the engine drives for each enabled `mechanisms:` ID. An
+// id absent from the catalogue is a loud error naming the known IDs and wrapping
+// domain.ErrUnknownMechanism (so callers can match it with errors.Is), so a typo'd config key
+// fails startup rather than silently disabling a Mechanism.
+func Build(id domain.MechanismID, deps Deps) (domain.RegisteredMechanism, error) {
 	return buildFrom(catalogue, id, deps)
 }
 
@@ -141,12 +146,16 @@ func cloneDescriptor(d domain.MechanismDescriptor) domain.MechanismDescriptor {
 
 // buildFrom is Build over an explicit table, so a test can exercise the lookup / unknown-id /
 // inject path against a fake row while the production catalogue is still empty.
-func buildFrom(table map[domain.MechanismID]row, id domain.MechanismID, deps Deps) (domain.Mechanism, error) {
+func buildFrom(table map[domain.MechanismID]row, id domain.MechanismID, deps Deps) (domain.RegisteredMechanism, error) {
 	r, ok := table[id]
 	if !ok {
-		return nil, fmt.Errorf("%w %q; known: %s", domain.ErrUnknownMechanism, id, knownList(table))
+		return domain.RegisteredMechanism{}, fmt.Errorf("%w %q; known: %s", domain.ErrUnknownMechanism, id, knownList(table))
 	}
-	return r.construct(deps)
+	hook, err := r.construct(deps)
+	if err != nil {
+		return domain.RegisteredMechanism{}, err
+	}
+	return domain.RegisteredMechanism{Descriptor: r.descriptor, Ordering: r.ordering, Hook: hook}, nil
 }
 
 // knownIDs returns the table's IDs sorted by their canonical spelling (the stable order the

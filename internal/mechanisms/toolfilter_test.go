@@ -34,11 +34,11 @@ func nameSet(tools []domain.ToolDef) map[string]bool {
 
 func TestToolFilterDescriptorAndOrdering(t *testing.T) {
 	t.Parallel()
-	m, err := newToolFilter(Deps{})
+	m, err := Build(toolFilterID, Deps{})
 	if err != nil {
-		t.Fatalf("newToolFilter: %v", err)
+		t.Fatalf("Build(%q): %v", toolFilterID, err)
 	}
-	d := m.Descriptor()
+	d := m.Descriptor
 	if d.ID != toolFilterID {
 		t.Errorf("ID = %q, want %q", d.ID, toolFilterID)
 	}
@@ -48,10 +48,10 @@ func TestToolFilterDescriptorAndOrdering(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering(); len(o.Before) != 1 || o.Before[0] != "decompose" {
+	if o := m.Ordering; len(o.Before) != 1 || o.Before[0] != "decompose" {
 		t.Errorf("Ordering = %+v, want Before decompose (catalogue Table A)", o)
 	}
-	if _, ok := m.(domain.PreRequestHook); !ok {
+	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("toolfilter does not implement PreRequestHook")
 	}
 }
@@ -211,7 +211,7 @@ func TestToolFilterBuildsFromCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build(%q): %v", toolFilterID, err)
 	}
-	if m.Descriptor().ID != toolFilterID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor().ID, toolFilterID)
+	if m.Descriptor.ID != toolFilterID {
+		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, toolFilterID)
 	}
 }

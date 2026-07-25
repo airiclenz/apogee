@@ -52,7 +52,7 @@ type cachedContentMechanism struct{}
 // newCachedContentIntercept builds the cached_content_intercept Mechanism. It needs no injected Deps
 // (D3): redundancy is decided from the pending call and the conversation on the LoopView it is
 // handed.
-func newCachedContentIntercept(Deps) (domain.Mechanism, error) { return cachedContentMechanism{}, nil }
+func newCachedContentIntercept(Deps) (any, error) { return cachedContentMechanism{}, nil }
 
 // cachedContentDescriptor identifies cached_content_intercept as a strikes-3 proactive-nudge
 // Mechanism (catalogue Table A), incompatible with read_loop and read_repeat (the re-read family is

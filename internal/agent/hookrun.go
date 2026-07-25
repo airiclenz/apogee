@@ -39,8 +39,8 @@ import (
 // non-off-ramp catalogued Mechanism is skipped at dispatch, an off-ramp survives (D5). It
 // governs only catalogued Mechanisms; experimental hooks never consult it. skipMechanism
 // (selfreg.go) combines it with the self-regulation withdrawal.
-func (a *Agent) skipUnderBypass(m domain.Mechanism) bool {
-	return a.cfg.Bypass && m.Descriptor().Capability != domain.CapOffRamp
+func (a *Agent) skipUnderBypass(m domain.RegisteredMechanism) bool {
+	return a.cfg.Bypass && m.Descriptor.Capability != domain.CapOffRamp
 }
 
 // runHistoryRewriteHooks lets each history-rewrite Mechanism/hook edit conversation state
@@ -51,11 +51,11 @@ func (a *Agent) runHistoryRewriteHooks(ctx context.Context, turn int) error {
 		if a.skipMechanism(m) {
 			continue
 		}
-		hook, ok := m.(domain.HistoryRewriter)
+		hook, ok := m.Hook.(domain.HistoryRewriter)
 		if !ok {
 			continue
 		}
-		id := m.Descriptor().ID
+		id := m.Descriptor.ID
 		before := a.conv.Revision()
 		if err := a.fireHistoryRewrite(ctx, id, hook, turn); err != nil {
 			return err
@@ -91,11 +91,11 @@ func (a *Agent) runPreRequestHooks(ctx context.Context, turn int, req *domain.Re
 		if a.skipMechanism(m) {
 			continue
 		}
-		hook, ok := m.(domain.PreRequestHook)
+		hook, ok := m.Hook.(domain.PreRequestHook)
 		if !ok {
 			continue
 		}
-		id := m.Descriptor().ID
+		id := m.Descriptor.ID
 		before := req.Revision()
 		if err := a.firePreRequest(ctx, id, hook, turn, req); err != nil {
 			return err
@@ -135,11 +135,11 @@ func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain
 		if a.skipMechanism(m) {
 			continue
 		}
-		hook, ok := m.(domain.PostResponseHook)
+		hook, ok := m.Hook.(domain.PostResponseHook)
 		if !ok {
 			continue
 		}
-		wantRetry, retryInject, fireErr := a.applyPostResponse(ctx, turn, m.Descriptor().ID, hook, resp)
+		wantRetry, retryInject, fireErr := a.applyPostResponse(ctx, turn, m.Descriptor.ID, hook, resp)
 		if fireErr != nil {
 			return false, "", fireErr
 		}
@@ -207,11 +207,11 @@ func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.
 		if a.skipMechanism(m) {
 			continue
 		}
-		hook, ok := m.(domain.PreToolExecHook)
+		hook, ok := m.Hook.(domain.PreToolExecHook)
 		if !ok {
 			continue
 		}
-		id := m.Descriptor().ID
+		id := m.Descriptor.ID
 		before := callSnapshot(*call)
 		if err := a.firePreToolExec(ctx, id, hook, turn, call, view); err != nil {
 			return err
@@ -248,11 +248,11 @@ func (a *Agent) runPostToolResultHooks(ctx context.Context, turn int, call domai
 		if a.skipMechanism(m) {
 			continue
 		}
-		hook, ok := m.(domain.PostToolResultHook)
+		hook, ok := m.Hook.(domain.PostToolResultHook)
 		if !ok {
 			continue
 		}
-		id := m.Descriptor().ID
+		id := m.Descriptor.ID
 		before := *result
 		if err := a.firePostToolResult(ctx, id, hook, turn, call, result, view); err != nil {
 			return

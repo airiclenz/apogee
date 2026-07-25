@@ -18,11 +18,11 @@ func grammarTools() []domain.ToolDef {
 
 func TestGrammarDescriptorAndOrdering(t *testing.T) {
 	t.Parallel()
-	m, err := newGrammar(Deps{})
+	m, err := Build(grammarID, Deps{})
 	if err != nil {
-		t.Fatalf("newGrammar: %v", err)
+		t.Fatalf("Build(%q): %v", grammarID, err)
 	}
-	d := m.Descriptor()
+	d := m.Descriptor
 	if d.ID != grammarID {
 		t.Errorf("ID = %q, want %q", d.ID, grammarID)
 	}
@@ -32,10 +32,10 @@ func TestGrammarDescriptorAndOrdering(t *testing.T) {
 	if d.Suppression != domain.SuppressStrikesThree {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
-	if o := m.Ordering(); len(o.Before) != 0 || len(o.After) != 0 {
+	if o := m.Ordering; len(o.Before) != 0 || len(o.After) != 0 {
 		t.Errorf("Ordering = %+v, want none (catalogue Table A)", o)
 	}
-	if _, ok := m.(domain.PreRequestHook); !ok {
+	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("grammar does not implement PreRequestHook")
 	}
 }
@@ -136,7 +136,7 @@ func TestGrammarBuildsFromCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build(%q): %v", grammarID, err)
 	}
-	if m.Descriptor().ID != grammarID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor().ID, grammarID)
+	if m.Descriptor.ID != grammarID {
+		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, grammarID)
 	}
 }

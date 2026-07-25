@@ -22,19 +22,19 @@ func TestHistoryFamilyDescriptorsNonExempt(t *testing.T) {
 	cases := []struct {
 		id   domain.MechanismID
 		cap  domain.Capability
-		hook func(domain.Mechanism) bool
+		hook func(any) bool
 	}{
-		{errorEnrichmentID, domain.CapResponseRepair, func(m domain.Mechanism) bool { _, ok := m.(domain.PostToolResultHook); return ok }},
-		{readLoopID, domain.CapProactiveNudge, func(m domain.Mechanism) bool { _, ok := m.(domain.PreRequestHook); return ok }},
-		{readRepeatID, domain.CapResponseRepair, func(m domain.Mechanism) bool { _, ok := m.(domain.PostResponseHook); return ok }},
-		{toolLoopInterceptorID, domain.CapResponseRepair, func(m domain.Mechanism) bool { _, ok := m.(domain.PostResponseHook); return ok }},
-		{cachedContentInterceptID, domain.CapProactiveNudge, func(m domain.Mechanism) bool { _, ok := m.(domain.PreToolExecHook); return ok }},
+		{errorEnrichmentID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostToolResultHook); return ok }},
+		{readLoopID, domain.CapProactiveNudge, func(h any) bool { _, ok := h.(domain.PreRequestHook); return ok }},
+		{readRepeatID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostResponseHook); return ok }},
+		{toolLoopInterceptorID, domain.CapResponseRepair, func(h any) bool { _, ok := h.(domain.PostResponseHook); return ok }},
+		{cachedContentInterceptID, domain.CapProactiveNudge, func(h any) bool { _, ok := h.(domain.PreToolExecHook); return ok }},
 	}
 	for _, c := range cases {
 		m := mustBuild(t, c.id)
-		d := m.Descriptor()
+		d := m.Descriptor
 		if d.ID != c.id {
-			t.Errorf("Descriptor().ID = %q, want %q", d.ID, c.id)
+			t.Errorf("Descriptor.ID = %q, want %q", d.ID, c.id)
 		}
 		if d.Capability != c.cap {
 			t.Errorf("%q Capability = %q, want %q", c.id, d.Capability, c.cap)
@@ -42,7 +42,7 @@ func TestHistoryFamilyDescriptorsNonExempt(t *testing.T) {
 		if d.Suppression != domain.SuppressStrikesThree {
 			t.Errorf("%q Suppression = %q, want strikes-3 (non-exempt)", c.id, d.Suppression)
 		}
-		if !c.hook(m) {
+		if !c.hook(m.Hook) {
 			t.Errorf("%q does not implement its catalogued hook interface", c.id)
 		}
 	}
@@ -112,8 +112,8 @@ func TestPostResponseCascadeOrder(t *testing.T) {
 		t.Fatalf("Ordered(post-response) has %d mechanisms, want %d", len(got), len(want))
 	}
 	for i, m := range got {
-		if m.Descriptor().ID != want[i] {
-			t.Errorf("cascade[%d] = %q, want %q (full order: %v)", i, m.Descriptor().ID, want[i], want)
+		if m.Descriptor.ID != want[i] {
+			t.Errorf("cascade[%d] = %q, want %q (full order: %v)", i, m.Descriptor.ID, want[i], want)
 		}
 	}
 }

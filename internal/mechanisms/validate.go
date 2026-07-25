@@ -37,7 +37,7 @@ type validateMechanism struct{}
 
 // newValidate builds the validate Mechanism. It needs no injected Deps (D3): validation reads
 // only the response and the tool menu already on its LoopView.
-func newValidate(Deps) (domain.Mechanism, error) { return validateMechanism{}, nil }
+func newValidate(Deps) (any, error) { return validateMechanism{}, nil }
 
 // validateDescriptor identifies validate as a strikes-3 response-repair Mechanism (catalogue
 // Table A) — disabled under Bypass (ADR 0006) and withdrawn by self-regulation after repeated
@@ -52,7 +52,7 @@ var validateDescriptor = domain.MechanismDescriptor{
 func (validateMechanism) Descriptor() domain.MechanismDescriptor { return validateDescriptor }
 
 // Ordering returns the edges validate's catalogue row declares (see init) — the row is the source
-// of record; this method is the domain.Mechanism remnant the registry still reads.
+// of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (validateMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{syntaxID, autofixID}}
 }

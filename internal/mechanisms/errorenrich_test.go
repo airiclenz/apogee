@@ -12,7 +12,7 @@ import (
 // as the conversation so far, and reports whether it appended the enrichment.
 func enrich(t *testing.T, history []domain.Message, call domain.ToolCall, result *domain.ToolResult) bool {
 	t.Helper()
-	hook, ok := mustBuild(t, errorEnrichmentID).(domain.PostToolResultHook)
+	hook, ok := mustBuild(t, errorEnrichmentID).Hook.(domain.PostToolResultHook)
 	if !ok {
 		t.Fatal("error_enrichment does not implement PostToolResultHook")
 	}
@@ -112,7 +112,7 @@ func TestErrorEnrichmentSkipsNonActionable(t *testing.T) {
 // error_enrichment builds from the production catalogue (the config surface's path).
 func TestErrorEnrichmentBuildsFromCatalogue(t *testing.T) {
 	t.Parallel()
-	if m := mustBuild(t, errorEnrichmentID); m.Descriptor().ID != errorEnrichmentID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor().ID, errorEnrichmentID)
+	if m := mustBuild(t, errorEnrichmentID); m.Descriptor.ID != errorEnrichmentID {
+		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, errorEnrichmentID)
 	}
 }

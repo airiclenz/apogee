@@ -110,7 +110,7 @@ type libraryMechanism struct {
 // library Mechanism with no store cannot observe or inject, so a nil store is a loud construction
 // error rather than a silently-inert Mechanism. The fingerprint may be zero (an unidentified model):
 // that is not an error, it just leaves the Library inert (nothing to key on).
-func newLibrary(deps Deps) (domain.Mechanism, error) {
+func newLibrary(deps Deps) (any, error) {
 	if deps.Library == nil {
 		return nil, errLibraryStoreRequired
 	}
@@ -130,7 +130,7 @@ var libraryDescriptor = domain.MechanismDescriptor{
 func (*libraryMechanism) Descriptor() domain.MechanismDescriptor { return libraryDescriptor }
 
 // Ordering returns the edge library's catalogue row declares (see init) — the row is the source of
-// record; this method is the domain.Mechanism remnant the registry still reads.
+// record; this method is a remnant of the self-describing interface; nothing reads it.
 func (*libraryMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }

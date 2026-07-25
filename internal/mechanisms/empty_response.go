@@ -30,7 +30,7 @@ type emptyResponseRecoveryMechanism struct{}
 
 // newEmptyResponseRecovery builds the empty_response_recovery Mechanism. It needs no injected Deps
 // (D3): the trigger reads only the response and the conversation already on its LoopView.
-func newEmptyResponseRecovery(Deps) (domain.Mechanism, error) {
+func newEmptyResponseRecovery(Deps) (any, error) {
 	return emptyResponseRecoveryMechanism{}, nil
 }
 

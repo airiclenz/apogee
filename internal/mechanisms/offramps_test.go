@@ -46,9 +46,9 @@ func TestOffRampDescriptors(t *testing.T) {
 	t.Parallel()
 	for _, id := range []domain.MechanismID{emptyResponseRecoveryID, toolUseEnforcerID} {
 		m := mustBuild(t, id)
-		d := m.Descriptor()
+		d := m.Descriptor
 		if d.ID != id {
-			t.Errorf("Descriptor().ID = %q, want %q", d.ID, id)
+			t.Errorf("Descriptor.ID = %q, want %q", d.ID, id)
 		}
 		if d.Capability != domain.CapOffRamp {
 			t.Errorf("%q Capability = %q, want %q (survives Bypass)", id, d.Capability, domain.CapOffRamp)
@@ -56,7 +56,7 @@ func TestOffRampDescriptors(t *testing.T) {
 		if d.Suppression != domain.SuppressExempt {
 			t.Errorf("%q Suppression = %q, want %q (ignores self-regulation)", id, d.Suppression, domain.SuppressExempt)
 		}
-		if _, ok := m.(domain.PostResponseHook); !ok {
+		if _, ok := m.Hook.(domain.PostResponseHook); !ok {
 			t.Errorf("%q does not implement PostResponseHook", id)
 		}
 	}

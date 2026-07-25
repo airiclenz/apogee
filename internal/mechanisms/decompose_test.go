@@ -21,11 +21,11 @@ var oneTool = []domain.ToolDef{{Name: "write_file"}}
 
 func TestDecomposeDescriptorAndOrdering(t *testing.T) {
 	t.Parallel()
-	m, err := newDecompose(Deps{})
+	m, err := Build(decomposeID, Deps{})
 	if err != nil {
-		t.Fatalf("newDecompose: %v", err)
+		t.Fatalf("Build(%q): %v", decomposeID, err)
 	}
-	d := m.Descriptor()
+	d := m.Descriptor
 	if d.ID != decomposeID {
 		t.Errorf("ID = %q, want %q", d.ID, decomposeID)
 	}
@@ -36,10 +36,10 @@ func TestDecomposeDescriptorAndOrdering(t *testing.T) {
 		t.Errorf("Suppression = %q, want strikes-3", d.Suppression)
 	}
 	// After toolfilter (catalogue Table A).
-	if o := m.Ordering(); len(o.After) != 1 || o.After[0] != toolFilterID {
+	if o := m.Ordering; len(o.After) != 1 || o.After[0] != toolFilterID {
 		t.Errorf("Ordering.After = %v, want [%q]", o.After, toolFilterID)
 	}
-	if _, ok := m.(domain.PreRequestHook); !ok {
+	if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 		t.Error("decompose does not implement PreRequestHook")
 	}
 }
@@ -50,8 +50,8 @@ func TestDecomposeBuildsFromCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build(%q): %v", decomposeID, err)
 	}
-	if m.Descriptor().ID != decomposeID {
-		t.Errorf("built ID = %q, want %q", m.Descriptor().ID, decomposeID)
+	if m.Descriptor.ID != decomposeID {
+		t.Errorf("built ID = %q, want %q", m.Descriptor.ID, decomposeID)
 	}
 }
 

@@ -68,7 +68,7 @@ type repairer func(path, content string) (string, bool)
 // per-language repair ladder — the sim's LookPath-cached formatter table, injected at
 // construction per D3 so fires never touch PATH. An absent executable simply leaves its rung
 // out; Go's in-process gofmt tail is always appended.
-func newAutofix(deps Deps) (domain.Mechanism, error) {
+func newAutofix(deps Deps) (any, error) {
 	look := deps.LookPath
 	if look == nil {
 		look = exec.LookPath
@@ -126,7 +126,7 @@ var autofixDescriptor = domain.MechanismDescriptor{
 func (autofixMechanism) Descriptor() domain.MechanismDescriptor { return autofixDescriptor }
 
 // Ordering returns the edges autofix's catalogue row declares (see init) — the row is the source
-// of record; this method is the domain.Mechanism remnant the registry still reads.
+// of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (autofixMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{
 		After:  []domain.MechanismID{validateID},

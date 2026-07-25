@@ -37,7 +37,7 @@ type syntaxMechanism struct{}
 
 // newSyntax builds the syntax Mechanism. It needs no injected Deps (D3): the checks are in-process
 // and read only the response.
-func newSyntax(Deps) (domain.Mechanism, error) { return syntaxMechanism{}, nil }
+func newSyntax(Deps) (any, error) { return syntaxMechanism{}, nil }
 
 // syntaxDescriptor identifies syntax as a strikes-3 response-repair Mechanism (catalogue Table A).
 var syntaxDescriptor = domain.MechanismDescriptor{
@@ -50,7 +50,7 @@ var syntaxDescriptor = domain.MechanismDescriptor{
 func (syntaxMechanism) Descriptor() domain.MechanismDescriptor { return syntaxDescriptor }
 
 // Ordering returns the edges syntax's catalogue row declares (see init) — the row is the source of
-// record; this method is the domain.Mechanism remnant the registry still reads.
+// record; this method is a remnant of the self-describing interface; nothing reads it.
 func (syntaxMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{
 		After: []domain.MechanismID{validateID, autofixID},

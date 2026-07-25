@@ -38,7 +38,7 @@ type readLoopMechanism struct{}
 
 // newReadLoop builds the read_loop Mechanism. It needs no injected Deps (D3): the loop is detected
 // entirely from the conversation on the Request it is handed.
-func newReadLoop(Deps) (domain.Mechanism, error) { return readLoopMechanism{}, nil }
+func newReadLoop(Deps) (any, error) { return readLoopMechanism{}, nil }
 
 // readLoopDescriptor identifies read_loop as a strikes-3 proactive-nudge Mechanism (catalogue
 // Table A) — disabled under Bypass (D5), withdrawn after repeated non-help.

@@ -61,7 +61,7 @@ type fileHintMechanism struct{}
 
 // newFileHint builds the filehint Mechanism. It needs no injected Deps (D3): the hint is derived
 // entirely from the conversation on the Request it is handed.
-func newFileHint(Deps) (domain.Mechanism, error) { return fileHintMechanism{}, nil }
+func newFileHint(Deps) (any, error) { return fileHintMechanism{}, nil }
 
 // fileHintDescriptor identifies filehint as a strikes-3 proactive-nudge Mechanism (catalogue
 // Table A): disabled under Bypass (D5), withdrawn by self-regulation after repeated non-help.

@@ -37,7 +37,7 @@ type readRepeatMechanism struct{}
 
 // newReadRepeat builds the read_repeat Mechanism. It needs no injected Deps (D3): the repeat is
 // detected from the response's tool calls and the conversation on its LoopView.
-func newReadRepeat(Deps) (domain.Mechanism, error) { return readRepeatMechanism{}, nil }
+func newReadRepeat(Deps) (any, error) { return readRepeatMechanism{}, nil }
 
 // readRepeatDescriptor identifies read_repeat as a strikes-3 response-repair Mechanism (catalogue
 // Table A), incompatible with cached_content_intercept (the re-read family is pairwise-exclusive,
@@ -53,7 +53,7 @@ var readRepeatDescriptor = domain.MechanismDescriptor{
 func (readRepeatMechanism) Descriptor() domain.MechanismDescriptor { return readRepeatDescriptor }
 
 // Ordering returns the edges read_repeat's catalogue row declares (see init) — the row is the
-// source of record; this method is the domain.Mechanism remnant the registry still reads.
+// source of record; this method is a remnant of the self-describing interface; nothing reads it.
 func (readRepeatMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolLoopInterceptorID, validateID}}
 }

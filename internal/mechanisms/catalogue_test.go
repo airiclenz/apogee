@@ -12,18 +12,14 @@ import (
 	"github.com/airiclenz/apogee/internal/library"
 )
 
-// fakeMechanism is a minimal catalogued Mechanism for exercising the catalogue table while the
-// production catalogue is still empty (waves 5–14 fill it). It implements one hook interface
-// (pre-request) so it is a valid Mechanism the registry would accept.
+// fakeMechanism is a minimal Mechanism HOOK for exercising the catalogue table independently of
+// the real rows. It implements one hook interface (pre-request), so a row carrying it is one the
+// registry would accept; its metadata comes from the row it sits in, never from the value.
 type fakeMechanism struct {
 	id   domain.MechanismID
 	deps Deps
 }
 
-func (f fakeMechanism) Descriptor() domain.MechanismDescriptor {
-	return domain.MechanismDescriptor{ID: f.id, Capability: domain.CapProactiveNudge, Suppression: domain.SuppressStrikesThree}
-}
-func (f fakeMechanism) Ordering() domain.OrderingConstraints              { return domain.OrderingConstraints{} }
 func (f fakeMechanism) PreRequest(context.Context, *domain.Request) error { return nil }
 
 // A fake row in an explicit table builds and receives the injected Deps — the seam every real
@@ -35,7 +31,7 @@ func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 	table := map[domain.MechanismID]row{
 		id: {
 			descriptor: domain.MechanismDescriptor{ID: id},
-			construct:  func(d Deps) (domain.Mechanism, error) { return fakeMechanism{id: id, deps: d}, nil },
+			construct:  func(d Deps) (any, error) { return fakeMechanism{id: id, deps: d}, nil },
 		},
 	}
 
@@ -43,9 +39,12 @@ func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildFrom(%q): %v", id, err)
 	}
-	fake, ok := m.(fakeMechanism)
+	if m.Descriptor.ID != id {
+		t.Errorf("built row descriptor ID = %q; want %q", m.Descriptor.ID, id)
+	}
+	fake, ok := m.Hook.(fakeMechanism)
 	if !ok {
-		t.Fatalf("built mechanism is %T; want fakeMechanism", m)
+		t.Fatalf("built hook is %T; want fakeMechanism", m.Hook)
 	}
 	if fake.id != id {
 		t.Errorf("built ID = %q; want %q", fake.id, id)
@@ -62,11 +61,11 @@ func TestBuildFromUnknownIDErrorsListingKnown(t *testing.T) {
 	table := map[domain.MechanismID]row{
 		"beta": {
 			descriptor: domain.MechanismDescriptor{ID: "beta"},
-			construct:  func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: "beta"}, nil },
+			construct:  func(Deps) (any, error) { return fakeMechanism{id: "beta"}, nil },
 		},
 		"alpha": {
 			descriptor: domain.MechanismDescriptor{ID: "alpha"},
-			construct:  func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: "alpha"}, nil },
+			construct:  func(Deps) (any, error) { return fakeMechanism{id: "alpha"}, nil },
 		},
 	}
 
@@ -88,7 +87,7 @@ func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 	table := map[domain.MechanismID]row{
 		"needs-deps": {
 			descriptor: domain.MechanismDescriptor{ID: "needs-deps"},
-			construct:  func(Deps) (domain.Mechanism, error) { return nil, boom },
+			construct:  func(Deps) (any, error) { return nil, boom },
 		},
 	}
 	_, err := buildFrom(table, "needs-deps", Deps{})
@@ -159,7 +158,7 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 		"filehint", "grammar", "read_loop",
 	}
 	reg := domain.NewMechanismRegistry()
-	built := make(map[domain.MechanismID]domain.Mechanism, len(ids))
+	built := make(map[domain.MechanismID]domain.RegisteredMechanism, len(ids))
 	for _, id := range ids {
 		m, err := Build(id, deps)
 		if err != nil {
@@ -177,7 +176,7 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	}
 	pos := make(map[domain.MechanismID]int, len(ordered))
 	for i, m := range ordered {
-		pos[m.Descriptor().ID] = i
+		pos[m.Descriptor.ID] = i
 	}
 
 	// Every cot nudge and library injects before toolfilter narrows the menu — assert each one
@@ -186,8 +185,8 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	// edge dropped, so an emergent-position check passes vacuously and would not catch an
 	// accidentally-deleted edge; inspecting the declared Ordering guards each edge independently.
 	for _, before := range []domain.MechanismID{"stall_nudge", "list_nudge", "tool_use_directive", "library"} {
-		if !slices.Contains(built[before].Ordering().Before, "toolfilter") {
-			t.Errorf("%s does not declare Before toolfilter (Ordering = %+v)", before, built[before].Ordering())
+		if !slices.Contains(built[before].Ordering.Before, "toolfilter") {
+			t.Errorf("%s does not declare Before toolfilter (Ordering = %+v)", before, built[before].Ordering)
 		}
 	}
 	// The transform chain: toolfilter before decompose before tool_result_cap.
@@ -198,9 +197,9 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	// guided_decomposition declares After toolfilter (its sub_agent-presence gate must read the final,
 	// post-toolfilter menu) — assert the DECLARED edge, not merely that it sorts after toolfilter, and
 	// that it lands after the narrowing yet before the trailing tool_result_cap.
-	if !slices.Contains(built["guided_decomposition"].Ordering().After, "toolfilter") {
+	if !slices.Contains(built["guided_decomposition"].Ordering.After, "toolfilter") {
 		t.Errorf("guided_decomposition does not declare After toolfilter (Ordering = %+v)",
-			built["guided_decomposition"].Ordering())
+			built["guided_decomposition"].Ordering)
 	}
 	if !(pos["toolfilter"] < pos["guided_decomposition"] && pos["guided_decomposition"] < pos["tool_result_cap"]) {
 		t.Errorf("want toolfilter@%d < guided_decomposition@%d < tool_result_cap@%d",
@@ -209,7 +208,7 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	// tool_result_cap runs last among the pre-request shapers (§Ordering: it trims after context is
 	// assembled), which here means the final position overall — the injectors are in-degree-0 and
 	// emit early, so nothing sorts after tool_result_cap.
-	if last := ordered[len(ordered)-1].Descriptor().ID; last != "tool_result_cap" {
+	if last := ordered[len(ordered)-1].Descriptor.ID; last != "tool_result_cap" {
 		t.Errorf("last pre-request Mechanism = %q, want tool_result_cap (runs last among shapers)", last)
 	}
 }
@@ -266,8 +265,22 @@ func TestDescriptorsMatchCatalogue(t *testing.T) {
 			t.Errorf("Build(%q): %v", id, err)
 			continue
 		}
-		if got := m.Descriptor(); !reflect.DeepEqual(got, row) {
-			t.Errorf("Build(%q).Descriptor() = %+v; want its static row %+v", id, got, row)
+		if got := m.Descriptor; !reflect.DeepEqual(got, row) {
+			t.Errorf("Build(%q).Descriptor = %+v; want its static row %+v", id, got, row)
+		}
+		// The hook's own Descriptor() — the remnant of the self-describing interface, deleted once
+		// nothing reads it — still answers with the same row, so nothing drifted when the metadata
+		// moved off the instance. Asserted through an ad-hoc interface because the registry no
+		// longer names one.
+		described, ok := m.Hook.(interface {
+			Descriptor() domain.MechanismDescriptor
+		})
+		if !ok {
+			t.Errorf("Build(%q).Hook carries no Descriptor method", id)
+			continue
+		}
+		if got := described.Descriptor(); !reflect.DeepEqual(got, row) {
+			t.Errorf("Build(%q).Hook.Descriptor() = %+v; want its static row %+v", id, got, row)
 		}
 	}
 }
@@ -306,7 +319,7 @@ func TestRegisterRejectsDuplicateAndEmptyID(t *testing.T) {
 	fakeRow := func(id domain.MechanismID) row {
 		return row{
 			descriptor: domain.MechanismDescriptor{ID: id},
-			construct:  func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: id}, nil },
+			construct:  func(Deps) (any, error) { return fakeMechanism{id: id}, nil },
 		}
 	}
 	panics := func(f func()) (panicked bool) {

@@ -2,7 +2,7 @@ package domain
 
 // White-box tests for MechanismRegistry.Add's registration gates (phase-4-review-fixes
 // item 5): a duplicate MechanismID and the reserved experimental sentinel are refused
-// loudly at registration, never silently absorbed. The fixtures (preReqMech) live in
+// loudly at registration, never silently absorbed. The row builder (regd) lives in
 // registry_ordered_test.go.
 
 import (
@@ -16,11 +16,11 @@ import (
 func TestAdd_RefusesDuplicateID(t *testing.T) {
 	t.Parallel()
 	r := NewMechanismRegistry()
-	if err := r.Add(preReqMech{id: "dup"}); err != nil {
+	if err := r.Add(regd("dup")); err != nil {
 		t.Fatalf("first Add(dup): %v", err)
 	}
 
-	err := r.Add(preReqMech{id: "dup"})
+	err := r.Add(regd("dup"))
 	if err == nil {
 		t.Fatal("second Add of the same ID: want an error, got nil")
 	}
@@ -39,7 +39,7 @@ func TestAdd_RefusesReservedExperimentalID(t *testing.T) {
 	t.Parallel()
 	r := NewMechanismRegistry()
 
-	err := r.Add(preReqMech{id: ExperimentalMechanismID})
+	err := r.Add(regd(ExperimentalMechanismID))
 	if err == nil {
 		t.Fatal("Add of the reserved experimental ID: want an error, got nil")
 	}

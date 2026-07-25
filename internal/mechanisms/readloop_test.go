@@ -12,7 +12,7 @@ import (
 // whether it injected (Revision moved) and the injected hint text (empty when it did not fire).
 func fireReadLoop(t *testing.T, msgs []domain.Message) (fired bool, hint string) {
 	t.Helper()
-	hook, ok := mustBuild(t, readLoopID).(domain.PreRequestHook)
+	hook, ok := mustBuild(t, readLoopID).Hook.(domain.PreRequestHook)
 	if !ok {
 		t.Fatal("read_loop does not implement PreRequestHook")
 	}
@@ -113,7 +113,7 @@ func TestReadLoopHintIsIdempotent(t *testing.T) {
 		assistantCall(readCall("r1", "app.go")),
 		toolResult("r1", "file not found: app.go"),
 	}
-	hook := mustBuild(t, readLoopID).(domain.PreRequestHook)
+	hook := mustBuild(t, readLoopID).Hook.(domain.PreRequestHook)
 	req := shaperRequest(msgs, nil)
 	if err := hook.PreRequest(context.Background(), req); err != nil {
 		t.Fatalf("PreRequest #1: %v", err)

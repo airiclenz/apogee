@@ -332,7 +332,7 @@ func messageText(events []apogee.Event) string {
 
 func orderedIndex(reg *apogee.MechanismRegistry, at apogee.HookPoint, want apogee.MechanismID) int {
 	for i, m := range reg.Ordered(at) {
-		if m.Descriptor().ID == want {
+		if m.Descriptor.ID == want {
 			return i
 		}
 	}

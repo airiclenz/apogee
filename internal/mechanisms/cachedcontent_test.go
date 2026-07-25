@@ -20,7 +20,7 @@ var readFileTool = domain.ToolDef{
 // tools as the menu the hook sees, and returns the (possibly mutated) call.
 func fireCachedWithTools(t *testing.T, history []domain.Message, call domain.ToolCall, tools []domain.ToolDef) domain.ToolCall {
 	t.Helper()
-	hook, ok := mustBuild(t, cachedContentInterceptID).(domain.PreToolExecHook)
+	hook, ok := mustBuild(t, cachedContentInterceptID).Hook.(domain.PreToolExecHook)
 	if !ok {
 		t.Fatal("cached_content_intercept does not implement PreToolExecHook")
 	}

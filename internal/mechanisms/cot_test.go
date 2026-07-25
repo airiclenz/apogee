@@ -42,7 +42,7 @@ func TestCotNudgesDescriptorsAndBuild(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build(%q): %v", id, err)
 		}
-		d := m.Descriptor()
+		d := m.Descriptor
 		if d.ID != id {
 			t.Errorf("built ID = %q, want %q", d.ID, id)
 		}
@@ -52,7 +52,7 @@ func TestCotNudgesDescriptorsAndBuild(t *testing.T) {
 		if d.Suppression != domain.SuppressStrikesThree {
 			t.Errorf("%q Suppression = %q, want strikes-3", id, d.Suppression)
 		}
-		if _, ok := m.(domain.PreRequestHook); !ok {
+		if _, ok := m.Hook.(domain.PreRequestHook); !ok {
 			t.Errorf("%q does not implement PreRequestHook", id)
 		}
 	}
@@ -63,8 +63,8 @@ func TestCotNudgesDescriptorsAndBuild(t *testing.T) {
 // "only one fires" exclusivity per config.
 func TestStallListIncompatible(t *testing.T) {
 	t.Parallel()
-	stall, _ := newStallNudge(Deps{})
-	list, _ := newListNudge(Deps{})
+	stall := mustBuild(t, stallNudgeID)
+	list := mustBuild(t, listNudgeID)
 	reg := domain.NewMechanismRegistry()
 	if err := reg.Add(stall); err != nil {
 		t.Fatalf("Add(stall): %v", err)
