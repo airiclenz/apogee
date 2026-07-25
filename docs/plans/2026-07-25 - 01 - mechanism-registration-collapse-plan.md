@@ -209,10 +209,19 @@ their own files); no signature outside `internal/mechanisms` changed. Commit:
 
 ---
 
-## 2. One home for the Mechanism-stack validity rule — `internal/domain/stack.go` (candidate 07)
+## 2. One home for the Mechanism-stack validity rule — `internal/domain/stack.go` (candidate 07) — ✅ DONE (2026-07-25)
 
 Do this while the `Mechanism` interface still exists, so it lands as an isolated, independently
 reviewable change. This is candidate **07** in full.
+
+NOTES (2026-07-25): `detectIncompatibility` keeps its pre-existing `if len(mechanisms) < 2 { return
+nil }` fast path rather than becoming a bare renderer. Dropping it would be a behaviour change: a
+lone Mechanism naming *itself* in `IncompatibleWith` returns nil today and would start failing at
+startup, which the plan's "no Mechanism behaviour changes" non-goal forbids. The guard is not a
+`present` map and does not re-implement the rule. `detectRequirements` needed no such guard (its
+zero/one-member cases already agree with `CheckStack`).
+NOTES (2026-07-25): `stack_test.go` adds one case beyond the plan's six — an empty `descs` slice
+⇒ nil — pinning `CheckStack`'s own early return.
 
 - **New file `internal/domain/stack.go`:**
   - **`type StackDefectKind string`** with `StackMissingRequirement` (`"missing-requirement"`) and

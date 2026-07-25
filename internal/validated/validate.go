@@ -16,6 +16,11 @@ import (
 // Descriptors are a parameter (the caller passes the live catalogue) so this package
 // never imports the Mechanism constructors; shipped_test.go runs the same check against
 // the real catalogue as the CI drift pin.
+//
+// The unknown-ID and duplicate-ID checks are this package's own — the registry can have
+// neither. The stacking rule is not: it is domain.CheckStack, shared with the registry's
+// startup gates so the two cannot drift. Only the RENDERING stays here, because a defect
+// found pre-build is a soft skip-and-warn, not the loud startup failure it is post-build.
 func Validate(e Entry, descriptors []domain.MechanismDescriptor) error {
 	byID := make(map[domain.MechanismID]domain.MechanismDescriptor, len(descriptors))
 	for _, d := range descriptors {
@@ -23,27 +28,25 @@ func Validate(e Entry, descriptors []domain.MechanismDescriptor) error {
 	}
 
 	members := make(map[domain.MechanismID]bool, len(e.Set))
+	set := make([]domain.MechanismDescriptor, 0, len(e.Set))
 	for _, id := range e.Set {
-		if _, ok := byID[id]; !ok {
+		d, ok := byID[id]
+		if !ok {
 			return fmt.Errorf("set names unknown mechanism %q (catalogue evolved since the entry was recorded)", id)
 		}
 		if members[id] {
 			return fmt.Errorf("set lists mechanism %q twice", id)
 		}
 		members[id] = true
+		set = append(set, d)
 	}
 
-	for _, id := range e.Set {
-		d := byID[id]
-		for _, req := range d.Requires {
-			if !members[req] {
-				return fmt.Errorf("mechanism %q requires %q, which is not in the set", id, req)
-			}
-		}
-		for _, inc := range d.IncompatibleWith {
-			if members[inc] {
-				return fmt.Errorf("mechanisms %q and %q are declared incompatible", id, inc)
-			}
+	for _, defect := range domain.CheckStack(set) {
+		switch defect.Kind {
+		case domain.StackMissingRequirement:
+			return fmt.Errorf("mechanism %q requires %q, which is not in the set", defect.Mechanism, defect.Peer)
+		case domain.StackIncompatible:
+			return fmt.Errorf("mechanisms %q and %q are declared incompatible", defect.Mechanism, defect.Peer)
 		}
 	}
 	return nil

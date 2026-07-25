@@ -188,26 +188,32 @@ func topoSort(mechs []Mechanism) []Mechanism {
 	return out
 }
 
+// descriptorsOf returns the registered Mechanisms' descriptors in registration order — the
+// input the shared stack-validity rule (CheckStack, stack.go) reads, so the two gates below
+// share the rule without sharing their wording.
+func descriptorsOf(mechanisms []Mechanism) []MechanismDescriptor {
+	descriptors := make([]MechanismDescriptor, 0, len(mechanisms))
+	for _, m := range mechanisms {
+		descriptors = append(descriptors, m.Descriptor())
+	}
+	return descriptors
+}
+
 // detectIncompatibility reports ErrIncompatibleMechanisms if two registered Mechanisms
 // declare each other incompatible (MechanismDescriptor.IncompatibleWith). Incompatibility is
 // GLOBAL, not per-hook-point: two Mechanisms that must never co-fire — e.g. read_loop and
 // cached_content_intercept, which sit at different hook points — cannot both be enabled. A
 // declaration is directional in the data but symmetric in effect (either side naming the other
 // trips it), so it fails loudly at startup the same way an ordering cycle does (ADR 0003).
+// The rule is CheckStack's; this is the registry's post-build rendering of the first
+// incompatibility it finds in registration order.
 func detectIncompatibility(mechanisms []Mechanism) error {
 	if len(mechanisms) < 2 {
-		return nil
+		return nil // a lone Mechanism has no co-registered peer to conflict with
 	}
-	present := make(map[MechanismID]bool, len(mechanisms))
-	for _, m := range mechanisms {
-		present[m.Descriptor().ID] = true
-	}
-	for _, m := range mechanisms {
-		desc := m.Descriptor()
-		for _, other := range desc.IncompatibleWith {
-			if present[other] {
-				return fmt.Errorf("apogee: mechanisms %q and %q: %w", desc.ID, other, ErrIncompatibleMechanisms)
-			}
+	for _, defect := range CheckStack(descriptorsOf(mechanisms)) {
+		if defect.Kind == StackIncompatible {
+			return fmt.Errorf("apogee: mechanisms %q and %q: %w", defect.Mechanism, defect.Peer, ErrIncompatibleMechanisms)
 		}
 	}
 	return nil
@@ -220,17 +226,12 @@ func detectIncompatibility(mechanisms []Mechanism) error {
 // link anywhere in the chain trips (checking B catches an absent C independently of A). The error
 // names both IDs and the reason so the config author sees which stack to complete. It fails loudly
 // at startup the same way an ordering cycle or an incompatibility does (ADR 0003; ADR 0014 §4).
+// The rule is CheckStack's; this is the registry's post-build rendering of the first missing
+// requirement it finds in registration order.
 func detectRequirements(mechanisms []Mechanism) error {
-	present := make(map[MechanismID]bool, len(mechanisms))
-	for _, m := range mechanisms {
-		present[m.Descriptor().ID] = true
-	}
-	for _, m := range mechanisms {
-		desc := m.Descriptor()
-		for _, req := range desc.Requires {
-			if !present[req] {
-				return fmt.Errorf("apogee: mechanism %q requires %q — enable both or neither; they are benched as a stack: %w", desc.ID, req, ErrMissingRequirement)
-			}
+	for _, defect := range CheckStack(descriptorsOf(mechanisms)) {
+		if defect.Kind == StackMissingRequirement {
+			return fmt.Errorf("apogee: mechanism %q requires %q — enable both or neither; they are benched as a stack: %w", defect.Mechanism, defect.Peer, ErrMissingRequirement)
 		}
 	}
 	return nil
