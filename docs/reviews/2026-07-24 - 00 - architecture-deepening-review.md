@@ -20,8 +20,9 @@ a smaller-deepenings list**, framed in the depth glossary (module / interface / 
 
 **Ledger (updated as candidates land).** **01 landed 2026-07-24**
 (`docs/plans/archived/2026-07-24 - 00 - turn-lifecycle-owner-plan.md`); **02 landed 2026-07-25**
-(`docs/plans/2026-07-25 - 00 - url-safety-choke-point-plan.md`). **03–07 are still outstanding and
-un-grilled** — for each of those the next session's job is step 3 of the skill: pick a candidate,
+(`docs/plans/archived/2026-07-25 - 00 - url-safety-choke-point-plan.md`). Of the smaller
+deepenings, **session store lifecycle landed 2026-07-24** (absorbed by the session system, ADR
+0022). **03–07 are still outstanding and un-grilled** — for each of those the next session's job is step 3 of the skill: pick a candidate,
 walk its design tree, and land side-effects inline (CONTEXT.md term if a deepened module names a new
 concept; an ADR if the owner rejects a candidate for a load-bearing reason; a saved plan doc if it
 graduates to implementation — see *Suggested skills*).
@@ -61,7 +62,10 @@ Explore agents and should be spot-checked before acting.
   worst test friction: self-reg/turn state is today only assertable by reaching through the Agent
   (163 `a.conv` + 22 `a.tracker` reach-ins across tests).
 - **Related (smaller):** split `loop.go` (1172 LOC) — the construction cluster and the
-  domain→wire translation cluster are deep modules trapped in the god-file.
+  domain→wire translation cluster are deep modules trapped in the god-file. ✅ **Landed with 01**:
+  both clusters moved out (`construct.go` 223 LOC, `wire.go` 121 LOC) and `loop.go` is **773 LOC**.
+  Still over the ~400-line house guideline, so a further split remains available — but the two
+  modules the card named are out.
 
 ### 02 — One choke point for url-safety · **Strong** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/agent/resolution.go` (`classNetwork → resolveRun`), `dispatch.go`,
@@ -79,7 +83,7 @@ Explore agents and should be spot-checked before acting.
 - **Note:** strengthens ADR 0012's url-safety floor (no conflict). The **live** gap is a
   correctness matter — this card fixes the *shape*; run `/code-audit` to confirm/close the hole
   itself independently.
-- **Landed 2026-07-25** via `docs/plans/2026-07-25 - 00 - url-safety-choke-point-plan.md`, as the
+- **Landed 2026-07-25** via `docs/plans/archived/2026-07-25 - 00 - url-safety-choke-point-plan.md`, as the
   *funnel* variant (a `networkTool` all three built-ins embed, not a dispatch pre-flight — a
   dispatch check keyed on a declared URL list would still be a declaration). The funnel carries an
   **unexported url-filter marker**, and the ladder split `classNetwork` (marked ⇒ auto-runs in Auto)
@@ -119,9 +123,13 @@ Explore agents and should be spot-checked before acting.
   **authoring** seam deepens. Deep dispatch/self-reg core untouched.
 
 ### 05 — Split the Windows Confiner into three deep sub-modules · **Worth exploring · owner-flagged**
-- **Files:** `internal/platform/winconfine.go` (581), `confiner_windows.go` (572).
+- **Files:** `internal/platform/winconfine.go` (581 at review time — **804 as of 2026-07-25**),
+  `confiner_windows.go` (572 → **777**).
 - **Problem:** two 570+ line files split by **build tag, not concern** — each carries 2–3 of
   {label journal, SDDL label-walk, notice wording, token construction}. Past one-pass navigability.
+  **Both grew ~40% since the review** (nothing in 01/02 touched them — the Phase-5 follow-ups did),
+  so this card is now the most degraded of the outstanding seven. `TODO.md`'s entry still quotes the
+  old 581/572 figures and should be refreshed when the card is picked up.
 - **Deepening:** extract the **journal** (record + atomic r/w/list + retention + revert), the
   **label-walk** (read/set/clear SDDL over a tree + reparse-skip), the **notice wording** as
   their own modules; leave the Confiner as the composer. Keep decision logic in untagged files so
@@ -153,8 +161,9 @@ Explore agents and should be spot-checked before acting.
 
 - **Self-regulator read model** *(Speculative, test-only)* — `selfreg.go` has no accessors; 22
   tests poke `strikes`/`suppressed`/`budgetTripped`. Add an observed-state accessor.
-- **Session store lifecycle** *(Speculative)* — `internal/session` (72 LOC) is write-only `Save`;
-  read path lives in `domain.DecodeSession` + a caller's `ReadFile`. Give it `Save/List/Load`.
+- **Session store lifecycle** *(Speculative)* — ✅ **LANDED 2026-07-24**, absorbed by the session
+  system (ADR 0022) rather than picked up as a deepening: `internal/session/store.go` (277 LOC) now
+  owns `Save/List/Load/LoadPath/Delete/Rename` over id-addressed records. Nothing left to do.
 - **`workspaceWriteTarget` helper** — marker body copied across `write_file/file_edit/find_replace`
   (✓ 4 files); one path-arg helper collapses them.
 - **`read_file` → `SafeStat`/`SafeReadFile`** — the TOCTOU-safe primitive exists and is documented
@@ -168,10 +177,19 @@ Explore agents and should be spot-checked before acting.
 
 ## State of the tree
 
-Clean working tree at session start; this session added exactly two untracked files under
-`docs/reviews/` (this doc + the `.html`). Nothing built, tested, or committed. Per the standing
-owner directive Apogee commits directly to `main` (pre-production) — but committing these docs is
-the owner's call; they are not yet staged.
+*At the review session (2026-07-24):* clean tree at start; the session added exactly two untracked
+files under `docs/reviews/` (this doc + the `.html`) and built, tested and committed nothing.
+
+*As of 2026-07-25:* both landed candidates are committed on `main` (01: `5997ce8`…`cd39e23`;
+02: `2f881f9`…`a6e39db`, incl. the follow-up `76ec91c` making a url-safety block state itself once
+rather than twice), each with its plan doc archived. Per the standing owner directive Apogee commits
+directly to `main` (pre-production). The remaining five candidates and five smaller deepenings have
+had **no code written for them** — their evidence below is still review-session evidence and, apart
+from the ✓-marked and 2026-07-25-refreshed figures, should be spot-checked before acting.
+
+**Re-verified 2026-07-25 as still outstanding:** `workspaceWriteTarget` (4 methods across 3 files),
+`read_file` (still `resolveInRoot → os.Stat → os.ReadFile`), self-regulator accessors (none), the
+POSIX `Confine` argv-wrap duplication, and candidates 03, 04, 06, 07 exactly as described.
 
 ## Recommended next step
 
@@ -180,8 +198,18 @@ yardstick is in the same package, no ADR conflict. Then 02 and 04 as the stronge
 follow-ons ("make X follow the deep pattern the codebase already trusts"). If the owner would rather
 start narrow, 05 is owner-pre-blessed and self-contained.
 
-*As of 2026-07-25:* 01 and 02 have landed (see the ledger above), so the next pick is **04**
-(the Mechanism registration ritual), with 05 as the narrow self-contained alternative.
+*As of 2026-07-25:* 01 and 02 have landed (see the ledger above). Two defensible next picks:
+
+- **04** (Mechanism registration ritual) — the strongest remaining *Strong*, same "make X follow the
+  deep pattern the codebase already trusts" shape as the two that landed, and ADR 0003 is
+  preserved (only the authoring seam moves).
+- **05** (Windows Confiner split) — owner-pre-blessed, self-contained, and the only card that has
+  **got worse since the review** (both files ~40% larger). If the choice is close, urgency favours
+  05; leverage favours 04.
+
+Also still open from candidate 02: the separate **`/code-audit`** on the *live* url-safety gap. The
+shape fix landed; whether any currently-registered path reaches the network unfiltered is a
+correctness question the audit answers, and it now has one place to look.
 
 ## Suggested skills
 
