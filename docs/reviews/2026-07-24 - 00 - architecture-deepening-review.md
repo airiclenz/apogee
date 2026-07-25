@@ -111,6 +111,17 @@ Explore agents and should be spot-checked before acting.
   host.
 - **Note:** additive to public `ToolResult` (minor bump under ADR 0010 stability; back-compatible
   with ADR 0002's open extension point — summary optional, prose fallback stays).
+- **Shape resolved 2026-07-25, PLANNED (not yet built)** →
+  `docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md`, items **1–5**. The summary is a
+  **sealed sum** in `domain` (`ToolSummary` + seven variants), sealed the way `Event` is, so an
+  embedder can *read* every variant and *add* none. **Seven** tools carry one — the ones whose
+  outcome the view re-derives (`read_file`, `write_file`, `list_dir`, `grep`, `view_diff`,
+  `web_search`, `open_file`); the `firstLineDetail` and `outputDetail` families stay on prose,
+  because quoting a fixed sentence or compressing free-form stdout is *rendering*, not scavenging.
+  The acceptance oracle is that **rendered output does not change byte for byte**. Two figures in
+  this card, corrected while planning: the registry has **21** entries, not 24, and the view
+  re-derives **seven** facts (four regexes plus three prefix/count sniffers in `grepDetail`,
+  `diffDetail`, `openFileDetail`/`searchDetail`).
 
 ### 04 — Collapse the 21× Mechanism registration ritual · **Strong** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/mechanisms/*.go` (~20 `Descriptor()` methods ✓), `catalogue.go` (the two
@@ -273,6 +284,16 @@ Explore agents and should be spot-checked before acting.
   edits with no compiler nudge.
 - **Deepening:** decode each Event once into a typed view-delta the 3 consumers read; ordering
   becomes data flow, exhaustive switch makes a missed fold a compile nudge. Strengthens ADR 0011.
+- **Shape resolved 2026-07-25, PLANNED (not yet built)** →
+  `docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md`, item **6**. The owner chose the
+  **narrower** of the two shapes: one `foldEvent` owner (a new `internal/tui/fold.go`, taking
+  `foldStats` out of the 1,772-line `model.go`) that runs the three folds in order and **passes**
+  `hasOpenToolCall()` into `foldActivity` as a parameter — the ordering becomes a data dependency
+  instead of a comment. The card's **typed view-delta is rejected on the record**: the three folds
+  produce genuinely different things (Model scalars, transcript entries, an activity phrase), so a
+  delta struct would mirror all three consumers and hide nothing. The compile nudge comes instead
+  from a variant-coverage test that parses `domain/events.go` for every `EventBase`-embedding type
+  (the `winlabel/deps_test.go` idiom) and fails when one is missing from the fold table.
 
 ### 07 — One home for the Mechanism-stack validity rule · **Worth exploring** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/domain/registry.go` (`detectIncompatibility`, `detectRequirements`),
@@ -299,17 +320,27 @@ Explore agents and should be spot-checked before acting.
 
 ## Smaller deepenings (lower leverage; see HTML for the full list)
 
-- **Self-regulator read model** *(Speculative, test-only)* — `selfreg.go` has no accessors; 22
-  tests poke `strikes`/`suppressed`/`budgetTripped`. Add an observed-state accessor.
+All four still-open entries below are **PLANNED (not yet built)** as items 7–10 of
+`docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md`.
+
+- **Self-regulator read model** *(Speculative, test-only)* — `selfreg.go` has no accessors; **32**
+  test sites (re-counted 2026-07-25; the review said 22) poke
+  `strikes`/`suppressed`/`budgetTripped`/`harmfulStreak`. Add an observed-state accessor.
+  → **plan item 10**, recorded there as the plan's weakest and most droppable item.
 - **Session store lifecycle** *(Speculative)* — ✅ **LANDED 2026-07-24**, absorbed by the session
   system (ADR 0022) rather than picked up as a deepening: `internal/session/store.go` (277 LOC) now
   owns `Save/List/Load/LoadPath/Delete/Rename` over id-addressed records. Nothing left to do.
 - **`workspaceWriteTarget` helper** — marker body copied across `write_file/file_edit/find_replace`
-  (✓ 4 files); one path-arg helper collapses them.
+  (✓ 4 methods in 3 files); one path-arg helper collapses them. → **plan item 7** (the *methods*
+  stay — the marker is a method set; only the bodies collapse, guarded by a test that all four
+  agree on the same path).
 - **`read_file` → `SafeStat`/`SafeReadFile`** — the TOCTOU-safe primitive exists and is documented
-  *for* read_file, but read_file still does `resolveInRoot → os.Stat → os.ReadFile`.
+  *for* read_file, but read_file still does `resolveInRoot → os.Stat → os.ReadFile`. → **plan item
+  8**, deliberately widened to `open_file`, which carries the identical trio (`open_file.go`
+  L65–84).
 - **POSIX `Confine` argv-wrap helper** — landlock + seatbelt share a verbatim cmd-rewrite skeleton;
-  `wrapArgvUnderLauncher` + `setConfinedPgid` absorbs both.
+  `wrapArgvUnderLauncher` + `setConfinedPgid` absorbs both. → **plan item 9**, in a `!windows`
+  file (the only tag both backends compile under).
 - **`Request.InjectContext` placement** *(Speculative — reopens an ADR-0010 line)* — encodes
   chat-template role-safety policy inside a `domain` data type; the engine/`context` layer owns
   role-alternation. Flagged, **not** recommended without a grill; the current placement is
@@ -364,6 +395,14 @@ start narrow, 05 is owner-pre-blessed and self-contained.
 
 *As of 2026-07-25:* **01, 02, 04, 05 and 07 have all landed** (see the ledger above), and the
 ledger is clean — no plan is mid-flight.
+
+*As of 2026-07-25 (later the same day):* everything still outstanding — **03, 06 and all four
+remaining smaller deepenings** — is now written up as one close-out plan,
+`docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md` (10 items, to be executed with
+`/implement-plan`). Nothing in it has been built yet. When it lands this review's ledger is empty
+except for the two items it deliberately parks: the `/code-audit` below, and
+`Request.InjectContext` (still un-grilled). The reasoning that follows is what that plan was
+written against.
 
 The outstanding cards are 03 and 06, and **03 is the strongest pick**:
 
