@@ -29,8 +29,9 @@
 //
 // Some exports here exist for package platform's Windows-tagged tests rather than for
 // production callers: confiner_windows_test.go asserts against real SACLs and real
-// journal files, and it stays with the backend it tests. IsLowLabel is one of them. They
-// are the module's honest file/OS surface — production code in this package uses the same
-// verbs — but they are named in the doc so a later audit does not re-litigate why the
-// surface is as wide as it is.
+// journal files, and it stays with the backend it tests. They are IsLowLabel, the
+// journal-file API (JournalDir, JournalPath, ListJournals, ReadJournal, WriteJournal) and
+// ResidueIn, the home-taking form of Residue. They are the module's honest file/OS surface
+// — production code in this package uses the same verbs — but they are named in the doc so
+// a later audit does not re-litigate why the surface is as wide as it is.
 package winlabel

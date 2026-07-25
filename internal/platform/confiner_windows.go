@@ -97,7 +97,7 @@ type tokenConfiner struct {
 	// so the once-per-box cost is not paid once per command.
 	labelled map[string]bool
 	// journal is the in-memory twin of journalPath.
-	journal labelJournal
+	journal winlabel.Record
 }
 
 // NewConfiner returns the host's real Confiner backend for this OS
@@ -136,7 +136,7 @@ func selectWindowsConfiner(build func(home string) *tokenConfiner) domain.Confin
 	if _, _, buildNumber := windows.RtlGetNtVersionNumbers(); belowWindowsFloor(buildNumber) {
 		return NewDenyConfiner()
 	}
-	return build(confinementJournalHome())
+	return build(winlabel.Home())
 }
 
 // newTokenConfiner builds the SESSION backend against a given apogee home (the journal's
@@ -173,7 +173,7 @@ func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 	}
 	if home != "" {
 		c.journalHome = home
-		c.journalPath = labelJournalPath(home, os.Getpid())
+		c.journalPath = winlabel.JournalPath(home, os.Getpid())
 	}
 
 	token, err := mintRestrictedLowToken()
@@ -250,7 +250,7 @@ func (c *tokenConfiner) Close() error {
 
 // labelBox labels the box's roots Low, once per root per session. The journal is written
 // BEFORE the first label so a process killed mid-pass still leaves a complete-enough record
-// to undo the mutation, and what it may say about a root is journalLabelEntry's decision —
+// to undo the mutation, and what it may say about a root is winlabel.RecordEntry's decision —
 // never apogee's own label as the state to restore. The order's one debris case is unwound at
 // the source: a root whose label write then fails has refused the box with nothing mutated,
 // so its just-journalled no-prior entry is removed again (unwindRootLabel) rather than left
@@ -294,7 +294,7 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 		if err != nil {
 			return fmt.Errorf("%w: cannot read the mandatory label of %q: %v", domain.ErrConfinementUnavailable, root, err)
 		}
-		journalled, err := c.journalLabel(labelJournalEntry{Path: root, Root: true, PriorSDDL: prior})
+		journalled, err := c.journalLabel(winlabel.Entry{Path: root, Root: true, PriorSDDL: prior})
 		if err != nil {
 			return err
 		}
@@ -308,7 +308,7 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 			// carrying no label — so the entry is unwound at its source. Only a JUST-ADDED
 			// entry qualifies: one that predates this attempt records an earlier pass whose
 			// root label may really be on the disk. What the unwind may remove is
-			// unwindLabelEntry's decision — an entry with a foreign prior is kept.
+			// winlabel.UnwindEntry's decision — an entry with a foreign prior is kept.
 			if journalled && !rootLabelled {
 				c.unwindRootLabel(root)
 			}
@@ -379,8 +379,8 @@ func (c *tokenConfiner) resolveBoxRoot(root string) (string, error) {
 // without a journal on disk describing how to undo it. It reports whether the entry newly
 // changed the journal, which is what entitles labelBox to unwind it should the label write
 // that follows fail. Callers hold c.mu.
-func (c *tokenConfiner) journalLabel(entry labelJournalEntry) (bool, error) {
-	entries, changed := journalLabelEntry(c.journal.Entries, entry, winlabel.FoldPath)
+func (c *tokenConfiner) journalLabel(entry winlabel.Entry) (bool, error) {
+	entries, changed := winlabel.RecordEntry(c.journal.Entries, entry, winlabel.FoldPath)
 	c.journal.Entries = entries
 	if !changed {
 		return false, nil
@@ -392,13 +392,13 @@ func (c *tokenConfiner) journalLabel(entry labelJournalEntry) (bool, error) {
 }
 
 // unwindRootLabel removes root's just-journalled entry after its label write failed — the
-// phantom-entry undo, decided by unwindLabelEntry (an entry recording a foreign prior stays).
+// phantom-entry undo, decided by winlabel.UnwindEntry (an entry recording a foreign prior stays).
 // The re-flush is best-effort: the caller is already returning the label failure, which is the
 // error that matters, and a stale on-disk entry costs at worst the pre-unwind behaviour —
 // Close retires the whole file on success, and only a crash before that resurrects the
 // phantom. Callers hold c.mu.
 func (c *tokenConfiner) unwindRootLabel(root string) {
-	entries, removed := unwindLabelEntry(c.journal.Entries, root, winlabel.FoldPath)
+	entries, removed := winlabel.UnwindEntry(c.journal.Entries, root, winlabel.FoldPath)
 	if !removed {
 		return
 	}
@@ -461,7 +461,7 @@ func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 			// A Low prior here is apogee's own label — a tree being re-walked, or one a
 			// concurrent session labelled — and journalLabel drops it rather than recording
 			// an instruction to put it back.
-			if _, err := c.journalLabel(labelJournalEntry{Path: path, PriorSDDL: prior}); err != nil {
+			if _, err := c.journalLabel(winlabel.Entry{Path: path, PriorSDDL: prior}); err != nil {
 				return err
 			}
 		}
@@ -492,7 +492,7 @@ func (c *tokenConfiner) restoreLabels() error {
 		return fmt.Errorf("apogee: confine: could not revert every mandatory label; the journal %q is kept so the next run retries: %w",
 			c.journalPath, err)
 	}
-	c.journal = labelJournal{Entries: remaining}
+	c.journal = winlabel.Record{Entries: remaining}
 	c.labelled = make(map[string]bool)
 	return nil
 }
@@ -505,7 +505,7 @@ func (c *tokenConfiner) flushJournal() error {
 		return nil
 	}
 	c.journal.PID = os.Getpid()
-	return writeLabelJournal(c.journalPath, c.journal)
+	return winlabel.WriteJournal(c.journalPath, c.journal)
 }
 
 // revertSparingLiveSiblings returns the production revert for the journal at own under
@@ -517,9 +517,9 @@ func (c *tokenConfiner) flushJournal() error {
 // neither restores a foreign prior a sibling's pending clear would destroy — the sibling
 // read and both exclusions happen at revert time, when liveness and the claim set are
 // current, not at construction.
-func revertSparingLiveSiblings(home, own string) func(labelJournal) ([]labelJournalEntry, error) {
-	return func(j labelJournal) ([]labelJournalEntry, error) {
-		siblings := siblingLabelJournals(home, own)
+func revertSparingLiveSiblings(home, own string) func(winlabel.Record) ([]winlabel.Entry, error) {
+	return func(j winlabel.Record) ([]winlabel.Entry, error) {
+		siblings := winlabel.SiblingJournals(home, own)
 		restore, handoff := restorablePriors(j, siblings)
 		if err := revertLabelJournal(revertibleRoots(j, siblings, processAlive), restore); err != nil {
 			return nil, err
@@ -639,8 +639,8 @@ func recoverLabelJournals(home string) {
 	self := os.Getpid()
 	for {
 		retiredAny := false
-		for _, path := range listLabelJournals(home) {
-			j, err := readLabelJournal(path)
+		for _, path := range winlabel.ListJournals(home) {
+			j, err := winlabel.ReadJournal(path)
 			if err != nil {
 				continue
 			}

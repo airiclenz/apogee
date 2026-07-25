@@ -23,7 +23,7 @@ func TestConfinementTeardownNoticeWordsTheFailure(t *testing.T) {
 	if !strings.Contains(got, Remedy) {
 		t.Errorf("notice = %q; want the same manual remedy the host report names", got)
 	}
-	if !strings.Contains(ResidueNotice([]string{`C:\work`}, nil), Remedy) {
+	if !strings.Contains(residueNotice([]string{`C:\work`}, nil), Remedy) {
 		t.Error("the host report no longer quotes the shared remedy; the two surfaces have drifted")
 	}
 }
@@ -45,7 +45,7 @@ func TestWindowsLabelProgressNoticeNamesRootAndFence(t *testing.T) {
 	}
 	// The fence wording is the shared remedy verbatim, so this surface never invents a third
 	// spelling of the manual undo the teardown warning and host report already quote — the
-	// ResidueNotice byte-identity assertion pattern.
+	// residueNotice byte-identity assertion pattern.
 	if !strings.Contains(got, Remedy) {
 		t.Errorf("notice = %q; want the shared remedy %q so the surfaces cannot drift", got, Remedy)
 	}
@@ -89,7 +89,7 @@ func TestWindowsResidueNoticeWordsBothFindings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := ResidueNotice(tt.roots, tt.unreadable)
+			got := residueNotice(tt.roots, tt.unreadable)
 			if tt.wantEmpty {
 				if got != "" {
 					t.Fatalf("notice = %q, want \"\" so the caller can state it unconditionally", got)
@@ -115,7 +115,7 @@ func TestWindowsResidueNoticeWordsBothFindings(t *testing.T) {
 	want := "1 path(s) may still carry apogee's Low integrity label: C:\\work\n" +
 		residueIndent + "(a run was interrupted, or another apogee holds them now; a new session\n" +
 		residueIndent + "reverts them automatically, or: " + Remedy + ")"
-	if got := ResidueNotice([]string{`C:\work`}, nil); got != want {
+	if got := residueNotice([]string{`C:\work`}, nil); got != want {
 		t.Errorf("the outstanding-labels wording drifted:\n got %q\nwant %q", got, want)
 	}
 }

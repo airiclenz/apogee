@@ -1,11 +1,8 @@
 package platform
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -34,151 +31,6 @@ const windowsFloorBuild = 17763
 // only ever observe the branch its own host is on, and the branch that matters most is the one
 // the development machine is never on.
 func belowWindowsFloor(build uint32) bool { return build < windowsFloorBuild }
-
-// labelJournalDirName is the sub-directory of the apogee home holding the label journals,
-// and labelJournalPrefix/Suffix name one run's file. The journal is per-PID rather than
-// shared so two concurrent apogee processes cannot overwrite each other's record of what
-// they labelled — the file name IS the ownership claim.
-//
-// labelJournalTempPattern names the file an atomic write lands in before it is renamed into
-// place. It deliberately matches NEITHER the prefix NOR the suffix, so a temp file left by a
-// crash is invisible to listLabelJournals and can never be read — or reported — as a journal.
-const (
-	labelJournalDirName    = "confinement"
-	labelJournalPrefix     = "labels-"
-	labelJournalSuffix     = ".json"
-	labelJournalTempPrefix = "writing-"
-	labelJournalTempSuffix = ".tmp"
-)
-
-// labelJournal is the on-disk record written BEFORE the first mandatory label is applied
-// (ADR 0020 §2), so an apogee that is killed mid-run leaves behind enough to undo the disk
-// mutation: the next NewConfiner finishes the restore, and `apogee probe host` reports the
-// journal so an interrupted cleanup is diagnosable off-session.
-type labelJournal struct {
-	// PID owns this journal. A journal whose process is still alive belongs to a running
-	// apogee and must never be recovered by another one.
-	PID int `json:"pid"`
-	// Entries are the labelled roots (Root == true) plus every path found already carrying a
-	// FOREIGN explicit label, whose prior descriptor teardown puts back verbatim. One entry
-	// per path, and never one whose prior is a label apogee itself could have written — see
-	// journalLabelEntry, which is the only thing that builds them.
-	Entries []labelJournalEntry `json:"entries"`
-}
-
-// labelJournalEntry is one journalled path: a box root the backend labelled, and/or a path
-// that already carried a foreign mandatory label before the run.
-type labelJournalEntry struct {
-	Path string `json:"path"`
-	// Root marks a box root whose whole tree teardown walks and clears.
-	Root bool `json:"root,omitempty"`
-	// PriorSDDL is the descriptor the path carried before labelling, empty when it carried
-	// no label (the overwhelmingly common case) or carried a Low one apogee must never put
-	// back (journalLabelEntry); teardown then clears the path instead.
-	PriorSDDL string `json:"prior_sddl,omitempty"`
-}
-
-// roots returns the journalled box roots, the trees teardown walks.
-func (j labelJournal) roots() []string {
-	out := make([]string, 0, len(j.Entries))
-	for _, entry := range j.Entries {
-		if entry.Root {
-			out = append(out, entry.Path)
-		}
-	}
-	return out
-}
-
-// priorLabels returns the paths that carried an explicit label before the run, mapped to
-// the descriptor teardown restores.
-func (j labelJournal) priorLabels() map[string]string {
-	out := make(map[string]string, len(j.Entries))
-	for _, entry := range j.Entries {
-		if entry.PriorSDDL != "" {
-			out[entry.Path] = entry.PriorSDDL
-		}
-	}
-	return out
-}
-
-// journalLabelEntry folds one about-to-be-labelled path into a journal's entries, returning the
-// entries to persist and whether anything actually changed (unchanged ⇒ there is nothing new to
-// flush before the label goes on).
-//
-// It is the only thing that builds an entry, because a journal is an INSTRUCTION to a future
-// revert and the two ways it can lie both end in apogee's own Low label being restored rather
-// than removed — residue that puts itself back (ADR 0020 §2):
-//
-//   - One entry per path, first prior wins. Labelling a root twice — a re-Confine after a
-//     partial pass, or a second backend over a box another session already labelled — would
-//     otherwise read the label apogee just wrote and record it as "the state before the run".
-//   - A prior that is itself a LOW label is recorded as NO prior at all, so teardown clears the
-//     path to unlabelled rather than putting a Low label back. That covers this backend's own
-//     spellings, the inherited variant a labelled root propagates, and a genuinely foreign Low
-//     label — which is ambiguous by construction, and where clearing is the SAFE direction:
-//     unlabelled means implicitly Medium, i.e. LESS writable, and ADR 0020's manual remedy
-//     states an explicit Medium label is behaviourally identical to no label at all.
-//
-// An entry naming neither a root to walk nor a prior to put back describes no mutation to undo,
-// so it is not recorded — that is what keeps a re-walked tree of apogee's own labels out of the
-// journal instead of appending (and re-flushing) one useless entry per file.
-//
-// fold is injected (nil ⇒ winlabel.FoldPath) so the decision is table-testable on any OS.
-func journalLabelEntry(entries []labelJournalEntry, entry labelJournalEntry, fold func(string) string) ([]labelJournalEntry, bool) {
-	if fold == nil {
-		fold = winlabel.FoldPath
-	}
-	if winlabel.IsLowLabel(entry.PriorSDDL) {
-		entry.PriorSDDL = ""
-	}
-	if !entry.Root && entry.PriorSDDL == "" {
-		return entries, false
-	}
-	key := fold(entry.Path)
-	for i := range entries {
-		if fold(entries[i].Path) != key {
-			continue
-		}
-		// The first prior recorded for a path is the only honest one, but a path first seen as
-		// a labelled descendant can still be promoted to a ROOT, whose tree teardown walks.
-		if entry.Root && !entries[i].Root {
-			entries[i].Root = true
-			return entries, true
-		}
-		return entries, false
-	}
-	return append(entries, entry), true
-}
-
-// unwindLabelEntry removes the entry for path when it records NO prior, returning the
-// surviving entries and whether anything was removed. It is labelBox's undo for a root whose
-// label write FAILED right after the entry was journalled: journal-before-label is the correct
-// order and stays, but the failure means the entry now describes a mutation that never
-// happened, and keeping it turns every later Close and recovery into a failing no-op —
-// clearing a label that is not there fails on the same unwritable root, so the journal is
-// never retired and ConfinementResidue alarms forever over a disk carrying no label.
-//
-// An entry that DOES record a prior is kept even then: whether that prior still sits on the
-// path is not knowable from here, and ambiguity resolves toward keeping the record — a
-// spurious restore attempt is recoverable, a destroyed record is not.
-//
-// fold is injected (nil ⇒ winlabel.FoldPath) so the decision is table-testable on any OS.
-func unwindLabelEntry(entries []labelJournalEntry, path string, fold func(string) string) ([]labelJournalEntry, bool) {
-	if fold == nil {
-		fold = winlabel.FoldPath
-	}
-	key := fold(path)
-	for i := range entries {
-		if fold(entries[i].Path) != key {
-			continue
-		}
-		if entries[i].PriorSDDL != "" {
-			return entries, false
-		}
-		return append(entries[:i], entries[i+1:]...), true
-	}
-	return entries, false
-}
 
 // windowsProtectedRoots lists the locations the backend refuses to label, resolved from the
 // environment (ADR 0020 §2's guardrails). Labelling any of them Low would be a catastrophic
@@ -313,86 +165,6 @@ func windowsNetworkDenyDecision(box domain.ConfinementBox) error {
 		domain.ErrConfinementUnavailable)
 }
 
-// confinementJournalHome resolves the apogee home the label journals live under, matching the
-// composition root's DEFAULT (~/.apogee). NewConfiner takes no arguments — it is the per-OS
-// selector every backend shares — so a --config override is deliberately not threaded into it;
-// the journal is a crash-recovery aid whose location must be findable without one. Everything
-// that reads the journals resolves them through here for the same reason: a reader that used
-// the session's configured root instead would report "no outstanding labels" under a
-// non-default --config while the labels were sitting in the default home.
-func confinementJournalHome() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".apogee")
-}
-
-// labelJournalDir returns the journal directory inside the apogee home.
-func labelJournalDir(home string) string { return filepath.Join(home, labelJournalDirName) }
-
-// labelJournalPath returns the journal file one process owns.
-func labelJournalPath(home string, pid int) string {
-	return filepath.Join(labelJournalDir(home), fmt.Sprintf("%s%d%s", labelJournalPrefix, pid, labelJournalSuffix))
-}
-
-// writeLabelJournal persists j to path, creating the journal directory. It is called BEFORE
-// the first label of a box is applied and again whenever a pre-existing label is discovered,
-// so a crash at any point leaves a journal describing at least everything already mutated.
-//
-// That promise only holds if the file is never observed HALF-written, which a truncate-in-place
-// write cannot offer: the process is killed between the truncate and the last byte, and what
-// survives is a journal neither recovery nor ConfinementResidue can decode, describing labels
-// that are really on the disk. So the write is atomic — the JSON goes to a temp file in the
-// journal directory itself (same volume, so the rename is a metadata operation), is flushed,
-// and os.Rename replaces the previous journal in one step. A crash mid-flush therefore leaves
-// either the PREVIOUS complete journal or, on the very first write, no journal at all, and the
-// caller has not labelled anything yet in that case.
-//
-// A failure anywhere here is the caller's cue to refuse the box (labelBox): no journal on disk
-// means no label on the disk either.
-func writeLabelJournal(path string, j labelJournal) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("apogee: confine: create label journal dir: %w", err)
-	}
-	raw, err := json.Marshal(j)
-	if err != nil {
-		return fmt.Errorf("apogee: confine: encode label journal: %w", err)
-	}
-	temp, err := os.CreateTemp(dir, labelJournalTempPrefix+"*"+labelJournalTempSuffix)
-	if err != nil {
-		return fmt.Errorf("apogee: confine: create the label journal temp file: %w", err)
-	}
-	tempPath := temp.Name()
-	// A no-op once the rename has consumed the temp file; on every failure below it is what
-	// keeps a partial write from being left behind next to the journal.
-	defer func() { _ = os.Remove(tempPath) }()
-
-	if err := writeAndSync(temp, raw); err != nil {
-		return fmt.Errorf("apogee: confine: write the label journal %q: %w", tempPath, err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("apogee: confine: replace the label journal %q: %w", path, err)
-	}
-	return nil
-}
-
-// writeAndSync writes raw to f, flushes it to the disk and closes it, so the rename that
-// follows can only ever publish a complete file. os.CreateTemp already creates f 0600, the
-// mode the journal has always carried.
-func writeAndSync(f *os.File, raw []byte) error {
-	if _, err := f.Write(raw); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
-}
-
 // retireLabelJournal reverts one journal's disk mutation through revert and then decides the
 // journal FILE's fate: it is removed only when the revert succeeded AND left nothing behind. A
 // failed revert leaves the file exactly where it is, because the journal is the only record of
@@ -414,7 +186,7 @@ func writeAndSync(f *os.File, raw []byte) error {
 // retention rule itself is table-testable on any OS, the same seam every other decision in this
 // file is behind. path may be "" for a backend that keeps no journal file: there is then nothing
 // to remove or rewrite and the revert outcome passes through unchanged.
-func retireLabelJournal(path string, j labelJournal, revert func(labelJournal) ([]labelJournalEntry, error)) ([]labelJournalEntry, error) {
+func retireLabelJournal(path string, j winlabel.Record, revert func(winlabel.Record) ([]winlabel.Entry, error)) ([]winlabel.Entry, error) {
 	remaining, err := revert(j)
 	if err != nil {
 		return nil, err
@@ -423,7 +195,7 @@ func retireLabelJournal(path string, j labelJournal, revert func(labelJournal) (
 		return remaining, nil
 	}
 	if len(remaining) > 0 {
-		if err := writeLabelJournal(path, labelJournal{PID: j.PID, Entries: remaining}); err != nil {
+		if err := winlabel.WriteJournal(path, winlabel.Record{PID: j.PID, Entries: remaining}); err != nil {
 			return nil, err
 		}
 		return remaining, nil
@@ -450,63 +222,6 @@ func clearTreeOutcome(root string, failures int, first error) error {
 		failures, root, first)
 }
 
-// readLabelJournal loads one journal file.
-func readLabelJournal(path string) (labelJournal, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return labelJournal{}, err
-	}
-	var j labelJournal
-	if err := json.Unmarshal(raw, &j); err != nil {
-		return labelJournal{}, fmt.Errorf("apogee: confine: decode label journal %q: %w", path, err)
-	}
-	return j, nil
-}
-
-// listLabelJournals returns the journal files under home, sorted, or nil when the directory
-// does not exist — the normal case on every OS but Windows and on a Windows host that has
-// never confined anything.
-func listLabelJournals(home string) []string {
-	entries, err := os.ReadDir(labelJournalDir(home))
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, labelJournalPrefix) || !strings.HasSuffix(name, labelJournalSuffix) {
-			continue
-		}
-		out = append(out, filepath.Join(labelJournalDir(home), name))
-	}
-	sort.Strings(out)
-	return out
-}
-
-// siblingLabelJournals reads every journal under home EXCEPT the one at own — the other
-// sessions whose journals may still claim a root the caller is about to clear. An
-// undecodable sibling is skipped: it names no owner to check alive and no roots to spare,
-// and erring toward clearing is the safe direction — a cleared label is less privilege,
-// never more (the posture recoverLabelJournals takes with the same file). home may be ""
-// (no resolvable user profile), where no journal exists and there is nothing to read.
-func siblingLabelJournals(home, own string) []labelJournal {
-	if home == "" {
-		return nil
-	}
-	var out []labelJournal
-	for _, path := range listLabelJournals(home) {
-		if strings.EqualFold(path, own) {
-			continue
-		}
-		j, err := readLabelJournal(path)
-		if err != nil {
-			continue
-		}
-		out = append(out, j)
-	}
-	return out
-}
-
 // revertibleRoots returns the journalled roots a revert may clear: j's roots minus every
 // root also named (Root == true) by a sibling journal whose owning process is still ALIVE.
 // Two sessions confining one workspace journal the same root, and the first to tear down
@@ -523,17 +238,17 @@ func siblingLabelJournals(home, own string) []labelJournal {
 // Roots are compared case-folded (winlabel.FoldPath): C:\Work and c:\work name one location.
 // alive is injected (processAlive in production, which is Windows-tagged) so the decision is
 // table-testable on any OS — the retireLabelJournal seam pattern.
-func revertibleRoots(j labelJournal, siblings []labelJournal, alive func(int) bool) []string {
+func revertibleRoots(j winlabel.Record, siblings []winlabel.Record, alive func(int) bool) []string {
 	claimed := make(map[string]bool)
 	for _, sibling := range siblings {
 		if !alive(sibling.PID) {
 			continue
 		}
-		for _, root := range sibling.roots() {
+		for _, root := range sibling.Roots() {
 			claimed[winlabel.FoldPath(root)] = true
 		}
 	}
-	roots := j.roots()
+	roots := j.Roots()
 	if len(claimed) == 0 {
 		return roots
 	}
@@ -568,15 +283,15 @@ func revertibleRoots(j labelJournal, siblings []labelJournal, alive func(int) bo
 // Containment is the case-folded whole-path prefix: a descendant's journalled path is the
 // label walk's own spelling — the root plus its relative path — so the lexical test is exact
 // here and nothing needs re-resolution.
-func restorablePriors(j labelJournal, siblings []labelJournal) (restore map[string]string, handoff []labelJournalEntry) {
+func restorablePriors(j winlabel.Record, siblings []winlabel.Record) (restore map[string]string, handoff []winlabel.Entry) {
 	var claimed []string
 	for _, sibling := range siblings {
-		for _, root := range sibling.roots() {
+		for _, root := range sibling.Roots() {
 			claimed = append(claimed, winlabel.FoldPath(root))
 		}
 	}
 	if len(claimed) == 0 {
-		return j.priorLabels(), nil
+		return j.PriorLabels(), nil
 	}
 	underClaim := func(path string) bool {
 		folded := winlabel.FoldPath(path)
@@ -606,43 +321,13 @@ func restorablePriors(j labelJournal, siblings []labelJournal) (restore map[stri
 // returns "" when there is nothing outstanding, which is every OS but Windows and the normal
 // case on Windows, so the caller can state it unconditionally.
 //
-// It takes no home: the journals live where the backend writes them (confinementJournalHome),
-// not under the session's configured root, and a caller that could name a root could name the
+// It takes no home: the journals live where the backend writes them (winlabel.Home), not
+// under the session's configured root, and a caller that could name a root could name the
 // wrong one and report residue-free a disk that is not.
-func ConfinementResidue() string { return confinementResidue(confinementJournalHome()) }
-
-// confinementResidue is ConfinementResidue against a given home, so the reporting rules are
-// testable against a temporary directory.
 //
-// A journal belonging to THIS process is skipped: an in-session report must not describe the
-// session's own live labels as residue. A journal belonging to another live apogee is still
-// listed, because from the reader's point of view "there are Low labels on your disk right
-// now" is the fact worth stating, and the wording names both causes.
-//
-// A journal that cannot be READ is reported rather than skipped. It is the worst state on this
-// list — recoverLabelJournals cannot revert what it cannot decode, so it stays on the disk
-// forever — and skipping it made the one surface that could tell the user silent about it.
-// Its owner cannot be identified either, so it is reported even though it MIGHT be this
-// process's own: since journals are written atomically, a live session's own file is never
-// mid-write, and an unreadable one is a genuine finding whoever wrote it.
-func confinementResidue(home string) string {
-	if home == "" {
-		return ""
-	}
-	var roots, unreadable []string
-	for _, path := range listLabelJournals(home) {
-		j, err := readLabelJournal(path)
-		if err != nil {
-			unreadable = append(unreadable, path)
-			continue
-		}
-		if j.PID == os.Getpid() {
-			continue
-		}
-		roots = append(roots, j.roots()...)
-	}
-	return winlabel.ResidueNotice(roots, unreadable)
-}
+// The journal it reads, and the reporting rules, live in winlabel (Residue); this export is
+// the name `apogee probe host` already knows.
+func ConfinementResidue() string { return winlabel.Residue() }
 
 // WindowsLabelProgressNotice words the "please wait" line the composition root prints on stderr
 // before the first Low-labelling walk of root, so the one-time pass (ADR 0020 §2) stops being a

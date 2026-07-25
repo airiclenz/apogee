@@ -75,7 +75,7 @@ func IsLowLabel(sddl string) bool {
 //     tolerated-descendant one — that single path stays opaque to the confined child and
 //     never gates the box.
 //   - A non-empty prior is journalled and then labelled; what the entry may SAY about the
-//     prior remains journalLabelEntry's decision.
+//     prior remains RecordEntry's decision.
 //   - No prior (the overwhelmingly common case) is labelled with nothing to journal.
 //
 // It is pure so the decision is table-testable on any OS — the retireLabelJournal seam

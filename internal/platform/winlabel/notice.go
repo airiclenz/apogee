@@ -15,7 +15,7 @@ const Remedy = "icacls <path> /setintegritylevel (OI)(CI)M /T /C"
 // which renders the notice verbatim (probe.Host.Report).
 const residueIndent = "                 "
 
-// ResidueNotice words the outstanding-journal findings, or "" when there are none. It
+// residueNotice words the outstanding-journal findings, or "" when there are none. It
 // is pure so the wording is table-testable on any host, and it names ADR 0020's manual
 // remedy — an explicit Medium label is behaviourally identical to no label at all.
 //
@@ -23,7 +23,7 @@ const residueIndent = "                 "
 // readable journal describes are reverted by the next session automatically, whereas an
 // UNREADABLE journal is a dead end for every automatic path — recovery skips what it cannot
 // decode — so the manual undo is the only remedy there is.
-func ResidueNotice(roots, unreadable []string) string {
+func residueNotice(roots, unreadable []string) string {
 	var lines []string
 	if len(roots) > 0 {
 		lines = append(lines,
@@ -70,7 +70,7 @@ func ProgressNotice(root string) string {
 // it does with ConfinementResidue and the degradation notice.
 //
 // err is the backend's Close error; on Windows it already names the journal that SURVIVED the
-// failed revert, which is what makes the labels recoverable. The remedy is ResidueNotice's
+// failed revert, which is what makes the labels recoverable. The remedy is residueNotice's
 // verbatim, because this is the same situation seen from inside the session that caused it.
 func TeardownNotice(err error) string {
 	if err == nil {

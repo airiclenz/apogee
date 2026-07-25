@@ -267,7 +267,50 @@ walk decisions and notice wording get a package`.
 
 ---
 
-## 2. Move the label journal — record, fold rules, atomic write, read/list/siblings
+## 2. Move the label journal — record, fold rules, atomic write, read/list/siblings — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): deviations, all forced by callers the item's literal text does not account
+for. Everything else moved verbatim.
+
+**(a) `residue` is EXPORTED as `ResidueIn(home string)`.** The item names it unexported, but
+`confiner_windows_test.go` — which stays in `platform` by D7 — calls `confinementResidue(home)`
+at **seven** sites against a `t.TempDir()` home (`:814`, `:888`, `:927`, `:968`, `:1005`,
+`:1042`, `:1201`), and an unexported `residue` is unreachable from `package platform`. It is a
+permanent D6-class export, not a transitional one, and doc.go now names it. The no-arg `Residue()`
+is exactly as planned (`ResidueIn(Home())`), and `ConfinementResidue` is still the one-line
+delegation to `winlabel.Residue()` with its doc comment kept.
+
+**(b) `journalDir` is EXPORTED as `JournalDir`** for the same reason: `confiner_windows_test.go`
+calls `labelJournalDir(home)` at `:371` and `:1024`, and the plan forbids rewriting those bodies
+beyond identifier renames. Also a permanent D6 export, also named in doc.go.
+
+**(c) Three TRANSITIONAL exports** (item 1's NOTES(a) pattern — the plan's name with the leading
+letter capitalised, unexported again by the item that removes the last `platform` caller):
+`RecordEntry` and `UnwindEntry`, called by `journalLabel`/`unwindRootLabel` in
+`confiner_windows.go` — **item 4** deletes both wrappers and lowercases these two to
+`recordEntry`/`unwindEntry`; and `SiblingJournals`, called by `revertSparingLiveSiblings` —
+**item 5** moves that function and lowercases it to `siblingJournals`. Item 6's acceptance should
+confirm all three are gone.
+
+**(d) The journal-identifier renames in `confiner_windows_test.go` landed HERE, not in item 5.**
+This item deletes the declarations, so both the `GOOS=windows go test -c` gate and this item's own
+acceptance grep (`internal/platform/*.go` matches `_test.go` too) require them now. Renamed:
+`labelJournal`→`winlabel.Record`, `labelJournalEntry`→`winlabel.Entry`,
+`labelJournalPath`→`winlabel.JournalPath`, `labelJournalDir`→`winlabel.JournalDir`,
+`writeLabelJournal`→`winlabel.WriteJournal`, `readLabelJournal`→`winlabel.ReadJournal`,
+`listLabelJournals`→`winlabel.ListJournals`, `confinementResidue`→`winlabel.ResidueIn`,
+`priorLabels()`→`PriorLabels()`. **No assertion, scenario or comment changed** beyond those
+identifiers. Item 5's remaining share is the `readLabelSDDL`/`setLabelSDDL`/`processAlive` set.
+The six retention/revert tests in `winconfine_test.go` (item 3's) were renamed here for the same
+compile reason; they are otherwise untouched and still move in item 3.
+
+**(e) `ResidueNotice` → `residueNotice`**, as item 1's NOTES(a) assigned to this item.
+`DescendantDecision`'s doc comment in `sddl.go` said "remains `journalLabelEntry`'s decision" and
+now says `RecordEntry`'s — a staleness this item's rename created.
+
+**(f) Small doc edits:** `Record`'s doc gains one sentence naming its JSON tags as the on-disk
+compatibility surface (the item's own rationale for keeping them), and `Record`'s methods take
+receiver `r` rather than the old `j`, which item 4's `*Journal` needs.
 
 The biggest single chunk (~370 lines) and the reason the file is 804 lines long. Still free
 functions at this point: the stateful `Journal` type is item 4, so this item is a pure move and

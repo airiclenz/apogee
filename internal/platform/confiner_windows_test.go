@@ -368,7 +368,7 @@ func TestWindowsUnwritableJournalRefusesToLabel(t *testing.T) {
 	// the root's prior label and writing the first new one, so this pins the ordering ("journal
 	// first, label second") as well as the fail-closed outcome.
 	home := t.TempDir()
-	if err := os.WriteFile(labelJournalDir(home), []byte("not a directory"), 0o600); err != nil {
+	if err := os.WriteFile(winlabel.JournalDir(home), []byte("not a directory"), 0o600); err != nil {
 		t.Fatalf("occupy the journal directory's path with a file: %v", err)
 	}
 
@@ -523,15 +523,15 @@ func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
 
 	// The ON-DISK journal — what a crash recovery would replay — carries the prior
 	// verbatim for the child, beside the root's own entry.
-	journals := listLabelJournals(home)
+	journals := winlabel.ListJournals(home)
 	if len(journals) != 1 {
 		t.Fatalf("journals = %v, want exactly one", journals)
 	}
-	onDisk, err := readLabelJournal(journals[0])
+	onDisk, err := winlabel.ReadJournal(journals[0])
 	if err != nil {
 		t.Fatalf("read journal %q: %v", journals[0], err)
 	}
-	var childEntry *labelJournalEntry
+	var childEntry *winlabel.Entry
 	for i := range onDisk.Entries {
 		if strings.EqualFold(onDisk.Entries[i].Path, child) {
 			childEntry = &onDisk.Entries[i]
@@ -570,7 +570,7 @@ func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
 			t.Errorf("%q still carries a mandatory label after teardown: %q", path, label)
 		}
 	}
-	if left := listLabelJournals(home); len(left) != 0 {
+	if left := winlabel.ListJournals(home); len(left) != 0 {
 		t.Errorf("journals = %v after teardown, want the fully reverted journal retired", left)
 	}
 }
@@ -617,15 +617,15 @@ func TestWindowsUnreadablePriorDescendantIsNotLabelled(t *testing.T) {
 
 	// The journal — in memory and the on-disk record a crash recovery would replay — carries
 	// NO entry for the child: an entry could only describe a prior the read never delivered.
-	journals := listLabelJournals(home)
+	journals := winlabel.ListJournals(home)
 	if len(journals) != 1 {
 		t.Fatalf("journals = %v, want exactly one", journals)
 	}
-	onDisk, err := readLabelJournal(journals[0])
+	onDisk, err := winlabel.ReadJournal(journals[0])
 	if err != nil {
 		t.Fatalf("read journal %q: %v", journals[0], err)
 	}
-	for _, j := range []labelJournal{onDisk, c.journal} {
+	for _, j := range []winlabel.Record{onDisk, c.journal} {
 		for _, entry := range j.Entries {
 			if strings.EqualFold(entry.Path, child) {
 				t.Errorf("journal entry %+v names the unreadable-prior child; nothing may be journalled for a path the walk skipped", entry)
@@ -743,7 +743,7 @@ func TestWindowsUnclearableDescendantKeepsTheJournal(t *testing.T) {
 	if err == nil {
 		t.Fatal("Close reported success while a descendant kept its Low label; the journal would be retired over live residue")
 	}
-	if journals := listLabelJournals(home); len(journals) != 1 {
+	if journals := winlabel.ListJournals(home); len(journals) != 1 {
 		t.Fatalf("journals = %v after the failed revert, want the journal kept so the next run retries", journals)
 	}
 
@@ -755,7 +755,7 @@ func TestWindowsUnclearableDescendantKeepsTheJournal(t *testing.T) {
 	if label, _ := readLabelSDDL(child); label != "" {
 		t.Errorf("child still labelled %q after recovery; the kept journal must let the next run finish the revert", label)
 	}
-	if left := listLabelJournals(home); len(left) != 0 {
+	if left := winlabel.ListJournals(home); len(left) != 0 {
 		t.Errorf("journals = %v after recovery, want the fully reverted journal retired", left)
 	}
 }
@@ -791,9 +791,9 @@ func TestWindowsDeletedPriorLabelledPathDoesNotWedgeTheRevert(t *testing.T) {
 	}
 	// The journal really carries a restore obligation for the child — otherwise the delete
 	// below would prove nothing.
-	prior, found := c.journal.priorLabels()[child]
+	prior, found := c.journal.PriorLabels()[child]
 	if !found || prior == "" {
-		t.Fatalf("journal priors = %v; the foreign prior of %q was not journalled", c.journal.priorLabels(), child)
+		t.Fatalf("journal priors = %v; the foreign prior of %q was not journalled", c.journal.PriorLabels(), child)
 	}
 
 	// Routine workspace activity: the (simulated) agent deletes the prior-labelled file.
@@ -805,14 +805,14 @@ func TestWindowsDeletedPriorLabelledPathDoesNotWedgeTheRevert(t *testing.T) {
 		t.Fatalf("Close = %v; a vanished prior-labelled path must not fail the revert", err)
 	}
 	closed = true
-	if left := listLabelJournals(home); len(left) != 0 {
+	if left := winlabel.ListJournals(home); len(left) != 0 {
 		t.Errorf("journals = %v after teardown, want the journal retired — the revert is complete", left)
 	}
 	if label, err := readLabelSDDL(ws); err != nil || label != "" {
 		t.Errorf("root label = %q (err %v) after teardown, want the disk clean", label, err)
 	}
-	if got := confinementResidue(home); got != "" {
-		t.Errorf("confinementResidue = %q after teardown, want nothing outstanding", got)
+	if got := winlabel.ResidueIn(home); got != "" {
+		t.Errorf("winlabel.ResidueIn = %q after teardown, want nothing outstanding", got)
 	}
 }
 
@@ -861,9 +861,9 @@ func TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry(t *testing.T) {
 			t.Errorf("in-memory journal entry %+v survives the refused box; a phantom entry alarms forever", entry)
 		}
 	}
-	journals := listLabelJournals(home)
+	journals := winlabel.ListJournals(home)
 	for _, path := range journals {
-		onDisk, readErr := readLabelJournal(path)
+		onDisk, readErr := winlabel.ReadJournal(path)
 		if readErr != nil {
 			t.Fatalf("read journal %q: %v", path, readErr)
 		}
@@ -885,8 +885,8 @@ func TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry(t *testing.T) {
 	for _, path := range journals {
 		rewriteJournalPID(t, home, path)
 	}
-	if got := confinementResidue(home); got != "" {
-		t.Errorf("confinementResidue = %q, want nothing — the refused box left no label behind", got)
+	if got := winlabel.ResidueIn(home); got != "" {
+		t.Errorf("winlabel.ResidueIn = %q, want nothing — the refused box left no label behind", got)
 	}
 }
 
@@ -907,7 +907,7 @@ func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
 		t.Fatalf("box root label = %q, want Low before the simulated crash", label)
 	}
-	journals := listLabelJournals(home)
+	journals := winlabel.ListJournals(home)
 	if len(journals) != 1 {
 		t.Fatalf("journals = %v, want exactly one written BEFORE the labels", journals)
 	}
@@ -921,11 +921,11 @@ func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	if label, _ := readLabelSDDL(ws); label != "" {
 		t.Errorf("%q still labelled %q after recovery; the next NewConfiner must finish the restore", ws, label)
 	}
-	if left := listLabelJournals(home); len(left) != 0 {
+	if left := winlabel.ListJournals(home); len(left) != 0 {
 		t.Errorf("journals = %v after recovery, want the recovered one removed", left)
 	}
-	if got := confinementResidue(home); got != "" {
-		t.Errorf("confinementResidue = %q after recovery, want nothing outstanding", got)
+	if got := winlabel.ResidueIn(home); got != "" {
+		t.Errorf("winlabel.ResidueIn = %q after recovery, want nothing outstanding", got)
 	}
 }
 
@@ -948,7 +948,7 @@ func TestWindowsReportConstructionLeavesAnOutstandingJournalAlone(t *testing.T) 
 	if err := crashed.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
 		t.Fatalf("labelBox: %v", err)
 	}
-	journals := listLabelJournals(home)
+	journals := winlabel.ListJournals(home)
 	if len(journals) != 1 {
 		t.Fatalf("journals = %v, want exactly one written BEFORE the labels", journals)
 	}
@@ -959,14 +959,14 @@ func TestWindowsReportConstructionLeavesAnOutstandingJournalAlone(t *testing.T) 
 	report := newTokenConfinerWithoutRecovery(home)
 	t.Cleanup(func() { _ = report.Close() })
 
-	if left := listLabelJournals(home); len(left) != 1 {
+	if left := winlabel.ListJournals(home); len(left) != 1 {
 		t.Errorf("journals = %v after the report backend was constructed, want the outstanding one untouched", left)
 	}
 	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
 		t.Errorf("the report constructor reverted %q (label = %q); the host half writes nothing", ws, label)
 	}
-	if got := confinementResidue(home); !strings.Contains(got, ws) {
-		t.Errorf("confinementResidue = %q; want the interrupted run still reportable after the report backend exists", got)
+	if got := winlabel.ResidueIn(home); !strings.Contains(got, ws) {
+		t.Errorf("winlabel.ResidueIn = %q; want the interrupted run still reportable after the report backend exists", got)
 	}
 
 	// And the deferral costs nothing: the next SESSION constructor finishes the restore, which
@@ -995,15 +995,15 @@ func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
 	}
 	// Re-own the journal by a different but definitely-alive PID (this process's parent
 	// stand-in: our own PID is skipped by identity, so use the live-process branch instead).
-	rewriteJournalOwner(t, home, listLabelJournals(home)[0], liveForeignPID(t))
+	rewriteJournalOwner(t, home, winlabel.ListJournals(home)[0], liveForeignPID(t))
 
 	second := newTokenConfiner(home) // a second apogee starting up
 	t.Cleanup(func() { _ = second.Close() })
 	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
 		t.Errorf("a second apogee reverted a LIVE run's label (%q); its session would be un-fenced", label)
 	}
-	if got := confinementResidue(home); !strings.Contains(got, ws) {
-		t.Errorf("confinementResidue = %q; want the outstanding journal reported off-session", got)
+	if got := winlabel.ResidueIn(home); !strings.Contains(got, ws) {
+		t.Errorf("winlabel.ResidueIn = %q; want the outstanding journal reported off-session", got)
 	}
 }
 
@@ -1014,14 +1014,14 @@ func TestWindowsRecoveryLeavesAnUndecodableJournalInPlace(t *testing.T) {
 	// mutation it once described. The SESSION constructor is the one code path that removes
 	// journals at construction time, so it is the constructor under test (the report variant
 	// touches nothing by design): the file must survive construction byte-for-byte, and
-	// confinementResidue must still name it afterwards — that report is the only path by which
+	// winlabel.ResidueIn must still name it afterwards — that report is the only path by which
 	// this state ever reaches a human, and a plausible "clean up what we can't decode" refactor
 	// would make it permanently unreachable while passing every decode-path test.
 	home := t.TempDir()
 	// A dead PID in the file name; the shield under test is the undecodability alone, since
 	// recovery never gets far enough to consult liveness for a journal it cannot read.
-	garbage := labelJournalPath(home, 909)
-	if err := os.MkdirAll(labelJournalDir(home), 0o700); err != nil {
+	garbage := winlabel.JournalPath(home, 909)
+	if err := os.MkdirAll(winlabel.JournalDir(home), 0o700); err != nil {
 		t.Fatalf("create journal dir: %v", err)
 	}
 	seed := []byte(`{"pid":909,"entries":[{"path":"C:\\wo`)
@@ -1039,9 +1039,9 @@ func TestWindowsRecoveryLeavesAnUndecodableJournalInPlace(t *testing.T) {
 	if string(kept) != string(seed) {
 		t.Errorf("the undecodable journal was rewritten to %q; recovery must leave what it cannot decode untouched", kept)
 	}
-	got := confinementResidue(home)
+	got := winlabel.ResidueIn(home)
 	if !strings.Contains(got, "unreadable") || !strings.Contains(got, garbage) {
-		t.Errorf("confinementResidue = %q; want the unreadable journal %q still reportable after construction", got, garbage)
+		t.Errorf("winlabel.ResidueIn = %q; want the unreadable journal %q still reportable after construction", got, garbage)
 	}
 }
 
@@ -1072,9 +1072,9 @@ func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 	}
 
 	pid, kill := liveChildPID(t)
-	siblingPath := labelJournalPath(home, pid)
-	sibling := labelJournal{PID: pid, Entries: []labelJournalEntry{{Path: ws, Root: true}}}
-	if err := writeLabelJournal(siblingPath, sibling); err != nil {
+	siblingPath := winlabel.JournalPath(home, pid)
+	sibling := winlabel.Record{PID: pid, Entries: []winlabel.Entry{{Path: ws, Root: true}}}
+	if err := winlabel.WriteJournal(siblingPath, sibling); err != nil {
 		t.Fatalf("plant the sibling journal: %v", err)
 	}
 
@@ -1088,7 +1088,7 @@ func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 	if label, _ := readLabelSDDL(ws); !strings.Contains(label, ";LW)") {
 		t.Errorf("shared root label = %q after the first session's Close; the live sibling's box was un-fenced", label)
 	}
-	left := listLabelJournals(home)
+	left := winlabel.ListJournals(home)
 	if len(left) != 1 || !strings.EqualFold(left[0], siblingPath) {
 		t.Errorf("journals = %v after Close, want only the live sibling's %q — the first session's own journal still retires", left, siblingPath)
 	}
@@ -1101,7 +1101,7 @@ func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 	if label, _ := readLabelSDDL(ws); label != "" {
 		t.Errorf("%q still labelled %q after the sibling died; recovery must clear a root no live session claims", ws, label)
 	}
-	if left := listLabelJournals(home); len(left) != 0 {
+	if left := winlabel.ListJournals(home); len(left) != 0 {
 		t.Errorf("journals = %v after recovery, want none outstanding", left)
 	}
 }
@@ -1147,13 +1147,13 @@ func TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown(t *testing.T) {
 	if err := first.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
 		t.Fatalf("labelBox: %v", err)
 	}
-	if prior, found := first.journal.priorLabels()[ws]; !found || prior != foreignPrior {
+	if prior, found := first.journal.PriorLabels()[ws]; !found || prior != foreignPrior {
 		t.Fatalf("journalled prior = %q (found %v), want the planted descriptor %q verbatim", prior, found, foreignPrior)
 	}
 
 	pid, kill := liveChildPID(t)
-	siblingPath := labelJournalPath(home, pid)
-	if err := writeLabelJournal(siblingPath, labelJournal{PID: pid, Entries: []labelJournalEntry{{Path: ws, Root: true}}}); err != nil {
+	siblingPath := winlabel.JournalPath(home, pid)
+	if err := winlabel.WriteJournal(siblingPath, winlabel.Record{PID: pid, Entries: []winlabel.Entry{{Path: ws, Root: true}}}); err != nil {
 		t.Fatalf("plant the sibling journal: %v", err)
 	}
 
@@ -1168,8 +1168,8 @@ func TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown(t *testing.T) {
 	if label, _ := readLabelSDDL(ws); !winlabel.IsLowLabel(label) {
 		t.Fatalf("shared root label = %q after the first session's Close, want the sibling's Low fence untouched", label)
 	}
-	ownPath := labelJournalPath(home, os.Getpid())
-	kept, err := readLabelJournal(ownPath)
+	ownPath := winlabel.JournalPath(home, os.Getpid())
+	kept, err := winlabel.ReadJournal(ownPath)
 	if err != nil {
 		t.Fatalf("the first session's journal did not survive the handoff: %v", err)
 	}
@@ -1195,11 +1195,11 @@ func TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown(t *testing.T) {
 	if restored != foreignPrior {
 		t.Errorf("label after recovery = %q, want the prior %q back verbatim", restored, foreignPrior)
 	}
-	if left := listLabelJournals(home); len(left) != 0 {
+	if left := winlabel.ListJournals(home); len(left) != 0 {
 		t.Errorf("journals = %v after recovery, want both retired — the handoff must not linger once discharged", left)
 	}
-	if got := confinementResidue(home); got != "" {
-		t.Errorf("confinementResidue = %q after recovery, want nothing outstanding", got)
+	if got := winlabel.ResidueIn(home); got != "" {
+		t.Errorf("winlabel.ResidueIn = %q after recovery, want nothing outstanding", got)
 	}
 }
 
@@ -1258,15 +1258,15 @@ func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 		t.Fatalf("a second backend could not label the already-labelled box: %v", err)
 	}
 
-	journals := listLabelJournals(home)
+	journals := winlabel.ListJournals(home)
 	if len(journals) != 1 {
 		t.Fatalf("journals under %q = %v, want exactly one", home, journals)
 	}
-	onDisk, err := readLabelJournal(journals[0])
+	onDisk, err := winlabel.ReadJournal(journals[0])
 	if err != nil {
 		t.Fatalf("read journal %q: %v", journals[0], err)
 	}
-	for _, j := range []labelJournal{onDisk, second.journal} {
+	for _, j := range []winlabel.Record{onDisk, second.journal} {
 		for _, entry := range j.Entries {
 			if winlabel.IsLowLabel(entry.PriorSDDL) {
 				t.Errorf("journal entry %+v records apogee's own Low label as prior state; the revert would put it back", entry)
@@ -1321,7 +1321,7 @@ func rewriteJournalPID(t *testing.T, home, path string) {
 // rewriteJournalOwner rewrites a journal under the PID-named file its new owner would use.
 func rewriteJournalOwner(t *testing.T, home, path string, pid int) {
 	t.Helper()
-	journal, err := readLabelJournal(path)
+	journal, err := winlabel.ReadJournal(path)
 	if err != nil {
 		t.Fatalf("read journal %q: %v", path, err)
 	}
@@ -1329,7 +1329,7 @@ func rewriteJournalOwner(t *testing.T, home, path string, pid int) {
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove journal %q: %v", path, err)
 	}
-	if err := writeLabelJournal(labelJournalPath(home, pid), journal); err != nil {
+	if err := winlabel.WriteJournal(winlabel.JournalPath(home, pid), journal); err != nil {
 		t.Fatalf("rewrite journal: %v", err)
 	}
 }

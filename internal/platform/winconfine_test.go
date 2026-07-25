@@ -3,7 +3,6 @@ package platform
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -273,104 +272,6 @@ func TestWindowsNetworkDenyDecisionFailsClosed(t *testing.T) {
 	}
 }
 
-func TestLabelJournalRoundTripAndAccessors(t *testing.T) {
-	t.Parallel()
-
-	home := t.TempDir()
-	path := labelJournalPath(home, 4242)
-	journal := labelJournal{
-		PID: 4242,
-		Entries: []labelJournalEntry{
-			{Path: `C:\work`, Root: true},
-			{Path: `D:\cache`, Root: true, PriorSDDL: "S:AI(ML;OICI;NW;;;ME)"},
-			{Path: `C:\work\downloaded.txt`, PriorSDDL: "S:AI(ML;;NW;;;LW)"},
-		},
-	}
-	if err := writeLabelJournal(path, journal); err != nil {
-		t.Fatalf("writeLabelJournal: %v", err)
-	}
-
-	got, err := readLabelJournal(path)
-	if err != nil {
-		t.Fatalf("readLabelJournal: %v", err)
-	}
-	if got.PID != journal.PID || len(got.Entries) != len(journal.Entries) {
-		t.Fatalf("round-trip mismatch: got %+v, want %+v", got, journal)
-	}
-
-	// roots() drives the teardown walk; priorLabels() drives what is put back afterwards.
-	roots := got.roots()
-	if len(roots) != 2 || roots[0] != `C:\work` || roots[1] != `D:\cache` {
-		t.Errorf("roots() = %v, want the two journalled box roots", roots)
-	}
-	priors := got.priorLabels()
-	if len(priors) != 2 || priors[`C:\work\downloaded.txt`] != "S:AI(ML;;NW;;;LW)" {
-		t.Errorf("priorLabels() = %v, want the two pre-existing descriptors", priors)
-	}
-
-	// listLabelJournals finds it by name, and ignores anything else in the directory.
-	if err := os.WriteFile(filepath.Join(labelJournalDir(home), "notes.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatalf("seed stray file: %v", err)
-	}
-	found := listLabelJournals(home)
-	if len(found) != 1 || found[0] != path {
-		t.Errorf("listLabelJournals = %v, want just %q", found, path)
-	}
-}
-
-func TestWriteLabelJournalPublishesAtomically(t *testing.T) {
-	t.Parallel()
-
-	// The journal is rewritten every time the label pass discovers something new, so an
-	// in-place truncate would leave a window in which the file on disk describes neither the
-	// old set of labels nor the new one. The write therefore goes to a temp file and is
-	// renamed over the journal: the round trip below reads back the SECOND write whole, and
-	// the directory holds exactly one file afterwards — no temp debris a reader could trip on.
-	home := t.TempDir()
-	path := labelJournalPath(home, 77)
-
-	first := labelJournal{PID: 77, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}}
-	if err := writeLabelJournal(path, first); err != nil {
-		t.Fatalf("writeLabelJournal (create): %v", err)
-	}
-	second := labelJournal{PID: 77, Entries: []labelJournalEntry{
-		{Path: `C:\work`, Root: true},
-		{Path: `C:\work\vendor`, PriorSDDL: "S:AI(ML;;NW;;;ME)"},
-	}}
-	if err := writeLabelJournal(path, second); err != nil {
-		t.Fatalf("writeLabelJournal (replace): %v", err)
-	}
-
-	got, err := readLabelJournal(path)
-	if err != nil {
-		t.Fatalf("readLabelJournal after the replacing write: %v", err)
-	}
-	if len(got.Entries) != 2 || got.Entries[1].Path != `C:\work\vendor` {
-		t.Errorf("journal = %+v, want the second write's entries whole", got)
-	}
-
-	entries, err := os.ReadDir(labelJournalDir(home))
-	if err != nil {
-		t.Fatalf("read the journal dir: %v", err)
-	}
-	if len(entries) != 1 || filepath.Join(labelJournalDir(home), entries[0].Name()) != path {
-		t.Errorf("journal dir holds %v, want only %q — a temp file left behind is debris", entries, path)
-	}
-
-	// Even if debris DID survive a crash, it is not a journal: the name matches neither half
-	// of the journal naming rule, so nothing lists, reads or reports it.
-	debris := filepath.Join(labelJournalDir(home), labelJournalTempPrefix+"1234"+labelJournalTempSuffix)
-	if err := os.WriteFile(debris, []byte("half a journal"), 0o600); err != nil {
-		t.Fatalf("seed temp debris: %v", err)
-	}
-	if found := listLabelJournals(home); len(found) != 1 || found[0] != path {
-		t.Errorf("listLabelJournals = %v, want just %q", found, path)
-	}
-	if got := confinementResidue(home); strings.Contains(got, "unreadable") || strings.Contains(got, debris) {
-		t.Errorf("confinementResidue = %q; temp debris must not be reported as an unreadable journal", got)
-	}
-}
-
 func TestRetireLabelJournalKeepsTheFileWhenTheRevertFails(t *testing.T) {
 	t.Parallel()
 
@@ -405,14 +306,14 @@ func TestRetireLabelJournalKeepsTheFileWhenTheRevertFails(t *testing.T) {
 			t.Parallel()
 
 			home := t.TempDir()
-			path := labelJournalPath(home, 1234)
-			journal := labelJournal{PID: 1234, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}}
-			if err := writeLabelJournal(path, journal); err != nil {
+			path := winlabel.JournalPath(home, 1234)
+			journal := winlabel.Record{PID: 1234, Entries: []winlabel.Entry{{Path: `C:\work`, Root: true}}}
+			if err := winlabel.WriteJournal(path, journal); err != nil {
 				t.Fatalf("seed journal: %v", err)
 			}
 
-			var seen labelJournal
-			_, err := retireLabelJournal(path, journal, func(j labelJournal) ([]labelJournalEntry, error) {
+			var seen winlabel.Record
+			_, err := retireLabelJournal(path, journal, func(j winlabel.Record) ([]winlabel.Entry, error) {
 				seen = j
 				return nil, tt.revertErr
 			})
@@ -439,18 +340,18 @@ func TestRetireLabelJournalWithoutAJournalFile(t *testing.T) {
 
 	// A backend with no journal location (no resolvable user profile) has nothing to remove,
 	// so the revert outcome passes straight through — in both directions.
-	if _, err := retireLabelJournal("", labelJournal{}, func(labelJournal) ([]labelJournalEntry, error) { return nil, nil }); err != nil {
+	if _, err := retireLabelJournal("", winlabel.Record{}, func(winlabel.Record) ([]winlabel.Entry, error) { return nil, nil }); err != nil {
 		t.Errorf("retireLabelJournal(\"\") = %v, want nil", err)
 	}
 	sentinel := errors.New("revert failed")
-	if _, err := retireLabelJournal("", labelJournal{}, func(labelJournal) ([]labelJournalEntry, error) { return nil, sentinel }); !errors.Is(err, sentinel) {
+	if _, err := retireLabelJournal("", winlabel.Record{}, func(winlabel.Record) ([]winlabel.Entry, error) { return nil, sentinel }); !errors.Is(err, sentinel) {
 		t.Errorf("retireLabelJournal(\"\") = %v, want the revert error", err)
 	}
 
 	// An already-absent journal file is not a failure: recovery may run twice over the same
 	// home, and the second pass must not invent an error out of work already done.
-	gone := labelJournalPath(t.TempDir(), 7)
-	if _, err := retireLabelJournal(gone, labelJournal{}, func(labelJournal) ([]labelJournalEntry, error) { return nil, nil }); err != nil {
+	gone := winlabel.JournalPath(t.TempDir(), 7)
+	if _, err := retireLabelJournal(gone, winlabel.Record{}, func(winlabel.Record) ([]winlabel.Entry, error) { return nil, nil }); err != nil {
 		t.Errorf("retireLabelJournal on a missing file = %v, want nil", err)
 	}
 }
@@ -467,17 +368,17 @@ func TestRetireLabelJournalRewritesTheFileToTheHandedOffEntries(t *testing.T) {
 	// backend keeps its in-memory journal in step and a repeated Close converges instead of
 	// deleting the handoff record.
 	home := t.TempDir()
-	path := labelJournalPath(home, 4321)
-	journal := labelJournal{PID: 4321, Entries: []labelJournalEntry{
+	path := winlabel.JournalPath(home, 4321)
+	journal := winlabel.Record{PID: 4321, Entries: []winlabel.Entry{
 		{Path: `C:\work`, Root: true, PriorSDDL: "S:AI(ML;OICI;NW;;;ME)"},
 		{Path: `C:\scratch`, Root: true},
 	}}
-	if err := writeLabelJournal(path, journal); err != nil {
+	if err := winlabel.WriteJournal(path, journal); err != nil {
 		t.Fatalf("seed journal: %v", err)
 	}
 
-	handoff := []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: "S:AI(ML;OICI;NW;;;ME)"}}
-	remaining, err := retireLabelJournal(path, journal, func(labelJournal) ([]labelJournalEntry, error) {
+	handoff := []winlabel.Entry{{Path: `C:\work`, Root: true, PriorSDDL: "S:AI(ML;OICI;NW;;;ME)"}}
+	remaining, err := retireLabelJournal(path, journal, func(winlabel.Record) ([]winlabel.Entry, error) {
 		return handoff, nil
 	})
 	if err != nil {
@@ -487,7 +388,7 @@ func TestRetireLabelJournalRewritesTheFileToTheHandedOffEntries(t *testing.T) {
 		t.Fatalf("remaining = %+v, want the handed-off entry back verbatim", remaining)
 	}
 
-	kept, err := readLabelJournal(path)
+	kept, err := winlabel.ReadJournal(path)
 	if err != nil {
 		t.Fatalf("the journal did not survive the handoff: %v", err)
 	}
@@ -500,7 +401,7 @@ func TestRetireLabelJournalRewritesTheFileToTheHandedOffEntries(t *testing.T) {
 
 	// With nothing handed off the same journal retires fully — the handoff is the ONLY thing
 	// that keeps a successfully reverted journal alive.
-	if remaining, err := retireLabelJournal(path, kept, func(labelJournal) ([]labelJournalEntry, error) {
+	if remaining, err := retireLabelJournal(path, kept, func(winlabel.Record) ([]winlabel.Entry, error) {
 		return nil, nil
 	}); err != nil || len(remaining) != 0 {
 		t.Fatalf("retireLabelJournal (final) = %+v, %v; want a full retirement", remaining, err)
@@ -524,7 +425,7 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 		foreignMedium = "S:AI(ML;OICI;NW;;;ME)"
 		foreignHigh   = "S:(ML;;NW;;;HI)"
 	)
-	journal := labelJournal{PID: 100, Entries: []labelJournalEntry{
+	journal := winlabel.Record{PID: 100, Entries: []winlabel.Entry{
 		{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
 		{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
 		{Path: `C:\scratch`, Root: true},
@@ -532,9 +433,9 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		siblings    []labelJournal
+		siblings    []winlabel.Record
 		wantRestore map[string]string
-		wantHandoff []labelJournalEntry
+		wantHandoff []winlabel.Entry
 	}{
 		{
 			name: "no_siblings_restores_everything",
@@ -545,30 +446,30 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 		},
 		{
 			name: "sibling_claim_on_the_shared_root_hands_off_the_root_prior_and_its_descendants",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\work`, Root: true}}},
 			},
 			wantRestore: map[string]string{},
-			wantHandoff: []labelJournalEntry{
+			wantHandoff: []winlabel.Entry{
 				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
 				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
 			},
 		},
 		{
 			name: "case_folded_claim_names_the_same_tree",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `c:\WORK`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `c:\WORK`, Root: true}}},
 			},
 			wantRestore: map[string]string{},
-			wantHandoff: []labelJournalEntry{
+			wantHandoff: []winlabel.Entry{
 				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
 				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
 			},
 		},
 		{
 			name: "claim_on_an_unrelated_root_hands_off_nothing",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\scratch`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\scratch`, Root: true}}},
 			},
 			wantRestore: map[string]string{
 				`C:\work`:                foreignMedium,
@@ -577,8 +478,8 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 		},
 		{
 			name: "a_sibling_prefix_root_is_not_a_containing_root",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\wo`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\wo`, Root: true}}},
 			},
 			wantRestore: map[string]string{
 				`C:\work`:                foreignMedium,
@@ -587,8 +488,8 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 		},
 		{
 			name: "a_siblings_prior_only_entry_claims_no_tree",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, PriorSDDL: foreignMedium}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\work`, PriorSDDL: foreignMedium}}},
 			},
 			wantRestore: map[string]string{
 				`C:\work`:                foreignMedium,
@@ -661,14 +562,14 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 	// journal also names. A spared root is not a failed revert — the sibling's own Root entry
 	// carries the clear obligation, so this journal may still retire — and a DEAD sibling
 	// spares nothing, because its roots are an interrupted run recovery clears anyway.
-	journal := labelJournal{PID: 100, Entries: []labelJournalEntry{
+	journal := winlabel.Record{PID: 100, Entries: []winlabel.Entry{
 		{Path: `C:\work`, Root: true},
 		{Path: `C:\scratch`, Root: true},
 	}}
 
 	tests := []struct {
 		name     string
-		siblings []labelJournal
+		siblings []winlabel.Record
 		live     map[int]bool
 		want     []string
 	}{
@@ -678,40 +579,40 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 		},
 		{
 			name: "live_sibling_spares_the_shared_root_only",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\work`, Root: true}}},
 			},
 			live: map[int]bool{200: true},
 			want: []string{`C:\scratch`},
 		},
 		{
 			name: "dead_sibling_spares_nothing",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\work`, Root: true}}},
 			},
 			want: []string{`C:\work`, `C:\scratch`},
 		},
 		{
 			name: "case_folded_spelling_names_the_same_root",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `c:\WORK`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `c:\WORK`, Root: true}}},
 			},
 			live: map[int]bool{200: true},
 			want: []string{`C:\scratch`},
 		},
 		{
 			name: "a_live_siblings_prior_only_entry_claims_no_root",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, PriorSDDL: "S:(ML;;NW;;;ME)"}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\work`, PriorSDDL: "S:(ML;;NW;;;ME)"}}},
 			},
 			live: map[int]bool{200: true},
 			want: []string{`C:\work`, `C:\scratch`},
 		},
 		{
 			name: "both_roots_claimed_by_live_siblings_spares_everything",
-			siblings: []labelJournal{
-				{PID: 200, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}},
-				{PID: 300, Entries: []labelJournalEntry{{Path: `C:\scratch`, Root: true}}},
+			siblings: []winlabel.Record{
+				{PID: 200, Entries: []winlabel.Entry{{Path: `C:\work`, Root: true}}},
+				{PID: 300, Entries: []winlabel.Entry{{Path: `C:\scratch`, Root: true}}},
 			},
 			live: map[int]bool{200: true, 300: true},
 			want: []string{},
@@ -736,40 +637,6 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 	}
 }
 
-func TestSiblingLabelJournalsExcludesOwnAndUndecodable(t *testing.T) {
-	t.Parallel()
-
-	// The revert's view of the OTHER sessions in the same home: everything but its own file,
-	// with an undecodable journal skipped — it names no owner to check and no roots to spare,
-	// and erring toward clearing is the safe direction (less privilege, never more).
-	home := t.TempDir()
-	own := labelJournalPath(home, 100)
-	if err := writeLabelJournal(own, labelJournal{PID: 100, Entries: []labelJournalEntry{{Path: `C:\work`, Root: true}}}); err != nil {
-		t.Fatalf("seed own journal: %v", err)
-	}
-	if err := writeLabelJournal(labelJournalPath(home, 200), labelJournal{PID: 200, Entries: []labelJournalEntry{{Path: `C:\other`, Root: true}}}); err != nil {
-		t.Fatalf("seed sibling journal: %v", err)
-	}
-	if err := os.WriteFile(labelJournalPath(home, 300), []byte("{not json"), 0o600); err != nil {
-		t.Fatalf("seed undecodable journal: %v", err)
-	}
-
-	got := siblingLabelJournals(home, own)
-	if len(got) != 1 || got[0].PID != 200 {
-		t.Fatalf("siblingLabelJournals = %+v, want only the decodable sibling (PID 200)", got)
-	}
-
-	// Windows paths are case-insensitive, so a differently-cased spelling of own is still own.
-	if got := siblingLabelJournals(home, strings.ToUpper(own)); len(got) != 1 || got[0].PID != 200 {
-		t.Errorf("siblingLabelJournals with upper-cased own = %+v, want the own journal still excluded", got)
-	}
-
-	// No home means no journals — the no-user-profile backend must not read a relative path.
-	if got := siblingLabelJournals("", own); got != nil {
-		t.Errorf("siblingLabelJournals(\"\") = %+v, want nil", got)
-	}
-}
-
 func TestConfinementTeardownNoticeDelegatesToWinlabel(t *testing.T) {
 	t.Parallel()
 
@@ -791,299 +658,6 @@ func TestWindowsLabelProgressNoticeDelegatesToWinlabel(t *testing.T) {
 	const root = `C:\work\proj`
 	if got, want := WindowsLabelProgressNotice(root), winlabel.ProgressNotice(root); got != want {
 		t.Errorf("WindowsLabelProgressNotice = %q; want winlabel.ProgressNotice's %q", got, want)
-	}
-}
-
-func TestConfinementResidueReportsOnlyForeignJournals(t *testing.T) {
-	t.Parallel()
-
-	home := t.TempDir()
-	if got := confinementResidue(home); got != "" {
-		t.Errorf("confinementResidue on a clean home = %q, want \"\" (there is nothing to report)", got)
-	}
-
-	// This process's own journal is the live session's fence, not residue: reporting it would
-	// tell a user their own running session had left labels behind.
-	if err := writeLabelJournal(labelJournalPath(home, os.Getpid()), labelJournal{
-		PID:     os.Getpid(),
-		Entries: []labelJournalEntry{{Path: `C:\mine`, Root: true}},
-	}); err != nil {
-		t.Fatalf("write own journal: %v", err)
-	}
-	if got := confinementResidue(home); got != "" {
-		t.Errorf("confinementResidue reported this process's own journal: %q", got)
-	}
-
-	// A journal from another process is the finding the host report exists to surface, and it
-	// must name both the affected path and the manual remedy.
-	if err := writeLabelJournal(labelJournalPath(home, os.Getpid()+1), labelJournal{
-		PID:     os.Getpid() + 1,
-		Entries: []labelJournalEntry{{Path: `C:\work\proj`, Root: true}},
-	}); err != nil {
-		t.Fatalf("write foreign journal: %v", err)
-	}
-	got := confinementResidue(home)
-	if !strings.Contains(got, `C:\work\proj`) {
-		t.Errorf("residue = %q; want it to name the still-labelled path", got)
-	}
-	if !strings.Contains(got, "icacls") {
-		t.Errorf("residue = %q; want it to name the manual remedy", got)
-	}
-}
-
-func TestConfinementResidueReportsAnUnreadableJournal(t *testing.T) {
-	t.Parallel()
-
-	// The worst state the journal directory can be in: a file that IS a journal by name but
-	// cannot be decoded. Recovery skips it — it has no roots to revert and no PID to check —
-	// so it sits on the disk forever, possibly describing labels that are really there. Before
-	// this, the residue report skipped it too, which made the one surface that could tell the
-	// user silent about precisely the case it exists for.
-	home := t.TempDir()
-	garbage := labelJournalPath(home, 909)
-	if err := os.MkdirAll(labelJournalDir(home), 0o700); err != nil {
-		t.Fatalf("create journal dir: %v", err)
-	}
-	if err := os.WriteFile(garbage, []byte(`{"pid":909,"entries":[{"path":"C:\\wo`), 0o600); err != nil {
-		t.Fatalf("seed a half-written journal: %v", err)
-	}
-
-	got := confinementResidue(home)
-	if !strings.Contains(got, "unreadable") || !strings.Contains(got, garbage) {
-		t.Fatalf("residue = %q; want it to name the unreadable journal %q", got, garbage)
-	}
-	if !strings.Contains(got, winlabel.Remedy) {
-		t.Errorf("residue = %q; want the manual remedy, which is the ONLY one for a journal no run can decode", got)
-	}
-
-	// A readable journal alongside it is still reported on its own terms: one finding must not
-	// swallow the other.
-	if err := writeLabelJournal(labelJournalPath(home, os.Getpid()+1), labelJournal{
-		PID:     os.Getpid() + 1,
-		Entries: []labelJournalEntry{{Path: `C:\work\proj`, Root: true}},
-	}); err != nil {
-		t.Fatalf("write foreign journal: %v", err)
-	}
-	got = confinementResidue(home)
-	if !strings.Contains(got, garbage) || !strings.Contains(got, `C:\work\proj`) {
-		t.Errorf("residue = %q; want both the unreadable journal and the still-labelled path", got)
-	}
-}
-
-func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
-	t.Parallel()
-
-	// A journal entry is an instruction to a future revert, so the one thing it must never say
-	// is "this path carried a Low label before the run" — apogee is the only thing that writes
-	// Low labels here, and restoring one is residue that puts itself back. The two ways that
-	// happens are a path journalled twice (the second read sees apogee's own label) and a prior
-	// read off a tree apogee (or a concurrent session) has already labelled, so both are decided
-	// here, on every OS, rather than only on a machine that can write a real SACL.
-	const (
-		foreignMedium = "S:AI(ML;;NW;;;ME)"
-		foreignHigh   = "S:(ML;OICI;NW;;;HI)"
-		ownInherited  = "S:AI(ML;OICIID;NW;;;LW)"
-		ownCanonical  = "S:(ML;;NW;;;S-1-16-4096)"
-	)
-
-	tests := []struct {
-		name        string
-		entries     []labelJournalEntry
-		entry       labelJournalEntry
-		wantChanged bool
-		wantEntries []labelJournalEntry
-	}{
-		{
-			name:        "first_root_is_recorded",
-			entry:       labelJournalEntry{Path: `C:\work`, Root: true},
-			wantChanged: true,
-			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true}},
-		},
-		{
-			name:        "foreign_prior_is_kept_verbatim",
-			entry:       labelJournalEntry{Path: `C:\work\vendor`, PriorSDDL: foreignMedium},
-			wantChanged: true,
-			wantEntries: []labelJournalEntry{{Path: `C:\work\vendor`, PriorSDDL: foreignMedium}},
-		},
-		{
-			name:        "foreign_root_prior_is_kept_verbatim",
-			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: foreignHigh},
-			wantChanged: true,
-			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignHigh}},
-		},
-		{
-			name:        "own_dir_label_as_root_prior_is_recorded_as_no_prior",
-			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: winlabel.DirSDDL},
-			wantChanged: true,
-			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true}},
-		},
-		{
-			name:  "own_file_label_on_a_descendant_is_not_recorded_at_all",
-			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: winlabel.FileSDDL},
-		},
-		{
-			name:  "inherited_own_label_on_a_descendant_is_not_recorded_at_all",
-			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: ownInherited},
-		},
-		{
-			name:  "canonical_low_sid_is_recognised_as_our_own",
-			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: ownCanonical},
-		},
-		{
-			name:        "duplicate_path_keeps_the_first_prior",
-			entries:     []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
-			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: winlabel.DirSDDL},
-			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
-		},
-		{
-			name:        "case_varied_duplicate_path_is_the_same_path",
-			entries:     []labelJournalEntry{{Path: `C:\Work`, Root: true}},
-			entry:       labelJournalEntry{Path: `c:\work`, Root: true, PriorSDDL: winlabel.DirSDDL},
-			wantEntries: []labelJournalEntry{{Path: `C:\Work`, Root: true}},
-		},
-		{
-			name:        "a_journalled_descendant_can_still_become_a_root",
-			entries:     []labelJournalEntry{{Path: `C:\work\vendor`, PriorSDDL: foreignMedium}},
-			entry:       labelJournalEntry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: winlabel.DirSDDL},
-			wantChanged: true,
-			wantEntries: []labelJournalEntry{{Path: `C:\work\vendor`, Root: true, PriorSDDL: foreignMedium}},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, changed := journalLabelEntry(tt.entries, tt.entry, winlabel.FoldPath)
-			if changed != tt.wantChanged {
-				t.Errorf("changed = %v, want %v (it decides whether the journal is flushed)", changed, tt.wantChanged)
-			}
-			if len(got) != len(tt.wantEntries) {
-				t.Fatalf("entries = %+v, want %+v", got, tt.wantEntries)
-			}
-			for i, want := range tt.wantEntries {
-				if got[i] != want {
-					t.Errorf("entries[%d] = %+v, want %+v", i, got[i], want)
-				}
-			}
-			for _, entry := range got {
-				if winlabel.IsLowLabel(entry.PriorSDDL) {
-					t.Errorf("entry %+v records a Low prior; the revert would re-apply apogee's own label", entry)
-				}
-			}
-		})
-	}
-}
-
-func TestJournalLabelEntryUsesTheInjectedFold(t *testing.T) {
-	t.Parallel()
-
-	// The fold is a parameter so the rule is provable off Windows: under a fold that treats two
-	// spellings as one path, the second spelling adds nothing.
-	entries := []labelJournalEntry{{Path: `C:\Work`, Root: true}}
-	if _, changed := journalLabelEntry(entries, labelJournalEntry{Path: `c:\WORK`, Root: true}, nil); changed {
-		t.Error("the default fold treated two case spellings of one path as two paths")
-	}
-	identity := func(p string) string { return p }
-	if _, changed := journalLabelEntry(entries, labelJournalEntry{Path: `c:\WORK`, Root: true}, identity); !changed {
-		t.Error("the injected fold was ignored; the helper is not honouring its seam")
-	}
-}
-
-func TestUnwindLabelEntry(t *testing.T) {
-	t.Parallel()
-
-	// labelBox's phantom-entry undo, proven on every OS: a root entry journalled ahead of a
-	// label write that then FAILED describes a mutation that never happened, and it must come
-	// out again — left in place, every later Close and recovery fails clearing a label that is
-	// not there, the journal is never retired, and ConfinementResidue alarms forever over a
-	// clean disk. The one exception is an entry recording a foreign prior, which is kept:
-	// ambiguity resolves toward keeping the record.
-	const foreignMedium = "S:AI(ML;;NW;;;ME)"
-
-	tests := []struct {
-		name        string
-		entries     []labelJournalEntry
-		path        string
-		wantRemoved bool
-		wantEntries []labelJournalEntry
-	}{
-		{
-			name:        "no_prior_root_entry_is_removed",
-			entries:     []labelJournalEntry{{Path: `C:\work`, Root: true}},
-			path:        `C:\work`,
-			wantRemoved: true,
-		},
-		{
-			name:        "foreign_prior_entry_is_kept",
-			entries:     []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
-			path:        `C:\work`,
-			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
-		},
-		{
-			name:        "unknown_path_removes_nothing",
-			entries:     []labelJournalEntry{{Path: `C:\other`, Root: true}},
-			path:        `C:\work`,
-			wantEntries: []labelJournalEntry{{Path: `C:\other`, Root: true}},
-		},
-		{
-			name:        "case_varied_spelling_is_the_same_path",
-			entries:     []labelJournalEntry{{Path: `C:\Work`, Root: true}},
-			path:        `c:\WORK`,
-			wantRemoved: true,
-		},
-		{
-			name: "only_the_named_entry_is_removed",
-			entries: []labelJournalEntry{
-				{Path: `C:\keep`, Root: true},
-				{Path: `C:\work`, Root: true},
-				{Path: `C:\keep\vendor`, PriorSDDL: foreignMedium},
-			},
-			path:        `C:\work`,
-			wantRemoved: true,
-			wantEntries: []labelJournalEntry{
-				{Path: `C:\keep`, Root: true},
-				{Path: `C:\keep\vendor`, PriorSDDL: foreignMedium},
-			},
-		},
-		{
-			name: "empty_journal_removes_nothing",
-			path: `C:\work`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, removed := unwindLabelEntry(tt.entries, tt.path, winlabel.FoldPath)
-			if removed != tt.wantRemoved {
-				t.Errorf("removed = %v, want %v (it decides whether the journal is re-flushed)", removed, tt.wantRemoved)
-			}
-			if len(got) != len(tt.wantEntries) {
-				t.Fatalf("entries = %+v, want %+v", got, tt.wantEntries)
-			}
-			for i, want := range tt.wantEntries {
-				if got[i] != want {
-					t.Errorf("entries[%d] = %+v, want %+v", i, got[i], want)
-				}
-			}
-		})
-	}
-}
-
-func TestUnwindLabelEntryUsesTheInjectedFold(t *testing.T) {
-	t.Parallel()
-
-	// The fold is a parameter so the rule is provable off Windows: under the default fold two
-	// case spellings are one path; under an injected identity fold they are two.
-	entries := []labelJournalEntry{{Path: `C:\Work`, Root: true}}
-	if _, removed := unwindLabelEntry(entries, `c:\WORK`, nil); !removed {
-		t.Error("the default fold treated two case spellings of one path as two paths")
-	}
-	identity := func(p string) string { return p }
-	if _, removed := unwindLabelEntry(entries, `c:\WORK`, identity); removed {
-		t.Error("the injected fold was ignored; the helper is not honouring its seam")
 	}
 }
 
