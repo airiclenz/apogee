@@ -371,7 +371,26 @@ in Auto with `confine=true` any more. Commit:
 
 ---
 
-## 5. Record it — ADR 0012 amendment, CONTEXT.md, docs, CHANGELOG, TODO
+## 5. Record it — ADR 0012 amendment, CONTEXT.md, docs, CHANGELOG, TODO — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): one assigned addition and three deviations. (a) **Assigned in-scope addition**
+(flagged by item 4's implementer and verifier, coordinator-assigned here):
+`docs/design/confinement-execution-contract.md` §4 now carries the split — the `3p-net` class
+definition beside `net` (which now reads "kind `network` **carrying** the marker"), a `3p-net` table
+row (Auto/`confine=true` ⇒ gate), the `unfiltered network reach` gate reason, the footnote and the
+load-bearing-column paragraph, plus a dated `> **Amended 2026-07-25**` blockquote following the
+section's own 2026-07-02 convention. (b) `internal/agent/doc.go` was **checked and left untouched**
+as the item permits — it describes the package's role and does not enumerate tool classes.
+(c) the review doc's premise is wrong: candidate **01 was never marked landed**, so there was no
+precedent style to copy. Chosen style: the stale "No candidate has been grilled yet" paragraph
+becomes a **Ledger** (01 landed 2026-07-24, 02 landed 2026-07-25, 03–07 outstanding), each of 01 and
+02 gets a one-line `✅ **LANDED <date>**` heading suffix (01 touched **only** for that line, so the
+doc is not half-honest), 02 gains a `Landed 2026-07-25` bullet recording that the funnel+marker
+variant was built rather than the card's "check in dispatch" sketch, and the now-false title line and
+`Recommended next step` are refreshed. 03–07 entries are untouched; the companion `.html` is left
+alone (the item names only the `.md`). (d) CONTEXT.md's guardrail list item **`web_search` API-key
+redaction** is renamed **network failure-message redaction** — the item mandates generalizing the
+clause, and keeping the old headword would have named one tool for a property all three now have.
 
 - **`docs/adr/0012-…md`** — append `## Amendment (2026-07-25) — url-safety is vouched-for by
   construction; an unvouched network tool gates`, following the shape of its existing

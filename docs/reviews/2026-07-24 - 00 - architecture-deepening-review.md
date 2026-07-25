@@ -1,4 +1,4 @@
-# Handoff — Architecture deepening review: 7 candidates, none yet grilled or implemented
+# Handoff — Architecture deepening review: 7 candidates (01 and 02 landed; 03–07 outstanding)
 
 Date: 2026-07-24
 Session type: **review only** (`/improve-codebase-architecture`). No code changed, no plan
@@ -18,10 +18,13 @@ and cross-checked the headline claims at file level. Output: **7 ranked deepenin
 a smaller-deepenings list**, framed in the depth glossary (module / interface / deep / shallow
 / seam / leverage / locality).
 
-**No candidate has been grilled yet.** The next session's job is step 3 of the skill: pick a
-candidate, walk its design tree, and land side-effects inline (CONTEXT.md term if a deepened
-module names a new concept; an ADR if the owner rejects a candidate for a load-bearing reason;
-a saved plan doc if it graduates to implementation — see *Suggested skills*).
+**Ledger (updated as candidates land).** **01 landed 2026-07-24**
+(`docs/plans/archived/2026-07-24 - 00 - turn-lifecycle-owner-plan.md`); **02 landed 2026-07-25**
+(`docs/plans/2026-07-25 - 00 - url-safety-choke-point-plan.md`). **03–07 are still outstanding and
+un-grilled** — for each of those the next session's job is step 3 of the skill: pick a candidate,
+walk its design tree, and land side-effects inline (CONTEXT.md term if a deepened module names a new
+concept; an ADR if the owner rejects a candidate for a load-bearing reason; a saved plan doc if it
+graduates to implementation — see *Suggested skills*).
 
 ## The spine is already deep — leave it alone
 
@@ -40,7 +43,7 @@ the deep pattern these already set."
 Evidence is file-level; line numbers marked ✓ were verified this session, others come from the
 Explore agents and should be spot-checked before acting.
 
-### 01 — Give the Turn a lifecycle owner · **Strong · TOP RECOMMENDATION**
+### 01 — Give the Turn a lifecycle owner · **Strong · TOP RECOMMENDATION** · ✅ **LANDED 2026-07-24**
 - **Files:** `internal/agent/loop.go` (`step`, `closeExchange`✓L754, `completeTurn`✓L763,
   `abandonTurn`✓L781, `cancelTurn`✓L807), `compact.go` (`emergencyFold`✓L205), `selfreg.go`
   (`endTurn`/`discardTurn`), `state.go` (`exchangeStart`).
@@ -60,7 +63,7 @@ Explore agents and should be spot-checked before acting.
 - **Related (smaller):** split `loop.go` (1172 LOC) — the construction cluster and the
   domain→wire translation cluster are deep modules trapped in the god-file.
 
-### 02 — One choke point for url-safety · **Strong**
+### 02 — One choke point for url-safety · **Strong** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/agent/resolution.go` (`classNetwork → resolveRun`), `dispatch.go`,
   `internal/tools/{web_fetch,http_request,web_search}.go` (✓ the only 3 with `CheckContext`),
   `internal/security/urlsafety.go`.
@@ -76,6 +79,14 @@ Explore agents and should be spot-checked before acting.
 - **Note:** strengthens ADR 0012's url-safety floor (no conflict). The **live** gap is a
   correctness matter — this card fixes the *shape*; run `/code-audit` to confirm/close the hole
   itself independently.
+- **Landed 2026-07-25** via `docs/plans/2026-07-25 - 00 - url-safety-choke-point-plan.md`, as the
+  *funnel* variant (a `networkTool` all three built-ins embed, not a dispatch pre-flight — a
+  dispatch check keyed on a declared URL list would still be a declaration). The funnel carries an
+  **unexported url-filter marker**, and the ladder split `classNetwork` (marked ⇒ auto-runs in Auto)
+  from `classThirdPartyNetwork` (unmarked ⇒ gates, reason `unfiltered network reach`), so
+  "url-filtered" is now true by construction. Recorded in **ADR 0012 amendment 2026-07-25** +
+  `confinement-execution-contract.md` §4. The separate `/code-audit` on the *live* gap is still
+  worth running; the shape now gives it one place to look.
 
 ### 03 — Hand the view structured tool results · **Strong**
 - **Files:** `internal/tui/toolpresent.go` (regexes ✓L243–246: `reReadRange`, `reWriteBytes`,
@@ -164,10 +175,13 @@ the owner's call; they are not yet staged.
 
 ## Recommended next step
 
-Grill **candidate 01** (Turn lifecycle owner) first — highest leverage, the `resolve()` yardstick
-is in the same package, no ADR conflict. Then 02 and 04 as the strongest lower-risk follow-ons
-("make X follow the deep pattern the codebase already trusts"). If the owner would rather start
-narrow, 05 is owner-pre-blessed and self-contained.
+*Originally:* grill **candidate 01** (Turn lifecycle owner) first — highest leverage, the `resolve()`
+yardstick is in the same package, no ADR conflict. Then 02 and 04 as the strongest lower-risk
+follow-ons ("make X follow the deep pattern the codebase already trusts"). If the owner would rather
+start narrow, 05 is owner-pre-blessed and self-contained.
+
+*As of 2026-07-25:* 01 and 02 have landed (see the ledger above), so the next pick is **04**
+(the Mechanism registration ritual), with 05 as the narrow self-contained alternative.
 
 ## Suggested skills
 

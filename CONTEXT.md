@@ -203,8 +203,9 @@ surface (Linux **landlock** applied pre-`execve` on the child; macOS **`sandbox-
 the child; Windows a restricted **low-integrity token** handed to process creation, with the box
 expressed as a mandatory label on the disk and reverted on teardown — one clean subprocess
 granularity on all three), **or** by Apogee's own
-**path-safety-to-workspace** for its own in-process write tools (a third-party in-process tool,
-whose scoping Apogee cannot vouch for, gates instead of running unsupervised). It is a **capability
+**path-safety-to-workspace** for its own in-process write tools **and url-safety for its own
+network tools** (a third-party tool of either kind, whose scoping Apogee cannot vouch for, gates
+instead of running unsupervised). It is a **capability
 matrix, not a one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`,
 …). In **Auto** the network is **open by default**, so **`AutoEligible()` requires filesystem
 confinement only** — Linux Auto needs landlock ABI ≥1 (kernel ≥5.13), not ABI v4. The unbounded
@@ -258,10 +259,13 @@ escaping symlink component swapped after the check is refused at write/read time
 (the network tools' `URLGuard` — scheme/host allow-deny plus a **default-on SSRF floor** that denies
 loopback / private / IMDS / link-local **plus** RFC-6598 CGNAT `100.64/10`, the whole `0.0.0.0/8`,
 TEST-NET / benchmark ranges, and NAT64-embedded private/loopback `64:ff9b::/96` **by resolved IP**,
-re-checked at dial time so DNS-rebinding is closed; tighten-only, never dissolvable by config),
-tool-argument-guard (incl. the **Dangerous-action guard** floor, the `http_request` header filter,
-a leading-`-` guard on git ref args, and **`web_search` API-key redaction** — only the bare endpoint
-host, never the key-bearing request URL, reaches a model-facing error), circuit-breaker, and a
+re-checked at dial time so DNS-rebinding is closed; tighten-only, never dissolvable by config —
+and applied through the **one network funnel** every one of Apogee's own network tools reaches the
+network through, so such a tool cannot reach the network unfiltered, and one that does not route
+through it is not vouched for and gates), tool-argument-guard (incl. the **Dangerous-action guard**
+floor, the `http_request` header filter, a leading-`-` guard on git ref args, and **network
+failure-message redaction** — every network tool's failure message names only the bare host, never
+the key-bearing request URL), circuit-breaker, and a
 **bounded audit log surfaced on the `EventSink`** (`domain.AuditEvent`, so the trail is observable —
 a sub-agent's records reach the parent observer at `Depth>0`, not lost with the discarded child).
 The human-in-the-loop model — distinct from Confinement (OS-level) and from the bench's Sandbox.

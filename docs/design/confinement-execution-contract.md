@@ -346,6 +346,13 @@ one level down (D2), for free, with no threading.
 > the ladder stage). See CONTEXT.md → **Resolution** and the 2026-07-02 clarification in ADR 0013.
 > The section number is kept because code comments cite "§4".
 
+> **Amended 2026-07-25 (url-safety choke point; ADR 0012 amendment 2026-07-25).** The **net** class
+> no longer means "declares `EffectNetwork`" — it means "declares it **and** carries the unexported
+> url-filter marker", which is obtainable only by embedding `internal/tools`' network funnel (the
+> single path from a tool to the network, which applies the host's `URLGuard`). An `EffectNetwork`
+> tool **without** the marker is the new **3p-net** class and **gates** in Auto, with its own gate
+> reason. Tighten-only; `confine=false` is unaffected.
+
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:
 
@@ -366,7 +373,10 @@ computed in a fixed, load-bearing order:
 
 Tool-classes: **RO** = `IsReadOnly`; **WS-write** = `workspaceScopedWriter` (§3); **subproc** =
 shell/exec subprocess tool (`terminal`/`python-exec`/`git`); **net** = `ExternalEffectTool` of kind
-`network`; **mcp** = `ExternalEffectTool` of kind `mcp`; **3p-write** = a write-capable tool that is
+`network` carrying the `urlFilteredNetworker` marker (Apogee's own — the marker is obtainable only by
+embedding `internal/tools`' network funnel, so it cannot exist without the `URLGuard`); **3p-net** =
+kind `network` **without** that marker (a third-party network tool whose URLs Apogee cannot vouch
+for); **mcp** = `ExternalEffectTool` of kind `mcp`; **3p-write** = a write-capable tool that is
 neither RO, WS-write, nor External (a third-party in-process writer Apogee cannot vouch for).
 
 Ladder-leaf outcomes: **run** = execute directly, no gate, no `Confine`; **confine** = execute inside
@@ -381,10 +391,11 @@ Ladder-leaf outcomes: **run** = execute directly, no gate, no `Confine`; **confi
 | **subproc** (caps sufficient) | refuse | gate | gate | **confine** | run |
 | **subproc** (caps **insufficient**) | refuse | gate | gate | **gate** ("confine if you can, gate if you can't") | run |
 | **net** (`web-fetch`/`http-request`) | refuse¹ | gate | gate | **run** (url-safety filtered) | run |
+| **3p-net** (no url-filter marker) | refuse¹ | gate | gate | **gate** (URLs unfiltered) | run |
 | **mcp** | refuse¹ | gate | gate | **gate** (server-grain allow-for-session) | run |
 | **3p-write** (can't vouch for scoping) | refuse | gate | gate | **gate** | run |
 
-¹ Plan filters to RO tools, so net/mcp tools are not even offered; a defensive call refuses.
+¹ Plan filters to RO tools, so net / 3p-net / mcp tools are not even offered; a defensive call refuses.
 `confine=false` is global-config-only, VM-only, prints a per-session startup warning, and **never**
 escapes the dangerous-action floor.
 
@@ -392,11 +403,14 @@ Reading the load-bearing column (**Auto · `confine=true`**, the default): a sub
 **OS-blocked**; an Apogee in-workspace write is **path-safety-bounded** (no Confine, no prompt); an
 out-of-workspace Apogee write **asks** (Apogee can inspect the path, so it can — unlike a subprocess);
 `web-fetch` **auto-runs** url-filtered (the network is open; a subprocess could `curl` the same host, and
-the native tool is the *safer* path); **MCP asks** (unfenceable server — the per-tool teeth, intact).
+the native tool is the *safer* path) while a network tool that does **not** route through the funnel
+**asks** (its URLs are unfiltered — the network analogue of the 3p-write row); **MCP asks**
+(unfenceable server — the per-tool teeth, intact).
 
 **A `Gate` carries `Reason` + `CacheKey`.** `Reason` is the human-facing why, mapped from the tool's
-class — `network reach` (net), `unconfinable MCP tool` (mcp), `subprocess execution (confinement
-unavailable on this host)` (subproc), `out-of-workspace write` (WS-write), `write` (3p-write); a
+class — `network reach` (net), `unfiltered network reach` (3p-net), `unconfinable MCP tool` (mcp),
+`subprocess execution (confinement unavailable on this host)` (subproc), `out-of-workspace write`
+(WS-write), `write` (3p-write); a
 Tier-2-forced gate overrides it with `dangerous-action guard forced approval`. `CacheKey` is the
 allow-for-session key — the **tool name** for every class **except mcp**, whose key is the **server
 grain** `mcp-server:<alias>` so approving one of a server's tools clears its siblings for the Session

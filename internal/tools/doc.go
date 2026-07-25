@@ -35,9 +35,14 @@
 // request), and web_search (DuckDuckGo by default; a config'd custom endpoint, or "off" to
 // disable) — in-process net/http
 // ExternalEffectTools of kind network (the disposition auto-runs them in Auto, url-filtered,
-// and routes them through ExternalEffects for the bench), each filtering every URL through a
-// security.URLGuard whose default-on, resolved-IP SSRF floor blocks loopback / private /
-// metadata addresses (pre-flight AND at dial time, closing DNS-rebinding). ask_user routes a
+// and routes them through ExternalEffects for the bench). They are url-filtered BECAUSE they
+// route through one funnel (network.go's networkTool.do, the single path from a tool to the
+// network), which applies the host's security.URLGuard — whose default-on, resolved-IP SSRF
+// floor blocks loopback / private / metadata addresses pre-flight AND at dial time, closing
+// DNS-rebinding — and renders every failure message host-scoped. Embedding the funnel is the
+// only way to obtain the unexported url-filter marker, and the disposition keys on that marker
+// rather than on the declared effect kind: a network tool without it gates in Auto instead of
+// running unattended (ADR 0012 Amendment 2026-07-25). ask_user routes a
 // free-text question to the host's Asker delegate (the public analogue of Approver); it is
 // ReadOnly (runs in Plan, mode-independent) and is registered only when an Asker is supplied
 // (NewDefaultRegistryWithHost threads the URLGuard, search endpoint, and Asker from Config).

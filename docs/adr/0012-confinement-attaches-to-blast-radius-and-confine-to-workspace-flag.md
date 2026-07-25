@@ -200,3 +200,56 @@ a smaller-scoped way to express one and a shorter route to making it, and nothin
 
 Implementation lives in [`docs/plans/auto-confinement-degradation-plan.md`](../plans/auto-confinement-degradation-plan.md);
 CONTEXT.md carries the term **Host acknowledgement**.
+
+## Amendment (2026-07-25) — url-safety is vouched-for by construction; an unvouched network tool gates
+
+**Why now.** The decision above scopes Auto's network auto-run to **Apogee's own** network tools:
+*"Apogee's own network tools (`web-fetch`, `http-request`) auto-run (filtered by url-safety)"*. The
+ladder, however, keyed that cell on the **declared effect kind** — any tool reporting
+`domain.EffectNetwork` landed in the vouched-for network class and auto-ran unattended in Auto — so a
+host-registered tool that declared the kind reached the network with **no** url-safety at all, and
+dispatch could not tell the difference. The `URLGuard` was construction-injected into Apogee's own
+tools (`NewWebFetch(host.URLGuard)`), so a third-party network tool could not have been url-filtered
+even if it wanted to be: there was no ctx handle for url-safety the way there is for Confinement.
+The ladder had generalized a promise this ADR scoped narrowly. This amendment makes the class mean
+what the ADR always said, and changes nothing about what Apogee's own tools may do.
+
+**(a) The vouched-for network class now requires a marker, not a declaration.** Apogee's own network
+tools reach the network through **one funnel** (`internal/tools`' `networkTool.do` — check the guard,
+build the client, make the request, render the failure message host-scoped), and embedding that
+funnel is the **only** way to obtain an unexported url-filter marker. The marker cannot exist without
+the guard, so it is unfakeable outside the package. Classification keys on the marker: an
+`EffectNetwork` tool that carries it keeps the **auto-run** cell (Apogee vouches that every outbound
+URL passed the host's `URLGuard`); an `EffectNetwork` tool **without** it is a distinct
+third-party-network class that **gates through Approval**, with its own prompt reason (`unfiltered
+network reach` versus `network reach`). This is the same answer the ladder already gives MCP and
+third-party writes, on this ADR's own reasoning — *gating is how `confine=true`'s promise stays
+honest* — and with no Approver configured the gate resolves to a Refuse by the existing rule.
+
+**(b) Strictly tighten-only, and `confine-to-workspace: false` is unaffected.** A call that gated
+before still gates; a call that auto-ran before only ever moves to a prompt, never the reverse.
+Apogee's own `web-fetch` / `http-request` / `web-search` are in the marked class and behave exactly
+as this ADR describes. `confine-to-workspace: false` ("I am the sandbox") returns its verdict
+**before** the class switch, so it still runs everything unattended — the loosen is untouched. In the
+lower three modes every non-read-only tool already gates, so the only visible change there is the
+more honest prompt reason.
+
+**(c) The trade-off: an embedder cannot mint a vouched-for network tool.** Because the marker is
+unexported, a host-registered network tool gates in Auto no matter how carefully it filters its own
+URLs. That is the **same second-class status the write axis has had since Phase 3** — an embedder's
+write tool cannot carry `workspaceScopedWriter` either, and gates. We accept it rather than export
+the funnel now: gating is the safe direction, the demand is hypothetical, and exporting a
+`NewNetworkTool`-style constructor later is purely additive (it would let an embedder **inherit** the
+marker by routing through the guard, never claim it). The door is parked in `TODO.md`, not shut.
+
+**(d) The floor this rests on is unchanged.** The `URLGuard`'s default-on, resolved-IP SSRF floor
+(pre-flight **and** at dial time) is moved into the funnel, not revisited; the MCP transport's
+connect-time endpoint check is a different lifecycle and stays where it is; subprocess network reach
+remains out of scope by this ADR's own reasoning (*"a subprocess can already `curl` the same
+host"*). One security property generalizes as a side effect: the host-only, key-scrubbed failure
+message that was `web_search`'s private discipline is now **every** network tool's, by construction.
+
+Implementation lives in [`docs/plans/2026-07-25 - 00 - url-safety-choke-point-plan.md`](../plans/2026-07-25%20-%2000%20-%20url-safety-choke-point-plan.md);
+the class row and gate reason are in
+[`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
+and CONTEXT.md's **Confinement** and **Safety guardrails** entries carry the prose.

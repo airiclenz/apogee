@@ -46,6 +46,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A tool that reaches the network but is not one of Apogee's own url-filtered tools now asks for
+  approval in Auto instead of running unattended.** Auto's "network runs freely" cell was always
+  meant for Apogee's own network tools, which filter every URL through url-safety (the scheme/host
+  rules plus the default-on SSRF floor). It was keyed on a tool merely *declaring* that it reaches
+  the network, so a host-registered tool could reach any address unattended and unfiltered. Apogee's
+  own network tools now reach the network through a single choke point that applies url-safety, and
+  carrying the mark that choke point confers is what earns the unattended cell; any other
+  network-reaching tool raises an Approval prompt, whose reason reads `unfiltered network reach`
+  rather than `network reach` so you can see which kind of reach you are authorising. The change is
+  tighten-only — nothing that used to prompt stops prompting — and `confine-to-workspace: false`
+  ("I am the sandbox") is unaffected. **`web_fetch`, `http_request`, and `web_search` behave exactly
+  as before.** Embedders: an in-process tool of your own that reaches the network gates in Auto, the
+  same way your own write tools already do.
+- **Every network tool's failure message now names only the host, never the full request URL.** A
+  blocked or failed `web_fetch` / `http_request` previously echoed the underlying error, which for a
+  bad URL embedded the whole URL — including any credential in its query string. All three network
+  tools now share one message renderer that reports the bare host and scrubs the URL out of the
+  reason, so the protection that was `web_search`'s alone (its API-key redaction) is now every
+  network tool's by construction. Successful results are unchanged.
 - **Selector popups now share one look — a solid-black pane spanning the full window width.** A
   single shared painter (`internal/tui/popup.go`) draws every boxed selector overlay — a title row,
   `❯`-marked rows with the selected row highlighted, and a key-hint footer — so the pickers line up
