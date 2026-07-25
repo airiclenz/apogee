@@ -21,7 +21,7 @@ a smaller-deepenings list**, framed in the depth glossary (module / interface / 
 **Ledger (updated as candidates land).** **01 landed 2026-07-24**
 (`docs/plans/archived/2026-07-24 - 00 - turn-lifecycle-owner-plan.md`); **02 landed 2026-07-25**
 (`docs/plans/archived/2026-07-25 - 00 - url-safety-choke-point-plan.md`); **04 and 07 landed
-2026-07-25**, both under `docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md` — 07
+2026-07-25**, both under `docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md` — 07
 was folded into 04's plan as item 2, because a shared stack-validity checker is nearly free once the
 Mechanism metadata is row-shaped, but it was built and committed standalone. Of the smaller
 deepenings, **session store lifecycle landed 2026-07-24** (absorbed by the session system, ADR 0022).
@@ -125,7 +125,7 @@ Explore agents and should be spot-checked before acting.
   synthesized. Let a catalogue row declare its deps so the engine loops uniformly.
 - **Note:** preserves ADR 0003 — registry ordering/stacking semantics unchanged; only the
   **authoring** seam deepens. Deep dispatch/self-reg core untouched.
-- **Grilled 2026-07-25** → `docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`
+- **Grilled 2026-07-25** → `docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`
   (6 items). The owner chose the **deeper** of the two shapes: the metadata leaves the Mechanism
   entirely and `MechanismRegistry` stores `RegisteredMechanism{Descriptor, Ordering, Hook}` rows,
   rather than staying on the instance behind an embedded helper. The card's "methods synthesized"
@@ -211,7 +211,7 @@ Explore agents and should be spot-checked before acting.
 - **Deepening:** one shared checker over `[]MechanismDescriptor` that both call. Keep the timing
   split (validated pre-build/soft-degrade, domain post-build) — share only the rule.
 - **Landed 2026-07-25** (`f00cd6e`) as item 2 of
-  `docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`, folded into candidate 04's
+  `docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`, folded into candidate 04's
   plan because it is nearly free alongside that work — but built and committed **standalone**, so it
   stands on its own regardless of 04's remaining items. `internal/domain/stack.go` is the one home:
   `CheckStack([]MechanismDescriptor) []StackDefect` returns **structured defects**, not formatted
@@ -250,12 +250,12 @@ files under `docs/reviews/` (this doc + the `.html`) and built, tested and commi
 
 *As of 2026-07-25:* the landed candidates are committed on `main` (01: `5997ce8`…`cd39e23`;
 02: `2f881f9`…`a6e39db`, incl. the follow-up `76ec91c` making a url-safety block state itself once
-rather than twice; 04 + 07: `a924ef1`…`4803bdb` plus this documentation commit), 01's and 02's plan
-docs archived. Per the standing owner directive Apogee commits directly to `main` (pre-production).
+rather than twice; 04 + 07: `a924ef1`…`85a9f6a`), every landed candidate's plan doc archived. Per
+the standing owner directive Apogee commits directly to `main` (pre-production).
 
-**Candidate 04's plan is complete.** All six items of
-`docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md` are ✅ DONE, each committed on
-its own green gate, and the plan doc is ready to move to `docs/plans/archived/`. The whole-plan
+**Candidate 04's plan is complete and archived.** All six items of
+`docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md` are ✅ DONE, each committed on
+its own green gate, and the plan doc was archived in `20110c8`. The whole-plan
 verification greps all come back empty as specified: no `domain.Mechanism`, no `descriptors[`, no
 `Descriptor() domain.MechanismDescriptor` / `Ordering() domain.OrderingConstraints`, no
 `libraryMechanismID`, and no `IncompatibleWith`/`Requires` in `internal/validated/validate.go`. The
