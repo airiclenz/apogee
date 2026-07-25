@@ -710,7 +710,49 @@ labels`.
 
 ---
 
-## 6. Split what is left in `platform`, and rename the file that no longer confines
+## 6. Split what is left in `platform`, and rename the file that no longer confines — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): one acceptance criterion cannot be met literally, plus two header
+judgement calls. No code moved changed a byte: `wintoken_windows.go`'s four declarations diff
+**empty** against their `confiner_windows.go` originals, and `winguard.go` /
+`winguard_test.go` are pure `git mv`s whose only content change is the file header named
+below.
+
+**(a) `internal/platform/host.go` is 434 lines, so "every non-test file under 400" is FALSE for
+the package — and no edit inside this plan's scope can make it true.** `host.go` is the
+untagged host rule table (`hostRules`, `split`, `Contains`, the POSIX/Windows tables); it was
+last touched at `019d93c`, before item 1, and this plan does not name it anywhere. The
+criterion holds for every file the plan created or touched: `confiner_windows.go` 328,
+`winguard.go` 208, `wintoken_windows.go` 101, and all eight non-test `winlabel` files (largest:
+`walk_windows.go` 345, `journal.go` 339). The files over the guideline in `internal/platform`
+after this item are therefore `confiner_windows_test.go` (1377, by D7) and `host.go` (434,
+pre-existing and out of scope) — item 7's `TODO.md` note should say so rather than let the next
+reader read the acceptance line as a claim about `host.go`.
+
+**(b) `confiner_windows.go`'s header keeps its three design bullets and gains a composer
+paragraph.** The item asks for the header to be re-read end to end so the journal and label-walk
+paragraphs describe a module the file composes. Read end to end, the three bullets (fence /
+box / no-helper-process) state ADR 0020's asymmetry — *why* the backend has this shape at all
+— and restate no internals of anything that moved; deleting them would lose the only place
+that argument is written down near the code. What was missing was the composition itself, so a
+paragraph was added naming `wintoken_windows.go` for the fence, `winlabel` for the box (with
+its plain-error/D4 consequence at `labelBox`) and `winguard.go` for the floor and guardrails,
+and stating what is left in the file. Mechanical consequence: the `unsafe` import left with
+`mintRestrictedLowToken`.
+
+**(c) `winguard.go`'s header was replaced, not amended.** The old one described "the OS-free
+half" of a Confiner — a file split by build tag — which is no longer what the file is; the new
+one leads with what it now holds (the floor, the three labelling guardrails, the network-deny
+refusal), says why the guardrails did **not** follow the mechanism into `winlabel` (they are
+`hostRules` applied to a box, per the plan's non-goals), and points at `winlabel` for the
+wording behind the three delegations. `winguard_test.go`'s own header still reads correctly
+after the rename and was left untouched.
+
+**(d) The transitional exports items 1–5 asked this item to confirm are ALL gone.**
+`grep -rn` over `internal/` and `cmd/` for `DirSDDL`, `FileSDDL`, `ClearSDDL`, `LabelACEPrefix`,
+`FoldPath`, `DescendantDecision`, `ResidueNotice`, `RecordEntry`, `UnwindEntry`,
+`SiblingJournals`, `ClearTreeOutcome`, `RevertibleRoots`, `RestorablePriors`, `MarkLabelled`,
+`Labelled(`, the package-level `Retire` and `(*Journal).Record`/`Unwind` returns nothing.
 
 **What:**
 

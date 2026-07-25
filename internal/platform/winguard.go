@@ -9,14 +9,24 @@ import (
 	"github.com/airiclenz/apogee/internal/platform/winlabel"
 )
 
-// Windows token Confiner — the OS-free half (ADR 0020; confinement-execution-contract §9).
+// Windows token Confiner — the GUARDRAILS (ADR 0020; confinement-execution-contract §9).
 //
-// Everything here is a pure function or plain file I/O over JSON, so the Windows
-// backend's DECISIONS — which roots get labelled, which are refused outright, what
-// happens to a network-deny box, and what an interrupted run leaves behind — are
-// table-testable on Linux and macOS exactly as the seatbelt profile generator is
-// (seatbelt.go). The OS calls that mint the token and write mandatory labels live in
-// confiner_windows.go, which is the only Windows-tagged part.
+// Nothing here confines anything. This file holds the rules that decide what the backend is
+// allowed to do before it does it: the version floor below which there is no token backend at
+// all, and the labelling guardrails that say which roots may be labelled Low — a volume root
+// may not, a root that is or contains %SystemRoot%, %ProgramFiles% or the user profile may
+// not, a root this host cannot resolve may not — plus the network-deny box the token backend
+// must fail closed on. They stay in `platform` rather than moving to winlabel with the rest of
+// the label mechanism because they are the HOST's path rules (hostRules.split/Contains)
+// applied to a box, not part of the mechanism they veto.
+//
+// The three notice functions at the foot of the file are the exported names cmd/apogee already
+// knows; the wording itself lives beside the mechanism it describes, in winlabel.
+//
+// Every rule here is a pure function over the Windows rule table, so the DECISIONS are
+// table-testable on Linux and macOS exactly as the seatbelt profile generator is (seatbelt.go),
+// including the cases no development machine can produce on demand. The Windows-tagged OS
+// calls live in confiner_windows.go, wintoken_windows.go and winlabel's walk_windows.go.
 
 // windowsFloorBuild is the minimum Windows build this project claims to have tested and
 // can service: 10 1809 / build 17763 / Server 2019 (ADR 0020 §5). It is NOT an API floor —
