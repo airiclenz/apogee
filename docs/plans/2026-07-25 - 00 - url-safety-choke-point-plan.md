@@ -115,6 +115,17 @@ and `clampTimeout` now delegates to it — one ceiling, both entry points (teste
 blocked message is rendered by a tiny `blockedMessage(label, err, rawURL)` helper because the
 pre-flight and dial-time branches emit the same string; wording is exactly as specified.
 
+NOTES (2026-07-25): follow-up fix, authorized by the user after this item landed (defect found by
+item 2's verifier). The blocked message stated the block twice — `url blocked by url-safety (host
+127.0.0.1): security: url blocked by url-safety: …` — because every guard error carries the
+`security.ErrURLBlocked` sentinel text in its own string and the mandated prefix already states it.
+`blockedMessage` now renders the guard's REASON only, through a new `blockedReason(err, rawURL)`
+that strips the sentinel wherever it appears (mid-string for a dial-time block, which arrives
+wrapped in the transport's `*url.Error`) and, if that leaves nothing, drops the dangling `": "`.
+The mandated format, the host naming and the M2 scrub are unchanged; the guard's own error type is
+untouched. New `TestBlockedMessage_StatesTheBlockOnce` (pre-flight + dial-time shapes) plus a
+count-of-one assertion in `TestNetworkFunnel_DoBlockedURL`, both verified to fail pre-fix.
+
 The funnel is a struct the network tools **embed**; embedding is the only way to obtain the marker,
 so the marker cannot exist without the guard. Nothing is ported onto it in this item — the three
 tools keep working exactly as they do (items 2 and 3 move them), so this item is purely additive.

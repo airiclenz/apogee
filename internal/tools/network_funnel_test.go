@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -175,11 +177,64 @@ func TestNetworkFunnel_DoBlockedURL(t *testing.T) {
 	if !strings.Contains(msg, "url-safety") {
 		t.Errorf("blocked message should name url-safety: %q", msg)
 	}
+	if got := strings.Count(msg, "url blocked by url-safety"); got != 1 {
+		t.Errorf("blocked message states the block %d times, want exactly 1: %q", got, msg)
+	}
 	if !strings.Contains(msg, "127.0.0.1") {
 		t.Errorf("blocked message should name the bare host for diagnosability: %q", msg)
 	}
 	if resp.status != "" || resp.statusCode != 0 || resp.body != "" || resp.header != nil {
 		t.Errorf("a blocked call must yield the zero netResponse; got %+v", resp)
+	}
+}
+
+// TestBlockedMessage_StatesTheBlockOnce pins the wording of a url-safety block: the message
+// states "url blocked by url-safety" EXACTLY once. Every guard error already carries the
+// security.ErrURLBlocked sentinel text ("security: url blocked by url-safety") in its own
+// string, so interpolating it raw behind the mandated prefix made the model-facing message read
+// "url blocked by url-safety (host 127.0.0.1): security: url blocked by url-safety: …" — the
+// same phrase twice. Only the guard's REASON belongs after the prefix; the host must still be
+// named and the key-bearing URL must still never appear (M2).
+func TestBlockedMessage_StatesTheBlockOnce(t *testing.T) {
+	t.Parallel()
+
+	const rawURL = "http://127.0.0.1:9/search?key=" + secretKey
+	preflight := security.URLGuard{}.CheckContext(context.Background(), rawURL)
+	if preflight == nil {
+		t.Fatal("the floor-on guard must reject a loopback URL — this test needs its error")
+	}
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"pre-flight check", preflight},
+		// A dial-time floor block reaches blockedMessage wrapped in the transport's *url.Error,
+		// so the sentinel sits MID-string there rather than at the front.
+		{"dial-time floor", &url.Error{
+			Op:  "Get",
+			URL: rawURL,
+			Err: fmt.Errorf("dial tcp 127.0.0.1:9: %w", security.ErrSSRFBlocked),
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			msg := blockedMessage("127.0.0.1", tc.err, rawURL)
+			if got := strings.Count(msg, "url blocked by url-safety"); got != 1 {
+				t.Errorf("message states the block %d times, want exactly 1: %q", got, msg)
+			}
+			if sentinel := security.ErrURLBlocked.Error(); strings.Contains(msg, sentinel) {
+				t.Errorf("the guard's own %q text must not ride along behind the prefix: %q", sentinel, msg)
+			}
+			if !strings.Contains(msg, "127.0.0.1") {
+				t.Errorf("message must still name the bare host: %q", msg)
+			}
+			if strings.Contains(msg, secretKey) {
+				t.Fatalf("API key LEAKED into the block message: %q", msg)
+			}
+		})
 	}
 }
 

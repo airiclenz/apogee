@@ -64,7 +64,9 @@ point is a **minor** bump, not a breaking change.
   bad URL embedded the whole URL — including any credential in its query string. All three network
   tools now share one message renderer that reports the bare host and scrubs the URL out of the
   reason, so the protection that was `web_search`'s alone (its API-key redaction) is now every
-  network tool's by construction. Successful results are unchanged.
+  network tool's by construction. A url-safety block also states itself once instead of repeating
+  the phrase (`url blocked by url-safety (host 127.0.0.1): security: url blocked by url-safety: …`),
+  so the reason is what you read. Successful results are unchanged.
 - **Selector popups now share one look — a solid-black pane spanning the full window width.** A
   single shared painter (`internal/tui/popup.go`) draws every boxed selector overlay — a title row,
   `❯`-marked rows with the selected row highlighted, and a key-hint footer — so the pickers line up

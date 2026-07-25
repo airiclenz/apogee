@@ -190,7 +190,27 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 // guard's reason, with the (possibly key-bearing) request URL scrubbed out of that reason
 // (M2). It serves both the pre-flight Check and the dial-time floor.
 func blockedMessage(label string, err error, rawURL string) string {
-	return "url blocked by url-safety (host " + label + "): " + scrubURLError(err, rawURL)
+	msg := "url blocked by url-safety (host " + label + ")"
+	if reason := blockedReason(err, rawURL); reason != "" {
+		return msg + ": " + reason
+	}
+	return msg
+}
+
+// blockedReason is the guard's cause alone: URL-scrubbed (M2) and stripped of the
+// security.ErrURLBlocked sentinel text ("security: url blocked by url-safety") that every
+// url-safety error carries in its own string. Without the strip the message repeated itself —
+// "url blocked by url-safety (host 127.0.0.1): security: url blocked by url-safety: …" —
+// because blockedMessage's own prefix already states the block. The sentinel is removed
+// wherever it appears, not only at the front: a dial-time floor block arrives wrapped inside
+// the transport error's text, so the sentinel sits mid-string there.
+func blockedReason(err error, rawURL string) string {
+	sentinel := security.ErrURLBlocked.Error()
+	reason := scrubURLError(err, rawURL)
+	reason = strings.ReplaceAll(reason, sentinel+": ", "")
+	reason = strings.ReplaceAll(reason, sentinel, "")
+	// A sentinel-only cause leaves a dangling separator; trim it rather than surface ": ".
+	return strings.Trim(reason, ": ")
 }
 
 // newHTTPClient builds an http.Client whose transport validates the ACTUAL connected IP at
