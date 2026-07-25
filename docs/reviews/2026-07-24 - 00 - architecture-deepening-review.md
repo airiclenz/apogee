@@ -203,9 +203,11 @@ Explore agents and should be spot-checked before acting.
   `golang.org/x/sys/windows`, nothing from apogee — so it returns plain errors and `labelBox`
   wraps `domain.ErrConfinementUnavailable` once at the call site, leaving every rendered message
   byte-for-byte identical and `errors.Is` true everywhere it was before.
-- **LANDED 2026-07-25** — six code items, each on its own green gate (`9a2a074` · `e165d79` ·
-  `9d4adb4` · `6a95e8d` · `7b3e593` · `c7c3b7b`, plus this documentation commit). What was
-  actually built, against the card's sketch:
+- **LANDED 2026-07-25 — plan complete and archived.** All **seven** plan items are ✅ DONE, each
+  committed on its own green gate: six code items (`9a2a074` · `e165d79` · `9d4adb4` · `6a95e8d` ·
+  `7b3e593` · `c7c3b7b`) and the documentation item (`281f36d`), followed by one follow-up commit
+  (`0ec4c0c`) and the archive commit (`ba570ba`). What was actually built, against the card's
+  sketch:
   - **The three seams the card named are all inside `winlabel`**, as files rather than packages:
     the *journal* (`journal.go` — record, atomic write, list/siblings, `session.go` — the stateful
     `Journal`, `retire.go` — retention and revert-split), the *label walk* (`walk_windows.go`,
@@ -224,8 +226,12 @@ Explore agents and should be spot-checked before acting.
     the journal's state (`journal`, `journalHome`, `journalPath`, `labelled`, `mu`); it now holds
     four plus one `*winlabel.Journal`, and its four wrapper methods (`journalLabel`,
     `unwindRootLabel`, `flushJournal`, `restoreLabels`) are gone. The backend keeps **no** mutex:
-    serialization moved inside `Journal`, which holds its lock for the whole of `LabelTree` and
-    `Retire` exactly as `labelBox` held `c.mu` across the whole label pass before.
+    serialization moved inside `Journal`, which holds its lock across the whole of `LabelTree`
+    (read prior → record → label → walk → mark) and of `Retire`. One deliberate narrowing versus
+    the old `c.mu`: `labelBox` loops root-by-root, so the lock is taken **once per root** rather
+    than once per `Confine`, and two concurrent multi-root `Confine` calls can interleave *between*
+    roots. Each root's pass stays atomic and the labelled-memo is keyed per folded root, so the
+    journal-before-label invariant holds — checked against the diff at close, not assumed.
   - **The guardrails deliberately did not move.** `windowsProtectedRoots`, `windowsBoxRoots`,
     `windowsLabelGuardrail` and `windowsNetworkDenyDecision` need `hostRules`, and they are the
     *host's* path rules applied to a box, not part of the mechanism they veto. They stayed in
@@ -252,9 +258,10 @@ Explore agents and should be spot-checked before acting.
     recording under `-race`, proving the concurrency claim instead of asserting it in a comment)
     and `walk_other_test.go` (83).
   - The win is a boundary and an invariant made structural, plus **two ~800-line files gone**; it
-    is not a line count. Two files in `internal/platform` remain over the guideline and are
+    is not a line count. Three files under `internal/platform` remain over the guideline and are
     recorded in `TODO.md` as *not* findings: `confiner_windows_test.go` (1,377, by plan decision
-    D7) and `host.go` (434, pre-existing and out of scope). That `TODO.md` entry — the one this
+    D7), `host.go` (434, pre-existing and out of scope) and `winlabel/journal_test.go` (433, an
+    owner call at close — recorded rather than split). That `TODO.md` entry — the one this
     card was raised against — is now closed, with its stale 581/572 figures corrected.
 
 ### 06 — Decode each engine Event once · **Worth exploring**
@@ -315,8 +322,8 @@ files under `docs/reviews/` (this doc + the `.html`) and built, tested and commi
 
 *As of 2026-07-25:* the landed candidates are committed on `main` (01: `5997ce8`…`cd39e23`;
 02: `2f881f9`…`a6e39db`, incl. the follow-up `76ec91c` making a url-safety block state itself once
-rather than twice; 04 + 07: `a924ef1`…`85a9f6a`; 05: `9a2a074`…`c7c3b7b` plus this documentation
-commit), every landed candidate's plan doc archived. Per
+rather than twice; 04 + 07: `a924ef1`…`85a9f6a`; 05: `9a2a074`…`ba570ba`, incl. the follow-up
+`0ec4c0c`), every landed candidate's plan doc archived. Per
 the standing owner directive Apogee commits directly to `main` (pre-production).
 
 **Candidate 04's plan is complete and archived.** All six items of
@@ -328,6 +335,16 @@ verification greps all come back empty as specified: no `domain.Mechanism`, no `
 one item left for the owner is the plan's **manual** step 9 (build the TUI and drive one Turn with
 `guided_decomposition` + `tool_result_cap`, then confirm the three loud failure paths still fail
 loudly) — the automated suite pins all of it, but the plan asked for eyes on it.
+
+**Candidate 05's plan is complete and archived.** All seven items of
+`docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md` are ✅ DONE, each committed on its
+own green gate, and the plan doc was archived in `ba570ba`. Every item was verified by an
+independent agent before its commit, and three follow-ups raised during the run were settled at
+close (`0ec4c0c`): a stale `journalLabelEntry` comment renamed, `winlabel/journal_test.go` recorded
+in `TODO.md` as a deliberate size exception, and the transitional locking gap opened when the
+confiner's mutex was removed confirmed **closed** by `LabelTree`. The one item left for the owner is
+the plan's **manual** step 4: the Windows-tagged half is *compiled* by the gate (`GOOS=windows go
+vet` + two `go test -c`) but has never been *run* — that needs a real Windows host at build ≥ 17763.
 
 Candidates 03 and 06 and the four remaining smaller deepenings have had **no code written for
 them** — their evidence below is still review-session evidence and, apart from the ✓-marked and
