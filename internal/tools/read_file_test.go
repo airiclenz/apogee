@@ -91,6 +91,82 @@ func TestReadFile_Execute(t *testing.T) {
 	}
 }
 
+func TestReadFile_Execute_ReportsTheSpanItRendered(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("line1\nline2\nline3"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool := NewReadFile(root)
+
+	cases := []struct {
+		name        string
+		args        map[string]any
+		wantContent string
+		wantSummary domain.ReadSpan
+	}{
+		{
+			name:        "whole file",
+			args:        map[string]any{"path": "hello.txt"},
+			wantContent: "[File: hello.txt, 3 lines total, showing lines 1-3]\nline1\nline2\nline3",
+			wantSummary: domain.ReadSpan{Start: 1, End: 3, Total: 3},
+		},
+		{
+			name:        "narrowed range",
+			args:        map[string]any{"path": "hello.txt", "start_line": 2, "end_line": 3},
+			wantContent: "[File: hello.txt, 3 lines total, showing lines 2-3]\nline2\nline3",
+			wantSummary: domain.ReadSpan{Start: 2, End: 3, Total: 3},
+		},
+		{
+			name:        "max_lines truncation",
+			args:        map[string]any{"path": "hello.txt", "max_lines": 2},
+			wantContent: "[File: hello.txt, 3 lines total, showing lines 1-2]\nline1\nline2\n[...truncated at 2 lines]",
+			wantSummary: domain.ReadSpan{Start: 1, End: 2, Total: 3},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.Content != tc.wantContent {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantContent)
+			}
+			span, ok := result.Summary.(domain.ReadSpan)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ReadSpan", result.Summary)
+			}
+			if span != tc.wantSummary {
+				t.Errorf("Summary = %+v, want %+v", span, tc.wantSummary)
+			}
+		})
+	}
+}
+
+func TestReadFile_Execute_ErrorCarriesNoSummary(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewReadFile(t.TempDir()).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "absent.txt"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+	}
+	if result.Summary != nil {
+		t.Errorf("Summary = %#v, want nil on a failed call", result.Summary)
+	}
+}
+
 func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 	t.Parallel()
 

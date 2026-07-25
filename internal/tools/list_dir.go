@@ -89,7 +89,8 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
 
-	return okResult(call.ID, renderEntries(entries, args.Offset)), nil
+	text, listed := renderEntries(entries, args.Offset)
+	return okSummary(call.ID, text, listed), nil
 }
 
 // collectEntries walks dir to the given depth, returning indented entry names. It
@@ -132,8 +133,10 @@ func collectEntries(ctx context.Context, dir string, recursive bool, maxDepth, d
 	return entries, nil
 }
 
-// renderEntries paginates from offset and prepends a header naming the total count.
-func renderEntries(entries []string, offset int) string {
+// renderEntries paginates from offset and prepends a header naming the total count. It
+// returns the two counts the header states as a domain.ListedEntries — the total and the
+// pagination offset actually applied, which is the offset after clamping to the total.
+func renderEntries(entries []string, offset int) (string, domain.ListedEntries) {
 	total := len(entries)
 	if offset < 0 {
 		offset = 0
@@ -152,7 +155,8 @@ func renderEntries(entries []string, offset int) string {
 		skipped = fmt.Sprintf(", skipped first %d", offset)
 	}
 	header := fmt.Sprintf("[%d entries total%s]", total, skipped)
-	return header + "\n" + strings.Join(shown, "\n") + truncated
+	listed := domain.ListedEntries{Total: total, Skipped: offset}
+	return header + "\n" + strings.Join(shown, "\n") + truncated, listed
 }
 
 var _ domain.ReadOnlyTool = (*ListDir)(nil)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 func TestWriteFile_Execute_CreatesFileAndParents(t *testing.T) {
@@ -50,6 +52,29 @@ func TestWriteFile_Execute_OverwritesExisting(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != "new" {
 		t.Errorf("content = %q, want %q", string(got), "new")
+	}
+}
+
+func TestWriteFile_Execute_ReportsBytesWritten(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "out.txt", "content": "hello"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if want := "wrote 5 bytes to out.txt"; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+	wrote, ok := result.Summary.(domain.WroteBytes)
+	if !ok {
+		t.Fatalf("Summary = %#v, want a domain.WroteBytes", result.Summary)
+	}
+	if want := (domain.WroteBytes{Bytes: 5}); wrote != want {
+		t.Errorf("Summary = %+v, want %+v", wrote, want)
 	}
 }
 

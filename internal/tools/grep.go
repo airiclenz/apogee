@@ -109,7 +109,8 @@ func (t *Grep) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolRe
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
 
-	return okResult(call.ID, renderMatches(matches, args.MaxResults, args.Offset)), nil
+	text, matched := renderMatches(matches, args.MaxResults, args.Offset)
+	return okSummary(call.ID, text, matched), nil
 }
 
 // search collects matches from a single file or by walking a directory.
@@ -224,10 +225,13 @@ func matchesInclude(name string, globs []string) bool {
 	return false
 }
 
-// renderMatches paginates from offset and prepends a header naming the total count.
-func renderMatches(matches []string, maxResults, offset int) string {
+// renderMatches paginates from offset and prepends a header naming the total count. It
+// returns the total as a domain.MatchedLines on BOTH paths — a search that found nothing
+// reports Total 0 rather than no summary, so a host reads a number instead of testing the
+// "No matches found" sentence for a prefix.
+func renderMatches(matches []string, maxResults, offset int) (string, domain.MatchedLines) {
 	if len(matches) == 0 {
-		return "No matches found"
+		return "No matches found", domain.MatchedLines{Total: 0}
 	}
 	if maxResults <= 0 {
 		maxResults = defaultGrepResults
@@ -252,7 +256,7 @@ func renderMatches(matches []string, maxResults, offset int) string {
 		capped = fmt.Sprintf(" (capped at %d)", maxGrepMatches)
 	}
 	header := fmt.Sprintf("[%d total matches%s, showing %d-%d]", total, capped, start+1, end)
-	return header + "\n" + strings.Join(shown, "\n")
+	return header + "\n" + strings.Join(shown, "\n"), domain.MatchedLines{Total: total}
 }
 
 var _ domain.ReadOnlyTool = (*Grep)(nil)

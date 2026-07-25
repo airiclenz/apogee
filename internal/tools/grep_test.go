@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 func TestGrep_Execute_FindsMatchesWithLocation(t *testing.T) {
@@ -96,6 +98,58 @@ func TestGrep_Execute_SearchesSingleFile(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "b.go:2:") || !strings.Contains(result.Content, "Beta") {
 		t.Errorf("single-file search missing match: %q", result.Content)
+	}
+}
+
+func TestGrep_Execute_ReportsMatchCount(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedTree(t, root)
+	tool := NewGrep(root)
+
+	cases := []struct {
+		name        string
+		args        map[string]any
+		wantContent string
+		wantSummary domain.MatchedLines
+	}{
+		{
+			name:        "matches",
+			args:        map[string]any{"pattern": "^package "},
+			wantContent: "[2 total matches, showing 1-2]\nsrc/a.go:1:package a\nsrc/inner/b.go:1:package b",
+			wantSummary: domain.MatchedLines{Total: 2},
+		},
+		{
+			// The sentinel path carries a summary too, so a host reads a zero rather
+			// than testing this sentence for a "No matches" prefix.
+			name:        "no matches",
+			args:        map[string]any{"pattern": "zzz-nothing-matches-this"},
+			wantContent: "No matches found",
+			wantSummary: domain.MatchedLines{Total: 0},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.Content != tc.wantContent {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantContent)
+			}
+			matched, ok := result.Summary.(domain.MatchedLines)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.MatchedLines", result.Summary)
+			}
+			if matched != tc.wantSummary {
+				t.Errorf("Summary = %+v, want %+v", matched, tc.wantSummary)
+			}
+		})
 	}
 }
 

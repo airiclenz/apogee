@@ -45,6 +45,15 @@ func okResult(callID, content string) domain.ToolResult {
 	return domain.ToolResult{CallID: callID, Content: content}
 }
 
+// okSummary builds a success ToolResult carrying both halves of the outcome: the prose
+// content the model reads and the structured summary a host renders (domain.ToolSummary).
+// A tool with nothing structured to report uses okResult and the host reads the prose.
+// There is deliberately no error-carrying twin: a failed call has no outcome to describe
+// beyond IsError, which the host renders itself.
+func okSummary(callID, content string, summary domain.ToolSummary) domain.ToolResult {
+	return domain.ToolResult{CallID: callID, Content: content, Summary: summary}
+}
+
 // errorResult builds a tool-level failure ToolResult — surfaced to the model rather
 // than returned as a Go error, which is reserved for ctx cancellation (ADR 0007).
 func errorResult(callID, message string) domain.ToolResult {

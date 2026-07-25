@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // seedTree creates a small directory tree under root for the list_dir and grep tests.
@@ -86,6 +88,56 @@ func TestListDir_Execute_NonRecursiveStopsAtTop(t *testing.T) {
 	}
 	if strings.Contains(result.Content, "b.go") {
 		t.Errorf("non-recursive listing leaked nested entry: %q", result.Content)
+	}
+}
+
+func TestListDir_Execute_ReportsEntryCounts(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedTree(t, root)
+	tool := NewListDir(root)
+
+	cases := []struct {
+		name        string
+		args        map[string]any
+		wantContent string
+		wantSummary domain.ListedEntries
+	}{
+		{
+			name:        "no pagination",
+			args:        map[string]any{"path": "."},
+			wantContent: "[2 entries total]\nsrc/\ntop.txt",
+			wantSummary: domain.ListedEntries{Total: 2, Skipped: 0},
+		},
+		{
+			name:        "offset skips entries",
+			args:        map[string]any{"path": ".", "offset": 1},
+			wantContent: "[2 entries total, skipped first 1]\ntop.txt",
+			wantSummary: domain.ListedEntries{Total: 2, Skipped: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.Content != tc.wantContent {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantContent)
+			}
+			listed, ok := result.Summary.(domain.ListedEntries)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ListedEntries", result.Summary)
+			}
+			if listed != tc.wantSummary {
+				t.Errorf("Summary = %+v, want %+v", listed, tc.wantSummary)
+			}
+		})
 	}
 }
 

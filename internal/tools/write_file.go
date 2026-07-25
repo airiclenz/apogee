@@ -86,7 +86,9 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	return okResult(call.ID, fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path)), nil
+	return okSummary(call.ID,
+		fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path),
+		domain.WroteBytes{Bytes: len(args.Content)}), nil
 }
 
 var (

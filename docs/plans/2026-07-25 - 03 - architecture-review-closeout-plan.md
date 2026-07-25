@@ -274,7 +274,15 @@ alias block; no file outside `internal/domain` and `apogee.go` changed. Commit:
 
 ---
 
-## 2. The four header-shaped tools attach their summary
+## 2. The four header-shaped tools attach their summary — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): two additions beyond the item's literal "one case per tool". The new
+tests pin `Content` as a byte-exact string (the existing cases pin substrings of the same
+text, so nothing they assert changed), `read_file` gets a third row for the `max_lines`
+truncation path because it is the one place `End` is not `Total`, and
+`TestReadFile_Execute_ErrorCarriesNoSummary` pins the item's "an error result never carries
+a summary" claim, which no other test covered. `renderFile`/`renderEntries`/`renderMatches`
+each took the `(string, domain.X)` return the item offered as the first option.
 
 **What:**
 

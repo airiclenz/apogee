@@ -82,12 +82,15 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	return okResult(call.ID, renderFile(args.Path, string(content), args)), nil
+	text, span := renderFile(args.Path, string(content), args)
+	return okSummary(call.ID, text, span), nil
 }
 
 // renderFile selects the requested line range and prepends a header naming the file
-// and the lines shown, mirroring the oracle's read output.
-func renderFile(displayPath, content string, args readFileArgs) string {
+// and the lines shown, mirroring the oracle's read output. It returns the same three
+// numbers the header states as a domain.ReadSpan, so a host reads the span as data
+// instead of parsing it back out of the sentence.
+func renderFile(displayPath, content string, args readFileArgs) (string, domain.ReadSpan) {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 
@@ -115,7 +118,8 @@ func renderFile(displayPath, content string, args readFileArgs) string {
 
 	header := fmt.Sprintf("[File: %s, %d lines total, showing lines %d-%d]",
 		displayPath, totalLines, start+1, start+len(selected))
-	return header + "\n" + strings.Join(selected, "\n") + truncated
+	span := domain.ReadSpan{Start: start + 1, End: start + len(selected), Total: totalLines}
+	return header + "\n" + strings.Join(selected, "\n") + truncated, span
 }
 
 // Ensure ReadFile satisfies the domain.Tool contract at compile time. The same guard
