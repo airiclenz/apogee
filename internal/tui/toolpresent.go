@@ -2,7 +2,7 @@ package tui
 
 import (
 	"encoding/json"
-	"regexp"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -19,6 +19,21 @@ import (
 // no I/O — so it is trivially table-testable (TestPresentToolCall); render.go owns the styling
 // and the block shape.
 //
+// What lives here is PRESENTATION vocabulary: labels, verbs, targets, and the wording of the
+// one-line outcome. What does NOT live here is the outcome's facts. A tool that computed
+// something worth showing reports it as a typed domain.ToolSummary beside the prose Content
+// (internal/tools), and summaryLine below renders that value. The view never parses a result
+// string to find out what a tool did: prose written for the MODEL is not an interface, and
+// re-deriving facts from it meant a wording change in internal/tools silently degraded a card
+// with no compiler nudge and no failing test in the package that changed.
+//
+// The two halves stay independent. The wording is the view's own — that several of these
+// lines read like the tool's own header today is what makes the change checkable, not a
+// contract — and a result carrying NO summary still renders from prose exactly as before:
+// the registry's detail extractor quotes a fixed first line, or compresses free-form output
+// to a first line plus a remainder count. Quoting or compressing is rendering; re-deriving a
+// number from a sentence was not.
+//
 // The label+extractor map is an OPEN, name-keyed registry, not a closed switch: the Phase-3
 // tool fan-out (P3.7–P3.11, ~30 tools, ADR 0002) adds one entry per tool (terminal→"Run",
 // git→"Git", find_replace→"Edit File", …) rather than editing a control-flow statement. An
@@ -30,7 +45,7 @@ import (
 // stays in this one registry instead of growing a second, parallel switch elsewhere.
 
 // detailKind tags a tool-detail line so the renderer can colour it. The diff kinds are
-// emitted by diffDetail (the view_diff extractor) and rendered red/green in render.go.
+// emitted by diffBody (view_diff's body renderer) and rendered red/green in render.go.
 type detailKind int
 
 const (
@@ -69,11 +84,12 @@ type toolView struct {
 	name string
 }
 
-// toolOutcome is what a result extractor returns: the one-line Summary that rides the branch
+// toolOutcome is what a prose extractor returns: the one-line Summary that rides the branch
 // line beside the target, and the Details body laid out beneath it. Either half may be empty
-// — a fixed result header is summary-only ("1 - 154"), free-form output is body-only (its
-// first line plus the remainder count), and view_diff is both (a "+2 -2" diffstat over a body
-// of coloured diff lines).
+// — a fixed result sentence is summary-only ("HTTP 200 OK") and free-form output is body-only
+// (its first line plus the remainder count). A tool whose result carries a domain.ToolSummary
+// does not come through here at all: summaryLine words the branch line and the presenter's
+// body renderer (view_diff's alone) fills the half beneath it.
 type toolOutcome struct {
 	Summary detailLine
 	Details []detailLine
@@ -87,9 +103,10 @@ func summaryOnly(text string) toolOutcome {
 
 // toolPresenter maps a tool name to its friendly label, the active verb naming what the tool
 // is doing while it runs, a header extractor that pulls the Target from the call's
-// arguments, and a detail extractor that turns the tool's result into a [toolOutcome] — the
-// one-line summary, the body beneath it, or both. A nil extractor is valid (the tool has no
-// target or no summarisable result).
+// arguments, a prose extractor that turns a summary-less result into a [toolOutcome], and —
+// for the one tool that has one — a body renderer for a result whose branch line comes from
+// its typed summary. A nil extractor is valid (the tool has no target, or no summarisable
+// result).
 //
 // label and verb are two views of the same tool for two places: label titles the finished
 // header line ("Read File"), verb is the lowercase present participle the live status line
@@ -98,39 +115,54 @@ type toolPresenter struct {
 	label  string
 	verb   string
 	target func(args map[string]any) string
+
+	// detail renders a result that carries NO domain.ToolSummary — the degraded floor for a
+	// summary-bearing tool (its verbatim first line) and the only path for the tools that
+	// report nothing structured (a fixed sentence, free-form output).
 	detail func(content string) toolOutcome
+
+	// body renders the lines laid out BENEATH the branch when the summary supplied the
+	// branch line itself. Exactly one entry sets it — view_diff, the only tool with both a
+	// summary and a body — so the asymmetry is intentional, not an oversight.
+	body func(content string) []detailLine
 }
 
 // toolRegistry is the open, name-keyed catalogue. Each later tool adds one entry here; the
 // renderer and the transcript never grow a per-tool branch. It covers the full built-in set
 // (internal/tools DefaultToolsWithHost); only a dynamic tool (an MCP server's) falls to the
-// raw-name fallback. Fixed result headers are parsed with small, anchored patterns;
-// free-form output (a command run, a sub-agent report) is compressed to its first line plus
-// a remainder count — the chat shows the gist, the model still gets the full text.
+// raw-name fallback.
+//
+// Every detail extractor here renders PROSE. The seven tools that report a typed summary
+// (read_file, write_file, list_dir, grep, view_diff, web_search, open_file) get their branch
+// line from summaryLine instead, and keep firstLineDetail as the floor for a result that
+// carries none — a degraded card is that tool's own first line, never a file dumped into the
+// transcript. The rest quote their fixed sentence or compress free-form output (a command
+// run, a sub-agent report) to its first line plus a remainder count: the chat shows the gist,
+// the model still gets the full text.
 var toolRegistry = map[string]toolPresenter{
 	"read_file": {
 		label:  "Read File",
 		verb:   "reading",
 		target: stringArg("path"),
-		detail: detailFromPattern(reReadRange, func(m []string) string { return m[1] + " - " + m[2] }),
+		detail: firstLineDetail, // floor; the span comes from domain.ReadSpan
 	},
 	"write_file": {
 		label:  "Write File",
 		verb:   "writing",
 		target: stringArg("path"),
-		detail: detailFromPattern(reWriteBytes, func(m []string) string { return "+" + m[1] + " bytes" }),
+		detail: firstLineDetail, // floor; the count comes from domain.WroteBytes
 	},
 	"list_dir": {
 		label:  "List Dir",
 		verb:   "listing",
 		target: stringArg("path"),
-		detail: detailFromPattern(reListEntries, func(m []string) string { return m[1] + " entries" }),
+		detail: firstLineDetail, // floor; the count comes from domain.ListedEntries
 	},
 	"grep": {
 		label:  "Search",
 		verb:   "searching",
 		target: stringArg("pattern"),
-		detail: grepDetail,
+		detail: firstLineDetail, // floor; the count comes from domain.MatchedLines
 	},
 	"single_find_and_replace": {
 		label:  "Edit File",
@@ -154,13 +186,14 @@ var toolRegistry = map[string]toolPresenter{
 		label:  "View Diff",
 		verb:   "diffing",
 		target: stringArg("path"),
-		detail: diffDetail,
+		detail: firstLineDetail, // floor; the "No changes detected" sentinel renders here too
+		body:   diffBody,        // the coloured diff beneath a domain.DiffStat branch line
 	},
 	"open_file": {
 		label:  "Open File",
 		verb:   "opening",
 		target: stringArg("path"),
-		detail: openFileDetail,
+		detail: firstLineDetail, // floor; the locate report comes from domain.OpenedFile
 	},
 	"terminal": {
 		label:  "Run",
@@ -214,7 +247,7 @@ var toolRegistry = map[string]toolPresenter{
 		label:  "Web Search",
 		verb:   "searching the web",
 		target: stringArg("query"),
-		detail: searchDetail,
+		detail: firstLineDetail, // floor; a hit count comes from domain.SearchHits
 	},
 	"sub_agent": {
 		label:  "Sub-Agent",
@@ -235,16 +268,6 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail, // "Presented <path>: opened on the user's machine."
 	},
 }
-
-// The fixed result headers the default tools emit (internal/tools). The patterns are
-// anchored to the documented shapes, not free text, so an unexpected result falls through to
-// the verbatim-first-line fallback rather than mis-summarising.
-var (
-	reReadRange   = regexp.MustCompile(`showing lines (\d+)-(\d+)`)
-	reWriteBytes  = regexp.MustCompile(`wrote (\d+) bytes`)
-	reListEntries = regexp.MustCompile(`\[(\d+) entries total`)
-	reGrepMatches = regexp.MustCompile(`\[(\d+) total matches`)
-)
 
 // presentToolCall builds the header view of a tool call. A known tool gets its friendly
 // label, its active verb, and a target pulled from the arguments; an unknown tool falls back
@@ -270,18 +293,27 @@ func presentToolCall(call domain.ToolCall) toolView {
 	return tv
 }
 
-// enrichWithResult folds a tool's result into the view. An error result (the tool flagged it
-// IsError — a normal in-band outcome the model reacts to) is the one-line summary, so an
-// errored call still groups with its neighbours. A known tool's result is split by its
-// extractor into that summary and the body beneath it; an unknown tool's result is shown raw
-// as body lines (nothing is hidden); an unparseable known result falls back to its verbatim
-// first line.
+// enrichWithResult folds a tool's result into the view, in three layers. An error result
+// (the tool flagged it IsError — a normal in-band outcome the model reacts to) is the
+// one-line summary, so an errored call still groups with its neighbours. A result carrying a
+// typed domain.ToolSummary is worded by summaryLine, with the presenter's body renderer
+// filling the half beneath it (view_diff alone). Everything else falls to prose: a known
+// tool's extractor splits the text into a summary and a body, and an unknown tool's result is
+// shown raw as body lines, so nothing is ever silently dropped.
 func (tv *toolView) enrichWithResult(result domain.ToolResult) {
 	if result.IsError {
 		tv.Summary = detailLine{Text: "error: " + firstLine(result.Content)}
 		return
 	}
-	if p, ok := toolRegistry[tv.name]; ok && p.detail != nil {
+	p, known := toolRegistry[tv.name]
+	if line, ok := summaryLine(result.Summary); ok {
+		tv.Summary = line
+		if known && p.body != nil {
+			tv.Details = append(tv.Details, p.body(result.Content)...)
+		}
+		return
+	}
+	if known && p.detail != nil {
 		out := p.detail(result.Content)
 		tv.Summary = out.Summary
 		tv.Details = append(tv.Details, out.Details...)
@@ -291,6 +323,54 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult) {
 	for _, ln := range splitLines(strings.TrimRight(result.Content, "\n")) {
 		tv.Details = append(tv.Details, detailLine{Text: ln})
 	}
+}
+
+// summaryLine words a tool's structured outcome as the one-line summary that rides the
+// branch beside the target. It is the view's ONE switch over domain.ToolSummary, and ok is
+// false for a nil summary and for a variant this view has no line for — either way the caller
+// falls through to the prose path, so a tool that reports nothing structured (and a variant
+// added before this view knows what to say about it) renders exactly as it always did.
+//
+// The wording is the VIEW's. A summary carries numbers; what a card says about them is
+// presentation, and this file may reword any line here without touching internal/tools.
+func summaryLine(s domain.ToolSummary) (detailLine, bool) {
+	switch v := s.(type) {
+	case domain.ReadSpan:
+		return detailLine{Text: strconv.Itoa(v.Start) + " - " + strconv.Itoa(v.End)}, true
+	case domain.WroteBytes:
+		return detailLine{Text: "+" + strconv.Itoa(v.Bytes) + " bytes"}, true
+	case domain.ListedEntries:
+		// "entries" and "matches" are FIXED plurals, deliberately not plural(): the card has
+		// always read "1 entries", and plural() would both change that and render "matchs".
+		return detailLine{Text: strconv.Itoa(v.Total) + " entries"}, true
+	case domain.MatchedLines:
+		return detailLine{Text: strconv.Itoa(v.Total) + " matches"}, true
+	case domain.DiffStat:
+		return detailLine{Text: "+" + strconv.Itoa(v.Added) + " -" + strconv.Itoa(v.Removed)}, true
+	case domain.SearchHits:
+		return detailLine{Text: plural(v.Count, "result")}, true
+	case domain.OpenedFile:
+		return detailLine{Text: openedFileLine(v)}, true
+	}
+	return detailLine{}, false
+}
+
+// openedFileLine words open_file's outcome: the locate report when a term was requested —
+// including the "on no lines" case, which only the typed summary can tell apart from "no
+// locate was asked for" — and otherwise the body's line count, since the file's content
+// belongs to the model and the header would only repeat the target.
+func openedFileLine(v domain.OpenedFile) string {
+	if v.Locate == "" {
+		return plural(v.Lines, "line")
+	}
+	if len(v.LocatedOn) == 0 {
+		return clipDetail(fmt.Sprintf("Located %q on no lines", v.Locate))
+	}
+	numbers := make([]string, len(v.LocatedOn))
+	for i, n := range v.LocatedOn {
+		numbers[i] = strconv.Itoa(n)
+	}
+	return clipDetail(fmt.Sprintf("Located %q on lines: %s", v.Locate, strings.Join(numbers, ", ")))
 }
 
 // ----------------------------------------------------------------------------
@@ -358,33 +438,6 @@ func methodURLTarget(args map[string]any) string {
 	return strings.TrimSpace(m + " " + u)
 }
 
-// detailFromPattern returns a detail extractor that runs re against the result's first line
-// and formats the submatches with build. The result is one line, so it is the branch-riding
-// summary with no body. A non-match falls back to the verbatim first line, so an unexpected
-// result is shown rather than summarised away.
-func detailFromPattern(re *regexp.Regexp, build func(match []string) string) func(string) toolOutcome {
-	return func(content string) toolOutcome {
-		head := firstLine(content)
-		if m := re.FindStringSubmatch(head); m != nil {
-			return summaryOnly(build(m))
-		}
-		return summaryOnly(head)
-	}
-}
-
-// grepDetail summarises a grep result: the "No matches found" sentinel becomes "0 matches",
-// and the "[N total matches…]" header becomes "N matches".
-func grepDetail(content string) toolOutcome {
-	head := firstLine(content)
-	if strings.HasPrefix(head, "No matches") {
-		return summaryOnly("0 matches")
-	}
-	if m := reGrepMatches.FindStringSubmatch(head); m != nil {
-		return summaryOnly(m[1] + " matches")
-	}
-	return summaryOnly(head)
-}
-
 // firstLineDetail summarises a result to its first line, clipped — for tools whose result
 // is a short fixed sentence ("updated main.go") or opens with a status header ("HTTP 200
 // OK"): one line carries the outcome, the rest is the model's food, not the chat's.
@@ -420,47 +473,23 @@ func outputDetail(content string) toolOutcome {
 	}}
 }
 
-// searchDetail summarises web_search: a structured render (numbered "N. title" hits)
-// becomes a result count; anything else — "No results found for: …", the disabled notice, a
-// custom backend's pass-through — falls back to its first line.
-func searchDetail(content string) toolOutcome {
-	if n := len(reSearchHit.FindAllString(content, -1)); n > 0 {
-		return summaryOnly(plural(n, "result"))
-	}
-	return firstLineDetail(content)
-}
-
-// reSearchHit matches the numbered result lines of web_search's structured render.
-var reSearchHit = regexp.MustCompile(`(?m)^\d+\. `)
-
 // diffDetailCap bounds how many diff lines reach the chat — enough to read a focused
 // change, not enough for a rewrite to flood the transcript.
 const diffDetailCap = 20
 
-// diffDetail splits view_diff's unified output into the "+A -R" diffstat that rides the
-// branch beside the path and the coloured body beneath it — "+ " lines green, "- " lines red,
-// context plain — capped at diffDetailCap with a remainder count (layout.md's Update File
-// sketch). The diffstat counts the WHOLE diff, not just the lines that survive the cap: it is
-// the one number a truncated body cannot tell you. Counting on the leading "+"/"-" is exact
-// here because internal/tools' unifiedLineDiff tags every line "  ", "- " or "+ " and emits
-// no "+++ b/…" / "--- a/…" file header, so a content line that itself starts with "+" always
-// arrives behind a tag. A diff with neither an addition nor a removal is not a diff at all —
-// the "No changes detected" sentinel — and passes through as its single plain summary line.
-func diffDetail(content string) toolOutcome {
+// diffBody renders view_diff's unified output as the coloured body beneath the branch — "+ "
+// lines green, "- " lines red, context plain — capped at diffDetailCap with a remainder count
+// (layout.md's Update File sketch). Tagging on the leading "+"/"-" is exact here because
+// internal/tools' unifiedLineDiff tags every line "  ", "- " or "+ " and emits no "+++ b/…" /
+// "--- a/…" file header, so a content line that itself starts with "+" always arrives behind
+// a tag.
+//
+// It counts NOTHING. The "+A -R" diffstat riding the branch above it comes from the tool's
+// domain.DiffStat, counted from the diff operations themselves — which is why the stat still
+// describes the whole diff when this body stops at the cap, and why a "No changes detected"
+// result (no diff, hence no stat) never reaches here at all.
+func diffBody(content string) []detailLine {
 	lines := splitLines(strings.TrimRight(content, "\n"))
-	added, removed := 0, 0
-	for _, ln := range lines {
-		switch {
-		case strings.HasPrefix(ln, "+"):
-			added++
-		case strings.HasPrefix(ln, "-"):
-			removed++
-		}
-	}
-	if added == 0 && removed == 0 {
-		return summaryOnly(clipDetail(firstLine(content)))
-	}
-
 	body := make([]detailLine, 0, min(len(lines), diffDetailCap+1))
 	for i, ln := range lines {
 		if i == diffDetailCap {
@@ -476,25 +505,7 @@ func diffDetail(content string) toolOutcome {
 		}
 		body = append(body, detailLine{Kind: kind, Text: clipDetail(ln)})
 	}
-	return toolOutcome{
-		Summary: detailLine{Text: "+" + strconv.Itoa(added) + " -" + strconv.Itoa(removed)},
-		Details: body,
-	}
-}
-
-// openFileDetail summarises open_file: the "Located …" line when a locate was requested
-// (the interesting outcome), otherwise the content's line count — the header's "File: …"
-// repeats the target and the content itself belongs to the model.
-func openFileDetail(content string) toolOutcome {
-	lines := splitLines(content)
-	if len(lines) > 1 && strings.HasPrefix(lines[1], "Located ") {
-		return summaryOnly(clipDetail(lines[1]))
-	}
-	n := len(lines) - 2 // the "File: …" header and its blank separator precede the content
-	if n < 0 {
-		n = 0
-	}
-	return summaryOnly(plural(n, "line"))
+	return body
 }
 
 // detailClipRunes caps one detail/target line so a minified blob or a wall-of-text report

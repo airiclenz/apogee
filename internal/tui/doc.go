@@ -29,7 +29,7 @@
 // context-window, mode). The live token gauge (reserved at P2.7) is now wired: the post-v1
 // track folds each top-level UsageEvent's total into the status-line context-fill gauge,
 // measured against the discovered context window ([Model.contextGauge] / [Model.statusRight]). The
-// red/green diff detail reserved there has its producer: the Phase-3 view_diff tool (diffDetail).
+// red/green diff detail reserved there has its producer: the Phase-3 view_diff tool (diffBody).
 //
 // P3.14 turns the Depth-tolerating renderer into a Depth-rendering one: a sub-agent (Depth > 0)
 // run is framed as a vertical-ruled sub-section — each line carries one "│ " rail gutter per

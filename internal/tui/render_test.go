@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -115,9 +116,11 @@ func TestToolHeaderLabelStyled(t *testing.T) {
 // Grouped same-label tool calls (tool-call layout item 4)
 // ----------------------------------------------------------------------------
 
-// readCall folds a read_file call and its "showing lines from-to" result into tr, so a grouping
-// test reads as the batch of reads it is meant to render.
-func readCall(tr *transcript, id, path, from, to string, depth int) {
+// readCall folds a read_file call and its result into tr, so a grouping test reads as the
+// batch of reads it is meant to render. The result carries BOTH halves the real tool reports:
+// the "showing lines from-to" prose the model reads, and the domain.ReadSpan the view renders
+// its branch line from.
+func readCall(tr *transcript, id, path string, from, to, depth int) {
 	base := domain.EventBase{Depth: depth}
 	tr.apply(domain.ToolCallEvent{
 		EventBase: base,
@@ -126,8 +129,10 @@ func readCall(tr *transcript, id, path, from, to string, depth int) {
 	tr.apply(domain.ToolResultEvent{
 		EventBase: base,
 		Result: domain.ToolResult{
-			CallID:  id,
-			Content: "[File: " + path + ", " + to + " lines total, showing lines " + from + "-" + to + "]\n…",
+			CallID: id,
+			Content: "[File: " + path + ", " + strconv.Itoa(to) + " lines total, showing lines " +
+				strconv.Itoa(from) + "-" + strconv.Itoa(to) + "]\n…",
+			Summary: domain.ReadSpan{Start: from, End: to, Total: to},
 		},
 	})
 }
@@ -136,9 +141,9 @@ func readCall(tr *transcript, id, path, from, to string, depth int) {
 // target padded to the widest one so the detail column lines up — the shape layout.md sketches.
 func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	tr := &transcript{}
-	readCall(tr, "c1", "README.md", "1", "154", 0)
-	readCall(tr, "c2", "TODO.md", "1", "408", 0)
-	readCall(tr, "c3", "ISSUES.md", "1", "8", 0)
+	readCall(tr, "c1", "README.md", 1, 154, 0)
+	readCall(tr, "c2", "TODO.md", 1, 408, 0)
+	readCall(tr, "c3", "ISSUES.md", 1, 8, 0)
 
 	want := strings.Join([]string{
 		"✦ Read File",
@@ -155,8 +160,8 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 // and every line of the group — header and branches alike — carries the │ rail gutter.
 func TestRenderGroupsInsideSubAgent(t *testing.T) {
 	tr := &transcript{}
-	readCall(tr, "c1", "a.go", "1", "5", 1)
-	readCall(tr, "c2", "bb.go", "1", "9", 1)
+	readCall(tr, "c1", "a.go", 1, 5, 1)
+	readCall(tr, "c2", "bb.go", 1, 9, 1)
 
 	want := strings.Join([]string{
 		"│ ⤷ sub-agent",
@@ -193,7 +198,7 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 // result folds in, the whole block repaints with that member's detail in the aligned column.
 func TestRenderGroupWithInFlightMember(t *testing.T) {
 	tr := &transcript{}
-	readCall(tr, "c1", "README.md", "1", "154", 0)
+	readCall(tr, "c1", "README.md", 1, 154, 0)
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"TODO.md"}`)}})
 
 	want := strings.Join([]string{
@@ -205,7 +210,9 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 		t.Errorf("in-flight member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 
-	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "[File: TODO.md, 408 lines total, showing lines 1-408]\n…"}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2",
+		Content: "[File: TODO.md, 408 lines total, showing lines 1-408]\n…",
+		Summary: domain.ReadSpan{Start: 1, End: 408, Total: 408}}})
 	want = strings.Join([]string{
 		"✦ Read File",
 		"  ┝ README.md 1 - 154",
@@ -221,7 +228,7 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 // the uniform layout, and the ┕-with-no-padding is what "a group of one pads to itself" means.
 func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	tr := &transcript{}
-	readCall(tr, "c1", "main.go", "1", "154", 0)
+	readCall(tr, "c1", "main.go", 1, 154, 0)
 
 	want := strings.Join([]string{
 		"✦ Read File",
@@ -232,7 +239,7 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	}
 
 	// …and a second call joins it by adding a line, not by moving the first one's target.
-	readCall(tr, "c2", "a-much-longer-name.go", "1", "9", 0)
+	readCall(tr, "c2", "a-much-longer-name.go", 1, 9, 0)
 	want = strings.Join([]string{
 		"✦ Read File",
 		"  ┝ main.go               1 - 154",
@@ -271,7 +278,9 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 func TestRenderDiffDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
-	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "- a removed line\n+ an added line"}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
+		Content: "- a removed line\n+ an added line",
+		Summary: domain.DiffStat{Added: 1, Removed: 1}}})
 
 	want := strings.Join([]string{
 		"✦ View Diff",
@@ -302,6 +311,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID:  "c1",
 		Content: "- a code line that has been removed\n- a second removed line\n+ a new code line\n+ a second new line",
+		Summary: domain.DiffStat{Added: 2, Removed: 2},
 	}})
 
 	want := strings.Join([]string{
@@ -330,6 +340,7 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID:  "c1",
 		Content: strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n"),
+		Summary: domain.DiffStat{Added: diffDetailCap + 5},
 	}})
 
 	lines := strings.Split(renderPlain(tr, 80), "\n")
@@ -442,10 +453,10 @@ func TestRenderGroupBreakers(t *testing.T) {
 		{
 			name: "a multi-detail call between two reads",
 			build: func(tr *transcript) {
-				readCall(tr, "c1", "a.go", "1", "5", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 0)
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "ok\nPASS\ndone"}})
-				readCall(tr, "c3", "b.go", "1", "9", 0)
+				readCall(tr, "c3", "b.go", 1, 9, 0)
 			},
 			want: []string{
 				"✦ Read File",
@@ -463,9 +474,9 @@ func TestRenderGroupBreakers(t *testing.T) {
 		{
 			name: "an approval note between two reads",
 			build: func(tr *transcript) {
-				readCall(tr, "c1", "a.go", "1", "5", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 0)
 				tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "read_file"}, Decision: domain.ApprovalAllow})
-				readCall(tr, "c2", "b.go", "1", "9", 0)
+				readCall(tr, "c2", "b.go", 1, 9, 0)
 			},
 			want: []string{
 				"✦ Read File",
@@ -480,8 +491,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 		{
 			name: "a deeper sub-agent call",
 			build: func(tr *transcript) {
-				readCall(tr, "c1", "a.go", "1", "5", 0)
-				readCall(tr, "c2", "b.go", "1", "9", 1)
+				readCall(tr, "c1", "a.go", 1, 5, 0)
+				readCall(tr, "c2", "b.go", 1, 9, 1)
 			},
 			want: []string{
 				"✦ Read File",
@@ -496,9 +507,11 @@ func TestRenderGroupBreakers(t *testing.T) {
 		{
 			name: "a call with no target",
 			build: func(tr *transcript) {
-				readCall(tr, "c1", "a.go", "1", "5", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 0)
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file"}})
-				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "[File: ?, 1 lines total, showing lines 1-1]"}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2",
+					Content: "[File: ?, 1 lines total, showing lines 1-1]",
+					Summary: domain.ReadSpan{Start: 1, End: 1, Total: 1}}})
 			},
 			want: []string{
 				"✦ Read File",
@@ -540,9 +553,9 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 	tr.addUser("read the docs, then run the tests", nil)
 	tr.apply(domain.TokenEvent{Text: "Reading the docs first."})
 	tr.apply(domain.TokenEvent{Text: "\n\n"}) // the model's own padding: trimmed at commit
-	readCall(tr, "c1", "README.md", "1", "154", 0)
-	readCall(tr, "c2", "TODO.md", "1", "408", 0)
-	readCall(tr, "c3", "ISSUES.md", "1", "8", 0)
+	readCall(tr, "c1", "README.md", 1, 154, 0)
+	readCall(tr, "c2", "TODO.md", 1, 408, 0)
+	readCall(tr, "c3", "ISSUES.md", 1, 8, 0)
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c4", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID:  "c4",
@@ -552,9 +565,10 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID:  "c5",
 		Content: "  func main() {\n-     fmt.Println(\"old\")\n-     return\n+     fmt.Println(\"new\")\n+     os.Exit(0)\n  }",
+		Summary: domain.DiffStat{Added: 2, Removed: 2},
 	}})
 	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
-	readCall(tr, "c6", "main.go", "1", "154", 1)
+	readCall(tr, "c6", "main.go", 1, 154, 1)
 
 	want := strings.Join([]string{
 		"❯ read the docs, then run the tests",

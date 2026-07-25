@@ -499,7 +499,7 @@ func renderDetails(th theme, details []detailLine, width int) []string {
 }
 
 // detailStyle maps a detail kind to its style: plain detail is dim; the diff kinds are
-// red/green (view_diff's body is their producer — diffDetail).
+// red/green (view_diff's body is their producer — diffBody).
 func detailStyle(th theme, kind detailKind) lipgloss.Style {
 	switch kind {
 	case detailDiffAdded:

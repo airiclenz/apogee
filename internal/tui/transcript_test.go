@@ -53,7 +53,9 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	})
 	tr.apply(domain.ToolResultEvent{
 		EventBase: domain.EventBase{Turn: 0},
-		Result:    domain.ToolResult{CallID: "c1", Content: "[File: main.go, 1 lines total, showing lines 1-1]\npackage main"},
+		Result: domain.ToolResult{CallID: "c1",
+			Content: "[File: main.go, 1 lines total, showing lines 1-1]\npackage main",
+			Summary: domain.ReadSpan{Start: 1, End: 1, Total: 1}},
 	})
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 1}, Text: "It is "})
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 1}, Text: "a Go file."})
@@ -550,7 +552,9 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "b", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
 
 	// The second call's result arrives first; it must fold into call b, not call a.
-	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "b", Content: "[File: b.go, 10 lines total, showing lines 1-10]\n…"}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "b",
+		Content: "[File: b.go, 10 lines total, showing lines 1-10]\n…",
+		Summary: domain.ReadSpan{Start: 1, End: 10, Total: 10}}})
 
 	if n := len(tr.entries); n != 2 {
 		t.Fatalf("entries = %d, want 2 (the result folded in, no orphan entry)", n)
@@ -570,7 +574,9 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	}
 
 	// Call a's result arrives later and folds into a — still two entries, no orphan.
-	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "a", Content: "[File: a.go, 5 lines total, showing lines 1-5]\n…"}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "a",
+		Content: "[File: a.go, 5 lines total, showing lines 1-5]\n…",
+		Summary: domain.ReadSpan{Start: 1, End: 5, Total: 5}}})
 	if !callEntry(tr, "a").done {
 		t.Error("call a's later result did not fold into it")
 	}

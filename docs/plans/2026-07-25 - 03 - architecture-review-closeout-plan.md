@@ -371,7 +371,26 @@ sites; `go test ./internal/tools/...` green with no pre-existing assertion edite
 
 ---
 
-## 4. The view reads fields — retire the regexes and the prose sniffers
+## 4. The view reads fields — retire the regexes and the prose sniffers — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): four deviations from the item's literal text, all forced by the change
+itself. (a) **Test fixtures outside `toolpresent_test.go`** gained the summaries their tools
+now attach: `render_test.go`'s `readCall` helper (its `from`/`to` became ints so it can build
+a `ReadSpan`) and its four `view_diff` blocks, plus three `read_file` results in
+`transcript_test.go`. Those tests assert on rendered card lines, so without the summary they
+would have pinned the degraded prose floor instead of the line they claim to test; every
+`want` string is unchanged. (b) **`TestDiffDetailStat` did not survive as a stat test** — its
+content-driven counting cases ("a line starting with + is tagged, not counted", "the count
+spans the whole diff") tested counting that now lives in `internal/tools` and is covered by
+`diff_test.go`. It is replaced by `TestSummaryLine` (the exhaustive variant→line table,
+including the `"1 entries"`/`"1 matches"` fixed-plural traps) and
+`TestDiffStatSpansTheWholeDiff` (the stat still describes the whole diff when `diffBody` stops
+at the cap). (c) **`internal/tui/doc.go` and `render.go` each had one dangling `diffDetail`
+symbol reference** renamed to `diffBody` — item 4's own acceptance grep spans `internal/tui/`,
+so the name could not survive; doc.go's tool-presentation *paragraph* is untouched and stays
+item 5's. (d) **web_search's no-summary row already existed** (the `No results found for:`
+sentinel is exactly the path the tool attaches no summary on), so the six added fallback rows
+plus that one cover all seven tools.
 
 The point of the card. Everything before this was groundwork; nothing has changed behaviour
 yet.
