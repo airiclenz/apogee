@@ -257,12 +257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case eventMsg:
-		m = m.foldStats(msg.Event)
-		m.transcript.apply(msg.Event)
-		// foldActivity runs AFTER apply, unlike foldStats: its ToolResultEvent rule asks the
-		// transcript whether any call is still open, and apply is what pairs this result with
-		// its call (activity.go).
-		m = m.foldActivity(msg.Event)
+		m = m.foldEvent(msg.Event)
 		m.refreshViewport()
 		return m, nil
 
@@ -1469,45 +1464,6 @@ func modeColor(m domain.Mode) color.Color {
 	default:
 		return colFaint
 	}
-}
-
-// foldStats updates the live token stats from one engine Event (the eventMsg fold). Only the
-// top-level agent's (Depth 0) accounting drives the status line: a sub-agent's usage nests in
-// the stream, but the gauge tracks the conversation the human is steering. It marks when a
-// Turn's content begins streaming (its first token) so a later UsageEvent can time the
-// completion for a tokens/sec readout, resets that clock when the Turn re-streams, and on usage
-// adopts the new context fill (the gauge's Used) and throughput. It mutates the local copy and
-// returns it, like every Update fold.
-func (m Model) foldStats(e domain.Event) Model {
-	switch e := e.(type) {
-	case domain.TokenEvent:
-		if e.Depth == 0 && m.genStart.IsZero() {
-			m.genStart = time.Now()
-		}
-	case domain.StreamResetEvent:
-		if e.Depth == 0 {
-			m.genStart = time.Time{} // the Turn re-streams (events.go) — time the fresh generation
-		}
-	case domain.UsageEvent:
-		if e.Depth != 0 {
-			break
-		}
-		// Prefer the server's total; fall back to prompt+completion when it omits the sum.
-		total := e.TotalTokens
-		if total == 0 {
-			total = e.PromptTokens + e.CompletionTokens
-		}
-		if total > 0 {
-			m.ctxUsed = total
-		}
-		if !m.genStart.IsZero() && e.CompletionTokens > 0 {
-			if secs := time.Since(m.genStart).Seconds(); secs > 0 {
-				m.tokPerSec = float64(e.CompletionTokens) / secs
-			}
-		}
-		m.genStart = time.Time{}
-	}
-	return m
 }
 
 // throughputSuffix is the status line's "· N tok/s" readout while a Turn generates, timed off

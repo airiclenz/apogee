@@ -120,6 +120,17 @@
 // machine is untouched and only statusLine's running branch consults it. The per-tool verb it
 // renders comes from the same open registry toolpresent.go already keys by tool name.
 //
+// That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
+// [Model.foldEvent] is the single door every engine Event enters the view through: the Update
+// loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the three
+// folds a view update is made of — [Model.foldStats] (which moved there out of model.go, a file it
+// belonged to only because [Model] does), transcript.apply, then [Model.foldActivity] — in the one
+// order that works. That order used to be enforced by three comments in three files; it is now a
+// data dependency, because foldEvent reads the open-tool-call fact transcript.apply establishes and
+// PASSES it to foldActivity, which can no longer ask for it early. TestFoldEventCoversEveryEventVariant
+// parses internal/domain/events.go and fails on a variant with no row in the fold table, so a
+// twelfth Event has to be answered for — including with "deliberately nothing".
+//
 // The tool-call layout pass (post-v1.5.0) tightens how a session reads without touching what the
 // model sees: committed assistant text is trimmed of its leading and trailing blank lines
 // (trimBlankLines) and interior blank runs collapse outside fenced code, so layout.md's "exactly

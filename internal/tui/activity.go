@@ -14,8 +14,9 @@ import (
 // activity answers the question the human is actually asking while a worker runs — is it
 // reasoning, writing, running a tool, or stuck? — in place of the turn index, which answered
 // none of it. It is DERIVED, never authoritative: foldActivity folds the same Event stream the
-// transcript folds (beside foldStats in the eventMsg case), and the handful of transitions no
-// Event announces — a submit, /compact, a stop, the worker's terminal Msg — set it directly.
+// transcript folds (the last of the three folds foldEvent owns — fold.go), and the handful of
+// transitions no Event announces — a submit, /compact, a stop, the worker's terminal Msg — set
+// it directly.
 //
 // It is not a lifecycle state. compacting and stopping are activities, not uiStates, so the
 // ADR 0011 state machine is untouched: statusLine still switches on m.state and only the
@@ -144,9 +145,10 @@ func (m *Model) setActivity(kind activityKind, label string, depth int) {
 	m.act.depth = depth
 }
 
-// foldActivity derives the live activity from one engine Event (the eventMsg fold, beside
-// foldStats). It must run AFTER transcript.apply: the ToolResultEvent rule reads the
-// transcript's call/result pairing, which apply is what establishes.
+// foldActivity derives the live activity from one engine Event (the third fold foldEvent runs).
+// openCall is whether any tool call is still waiting for its result — the call/result pairing
+// transcript.apply establishes and foldEvent hands over (fold.go), so the ToolResultEvent rule
+// below reads a value rather than an ordering.
 //
 // Events that say nothing about what the worker is doing next — an error notice, usage
 // accounting, an audit record, a fired mechanism, an approval record — leave the activity
@@ -155,7 +157,7 @@ func (m *Model) setActivity(kind activityKind, label string, depth int) {
 // stopping is STICKY: once Esc has fired the cancel the worker keeps emitting events until it
 // reaches a quiescent boundary, and overwriting the phrase there would tell the human their
 // stop was ignored. Only finishWorker clears it, when the worker has actually unwound.
-func (m Model) foldActivity(e domain.Event) Model {
+func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 	if m.act.kind == actStopping {
 		return m
 	}
@@ -173,7 +175,7 @@ func (m Model) foldActivity(e domain.Event) Model {
 		// One result does not end the tool phase while another call is still open (a parallel
 		// batch); today's loop dispatches sequentially, so this normally falls straight through
 		// to thinking — the model has the result and is deciding what to do with it.
-		if m.transcript.hasOpenToolCall() {
+		if openCall {
 			break
 		}
 		m.setActivity(actThinking, "", e.Depth)

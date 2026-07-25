@@ -517,7 +517,25 @@ owner call and was not touched.
 
 ---
 
-## 6. One `foldEvent` owns the Event fold and its order (candidate 06)
+## 6. One `foldEvent` owns the Event fold and its order (candidate 06) — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): three deviations from the item's literal text, plus one note for the
+verifier. (a) `activity_test.go` already had a **package-level test helper named `foldEvent`**
+(`func foldEvent(m Model, e domain.Event) Model`) doing `apply` then `foldActivity` — the thing
+this item makes production code. Go would have compiled both (a method is not in package scope),
+but keeping a shadow duplicate of the new owner, with a *different* fold set (no `foldStats`),
+next to it is exactly the drift the item removes: the helper is **deleted** and its 14 call sites
+now call `m.foldEvent(e)`. So no test "gains the new argument" — none calls `foldActivity`
+directly any more; every existing expectation is unchanged and the section comment says why the
+phrase is asserted through `foldEvent`. (b) **`internal/tui/doc.go` gained a paragraph** for
+`fold.go` after the activity.go one — the package's module map is where this repo records a new
+file and a package-wide invariant, and "every Event enters through `foldEvent`" is worth nothing
+if it is only stated inside the file it constrains. (c) `activity.go`'s **file header** was
+re-pointed too (it said `foldActivity` folds "beside `foldStats` in the eventMsg case", which is
+no longer where either runs). (d) For the acceptance grep: it also matches four **prose
+cross-references** to `foldStats` left in `model.go` comments (L325, L842–843, L1470, L1552) and
+the `foldActivity` **declaration** in `activity.go` — all still accurate; the only *calls* are
+`fold.go`'s. `model.go` is 1,772 → 1,728 lines (44 shorter).
 
 **What:**
 

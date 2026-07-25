@@ -350,9 +350,11 @@ func (t *transcript) addToolResult(result domain.ToolResult, depth int) {
 }
 
 // hasOpenToolCall reports whether any tool-call entry is still waiting for its result — the
-// signal the live status line uses to stay on the tool phrase while a batch of calls runs
-// (foldActivity). It reads the same call/result pairing addToolResult maintains, so a call is
-// "open" from the moment it is recorded until its result folds into it. A call whose result
+// signal the live status line uses to stay on the tool phrase while a batch of calls runs. Its
+// caller is foldEvent (fold.go), which reads it straight after apply and hands the answer to
+// foldActivity, so the phrase can never be derived from a pairing that has not happened yet.
+// It reads the same call/result pairing addToolResult maintains, so a call is "open" from the
+// moment it is recorded until its result folds into it. A call whose result
 // never arrived (a run cancelled mid-tool) stays open forever, which at worst holds the tool
 // phrase one event longer after some later result; the next reasoning/token/message event
 // moves it on.

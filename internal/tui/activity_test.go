@@ -158,13 +158,11 @@ func TestActivityElapsed(t *testing.T) {
 // ----------------------------------------------------------------------------
 // The fold (foldActivity)
 // ----------------------------------------------------------------------------
-
-// foldEvent folds one Event through the eventMsg path — transcript first, then the activity —
-// exactly as Update does, so the ToolResultEvent rule sees the pairing apply establishes.
-func foldEvent(m Model, e domain.Event) Model {
-	m.transcript.apply(e)
-	return m.foldActivity(e)
-}
+//
+// The phrase is asserted through Model.foldEvent (fold.go), the one owner of the fold and its
+// order: it is what pairs a result with its call before the activity's ToolResultEvent rule
+// reads the open-call fact, so a test that called foldActivity alone would have to reproduce
+// the order by hand and could drift away from what Update actually does.
 
 // TestFoldActivitySequence walks a realistic turn — reasoning, streamed text, a tool call, its
 // result, the closing message — and asserts the phrase at every step.
@@ -191,14 +189,14 @@ func TestFoldActivitySequence(t *testing.T) {
 		{name: "message keeps thinking (the loop may step again)", event: domain.MessageEvent{Text: "done"}, want: "thinking"},
 	}
 	for _, s := range steps {
-		m = foldEvent(m, s.event)
+		m = m.foldEvent(s.event)
 		if got := m.act.text(); got != s.want {
 			t.Errorf("after %s the phrase is %q, want %q", s.name, got, s.want)
 		}
 	}
 
 	// A re-streamed turn says so.
-	m = foldEvent(m, domain.StreamResetEvent{})
+	m = m.foldEvent(domain.StreamResetEvent{})
 	if got := m.act.text(); got != "retrying" {
 		t.Errorf("after a stream reset the phrase is %q, want %q", got, "retrying")
 	}
@@ -209,19 +207,19 @@ func TestFoldActivitySequence(t *testing.T) {
 func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
 	m := newTestModel(t)
 
-	m = foldEvent(m, domain.TokenEvent{Text: "one"})
+	m = m.foldEvent(domain.TokenEvent{Text: "one"})
 	started := m.act.since
 	if started.IsZero() {
 		t.Fatal("the first token did not start the clock")
 	}
 	for i := 0; i < 3; i++ {
-		m = foldEvent(m, domain.TokenEvent{Text: "more"})
+		m = m.foldEvent(domain.TokenEvent{Text: "more"})
 	}
 	if !m.act.since.Equal(started) {
 		t.Errorf("a stream of tokens restarted the clock (%v → %v)", started, m.act.since)
 	}
 
-	m = foldEvent(m, domain.MessageEvent{Text: "done"})
+	m = m.foldEvent(domain.MessageEvent{Text: "done"})
 	if m.act.since.Equal(started) {
 		t.Error("the phrase changed to thinking but the clock kept the responding start")
 	}
@@ -232,7 +230,7 @@ func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
 func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
 	m := newTestModel(t)
 
-	m = foldEvent(m, domain.ToolCallEvent{
+	m = m.foldEvent(domain.ToolCallEvent{
 		EventBase: domain.EventBase{Depth: 1},
 		Call:      domain.ToolCall{ID: "1", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)},
 	})
@@ -240,7 +238,7 @@ func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
 		t.Errorf("nested tool phrase = %q, want %q", got, want)
 	}
 
-	m = foldEvent(m, domain.MessageEvent{Text: "back"})
+	m = m.foldEvent(domain.MessageEvent{Text: "back"})
 	if got, want := m.act.text(), "thinking"; got != want {
 		t.Errorf("phrase after the parent resumed = %q, want %q", got, want)
 	}
@@ -251,15 +249,15 @@ func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
 // thinking again.
 func TestFoldActivityBatchStaysOnTool(t *testing.T) {
 	m := newTestModel(t)
-	m = foldEvent(m, domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
-	m = foldEvent(m, domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
+	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
+	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
 
-	m = foldEvent(m, domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
+	m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
 	if got, want := m.act.text(), "reading · b.go"; got != want {
 		t.Errorf("phrase with one call still open = %q, want %q", got, want)
 	}
 
-	m = foldEvent(m, domain.ToolResultEvent{Result: domain.ToolResult{CallID: "2", Content: "ok"}})
+	m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "2", Content: "ok"}})
 	if got, want := m.act.text(), "thinking"; got != want {
 		t.Errorf("phrase after the batch drained = %q, want %q", got, want)
 	}
@@ -280,7 +278,7 @@ func TestFoldActivityStoppingIsSticky(t *testing.T) {
 		domain.MessageEvent{Text: "done"},
 		domain.StreamResetEvent{},
 	} {
-		m = foldEvent(m, e)
+		m = m.foldEvent(e)
 		if got := m.act.text(); got != "stopping" {
 			t.Fatalf("%T overwrote the sticky stop phrase with %q", e, got)
 		}
@@ -296,7 +294,7 @@ func TestFoldActivityStoppingIsSticky(t *testing.T) {
 // live phrase alone — the status line must not flicker off the work actually in flight.
 func TestFoldActivityIgnoresObservationalEvents(t *testing.T) {
 	m := newTestModel(t)
-	m = foldEvent(m, domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
+	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
 	want := m.act
 
 	for _, e := range []domain.Event{
@@ -306,7 +304,7 @@ func TestFoldActivityIgnoresObservationalEvents(t *testing.T) {
 		domain.MechanismFiredEvent{Mechanism: "m", Hook: "h", Action: "a"},
 		domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
 	} {
-		m = foldEvent(m, e)
+		m = m.foldEvent(e)
 		if m.act != want {
 			t.Errorf("%T changed the activity: %+v, want %+v", e, m.act, want)
 		}
