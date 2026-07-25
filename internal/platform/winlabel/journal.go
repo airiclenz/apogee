@@ -100,10 +100,10 @@ func (r Record) PriorLabels() map[string]string {
 // so it is not recorded — that is what keeps a re-walked tree of apogee's own labels out of the
 // journal instead of appending (and re-flushing) one useless entry per file.
 //
-// fold is injected (nil ⇒ FoldPath) so the decision is table-testable on any OS.
+// fold is injected (nil ⇒ foldPath) so the decision is table-testable on any OS.
 func recordEntry(entries []Entry, entry Entry, fold func(string) string) ([]Entry, bool) {
 	if fold == nil {
-		fold = FoldPath
+		fold = foldPath
 	}
 	if IsLowLabel(entry.PriorSDDL) {
 		entry.PriorSDDL = ""
@@ -139,10 +139,10 @@ func recordEntry(entries []Entry, entry Entry, fold func(string) string) ([]Entr
 // path is not knowable from here, and ambiguity resolves toward keeping the record — a
 // spurious restore attempt is recoverable, a destroyed record is not.
 //
-// fold is injected (nil ⇒ FoldPath) so the decision is table-testable on any OS.
+// fold is injected (nil ⇒ foldPath) so the decision is table-testable on any OS.
 func unwindEntry(entries []Entry, path string, fold func(string) string) ([]Entry, bool) {
 	if fold == nil {
-		fold = FoldPath
+		fold = foldPath
 	}
 	key := fold(path)
 	for i := range entries {
@@ -270,13 +270,13 @@ func ListJournals(home string) []string {
 	return out
 }
 
-// SiblingJournals reads every journal under home EXCEPT the one at own — the other
+// siblingJournals reads every journal under home EXCEPT the one at own — the other
 // sessions whose journals may still claim a root the caller is about to clear. An
 // undecodable sibling is skipped: it names no owner to check alive and no roots to spare,
 // and erring toward clearing is the safe direction — a cleared label is less privilege,
-// never more (the posture recoverLabelJournals takes with the same file). home may be ""
+// never more (the posture Recover takes with the same file). home may be ""
 // (no resolvable user profile), where no journal exists and there is nothing to read.
-func SiblingJournals(home, own string) []Record {
+func siblingJournals(home, own string) []Record {
 	if home == "" {
 		return nil
 	}
@@ -314,7 +314,7 @@ func Residue() string { return ResidueIn(Home()) }
 // now" is the fact worth stating, and the wording names both causes.
 //
 // A journal that cannot be READ is reported rather than skipped. It is the worst state on this
-// list — recoverLabelJournals cannot revert what it cannot decode, so it stays on the disk
+// list — Recover cannot revert what it cannot decode, so it stays on the disk
 // forever — and skipping it made the one surface that could tell the user silent about it.
 // Its owner cannot be identified either, so it is reported even though it MIGHT be this
 // process's own: since journals are written atomically, a live session's own file is never

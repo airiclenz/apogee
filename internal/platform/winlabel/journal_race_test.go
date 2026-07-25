@@ -48,7 +48,9 @@ func TestJournalIsSafeForConcurrentUse(t *testing.T) {
 				_ = j.Writable()
 				_ = j.Entries()
 				_ = j.PriorLabels()
-				j.MarkLabelled(fmt.Sprintf(`C:\work\%d`, i))
+				j.mu.Lock()
+				j.markLabelled(fmt.Sprintf(`C:\work\%d`, i))
+				j.mu.Unlock()
 			}
 		}()
 	}

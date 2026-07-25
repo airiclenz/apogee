@@ -37,7 +37,20 @@ type Journal struct {
 	// labelled records the folded box roots whose trees have already been labelled this
 	// session, so the once-per-box cost is not paid once per command.
 	labelled map[string]bool
+	// revert is the OS seam Retire drives, fixed at Open from the build's osRevert. It is a
+	// per-journal field rather than a package-level variable so a test can hand one journal a
+	// stand-in without a global that two of them could race over or clobber for each other.
+	// nil is the honest non-Windows answer — no facility labelled anything, so there is
+	// nothing to put back — and Retire treats it as exactly that.
+	revert revertFunc
 }
+
+// revertFunc is the shape of the revert Retire drives: given the journal's home and its own
+// file, it returns the undo for one Record, handing back the entries it deliberately did not
+// act on. The production implementation IS the Windows label walk (walk_windows.go), which is
+// why the seam exists at all: it is what lets one Retire, declared once and unguarded, reach an
+// OS-specific body without a build tag on the method itself.
+type revertFunc func(home, own string) func(Record) ([]Entry, error)
 
 // Open returns the label journal THIS process owns under home, touching the disk NOWHERE: it
 // resolves the file's path without reading, writing or creating anything under it, so a report
@@ -49,7 +62,7 @@ type Journal struct {
 // made against a record of how to undo it, so no journal means no label rather than an
 // unrevertable one.
 func Open(home string) *Journal {
-	j := &Journal{labelled: make(map[string]bool)}
+	j := &Journal{labelled: make(map[string]bool), revert: osRevert()}
 	if home == "" {
 		return j
 	}
@@ -78,7 +91,7 @@ func (j *Journal) Writable() bool {
 // caller refuses the box; the error is plain — package platform wraps the confinement sentinel
 // at its own call site.
 func (j *Journal) record(entry Entry) (bool, error) {
-	entries, changed := recordEntry(j.rec.Entries, entry, FoldPath)
+	entries, changed := recordEntry(j.rec.Entries, entry, foldPath)
 	j.rec.Entries = entries
 	if !changed {
 		return false, nil
@@ -87,14 +100,6 @@ func (j *Journal) record(entry Entry) (bool, error) {
 		return false, err
 	}
 	return true, nil
-}
-
-// Record is record with the lock taken, for the backend's label pass while the walk itself
-// still lives in package platform.
-func (j *Journal) Record(entry Entry) (bool, error) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.record(entry)
 }
 
 // unwind removes path's just-journalled entry after its label write failed — the phantom-entry
@@ -106,20 +111,12 @@ func (j *Journal) Record(entry Entry) (bool, error) {
 // Retire rewrites or removes the whole file on success, and only a crash before that
 // resurrects the phantom.
 func (j *Journal) unwind(path string) {
-	entries, removed := unwindEntry(j.rec.Entries, path, FoldPath)
+	entries, removed := unwindEntry(j.rec.Entries, path, foldPath)
 	if !removed {
 		return
 	}
 	j.rec.Entries = entries
 	_ = j.flush()
-}
-
-// Unwind is unwind with the lock taken, for the backend's label pass while the walk itself
-// still lives in package platform.
-func (j *Journal) Unwind(path string) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.unwind(path)
 }
 
 // flush persists the in-memory record. Assumes the caller holds j.mu. A journal with no path
@@ -153,22 +150,17 @@ func (j *Journal) PriorLabels() map[string]string {
 	return j.rec.PriorLabels()
 }
 
-// Labelled reports whether root's tree has already been labelled this session. The memo is
-// keyed by the FOLDED path for the same reason the journal is: C:\Work and c:\work are one
-// root, and labelling it twice would journal it twice.
-func (j *Journal) Labelled(root string) bool {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.labelled[FoldPath(root)]
-}
+// isLabelled reports whether root's tree has already been labelled this session. Assumes the
+// caller holds j.mu — LabelTree asks at the top of its own critical section. The memo is keyed
+// by the FOLDED path for the same reason the journal is: C:\Work and c:\work are one root, and
+// labelling it twice would journal it twice.
+func (j *Journal) isLabelled(root string) bool { return j.labelled[foldPath(root)] }
 
-// MarkLabelled records that root's tree has been labelled, so the once-per-box cost is paid by
-// the first confined command of a session and not by every one of them.
-func (j *Journal) MarkLabelled(root string) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.labelled[FoldPath(root)] = true
-}
+// markLabelled records that root's tree has been labelled, so the once-per-box cost is paid by
+// the first confined command of a session and not by every one of them. Assumes the caller
+// holds j.mu — LabelTree marks it at the end of the same critical section that walked it, so
+// the memo can never claim a tree a concurrent walk has not finished.
+func (j *Journal) markLabelled(root string) { j.labelled[foldPath(root)] = true }
 
 // forgetLabelled drops the once-per-root memo, so a later pass walks those roots again.
 // Assumes the caller holds j.mu. Retire calls it from inside its own critical section: the
@@ -187,33 +179,41 @@ func (j *Journal) ForgetLabelled() {
 }
 
 // Retire puts the disk back: every journalled root's tree is cleared of the mandatory label —
-// minus any root a LIVE sibling session's journal still names (RevertibleRoots), which stays
+// minus any root a LIVE sibling session's journal still names (revertibleRoots), which stays
 // fenced for that session — then the paths that carried an explicit label before the run get
 // theirs back verbatim — minus any prior under a root a sibling journal still claims, which is
 // handed off rather than restored into the sibling's live box and lost to its later clear
-// (RestorablePriors) — and the journal file is removed, but ONLY if nothing failed and nothing
-// was handed off (the package-level Retire). A failed revert keeps both the file and the
+// (restorablePriors) — and the journal file is removed, but ONLY if nothing failed and nothing
+// was handed off (the package-level retire). A failed revert keeps both the file and the
 // in-memory record, so the labels it describes are still recoverable: the next NewConfiner
 // retries them and Residue reports them meanwhile. A handoff is not a failure — the caller's
 // Close returns nil — but the surviving entries stay in memory too, so a repeated Close
 // converges instead of deleting the handoff record.
 //
-// revert is injected because the production revert IS the label walk, which is Windows-tagged
-// and still lives in package platform. It is handed this journal's home and its own file, so
+// The revert itself is reached through j.revert, the seam Open fixed from the build's
+// osRevert: the production revert IS the label walk, which is Windows-tagged, and routing it
+// through one seam is what lets this method be declared ONCE for every OS rather than as two
+// build-tagged copies of one contract. It is handed this journal's home and its own file, so
 // the sibling read and both exclusions happen at revert time, when liveness and the claim set
-// are current, rather than at construction.
+// are current, rather than at construction. A NIL seam is the non-Windows build's honest
+// answer — no facility here labels anything, so there is nothing on the disk to put back — and
+// it retires to a no-op rather than an error: the journal file, if a test made one, is left
+// exactly as it is.
 //
 // The lock is held for the whole duration, and the memo is dropped through the UNEXPORTED
 // forgetLabelled from inside that critical section — calling the exported wrapper here would
 // deadlock on a mutex that is not reentrant, invisibly to every non-Windows gate.
-func (j *Journal) Retire(revert func(home, own string) func(Record) ([]Entry, error)) error {
+func (j *Journal) Retire() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	// The package-level Retire is the retention rule over one journal FILE; this method is one
+	if j.revert == nil {
+		return nil
+	}
+	// The package-level retire is the retention rule over one journal FILE; this method is one
 	// session's way in, and crash recovery drives the same rule over the files of runs that
 	// never got here.
-	remaining, err := Retire(j.path, j.rec, revert(j.home, j.path))
+	remaining, err := retire(j.path, j.rec, j.revert(j.home, j.path))
 	if err != nil {
 		return fmt.Errorf("apogee: confine: could not revert every mandatory label; the journal %q is kept so the next run retries: %w",
 			j.path, err)

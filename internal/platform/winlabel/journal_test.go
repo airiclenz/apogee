@@ -123,19 +123,19 @@ func TestSiblingLabelJournalsExcludesOwnAndUndecodable(t *testing.T) {
 		t.Fatalf("seed undecodable journal: %v", err)
 	}
 
-	got := SiblingJournals(home, own)
+	got := siblingJournals(home, own)
 	if len(got) != 1 || got[0].PID != 200 {
-		t.Fatalf("SiblingJournals = %+v, want only the decodable sibling (PID 200)", got)
+		t.Fatalf("siblingJournals = %+v, want only the decodable sibling (PID 200)", got)
 	}
 
 	// Windows paths are case-insensitive, so a differently-cased spelling of own is still own.
-	if got := SiblingJournals(home, strings.ToUpper(own)); len(got) != 1 || got[0].PID != 200 {
-		t.Errorf("SiblingJournals with upper-cased own = %+v, want the own journal still excluded", got)
+	if got := siblingJournals(home, strings.ToUpper(own)); len(got) != 1 || got[0].PID != 200 {
+		t.Errorf("siblingJournals with upper-cased own = %+v, want the own journal still excluded", got)
 	}
 
 	// No home means no journals — the no-user-profile backend must not read a relative path.
-	if got := SiblingJournals("", own); got != nil {
-		t.Errorf("SiblingJournals(\"\") = %+v, want nil", got)
+	if got := siblingJournals("", own); got != nil {
+		t.Errorf("siblingJournals(\"\") = %+v, want nil", got)
 	}
 }
 
@@ -258,13 +258,13 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		},
 		{
 			name:        "own_dir_label_as_root_prior_is_recorded_as_no_prior",
-			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: DirSDDL},
+			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: dirSDDL},
 			wantChanged: true,
 			wantEntries: []Entry{{Path: `C:\work`, Root: true}},
 		},
 		{
 			name:  "own_file_label_on_a_descendant_is_not_recorded_at_all",
-			entry: Entry{Path: `C:\work\main.go`, PriorSDDL: FileSDDL},
+			entry: Entry{Path: `C:\work\main.go`, PriorSDDL: fileSDDL},
 		},
 		{
 			name:  "inherited_own_label_on_a_descendant_is_not_recorded_at_all",
@@ -277,19 +277,19 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		{
 			name:        "duplicate_path_keeps_the_first_prior",
 			entries:     []Entry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
-			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: DirSDDL},
+			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: dirSDDL},
 			wantEntries: []Entry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
 		},
 		{
 			name:        "case_varied_duplicate_path_is_the_same_path",
 			entries:     []Entry{{Path: `C:\Work`, Root: true}},
-			entry:       Entry{Path: `c:\work`, Root: true, PriorSDDL: DirSDDL},
+			entry:       Entry{Path: `c:\work`, Root: true, PriorSDDL: dirSDDL},
 			wantEntries: []Entry{{Path: `C:\Work`, Root: true}},
 		},
 		{
 			name:        "a_journalled_descendant_can_still_become_a_root",
 			entries:     []Entry{{Path: `C:\work\vendor`, PriorSDDL: foreignMedium}},
-			entry:       Entry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: DirSDDL},
+			entry:       Entry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: dirSDDL},
 			wantChanged: true,
 			wantEntries: []Entry{{Path: `C:\work\vendor`, Root: true, PriorSDDL: foreignMedium}},
 		},
@@ -299,7 +299,7 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, changed := recordEntry(tt.entries, tt.entry, FoldPath)
+			got, changed := recordEntry(tt.entries, tt.entry, foldPath)
 			if changed != tt.wantChanged {
 				t.Errorf("changed = %v, want %v (it decides whether the journal is flushed)", changed, tt.wantChanged)
 			}
@@ -401,7 +401,7 @@ func TestUnwindLabelEntry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, removed := unwindEntry(tt.entries, tt.path, FoldPath)
+			got, removed := unwindEntry(tt.entries, tt.path, foldPath)
 			if removed != tt.wantRemoved {
 				t.Errorf("removed = %v, want %v (it decides whether the journal is re-flushed)", removed, tt.wantRemoved)
 			}

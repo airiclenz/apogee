@@ -48,12 +48,12 @@ func TestRetireLabelJournalKeepsTheFileWhenTheRevertFails(t *testing.T) {
 			}
 
 			var seen Record
-			_, err := Retire(path, journal, func(r Record) ([]Entry, error) {
+			_, err := retire(path, journal, func(r Record) ([]Entry, error) {
 				seen = r
 				return nil, tt.revertErr
 			})
 			if !errors.Is(err, tt.wantErrIs) {
-				t.Fatalf("Retire err = %v, want %v", err, tt.wantErrIs)
+				t.Fatalf("retire err = %v, want %v", err, tt.wantErrIs)
 			}
 			if len(seen.Entries) != 1 || seen.Entries[0].Path != `C:\work` {
 				t.Errorf("the revert was handed %+v, want the journal itself", seen)
@@ -75,19 +75,19 @@ func TestRetireLabelJournalWithoutAJournalFile(t *testing.T) {
 
 	// A backend with no journal location (no resolvable user profile) has nothing to remove,
 	// so the revert outcome passes straight through — in both directions.
-	if _, err := Retire("", Record{}, func(Record) ([]Entry, error) { return nil, nil }); err != nil {
-		t.Errorf("Retire(\"\") = %v, want nil", err)
+	if _, err := retire("", Record{}, func(Record) ([]Entry, error) { return nil, nil }); err != nil {
+		t.Errorf("retire(\"\") = %v, want nil", err)
 	}
 	sentinel := errors.New("revert failed")
-	if _, err := Retire("", Record{}, func(Record) ([]Entry, error) { return nil, sentinel }); !errors.Is(err, sentinel) {
-		t.Errorf("Retire(\"\") = %v, want the revert error", err)
+	if _, err := retire("", Record{}, func(Record) ([]Entry, error) { return nil, sentinel }); !errors.Is(err, sentinel) {
+		t.Errorf("retire(\"\") = %v, want the revert error", err)
 	}
 
 	// An already-absent journal file is not a failure: recovery may run twice over the same
 	// home, and the second pass must not invent an error out of work already done.
 	gone := JournalPath(t.TempDir(), 7)
-	if _, err := Retire(gone, Record{}, func(Record) ([]Entry, error) { return nil, nil }); err != nil {
-		t.Errorf("Retire on a missing file = %v, want nil", err)
+	if _, err := retire(gone, Record{}, func(Record) ([]Entry, error) { return nil, nil }); err != nil {
+		t.Errorf("retire on a missing file = %v, want nil", err)
 	}
 }
 
@@ -113,11 +113,11 @@ func TestRetireLabelJournalRewritesTheFileToTheHandedOffEntries(t *testing.T) {
 	}
 
 	handoff := []Entry{{Path: `C:\work`, Root: true, PriorSDDL: "S:AI(ML;OICI;NW;;;ME)"}}
-	remaining, err := Retire(path, journal, func(Record) ([]Entry, error) {
+	remaining, err := retire(path, journal, func(Record) ([]Entry, error) {
 		return handoff, nil
 	})
 	if err != nil {
-		t.Fatalf("Retire = %v, want nil — a handoff is not a failed revert", err)
+		t.Fatalf("retire = %v, want nil — a handoff is not a failed revert", err)
 	}
 	if len(remaining) != 1 || remaining[0] != handoff[0] {
 		t.Fatalf("remaining = %+v, want the handed-off entry back verbatim", remaining)
@@ -136,10 +136,10 @@ func TestRetireLabelJournalRewritesTheFileToTheHandedOffEntries(t *testing.T) {
 
 	// With nothing handed off the same journal retires fully — the handoff is the ONLY thing
 	// that keeps a successfully reverted journal alive.
-	if remaining, err := Retire(path, kept, func(Record) ([]Entry, error) {
+	if remaining, err := retire(path, kept, func(Record) ([]Entry, error) {
 		return nil, nil
 	}); err != nil || len(remaining) != 0 {
-		t.Fatalf("Retire (final) = %+v, %v; want a full retirement", remaining, err)
+		t.Fatalf("retire (final) = %+v, %v; want a full retirement", remaining, err)
 	}
 	if _, err := os.Stat(path); err == nil {
 		t.Error("the journal survived a revert that handed nothing off; a stale journal reports residue that is not there")
@@ -237,7 +237,7 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			restore, handoff := RestorablePriors(journal, tt.siblings)
+			restore, handoff := restorablePriors(journal, tt.siblings)
 			if len(restore) != len(tt.wantRestore) {
 				t.Fatalf("restore = %v, want %v", restore, tt.wantRestore)
 			}
@@ -261,7 +261,7 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 func TestClearTreeOutcome(t *testing.T) {
 	t.Parallel()
 
-	// The below-root accounting clearLabelTree hands to Retire's decision. A nil
+	// The below-root accounting ClearTree hands to retire's decision. A nil
 	// verdict is what retires the journal, so it may only ever mean "every descendant is
 	// verifiably cleared or gone"; any remaining failure must surface as an error naming the
 	// first one and the count, which keeps the journal for the next run. The walk itself is
@@ -269,13 +269,13 @@ func TestClearTreeOutcome(t *testing.T) {
 	// same seam TestRetireLabelJournalKeepsTheFileWhenTheRevertFails uses.
 	first := errors.New(`"C:\work\stuck.txt": access is denied`)
 
-	if err := ClearTreeOutcome(`C:\work`, 0, nil); err != nil {
-		t.Errorf("ClearTreeOutcome with no failures = %v, want nil so the journal is retired", err)
+	if err := clearTreeOutcome(`C:\work`, 0, nil); err != nil {
+		t.Errorf("clearTreeOutcome with no failures = %v, want nil so the journal is retired", err)
 	}
 
-	err := ClearTreeOutcome(`C:\work`, 3, first)
+	err := clearTreeOutcome(`C:\work`, 3, first)
 	if err == nil {
-		t.Fatal("ClearTreeOutcome with 3 failures = nil; the journal would be retired over labels still on the disk")
+		t.Fatal("clearTreeOutcome with 3 failures = nil; the journal would be retired over labels still on the disk")
 	}
 	if !errors.Is(err, first) {
 		t.Errorf("err = %v, want the first failure wrapped so callers can inspect it", err)
@@ -359,13 +359,13 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 			t.Parallel()
 
 			alive := func(pid int) bool { return tt.live[pid] }
-			got := RevertibleRoots(journal, tt.siblings, alive)
+			got := revertibleRoots(journal, tt.siblings, alive)
 			if len(got) != len(tt.want) {
-				t.Fatalf("RevertibleRoots = %v, want %v", got, tt.want)
+				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
 			}
 			for i := range tt.want {
 				if got[i] != tt.want[i] {
-					t.Errorf("RevertibleRoots[%d] = %q, want %q", i, got[i], tt.want[i])
+					t.Errorf("revertibleRoots[%d] = %q, want %q", i, got[i], tt.want[i])
 				}
 			}
 		})

@@ -110,24 +110,30 @@ func TestJournalForgetLabelledClearsTheMemo(t *testing.T) {
 
 	j := Open(t.TempDir())
 	const root = `C:\work`
-	j.MarkLabelled(root)
-	if !j.Labelled(root) {
+	j.mu.Lock()
+	j.markLabelled(root)
+	recorded, folded := j.isLabelled(root), j.isLabelled(`c:\WORK`)
+	j.mu.Unlock()
+	if !recorded {
 		t.Fatal("the memo did not record a labelled root; the once-per-box pass would repeat")
 	}
 	// The memo is folded, like the journal: C:\Work and c:\work are one root.
-	if !j.Labelled(`c:\WORK`) {
+	if !folded {
 		t.Error("the memo missed a case-varied spelling of the same root; it would be labelled — and journalled — twice")
 	}
 
 	j.ForgetLabelled()
-	if j.Labelled(root) {
+	j.mu.Lock()
+	survived := j.isLabelled(root)
+	j.mu.Unlock()
+	if survived {
 		t.Error("the memo survived ForgetLabelled; a reverted tree must be walked again")
 	}
 }
 
 // Retire hands its remaining entries back and reopens the memo, and a failed revert surfaces
-// as the wrapped keep-the-journal error. The revert itself is Windows-tagged, so it is
-// injected here exactly as the retention rule's own tests inject it.
+// as the wrapped keep-the-journal error. The revert itself is Windows-tagged, so it is planted
+// on the journal's own seam here exactly as the retention rule's own tests inject it.
 func TestJournalRetireKeepsTheHandoffAndReopensTheMemo(t *testing.T) {
 	t.Parallel()
 
@@ -138,16 +144,16 @@ func TestJournalRetireKeepsTheHandoffAndReopensTheMemo(t *testing.T) {
 		j.mu.Unlock()
 		t.Fatalf("record the root: %v", err)
 	}
+	j.markLabelled(`C:\work`)
 	j.mu.Unlock()
-	j.MarkLabelled(`C:\work`)
 
 	handoff := []Entry{{Path: `C:\work\vendor`, PriorSDDL: "S:AI(ML;;NW;;;ME)"}}
 	var gotHome, gotOwn string
-	revert := func(home, own string) func(Record) ([]Entry, error) {
+	j.revert = func(home, own string) func(Record) ([]Entry, error) {
 		gotHome, gotOwn = home, own
 		return func(Record) ([]Entry, error) { return handoff, nil }
 	}
-	if err := j.Retire(revert); err != nil {
+	if err := j.Retire(); err != nil {
 		t.Fatalf("Retire: %v", err)
 	}
 
@@ -157,7 +163,39 @@ func TestJournalRetireKeepsTheHandoffAndReopensTheMemo(t *testing.T) {
 	if got := j.Entries(); len(got) != 1 || got[0].Path != handoff[0].Path {
 		t.Errorf("entries after Retire = %+v, want the handed-off entry, so a repeated Close converges", got)
 	}
-	if j.Labelled(`C:\work`) {
+	j.mu.Lock()
+	memoSurvived := j.isLabelled(`C:\work`)
+	j.mu.Unlock()
+	if memoSurvived {
 		t.Error("the memo survived Retire; the labels are off the disk and the next Confine must re-apply them")
+	}
+}
+
+// A journal with NO revert seam retires to a no-op. That is the non-Windows build's state —
+// osRevert supplies nil there, because no facility on such a host labels anything — and it must
+// stay a no-op rather than an error or, far worse, a journal file deleted as though a revert
+// had really happened. The seam is cleared explicitly rather than inferred from the build, so
+// the case is covered on Windows too, where Open fills it in.
+func TestJournalRetireWithoutARevertSeamDoesNothing(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	j := Open(home)
+	j.mu.Lock()
+	if _, err := j.record(Entry{Path: `C:\work`, Root: true}); err != nil {
+		j.mu.Unlock()
+		t.Fatalf("record the root: %v", err)
+	}
+	j.mu.Unlock()
+
+	j.revert = nil
+	if err := j.Retire(); err != nil {
+		t.Fatalf("Retire with no revert seam = %v, want nil — there is no disk mutation to undo", err)
+	}
+	if got := j.Entries(); len(got) != 1 {
+		t.Errorf("entries after Retire = %+v, want the record untouched: nothing was reverted", got)
+	}
+	if _, err := os.Stat(JournalPath(home, os.Getpid())); err != nil {
+		t.Errorf("stat the journal file after Retire: %v; a revert that did not happen must not remove it", err)
 	}
 }

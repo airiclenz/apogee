@@ -26,7 +26,7 @@ import (
 // as it does today, so a labelBox failure here is dropped rather than aborting startup. It labels
 // ONLY the workspace root; an extra writable root added mid-session still walks lazily and
 // silently, which is acceptable since the workspace is the bulk (the plan's approach A). labelBox
-// and labelTree are untouched — this is purely an emission seam.
+// and winlabel.LabelTree are untouched — this is purely an emission seam.
 func PrewarmLabelWalk(c domain.Confiner, workspaceRoot string, out io.Writer) {
 	tc, ok := c.(*tokenConfiner)
 	if !ok || !tc.caps.FSWrite || tc.token == 0 {

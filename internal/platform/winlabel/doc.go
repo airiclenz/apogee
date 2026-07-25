@@ -24,7 +24,14 @@
 // mechanism's DECISIONS — what a journal entry may say, which descendants are labelled,
 // which journal files may be deleted, how residue is worded — are table-testable on Linux
 // and macOS exactly as the seatbelt profile generator is (platform/seatbelt.go). Only the
-// walk itself needs a real SACL, and it is the one Windows-tagged file here.
+// walk itself needs a real SACL, and it is the one Windows-tagged file here; walk_other.go
+// answers for it off Windows with stubs that report errors.ErrUnsupported rather than
+// succeeding quietly, so no test can ever pass over a label that was never written.
+//
+// LabelTree owns the journal-before-label pairing outright: it reads a root's prior, records
+// it, labels it, unwinds its own just-added entry if that write fails, and repeats the read →
+// record → label triple per descendant. The backend's label pass is a bare loop over the box's
+// roots, so there is no fourth call site that could label without journalling.
 //
 // The package is a LEAF: the standard library plus golang.org/x/sys/windows, and nothing
 // from apogee — not internal/domain, not internal/platform. Errors come back plain and
@@ -36,7 +43,8 @@
 // production callers: confiner_windows_test.go asserts against real SACLs and real
 // journal files, and it stays with the backend it tests. They are IsLowLabel, the
 // journal-file API (JournalDir, JournalPath, ListJournals, ReadJournal, WriteJournal),
-// ResidueIn, the home-taking form of Residue, and the Journal's snapshot readers Entries and
+// ResidueIn, the home-taking form of Residue, the SACL primitives ReadSDDL and SetSDDL, the
+// liveness probe ProcessAlive, and the Journal's snapshot readers Entries and
 // PriorLabels plus ForgetLabelled. They are the module's honest file/OS surface
 // — production code in this package uses the same verbs — but they are named in the doc so
 // a later audit does not re-litigate why the surface is as wide as it is.

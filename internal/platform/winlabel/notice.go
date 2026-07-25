@@ -50,7 +50,7 @@ func residueNotice(roots, unreadable []string) string {
 // silent hang on a workspace with a large .git or node_modules — the click-through-frustration
 // trap the auto-confinement work was built to avoid.
 //
-// It takes NO object count on purpose: labelTree streams via filepath.WalkDir, so a pre-count is
+// It takes NO object count on purpose: LabelTree streams via filepath.WalkDir, so a pre-count is
 // a second full walk that doubles the ~1 ms/object cost, and an after-the-fact summary prints
 // after the wait it was meant to explain. So the notice is indeterminate and upfront. It is
 // worded as the fence doing its job, never as a malfunction, matching probe.DegradedNotice's

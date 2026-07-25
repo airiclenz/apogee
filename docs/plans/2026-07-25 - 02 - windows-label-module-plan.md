@@ -555,7 +555,66 @@ a Journal, not five fields on the confiner`.
 
 ---
 
-## 5. Move the OS label walk, the revert and crash recovery
+## 5. Move the OS label walk, the revert and crash recovery — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): the seam chosen for the item's flagged design call, plus the deviations it
+and the four inherited rename assignments forced. Everything else moved verbatim — a mechanical
+rename of the original `confiner_windows.go` blocks for `revertSparingLiveSiblings`,
+`revertLabelJournal`, `clearLabelTree`, `recoverLabelJournals`, `processAlive`, `readLabelSDDL`
+and `setLabelSDDL` diffs **empty** against `walk_windows.go` but for (c), and
+`confiner_windows_test.go` diffs as identifier renames only (verified by re-applying the rename
+map to the HEAD version — the diff is empty).
+
+**(a) The `Retire` seam is a per-`Journal` FIELD, not a stub and not a package-level var** —
+the owner's design call, taking the item's own preferred shape. `Retire` is declared **once**,
+unguarded, in `session.go`; it reaches the OS through `j.revert`, a `revertFunc` field fixed at
+`Open` from the build-tagged `osRevert()` (`walk_windows.go` returns
+`revertSparingLiveSiblings`, `walk_other.go` returns nil). This EXTENDS item 4's injected-revert
+parameter rather than replacing it with a global: a per-value field cannot be raced or clobbered
+between two journals, and it is what lets a test hand one journal a stand-in — which is exactly
+how `TestJournalRetireKeepsTheHandoffAndReopensTheMemo` now injects, instead of passing an
+argument. The nil case is explicit and is a **no-op returning nil**, not an error: nothing off
+Windows can label anything (every other stub reports `errors.ErrUnsupported`), so there is no
+disk mutation to undo, and erroring would only invent a failure. It is covered twice on Linux —
+`TestJournalRetireWithoutARevertSeamDoesNothing` (seam cleared explicitly, so it also runs on
+Windows) and `TestNonWindowsJournalHasNoRevertSeam` (`osRevert()` and `Open(...).revert` are
+nil). This is the item's one literal deviation: its stub list names `Retire`, and `walk_other.go`
+does **not** stub it. One method, one doc comment, one contract.
+
+**(b) Item 4's four transitional exports are gone, which forced three test-body edits.**
+`(*Journal).Record` and `Unwind` are simply deleted (`LabelTree` absorbed both). `Labelled` /
+`MarkLabelled` became the lock-held unexported `isLabelled` / `markLabelled`: `LabelTree` calls
+them from **inside** its own critical section, where an exported wrapper is D5's self-deadlock.
+`journal_state_test.go` and `journal_race_test.go` therefore wrap those calls in
+`j.mu.Lock()`/`Unlock()`, exactly as they already do for `j.record` — **no assertion changed**.
+
+**(c) The `Record` parameters of the moved `revertSparingLiveSiblings` and `Recover` are `r`,
+not `j`** — item 3's NOTES(b) convention, now unavoidable: both sit beside `j *Journal` in one
+package, and `j Record` next to `j *Journal` is the confusion D5's lock discipline cannot
+afford. That is the whole of the diff against the originals.
+
+**(d) All four inherited rename assignments landed here**, all now unexported: item 1's
+`DirSDDL`/`FileSDDL`/`ClearSDDL`/`LabelACEPrefix`/`DescendantDecision`, item 4's `FoldPath`,
+item 2's `SiblingJournals`, and item 3's `Retire`/`ClearTreeOutcome`/`RevertibleRoots`/
+`RestorablePriors` (the coexisting package-level `Retire` and `(*Journal).Retire` trap item 3's
+NOTES(a) flagged — lowercased in the same edit). Doc comments naming the moved `platform`
+identifiers followed them (`labelTree`→`LabelTree`, `clearLabelTree`→`ClearTree`,
+`recoverLabelJournals`→`Recover`, `processAlive`→`ProcessAlive`,
+`revertLabelJournal`→`revertJournal`), including `prewarm_windows.go`'s and the four in
+`confiner_windows_test.go`. Item 6's acceptance can confirm the whole transitional set is gone.
+
+**(e) `doc.go` was updated, though the item does not ask.** Its D6 export list would otherwise
+have omitted `ReadSDDL`/`SetSDDL`/`ProcessAlive`, and its "the one Windows-tagged file here"
+sentence predated `walk_other.go`; it also now states that `LabelTree` owns journal-before-label
+outright, which is D3 and the point of the whole plan.
+
+**Lock-discipline review (D5), done before commit as the item requires:** `LabelTree`'s and
+`Retire`'s critical sections were read end to end. Every `j.` call inside them resolves to an
+unexported body — `isLabelled`, `record`, `unwind`, `markLabelled`, `flush`, `forgetLabelled` —
+and the injected revert closure (`siblingJournals`, `restorablePriors`, `revertibleRoots`,
+`revertJournal`, `retire`) touches only `Record` VALUES, never the `Journal`. No exported method
+is reachable from either locked path. `labelBox`'s `Writable()` call precedes the loop and does
+not nest.
 
 The Windows-tagged half, and the item that lands D3. **Nothing in this item can be run on the dev
 machine** — its gate is the two cross-compiles plus verification step 4.
