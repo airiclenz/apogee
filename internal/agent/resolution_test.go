@@ -17,8 +17,11 @@ import (
 // its reason / force / cacheKey / box / fallback shape pinned. They reuse the fake tools from
 // dispatch_test.go / statemachine_test.go (fakeTool, subprocTool, externalTool,
 // thirdPartyWriter) — resolve() reads only its input, so the tools need only classify
-// correctly. writeTargetInWorkspace / fsConfineAvailable / approverPresent are explicit input
-// bools (resolve does NO I/O), so the whole table is hermetic.
+// correctly. The two VOUCHED-FOR classes use the real tool instead, because their markers are
+// unexported and unfakeable by design: tools.NewWriteFile for the workspace writer and
+// tools.NewWebFetch for the url-filtered networker (a fake EffectNetwork tool is therefore the
+// third-party-network case). writeTargetInWorkspace / fsConfineAvailable / approverPresent are
+// explicit input bools (resolve does NO I/O), so the whole table is hermetic.
 
 // proceed is the always-on guardrail's "no guard fired" verdict — the ladder runs from here.
 var proceed = security.PreCheck{Outcome: security.GuardProceed, Audit: security.AuditAllowed}
@@ -36,8 +39,9 @@ func TestResolve_LadderTable(t *testing.T) {
 	ws := t.TempDir()
 
 	ro := fakeTool{name: "read_file", readOnly: true}
-	wsw := tools.NewWriteFile(ws) // carries the workspaceScopedWriter marker
-	net := externalTool{name: "web-fetch", kind: domain.EffectNetwork}
+	wsw := tools.NewWriteFile(ws)                                   // carries the workspaceScopedWriter marker
+	net := tools.NewWebFetch(security.URLGuard{})                   // carries the url-filter marker (vouched-for)
+	tpn := externalTool{name: "3p-net", kind: domain.EffectNetwork} // EffectNetwork, no marker
 	mcp := externalTool{name: "github", kind: domain.EffectMCP}
 	sub := &subprocTool{name: "terminal"}
 	tpw := thirdPartyWriter{name: "weird"}
@@ -82,13 +86,24 @@ func TestResolve_LadderTable(t *testing.T) {
 		{"subproc/auto-noconfine", sub, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
 		{"subproc/unknown-mode", sub, badMode, true, false, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
 
-		// native network — auto-runs url-filtered in Auto; gates on the lower rungs.
+		// vouched-for network (Apogee's own, url-filtered by the funnel) — auto-runs in Auto;
+		// gates on the lower rungs.
 		{"net/plan", net, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
 		{"net/ask-before", net, domain.ModeAskBefore, true, true, true, resolveGate, "network reach", security.AuditAllowed},
 		{"net/allow-edits", net, domain.ModeAllowEdits, true, true, true, resolveGate, "network reach", security.AuditAllowed},
 		{"net/auto-confine", net, domain.ModeAuto, true, true, true, resolveRun, "", security.AuditAllowed},
 		{"net/auto-noconfine", net, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
 		{"net/unknown-mode", net, badMode, true, true, true, resolveGate, "network reach", security.AuditAllowed},
+
+		// third-party network (EffectNetwork without the url-filter marker) — its URLs are
+		// unfiltered, so Auto/confine=true GATES it instead of auto-running it unattended;
+		// "I am the sandbox" (confine=false) still auto-runs everything.
+		{"3p-net/plan", tpn, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
+		{"3p-net/ask-before", tpn, domain.ModeAskBefore, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
+		{"3p-net/allow-edits", tpn, domain.ModeAllowEdits, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
+		{"3p-net/auto-confine", tpn, domain.ModeAuto, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
+		{"3p-net/auto-noconfine", tpn, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
+		{"3p-net/unknown-mode", tpn, badMode, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
 
 		// MCP — gates in Auto (unfenceable server), gates on the lower rungs.
 		{"mcp/plan", mcp, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
@@ -491,6 +506,8 @@ func TestResolve_NilApproverGateRefuses(t *testing.T) {
 		{"auto out-of-workspace write", tools.NewWriteFile(t.TempDir()), domain.ModeAuto, true, true, false},
 		{"auto subproc caps-insufficient", &subprocTool{name: "terminal"}, domain.ModeAuto, true, false, true},
 		{"auto third-party write", thirdPartyWriter{name: "weird"}, domain.ModeAuto, true, true, true},
+		// The unvouched network gate needs no rule of its own — finishGate already refuses it.
+		{"auto third-party network", externalTool{name: "3p-net", kind: domain.EffectNetwork}, domain.ModeAuto, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

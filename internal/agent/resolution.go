@@ -214,23 +214,31 @@ func resolve(in resolutionInput) resolution {
 
 // toolClass is the blast-radius class the ladder keys on (confinement-execution-contract §4).
 // The order is significant: read-only wins (a read never gates), then the unfakeable
-// workspace-scoped-writer marker, then the external-effect kinds, then the subprocess marker,
-// and finally a write-capable tool Apogee cannot vouch for (3p-write).
+// workspace-scoped-writer marker, then vouched-for network (the unfakeable url-filter marker),
+// then a network tool Apogee cannot vouch for, then MCP, then the subprocess marker, and
+// finally a write-capable tool Apogee cannot vouch for (3p-write).
 type toolClass int
 
 const (
-	classReadOnly        toolClass = iota // IsReadOnly
-	classWorkspaceWrite                   // workspaceScopedWriter marker (Apogee's own write)
-	classNetwork                          // ExternalEffectTool, kind network
-	classMCP                              // ExternalEffectTool, kind mcp
-	classSubprocess                       // SubprocessTool (shell/exec; OS-confinable)
-	classThirdPartyWrite                  // write-capable, none of the above (can't vouch for scoping)
+	classReadOnly          toolClass = iota // IsReadOnly
+	classWorkspaceWrite                     // workspaceScopedWriter marker (Apogee's own write)
+	classNetwork                            // network + urlFilteredNetworker marker (Apogee's own)
+	classThirdPartyNetwork                  // network, no url-filter marker (unfiltered URLs — gates)
+	classMCP                                // ExternalEffectTool, kind mcp
+	classSubprocess                         // SubprocessTool (shell/exec; OS-confinable)
+	classThirdPartyWrite                    // write-capable, none of the above (can't vouch for scoping)
 )
 
 // classifyTool maps a tool onto its blast-radius class. The classes are checked in a fixed
 // priority so a tool implementing several markers resolves deterministically: read-only first
 // (harmless), then Apogee's own writer, then the external kinds, then the confinable subprocess
 // surface, else a third-party in-process writer.
+//
+// The network kind splits on the url-filter marker: an EffectNetwork tool that routes through
+// internal/tools' network funnel is classNetwork (Apogee vouches that every outbound URL passed
+// the host's URLGuard, so it auto-runs in Auto); one WITHOUT the marker is
+// classThirdPartyNetwork — its URLs are unfiltered, so it gates instead of reaching the network
+// unattended (ADR 0012 Amendment 2026-07-25, the network analogue of classThirdPartyWrite).
 func classifyTool(tool domain.Tool) toolClass {
 	if domain.IsReadOnly(tool) {
 		return classReadOnly
@@ -240,7 +248,10 @@ func classifyTool(tool domain.Tool) toolClass {
 	}
 	if ext, ok := tool.(domain.ExternalEffectTool); ok {
 		if ext.ExternalEffect() == domain.EffectNetwork {
-			return classNetwork
+			if tools.IsURLFilteredNetworker(tool) {
+				return classNetwork
+			}
+			return classThirdPartyNetwork
 		}
 		return classMCP
 	}
@@ -289,8 +300,10 @@ func resolveLadder(in resolutionInput) resolution {
 	}
 }
 
-// resolveLadderAuto ports disposeAuto() verbatim: the Auto-mode leaf, tuned by
-// confine-to-workspace (the load-bearing column).
+// resolveLadderAuto ports disposeAuto(): the Auto-mode leaf, tuned by confine-to-workspace
+// (the load-bearing column). The one deliberate departure from the P3 table is
+// classThirdPartyNetwork, which gates where the undivided network class auto-ran (ADR 0012
+// Amendment 2026-07-25 — tighten-only).
 func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 	if !in.confineToWorkspace {
 		// "I am the sandbox" (VM-only): everything auto-runs unfenced. The dangerous-action
@@ -311,6 +324,10 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 	case classNetwork:
 		// Native network tools auto-run url-filtered — the network is open (ADR 0012).
 		return resolution{kind: resolveRun}
+	case classThirdPartyNetwork:
+		// Unfiltered network reach — Apogee cannot vouch for its URLs, so it gates (the
+		// network analogue of classThirdPartyWrite).
+		return resolution{kind: resolveGate}
 	case classMCP:
 		// MCP executes in a server Apogee cannot fence: gate (server-grain allow-for-session).
 		return resolution{kind: resolveGate}
@@ -440,11 +457,14 @@ func confineFallback(in resolutionInput) *resolution {
 
 // gateReason maps a gated tool onto the human-facing why for the Approval prompt, derived
 // from its blast-radius class so the human sees what kind of reach they are authorising. It
-// reproduces today's approvalReason() mapping exactly.
+// reproduces the P3 approvalReason() mapping, plus the third-party-network reason the
+// vouched-for/unvouched network split added (ADR 0012 Amendment 2026-07-25).
 func gateReason(tool domain.Tool) string {
 	switch classifyTool(tool) {
 	case classNetwork:
 		return "network reach"
+	case classThirdPartyNetwork:
+		return "unfiltered network reach"
 	case classMCP:
 		return "unconfinable MCP tool"
 	case classSubprocess:

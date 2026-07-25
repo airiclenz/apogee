@@ -303,7 +303,22 @@ test fails if any assertion is removed (verify by temporarily deleting one). Com
 
 ---
 
-## 4. The ladder splits vouched-for network from third-party — `internal/agent/resolution.go`
+## 4. The ladder splits vouched-for network from third-party — `internal/agent/resolution.go` — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): three additions beyond the literal text. (a) two doc comments in the touched
+functions were made honest, because the split falsifies their existing claims: `resolveLadderAuto`
+no longer says it "ports disposeAuto() **verbatim**" (it names `classThirdPartyNetwork` as the one
+deliberate departure) and `gateReason` no longer says it "reproduces today's `approvalReason()`
+mapping **exactly**"; `classifyTool` also gained a paragraph stating the marker split. (b) the new
+dispatch drive is a **sibling subtest** inside `TestDisposition_AutoConfineTrue`
+("third-party network raises Approval and does not run when denied"), next to the vouched-for one,
+rather than a new top-level `Test…` function — that test *is* the Auto/confine=true row set. (c) the
+real tool's name is `web_fetch` (not the fake's `web-fetch`), so the swapped drive and its
+`classifyTool` row use it, and `dispatch_test.go` gained the `strings` +
+`internal/security` imports the real tool and its result assertion need. FLAG for item 5:
+`docs/design/confinement-execution-contract.md` §4 (~L369, L394, L398) also enumerates the tool
+classes and the per-class gate reasons and is not in item 5's doc list — it now needs the
+third-party-network row and the `unfiltered network reach` reason.
 
 - **`classThirdPartyNetwork`** joins the `toolClass` enum after `classNetwork`, documented as *an
   `EffectNetwork` tool Apogee cannot vouch for — it does not carry the url-filter marker, so its

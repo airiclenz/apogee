@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -161,7 +163,11 @@ func TestClassifyTool(t *testing.T) {
 		{"edit existing file", tools.NewEditExistingFile(ws), classWorkspaceWrite},
 		{"view diff", tools.NewViewDiff(ws), classReadOnly},
 		{"open file", tools.NewOpenFile(ws), classReadOnly},
-		{"network", externalTool{name: "web-fetch", kind: domain.EffectNetwork}, classNetwork},
+		// The network kind splits on the (unexported, unfakeable) url-filter marker: Apogee's
+		// own web_fetch routes through the network funnel and is vouched for; a tool that only
+		// DECLARES EffectNetwork reaches unfiltered URLs and is third-party network.
+		{"vouched-for network", tools.NewWebFetch(security.URLGuard{}), classNetwork},
+		{"third-party network", externalTool{name: "3p-net", kind: domain.EffectNetwork}, classThirdPartyNetwork},
 		{"mcp", externalTool{name: "github", kind: domain.EffectMCP}, classMCP},
 		{"subprocess", &subprocTool{name: "terminal"}, classSubprocess},
 		{"third-party writer", thirdPartyWriter{name: "weird"}, classThirdPartyWrite},
@@ -181,8 +187,9 @@ func TestClassifyTool(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // TestDisposition_AutoConfineTrue covers every Auto/confine=true row with sufficient caps:
-// a subprocess tool runs WITHOUT Approval and UNDER Confine; a native network tool
-// auto-runs (no Approval); an MCP tool and a third-party writer each RAISE Approval.
+// a subprocess tool runs WITHOUT Approval and UNDER Confine; one of Apogee's own url-filtered
+// network tools auto-runs (no Approval); a network tool WITHOUT the url-filter marker, an MCP
+// tool and a third-party writer each RAISE Approval.
 func TestDisposition_AutoConfineTrue(t *testing.T) {
 	t.Parallel()
 
@@ -211,22 +218,52 @@ func TestDisposition_AutoConfineTrue(t *testing.T) {
 		}
 	})
 
-	t.Run("native network auto-runs, no Approval", func(t *testing.T) {
+	t.Run("vouched-for network auto-runs, no Approval", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		conf := &fakeConfiner{caps: capsBoth()}
+		// The real web_fetch, because the url-filter marker is unfakeable outside
+		// internal/tools — only a funnel-routed tool is vouched for. It has no run counter, so
+		// the proof that Execute ran unattended is its OWN argument error on a bare {} call:
+		// the tool was reached without the Approver being consulted, and it never touches the
+		// network (no URL to fetch).
+		cfg := autoConfig(sink, conf, true, tools.NewWebFetch(security.URLGuard{}))
+		approver := &fakeApprover{decision: domain.ApprovalDeny}
+		cfg.Approver = approver
+
+		driveToolCall(t, cfg, sink, "c1", "web_fetch", `{}`)
+
+		if approver.calls != 0 {
+			t.Errorf("Approver consulted %d times; a url-filtered network tool auto-runs in Auto (network open)", approver.calls)
+		}
+		res, ok := lastToolResult(sink.events)
+		if !ok {
+			t.Fatal("no ToolResult recorded; web_fetch did not run")
+		}
+		if !res.IsError || !strings.Contains(res.Content, "url is required") {
+			t.Errorf("result = %+v, want web_fetch's own \"url is required\" error (proof Execute ran)", res)
+		}
+	})
+
+	t.Run("third-party network raises Approval and does not run when denied", func(t *testing.T) {
 		t.Parallel()
 		sink := &recordingSink{}
 		ran := 0
 		conf := &fakeConfiner{caps: capsBoth()}
-		cfg := autoConfig(sink, conf, true, externalTool{name: "web-fetch", kind: domain.EffectNetwork, ran: &ran})
+		// Declares EffectNetwork but carries no url-filter marker: Apogee cannot vouch for its
+		// URLs, so it gates like MCP and third-party writes instead of reaching the network
+		// unattended (ADR 0012 Amendment 2026-07-25).
+		cfg := autoConfig(sink, conf, true, externalTool{name: "3p-net", kind: domain.EffectNetwork, ran: &ran})
 		approver := &fakeApprover{decision: domain.ApprovalDeny}
 		cfg.Approver = approver
 
-		driveToolCall(t, cfg, sink, "c1", "web-fetch", `{}`)
+		driveToolCall(t, cfg, sink, "c1", "3p-net", `{}`)
 
-		if approver.calls != 0 {
-			t.Errorf("Approver consulted %d times; a native network tool auto-runs in Auto (network open)", approver.calls)
+		if approver.calls != 1 {
+			t.Errorf("Approver consulted %d times; an unvouched network tool must gate in Auto", approver.calls)
 		}
-		if ran != 1 {
-			t.Errorf("web-fetch ran %d times, want 1 (auto-run)", ran)
+		if ran != 0 {
+			t.Errorf("3p-net ran %d times after a denying Approver, want 0", ran)
 		}
 	})
 
