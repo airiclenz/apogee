@@ -592,7 +592,8 @@ wants an owner decision. Logged here rather than left in the archive so it isn't
   session under Auto is what remains.
 - **Degradation notice on a below-minimum-version Windows host** (below build 17763). The
   **deny-vs-token decision itself is proven**: the untagged `belowWindowsFloor` predicate
-  (`winconfine.go:35`) has table coverage (`TestBelowWindowsFloor` — 17762⇒deny, 17763⇒token,
+  (`winguard.go:43`, was `winconfine.go:35` before the 2026-07-25 split) has table coverage
+  (`TestBelowWindowsFloor` — 17762⇒deny, 17763⇒token,
   26200⇒token), verified green on the Linux devbox 2026-07-23. What stays **UNTESTED** (recorded so
   in [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)'s
   consequences) is only the on-host UX observation of the notice — no such host exists here, and it
@@ -656,31 +657,43 @@ moment to give `ConfineWritablePaths` its first writer.
 
 ---
 
-## `internal/platform`'s two Windows confinement files exceed the file-size guideline
+## `internal/platform`'s two Windows confinement files exceed the file-size guideline — CLOSED (the label mechanism is a module)
 
-**Status:** recorded 2026-07-22 (Phase 5 review-fixes follow-up). Flagged for
-**`/improve-codebase-architecture`** — a shape observation, not a defect: both files are
-correct, tested and idiomatic; they are simply past the size at which a file stops being
-navigable in one pass.
+**Status:** CLOSED 2026-07-25. Recorded 2026-07-22 (Phase 5 review-fixes follow-up) as a shape
+observation flagged for **`/improve-codebase-architecture`**; picked up as candidate **05** of
+`docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md` and landed by
+`docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md` (7 items).
 
-The coding standards keep files under **~400 lines**. The two files that carry the Windows
-confinement backend are over it, and grew further during the Phase 5 review fixes (journal
-retention helper, own-label guard, atomic writes, unreadable-journal residue, the
-recovery-free report constructor, the build-floor predicate):
+The figures this entry quoted were **stale**: 581/572 at the time of writing, but
+`winconfine.go` was **804** lines and `confiner_windows.go` **777** by the time the card was
+picked up — both had grown ~40 % on the Phase-5 follow-ups. The three seams this entry named
+(journal, label walk, notice wording) became **one** package, not three: the walk and the
+journal have to be co-located for the journal-before-label invariant (ADR 0020 §2) to live
+inside the module instead of in three cooperating call sites. What landed:
 
-- `internal/platform/winconfine.go` — **581 lines** (untagged: the label journal's
-  read/write/list/revert-decision half, SDDL and fold helpers, guardrails, residue and
-  teardown notice wording, `belowWindowsFloor`).
-- `internal/platform/confiner_windows.go` — **572 lines** (`//go:build windows`: token
-  construction and the two selectors, the label/clear tree walks, `labelBox`, journal flush,
-  crash recovery).
+- **`internal/platform/winlabel`** — the mandatory label mechanism: the SDDL vocabulary, the
+  journal (record, atomic write, retention, revert-split), the tree walk and the notice
+  wording, behind a compiler-enforced boundary. It is a leaf package — standard library plus
+  `golang.org/x/sys/windows`, nothing from apogee — so the wraps stay one-way and the decision
+  half is still table-testable on Linux and macOS, the property Phase 5 bought. Eight non-test
+  files, the largest `walk_windows.go` (345) and `journal.go` (339).
+- **`internal/platform/confiner_windows.go`** — **328 lines**, the backend that *composes* it:
+  the selectors, `Confine`, `Close`, `labelBox` and root resolution.
+- **`internal/platform/winguard.go`** — **208 lines**, was `winconfine.go`, renamed because
+  nothing in it confines: the version floor, the labelling guardrails and the three notice
+  delegations. The guardrails deliberately did **not** follow the mechanism into `winlabel` —
+  they are the host's path rules (`hostRules.split`/`Contains`) applied to a box.
+- **`internal/platform/wintoken_windows.go`** — **101 lines**, the restricted low-integrity
+  token mint, the one concern in the old file that is about the token rather than the box.
 
-**The shape when picked up:** the split is by build tag today, not by concern, so each file
-holds two or three of them. The obvious seams are the *journal* (record type, atomic
-read/write/list, retention decision, revert) as its own unit, the *label walk* (read/set/clear
-SDDL over a tree, reparse-point skipping, per-descendant tolerance) as another, and the
-*notice wording* (`windowsResidueNotice`, `ConfinementTeardownNotice`, the shared `icacls`
-remedy) as a third — leaving the confiner itself as the thing that composes them. Any such
-move must keep the untagged/table-testable-on-Linux property the Phase 5 work deliberately
-bought: the decision logic stays out of `//go:build windows` files so it can be tested on
-every OS.
+**Two files in `internal/platform` are still over the ~400-line guideline. Neither is a finding
+— do not re-file them:**
+
+- `confiner_windows_test.go` — **1377 lines**, over **by decision** (plan decision D7). It is
+  the Windows-tagged lifecycle suite that asserts against real SACLs, real junctions and real
+  journal files, and it is the only proof this backend has on a machine that cannot execute it.
+  Rewriting ~900 lines of it to drive `winlabel.Journal` directly would have traded a proven
+  safety net for an unproven one. Only its call sites were renamed.
+- `host.go` — **434 lines**, pre-existing and **out of that plan's scope**: it is the untagged
+  host rule table (`hostRules`, `split`, `Contains`, the POSIX/Windows tables), last changed in
+  `019d93c`, before any of the split work. If it is ever picked up it wants its own entry.

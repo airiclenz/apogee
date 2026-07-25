@@ -20,7 +20,12 @@
 // labels ON THE DISK for the duration of the run and reverted on teardown
 // (an io.Closer the composition root defers), journalled under the apogee home
 // so an interrupted run is recoverable and reportable. That asymmetry is
-// recorded in ADR 0020 rather than discovered by a user.
+// recorded in ADR 0020 rather than discovered by a user. The label mechanism is
+// a module of its own — internal/platform/winlabel owns the SDDL vocabulary,
+// the journal that is written before any label lands, the walk that applies and
+// clears them, and the wording every surface quotes — and this package is its
+// composer: the restricted token, the guardrails that veto a root, and the
+// Confiner seam itself stay here.
 //
 // HostID lives here for the same reason the backends do — it is a per-machine fact.
 // It is the interlock that keeps a host-scoped confinement acknowledgement

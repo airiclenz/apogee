@@ -1,4 +1,4 @@
-# Handoff — Architecture deepening review: 7 candidates (01, 02, 04 and 07 landed; 03, 05, 06 outstanding)
+# Handoff — Architecture deepening review: 7 candidates (01, 02, 04, 05 and 07 landed; 03 and 06 outstanding)
 
 Date: 2026-07-24
 Session type: **review only** (`/improve-codebase-architecture`). No code changed, no plan
@@ -23,9 +23,10 @@ a smaller-deepenings list**, framed in the depth glossary (module / interface / 
 (`docs/plans/archived/2026-07-25 - 00 - url-safety-choke-point-plan.md`); **04 and 07 landed
 2026-07-25**, both under `docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md` — 07
 was folded into 04's plan as item 2, because a shared stack-validity checker is nearly free once the
-Mechanism metadata is row-shaped, but it was built and committed standalone. Of the smaller
+Mechanism metadata is row-shaped, but it was built and committed standalone; **05 landed 2026-07-25**
+(`docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md`). Of the smaller
 deepenings, **session store lifecycle landed 2026-07-24** (absorbed by the session system, ADR 0022).
-**03, 05 and 06 are still outstanding and un-grilled** — for each of
+**03 and 06 are still outstanding and un-grilled** — for each of
 those the next session's job is step 3 of the skill: pick a candidate,
 walk its design tree, and land side-effects inline (CONTEXT.md term if a deepened module names a new
 concept; an ADR if the owner rejects a candidate for a load-bearing reason; a saved plan doc if it
@@ -176,9 +177,9 @@ Explore agents and should be spot-checked before acting.
   the win here is structural (one table, drift unrepresentable, no engine-side special case), not a
   line count.
 
-### 05 — Split the Windows Confiner into three deep sub-modules · **Worth exploring · owner-flagged**
-- **Files:** `internal/platform/winconfine.go` (581 at review time — **804 as of 2026-07-25**),
-  `confiner_windows.go` (572 → **777**).
+### 05 — Split the Windows Confiner into three deep sub-modules · **Worth exploring · owner-flagged** · ✅ **LANDED 2026-07-25**
+- **Files:** `internal/platform/winguard.go` (spelled `winconfine` until this card landed — 581
+  lines at review time, **804 as of 2026-07-25**), `confiner_windows.go` (572 → **777**).
 - **Problem:** two 570+ line files split by **build tag, not concern** — each carries 2–3 of
   {label journal, SDDL label-walk, notice wording, token construction}. Past one-pass navigability.
   **Both grew ~40% since the review** (nothing in 01/02 touched them — the Phase-5 follow-ups did),
@@ -191,6 +192,70 @@ Explore agents and should be spot-checked before acting.
 - **Note:** the owner already recorded this exact refactor in `TODO.md` ("`## internal/platform`'s
   two Windows confinement files exceed the file-size guideline", explicitly flagged for
   `/improve-codebase-architecture`, naming these three seams). Consistent with ADR 0020.
+- **Shape resolved 2026-07-25** → `docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md`
+  (7 items). The card's *three sub-modules* became **one new package**,
+  `internal/platform/winlabel`, with the confiner as composer. Two alternatives were rejected on
+  the record: more files inside `package platform` — which is what `TODO.md` literally asked for,
+  and which gets every file under ~400 lines but hides **nothing**; and two packages (journal
+  untagged, walk tagged), which is not buildable as a deepening at all, because the walk and the
+  journal must be **co-located** for the journal-before-label invariant to be internal to a module
+  rather than a rule three call sites remember. The package is a **leaf** — standard library plus
+  `golang.org/x/sys/windows`, nothing from apogee — so it returns plain errors and `labelBox`
+  wraps `domain.ErrConfinementUnavailable` once at the call site, leaving every rendered message
+  byte-for-byte identical and `errors.Is` true everywhere it was before.
+- **LANDED 2026-07-25** — six code items, each on its own green gate (`9a2a074` · `e165d79` ·
+  `9d4adb4` · `6a95e8d` · `7b3e593` · `c7c3b7b`, plus this documentation commit). What was
+  actually built, against the card's sketch:
+  - **The three seams the card named are all inside `winlabel`**, as files rather than packages:
+    the *journal* (`journal.go` — record, atomic write, list/siblings, `session.go` — the stateful
+    `Journal`, `retire.go` — retention and revert-split), the *label walk* (`walk_windows.go`,
+    with `walk_other.go` stubbing it off Windows so no Linux test can pass over a label that was
+    never written), and the *notice wording* (`notice.go`). The untagged/table-testable-on-Linux
+    property the card insisted on is preserved: only `walk_windows.go` carries a build tag.
+  - **The deepening is the invariant, not the file split.** ADR 0020 §2's rule — the one disk
+    mutation apogee performs is only ever made against a record of how to undo it — was enforced
+    by three cooperating call sites in two files and ~40 lines of defensive comment. It is now
+    `winlabel.LabelTree`: it reads a root's prior, records it, labels it, unwinds its own
+    just-added entry if that write fails, and repeats read → record → label per descendant. The
+    `rootLabelled` bool that existed only to tell `labelBox` whether to unwind is **deleted**, and
+    the backend's label pass is a bare loop over the box's roots — there is no fourth call site
+    that could label without journalling.
+  - **The composer got genuinely thinner.** `tokenConfiner` held eight fields, five of which were
+    the journal's state (`journal`, `journalHome`, `journalPath`, `labelled`, `mu`); it now holds
+    four plus one `*winlabel.Journal`, and its four wrapper methods (`journalLabel`,
+    `unwindRootLabel`, `flushJournal`, `restoreLabels`) are gone. The backend keeps **no** mutex:
+    serialization moved inside `Journal`, which holds its lock for the whole of `LabelTree` and
+    `Retire` exactly as `labelBox` held `c.mu` across the whole label pass before.
+  - **The guardrails deliberately did not move.** `windowsProtectedRoots`, `windowsBoxRoots`,
+    `windowsLabelGuardrail` and `windowsNetworkDenyDecision` need `hostRules`, and they are the
+    *host's* path rules applied to a box, not part of the mechanism they veto. They stayed in
+    `platform`, which is why the old `winconfine` file was renamed `winguard.go` rather than
+    emptied. The token mint went to its own `wintoken_windows.go`.
+  - **Nothing observable changed** — no error string, no label, no journal byte, no walk order, no
+    public API. `confiner_windows_test.go` (the real-SACL lifecycle suite) diffs as identifier
+    renames only, which was the plan's acceptance oracle.
+  - **Still owed:** the Windows-tagged half is *compiled* by the gate (`GOOS=windows go vet` +
+    two `go test -c`) and has never been *run* on this machine. The plan's manual verification
+    step 4 — a real Windows host at build ≥ 17763 — is the owner's and remains outstanding.
+- **The line-count figures, reported straight.** Across the four files the card named, the total
+  went **UP**, 4,254 → 5,113 lines (+859):
+  - **Production: 1,581 → 1,974 (+393).** The 804-line `winconfine` file and `confiner_windows.go`
+    at 777 became `confiner_windows.go` 328 + `winguard.go` 208 + `wintoken_windows.go` 101 (637 in
+    `platform`) plus eight `winlabel` files totalling 1,337 (largest: `walk_windows.go` 345,
+    `journal.go` 339). Every file the plan created or touched is now under the ~400-line
+    guideline. The increase is doc comments **moved rather than deleted** (nothing explaining why
+    a rung is tolerated was allowed to be lost), eight new file headers, and a 51-line package doc
+    that did not exist before.
+  - **Tests: 2,673 → 3,139 (+466)**, of which **415 are four genuinely new test files** the
+    boundary made possible: `deps_test.go` (69 — the leaf-dependency guard, parsing the tagged
+    files too), `journal_state_test.go` (201), `journal_race_test.go` (62 — two goroutines
+    recording under `-race`, proving the concurrency claim instead of asserting it in a comment)
+    and `walk_other_test.go` (83).
+  - The win is a boundary and an invariant made structural, plus **two ~800-line files gone**; it
+    is not a line count. Two files in `internal/platform` remain over the guideline and are
+    recorded in `TODO.md` as *not* findings: `confiner_windows_test.go` (1,377, by plan decision
+    D7) and `host.go` (434, pre-existing and out of scope). That `TODO.md` entry — the one this
+    card was raised against — is now closed, with its stale 581/572 figures corrected.
 
 ### 06 — Decode each engine Event once · **Worth exploring**
 - **Files:** `internal/tui/model.go` (`foldStats`), `transcript.go` (`apply`), `activity.go`
@@ -250,7 +315,8 @@ files under `docs/reviews/` (this doc + the `.html`) and built, tested and commi
 
 *As of 2026-07-25:* the landed candidates are committed on `main` (01: `5997ce8`…`cd39e23`;
 02: `2f881f9`…`a6e39db`, incl. the follow-up `76ec91c` making a url-safety block state itself once
-rather than twice; 04 + 07: `a924ef1`…`85a9f6a`), every landed candidate's plan doc archived. Per
+rather than twice; 04 + 07: `a924ef1`…`85a9f6a`; 05: `9a2a074`…`c7c3b7b` plus this documentation
+commit), every landed candidate's plan doc archived. Per
 the standing owner directive Apogee commits directly to `main` (pre-production).
 
 **Candidate 04's plan is complete and archived.** All six items of
@@ -263,13 +329,14 @@ one item left for the owner is the plan's **manual** step 9 (build the TUI and d
 `guided_decomposition` + `tool_result_cap`, then confirm the three loud failure paths still fail
 loudly) — the automated suite pins all of it, but the plan asked for eyes on it.
 
-Candidates 03, 05 and 06 and the four remaining smaller deepenings have had **no code written for
+Candidates 03 and 06 and the four remaining smaller deepenings have had **no code written for
 them** — their evidence below is still review-session evidence and, apart from the ✓-marked and
 2026-07-25-refreshed figures, should be spot-checked before acting.
 
 **Re-verified 2026-07-25 as still outstanding:** `workspaceWriteTarget` (4 methods across 3 files),
 `read_file` (still `resolveInRoot → os.Stat → os.ReadFile`), self-regulator accessors (none), the
-POSIX `Confine` argv-wrap duplication, and candidates 03, 05 and 06 exactly as described.
+POSIX `Confine` argv-wrap duplication (landlock + seatbelt; untouched by 05, which is the Windows
+backend), and candidates 03 and 06 exactly as described.
 
 ## Recommended next step
 
@@ -278,19 +345,18 @@ yardstick is in the same package, no ADR conflict. Then 02 and 04 as the stronge
 follow-ons ("make X follow the deep pattern the codebase already trusts"). If the owner would rather
 start narrow, 05 is owner-pre-blessed and self-contained.
 
-*As of 2026-07-25:* **01, 02, 04 and 07 have all landed** (see the ledger above), and the ledger is
-clean — no plan is mid-flight.
+*As of 2026-07-25:* **01, 02, 04, 05 and 07 have all landed** (see the ledger above), and the
+ledger is clean — no plan is mid-flight.
 
-The outstanding cards are 03, 05 and 06. The strongest next pick is:
+The outstanding cards are 03 and 06, and **03 is the strongest pick**:
 
-- **05** (Windows Confiner split) — owner-pre-blessed in `TODO.md`, self-contained, and the only
-  card that has **got worse since the review** (both files ~40% larger, and nothing since has
-  touched them). `TODO.md` still quotes the stale 581/572 figures and should be refreshed when the
-  card is picked up.
-- **03** (structured tool results) is the strongest remaining *Strong* on leverage. It is an
-  additive public `ToolResult` change (ADR 0010 minor bump) and wanted a clean ledger to start
-  from — which it now has, so the only reason to prefer 05 first is 05's degradation, not
-  sequencing.
+- **03** (structured tool results) — the strongest remaining *Strong* on leverage: it retires the
+  view's 24-entry regex registry, deepens `internal/tools`, honours ADR 0011 by construction and
+  feeds a future headless/bench host. It is an additive public `ToolResult` change (ADR 0010 minor
+  bump) and wanted a clean ledger to start from, which it now has. The reason to prefer 05 first
+  (its degradation) is spent — 05 has landed.
+- **06** (decode each Event once) is *Worth exploring* and touches the same TUI surface, so it is
+  the natural follow-on rather than a competitor: 03 first gives 06 a typed delta to fold.
 
 Also still open from candidate 02: the separate **`/code-audit`** on the *live* url-safety gap. The
 shape fix landed; whether any currently-registered path reaches the network unfiltered is a

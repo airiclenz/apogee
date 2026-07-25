@@ -783,7 +783,45 @@ one file over the guideline is `confiner_windows_test.go`, by decision D7. Commi
 
 ---
 
-## 7. Documentation — say where the label mechanism lives now
+## 7. Documentation — say where the label mechanism lives now — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): the §9 read came back clean; four small deviations, three of them forced by
+this item's own acceptance grep.
+
+**(a) `confinement-execution-contract.md` §9 was read end to end and NOTHING was changed**, as the
+item's own instruction allows. §9.2 locates no behaviour in a file. The four file/symbol names it
+does carry are all still correct: `maybeDispatchConfinedExec` (unchanged), `landlock_linux.go`'s
+`networkDenyDecision` (still there, `:265`), `cmd/apogee/probe.go` and
+`internal/platform/confinetest` (both unmoved) — plus one *negative* mention of a
+`confined_exec_windows.go` that has never existed and still does not. §9.3/§9.4 name only
+`confinetest` and the gate commands.
+
+**(b) The review card's `Files:` line was rewritten, and the historical name is spelled
+`winconfine` without the extension.** The item's acceptance grep covers `docs/` and permits only
+*archived* docs to match; `docs/reviews/2026-07-24 - 00 - …` is live, and its `Files:` line was the
+one remaining `winconfine.go` in it. The line now names `internal/platform/winguard.go` and says it
+was "spelled `winconfine` until this card landed", keeping both review-time figures (581/804). The
+same respelling is used twice inside the new LANDED note. This is the item's only literal deviation.
+
+**(c) Two sentences outside the three the item names were updated in the review doc**, because they
+asserted the opposite of the ledger once 05 landed: *"Candidates 03, 05 and 06 … have had **no code
+written for them**"* and *"Re-verified 2026-07-25 as still outstanding: … candidates 03, 05 and 06
+exactly as described"* (both under *State of the tree*), plus that section's commit list, which now
+carries 05's `9a2a074`…`c7c3b7b`. The `POSIX Confine argv-wrap` smaller-deepening was annotated as
+landlock+seatbelt, i.e. untouched by 05, rather than left ambiguous.
+
+**(d) `TODO.md`'s Phase-5-leftovers bullet pointed at `winconfine.go:35`** for `belowWindowsFloor` —
+a live code pointer item 6's rename broke — and now reads `winguard.go:43`, with the old spelling
+kept in the clause so the reader can follow it. The dated **2026-07-23** entry at `TODO.md:572` that
+names `winconfine_test.go` was **left alone**: it is a record of what ran on that date, the same
+posture this plan takes toward the archived docs. The closed entry itself records both files still
+over the guideline — `confiner_windows_test.go` (D7) and `host.go` (pre-existing, out of scope) — as
+item 6's NOTES(a) asked.
+
+**Acceptance grep, reported straight:** `grep -rn "winconfine.go" docs/ internal/ cmd/ --include="*.md"
+--include="*.go"` returns three archived plan docs (as the acceptance predicts), two archived code
+reviews, one archived handoff, and **this plan doc**, which becomes an archived plan doc when the
+plan closes. All are historical records; none were edited.
 
 **What:**
 

@@ -99,7 +99,7 @@ func TestProbeHostChildMatchesTheParent(t *testing.T) {
 //
 // The journal home is deliberately independent of --config (a crashed run's record must be
 // findable without one), so redirecting the user profile is the only way to plant one; the
-// layout below mirrors platform's confinementJournalHome/labelJournalPath.
+// layout below mirrors winlabel.Home/winlabel.JournalPath.
 func TestProbeReportsConfinementResidueWithoutHealingIt(t *testing.T) {
 	// Not parallel: it redirects the process environment os.UserHomeDir reads.
 	home := t.TempDir()
