@@ -431,7 +431,56 @@ revert-split decisions`.
 
 ---
 
-## 4. `winlabel.Journal` — the stateful recorder the backend composes
+## 4. `winlabel.Journal` — the stateful recorder the backend composes — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): deviations. No behaviour, wording or error string changed anywhere.
+
+**(a) The record field is `rec`, not `record`.** A struct cannot carry a field and a method of
+the same name, and item 5's `LabelTree` pseudocode calls `j.record(...)` — so the METHOD keeps the
+plan's name and the field is `rec`. Item 5's `retire(j.path, j.record, …)` means `j.rec`.
+
+**(b) The type and its methods live in a NEW `winlabel/session.go`, not in `journal.go`.**
+`journal.go` is 339 lines and the type plus its eleven methods is ~220; keeping them together
+would leave a ~560-line file, and nothing after this item removes a line from it — so item 6's
+acceptance (*every* non-test `winlabel` file under 400) would already be unsatisfiable. The two
+new test files keep the plan's names (`journal_state_test.go`, `journal_race_test.go`).
+
+**(c) `restoreLabels` is deleted HERE, not in item 5**, and its body and doc comment became
+`(*Journal).Retire`. This item removes `mu`, `labelled`, `journalHome`, `journalPath` and the
+`Record` field from the confiner, which leaves `restoreLabels` with nothing to reach through;
+keeping it would have meant exporting home/path/record accessors that item 5 deletes again. Item
+3's own What already assigns `(*Journal).Retire()` to *item 4*. One transitional difference from
+item 5's shape: the method takes the revert as a parameter — `Retire(revert func(home, own string)
+func(Record) ([]Entry, error))` — because the production revert is `revertSparingLiveSiblings`,
+which is Windows-tagged and stays in `platform` until item 5. `Close` calls
+`c.journal.Retire(revertSparingLiveSiblings)`; **item 5 drops the parameter** and inlines it. The
+keep-the-journal error wrapping moved verbatim.
+
+**(d) Four TRANSITIONAL exports** (item 1's NOTES(a) pattern), all of which **item 5 removes**
+when `LabelTree` absorbs the pass: `Record` and `Unwind` (two-line locking wrappers over the
+unexported `record`/`unwind`, called by `labelBox` and by `labelTree`, which is still in
+`platform`), and `Labelled` / `MarkLabelled` (the once-per-root memo, called by `labelBox`).
+Item 6's acceptance should confirm all four are gone.
+
+**(e) `RecordEntry` → `recordEntry` and `UnwindEntry` → `unwindEntry`**, as item 2's NOTES(c)
+assigned to this item. `unwindEntry`'s doc said "It is labelBox's undo" and now names
+`Journal.unwind` (item 2's NOTES(e) pattern). `SiblingJournals` is item 5's and is untouched.
+
+**(f) `FoldPath` lost its last `platform` caller HERE** — `labelBox`'s `key`, plus the two deleted
+wrappers — one item earlier than item 1's NOTES(a) predicted. It is left **exported**: lowercasing
+it is still item 5's assignment and reaches into item 2's and 3's test files. Item 6's acceptance
+should confirm it happened.
+
+**(g) The package-level `Retire` and `(*Journal).Retire` now coexist** — exactly the trap item 3's
+NOTES(a) flagged, and the compiler will not point at the leftover. `recoverLabelJournals` is still
+the package-level function's caller, so it stays exported until item 5 moves that function in.
+
+**(h) Test reach-ins.** The two `[]winlabel.Record{onDisk, c.journal}` loops became
+`{Entries: c.journal.Entries()}` composite literals, so the loop bodies and every assertion stay
+byte-identical; the `first.mu` trio became `first.journal.ForgetLabelled()`; three
+`c.journal.Entries` field reads became `Entries()` calls. The `PriorLabels()` sites were already
+method-shaped and did not change. `prewarm_windows.go`'s doc comment named `c.labelled`, a field
+this item deletes, and now names the journal's memo.
 
 The first item that is not a move. Five of `tokenConfiner`'s eight fields collapse into one
 (D5), and four wrapper methods disappear.

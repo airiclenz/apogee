@@ -14,9 +14,9 @@ import (
 // ~1 ms/object pass over a large .git or node_modules reads as an explained wait rather than a
 // silent hang on the first confined command — the click-through-frustration trap Auto was built to
 // avoid. The composition root calls it pre-alt-screen, where a raw stderr write is safe
-// (cmd/apogee/wire.go); the first in-session Confine of the same workspace then hits the c.labelled
-// memo and no-ops, so the disk mutation's TIMING moves to startup while WHAT is labelled — and
-// Close's revert at shutdown — is unchanged (the plan's "keep semantics").
+// (cmd/apogee/wire.go); the first in-session Confine of the same workspace then hits the journal's
+// once-per-root memo and no-ops, so the disk mutation's TIMING moves to startup while WHAT is
+// labelled — and Close's revert at shutdown — is unchanged (the plan's "keep semantics").
 //
 // It is a no-op unless c is the Windows token backend with a minted Low token (FSWrite == true): a
 // below-floor host, a token-mint failure, or any other backend returns immediately and prints

@@ -253,8 +253,8 @@ func TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings(t *testing.T) {
 				t.Errorf("label of %q = %q (err %v) after the refusal, want the disk untouched", path, label, readErr)
 			}
 		}
-		if len(c.journal.Entries) != 0 {
-			t.Errorf("journal entries = %+v after the refusal, want none — a refused box mutates nothing", c.journal.Entries)
+		if len(c.journal.Entries()) != 0 {
+			t.Errorf("journal entries = %+v after the refusal, want none — a refused box mutates nothing", c.journal.Entries())
 		}
 	}
 
@@ -625,7 +625,7 @@ func TestWindowsUnreadablePriorDescendantIsNotLabelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read journal %q: %v", journals[0], err)
 	}
-	for _, j := range []winlabel.Record{onDisk, c.journal} {
+	for _, j := range []winlabel.Record{onDisk, {Entries: c.journal.Entries()}} {
 		for _, entry := range j.Entries {
 			if strings.EqualFold(entry.Path, child) {
 				t.Errorf("journal entry %+v names the unreadable-prior child; nothing may be journalled for a path the walk skipped", entry)
@@ -856,7 +856,7 @@ func TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry(t *testing.T) {
 
 	// No journal debris, in memory or on disk: the refused box mutated nothing, so nothing
 	// may be recorded as needing an undo.
-	for _, entry := range c.journal.Entries {
+	for _, entry := range c.journal.Entries() {
 		if strings.EqualFold(entry.Path, ws) {
 			t.Errorf("in-memory journal entry %+v survives the refused box; a phantom entry alarms forever", entry)
 		}
@@ -1237,9 +1237,7 @@ func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 
 	// Reopen the once-per-box memo: the label pass now runs over a tree that already carries
 	// apogee's own labels, which is exactly what it reads as "prior state".
-	first.mu.Lock()
-	first.labelled = make(map[string]bool)
-	first.mu.Unlock()
+	first.journal.ForgetLabelled()
 	if err := first.labelBox(box); err != nil {
 		t.Fatalf("second labelBox over the same box: %v", err)
 	}
@@ -1266,7 +1264,7 @@ func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read journal %q: %v", journals[0], err)
 	}
-	for _, j := range []winlabel.Record{onDisk, second.journal} {
+	for _, j := range []winlabel.Record{onDisk, {Entries: second.journal.Entries()}} {
 		for _, entry := range j.Entries {
 			if winlabel.IsLowLabel(entry.PriorSDDL) {
 				t.Errorf("journal entry %+v records apogee's own Low label as prior state; the revert would put it back", entry)

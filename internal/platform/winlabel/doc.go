@@ -15,6 +15,11 @@
 // exists so that ordering is a property of the module rather than a convention three call
 // sites in package platform remember.
 //
+// The stateful half is Journal (session.go): one session's record, the file it lives in and
+// the roots it has already walked, behind its own lock. The backend COMPOSES one rather than
+// carrying that state as five fields and a mutex of its own, which is what lets its label pass
+// be a bare loop. Journal's doc comment carries the lock discipline every method here obeys.
+//
 // Everything outside walk_windows.go is a pure function or plain JSON file I/O, so the
 // mechanism's DECISIONS — what a journal entry may say, which descendants are labelled,
 // which journal files may be deleted, how residue is worded — are table-testable on Linux
@@ -30,8 +35,9 @@
 // Some exports here exist for package platform's Windows-tagged tests rather than for
 // production callers: confiner_windows_test.go asserts against real SACLs and real
 // journal files, and it stays with the backend it tests. They are IsLowLabel, the
-// journal-file API (JournalDir, JournalPath, ListJournals, ReadJournal, WriteJournal) and
-// ResidueIn, the home-taking form of Residue. They are the module's honest file/OS surface
+// journal-file API (JournalDir, JournalPath, ListJournals, ReadJournal, WriteJournal),
+// ResidueIn, the home-taking form of Residue, and the Journal's snapshot readers Entries and
+// PriorLabels plus ForgetLabelled. They are the module's honest file/OS surface
 // — production code in this package uses the same verbs — but they are named in the doc so
 // a later audit does not re-litigate why the surface is as wide as it is.
 package winlabel

@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"unsafe"
 
@@ -83,21 +82,11 @@ type tokenConfiner struct {
 	rules hostRules
 	// protected are the locations the backend refuses to label (ADR 0020 §2).
 	protected []string
-	// journalHome is the apogee home the label journals live under, "" when no user profile
-	// resolved. It is kept beside journalPath so teardown can read the SIBLING journals — the
-	// concurrently running sessions whose live roots the revert must leave in place.
-	journalHome string
-	// journalPath is this process's label journal under the apogee home.
-	journalPath string
-
-	// mu guards the memoised label state and the journal, which Confine mutates from
-	// whichever goroutine is driving a tool call and Close reads at shutdown.
-	mu sync.Mutex
-	// labelled records the box roots whose trees have already been labelled this session,
-	// so the once-per-box cost is not paid once per command.
-	labelled map[string]bool
-	// journal is the in-memory twin of journalPath.
-	journal winlabel.Record
+	// journal is this session's label journal: the record of what has been labelled, the file
+	// it is written to, and the roots already walked. It carries its own lock, so the backend
+	// keeps none — Confine records through it from whichever goroutine is driving a tool call,
+	// and Close retires it at shutdown.
+	journal *winlabel.Journal
 }
 
 // NewConfiner returns the host's real Confiner backend for this OS
@@ -169,11 +158,7 @@ func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 	c := &tokenConfiner{
 		rules:     rules,
 		protected: windowsProtectedRoots(os.LookupEnv, userProfileRoot()),
-		labelled:  make(map[string]bool),
-	}
-	if home != "" {
-		c.journalHome = home
-		c.journalPath = winlabel.JournalPath(home, os.Getpid())
+		journal:   winlabel.Open(home),
 	}
 
 	token, err := mintRestrictedLowToken()
@@ -236,10 +221,7 @@ func (c *tokenConfiner) Confine(_ context.Context, box domain.ConfinementBox, cm
 // (ADR 0010) and must not sprout a lifecycle hook for one OS, so the composition root
 // asserts the optional interface and defers it beside its other Close calls (ADR 0020 §2).
 func (c *tokenConfiner) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	err := c.restoreLabels()
+	err := c.journal.Retire(revertSparingLiveSiblings)
 	if c.token != 0 {
 		_ = c.token.Close()
 		c.token = 0
@@ -250,11 +232,11 @@ func (c *tokenConfiner) Close() error {
 
 // labelBox labels the box's roots Low, once per root per session. The journal is written
 // BEFORE the first label so a process killed mid-pass still leaves a complete-enough record
-// to undo the mutation, and what it may say about a root is winlabel.RecordEntry's decision —
+// to undo the mutation, and what it may say about a root is the journal's own decision —
 // never apogee's own label as the state to restore. The order's one debris case is unwound at
 // the source: a root whose label write then fails has refused the box with nothing mutated,
-// so its just-journalled no-prior entry is removed again (unwindRootLabel) rather than left
-// to alarm forever as residue for a label that never landed.
+// so its just-journalled no-prior entry is removed again (winlabel.Journal's Unwind) rather
+// than left to alarm forever as residue for a label that never landed.
 //
 // A backend with nowhere to write its journal refuses the box outright, before any label is
 // read or written: an unrevertable Low label on the user's disk is a worse outcome than a
@@ -268,7 +250,7 @@ func (c *tokenConfiner) Close() error {
 // The memo is keyed by the folded path for the same reason the journal is: C:\Work and
 // c:\work are one root, and labelling it twice would journal it twice.
 func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
-	if c.journalPath == "" {
+	if !c.journal.Writable() {
 		return fmt.Errorf("%w: no user profile could be resolved, so there is nowhere to write the label journal; refusing to label %q rather than leave a mandatory label with no record of how to undo it",
 			domain.ErrConfinementUnavailable, box.WorkspaceRoot)
 	}
@@ -282,21 +264,17 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 		return err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	for _, root := range roots {
-		key := winlabel.FoldPath(root)
-		if c.labelled[key] {
+		if c.journal.Labelled(root) {
 			continue
 		}
 		prior, err := readLabelSDDL(root)
 		if err != nil {
 			return fmt.Errorf("%w: cannot read the mandatory label of %q: %v", domain.ErrConfinementUnavailable, root, err)
 		}
-		journalled, err := c.journalLabel(winlabel.Entry{Path: root, Root: true, PriorSDDL: prior})
+		journalled, err := c.journal.Record(winlabel.Entry{Path: root, Root: true, PriorSDDL: prior})
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
 		}
 		rootLabelled, err := c.labelTree(root)
 		if err != nil {
@@ -307,14 +285,14 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 			// journal is never retired, and ConfinementResidue alarms forever over a disk
 			// carrying no label — so the entry is unwound at its source. Only a JUST-ADDED
 			// entry qualifies: one that predates this attempt records an earlier pass whose
-			// root label may really be on the disk. What the unwind may remove is
-			// winlabel.UnwindEntry's decision — an entry with a foreign prior is kept.
+			// root label may really be on the disk. What the unwind may remove is likewise the
+			// journal's decision — an entry with a foreign prior is kept.
 			if journalled && !rootLabelled {
-				c.unwindRootLabel(root)
+				c.journal.Unwind(root)
 			}
 			return err
 		}
-		c.labelled[key] = true
+		c.journal.MarkLabelled(root)
 	}
 	return nil
 }
@@ -374,38 +352,6 @@ func (c *tokenConfiner) resolveBoxRoot(root string) (string, error) {
 	return final, nil
 }
 
-// journalLabel records one about-to-be-labelled path and persists the journal when the record
-// changed, wrapping a flush failure as ErrConfinementUnavailable — nothing is ever labelled
-// without a journal on disk describing how to undo it. It reports whether the entry newly
-// changed the journal, which is what entitles labelBox to unwind it should the label write
-// that follows fail. Callers hold c.mu.
-func (c *tokenConfiner) journalLabel(entry winlabel.Entry) (bool, error) {
-	entries, changed := winlabel.RecordEntry(c.journal.Entries, entry, winlabel.FoldPath)
-	c.journal.Entries = entries
-	if !changed {
-		return false, nil
-	}
-	if err := c.flushJournal(); err != nil {
-		return false, fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
-	}
-	return true, nil
-}
-
-// unwindRootLabel removes root's just-journalled entry after its label write failed — the
-// phantom-entry undo, decided by winlabel.UnwindEntry (an entry recording a foreign prior stays).
-// The re-flush is best-effort: the caller is already returning the label failure, which is the
-// error that matters, and a stale on-disk entry costs at worst the pre-unwind behaviour —
-// Close retires the whole file on success, and only a crash before that resurrects the
-// phantom. Callers hold c.mu.
-func (c *tokenConfiner) unwindRootLabel(root string) {
-	entries, removed := winlabel.UnwindEntry(c.journal.Entries, root, winlabel.FoldPath)
-	if !removed {
-		return
-	}
-	c.journal.Entries = entries
-	_ = c.flushJournal()
-}
-
 // labelTree walks root and labels every directory and regular file Low. It must recurse:
 // inheritance applies to NEWLY CREATED objects only, so a file that predates the labelling
 // is implicitly Medium and a Low child editing an existing source file would be denied.
@@ -459,10 +405,10 @@ func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 		}
 		if shouldJournal {
 			// A Low prior here is apogee's own label — a tree being re-walked, or one a
-			// concurrent session labelled — and journalLabel drops it rather than recording
+			// concurrent session labelled — and the journal drops it rather than recording
 			// an instruction to put it back.
-			if _, err := c.journalLabel(winlabel.Entry{Path: path, PriorSDDL: prior}); err != nil {
-				return err
+			if _, err := c.journal.Record(winlabel.Entry{Path: path, PriorSDDL: prior}); err != nil {
+				return fmt.Errorf("%w: %v", domain.ErrConfinementUnavailable, err)
 			}
 		}
 		sddl := winlabel.FileSDDL
@@ -472,40 +418,6 @@ func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 		_ = setLabelSDDL(path, sddl)
 		return nil
 	})
-}
-
-// restoreLabels puts the disk back: every journalled root's tree is cleared of the mandatory
-// label — minus any root a LIVE sibling session's journal still names (winlabel.RevertibleRoots),
-// which stays fenced for that session — then the paths that carried an explicit label before
-// the run get theirs back verbatim — minus any prior under a root a sibling journal still
-// claims, which is handed off rather than restored into the sibling's live box and lost to
-// its later clear (winlabel.RestorablePriors) — and the journal file is removed, but ONLY if nothing
-// failed and nothing was handed off (winlabel.Retire). A failed revert keeps both the
-// file and the in-memory record, so the labels it describes are still recoverable: the next
-// NewConfiner retries them and ConfinementResidue reports them meanwhile. A handoff is not a
-// failure — Close returns nil — but the surviving entries stay in memory too, so a repeated
-// Close converges instead of deleting the handoff record. Callers hold c.mu.
-func (c *tokenConfiner) restoreLabels() error {
-	revert := revertSparingLiveSiblings(c.journalHome, c.journalPath)
-	remaining, err := winlabel.Retire(c.journalPath, c.journal, revert)
-	if err != nil {
-		return fmt.Errorf("apogee: confine: could not revert every mandatory label; the journal %q is kept so the next run retries: %w",
-			c.journalPath, err)
-	}
-	c.journal = winlabel.Record{Entries: remaining}
-	c.labelled = make(map[string]bool)
-	return nil
-}
-
-// flushJournal persists the in-memory journal. Callers hold c.mu. The journal-less case is a
-// belt on labelBox's braces — it refuses a box before anything is journalled or labelled, so a
-// flush with no path can no longer accompany a disk mutation.
-func (c *tokenConfiner) flushJournal() error {
-	if c.journalPath == "" {
-		return nil
-	}
-	c.journal.PID = os.Getpid()
-	return winlabel.WriteJournal(c.journalPath, c.journal)
 }
 
 // revertSparingLiveSiblings returns the production revert for the journal at own under

@@ -39,7 +39,7 @@ type Record struct {
 	// Entries are the labelled roots (Root == true) plus every path found already carrying a
 	// FOREIGN explicit label, whose prior descriptor teardown puts back verbatim. One entry
 	// per path, and never one whose prior is a label apogee itself could have written — see
-	// RecordEntry, which is the only thing that builds them.
+	// recordEntry, which is the only thing that builds them.
 	Entries []Entry `json:"entries"`
 }
 
@@ -51,7 +51,7 @@ type Entry struct {
 	Root bool `json:"root,omitempty"`
 	// PriorSDDL is the descriptor the path carried before labelling, empty when it carried
 	// no label (the overwhelmingly common case) or carried a Low one apogee must never put
-	// back (RecordEntry); teardown then clears the path instead.
+	// back (recordEntry); teardown then clears the path instead.
 	PriorSDDL string `json:"prior_sddl,omitempty"`
 }
 
@@ -78,7 +78,7 @@ func (r Record) PriorLabels() map[string]string {
 	return out
 }
 
-// RecordEntry folds one about-to-be-labelled path into a journal's entries, returning the
+// recordEntry folds one about-to-be-labelled path into a journal's entries, returning the
 // entries to persist and whether anything actually changed (unchanged ⇒ there is nothing new to
 // flush before the label goes on).
 //
@@ -101,7 +101,7 @@ func (r Record) PriorLabels() map[string]string {
 // journal instead of appending (and re-flushing) one useless entry per file.
 //
 // fold is injected (nil ⇒ FoldPath) so the decision is table-testable on any OS.
-func RecordEntry(entries []Entry, entry Entry, fold func(string) string) ([]Entry, bool) {
+func recordEntry(entries []Entry, entry Entry, fold func(string) string) ([]Entry, bool) {
 	if fold == nil {
 		fold = FoldPath
 	}
@@ -127,10 +127,10 @@ func RecordEntry(entries []Entry, entry Entry, fold func(string) string) ([]Entr
 	return append(entries, entry), true
 }
 
-// UnwindEntry removes the entry for path when it records NO prior, returning the
-// surviving entries and whether anything was removed. It is labelBox's undo for a root whose
-// label write FAILED right after the entry was journalled: journal-before-label is the correct
-// order and stays, but the failure means the entry now describes a mutation that never
+// unwindEntry removes the entry for path when it records NO prior, returning the
+// surviving entries and whether anything was removed. It is the undo (Journal.unwind) for a
+// root whose label write FAILED right after the entry was journalled: journal-before-label is
+// the correct order and stays, but the failure means the entry now describes a mutation that never
 // happened, and keeping it turns every later Close and recovery into a failing no-op —
 // clearing a label that is not there fails on the same unwritable root, so the journal is
 // never retired and Residue alarms forever over a disk carrying no label.
@@ -140,7 +140,7 @@ func RecordEntry(entries []Entry, entry Entry, fold func(string) string) ([]Entr
 // spurious restore attempt is recoverable, a destroyed record is not.
 //
 // fold is injected (nil ⇒ FoldPath) so the decision is table-testable on any OS.
-func UnwindEntry(entries []Entry, path string, fold func(string) string) ([]Entry, bool) {
+func unwindEntry(entries []Entry, path string, fold func(string) string) ([]Entry, bool) {
 	if fold == nil {
 		fold = FoldPath
 	}

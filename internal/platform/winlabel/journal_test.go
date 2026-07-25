@@ -299,7 +299,7 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, changed := RecordEntry(tt.entries, tt.entry, FoldPath)
+			got, changed := recordEntry(tt.entries, tt.entry, FoldPath)
 			if changed != tt.wantChanged {
 				t.Errorf("changed = %v, want %v (it decides whether the journal is flushed)", changed, tt.wantChanged)
 			}
@@ -326,11 +326,11 @@ func TestJournalLabelEntryUsesTheInjectedFold(t *testing.T) {
 	// The fold is a parameter so the rule is provable off Windows: under a fold that treats two
 	// spellings as one path, the second spelling adds nothing.
 	entries := []Entry{{Path: `C:\Work`, Root: true}}
-	if _, changed := RecordEntry(entries, Entry{Path: `c:\WORK`, Root: true}, nil); changed {
+	if _, changed := recordEntry(entries, Entry{Path: `c:\WORK`, Root: true}, nil); changed {
 		t.Error("the default fold treated two case spellings of one path as two paths")
 	}
 	identity := func(p string) string { return p }
-	if _, changed := RecordEntry(entries, Entry{Path: `c:\WORK`, Root: true}, identity); !changed {
+	if _, changed := recordEntry(entries, Entry{Path: `c:\WORK`, Root: true}, identity); !changed {
 		t.Error("the injected fold was ignored; the helper is not honouring its seam")
 	}
 }
@@ -401,7 +401,7 @@ func TestUnwindLabelEntry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, removed := UnwindEntry(tt.entries, tt.path, FoldPath)
+			got, removed := unwindEntry(tt.entries, tt.path, FoldPath)
 			if removed != tt.wantRemoved {
 				t.Errorf("removed = %v, want %v (it decides whether the journal is re-flushed)", removed, tt.wantRemoved)
 			}
@@ -423,11 +423,11 @@ func TestUnwindLabelEntryUsesTheInjectedFold(t *testing.T) {
 	// The fold is a parameter so the rule is provable off Windows: under the default fold two
 	// case spellings are one path; under an injected identity fold they are two.
 	entries := []Entry{{Path: `C:\Work`, Root: true}}
-	if _, removed := UnwindEntry(entries, `c:\WORK`, nil); !removed {
+	if _, removed := unwindEntry(entries, `c:\WORK`, nil); !removed {
 		t.Error("the default fold treated two case spellings of one path as two paths")
 	}
 	identity := func(p string) string { return p }
-	if _, removed := UnwindEntry(entries, `c:\WORK`, identity); removed {
+	if _, removed := unwindEntry(entries, `c:\WORK`, identity); removed {
 		t.Error("the injected fold was ignored; the helper is not honouring its seam")
 	}
 }
