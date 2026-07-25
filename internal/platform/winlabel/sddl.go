@@ -78,7 +78,7 @@ func IsLowLabel(sddl string) bool {
 //     prior remains RecordEntry's decision.
 //   - No prior (the overwhelmingly common case) is labelled with nothing to journal.
 //
-// It is pure so the decision is table-testable on any OS — the retireLabelJournal seam
+// It is pure so the decision is table-testable on any OS — the Retire seam
 // pattern.
 func DescendantDecision(prior string, readErr error) (shouldJournal, shouldLabel bool) {
 	if readErr != nil {

@@ -364,7 +364,36 @@ Commit: `refactor(platform): winlabel owns the label journal — record, atomic 
 
 ---
 
-## 3. Move the retention and revert-split decisions
+## 3. Move the retention and revert-split decisions — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): three deviations. The moved code is otherwise byte-identical — a mechanical
+rename of the original `winconfine.go` block diffs **empty** against `retire.go`, and the same
+holds for the six moved test bodies.
+
+**(a) All four declarations are TRANSITIONAL EXPORTS, not unexported.** The item's *"Everything
+this item moves stays unexported"* cannot hold yet: its own What says *"`restoreLabels` and
+`recoverLabelJournals` call the moved names"*, and `package platform` still calls every one of the
+four until items 4–5 move those callers — `Retire` from `restoreLabels` and `recoverLabelJournals`,
+`ClearTreeOutcome` from `clearLabelTree`, `RevertibleRoots` and `RestorablePriors` from
+`revertSparingLiveSiblings`. `GOOS=windows go vet ./internal/platform/...` is the gate that proves
+it. They follow item 1's NOTES(a) pattern — the plan's name with the leading letter capitalised —
+so **item 5** unexports each by lowercasing one identifier as it moves the last caller, and item
+6's acceptance should confirm all four are gone. **One trap for item 5:** a package-level
+`func Retire(...)` and a `func (j *Journal) Retire()` coexist legally in one package, so the
+compiler will NOT flag a leftover `Retire` when item 5 adds the method — the lowercasing must
+happen in the same edit.
+
+**(b) The `Record` parameter is `r`, not `j`.** Item 2's NOTES(f) already renamed `Record`'s
+receivers `j` → `r` so `j` stays free for item 4's `*Journal`; that rename is extended here to the
+four free functions that take a `Record` (and to the one closure parameter in the moved
+`TestRetireLabelJournalKeepsTheFileWhenTheRevertFails`), with the doc comments following it ("r's
+roots"). A `j Record` beside a `j *Journal` in one package is exactly the confusion D5's lock
+discipline cannot afford.
+
+**(c) Two consequential edits.** `DescendantDecision`'s doc in `sddl.go` said *"the
+retireLabelJournal seam pattern"* and now says `Retire`'s — staleness this item's rename created
+(item 2's NOTES(e) pattern). `winconfine_test.go` lost its now-unused `os` import when the six
+tests left. Moved test FUNCTION names are kept verbatim, per item 1's NOTES(c).
 
 The rules that decide what a revert may touch and whether a journal file may be deleted. They are
 pure, they are already behind injected seams (`revert`, `alive`), and they are the last untagged
