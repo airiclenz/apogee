@@ -51,6 +51,25 @@ func WorkspaceWriteTarget(t domain.Tool, call domain.ToolCall) (string, bool) {
 	return w.workspaceWriteTarget(call)
 }
 
+// pathArgWriteTarget is the shared body of every workspaceScopedWriter's
+// workspaceWriteTarget: decode the call's "path" argument and resolve it against root
+// WITHOUT the containment check, because dispatch needs an out-of-workspace target to
+// resolve rather than error (contract §3). It decodes into a minimal one-field struct
+// rather than each tool's args type — every write tool spells the argument "path", and
+// TestWriteTargetsAgreeOnPath is what keeps that true. Ignoring the rest of the call's
+// arguments is deliberate: classification asks only where the write would land, so a
+// malformed sibling argument still yields a target for dispatch to judge, and Execute
+// is where that argument is decoded properly and rejected.
+func pathArgWriteTarget(call domain.ToolCall, root string) (string, bool) {
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := decodeArgs(call.Arguments, &args); err != nil {
+		return "", false
+	}
+	return resolveTargetUnbounded(args.Path, root)
+}
+
 // resolveTargetUnbounded resolves input (relative to root, or absolute) to an absolute
 // real path WITHOUT the containment check ResolveInRoot enforces — the path-resolution
 // half of the path-safety logic, used only to classify a write target as in- or

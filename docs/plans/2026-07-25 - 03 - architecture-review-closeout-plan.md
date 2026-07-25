@@ -594,7 +594,17 @@ is **empty**; `model.go` is ~40 lines shorter. Commit:
 
 ---
 
-## 7. One shared `workspaceWriteTarget` body
+## 7. One shared `workspaceWriteTarget` body — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): two additions to the item's literal text, both in doc comments, plus the
+semantic they record. The minimal one-field decode means a call whose **sibling** argument is
+malformed (`content` a number, `replacements` not an array) now RESOLVES a target where the
+per-tool args struct used to fail the decode and return `ok=false`. That is the better
+classification — dispatch asks only where the write would land, and `Execute` still decodes the
+full args and rejects the call — so `pathArgWriteTarget`'s comment states it rather than leaving
+it as a silent side effect of the collapse. `write_file`'s longer marker comment is preserved in
+full and gains one clause saying the method stays per-type *because* the marker is the method
+set, which is the question a reader now has when the body is one line.
 
 **What:**
 

@@ -67,11 +67,7 @@ func (t *SingleFindReplace) ReadOnly() bool { return false }
 // confinement-execution-contract §3). It performs no write — pure path resolution
 // without the containment check. A call with no decodable path yields ok=false.
 func (t *SingleFindReplace) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
-	var args singleFindReplaceArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return "", false
-	}
-	return resolveTargetUnbounded(args.Path, t.root)
+	return pathArgWriteTarget(call, t.root)
 }
 
 // Execute finds oldText in the file and replaces it with newText, honouring ctx
@@ -184,11 +180,7 @@ func (t *MultiFindReplace) ReadOnly() bool { return false }
 // workspaceWriteTarget resolves the absolute path this call would write so dispatch can
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker).
 func (t *MultiFindReplace) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
-	var args multiFindReplaceArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return "", false
-	}
-	return resolveTargetUnbounded(args.Path, t.root)
+	return pathArgWriteTarget(call, t.root)
 }
 
 // Execute applies the replacements sequentially against an in-memory copy of the file,

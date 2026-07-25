@@ -48,13 +48,10 @@ func (t *WriteFile) ReadOnly() bool { return false }
 // out-of-workspace target resolves rather than erroring (that is the classification
 // dispatch needs). A call with no decodable path yields ok=false (treated as in-bounds).
 // This method being unexported is what makes write_file an Apogee-own writer no
-// third-party tool can fake (contract §3.2).
+// third-party tool can fake (contract §3.2) — the method stays per-type even though
+// every writer shares one body (pathArgWriteTarget), because the marker IS the method set.
 func (t *WriteFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
-	var args writeFileArgs
-	if err := decodeArgs(call.Arguments, &args); err != nil {
-		return "", false
-	}
-	return resolveTargetUnbounded(args.Path, t.root)
+	return pathArgWriteTarget(call, t.root)
 }
 
 // Execute writes content to the file named in call.Arguments, honouring ctx
