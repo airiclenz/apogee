@@ -140,10 +140,10 @@ Explore agents and should be spot-checked before acting.
   was actually built, against the card's sketch:
   - **Item 1** (`a924ef1`) — the two hand-synced maps (`catalogue` + `descriptors`) are **one `row`
     table**; each Mechanism file's `init()` is a single `register(row{descriptor, ordering,
-    construct})` call (20 files, 21 rows — `cot.go` registers 3); all **13** ordering literals moved
-    onto their rows with their why-comments intact (the review's "11" undercounted — `autofix.go` and
-    `syntax.go` have multi-line returns); the `toolfilter.go` raw-`"decompose"` drift this card
-    flagged is fixed.
+    construct})` call (19 Mechanism files carry a `func init()`, 21 rows — `cot.go` registers 3, so
+    18+3=21); all **13** ordering literals moved onto their rows with their why-comments intact (the
+    review's "11" undercounted — `autofix.go` and `syntax.go` have multi-line returns); the
+    `toolfilter.go` raw-`"decompose"` drift this card flagged is fixed.
   - **Item 2** (`f00cd6e`) is candidate **07** in full — see its card below.
   - **Item 3** (`b651dc3`) — the registry holds `domain.RegisteredMechanism{Descriptor, Ordering,
     Hook}` and `domain.Mechanism` is **deleted**. The card's *"methods synthesized"* deepening was

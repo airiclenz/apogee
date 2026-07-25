@@ -531,6 +531,12 @@ NOTES (2026-07-25): `internal/domain/doc.go` was checked and **not** edited — 
 "the Mechanism registry's ordering-cycle detection", an example of domain-resident pure logic, not
 an enumeration of the deleted interface. The bullet's "do not force" applies.
 
+NOTES (2026-07-25): authorized deviation from "Leave 03/05/06 untouched" — **card 05's body was
+edited**, one phrase: "the most degraded of the outstanding **seven**" → "of the outstanding
+**cards**". With 04 and 07 marked landed by this item, "seven" became false prose *inside* an
+outstanding card, so the bullet's own goal (the doc no longer lists 04 or 07 as outstanding) forced
+it. No claim, figure or recommendation in card 05 changed; cards 03 and 06 are untouched.
+
 - **`docs/adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md`** — append
   `## Amendment (2026-07-25) — a Mechanism's descriptor and ordering are catalogue data, not
   instance methods`, following ADR 0012's amendment convention. Content: the Decision's three
