@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform/confinetest"
+	"github.com/airiclenz/apogee/internal/platform/winlabel"
 )
 
 // The Windows counterpart of landlock_linux_test.go / seatbelt_darwin_test.go. Unlike those
@@ -186,7 +187,7 @@ func TestWindowsGenuinelyTildeNamedRootIsContainable(t *testing.T) {
 	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: root}); err != nil {
 		t.Fatalf("labelBox(%q) refused a genuinely tilde-named workspace: %v", root, err)
 	}
-	if label, _ := readLabelSDDL(root); !isLowLabelSDDL(label) {
+	if label, _ := readLabelSDDL(root); !winlabel.IsLowLabel(label) {
 		t.Errorf("root label = %q while the box is up, want apogee's Low label — the label pass must run", label)
 	}
 	if err := c.Close(); err != nil {
@@ -289,7 +290,7 @@ func TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings(t *testing.T) {
 	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: plain}); err != nil {
 		t.Fatalf("labelBox(%q) refused an ordinary root: %v", plain, err)
 	}
-	if label, _ := readLabelSDDL(plain); !isLowLabelSDDL(label) {
+	if label, _ := readLabelSDDL(plain); !winlabel.IsLowLabel(label) {
 		t.Errorf("label of %q = %q, want apogee's Low label — an honest workspace is unaffected", plain, label)
 	}
 	if err := c.Close(); err != nil {
@@ -506,7 +507,7 @@ func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the planted label of %q: %v", child, err)
 	}
-	if foreignPrior == "" || isLowLabelSDDL(foreignPrior) {
+	if foreignPrior == "" || winlabel.IsLowLabel(foreignPrior) {
 		t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low prior", foreignPrior)
 	}
 
@@ -516,7 +517,7 @@ func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
 
 	// While the box is up, the foreign-prior file is Low like everything else — the
 	// restore below is only meaningful because the label pass really overwrote the prior.
-	if label, _ := readLabelSDDL(child); !isLowLabelSDDL(label) {
+	if label, _ := readLabelSDDL(child); !winlabel.IsLowLabel(label) {
 		t.Fatalf("foreign-prior file label = %q while the box is up, want apogee's Low label over the prior", label)
 	}
 
@@ -575,7 +576,7 @@ func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
 }
 
 func TestWindowsUnreadablePriorDescendantIsNotLabelled(t *testing.T) {
-	// The unreadable-prior rung of descendantLabelDecision, on a real DACL. The child's DACL
+	// The unreadable-prior rung of winlabel.DescendantDecision, on a real DACL. The child's DACL
 	// withholds READ_CONTROL from the current user (an OWNER_RIGHTS ACE displaces the owner's
 	// implicit grant) while keeping WRITE_OWNER, so the walk's prior read is denied by the
 	// kernel — the split under which the walk used to fall through to the label write with no
@@ -644,7 +645,7 @@ func TestWindowsUnreadablePriorDescendantIsNotLabelled(t *testing.T) {
 		t.Errorf("the unreadable-prior child carries the label %q; a path whose prior could not be read must not be labelled", label)
 	}
 	for _, path := range []string{ws, sibling} {
-		if got, _ := readLabelSDDL(path); !isLowLabelSDDL(got) {
+		if got, _ := readLabelSDDL(path); !winlabel.IsLowLabel(got) {
 			t.Errorf("label of %q = %q, want apogee's Low label — one opaque descendant must not gate the box", path, got)
 		}
 	}
@@ -727,7 +728,7 @@ func TestWindowsUnclearableDescendantKeepsTheJournal(t *testing.T) {
 	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
 		t.Fatalf("labelBox: %v", err)
 	}
-	if label, _ := readLabelSDDL(child); !isLowLabelSDDL(label) {
+	if label, _ := readLabelSDDL(child); !winlabel.IsLowLabel(label) {
 		t.Fatalf("child label = %q, want apogee's Low label before the revert is obstructed", label)
 	}
 
@@ -1129,7 +1130,7 @@ func TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the planted label of %q: %v", ws, err)
 	}
-	if foreignPrior == "" || isLowLabelSDDL(foreignPrior) {
+	if foreignPrior == "" || winlabel.IsLowLabel(foreignPrior) {
 		t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low prior", foreignPrior)
 	}
 
@@ -1164,7 +1165,7 @@ func TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown(t *testing.T) {
 		t.Fatalf("Close = %v, want nil; a handed-off prior must not fail the revert", err)
 	}
 	closed = true
-	if label, _ := readLabelSDDL(ws); !isLowLabelSDDL(label) {
+	if label, _ := readLabelSDDL(ws); !winlabel.IsLowLabel(label) {
 		t.Fatalf("shared root label = %q after the first session's Close, want the sibling's Low fence untouched", label)
 	}
 	ownPath := labelJournalPath(home, os.Getpid())
@@ -1267,7 +1268,7 @@ func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 	}
 	for _, j := range []labelJournal{onDisk, second.journal} {
 		for _, entry := range j.Entries {
-			if isLowLabelSDDL(entry.PriorSDDL) {
+			if winlabel.IsLowLabel(entry.PriorSDDL) {
 				t.Errorf("journal entry %+v records apogee's own Low label as prior state; the revert would put it back", entry)
 			}
 		}

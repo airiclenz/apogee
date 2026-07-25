@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform/winlabel"
 )
 
 // The Windows token backend's DECISIONS are pure functions over the Windows rule table, so
@@ -769,48 +770,27 @@ func TestSiblingLabelJournalsExcludesOwnAndUndecodable(t *testing.T) {
 	}
 }
 
-func TestConfinementTeardownNoticeWordsTheFailure(t *testing.T) {
+func TestConfinementTeardownNoticeDelegatesToWinlabel(t *testing.T) {
 	t.Parallel()
 
+	// The wording moved to winlabel and this export is a one-line delegation (D8). A
+	// delegation that silently stopped delegating is the one failure mode the move
+	// introduced, and it is invisible to every test that moved with the wording.
+	err := errors.New(`the journal "C:\Users\dev\.apogee\confinement\labels-9.json" is kept`)
+	if got, want := ConfinementTeardownNotice(err), winlabel.TeardownNotice(err); got != want {
+		t.Errorf("ConfinementTeardownNotice = %q; want winlabel.TeardownNotice's %q", got, want)
+	}
 	if got := ConfinementTeardownNotice(nil); got != "" {
 		t.Errorf("ConfinementTeardownNotice(nil) = %q, want \"\" so the caller can state it unconditionally", got)
 	}
-
-	got := ConfinementTeardownNotice(errors.New(`the journal "C:\Users\dev\.apogee\confinement\labels-9.json" is kept`))
-	if strings.Contains(got, "\n") {
-		t.Errorf("notice = %q; want a single stderr line", got)
-	}
-	if !strings.Contains(got, `labels-9.json`) {
-		t.Errorf("notice = %q; want it to name the journal that survived the failure", got)
-	}
-	if !strings.Contains(got, windowsLabelRemedy) {
-		t.Errorf("notice = %q; want the same manual remedy the host report names", got)
-	}
-	if !strings.Contains(windowsResidueNotice([]string{`C:\work`}, nil), windowsLabelRemedy) {
-		t.Error("the host report no longer quotes the shared remedy; the two surfaces have drifted")
-	}
 }
 
-func TestWindowsLabelProgressNoticeNamesRootAndFence(t *testing.T) {
+func TestWindowsLabelProgressNoticeDelegatesToWinlabel(t *testing.T) {
 	t.Parallel()
 
 	const root = `C:\work\proj`
-	got := WindowsLabelProgressNotice(root)
-
-	if got == "" {
-		t.Fatal("WindowsLabelProgressNotice returned \"\"; a wait notice with no words explains nothing")
-	}
-	if strings.Contains(got, "\n") {
-		t.Errorf("notice = %q; want a single pre-alt-screen stderr line", got)
-	}
-	if !strings.Contains(got, root) {
-		t.Errorf("notice = %q; want it to name the workspace root being labelled", got)
-	}
-	// The fence wording is the shared remedy verbatim, so this surface never invents a third
-	// spelling of the manual undo the teardown warning and host report already quote — the
-	// windowsResidueNotice byte-identity assertion pattern.
-	if !strings.Contains(got, windowsLabelRemedy) {
-		t.Errorf("notice = %q; want the shared remedy %q so the surfaces cannot drift", got, windowsLabelRemedy)
+	if got, want := WindowsLabelProgressNotice(root), winlabel.ProgressNotice(root); got != want {
+		t.Errorf("WindowsLabelProgressNotice = %q; want winlabel.ProgressNotice's %q", got, want)
 	}
 }
 
@@ -872,7 +852,7 @@ func TestConfinementResidueReportsAnUnreadableJournal(t *testing.T) {
 	if !strings.Contains(got, "unreadable") || !strings.Contains(got, garbage) {
 		t.Fatalf("residue = %q; want it to name the unreadable journal %q", got, garbage)
 	}
-	if !strings.Contains(got, windowsLabelRemedy) {
+	if !strings.Contains(got, winlabel.Remedy) {
 		t.Errorf("residue = %q; want the manual remedy, which is the ONLY one for a journal no run can decode", got)
 	}
 
@@ -887,75 +867,6 @@ func TestConfinementResidueReportsAnUnreadableJournal(t *testing.T) {
 	got = confinementResidue(home)
 	if !strings.Contains(got, garbage) || !strings.Contains(got, `C:\work\proj`) {
 		t.Errorf("residue = %q; want both the unreadable journal and the still-labelled path", got)
-	}
-}
-
-func TestWindowsResidueNoticeWordsBothFindings(t *testing.T) {
-	t.Parallel()
-
-	const journal = `C:\Users\dev\.apogee\confinement\labels-9.json`
-
-	tests := []struct {
-		name       string
-		roots      []string
-		unreadable []string
-		want       []string // substrings the notice must carry
-		wantEmpty  bool
-	}{
-		{
-			name:      "nothing_outstanding",
-			wantEmpty: true,
-		},
-		{
-			name:  "outstanding_labels",
-			roots: []string{`C:\work`, `D:\cache`},
-			want:  []string{"2 path(s)", `C:\work, D:\cache`, "reverts them automatically", windowsLabelRemedy},
-		},
-		{
-			name:       "unreadable_journal",
-			unreadable: []string{journal},
-			want:       []string{"journal present but unreadable: " + journal, "undecodable", windowsLabelRemedy},
-		},
-		{
-			name:       "both_findings_are_stated",
-			roots:      []string{`C:\work`},
-			unreadable: []string{journal},
-			want:       []string{`C:\work`, "journal present but unreadable: " + journal},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := windowsResidueNotice(tt.roots, tt.unreadable)
-			if tt.wantEmpty {
-				if got != "" {
-					t.Fatalf("notice = %q, want \"\" so the caller can state it unconditionally", got)
-				}
-				return
-			}
-			for _, want := range tt.want {
-				if !strings.Contains(got, want) {
-					t.Errorf("notice = %q; want it to carry %q", got, want)
-				}
-			}
-			// Every continuation line stays aligned under the host report's "labels:" field.
-			for _, line := range strings.Split(got, "\n")[1:] {
-				if !strings.HasPrefix(line, windowsResidueIndent) {
-					t.Errorf("continuation line %q is not indented under the labels field", line)
-				}
-			}
-		})
-	}
-
-	// The labels half is worded exactly as it was before the unreadable finding joined it: the
-	// host report renders this verbatim and its wording is pinned by internal/probe's tests.
-	want := "1 path(s) may still carry apogee's Low integrity label: C:\\work\n" +
-		windowsResidueIndent + "(a run was interrupted, or another apogee holds them now; a new session\n" +
-		windowsResidueIndent + "reverts them automatically, or: " + windowsLabelRemedy + ")"
-	if got := windowsResidueNotice([]string{`C:\work`}, nil); got != want {
-		t.Errorf("the outstanding-labels wording drifted:\n got %q\nwant %q", got, want)
 	}
 }
 
@@ -1002,13 +913,13 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		},
 		{
 			name:        "own_dir_label_as_root_prior_is_recorded_as_no_prior",
-			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: winlabel.DirSDDL},
 			wantChanged: true,
 			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true}},
 		},
 		{
 			name:  "own_file_label_on_a_descendant_is_not_recorded_at_all",
-			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: windowsFileLabelSDDL},
+			entry: labelJournalEntry{Path: `C:\work\main.go`, PriorSDDL: winlabel.FileSDDL},
 		},
 		{
 			name:  "inherited_own_label_on_a_descendant_is_not_recorded_at_all",
@@ -1021,19 +932,19 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		{
 			name:        "duplicate_path_keeps_the_first_prior",
 			entries:     []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
-			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			entry:       labelJournalEntry{Path: `C:\work`, Root: true, PriorSDDL: winlabel.DirSDDL},
 			wantEntries: []labelJournalEntry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
 		},
 		{
 			name:        "case_varied_duplicate_path_is_the_same_path",
 			entries:     []labelJournalEntry{{Path: `C:\Work`, Root: true}},
-			entry:       labelJournalEntry{Path: `c:\work`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			entry:       labelJournalEntry{Path: `c:\work`, Root: true, PriorSDDL: winlabel.DirSDDL},
 			wantEntries: []labelJournalEntry{{Path: `C:\Work`, Root: true}},
 		},
 		{
 			name:        "a_journalled_descendant_can_still_become_a_root",
 			entries:     []labelJournalEntry{{Path: `C:\work\vendor`, PriorSDDL: foreignMedium}},
-			entry:       labelJournalEntry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: windowsDirLabelSDDL},
+			entry:       labelJournalEntry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: winlabel.DirSDDL},
 			wantChanged: true,
 			wantEntries: []labelJournalEntry{{Path: `C:\work\vendor`, Root: true, PriorSDDL: foreignMedium}},
 		},
@@ -1043,7 +954,7 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, changed := journalLabelEntry(tt.entries, tt.entry, foldLabelPath)
+			got, changed := journalLabelEntry(tt.entries, tt.entry, winlabel.FoldPath)
 			if changed != tt.wantChanged {
 				t.Errorf("changed = %v, want %v (it decides whether the journal is flushed)", changed, tt.wantChanged)
 			}
@@ -1056,7 +967,7 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 				}
 			}
 			for _, entry := range got {
-				if isLowLabelSDDL(entry.PriorSDDL) {
+				if winlabel.IsLowLabel(entry.PriorSDDL) {
 					t.Errorf("entry %+v records a Low prior; the revert would re-apply apogee's own label", entry)
 				}
 			}
@@ -1145,7 +1056,7 @@ func TestUnwindLabelEntry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, removed := unwindLabelEntry(tt.entries, tt.path, foldLabelPath)
+			got, removed := unwindLabelEntry(tt.entries, tt.path, winlabel.FoldPath)
 			if removed != tt.wantRemoved {
 				t.Errorf("removed = %v, want %v (it decides whether the journal is re-flushed)", removed, tt.wantRemoved)
 			}
@@ -1173,96 +1084,6 @@ func TestUnwindLabelEntryUsesTheInjectedFold(t *testing.T) {
 	identity := func(p string) string { return p }
 	if _, removed := unwindLabelEntry(entries, `c:\WORK`, identity); removed {
 		t.Error("the injected fold was ignored; the helper is not honouring its seam")
-	}
-}
-
-func TestDescendantLabelDecision(t *testing.T) {
-	t.Parallel()
-
-	// The label walk's three-way decision for one descendant, proven on every OS. The rung
-	// that matters most is the read ERROR: labelling a path whose prior could not be read
-	// would destroy a possibly-foreign label with no journalled record to put it back, so the
-	// path must be skipped entirely — no journal entry AND no label.
-	tests := []struct {
-		name              string
-		prior             string
-		readErr           error
-		wantShouldJournal bool
-		wantShouldLabel   bool
-	}{
-		{
-			name:    "read_error_skips_journal_and_label",
-			readErr: errors.New("access is denied"),
-		},
-		{
-			name:    "read_error_wins_even_over_a_leftover_prior",
-			prior:   "S:AI(ML;;NW;;;ME)",
-			readErr: errors.New("access is denied"),
-		},
-		{
-			name:              "foreign_prior_is_journalled_then_labelled",
-			prior:             "S:AI(ML;;NW;;;ME)",
-			wantShouldJournal: true,
-			wantShouldLabel:   true,
-		},
-		{
-			name:              "own_low_prior_still_passes_through_the_journal",
-			prior:             windowsFileLabelSDDL, // journalLabelEntry decides what the entry may say
-			wantShouldJournal: true,
-			wantShouldLabel:   true,
-		},
-		{
-			name:            "empty_prior_labels_only",
-			wantShouldLabel: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			shouldJournal, shouldLabel := descendantLabelDecision(tt.prior, tt.readErr)
-			if shouldJournal != tt.wantShouldJournal {
-				t.Errorf("shouldJournal = %v, want %v", shouldJournal, tt.wantShouldJournal)
-			}
-			if shouldLabel != tt.wantShouldLabel {
-				t.Errorf("shouldLabel = %v, want %v", shouldLabel, tt.wantShouldLabel)
-			}
-			if shouldJournal && !shouldLabel {
-				t.Error("shouldJournal without shouldLabel; a journal entry would describe a mutation that never happens")
-			}
-		})
-	}
-}
-
-func TestIsLowLabelSDDL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		sddl string
-		want bool
-	}{
-		{name: "empty_descriptor", sddl: ""},
-		{name: "no_label_ace", sddl: "S:"},
-		{name: "own_dir_label", sddl: windowsDirLabelSDDL, want: true},
-		{name: "own_file_label", sddl: windowsFileLabelSDDL, want: true},
-		{name: "inherited_own_label", sddl: "S:AI(ML;OICIID;NW;;;LW)", want: true},
-		{name: "canonical_low_sid", sddl: "S:AI(ML;;NW;;;s-1-16-4096)", want: true},
-		{name: "medium_label", sddl: "S:AI(ML;;NW;;;ME)"},
-		{name: "high_label", sddl: "S:(ML;OICI;NW;;;HI)"},
-		{name: "truncated_ace", sddl: "S:(ML;OICI;NW;;;LW"},
-		{name: "audit_ace_then_low_label", sddl: "S:(AU;SA;WD;;;WD)(ML;;NW;;;LW)", want: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := isLowLabelSDDL(tt.sddl); got != tt.want {
-				t.Errorf("isLowLabelSDDL(%q) = %v, want %v", tt.sddl, got, tt.want)
-			}
-		})
 	}
 }
 

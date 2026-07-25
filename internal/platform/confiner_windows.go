@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform/winlabel"
 )
 
 // Windows token Confiner backend (Phase 5 item 8 — ADR 0020;
@@ -285,7 +286,7 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 	defer c.mu.Unlock()
 
 	for _, root := range roots {
-		key := foldLabelPath(root)
+		key := winlabel.FoldPath(root)
 		if c.labelled[key] {
 			continue
 		}
@@ -379,7 +380,7 @@ func (c *tokenConfiner) resolveBoxRoot(root string) (string, error) {
 // changed the journal, which is what entitles labelBox to unwind it should the label write
 // that follows fail. Callers hold c.mu.
 func (c *tokenConfiner) journalLabel(entry labelJournalEntry) (bool, error) {
-	entries, changed := journalLabelEntry(c.journal.Entries, entry, foldLabelPath)
+	entries, changed := journalLabelEntry(c.journal.Entries, entry, winlabel.FoldPath)
 	c.journal.Entries = entries
 	if !changed {
 		return false, nil
@@ -397,7 +398,7 @@ func (c *tokenConfiner) journalLabel(entry labelJournalEntry) (bool, error) {
 // Close retires the whole file on success, and only a crash before that resurrects the
 // phantom. Callers hold c.mu.
 func (c *tokenConfiner) unwindRootLabel(root string) {
-	entries, removed := unwindLabelEntry(c.journal.Entries, root, foldLabelPath)
+	entries, removed := unwindLabelEntry(c.journal.Entries, root, winlabel.FoldPath)
 	if !removed {
 		return
 	}
@@ -417,14 +418,14 @@ func (c *tokenConfiner) unwindRootLabel(root string) {
 // disk, and must not gate a whole session. A descendant whose PRIOR label cannot be read
 // takes the same tolerated rung, but before anything is written: no journal entry can
 // describe what the read did not deliver, so the path is left exactly as it is
-// (descendantLabelDecision) rather than labelled with no record of how to undo it.
+// (winlabel.DescendantDecision) rather than labelled with no record of how to undo it.
 //
 // rootLabelled reports whether the root's own label landed, distinguishing the one failure
 // under which NOTHING was mutated — the root write itself — from the failures after it (an
 // unwalkable root, a descendant's journal flush), under which the root's label is really on
 // the disk. labelBox unwinds the root's journal entry only in the first case.
 func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
-	if err := setLabelSDDL(root, windowsDirLabelSDDL); err != nil {
+	if err := setLabelSDDL(root, winlabel.DirSDDL); err != nil {
 		return false, fmt.Errorf("%w: cannot label %q Low: %v", domain.ErrConfinementUnavailable, root, err)
 	}
 	return true, filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -448,11 +449,11 @@ func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 			return nil
 		}
 		prior, priorErr := readLabelSDDL(path)
-		shouldJournal, shouldLabel := descendantLabelDecision(prior, priorErr)
+		shouldJournal, shouldLabel := winlabel.DescendantDecision(prior, priorErr)
 		if !shouldLabel {
 			// The prior could not be read, so labelling would destroy a possibly-foreign
 			// label with no journalled record to restore it from. The path takes the
-			// tolerated-descendant rung instead (descendantLabelDecision): it stays
+			// tolerated-descendant rung instead (winlabel.DescendantDecision): it stays
 			// unlabelled, and only that one path is opaque to the confined child.
 			return nil
 		}
@@ -464,9 +465,9 @@ func (c *tokenConfiner) labelTree(root string) (rootLabelled bool, err error) {
 				return err
 			}
 		}
-		sddl := windowsFileLabelSDDL
+		sddl := winlabel.FileSDDL
 		if entry.IsDir() {
-			sddl = windowsDirLabelSDDL
+			sddl = winlabel.DirSDDL
 		}
 		_ = setLabelSDDL(path, sddl)
 		return nil
@@ -568,7 +569,7 @@ func revertLabelJournal(roots []string, priors map[string]string) error {
 // Low labels on the disk with no record and no residue report; returning them keeps the
 // journal, so the next session or recovery retries.
 func clearLabelTree(root string) error {
-	if err := setLabelSDDL(root, windowsClearLabelSDDL); err != nil {
+	if err := setLabelSDDL(root, winlabel.ClearSDDL); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -602,7 +603,7 @@ func clearLabelTree(root string) error {
 			}
 			return nil
 		}
-		if err := setLabelSDDL(path, windowsClearLabelSDDL); err != nil && !os.IsNotExist(err) {
+		if err := setLabelSDDL(path, winlabel.ClearSDDL); err != nil && !os.IsNotExist(err) {
 			fail(path, err)
 		}
 		return nil
@@ -737,7 +738,7 @@ func readLabelSDDL(path string) (string, error) {
 		return "", err
 	}
 	text := sd.String()
-	if !strings.Contains(text, windowsLabelACEPrefix) {
+	if !strings.Contains(text, winlabel.LabelACEPrefix) {
 		return "", nil
 	}
 	return text, nil

@@ -170,7 +170,42 @@ the exception: they are the *host's path rules* applied to a box, they need `hos
 
 ---
 
-## 1. Create the package — SDDL vocabulary, walk decisions, notice wording
+## 1. Create the package — SDDL vocabulary, walk decisions, notice wording — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): three deviations, all forced by the intermediate state this item leaves the
+tree in.
+
+**(a) Six declarations the item's bullets call unexported had to be EXPORTED here**, because
+`package platform` still calls every one of them until items 2–5 move their callers, and the item's
+own What requires exactly that (*"now resolve through `winlabel.` at their remaining call sites in
+`winconfine.go` and `confiner_windows.go`"* — an unexported name cannot be resolved through a
+package qualifier). They are `DirSDDL` / `FileSDDL` / `ClearSDDL` (called by `labelTree` and
+`clearLabelTree`, which move in item 5), `LabelACEPrefix` (`readLabelSDDL`, item 5), `FoldPath`
+(`journalLabelEntry` and `unwindLabelEntry` in item 2, `revertibleRoots` and `restorablePriors` in
+item 3, `labelBox` in item 5), `DescendantDecision` (`labelTree`, item 5) and `ResidueNotice`
+(`confinementResidue`, item 2). Each is the plan's name with the leading letter capitalised, so the
+item that removes its last external caller unexports it by lowercasing one identifier: item 2 takes
+`ResidueNotice` → `residueNotice`, item 5 takes `DirSDDL`/`FileSDDL`/`ClearSDDL`/`LabelACEPrefix`/
+`DescendantDecision` and, with `labelBox`, `FoldPath`. Only `IsLowLabel`, `Remedy`,
+`ProgressNotice` and `TeardownNotice` are exported by decision (D6/D8); the other six are transitional
+and item 6's acceptance should confirm they are gone. `lowLabelSIDs` and `residueIndent` have no
+caller outside the package and are unexported as written.
+
+**(b) `confiner_windows_test.go` has NINE `isLowLabelSDDL` call sites, not the one at `:1267`** the
+item names (`:189`, `:292`, `:509`, `:519`, `:647`, `:730`, `:1132`, `:1167`, `:1270`), plus a
+comment at `:578` naming `descendantLabelDecision`. All ten were renamed — required both to compile
+the Windows-tagged file and to satisfy this item's own acceptance grep, which covers `*_test.go`.
+Nothing else in that file changed.
+
+**(c) `TestPackageImportsNothingFromApogee` is an ALLOW-list, not a ban on one module path.** It
+accepts the standard library (first import-path element carries no dot) plus
+`golang.org/x/sys/windows` and fails everything else, which is what D2 actually decides — a deny-list
+on `airiclenz/apogee` would wave through any third-party package that happened not to be apogee.
+It also keeps this item's acceptance grep literally empty: a guard that spelled its own needle would
+be the single hit in `grep -rn "airiclenz/apogee" internal/platform/winlabel/`. The guard is
+negative-tested (a planted `internal/domain` import fails it) and refuses to pass over zero parsed
+files. Moved test FUNCTION names are kept verbatim; only identifiers inside them were renamed,
+including the function names quoted in failure messages.
 
 The three smallest, most self-contained concerns first, so the package exists, its doc comment is
 written, and the boundary is proven before anything intricate crosses it.

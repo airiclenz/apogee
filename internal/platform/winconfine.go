@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform/winlabel"
 )
 
 // Windows token Confiner — the OS-free half (ADR 0020; confinement-execution-contract §9).
@@ -33,30 +34,6 @@ const windowsFloorBuild = 17763
 // only ever observe the branch its own host is on, and the branch that matters most is the one
 // the development machine is never on.
 func belowWindowsFloor(build uint32) bool { return build < windowsFloorBuild }
-
-// The mandatory-label SDDL strings the backend writes (ADR 0020 §2).
-//
-//   - windowsDirLabelSDDL labels a DIRECTORY Low with NO_WRITE_UP, object- and
-//     container-inheritable, so objects created inside the box during the run are Low too.
-//   - windowsFileLabelSDDL labels an existing FILE Low; inheritance flags are meaningless
-//     on a leaf, and the label pass must reach existing files because inheritance covers
-//     newly created objects ONLY — a Low child editing a pre-existing source file would
-//     otherwise be denied, which is the single most common thing an agent does.
-//   - windowsClearLabelSDDL is a NULL SACL: no mandatory label at all, which is the state
-//     an unlabelled object is in (implicitly Medium with NO_WRITE_UP). It is what teardown
-//     writes to a path that carried no label before the run. Clearing via a NULL SACL keeps
-//     the restore inside LABEL_SECURITY_INFORMATION, which needs only WRITE_OWNER on the
-//     object; asking additionally for UNPROTECTED_SACL_SECURITY_INFORMATION would drag in
-//     the SACL privilege check (SeSecurityPrivilege) and fail for an ordinary user.
-const (
-	windowsDirLabelSDDL   = "S:(ML;OICI;NW;;;LW)"
-	windowsFileLabelSDDL  = "S:(ML;;NW;;;LW)"
-	windowsClearLabelSDDL = "S:"
-)
-
-// windowsLabelACEPrefix is the SDDL spelling of a mandatory-label ACE. A descriptor string
-// containing it carries an explicit label that teardown must put back rather than clear.
-const windowsLabelACEPrefix = "(ML;"
 
 // labelJournalDirName is the sub-directory of the apogee home holding the label journals,
 // and labelJournalPrefix/Suffix name one run's file. The journal is per-PID rather than
@@ -124,44 +101,6 @@ func (j labelJournal) priorLabels() map[string]string {
 	return out
 }
 
-// foldLabelPath case-folds a path for the journal's one-entry-per-path rule. Windows paths are
-// case-insensitive, so C:\Work and c:\work name one location and must never become two journal
-// entries — the same upper-casing windowsProtectedRoots dedupes its locations with, and the
-// whole-path form of the component-wise fold hostRules.sameComponent applies.
-func foldLabelPath(p string) string { return strings.ToUpper(p) }
-
-// windowsLowLabelSIDs are the SDDL spellings of the Low integrity level — the ONE level this
-// backend ever writes — in both the alias and the canonical form, so a descriptor is recognised
-// whichever way the OS rendered it.
-var windowsLowLabelSIDs = map[string]bool{"LW": true, "S-1-16-4096": true}
-
-// isLowLabelSDDL reports whether sddl carries a mandatory-label ACE naming the Low integrity
-// level. It is deliberately looser than comparing against windowsDirLabelSDDL /
-// windowsFileLabelSDDL verbatim: the same label read back from the OS carries descriptor flags
-// (S:AI(…)) and, on a path that inherited it from a labelled root, the inherited ACE flag
-// (OICIID), so a string equality test would recognise apogee's own label only in the one
-// spelling apogee happens to write it in.
-func isLowLabelSDDL(sddl string) bool {
-	for rest := sddl; ; {
-		start := strings.Index(rest, windowsLabelACEPrefix)
-		if start < 0 {
-			return false
-		}
-		rest = rest[start+len(windowsLabelACEPrefix):]
-		end := strings.IndexByte(rest, ')')
-		if end < 0 {
-			return false
-		}
-		// What follows the consumed "(ML;" is flags;rights;object;inherit;sid — the integrity
-		// level is the trailing SID field.
-		if fields := strings.Split(rest[:end], ";"); len(fields) >= 5 &&
-			windowsLowLabelSIDs[strings.ToUpper(strings.TrimSpace(fields[4]))] {
-			return true
-		}
-		rest = rest[end+1:]
-	}
-}
-
 // journalLabelEntry folds one about-to-be-labelled path into a journal's entries, returning the
 // entries to persist and whether anything actually changed (unchanged ⇒ there is nothing new to
 // flush before the label goes on).
@@ -184,12 +123,12 @@ func isLowLabelSDDL(sddl string) bool {
 // so it is not recorded — that is what keeps a re-walked tree of apogee's own labels out of the
 // journal instead of appending (and re-flushing) one useless entry per file.
 //
-// fold is injected (nil ⇒ foldLabelPath) so the decision is table-testable on any OS.
+// fold is injected (nil ⇒ winlabel.FoldPath) so the decision is table-testable on any OS.
 func journalLabelEntry(entries []labelJournalEntry, entry labelJournalEntry, fold func(string) string) ([]labelJournalEntry, bool) {
 	if fold == nil {
-		fold = foldLabelPath
+		fold = winlabel.FoldPath
 	}
-	if isLowLabelSDDL(entry.PriorSDDL) {
+	if winlabel.IsLowLabel(entry.PriorSDDL) {
 		entry.PriorSDDL = ""
 	}
 	if !entry.Root && entry.PriorSDDL == "" {
@@ -223,10 +162,10 @@ func journalLabelEntry(entries []labelJournalEntry, entry labelJournalEntry, fol
 // path is not knowable from here, and ambiguity resolves toward keeping the record — a
 // spurious restore attempt is recoverable, a destroyed record is not.
 //
-// fold is injected (nil ⇒ foldLabelPath) so the decision is table-testable on any OS.
+// fold is injected (nil ⇒ winlabel.FoldPath) so the decision is table-testable on any OS.
 func unwindLabelEntry(entries []labelJournalEntry, path string, fold func(string) string) ([]labelJournalEntry, bool) {
 	if fold == nil {
-		fold = foldLabelPath
+		fold = winlabel.FoldPath
 	}
 	key := fold(path)
 	for i := range entries {
@@ -239,29 +178,6 @@ func unwindLabelEntry(entries []labelJournalEntry, path string, fold func(string
 		return append(entries[:i], entries[i+1:]...), true
 	}
 	return entries, false
-}
-
-// descendantLabelDecision is the label walk's three-way decision for one descendant, from
-// the outcome of reading its prior mandatory label: shouldJournal reports whether the prior
-// must be journalled before any label lands, shouldLabel whether the path may be labelled at
-// all.
-//
-//   - A read ERROR skips the path entirely — no journal entry, no label. Labelling anyway
-//     would destroy a possibly-foreign label with no record of how to put it back, which is
-//     the one thing ADR 0020 §2's journal-first invariant forbids; the cost is labelTree's
-//     tolerated-descendant one — that single path stays opaque to the confined child and
-//     never gates the box.
-//   - A non-empty prior is journalled and then labelled; what the entry may SAY about the
-//     prior remains journalLabelEntry's decision.
-//   - No prior (the overwhelmingly common case) is labelled with nothing to journal.
-//
-// It is pure so the decision is table-testable on any OS — the retireLabelJournal seam
-// pattern.
-func descendantLabelDecision(prior string, readErr error) (shouldJournal, shouldLabel bool) {
-	if readErr != nil {
-		return false, false
-	}
-	return prior != "", true
 }
 
 // windowsProtectedRoots lists the locations the backend refuses to label, resolved from the
@@ -604,7 +520,7 @@ func siblingLabelJournals(home, own string) []labelJournal {
 // is an interrupted run whose roots recovery will clear anyway, and clearing them here first
 // is the same idempotent operation.
 //
-// Roots are compared case-folded (foldLabelPath): C:\Work and c:\work name one location.
+// Roots are compared case-folded (winlabel.FoldPath): C:\Work and c:\work name one location.
 // alive is injected (processAlive in production, which is Windows-tagged) so the decision is
 // table-testable on any OS — the retireLabelJournal seam pattern.
 func revertibleRoots(j labelJournal, siblings []labelJournal, alive func(int) bool) []string {
@@ -614,7 +530,7 @@ func revertibleRoots(j labelJournal, siblings []labelJournal, alive func(int) bo
 			continue
 		}
 		for _, root := range sibling.roots() {
-			claimed[foldLabelPath(root)] = true
+			claimed[winlabel.FoldPath(root)] = true
 		}
 	}
 	roots := j.roots()
@@ -623,7 +539,7 @@ func revertibleRoots(j labelJournal, siblings []labelJournal, alive func(int) bo
 	}
 	out := make([]string, 0, len(roots))
 	for _, root := range roots {
-		if claimed[foldLabelPath(root)] {
+		if claimed[winlabel.FoldPath(root)] {
 			continue
 		}
 		out = append(out, root)
@@ -656,14 +572,14 @@ func restorablePriors(j labelJournal, siblings []labelJournal) (restore map[stri
 	var claimed []string
 	for _, sibling := range siblings {
 		for _, root := range sibling.roots() {
-			claimed = append(claimed, foldLabelPath(root))
+			claimed = append(claimed, winlabel.FoldPath(root))
 		}
 	}
 	if len(claimed) == 0 {
 		return j.priorLabels(), nil
 	}
 	underClaim := func(path string) bool {
-		folded := foldLabelPath(path)
+		folded := winlabel.FoldPath(path)
 		for _, root := range claimed {
 			if folded == root || strings.HasPrefix(folded, root+`\`) {
 				return true
@@ -725,47 +641,7 @@ func confinementResidue(home string) string {
 		}
 		roots = append(roots, j.roots()...)
 	}
-	return windowsResidueNotice(roots, unreadable)
-}
-
-// windowsLabelRemedy is ADR 0020 §2's manual undo — an explicit Medium label is behaviourally
-// identical to no label at all. Every surface that reports outstanding labels quotes THIS
-// string, so the off-session host report and the end-of-session teardown warning hand the user
-// one remedy rather than two spellings of it.
-const windowsLabelRemedy = "icacls <path> /setintegritylevel (OI)(CI)M /T /C"
-
-// windowsResidueIndent aligns a continuation line under the host report's "labels:" field,
-// which renders the notice verbatim (probe.Host.Report).
-const windowsResidueIndent = "                 "
-
-// windowsResidueNotice words the outstanding-journal findings, or "" when there are none. It
-// is pure so the wording is table-testable on any host, and it names ADR 0020's manual
-// remedy — an explicit Medium label is behaviourally identical to no label at all.
-//
-// The two findings are worded separately because their remedies genuinely differ: labels a
-// readable journal describes are reverted by the next session automatically, whereas an
-// UNREADABLE journal is a dead end for every automatic path — recovery skips what it cannot
-// decode — so the manual undo is the only remedy there is.
-func windowsResidueNotice(roots, unreadable []string) string {
-	var lines []string
-	if len(roots) > 0 {
-		lines = append(lines,
-			fmt.Sprintf("%d path(s) may still carry apogee's Low integrity label: %s", len(roots), strings.Join(roots, ", ")),
-			"(a run was interrupted, or another apogee holds them now; a new session",
-			fmt.Sprintf("reverts them automatically, or: %s)", windowsLabelRemedy))
-	}
-	if len(unreadable) > 0 {
-		for _, path := range unreadable {
-			lines = append(lines, fmt.Sprintf("journal present but unreadable: %s", path))
-		}
-		lines = append(lines,
-			"(a crash or an edit left it undecodable, so no run can revert what it names;",
-			fmt.Sprintf("delete it once the paths it covered are back to: %s)", windowsLabelRemedy))
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return strings.Join(lines, "\n"+windowsResidueIndent)
+	return winlabel.ResidueNotice(roots, unreadable)
 }
 
 // WindowsLabelProgressNotice words the "please wait" line the composition root prints on stderr
@@ -773,32 +649,16 @@ func windowsResidueNotice(roots, unreadable []string) string {
 // silent hang on a workspace with a large .git or node_modules — the click-through-frustration
 // trap the auto-confinement work was built to avoid.
 //
-// It takes NO object count on purpose: labelTree streams via filepath.WalkDir, so a pre-count is
-// a second full walk that doubles the ~1 ms/object cost, and an after-the-fact summary prints
-// after the wait it was meant to explain. So the notice is indeterminate and upfront. It is
-// worded as the fence doing its job, never as a malfunction, matching probe.DegradedNotice's
-// tone, and it quotes windowsLabelRemedy verbatim where it names the manual undo, so the wait
-// notice, the teardown warning and the host report all hand the user ONE spelling of the remedy
-// rather than three. Pure, so the wording is table-testable on any host.
-func WindowsLabelProgressNotice(root string) string {
-	return fmt.Sprintf(
-		"apogee: labelling the workspace %s Low so the confined child can write in it; "+
-			"a large .git or node_modules may take several seconds (undo manually: %s)",
-		root, windowsLabelRemedy)
-}
+// The wording itself lives in winlabel (ProgressNotice), beside the label mechanism it
+// describes and the one spelling of the manual remedy every surface quotes; this export is the
+// name the composition root already knows.
+func WindowsLabelProgressNotice(root string) string { return winlabel.ProgressNotice(root) }
 
 // ConfinementTeardownNotice words a confinement teardown that could not put the disk back, for
 // the composition root to print on stderr at shutdown — the one moment the user can still act
 // on it. It returns "" when err is nil, so the caller can state it unconditionally, exactly as
 // it does with ConfinementResidue and the degradation notice.
 //
-// err is the backend's Close error; on Windows it already names the journal that SURVIVED the
-// failed revert, which is what makes the labels recoverable. The remedy is windowsResidueNotice's
-// verbatim, because this is the same situation seen from inside the session that caused it.
-func ConfinementTeardownNotice(err error) string {
-	if err == nil {
-		return ""
-	}
-	return fmt.Sprintf("apogee: WARNING — confinement teardown did not put every path back: %v; "+
-		"a new session reverts them automatically, or: %s", err, windowsLabelRemedy)
-}
+// The wording itself lives in winlabel (TeardownNotice), beside the residue report it must not
+// drift from.
+func ConfinementTeardownNotice(err error) string { return winlabel.TeardownNotice(err) }
