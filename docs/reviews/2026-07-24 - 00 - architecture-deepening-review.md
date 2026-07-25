@@ -166,9 +166,9 @@ Explore agents and should be spot-checked before acting.
 - **The line-count figure, reported straight** (plan verification step 8, which expected ~−200):
   across the whole plan `internal/mechanisms` **production** files are net **−15** lines
   (+358/−373), and the package's non-comment code lines went **3,948 → 3,943**. The reduction is real
-  but concentrated where it should be: the **21 Mechanism files shed ~96 net lines** (every one of
-  them shrank), while `catalogue.go` **grew +79** absorbing the shared `row` type, `register`,
-  `DepNeeds`/`DepsNeeded` and their doc comments. Two things kept the total from matching the
+  but concentrated where it should be: the **19 registering Mechanism files shed 95 net lines** (18
+  shrank; `library.go` grew +1), while `catalogue.go` **grew +79** absorbing the shared `row` type,
+  `register`, `DepNeeds`/`DepsNeeded` and their doc comments. Two things kept the total from matching the
   estimate, both deliberate: the ordering/descriptor rationale comments attached to the deleted
   methods were **moved onto the rows rather than deleted** (nothing explaining *why* an edge exists
   was allowed to be lost), and item 5 added a new declaration surface. **Not a finding** — the plan's
