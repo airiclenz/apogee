@@ -14,6 +14,22 @@
 // return is reserved for ctx cancellation. NewDefaultRegistry assembles the built-ins
 // into a domain.ToolRegistry — the seam the loop's dispatch (P1.2) wires.
 //
+// A successful result has TWO halves, and they are for different readers. Content is the
+// prose half, written for the MODEL, and its wording is free to change. A domain.ToolSummary
+// attached beside it (okSummary, tools.go) is the structured half, written for a HOST — the
+// TUI's tool card today, a headless or bench renderer later — carrying as data the facts the
+// tool already computed for its own header. Exactly SEVEN built-ins attach one: read_file
+// (ReadSpan), write_file (WroteBytes), list_dir (ListedEntries), grep (MatchedLines),
+// view_diff (DiffStat), web_search (SearchHits) and open_file (OpenedFile) — the seven whose
+// outcome a host would otherwise have to re-derive from the sentence. The rest deliberately do
+// not, and that is not an omission to fill in later: quoting a fixed one-line sentence (the
+// find-replace/edit family, web_fetch, http_request, ask_user, present_document) or compressing
+// free-form output to a first line plus a count (terminal, python_exec, the git tools,
+// diagnostics, sub_agent) is RENDERING, not scavenging — there is no re-derived fact there for a
+// type to fix. A summary is optional by construction, so ADR 0002's open extension point is
+// untouched (a tool that emits none renders from its prose exactly as before); it is never
+// persisted and never sent to the model; and an error result never carries one.
+//
 // Phase 3 (P3.7) adds the file-editing family: single/multi find-replace, a patch-aware
 // edit_existing_file, a pure-Go view_diff, and a read-and-locate open_file. The write
 // tools among them carry the unexported workspaceScopedWriter marker so the dispatch

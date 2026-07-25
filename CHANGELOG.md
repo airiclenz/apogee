@@ -44,6 +44,26 @@ point is a **minor** bump, not a breaking change.
   picks one with `↑`/`↓` and `⏎`, or ignores the list and types a custom free-text answer exactly as
   before — the choices never gate the reply. Without `choices` the tool behaves as it always has.
 
+- **Tool cards no longer degrade when a tool changes its wording, and embedders can read a tool's
+  outcome as data.** The one-line summary a tool card puts beside its target (`1 - 154` after a
+  read, `+2 -2` after a diff, `12 matches` after a grep) was reconstructed by pattern-matching the
+  result text that is written for the *model*, so re-phrasing a tool's own header quietly dropped a
+  card back to its first line. Seven built-ins — `read_file`, `write_file`, `list_dir`, `grep`, `view_diff`,
+  `web_search`, `open_file` — now report their outcome as a typed value beside that text, and the
+  view renders the value. **Every card reads exactly as it did before** (the change was accepted
+  against a byte-for-byte oracle); what changed is that it keeps reading that way.
+
+  For embedders this is **additive** — no existing code changes shape. `apogee.ToolResult` gains one
+  optional field, `Summary`, and the new `apogee.ToolSummary` sum is re-exported with its seven
+  variants (`ReadSpan`, `WroteBytes`, `ListedEntries`, `MatchedLines`, `DiffStat`, `SearchHits`,
+  `OpenedFile`), so a headless or bench host can switch on a tool's outcome instead of parsing prose.
+  The sum is **sealed** the way `Event` is: you can read every variant and add none. Your own tools
+  are unaffected — attaching a summary is optional, `Summary` nil is the normal case, and a result
+  without one renders from its text exactly as before (see
+  [ADR 0002](docs/adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)'s and
+  [ADR 0011](docs/adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md)'s 2026-07-25
+  notes). Summaries are never persisted and never sent to the model.
+
 ### Changed
 
 - **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**

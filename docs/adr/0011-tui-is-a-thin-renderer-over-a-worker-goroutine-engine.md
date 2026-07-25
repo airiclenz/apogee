@@ -191,3 +191,28 @@ goroutine **only where the state machine proves no worker is running**; and add 
 call **only** behind the same mutex-guarded, documented-goroutine-safe surface `SetMode` carries.
 This mirrors [ADR 0007](0007-step-turn-and-the-quiescent-boundary.md)'s realisation notes: the
 boundary contract is unchanged; these entries record the exact control-flow calls that live at it.
+
+**Note (2026-07-25) — "thin renderer" now holds for tool outcomes too: the view reads a typed
+summary instead of re-deriving one from prose.** Until this date `internal/tui/toolpresent.go`
+reconstructed *what a tool had done* by pattern-matching the free-text result string the tool wrote
+for the **model** — five regexes and the five extractors around them, across seven of the
+registry's 21 entries. That was agent knowledge in the renderer wearing a rendering costume: a
+stringly-typed cross-package contract with no type (the TUI does not import `internal/tools`), so a
+wording change in a tool silently degraded a card with no compiler nudge and no failing test in the
+package that changed. It was also resting on a coincidence — `clampToolResult` and any
+`PostToolResult` Mechanism may rewrite `Content` before the view ever sees it.
+
+The fact now travels as data: a tool attaches a sealed `domain.ToolSummary`
+([ADR 0002](0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)'s 2026-07-25 note)
+and `summaryLine` renders it in one exhaustive type switch. **This makes the ADR *more* true, not
+less** — the renderer that stops parsing is thinner than the one that parsed — and it is the
+Event-fold posture applied to a second stream: the engine hands the view typed values; the view
+words them.
+
+**The two halves are deliberately independent, and the wording is the view's.** A summary carries
+only what the tool already computed for its own header, never a sentence; the view formats its own
+(`Located %q on lines: …` is built in `internal/tui`, not read out of the result). That several
+card lines still read like the tool's own header is what made "the rendered output does not change,
+byte for byte" a checkable acceptance oracle for the change — it is not a contract, and the view
+may reword without touching a tool. A result carrying **no** summary still renders from prose, so
+a third-party tool, or any built-in that attaches none, is unaffected.

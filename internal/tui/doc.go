@@ -20,13 +20,14 @@
 // P2.7 (the pre-Phase-3 TUI presentation pass) reshapes the look to layout.md and splits the
 // rendering into reusable seams the Phase-3 tool fan-out and sub-agent work extend rather than
 // rework: [theme] holds the palette, glyphs, and styles; toolpresent.go turns a tool call+result
-// into a compact [toolView] through an OPEN, name-keyed registry (each later tool adds one entry);
-// render.go is the line-oriented renderer (the full-width user block, ✦ assistant/tool headers,
-// ┝/┕ tool-detail branches, depth indenting, and the [wrappedOffset] that mirrors the viewport's
-// soft-wrap so the last user prompt sticks to the top while a reply streams). The transcript now
-// groups a tool call with its result by ToolCall ID, the input box is a rounded, auto-growing
-// black field, and the chrome is a braille status line plus a footer bar (host-alias ✦ model ✦
-// context-window, mode). The live token gauge (reserved at P2.7) is now wired: the post-v1
+// into a compact [toolView], keyed by an OPEN, name-keyed registry of presentation vocabulary
+// (each later tool adds one entry; where a card's facts come from is the tool-summary paragraph
+// below); render.go is the line-oriented renderer (the full-width user block, ✦ assistant/tool
+// headers, ┝/┕ tool-detail branches, depth indenting, and the [wrappedOffset] that mirrors the
+// viewport's soft-wrap so the last user prompt sticks to the top while a reply streams). The
+// transcript now groups a tool call with its result by ToolCall ID, the input box is a rounded,
+// auto-growing black field, and the chrome is a braille status line plus a footer bar (host-alias
+// ✦ model ✦ context-window, mode). The live token gauge (reserved at P2.7) is now wired: the post-v1
 // track folds each top-level UsageEvent's total into the status-line context-fill gauge,
 // measured against the discovered context window ([Model.contextGauge] / [Model.statusRight]). The
 // red/green diff detail reserved there has its producer: the Phase-3 view_diff tool (diffBody).
@@ -144,6 +145,23 @@
 // the reason the standalone and grouped paths were converged rather than kept in sync — and a
 // body of one line lays out exactly like a body of ten. TestTranscriptLayoutGolden pins the whole
 // rendered scrollback.
+//
+// A card's FACTS arrive as data; only its WORDING is this package's (post-v0.8 architecture
+// deepening, review candidate 03). toolpresent.go used to reconstruct what a tool had done by
+// pattern-matching the free-text result the tool wrote for the MODEL — five regexes and the five
+// extractors around them, over seven of the registry's 21 entries. That was a cross-package
+// contract with no type (this package does not import internal/tools), so a wording change over
+// there silently degraded a card here, with no compiler nudge and no failing test in the package
+// that changed. A tool now attaches a sealed [domain.ToolSummary] beside its prose Content and
+// [summaryLine] words it in one exhaustive type switch, with [diffBody] drawing view_diff's
+// coloured body beneath its stat. What the registry keeps is presentation vocabulary — label,
+// verb, target — plus the detail extractor that stays the FLOOR for a result carrying no summary:
+// a third-party tool, or any built-in that attaches none, still renders its first line exactly as
+// before. The wording stays the view's own; that several lines read like the tool's own header is
+// what made "the rendered output does not change, byte for byte" a checkable oracle for the
+// change, not a contract, and this package may reword without touching a tool.
+// toolsummary_pin_test.go executes all seven summary-bearing tools for real and asserts the
+// rendered line — the cross-package pin the old regexes never had.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole

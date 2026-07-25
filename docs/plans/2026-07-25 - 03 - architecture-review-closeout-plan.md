@@ -469,7 +469,17 @@ the file). Commit: `refactor(tui): the view reads a tool's outcome instead of re
 
 ---
 
-## 5. Documentation — the summary is domain vocabulary
+## 5. Documentation — the summary is domain vocabulary — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): three notes on what this item did and did not touch. (a) Candidate 03's card
+also lost the words **"PLANNED (not yet built)"** from its shape-resolved bullet (it now reads
+"Shape resolved 2026-07-25") and gained a sub-bullet naming this item's documentation, matching
+candidate 04's card style — both inside the card the item owns. (b) The review doc's **title line,
+"State of the tree" and "Recommended next step" were deliberately left stale**: the ledger rewrite
+is whole-plan verification step 10's, and candidate 06 has not landed yet. (c) In
+`internal/tui/doc.go` two pre-existing lines of the P2.7 paragraph were **re-wrapped** (no wording
+change) because the edited sentence changed the line fill. The `VERSION` question (step 8) is an
+owner call and was not touched.
 
 **What:**
 

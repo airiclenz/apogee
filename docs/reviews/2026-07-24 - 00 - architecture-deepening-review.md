@@ -97,7 +97,7 @@ Explore agents and should be spot-checked before acting.
   `confinement-execution-contract.md` §4. The separate `/code-audit` on the *live* gap is still
   worth running; the shape now gives it one place to look.
 
-### 03 — Hand the view structured tool results · **Strong**
+### 03 — Hand the view structured tool results · **Strong** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/tui/toolpresent.go` (regexes ✓L243–246: `reReadRange`, `reWriteBytes`,
   `reListEntries`, `reGrepMatches`), `internal/tools/{read_file,write_file,list_dir,grep}.go`,
   `internal/domain/tools.go` (`ToolResult`).
@@ -111,7 +111,7 @@ Explore agents and should be spot-checked before acting.
   host.
 - **Note:** additive to public `ToolResult` (minor bump under ADR 0010 stability; back-compatible
   with ADR 0002's open extension point — summary optional, prose fallback stays).
-- **Shape resolved 2026-07-25, PLANNED (not yet built)** →
+- **Shape resolved 2026-07-25** →
   `docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md`, items **1–5**. The summary is a
   **sealed sum** in `domain` (`ToolSummary` + seven variants), sealed the way `Event` is, so an
   embedder can *read* every variant and *add* none. **Seven** tools carry one — the ones whose
@@ -122,6 +122,57 @@ Explore agents and should be spot-checked before acting.
   this card, corrected while planning: the registry has **21** entries, not 24, and the view
   re-derives **seven** facts (four regexes plus three prefix/count sniffers in `grepDetail`,
   `diffDetail`, `openFileDetail`/`searchDetail`).
+- **LANDED 2026-07-25** — plan items **1–5**, each on its own green gate (`d964460` · `05aa0a0` ·
+  `5463257` · `551abac`, plus this documentation commit). What was actually built, against the
+  card's sketch:
+  - **The typed field is a SEALED SUM, not a struct of loose fields.** `internal/domain/toolsummary.go`
+    holds `ToolSummary` (unexported marker method, the `Event` precedent) and its **seven** variants;
+    `domain.ToolResult` gained one optional `Summary` field; `apogee.go` re-exports all eight names.
+    A flat `struct{Kind; A, B int; Text string}` and a `map[string]string` were rejected on the
+    record (plan D1) — both would have kept the view *interpreting* rather than reading. Deliberately
+    **no exported base struct** (unlike `EventBase`): an embeddable base would re-open the sum, so an
+    embedder reads every variant and adds none.
+  - **Seven tools attach one, and only seven** (plan D2): `read_file`, `write_file`, `list_dir`,
+    `grep`, `view_diff`, `web_search`, `open_file` — each through one new `okSummary` constructor
+    (`internal/tools/tools.go`, 7 call sites), each fact taken from the computation the tool already
+    ran for its own header rather than re-read from its output. The `firstLineDetail` and
+    `outputDetail` families stay on prose: quoting a fixed sentence or compressing free-form stdout
+    is *rendering*, not scavenging. An error result never carries a summary.
+  - **The view stopped parsing.** `summaryLine` (one exhaustive type switch) and `diffBody` replaced
+    the four anchored regexes, `reSearchHit`, and the five prose sniffers (`detailFromPattern`,
+    `grepDetail`, `searchDetail`, `openFileDetail`, `diffDetail`); the `regexp` import is gone from
+    `toolpresent.go`. The seven entries keep `firstLineDetail` as the **floor** (plan D6), so a
+    summary-less result degrades to its own first line rather than to a raw dump.
+  - **The acceptance oracle was byte-for-byte identical output** (plan D4), and it held: every
+    `wantDetail` literal in `toolpresent_test.go` is unchanged in the diff, and
+    `transcriptcodec_test.go` passed **untouched** — the session wire form is the *rendered* view, so
+    no summary reaches disk. The new cross-package pin `internal/tui/toolsummary_pin_test.go`
+    executes all **seven** real tools against a temp workspace and asserts the rendered card line;
+    that is the test the old regexes never had, and it is what now catches a tool that stops
+    attaching its summary.
+  - **Two aggravating facts found while planning, both now moot:** `clampToolResult` rewrites
+    `Content` *before* the `ToolResultEvent` is emitted, and a `PostToolResult` Mechanism may rewrite
+    it too (`errorenrich.go`) — so the old extractors' correctness rested on a coincidence between a
+    compression policy and a display regex. A summary describes what the tool *did*, not what the
+    text *says*, so neither seam can invalidate it.
+  - **Item 5 is the documentation** — CONTEXT.md gains the **Tool summary** term (the structured
+    half, sealed, optional, never persisted); ADR 0002 carries a dated note that a tool *may* attach
+    one and that **omitting it is fully supported**, so the open extension point is unchanged; ADR
+    0011 carries a dated note that the thin renderer now reads a typed value and **owns its own
+    wording** (plan D5); the CHANGELOG names the change in the user's terms and calls it
+    **additive**; and `internal/tools/doc.go` + `internal/tui/doc.go` state the two halves and the
+    seven-tool rule at each end of the seam.
+- **The line-count figures, reported straight** (the plan expected this card to ADD lines; the
+  figures below cover the four code commits — item 5 adds doc comments only):
+  **production** is net **+213** — `internal/domain` **+94** (a new file: the sum, its variants and
+  the header explaining sealing/optionality/non-persistence), `apogee.go` **+32** (eight aliases),
+  `internal/tools` **+76** (+123/−47, the render helpers now returning their facts), and
+  `internal/tui` **+11** (+131/−120 — `summaryLine`/`diffBody` and a rewritten file header cost
+  almost exactly what ten regexes and sniffers gave back). **Tests +886** (`domain` +80, `tools`
+  +489, `tui` +317), of which the seven-tool pin is 163. **Not a finding:** the win here is one
+  typed seam replacing a stringly-typed cross-package contract — the compiler now knows the view
+  and the tools are talking about the same fact — plus a public surface an embedder can *read*.
+  It is not a line count, and the TUI's near-flat production delta is the honest shape of it.
 
 ### 04 — Collapse the 21× Mechanism registration ritual · **Strong** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/mechanisms/*.go` (~20 `Descriptor()` methods ✓), `catalogue.go` (the two
