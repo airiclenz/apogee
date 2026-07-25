@@ -322,7 +322,16 @@ plus **four** call sites; every pre-existing tool test passes unchanged. Commit:
 
 ---
 
-## 3. The three computed-fact tools attach their summary
+## 3. The three computed-fact tools attach their summary — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): three additions beyond the item's literal text. `renderStructuredResults`
+returns its count too — the number rendered AFTER `ddgRenderMax` — so `SearchHits.Count` can
+never exceed the numbered lines the text actually carries, which is what the view counts.
+`diff.go` gained `tagContext`/`tagRemoved`/`tagAdded` constants so the stat's switch and the
+line-emitting code cannot drift apart on a tag spelling. The new tests pin `Content`
+byte-exactly (the pre-existing cases pin substrings of the same text, so nothing they assert
+changed), and `open_file`'s `Lines == len(splitLines(rendered)) - 2` oracle is pinned in its
+own test over four body shapes, the empty file included.
 
 Kept separate from item 2 because each of these three needs a small, reviewable change to a
 render helper — the fact has to come from the computation, not from re-reading the output.

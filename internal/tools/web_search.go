@@ -100,7 +100,9 @@ func (t *WebSearch) ExternalEffect() domain.ExternalEffectKind { return domain.E
 
 // Execute runs the search. A disabled tool (off sentinel) is a graceful "disabled" result;
 // a blocked endpoint URL, a transport error, or a non-2xx status are surfaced as results;
-// only ctx cancellation is a Go error (ADR 0007).
+// only ctx cancellation is a Go error (ADR 0007). A render that carries a numbered result
+// list attaches its hit count as a domain.SearchHits summary; every other render — the
+// sentinels, cleaned HTML, a verbatim pass-through — carries none.
 func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -179,7 +181,14 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		// rate-limit or challenge page is noise, and the URL must stay scrubbed (M2).
 		return errorResult(call.ID, "search endpoint returned HTTP "+resp.status+" (host "+endpointHost+")"), nil
 	}
-	return okResult(call.ID, renderSearch(t.provider, resp, args.Query)), nil
+	text, hits := renderSearch(t.provider, resp, args.Query)
+	if hits == 0 {
+		// Nothing numbered to count: a "No results" sentinel, a cleaned HTML page, or a
+		// custom backend's verbatim document. There is no hit count to report, so the result
+		// carries no summary and a host renders the prose — exactly as it does today.
+		return okResult(call.ID, text), nil
+	}
+	return okSummary(call.ID, text, domain.SearchHits{Count: hits}), nil
 }
 
 // buildSearchURL appends the query as the `q` parameter to the configured endpoint,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 func TestViewDiff_ReportsChanges(t *testing.T) {
@@ -53,6 +55,106 @@ func TestViewDiff_NoChanges(t *testing.T) {
 	}
 }
 
+// TestViewDiff_ReportsDiffStat pins the structured half of view_diff's outcome. The stat is
+// counted from the diff OPERATIONS, so the test also asserts the equality that makes it
+// trustworthy: it matches what counting leading "+"/"-" over the rendered text yields, which
+// is what a reader had to do before the summary existed.
+func TestViewDiff_ReportsDiffStat(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeTempFile(t, root, "f.txt", "one\ntwo\nthree\n")
+	tool := NewViewDiff(root)
+
+	cases := []struct {
+		name        string
+		newContent  string
+		wantContent string
+		wantSummary domain.DiffStat
+	}{
+		{
+			name:        "line replaced",
+			newContent:  "one\nTWO\nthree\n",
+			wantContent: "  one\n- two\n+ TWO\n  three\n  ",
+			wantSummary: domain.DiffStat{Added: 1, Removed: 1},
+		},
+		{
+			name:        "pure addition",
+			newContent:  "one\ntwo\nthree\nfour\n",
+			wantContent: "  one\n  two\n  three\n+ four\n  ",
+			wantSummary: domain.DiffStat{Added: 1},
+		},
+		{
+			name:        "pure deletion",
+			newContent:  "one\nthree\n",
+			wantContent: "  one\n- two\n  three\n  ",
+			wantSummary: domain.DiffStat{Removed: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": "f.txt", "newContent": tc.newContent}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.Content != tc.wantContent {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantContent)
+			}
+			stat, ok := result.Summary.(domain.DiffStat)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.DiffStat", result.Summary)
+			}
+			if stat != tc.wantSummary {
+				t.Errorf("Summary = %+v, want %+v", stat, tc.wantSummary)
+			}
+			if added, removed := countDiffTags(result.Content); added != stat.Added || removed != stat.Removed {
+				t.Errorf("stat %+v disagrees with the rendered text (+%d -%d)", stat, added, removed)
+			}
+		})
+	}
+}
+
+// countDiffTags counts the added and removed lines of a rendered diff the way a reader of
+// the text has to — by their leading "+"/"-".
+func countDiffTags(rendered string) (added, removed int) {
+	for _, line := range strings.Split(rendered, "\n") {
+		switch {
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return added, removed
+}
+
+// TestViewDiff_NoChangesCarriesNoSummary: identical content is not a diff, so the sentinel
+// result carries no summary at all and a host renders its sentence as prose.
+func TestViewDiff_NoChangesCarriesNoSummary(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeTempFile(t, root, "f.txt", "same\ncontent\n")
+
+	result, err := NewViewDiff(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "f.txt", "newContent": "same\ncontent\n"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.Content != "No changes detected" {
+		t.Fatalf("Content = %q, want the no-changes sentinel", result.Content)
+	}
+	if result.Summary != nil {
+		t.Errorf("Summary = %#v, want nil for the no-changes sentinel", result.Summary)
+	}
+}
+
 // TestViewDiff_Deterministic proves the diff output is stable across repeated calls — the
 // LCS table fully determines the ordering (no map iteration, no time-dependence).
 func TestViewDiff_Deterministic(t *testing.T) {
@@ -82,15 +184,15 @@ func TestUnifiedLineDiff_PureInsertionAndDeletion(t *testing.T) {
 	t.Parallel()
 
 	// Pure addition.
-	if got := unifiedLineDiff("a\nb", "a\nb\nc"); !strings.Contains(got, "+ c") {
+	if got, _ := unifiedLineDiff("a\nb", "a\nb\nc"); !strings.Contains(got, "+ c") {
 		t.Errorf("addition diff = %q, want a + c line", got)
 	}
 	// Pure deletion.
-	if got := unifiedLineDiff("a\nb\nc", "a\nc"); !strings.Contains(got, "- b") {
+	if got, _ := unifiedLineDiff("a\nb\nc", "a\nc"); !strings.Contains(got, "- b") {
 		t.Errorf("deletion diff = %q, want a - b line", got)
 	}
 	// Identical → empty.
-	if got := unifiedLineDiff("same", "same"); got != "" {
+	if got, _ := unifiedLineDiff("same", "same"); got != "" {
 		t.Errorf("identical diff = %q, want empty", got)
 	}
 }

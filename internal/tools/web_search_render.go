@@ -54,11 +54,16 @@ type searchResult struct {
 //
 // resp is what the network funnel brought back (network.go): the wire facts plus the already
 // capped body, since the funnel — not the tool — owns the request.
-func renderSearch(provider searchProvider, resp netResponse, query string) string {
+//
+// It returns the rendered text and the number of STRUCTURED hits that text carries: the
+// count on the numbered-list path, and 0 on every path that renders no numbered list (both
+// "No results" sentinels, cleaned HTML, the verbatim pass-through). A host with a 0 has no
+// hit count to show and renders the prose instead.
+func renderSearch(provider searchProvider, resp netResponse, query string) (string, int) {
 	if provider == providerDuckDuckGo {
 		results := parseDDGResults(resp.body)
 		if len(results) == 0 {
-			return "No results found for: " + query
+			return "No results found for: " + query, 0
 		}
 		return renderStructuredResults(results)
 	}
@@ -68,14 +73,14 @@ func renderSearch(provider searchProvider, resp netResponse, query string) strin
 		}
 		cleaned := cleanHTMLText(resp.body)
 		if cleaned == "" {
-			return "No results found for: " + query
+			return "No results found for: " + query, 0
 		}
 		if resp.truncated {
 			cleaned += fmt.Sprintf("\n\n[results truncated at %d bytes]", maxNetworkResponseBytes)
 		}
-		return cleaned
+		return cleaned, 0
 	}
-	return renderSearchResult(resp)
+	return renderSearchResult(resp), 0
 }
 
 // parseDDGResults extracts structured results from a DuckDuckGo-shaped HTML page: result
@@ -144,8 +149,10 @@ func contentLooksHTML(contentType, body string) bool {
 }
 
 // renderStructuredResults renders parsed results as a numbered title/url/snippet list,
-// capped at ddgRenderMax.
-func renderStructuredResults(results []searchResult) string {
+// capped at ddgRenderMax. It returns how many results it actually rendered — the count
+// AFTER the cap, since that is the number of hits the text carries and the only one a host
+// can honestly show.
+func renderStructuredResults(results []searchResult) (string, int) {
 	if len(results) > ddgRenderMax {
 		results = results[:ddgRenderMax]
 	}
@@ -159,7 +166,7 @@ func renderStructuredResults(results []searchResult) string {
 			fmt.Fprintf(&b, "\n   %s", r.snippet)
 		}
 	}
-	return b.String()
+	return b.String(), len(results)
 }
 
 // renderSearchResult is the verbatim pass-through for a custom endpoint's non-HTML (clean)

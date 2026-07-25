@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -48,7 +49,8 @@ func (t *OpenFile) ReadOnly() bool { return true }
 // Execute reads the file named in call.Arguments and returns its content, honouring ctx
 // cancellation. When locate is set, the 1-based line numbers where the substring occurs
 // are prepended. A missing file, a directory, an oversized file, or a path escape are
-// reported as IsError results, not Go errors.
+// reported as IsError results, not Go errors. A successful read carries the body's line
+// count and the located lines as a domain.OpenedFile summary.
 func (t *OpenFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -83,29 +85,43 @@ func (t *OpenFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	return okResult(call.ID, renderOpenFile(args.Path, string(content), args.Locate)), nil
+	text, opened := renderOpenFile(args.Path, string(content), args.Locate)
+	return okSummary(call.ID, text, opened), nil
 }
 
 // renderOpenFile builds the open_file output: a header naming the file, an optional
 // "found on lines …" locate report, then the file content.
-func renderOpenFile(displayPath, content, locate string) string {
+//
+// It returns the same facts as a domain.OpenedFile: the body's own line count and, when a
+// locate term was requested, the line numbers the sentence lists — the sentence is BUILT
+// from those numbers, so a host reads them as data instead of parsing the sentence back.
+// An empty Locate means none was requested; a set Locate with an empty LocatedOn means one
+// was requested and matched nothing, which the prose cannot distinguish without a prefix
+// test.
+func renderOpenFile(displayPath, content, locate string) (string, domain.OpenedFile) {
+	body := strings.Split(content, "\n")
+	opened := domain.OpenedFile{Lines: len(body), Locate: locate}
+
 	header := "File: " + displayPath
 	if locate == "" {
-		return header + "\n\n" + content
+		return header + "\n\n" + content, opened
 	}
 
-	var matches []string
-	for i, line := range strings.Split(content, "\n") {
+	for i, line := range body {
 		if strings.Contains(line, locate) {
-			matches = append(matches, fmt.Sprintf("%d", i+1))
+			opened.LocatedOn = append(opened.LocatedOn, i+1)
 		}
 	}
 
-	located := fmt.Sprintf("Located %q on lines: %s", locate, strings.Join(matches, ", "))
-	if len(matches) == 0 {
-		located = fmt.Sprintf("Located %q on no lines", locate)
+	located := fmt.Sprintf("Located %q on no lines", locate)
+	if len(opened.LocatedOn) > 0 {
+		numbers := make([]string, len(opened.LocatedOn))
+		for i, n := range opened.LocatedOn {
+			numbers[i] = strconv.Itoa(n)
+		}
+		located = fmt.Sprintf("Located %q on lines: %s", locate, strings.Join(numbers, ", "))
 	}
-	return header + "\n" + located + "\n\n" + content
+	return header + "\n" + located + "\n\n" + content, opened
 }
 
 var _ domain.ReadOnlyTool = (*OpenFile)(nil)

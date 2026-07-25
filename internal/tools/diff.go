@@ -45,7 +45,9 @@ func (t *ViewDiff) ReadOnly() bool { return true }
 
 // Execute reads the file named in call.Arguments and returns a deterministic unified-style
 // line diff against newContent, honouring ctx cancellation. A missing file or a path
-// escape is reported as an IsError result; identical content reports "No changes".
+// escape is reported as an IsError result; identical content reports "No changes". A real
+// diff carries its diffstat as a domain.DiffStat summary; the no-changes sentinel carries
+// none, because there is no diff to describe.
 func (t *ViewDiff) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -69,35 +71,54 @@ func (t *ViewDiff) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, "file not found: "+args.Path), nil
 	}
 
-	diff := unifiedLineDiff(string(current), args.NewContent)
+	diff, stat := unifiedLineDiff(string(current), args.NewContent)
 	if diff == "" {
 		return okResult(call.ID, "No changes detected"), nil
 	}
-	return okResult(call.ID, diff), nil
+	return okSummary(call.ID, diff, stat), nil
 }
 
 // unifiedLineDiff returns a unified-style line diff of old vs new, prefixing each line
 // with "  ", "- ", or "+ " for context, removal, and addition respectively. It returns
 // the empty string when the two are identical. The line ordering is fully determined by
 // the Myers LCS below, so the output is stable across runs.
-func unifiedLineDiff(oldText, newText string) string {
+//
+// The domain.DiffStat it returns alongside is counted from the OPERATIONS it renders from,
+// never from the rendered text, so a host reads the added/removed counts as data instead of
+// re-counting leading "+"/"-" over lines that may have been capped or elided on the way.
+// Identical input yields the zero stat with the empty string.
+func unifiedLineDiff(oldText, newText string) (string, domain.DiffStat) {
 	if oldText == newText {
-		return ""
+		return "", domain.DiffStat{}
 	}
 
 	oldLines := strings.Split(oldText, "\n")
 	newLines := strings.Split(newText, "\n")
 
+	var stat domain.DiffStat
 	var b strings.Builder
 	for _, op := range diffLines(oldLines, newLines) {
+		switch op.tag {
+		case tagAdded:
+			stat.Added++
+		case tagRemoved:
+			stat.Removed++
+		}
 		b.WriteString(op.tag)
 		b.WriteString(op.line)
 		b.WriteByte('\n')
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(b.String(), "\n"), stat
 }
 
-// diffOp is one line of a diff: tag is "  " (context), "- " (removal), or "+ " (addition).
+// The three line tags a diff op can carry: context, removal, and addition.
+const (
+	tagContext = "  "
+	tagRemoved = "- "
+	tagAdded   = "+ "
+)
+
+// diffOp is one line of a diff: tag is tagContext, tagRemoved, or tagAdded.
 type diffOp struct {
 	tag  string
 	line string
@@ -132,22 +153,22 @@ func diffLines(a, b []string) []diffOp {
 	for i < n && j < m {
 		switch {
 		case a[i] == b[j]:
-			ops = append(ops, diffOp{tag: "  ", line: a[i]})
+			ops = append(ops, diffOp{tag: tagContext, line: a[i]})
 			i++
 			j++
 		case lcs[i+1][j] >= lcs[i][j+1]:
-			ops = append(ops, diffOp{tag: "- ", line: a[i]})
+			ops = append(ops, diffOp{tag: tagRemoved, line: a[i]})
 			i++
 		default:
-			ops = append(ops, diffOp{tag: "+ ", line: b[j]})
+			ops = append(ops, diffOp{tag: tagAdded, line: b[j]})
 			j++
 		}
 	}
 	for ; i < n; i++ {
-		ops = append(ops, diffOp{tag: "- ", line: a[i]})
+		ops = append(ops, diffOp{tag: tagRemoved, line: a[i]})
 	}
 	for ; j < m; j++ {
-		ops = append(ops, diffOp{tag: "+ ", line: b[j]})
+		ops = append(ops, diffOp{tag: tagAdded, line: b[j]})
 	}
 	return ops
 }

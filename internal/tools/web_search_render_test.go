@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -73,18 +74,102 @@ func TestRenderSearch_DuckDuckGoAlwaysStructured(t *testing.T) {
 	t.Parallel()
 	resp := netResponse{status: "200 OK", statusCode: http.StatusOK, header: http.Header{}, body: ddgFixture}
 
-	out := renderSearch(providerDuckDuckGo, resp, "golang docs")
+	out, hits := renderSearch(providerDuckDuckGo, resp, "golang docs")
 	if !strings.Contains(out, "1. Go Documentation & Guides") || !strings.Contains(out, "https://go.dev/doc/") {
 		t.Errorf("structured render missing numbered title/url: %q", out)
 	}
+	if hits != 2 {
+		t.Errorf("structured render reported %d hits, want 2", hits)
+	}
 
 	resp.body = `<html><body><p>Unfortunately, bots use DuckDuckGo too.</p></body></html>`
-	out = renderSearch(providerDuckDuckGo, resp, "golang docs")
+	out, hits = renderSearch(providerDuckDuckGo, resp, "golang docs")
 	if out != "No results found for: golang docs" {
 		t.Errorf("an anchor-less DDG page must render 'No results', got: %q", out)
 	}
 	if strings.Contains(out, "bots") {
 		t.Errorf("DDG must never fall through to stripped page text: %q", out)
+	}
+	if hits != 0 {
+		t.Errorf("the 'No results' sentinel reported %d hits, want 0", hits)
+	}
+}
+
+// TestRenderStructuredResults_CountIsTheRenderedCount: the count that reaches a host is the
+// number of results that reached the MODEL — ddgRenderMax caps both, so the two can never
+// disagree.
+func TestRenderStructuredResults_CountIsTheRenderedCount(t *testing.T) {
+	t.Parallel()
+
+	results := make([]searchResult, 0, ddgRenderMax+2)
+	for i := range ddgRenderMax + 2 {
+		n := strconv.Itoa(i + 1)
+		results = append(results, searchResult{title: "title " + n, url: "https://example.test/" + n})
+	}
+
+	out, hits := renderStructuredResults(results)
+
+	if hits != ddgRenderMax {
+		t.Errorf("hits = %d, want the cap %d", hits, ddgRenderMax)
+	}
+	if !strings.Contains(out, strconv.Itoa(ddgRenderMax)+". title "+strconv.Itoa(ddgRenderMax)) {
+		t.Errorf("render dropped the last result under the cap: %q", out)
+	}
+	if strings.Contains(out, strconv.Itoa(ddgRenderMax+1)+". ") {
+		t.Errorf("render exceeded the cap: %q", out)
+	}
+}
+
+// TestWebSearch_ReportsHitCount pins the structured half of web_search's outcome: only the
+// numbered-list render carries a count, and the count is the number of numbered lines in it.
+// Every other render — cleaned HTML, a verbatim pass-through — carries no summary, which is
+// exactly the set of paths a host renders as prose.
+func TestWebSearch_ReportsHitCount(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		contentType string
+		body        string
+		wantSummary domain.ToolSummary // nil ⇒ the render carries no numbered result list
+	}{
+		{
+			name:        "structured results",
+			contentType: "text/html; charset=utf-8",
+			body:        ddgFixture,
+			wantSummary: domain.SearchHits{Count: 2},
+		},
+		{
+			name:        "cleaned html carries no count",
+			contentType: "text/html",
+			body:        "<html><body><p>alpha</p></body></html>",
+		},
+		{
+			name:        "verbatim passthrough carries no count",
+			contentType: "application/json",
+			body:        `{"results":[]}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			res := execSearch(t, srv.URL)
+
+			if res.IsError {
+				t.Fatalf("result is error: %q", res.Content)
+			}
+			if res.Summary != tc.wantSummary {
+				t.Errorf("Summary = %#v, want %#v", res.Summary, tc.wantSummary)
+			}
+		})
 	}
 }
 
