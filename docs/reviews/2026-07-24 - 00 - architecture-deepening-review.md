@@ -1,4 +1,4 @@
-# Handoff — Architecture deepening review: 7 candidates (01 and 02 landed; 03–07 outstanding)
+# Handoff — Architecture deepening review: 7 candidates (01, 02, 04 and 07 landed; 03, 05, 06 outstanding)
 
 Date: 2026-07-24
 Session type: **review only** (`/improve-codebase-architecture`). No code changed, no plan
@@ -20,9 +20,13 @@ a smaller-deepenings list**, framed in the depth glossary (module / interface / 
 
 **Ledger (updated as candidates land).** **01 landed 2026-07-24**
 (`docs/plans/archived/2026-07-24 - 00 - turn-lifecycle-owner-plan.md`); **02 landed 2026-07-25**
-(`docs/plans/archived/2026-07-25 - 00 - url-safety-choke-point-plan.md`). Of the smaller
-deepenings, **session store lifecycle landed 2026-07-24** (absorbed by the session system, ADR
-0022). **03–07 are still outstanding and un-grilled** — for each of those the next session's job is step 3 of the skill: pick a candidate,
+(`docs/plans/archived/2026-07-25 - 00 - url-safety-choke-point-plan.md`); **04 and 07 landed
+2026-07-25**, both under `docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md` — 07
+was folded into 04's plan as item 2, because a shared stack-validity checker is nearly free once the
+Mechanism metadata is row-shaped, but it was built and committed standalone. Of the smaller
+deepenings, **session store lifecycle landed 2026-07-24** (absorbed by the session system, ADR 0022).
+**03, 05 and 06 are still outstanding and un-grilled** — for each of
+those the next session's job is step 3 of the skill: pick a candidate,
 walk its design tree, and land side-effects inline (CONTEXT.md term if a deepened module names a new
 concept; an ADR if the owner rejects a candidate for a load-bearing reason; a saved plan doc if it
 graduates to implementation — see *Suggested skills*).
@@ -107,7 +111,7 @@ Explore agents and should be spot-checked before acting.
 - **Note:** additive to public `ToolResult` (minor bump under ADR 0010 stability; back-compatible
   with ADR 0002's open extension point — summary optional, prose fallback stays).
 
-### 04 — Collapse the 21× Mechanism registration ritual · **Strong**
+### 04 — Collapse the 21× Mechanism registration ritual · **Strong** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/mechanisms/*.go` (~20 `Descriptor()` methods ✓), `catalogue.go` (the two
   parallel maps `catalogue` + `descriptors`), `internal/domain/mechanism.go`,
   `internal/agent/loop.go` (`buildEnabledMechanisms`, `libraryMechanismID` duplicate const).
@@ -121,6 +125,56 @@ Explore agents and should be spot-checked before acting.
   synthesized. Let a catalogue row declare its deps so the engine loops uniformly.
 - **Note:** preserves ADR 0003 — registry ordering/stacking semantics unchanged; only the
   **authoring** seam deepens. Deep dispatch/self-reg core untouched.
+- **Grilled 2026-07-25** → `docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`
+  (6 items). The owner chose the **deeper** of the two shapes: the metadata leaves the Mechanism
+  entirely and `MechanismRegistry` stores `RegisteredMechanism{Descriptor, Ordering, Hook}` rows,
+  rather than staying on the instance behind an embedded helper. The card's "methods synthesized"
+  sketch is **not buildable as written** — Go cannot decorate a value with `Descriptor()`/`Ordering()`
+  while preserving which of the five hook interfaces it satisfies (embedding a type parameter is
+  illegal; a concrete wrapper would make every Mechanism claim every hook point). Accepted cost: a
+  public break (`apogee.Mechanism` removed in favour of `apogee.RegisteredMechanism`;
+  `MechanismRegistry.Add`/`.Ordered` change shape) plus an ADR 0003 amendment moving its clauses
+  (2)/(3) from *method* to *registration argument* — cheap at `v0.8.3`, and locality is preserved.
+- **LANDED 2026-07-25** — all six plan items, each on its own green gate
+  (`a924ef1` · `f00cd6e` · `b651dc3` · `26bf987` · `4803bdb`, plus this documentation commit). What
+  was actually built, against the card's sketch:
+  - **Item 1** (`a924ef1`) — the two hand-synced maps (`catalogue` + `descriptors`) are **one `row`
+    table**; each Mechanism file's `init()` is a single `register(row{descriptor, ordering,
+    construct})` call (20 files, 21 rows — `cot.go` registers 3); all **13** ordering literals moved
+    onto their rows with their why-comments intact (the review's "11" undercounted — `autofix.go` and
+    `syntax.go` have multi-line returns); the `toolfilter.go` raw-`"decompose"` drift this card
+    flagged is fixed.
+  - **Item 2** (`f00cd6e`) is candidate **07** in full — see its card below.
+  - **Item 3** (`b651dc3`) — the registry holds `domain.RegisteredMechanism{Descriptor, Ordering,
+    Hook}` and `domain.Mechanism` is **deleted**. The card's *"methods synthesized"* deepening was
+    not buildable (see the grill note above), so the metadata left the instance entirely: `Build` is
+    now the single place a descriptor and a behaviour are joined. Public break as forecast —
+    `apogee.Mechanism` removed, `apogee.RegisteredMechanism` added, `Add`/`Ordered` re-shaped.
+  - **Items 4–5** (`26bf987`, `4803bdb`) — the 21 `Descriptor()` + 21 `Ordering()` methods are gone
+    (−188 production lines in `internal/mechanisms` from item 4 alone); `libraryMechanismID` and
+    the `slices.Contains` special case in `internal/agent/construct.go` are gone with them, replaced
+    by `row.needs` / `mechanisms.DepsNeeded` + a `deriveDeps` helper, so the engine's build loop is
+    uniform for every ID.
+  - **Item 6** — ADR 0003 carries a 2026-07-25 **amendment** (clauses (2)/(3) move from *method* to
+    *registration argument*, with the registry semantics preserved byte-for-byte and the Go reason
+    the alternative was impossible on the record); ADR 0015 carries a dated realisation note (§3's
+    instance-match parenthetical is now vacuous, §5's "stable v1 API" is read against the 0.x reset,
+    §2 reaffirmed); CONTEXT.md's **Mechanism descriptor** entry says the descriptor is catalogue data
+    supplied at registration; the CHANGELOG names the break in the user's terms; `TODO.md` parks the
+    two non-goals (no empty-`Descriptor.ID` guard on `Add`; `internal/mechanisms` does not construct
+    its Deps).
+- **The line-count figure, reported straight** (plan verification step 8, which expected ~−200):
+  across the whole plan `internal/mechanisms` **production** files are net **−15** lines
+  (+358/−373), and the package's non-comment code lines went **3,948 → 3,943**. The reduction is real
+  but concentrated where it should be: the **21 Mechanism files shed ~96 net lines** (every one of
+  them shrank), while `catalogue.go` **grew +79** absorbing the shared `row` type, `register`,
+  `DepNeeds`/`DepsNeeded` and their doc comments. Two things kept the total from matching the
+  estimate, both deliberate: the ordering/descriptor rationale comments attached to the deleted
+  methods were **moved onto the rows rather than deleted** (nothing explaining *why* an edge exists
+  was allowed to be lost), and item 5 added a new declaration surface. **Not a finding** — the plan's
+  own trip-wire was a net *increase*, meaning "reshaped, not collapsed" — but worth stating plainly:
+  the win here is structural (one table, drift unrepresentable, no engine-side special case), not a
+  line count.
 
 ### 05 — Split the Windows Confiner into three deep sub-modules · **Worth exploring · owner-flagged**
 - **Files:** `internal/platform/winconfine.go` (581 at review time — **804 as of 2026-07-25**),
@@ -128,7 +182,7 @@ Explore agents and should be spot-checked before acting.
 - **Problem:** two 570+ line files split by **build tag, not concern** — each carries 2–3 of
   {label journal, SDDL label-walk, notice wording, token construction}. Past one-pass navigability.
   **Both grew ~40% since the review** (nothing in 01/02 touched them — the Phase-5 follow-ups did),
-  so this card is now the most degraded of the outstanding seven. `TODO.md`'s entry still quotes the
+  so this card is now the most degraded of the outstanding cards. `TODO.md`'s entry still quotes the
   old 581/572 figures and should be refreshed when the card is picked up.
 - **Deepening:** extract the **journal** (record + atomic r/w/list + retention + revert), the
   **label-walk** (read/set/clear SDDL over a tree + reparse-skip), the **notice wording** as
@@ -148,7 +202,7 @@ Explore agents and should be spot-checked before acting.
 - **Deepening:** decode each Event once into a typed view-delta the 3 consumers read; ordering
   becomes data flow, exhaustive switch makes a missed fold a compile nudge. Strengthens ADR 0011.
 
-### 07 — One home for the Mechanism-stack validity rule · **Worth exploring**
+### 07 — One home for the Mechanism-stack validity rule · **Worth exploring** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/domain/registry.go` (`detectIncompatibility`, `detectRequirements`),
   `internal/validated/validate.go`.
 - **Problem:** the "valid Mechanism stack" invariant (IncompatibleWith-absent, Requires-present)
@@ -156,6 +210,20 @@ Explore agents and should be spot-checked before acting.
   sites that can drift.
 - **Deepening:** one shared checker over `[]MechanismDescriptor` that both call. Keep the timing
   split (validated pre-build/soft-degrade, domain post-build) — share only the rule.
+- **Landed 2026-07-25** (`f00cd6e`) as item 2 of
+  `docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`, folded into candidate 04's
+  plan because it is nearly free alongside that work — but built and committed **standalone**, so it
+  stands on its own regardless of 04's remaining items. `internal/domain/stack.go` is the one home:
+  `CheckStack([]MechanismDescriptor) []StackDefect` returns **structured defects**, not formatted
+  errors, because the two call sites' messages differ on purpose — `domain`'s are loud startup
+  errors wrapping matchable sentinels, `validated`'s are soft skip-and-warn prose. Each caller
+  renders its own wording, so `registry_ordered_test.go` and `validate_test.go` passed
+  **unchanged** — that was the acceptance oracle for "the rule moved, the messages did not".
+  `CheckStack`'s walk order (input order; per member, `Requires` defects before `IncompatibleWith`)
+  is load-bearing: it is what makes all three call sites report the same first defect they did
+  before. `detectIncompatibility` kept its pre-existing `len < 2` fast path — dropping it would have
+  started failing a lone Mechanism that names *itself* incompatible, a behaviour change the plan
+  forbade. No root alias: `CheckStack` is an internal cross-package seam, not public surface.
 
 ## Smaller deepenings (lower leverage; see HTML for the full list)
 
@@ -180,16 +248,28 @@ Explore agents and should be spot-checked before acting.
 *At the review session (2026-07-24):* clean tree at start; the session added exactly two untracked
 files under `docs/reviews/` (this doc + the `.html`) and built, tested and committed nothing.
 
-*As of 2026-07-25:* both landed candidates are committed on `main` (01: `5997ce8`…`cd39e23`;
+*As of 2026-07-25:* the landed candidates are committed on `main` (01: `5997ce8`…`cd39e23`;
 02: `2f881f9`…`a6e39db`, incl. the follow-up `76ec91c` making a url-safety block state itself once
-rather than twice), each with its plan doc archived. Per the standing owner directive Apogee commits
-directly to `main` (pre-production). The remaining five candidates and five smaller deepenings have
-had **no code written for them** — their evidence below is still review-session evidence and, apart
-from the ✓-marked and 2026-07-25-refreshed figures, should be spot-checked before acting.
+rather than twice; 04 + 07: `a924ef1`…`4803bdb` plus this documentation commit), 01's and 02's plan
+docs archived. Per the standing owner directive Apogee commits directly to `main` (pre-production).
+
+**Candidate 04's plan is complete.** All six items of
+`docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md` are ✅ DONE, each committed on
+its own green gate, and the plan doc is ready to move to `docs/plans/archived/`. The whole-plan
+verification greps all come back empty as specified: no `domain.Mechanism`, no `descriptors[`, no
+`Descriptor() domain.MechanismDescriptor` / `Ordering() domain.OrderingConstraints`, no
+`libraryMechanismID`, and no `IncompatibleWith`/`Requires` in `internal/validated/validate.go`. The
+one item left for the owner is the plan's **manual** step 9 (build the TUI and drive one Turn with
+`guided_decomposition` + `tool_result_cap`, then confirm the three loud failure paths still fail
+loudly) — the automated suite pins all of it, but the plan asked for eyes on it.
+
+Candidates 03, 05 and 06 and the four remaining smaller deepenings have had **no code written for
+them** — their evidence below is still review-session evidence and, apart from the ✓-marked and
+2026-07-25-refreshed figures, should be spot-checked before acting.
 
 **Re-verified 2026-07-25 as still outstanding:** `workspaceWriteTarget` (4 methods across 3 files),
 `read_file` (still `resolveInRoot → os.Stat → os.ReadFile`), self-regulator accessors (none), the
-POSIX `Confine` argv-wrap duplication, and candidates 03, 04, 06, 07 exactly as described.
+POSIX `Confine` argv-wrap duplication, and candidates 03, 05 and 06 exactly as described.
 
 ## Recommended next step
 
@@ -198,14 +278,19 @@ yardstick is in the same package, no ADR conflict. Then 02 and 04 as the stronge
 follow-ons ("make X follow the deep pattern the codebase already trusts"). If the owner would rather
 start narrow, 05 is owner-pre-blessed and self-contained.
 
-*As of 2026-07-25:* 01 and 02 have landed (see the ledger above). Two defensible next picks:
+*As of 2026-07-25:* **01, 02, 04 and 07 have all landed** (see the ledger above), and the ledger is
+clean — no plan is mid-flight.
 
-- **04** (Mechanism registration ritual) — the strongest remaining *Strong*, same "make X follow the
-  deep pattern the codebase already trusts" shape as the two that landed, and ADR 0003 is
-  preserved (only the authoring seam moves).
-- **05** (Windows Confiner split) — owner-pre-blessed, self-contained, and the only card that has
-  **got worse since the review** (both files ~40% larger). If the choice is close, urgency favours
-  05; leverage favours 04.
+The outstanding cards are 03, 05 and 06. The strongest next pick is:
+
+- **05** (Windows Confiner split) — owner-pre-blessed in `TODO.md`, self-contained, and the only
+  card that has **got worse since the review** (both files ~40% larger, and nothing since has
+  touched them). `TODO.md` still quotes the stale 581/572 figures and should be refreshed when the
+  card is picked up.
+- **03** (structured tool results) is the strongest remaining *Strong* on leverage. It is an
+  additive public `ToolResult` change (ADR 0010 minor bump) and wanted a clean ledger to start
+  from — which it now has, so the only reason to prefer 05 first is 05's degradation, not
+  sequencing.
 
 Also still open from candidate 02: the separate **`/code-audit`** on the *live* url-safety gap. The
 shape fix landed; whether any currently-registered path reaches the network unfiltered is a

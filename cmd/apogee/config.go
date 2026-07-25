@@ -89,7 +89,8 @@ type settings struct {
 	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), file-only
 	// (a per-model tuning concern, like mcpServers, with no flag/env) and default-empty. All
 	// Mechanisms ship OFF (D1 — default-off until bench-proven); a `true` entry turns one on. The
-	// composition root drives the mechanisms catalogue's constructor table for each enabled ID; an
+	// composition root validates every key against the catalogue and hands the enabled IDs to
+	// apogee.Config.EnableMechanisms, which the engine builds catalogue rows from (ADR 0015 §1); an
 	// unknown ID is a loud startup error. Bypass still wins (an enabled non-off-ramp Mechanism is
 	// not dispatched under bypass — ADR 0006 / item 2's gate).
 	mechanisms map[string]bool

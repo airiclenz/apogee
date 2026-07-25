@@ -6,6 +6,9 @@
 //
 // The catalogue was ported from apogee-sim and A/B-validated, one Mechanism at a
 // time, in Phase 4 (completed 2026-07-04); each Mechanism file registers one
-// catalogue row — descriptor, ordering constraints and constructor — in its own
-// init().
+// catalogue row — descriptor, ordering constraints, constructor, and the Deps the
+// Mechanism needs the engine to derive (row.needs, zero for every row but library)
+// — in its own init(). The row is the single source of a Mechanism's metadata:
+// Build joins it to the constructed hook once, so a Mechanism and the row
+// describing it cannot disagree (ADR 0003 as amended 2026-07-25).
 package mechanisms

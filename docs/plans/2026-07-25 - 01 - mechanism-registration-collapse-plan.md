@@ -503,7 +503,33 @@ loop body is uniform for every ID. Commit:
 
 ---
 
-## 6. Record it — ADR 0003 amendment, ADR 0015 note, CONTEXT.md, docs, CHANGELOG, TODO, ledger
+## 6. Record it — ADR 0003 amendment, ADR 0015 note, CONTEXT.md, docs, CHANGELOG, TODO, ledger — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): four stale-prose sites carried over from items 1/3/4 were folded in here rather
+than dropped — `cmd/apogee/config.go:92`, `cmd/apogee/root.go:76`, `cmd/apogee/config_test.go:498`
+and `internal/mechanisms/tool_result_cap_test.go:149` still said "constructor table". The three
+`cmd/apogee` sentences were also stale in a **second** way, predating the ADR 0015 wire.go collapse
+(they claim the composition root drives the table; since ADR 0015 §1 it hands an ID list to the
+engine), so each was corrected to what actually happens rather than word-swapped — a half-true
+sentence is worse than the stale term. Beyond item 6's literal bullets; recorded here.
+
+NOTES (2026-07-25): the fifth site, ADR 0015's **Context** section (`:16`, "the catalogued
+constructor table"), is deliberately left as written — a Context section records the world as it
+stood at ratification, and this item's own bullet scopes ADR 0015 to a note under `## Realisation`.
+The new note closes with a parenthetical saying so, so the term is explained rather than silently
+stale.
+
+NOTES (2026-07-25): the review-doc ledger also records the whole-plan verification step 8 figure,
+since item 6 owns the ledger and step 8 says to report the real number: `internal/mechanisms`
+**production** files are net **−15** across the whole plan (+358/−373; non-comment code lines
+3,948 → 3,943), not the ~−200 estimated. Item 4 alone was −188; the 21 Mechanism files shed ~96 net
+lines, and `catalogue.go` grew +79 absorbing the shared `row`/`register`/`DepNeeds` surface and the
+rationale comments item 1 moved off the deleted methods rather than deleting. Not a finding by the
+plan's own trip-wire (which is a net *increase*), but stated plainly instead of quietly.
+
+NOTES (2026-07-25): `internal/domain/doc.go` was checked and **not** edited — its `:3` mention is
+"the Mechanism registry's ordering-cycle detection", an example of domain-resident pure logic, not
+an enumeration of the deleted interface. The bullet's "do not force" applies.
 
 - **`docs/adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md`** — append
   `## Amendment (2026-07-25) — a Mechanism's descriptor and ordering are catalogue data, not

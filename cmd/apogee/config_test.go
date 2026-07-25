@@ -495,8 +495,9 @@ func TestApplyConfigMCPServers(t *testing.T) {
 }
 
 // The mechanisms config block parses into opts.mechanisms (Phase 4): a map of canonical ID →
-// enabled, which runRoot drives the catalogue constructor table with. It is file-only, like
-// mcp-servers, so this proves the config surface lands end-to-end.
+// enabled, whose enabled IDs runRoot hands to Config.EnableMechanisms for the engine to build
+// catalogue rows from. It is file-only, like mcp-servers, so this proves the config surface lands
+// end-to-end.
 func TestApplyConfigMechanisms(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()

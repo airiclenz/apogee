@@ -369,6 +369,12 @@ it **requires** enabled (an enable-time constraint: switching a Mechanism on wit
 requirements is a config error, so dependent Mechanisms are benched and shipped as a
 stack). The single source of truth for which Mechanisms are exempt, which can co-fire,
 and which only make sense together.
+It is **catalogue data supplied when the Mechanism is registered**, not something a
+Mechanism says about itself: the catalogue holds one entry per Mechanism carrying its
+descriptor, its ordering constraints and the way to build it, and that one entry is
+read both by the running registry when the Mechanism is enabled and by the public
+catalogue query used to plan bench arms. A Mechanism and the description of it
+therefore cannot disagree.
 
 ### Self-regulation
 

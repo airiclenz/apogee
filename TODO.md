@@ -334,6 +334,40 @@ an extra prompt rather than a broken tool, and the export is purely additive whe
 
 ---
 
+## Two doors left open by the Mechanism-registration collapse
+
+**Status:** parked 2026-07-25 (`docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`,
+"Explicit non-goals" + D4; [ADR 0003](docs/adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md)
+amendment 2026-07-25). Both were named out of scope by that plan and recorded here so the door is
+documented rather than silently shut. **Neither is a live gap.**
+
+- **`MechanismRegistry.Add` does not reject an empty `Descriptor.ID`.** `Add` gates on the reserved
+  `experimental` ID, on a duplicate ID, and on the value implementing at least one hook interface —
+  not on the ID being non-empty. A row registered with a zero descriptor therefore gets a catalogued
+  Mechanism with an empty canonical ID: it sorts first in the stable tiebreak, and `MechanismFiredEvent`
+  attribution for it is blank. This is **pre-existing, not introduced by the row shape** — a Mechanism
+  whose `Descriptor()` returned the zero value could do exactly the same before — which is why adding
+  the guard was refused as a behaviour change riding on a refactor. It is unreachable from the
+  catalogue (`register` already panics at `init()` on an empty `descriptor.ID`, and the ID keys the
+  table), so the only way in is a hand-built row from an embedder or a test. Worth a guard later, as
+  its own small change with its own test: reject an empty `Descriptor.ID` in `Add` alongside the
+  reserved-ID gate, with a message in the same voice as the other three.
+
+- **`internal/mechanisms` declares which `Deps` a row needs, but does not construct them.** A row now
+  carries `needs DepNeeds`, and `DepsNeeded(ids)` ORs the flags for an enabled set, so the engine
+  derives exactly the collaborators the enabled rows asked for and its build loop is uniform for every
+  ID. The **construction** stays in `internal/agent`'s `deriveDeps` — the library store under
+  `Config.LibraryDir`, the corrupt-store-degrades-to-empty stderr notice, and the
+  `ResolveFingerprintFrom` identity ladder. Moving that wiring next to the row that needs it reads
+  better and was considered, but it contradicts
+  [ADR 0015](docs/adr/0015-catalogued-mechanisms-are-enabled-by-id-through-config.md) §2 (*"Deps stay
+  internal; the engine derives them from Config"*) for no gain the declaration does not already give.
+  Revisit only if a **second** `Deps`-bearing Mechanism arrives and the derivation genuinely wants to
+  live beside its row — and treat it as an ADR 0015 amendment, not a refactor, because §2 is what
+  makes "arming the library Mechanism against a different model than the loop runs" unrepresentable.
+
+---
+
 ## Deferred security-review Lows (P3 `/security-review`, 2026-06-24)
 
 Recorded so the deferral is deliberate, not a silent drop. Each is an INTENDED-design

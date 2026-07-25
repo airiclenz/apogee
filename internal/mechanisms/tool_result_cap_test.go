@@ -146,8 +146,8 @@ func TestToolResultCapInertWhenWindowUnknown(t *testing.T) {
 	}
 }
 
-// TestToolResultCapBuildsFromCatalogue proves the constructor table row is wired: Build returns a
-// working Mechanism under the canonical ID.
+// TestToolResultCapBuildsFromCatalogue proves the catalogue row is wired: Build returns a working
+// Mechanism under the canonical ID.
 func TestToolResultCapBuildsFromCatalogue(t *testing.T) {
 	t.Parallel()
 	m, err := Build(toolResultCapID, Deps{})

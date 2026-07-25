@@ -46,6 +46,33 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**
+  `apogee.Mechanism` is **removed**; `apogee.RegisteredMechanism` takes its place, a row of
+  `{Descriptor, Ordering, Hook}` in which the descriptor and the ordering constraints are catalogue
+  **data supplied at registration** and `Hook` is the value that carries the behaviour.
+  `MechanismRegistry.Add` now takes a `RegisteredMechanism` and `Ordered` returns them, so a hook
+  value implements only its hook interface(s) and no longer needs `Descriptor()` / `Ordering()`
+  methods of its own. The alias is removed rather than quietly redefined, so an out-of-date embedder
+  gets a loud compile error instead of a silent shape change; under `0.x` this ships as a documented
+  break with notice rather than a major bump (see
+  [ADR 0003](docs/adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md)'s
+  2026-07-25 amendment and [ADR 0015](docs/adr/0015-catalogued-mechanisms-are-enabled-by-id-through-config.md)'s
+  realisation note).
+
+  **No shipped behaviour changes.** The same Mechanisms fire at the same hook points in the same
+  deterministic order — same topological sort, same stable canonical-ID tiebreak — under the same
+  Bypass, self-regulation, incompatibility and requirement gates, with the same error messages and
+  matchable sentinels. The **CLI and TUI are unaffected**, and so are the file-only `mechanisms:`
+  config block, `Config.EnableMechanisms`, `CataloguedMechanisms()`, the enable errors, and
+  experimental hooks (`AddExperimental` still takes a bare value).
+
+  What it bought internally: one catalogue table instead of two hand-synced maps, one
+  `register(row{…})` call per Mechanism instead of a seven-part registration ritual, 42 dead
+  metadata methods deleted, the `"library"` Mechanism ID no longer re-declared as a literal in the
+  engine (a catalogue row declares the dependencies it needs, so the build loop is uniform for every
+  ID), and one shared Mechanism-stack validity checker behind both the loud startup gate and the
+  soft validated-set skip. A Mechanism and the row describing it can no longer drift, because they
+  are joined once where the Mechanism is built rather than kept in step by a guard test.
 - **A tool that reaches the network but is not one of Apogee's own url-filtered tools now asks for
   approval in Auto instead of running unattended.** Auto's "network runs freely" cell was always
   meant for Apogee's own network tools, which filter every URL through url-safety (the scheme/host

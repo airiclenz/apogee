@@ -144,3 +144,30 @@ already in the plan's per-item NOTES, mirrored here so the ADR stays the ground 
   corrupt or absent store degrades to an empty store with wire.go's exact `os.Stderr` notice, so
   an unreadable Library disables learning rather than failing `New`/`Resume` — the posture the
   cmd path it replaces already had.
+
+**Note (2026-07-25) — how this ADR reads after ADR 0003's row-shape amendment.** The Mechanism
+registry now holds `RegisteredMechanism{Descriptor, Ordering, Hook}` rows and a Mechanism value
+carries behaviour only
+([ADR 0003](0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md), Amendment
+2026-07-25). Nothing in the Decision above changes; three sentences are re-read:
+
+- **§3's parenthetical "(instances must keep matching their rows)" is now vacuous** — there is no
+  instance descriptor left to match. Descriptors were already "static catalogue data" here; they are
+  now *only* that, joined to the behaviour once in `mechanisms.Build`, so the query still never needs
+  to build and the drift the parenthetical guarded against is unrepresentable.
+- **§5's "stable v1 API" is read against the 0.x version reset.** That clause was written under the
+  `1.x` line; the human-facing release version reset to `0.8.0` on 2026-07-23, and under SemVer `0.x`
+  makes no stability promise. `apogee.Mechanism` is therefore **removed** (not deprecated) in favour
+  of `apogee.RegisteredMechanism`, and `MechanismRegistry.Add`/`.Ordered` change shape, shipping at
+  `v0.8.3` as a **documented break with CHANGELOG notice** rather than a major bump. Everything §5
+  actually names as the surface — the `EnableMechanisms` field, the `CataloguedMechanisms()` query,
+  the enable errors and the "catalogue contents are not a contract" posture — is unchanged.
+- **§2 is reaffirmed, not amended.** The engine still derives `Deps` from `Config`; a catalogue row
+  now only *declares* which of them it needs (`mechanisms.DepNeeds` / `DepsNeeded`, consumed by
+  `internal/agent`'s `deriveDeps`), which is what let the engine's `library`-only special case go. The
+  rejected alternative — moving the store construction and the fingerprint ladder into
+  `internal/mechanisms` — was rejected *because* it would contradict §2.
+
+(The Context section above names the enable path of its day, "the catalogued constructor table
+(`internal/mechanisms.Build`)". That table is now one `row` table and the wording is left as written:
+a Context section records the world as it stood at ratification.)

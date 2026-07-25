@@ -73,8 +73,9 @@ type options struct {
 
 	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), loaded from
 	// the config file only (default-empty ⇒ no Mechanism enabled; all default OFF, D1). applyConfig
-	// sets it from settings; runRoot drives the mechanisms catalogue's constructor table for each
-	// enabled ID and folds the built registry into apogee.Config.Mechanisms.
+	// sets it from settings; runRoot validates every key against the catalogue and folds the enabled
+	// IDs into apogee.Config.EnableMechanisms, which the engine builds catalogue rows from and merges
+	// into apogee.Config.Mechanisms (ADR 0015 §1).
 	mechanisms map[string]bool
 
 	// validatedSetsEnable is the Validated-set surface's off-switch (ADR 0016 §5; default true)
