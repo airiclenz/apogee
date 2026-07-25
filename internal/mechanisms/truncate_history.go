@@ -6,15 +6,17 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// truncate_history registers the drop-the-middle history-rewrite Mechanism in the catalogue
-// constructor table (Phase-4 item 7). Default-off (D1) — the config surface builds it only when
+// truncate_history registers the drop-the-middle history-rewrite Mechanism's catalogue row
+// (Phase-4 item 7). Default-off (D1) — the config surface builds it only when
 // the `mechanisms:` block enables it. It is the cheap A/B alternative to generative Compaction,
 // validated bench-side later; correct_tool_result, the other lab-only intervention, is DEFERRED
 // (owner-ratified 2026-07-04 — no production trigger to port; the bench plays the sim's operator
 // via an experimental post-tool-result hook — see docs/design/mechanism-catalogue.md Table B).
 func init() {
-	catalogue[truncateHistoryID] = newTruncateHistory
-	descriptors[truncateHistoryID] = truncateHistoryDescriptor
+	register(row{
+		descriptor: truncateHistoryDescriptor,
+		construct:  newTruncateHistory,
+	})
 }
 
 const truncateHistoryID domain.MechanismID = "truncate_history"

@@ -8,11 +8,13 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// tool_use_enforcer registers the narration off-ramp in the catalogue constructor table (Phase-4
-// item 6). Default-off (D1).
+// tool_use_enforcer registers the narration off-ramp's catalogue row (Phase-4 item 6). Default-off
+// (D1).
 func init() {
-	catalogue[toolUseEnforcerID] = newToolUseEnforcer
-	descriptors[toolUseEnforcerID] = toolUseEnforcerDescriptor
+	register(row{
+		descriptor: toolUseEnforcerDescriptor,
+		construct:  newToolUseEnforcer,
+	})
 }
 
 // toolUseEnforcerMechanism is the post-response narration off-ramp (catalogue Table A

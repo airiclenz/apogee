@@ -12,7 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/library"
 )
 
-// fakeMechanism is a minimal catalogued Mechanism for exercising the constructor table while the
+// fakeMechanism is a minimal catalogued Mechanism for exercising the catalogue table while the
 // production catalogue is still empty (waves 5–14 fill it). It implements one hook interface
 // (pre-request) so it is a valid Mechanism the registry would accept.
 type fakeMechanism struct {
@@ -32,8 +32,11 @@ func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 	t.Parallel()
 	const id domain.MechanismID = "fake"
 	marker := library.NewStore(t.TempDir())
-	table := map[domain.MechanismID]constructor{
-		id: func(d Deps) (domain.Mechanism, error) { return fakeMechanism{id: id, deps: d}, nil },
+	table := map[domain.MechanismID]row{
+		id: {
+			descriptor: domain.MechanismDescriptor{ID: id},
+			construct:  func(d Deps) (domain.Mechanism, error) { return fakeMechanism{id: id, deps: d}, nil },
+		},
 	}
 
 	m, err := buildFrom(table, id, Deps{Library: marker})
@@ -56,9 +59,15 @@ func TestBuildFromKnownIDInjectsDeps(t *testing.T) {
 // startup rather than silently disabling a Mechanism.
 func TestBuildFromUnknownIDErrorsListingKnown(t *testing.T) {
 	t.Parallel()
-	table := map[domain.MechanismID]constructor{
-		"beta":  func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: "beta"}, nil },
-		"alpha": func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: "alpha"}, nil },
+	table := map[domain.MechanismID]row{
+		"beta": {
+			descriptor: domain.MechanismDescriptor{ID: "beta"},
+			construct:  func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: "beta"}, nil },
+		},
+		"alpha": {
+			descriptor: domain.MechanismDescriptor{ID: "alpha"},
+			construct:  func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: "alpha"}, nil },
+		},
 	}
 
 	_, err := buildFrom(table, "nope", Deps{})
@@ -76,8 +85,11 @@ func TestBuildFromUnknownIDErrorsListingKnown(t *testing.T) {
 func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("missing collaborator")
-	table := map[domain.MechanismID]constructor{
-		"needs-deps": func(Deps) (domain.Mechanism, error) { return nil, boom },
+	table := map[domain.MechanismID]row{
+		"needs-deps": {
+			descriptor: domain.MechanismDescriptor{ID: "needs-deps"},
+			construct:  func(Deps) (domain.Mechanism, error) { return nil, boom },
+		},
 	}
 	_, err := buildFrom(table, "needs-deps", Deps{})
 	if !errors.Is(err, boom) {
@@ -277,7 +289,50 @@ func TestBuildUnknownIDWrapsSentinel(t *testing.T) {
 // knownList renders "(none)" for the empty catalogue rather than a dangling tail.
 func TestKnownListEmptyRendersNone(t *testing.T) {
 	t.Parallel()
-	if got := knownList(map[domain.MechanismID]constructor{}); got != "(none)" {
+	if got := knownList(map[domain.MechanismID]row{}); got != "(none)" {
 		t.Errorf("knownList(empty) = %q; want %q", got, "(none)")
+	}
+}
+
+// register is the only way a row enters the catalogue, and it refuses the two ways a row can be
+// mis-written: an empty descriptor ID (the row would be filed under "", and Build could never find
+// it) and an ID that is already registered (the second row would silently displace the first).
+// Both are init()-time programming errors inside this package, so register PANICS rather than
+// returning an error no init() could act on. Driven against a local table so the production
+// catalogue is untouched.
+func TestRegisterRejectsDuplicateAndEmptyID(t *testing.T) {
+	t.Parallel()
+
+	fakeRow := func(id domain.MechanismID) row {
+		return row{
+			descriptor: domain.MechanismDescriptor{ID: id},
+			construct:  func(Deps) (domain.Mechanism, error) { return fakeMechanism{id: id}, nil },
+		}
+	}
+	panics := func(f func()) (panicked bool) {
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		f()
+		return false
+	}
+
+	table := map[domain.MechanismID]row{}
+	if panics(func() { registerIn(table, fakeRow("alpha")) }) {
+		t.Fatal("registerIn(fresh ID) panicked; want the row registered")
+	}
+	if _, ok := table["alpha"]; !ok {
+		t.Fatal(`registerIn did not file the row under its descriptor ID "alpha"`)
+	}
+	if !panics(func() { registerIn(table, fakeRow("alpha")) }) {
+		t.Error("registerIn(duplicate ID): want a panic, got none")
+	}
+	if !panics(func() { registerIn(table, fakeRow("")) }) {
+		t.Error("registerIn(empty descriptor ID): want a panic, got none")
+	}
+	if len(table) != 1 {
+		t.Errorf("table holds %d rows; want only the first accepted row", len(table))
 	}
 }

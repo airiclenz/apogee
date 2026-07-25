@@ -7,11 +7,13 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// empty_response_recovery registers the empty-reply off-ramp in the catalogue constructor table
-// (Phase-4 item 6). Default-off (D1).
+// empty_response_recovery registers the empty-reply off-ramp's catalogue row (Phase-4 item 6).
+// Default-off (D1).
 func init() {
-	catalogue[emptyResponseRecoveryID] = newEmptyResponseRecovery
-	descriptors[emptyResponseRecoveryID] = emptyResponseRecoveryDescriptor
+	register(row{
+		descriptor: emptyResponseRecoveryDescriptor,
+		construct:  newEmptyResponseRecovery,
+	})
 }
 
 // emptyResponseRecoveryMechanism is the post-response empty-reply off-ramp (catalogue Table A

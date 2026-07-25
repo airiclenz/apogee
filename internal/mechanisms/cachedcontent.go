@@ -7,8 +7,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// cached_content_intercept registers the redundant-successful-re-read interceptor in the catalogue
-// constructor table (Phase-4 item 11, Wave 3 history-aware family). Default-off (D1). It is ported
+// cached_content_intercept registers the redundant-successful-re-read interceptor's catalogue row
+// (Phase-4 item 11, Wave 3 history-aware family). Default-off (D1). It is ported
 // from apogee-sim internal/proxy/cached_content_intercept.go @pin and RELOCATED to pre-tool-exec
 // (catalogue Table A / hook-mutation-api §5): the decision "this read is redundant" is made from the
 // history before the read runs, rather than by rewriting the result after it ran.
@@ -31,8 +31,10 @@ import (
 // one. Surfaced as a divergence-from-source; default-off and bench-gated (D1), so nothing un-vetted
 // ships.
 func init() {
-	catalogue[cachedContentInterceptID] = newCachedContentIntercept
-	descriptors[cachedContentInterceptID] = cachedContentDescriptor
+	register(row{
+		descriptor: cachedContentDescriptor,
+		construct:  newCachedContentIntercept,
+	})
 }
 
 const cachedContentInterceptID domain.MechanismID = "cached_content_intercept"

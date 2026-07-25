@@ -7,11 +7,18 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// syntax registers the write-content syntax-check Mechanism in the catalogue constructor table
-// (Phase-4 item 5). Default-off (D1).
+// syntax registers the write-content syntax-check Mechanism's catalogue row (Phase-4 item 5).
+// Default-off (D1).
 func init() {
-	catalogue[syntaxID] = newSyntax
-	descriptors[syntaxID] = syntaxDescriptor
+	register(row{
+		descriptor: syntaxDescriptor,
+		// Ordering runs syntax after validate and after autofix (catalogue Table A): repair precedes
+		// correction, so the correction covers only the post-repair remainder.
+		ordering: domain.OrderingConstraints{
+			After: []domain.MechanismID{validateID, autofixID},
+		},
+		construct: newSyntax,
+	})
 }
 
 // syntaxMechanism is the post-response write-content syntax checker (catalogue Table A `syntax`;
@@ -42,8 +49,8 @@ var syntaxDescriptor = domain.MechanismDescriptor{
 // Descriptor returns syntax's static catalogue descriptor.
 func (syntaxMechanism) Descriptor() domain.MechanismDescriptor { return syntaxDescriptor }
 
-// Ordering runs syntax after validate and after autofix (catalogue Table A): repair precedes
-// correction, so the correction covers only the post-repair remainder.
+// Ordering returns the edges syntax's catalogue row declares (see init) — the row is the source of
+// record; this method is the domain.Mechanism remnant the registry still reads.
 func (syntaxMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{
 		After: []domain.MechanismID{validateID, autofixID},

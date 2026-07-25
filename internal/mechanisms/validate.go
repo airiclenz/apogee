@@ -9,12 +9,16 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// validate registers the tool-call validation Mechanism in the catalogue constructor table
-// (Phase-4 item 5). It is default-off (D1) — the config surface builds it only when the
-// `mechanisms:` block enables it.
+// validate registers the tool-call validation Mechanism's catalogue row (Phase-4 item 5). It is
+// default-off (D1) — the config surface builds it only when the `mechanisms:` block enables it.
 func init() {
-	catalogue[validateID] = newValidate
-	descriptors[validateID] = validateDescriptor
+	register(row{
+		descriptor: validateDescriptor,
+		// Ordering runs validate before syntax and autofix (catalogue Table A): validation is the
+		// coarsest check, so a malformed call is corrected before the finer content passes look at it.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{syntaxID, autofixID}},
+		construct: newValidate,
+	})
 }
 
 // validateMechanism is the post-response tool-call validator (catalogue Table A `validate`;
@@ -47,8 +51,8 @@ var validateDescriptor = domain.MechanismDescriptor{
 // Descriptor returns validate's static catalogue descriptor.
 func (validateMechanism) Descriptor() domain.MechanismDescriptor { return validateDescriptor }
 
-// Ordering runs validate before syntax and autofix (catalogue Table A): validation is the
-// coarsest check, so a malformed call is corrected before the finer content passes look at it.
+// Ordering returns the edges validate's catalogue row declares (see init) — the row is the source
+// of record; this method is the domain.Mechanism remnant the registry still reads.
 func (validateMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{syntaxID, autofixID}}
 }

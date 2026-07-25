@@ -16,8 +16,8 @@ import (
 // fails loudly at build rather than registering a silently-inert Mechanism.
 var errLibraryStoreRequired = errors.New("apogee: library mechanism requires a Library store (Deps.Library)")
 
-// library registers the cross-session learning Mechanism in the catalogue constructor table
-// (Phase-4 item 14, the Library's two loop-facing halves). Default-off (D1) — the config surface
+// library registers the cross-session learning Mechanism's catalogue row (Phase-4 item 14, the
+// Library's two loop-facing halves). Default-off (D1) — the config surface
 // builds it only when the `mechanisms:` block enables it, and it needs the Library store +
 // resolved fingerprint injected at construction (D3, derived by buildEnabledMechanisms in
 // internal/agent/loop.go — the single build path since the ADR 0015 wire.go collapse). It is ported from
@@ -31,8 +31,15 @@ var errLibraryStoreRequired = errors.New("apogee: library mechanism requires a L
 // carries both halves. Both are proactive-nudge (not off-ramp), so item 2's dispatch gate skips
 // BOTH under Bypass — the Library is fully inert (no inject AND no observe/write, decision 13).
 func init() {
-	catalogue[libraryID] = newLibrary
-	descriptors[libraryID] = libraryDescriptor
+	register(row{
+		descriptor: libraryDescriptor,
+		// Ordering declares library Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
+		// review-fixes item 11 / option A): the inject side shapes the system prompt before toolfilter
+		// narrows the tool menu, matching the sim's cot → library → filter Transform order. The observe
+		// (post-response) side is a pure reader and carries no ordering edge.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}},
+		construct: newLibrary,
+	})
 }
 
 const libraryID domain.MechanismID = "library"
@@ -122,10 +129,8 @@ var libraryDescriptor = domain.MechanismDescriptor{
 // Descriptor returns library's static catalogue descriptor.
 func (*libraryMechanism) Descriptor() domain.MechanismDescriptor { return libraryDescriptor }
 
-// Ordering declares library Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
-// review-fixes item 11 / option A): the inject side shapes the system prompt before toolfilter
-// narrows the tool menu, matching the sim's cot → library → filter Transform order. The observe
-// (post-response) side is a pure reader and carries no ordering edge.
+// Ordering returns the edge library's catalogue row declares (see init) — the row is the source of
+// record; this method is the domain.Mechanism remnant the registry still reads.
 func (*libraryMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }

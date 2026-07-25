@@ -9,7 +9,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// read_loop registers the read-loop detector in the catalogue constructor table (Phase-4 item 11,
+// read_loop registers the read-loop detector's catalogue row (Phase-4 item 11,
 // Wave 3 history-aware family). Default-off (D1). It is ported from apogee-sim
 // internal/proxy/read_loop_detector.go @pin and CONSOLIDATES the sim's three variants
 // (read_loop_detector, greenfield_read_loop_detector, successful_read_loop_detector) into one
@@ -19,8 +19,10 @@ import (
 // selection — the failed-read branch (greenfield or normal) first, else the successful-read branch,
 // reproducing the sim proxy's priority chain (proxy.go:476-516 @pin).
 func init() {
-	catalogue[readLoopID] = newReadLoop
-	descriptors[readLoopID] = readLoopDescriptor
+	register(row{
+		descriptor: readLoopDescriptor,
+		construct:  newReadLoop,
+	})
 }
 
 const readLoopID domain.MechanismID = "read_loop"

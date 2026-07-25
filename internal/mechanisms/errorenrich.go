@@ -8,14 +8,16 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// error_enrichment registers the repeated-error clarification Mechanism in the catalogue
-// constructor table (Phase-4 item 11, Wave 3 history-aware family). Default-off (D1). It is ported
+// error_enrichment registers the repeated-error clarification Mechanism's catalogue row (Phase-4
+// item 11, Wave 3 history-aware family). Default-off (D1). It is ported
 // from apogee-sim internal/proxy/error_enrichment.go @pin and RELOCATED to post-tool-result
 // (catalogue Table A / hook-mutation-api §5): the sim injected its guidance into the next request,
 // but apogee owns the loop and can enrich the failing tool result before the model ever sees it.
 func init() {
-	catalogue[errorEnrichmentID] = newErrorEnrichment
-	descriptors[errorEnrichmentID] = errorEnrichmentDescriptor
+	register(row{
+		descriptor: errorEnrichmentDescriptor,
+		construct:  newErrorEnrichment,
+	})
 }
 
 const errorEnrichmentID domain.MechanismID = "error_enrichment"

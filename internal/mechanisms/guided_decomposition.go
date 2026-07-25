@@ -11,16 +11,22 @@ import (
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
-// guided_decomposition registers the guided-decomposition Mechanism in the catalogue constructor
-// table (ADR 0014). Default-off (D1) — the config surface builds it only when the `mechanisms:`
+// guided_decomposition registers the guided-decomposition Mechanism's catalogue row (ADR 0014).
+// Default-off (D1) — the config surface builds it only when the `mechanisms:`
 // block enables it, and it is benched as a stack with tool_result_cap (Requires, below) so the
 // bench measures the two together. It steers the PRIMARY call, on an oversized task, to first
 // enumerate the work as a numbered list of self-contained subtasks, then serializes the fan-out one
 // sub_agent delegation per Turn. Two halves on one struct: the pre-request gate + enumeration steer,
 // and the PostResponse intercept + serialized follow-through (both below).
 func init() {
-	catalogue[guidedDecompositionID] = newGuidedDecomposition
-	descriptors[guidedDecompositionID] = guidedDecompositionDescriptor
+	register(row{
+		descriptor: guidedDecompositionDescriptor,
+		// Ordering declares guided_decomposition After toolfilter: the sub_agent-presence gate must read the
+		// FINAL tool menu, and toolfilter narrows the menu via SetTools earlier in the pass. There is no
+		// runtime coupling to encode as an ordering edge here.
+		ordering:  domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}},
+		construct: newGuidedDecomposition,
+	})
 }
 
 const guidedDecompositionID domain.MechanismID = "guided_decomposition"
@@ -111,9 +117,8 @@ func (guidedDecompositionMechanism) Descriptor() domain.MechanismDescriptor {
 	return guidedDecompositionDescriptor
 }
 
-// Ordering declares guided_decomposition After toolfilter: the sub_agent-presence gate must read the
-// FINAL tool menu, and toolfilter narrows the menu via SetTools earlier in the pass. There is no
-// runtime coupling to encode as an ordering edge here.
+// Ordering returns the edge guided_decomposition's catalogue row declares (see init) — the row is
+// the source of record; this method is the domain.Mechanism remnant the registry still reads.
 func (guidedDecompositionMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}}
 }

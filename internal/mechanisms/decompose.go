@@ -9,16 +9,23 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// decompose registers the task-decomposition pre-request Mechanism in the catalogue constructor
-// table (Phase-4 item 12, Wave 4 — the last of the request shapers). Default-off (D1) — the config
+// decompose registers the task-decomposition pre-request Mechanism's catalogue row (Phase-4 item
+// 12, Wave 4 — the last of the request shapers). Default-off (D1) — the config
 // surface builds it only when the `mechanisms:` block enables it. It is ported from apogee-sim
 // internal/decompose/decompose.go @pin: for a small model that stalls on long multi-step prompts,
 // it (1) collapses complex prompts sitting in conversation history so the model cannot re-read a
 // full step-by-step plan from an earlier turn, and (2) hints the single next actionable step of the
 // current prompt into the system prompt, keeping the full user message intact.
 func init() {
-	catalogue[decomposeID] = newDecompose
-	descriptors[decomposeID] = decomposeDescriptor
+	register(row{
+		descriptor: decomposeDescriptor,
+		// Ordering declares decompose After toolfilter (catalogue Table A: "trim the menu before the
+		// user-message rewrite" — toolfilter already declares the mirror Before edge). The read-loop
+		// coupling is expressed as a runtime LoopView.Fired query in PreRequest (D2), not an ordering edge,
+		// so it is not encoded here.
+		ordering:  domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}},
+		construct: newDecompose,
+	})
 }
 
 const decomposeID domain.MechanismID = "decompose"
@@ -194,10 +201,8 @@ var decomposeDescriptor = domain.MechanismDescriptor{
 // Descriptor returns decompose's static catalogue descriptor.
 func (decomposeMechanism) Descriptor() domain.MechanismDescriptor { return decomposeDescriptor }
 
-// Ordering declares decompose After toolfilter (catalogue Table A: "trim the menu before the
-// user-message rewrite" — toolfilter already declares the mirror Before edge). The read-loop
-// coupling is expressed as a runtime LoopView.Fired query in PreRequest (D2), not an ordering edge,
-// so it is not encoded here.
+// Ordering returns the edge decompose's catalogue row declares (see init) — the row is the source
+// of record; this method is the domain.Mechanism remnant the registry still reads.
 func (decomposeMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}}
 }

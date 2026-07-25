@@ -9,16 +9,23 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// tool_loop_interceptor registers the identical-repeat-turn detector in the catalogue constructor
-// table (Phase-4 item 11, Wave 3 history-aware family). Default-off (D1). It was inventory-missed
+// tool_loop_interceptor registers the identical-repeat-turn detector's catalogue row (Phase-4 item
+// 11, Wave 3 history-aware family). Default-off (D1). It was inventory-missed
 // and found in the checkout (catalogue Table B): the item title names four members, but the
 // catalogue assigns this fifth to item 11 (D7 — the catalogue is authoritative for wave
 // composition). It is ported from apogee-sim internal/proxy/tool_loop_interceptor.go @pin: when the
 // model's response repeats its previous Turn's exact tool calls, it retries in place with a "you
 // are in a loop" directive.
 func init() {
-	catalogue[toolLoopInterceptorID] = newToolLoopInterceptor
-	descriptors[toolLoopInterceptorID] = toolLoopDescriptor
+	register(row{
+		descriptor: toolLoopDescriptor,
+		// Ordering runs tool_loop_interceptor before validate (catalogue Table A / apogee-sim
+		// response_analysis.go:60-94 @pin: the sim checks the tool loop before validation). read_repeat
+		// declares itself before this Mechanism, so the resolved post-response order is
+		// read_repeat → tool_loop_interceptor → validate → autofix → syntax — the sim's cascade priority.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{validateID}},
+		construct: newToolLoopInterceptor,
+	})
 }
 
 const toolLoopInterceptorID domain.MechanismID = "tool_loop_interceptor"
@@ -43,10 +50,8 @@ var toolLoopDescriptor = domain.MechanismDescriptor{
 // Descriptor returns tool_loop_interceptor's static catalogue descriptor.
 func (toolLoopMechanism) Descriptor() domain.MechanismDescriptor { return toolLoopDescriptor }
 
-// Ordering runs tool_loop_interceptor before validate (catalogue Table A / apogee-sim
-// response_analysis.go:60-94 @pin: the sim checks the tool loop before validation). read_repeat
-// declares itself before this Mechanism, so the resolved post-response order is
-// read_repeat → tool_loop_interceptor → validate → autofix → syntax — the sim's cascade priority.
+// Ordering returns the edge tool_loop_interceptor's catalogue row declares (see init) — the row is
+// the source of record; this method is the domain.Mechanism remnant the registry still reads.
 func (toolLoopMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{validateID}}
 }

@@ -7,8 +7,8 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// grammar registers the response-format grammar-constraint pre-request Mechanism in the catalogue
-// constructor table (Phase-4 item 10, Wave 3 request shapers). Default-off (D1) — the config
+// grammar registers the response-format grammar-constraint pre-request Mechanism's catalogue row
+// (Phase-4 item 10, Wave 3 request shapers). Default-off (D1) — the config
 // surface builds it only when the `mechanisms:` block enables it. It is ported from apogee-sim
 // internal/grammar/grammar.go + internal/proxy/proxy.go injectGrammarConstraint @pin: it derives a
 // json_schema from the current tool menu and sets it as the request's `response_format` so a model
@@ -17,8 +17,10 @@ import (
 // (see its doc) — false on every current apogee backend, so grammar no-ops (catalogue Table B: "may
 // no-op on all current apogee backends").
 func init() {
-	catalogue[grammarID] = newGrammar
-	descriptors[grammarID] = grammarDescriptor
+	register(row{
+		descriptor: grammarDescriptor,
+		construct:  newGrammar,
+	})
 }
 
 const grammarID domain.MechanismID = "grammar"

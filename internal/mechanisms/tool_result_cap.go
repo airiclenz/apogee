@@ -7,15 +7,24 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// tool_result_cap registers the tool-result capping pre-request Mechanism in the catalogue
-// constructor table (Phase-4 item 9). Default-off (D1) — the config surface builds it only when
+// tool_result_cap registers the tool-result capping pre-request Mechanism's catalogue row (Phase-4
+// item 9). Default-off (D1) — the config surface builds it only when
 // the `mechanisms:` block enables it. It is the surviving half of apogee-sim's `compress`
 // (catalogue C3 SPLIT — the generative Compaction and history-truncation halves live elsewhere,
 // D6): a per-tool-result truncation of any single result that has outgrown its fraction of the
 // Budget, the most recent Turn always protected.
 func init() {
-	catalogue[toolResultCapID] = newToolResultCap
-	descriptors[toolResultCapID] = toolResultCapDescriptor
+	register(row{
+		descriptor: toolResultCapDescriptor,
+		// Ordering declares tool_result_cap After decompose (§Ordering seed, ratified into Table A
+		// 2026-07-04, review-fixes item 11 / option A): it trims tool results after the other pre-request
+		// shapers assemble context, so it runs last among them. decompose is the last transform (the nudges
+		// and library precede toolfilter, which precedes decompose), so an After-decompose edge pushes
+		// tool_result_cap behind the whole shaper chain; filehint/grammar/read_loop are request-prep
+		// injectors with no hard order and fall by the D4 ID tiebreak.
+		ordering:  domain.OrderingConstraints{After: []domain.MechanismID{decomposeID}},
+		construct: newToolResultCap,
+	})
 }
 
 const toolResultCapID domain.MechanismID = "tool_result_cap"
@@ -57,12 +66,8 @@ var toolResultCapDescriptor = domain.MechanismDescriptor{
 // Descriptor returns tool_result_cap's static catalogue descriptor.
 func (toolResultCapMechanism) Descriptor() domain.MechanismDescriptor { return toolResultCapDescriptor }
 
-// Ordering declares tool_result_cap After decompose (§Ordering seed, ratified into Table A
-// 2026-07-04, review-fixes item 11 / option A): it trims tool results after the other pre-request
-// shapers assemble context, so it runs last among them. decompose is the last transform (the nudges
-// and library precede toolfilter, which precedes decompose), so an After-decompose edge pushes
-// tool_result_cap behind the whole shaper chain; filehint/grammar/read_loop are request-prep
-// injectors with no hard order and fall by the D4 ID tiebreak.
+// Ordering returns the edge tool_result_cap's catalogue row declares (see init) — the row is the
+// source of record; this method is the domain.Mechanism remnant the registry still reads.
 func (toolResultCapMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{After: []domain.MechanismID{decomposeID}}
 }

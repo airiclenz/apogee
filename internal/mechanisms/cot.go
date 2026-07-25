@@ -31,13 +31,35 @@ const (
 	listNudgeID        domain.MechanismID = "list_nudge"
 )
 
+// init registers the three cot nudges' catalogue rows — one row per nudge, all three in this file
+// because they share the directive text and the read-only-turn window above.
 func init() {
-	catalogue[toolUseDirectiveID] = newToolUseDirective
-	catalogue[stallNudgeID] = newStallNudge
-	catalogue[listNudgeID] = newListNudge
-	descriptors[toolUseDirectiveID] = toolUseDirectiveDescriptor
-	descriptors[stallNudgeID] = stallNudgeDescriptor
-	descriptors[listNudgeID] = listNudgeDescriptor
+	register(row{
+		descriptor: toolUseDirectiveDescriptor,
+		// Ordering declares tool_use_directive Before toolfilter (§Ordering seed, ratified into Table A
+		// 2026-07-04, review-fixes item 11 / option A): the cot nudges shape the system prompt before
+		// toolfilter narrows the tool menu, matching the sim's cot → filter Transform order. Rename-proof
+		// and sim-faithful; the "fires only before first tool use" gate stays a runtime condition in
+		// PreRequest, not an ordering edge.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}},
+		construct: newToolUseDirective,
+	})
+	register(row{
+		descriptor: stallNudgeDescriptor,
+		// Ordering declares stall_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
+		// review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows
+		// the menu. The incompatibility with list_nudge is carried in the descriptor.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}},
+		construct: newStallNudge,
+	})
+	register(row{
+		descriptor: listNudgeDescriptor,
+		// Ordering declares list_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
+		// review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows
+		// the menu. The incompatibility with stall_nudge is carried in the descriptor.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}},
+		construct: newListNudge,
+	})
 }
 
 // cot directives + their idempotency markers, ported verbatim from apogee-sim internal/cot/cot.go
@@ -111,11 +133,8 @@ func (toolUseDirectiveMechanism) Descriptor() domain.MechanismDescriptor {
 	return toolUseDirectiveDescriptor
 }
 
-// Ordering declares tool_use_directive Before toolfilter (§Ordering seed, ratified into Table A
-// 2026-07-04, review-fixes item 11 / option A): the cot nudges shape the system prompt before
-// toolfilter narrows the tool menu, matching the sim's cot → filter Transform order. Rename-proof
-// and sim-faithful; the "fires only before first tool use" gate stays a runtime condition in
-// PreRequest, not an ordering edge.
+// Ordering returns the edge tool_use_directive's catalogue row declares (see init) — the row is
+// the source of record; this method is the domain.Mechanism remnant the registry still reads.
 func (toolUseDirectiveMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }
@@ -154,9 +173,8 @@ var stallNudgeDescriptor = domain.MechanismDescriptor{
 // Descriptor returns stall_nudge's static catalogue descriptor.
 func (stallNudgeMechanism) Descriptor() domain.MechanismDescriptor { return stallNudgeDescriptor }
 
-// Ordering declares stall_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
-// review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows
-// the menu. The incompatibility with list_nudge is carried in the descriptor.
+// Ordering returns the edge stall_nudge's catalogue row declares (see init) — the row is the
+// source of record; this method is the domain.Mechanism remnant the registry still reads.
 func (stallNudgeMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }
@@ -197,9 +215,8 @@ var listNudgeDescriptor = domain.MechanismDescriptor{
 // Descriptor returns list_nudge's static catalogue descriptor.
 func (listNudgeMechanism) Descriptor() domain.MechanismDescriptor { return listNudgeDescriptor }
 
-// Ordering declares list_nudge Before toolfilter (§Ordering seed, ratified into Table A 2026-07-04,
-// review-fixes item 11 / option A): the cot nudges shape the system prompt before toolfilter narrows
-// the menu. The incompatibility with stall_nudge is carried in the descriptor.
+// Ordering returns the edge list_nudge's catalogue row declares (see init) — the row is the source
+// of record; this method is the domain.Mechanism remnant the registry still reads.
 func (listNudgeMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }

@@ -59,21 +59,51 @@ type Deps struct {
 // invalid configuration) fails construction loudly rather than registering a half-built Mechanism.
 type constructor func(Deps) (domain.Mechanism, error)
 
-// catalogue is the constructor table: canonical MechanismID → its builder. It is the single
-// registry of buildable Mechanisms — Build looks an ID up here, and the config surface validates
-// an enabled `mechanisms:` key against its keys by driving Build. The literal starts empty; each
-// ported Mechanism adds its row (a `catalogue[id] = newFoo` line in its file's init(), beside the
-// Mechanism's implementation). The wiring is also exercised independently of the real rows via
-// buildFrom against a fake row (catalogue_test.go).
-var catalogue = map[domain.MechanismID]constructor{}
+// row is one catalogue entry — everything the engine needs to build and register one Mechanism.
+// The row is the single source of a Mechanism's metadata; the ID is descriptor.ID, never a
+// separate key, so a row can never be filed under an ID other than the one it describes.
+type row struct {
+	// descriptor is the Mechanism's static, harvestable metadata (ADR 0015 §3): its canonical ID,
+	// what Bypass turns off, how it self-regulates, and what it may or must be stacked with.
+	descriptor domain.MechanismDescriptor
+	// ordering is the Mechanism's declared position relative to its peers at the same hook point
+	// (ADR 0003). The zero value declares no edge, which is what most rows want, so it is omitted
+	// from those rows' literals.
+	ordering domain.OrderingConstraints
+	// construct builds the Mechanism itself from the injected Deps (D3).
+	construct constructor
+}
 
-// descriptors is the static descriptor table: canonical MechanismID → its MechanismDescriptor, the
-// harvestable twin of catalogue. Each mechanism file registers its row in the SAME init() that
-// registers its constructor, from the SAME package-level descriptor value its instance's
-// Descriptor() returns — so a row and the Mechanism it describes can never drift (equality by
-// construction, ADR 0015 §3). Descriptors() reads it, and the public CataloguedMechanisms query is
-// backed by it, so a Mechanism's metadata is available without building the Mechanism.
-var descriptors = map[domain.MechanismID]domain.MechanismDescriptor{}
+// catalogue is the Mechanism table: canonical MechanismID → its row. It is the single registry of
+// buildable Mechanisms — Build looks an ID up here, Descriptors() harvests the same rows' metadata
+// without building anything, and the config surface validates an enabled `mechanisms:` key against
+// its keys. The literal starts empty; each ported Mechanism adds its row with one
+// `register(row{…})` call in its file's init(), beside the Mechanism's implementation. The wiring
+// is also exercised independently of the real rows via buildFrom against a fake table
+// (catalogue_test.go).
+var catalogue = map[domain.MechanismID]row{}
+
+// register files one Mechanism's row in the production catalogue under r.descriptor.ID — the call
+// every Mechanism file makes once, from its own init().
+//
+// It PANICS on a row with an empty descriptor ID and on an ID that is already registered. Both are
+// init()-time programming errors inside this package (a mis-written row), never runtime conditions
+// a caller could handle, and the first test run catches them. register is deliberately unexported:
+// the catalogue is curated (ADR 0002 / ADR 0015 §6), so there is no public way to add a Mechanism
+// to it.
+func register(r row) { registerIn(catalogue, r) }
+
+// registerIn is register over an explicit table, so a test can exercise the empty-ID and
+// duplicate-ID panics without touching the production catalogue.
+func registerIn(table map[domain.MechanismID]row, r row) {
+	if r.descriptor.ID == "" {
+		panic("mechanisms: register: row with an empty descriptor ID")
+	}
+	if _, dup := table[r.descriptor.ID]; dup {
+		panic(fmt.Sprintf("mechanisms: register: duplicate Mechanism ID %q", r.descriptor.ID))
+	}
+	table[r.descriptor.ID] = r
+}
 
 // Build constructs the catalogued Mechanism identified by id, injecting deps (D3). It is the seam
 // cmd/apogee/wire.go drives for each enabled `mechanisms:` ID. An id absent from the catalogue is
@@ -93,9 +123,9 @@ func KnownIDs() []domain.MechanismID { return knownIDs(catalogue) }
 // without building a Mechanism. Each returned descriptor is a copy with its slice fields cloned, so
 // a caller cannot mutate the catalogue's rows.
 func Descriptors() []domain.MechanismDescriptor {
-	out := make([]domain.MechanismDescriptor, 0, len(descriptors))
-	for _, d := range descriptors {
-		out = append(out, cloneDescriptor(d))
+	out := make([]domain.MechanismDescriptor, 0, len(catalogue))
+	for _, r := range catalogue {
+		out = append(out, cloneDescriptor(r.descriptor))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -111,17 +141,17 @@ func cloneDescriptor(d domain.MechanismDescriptor) domain.MechanismDescriptor {
 
 // buildFrom is Build over an explicit table, so a test can exercise the lookup / unknown-id /
 // inject path against a fake row while the production catalogue is still empty.
-func buildFrom(table map[domain.MechanismID]constructor, id domain.MechanismID, deps Deps) (domain.Mechanism, error) {
-	build, ok := table[id]
+func buildFrom(table map[domain.MechanismID]row, id domain.MechanismID, deps Deps) (domain.Mechanism, error) {
+	r, ok := table[id]
 	if !ok {
 		return nil, fmt.Errorf("%w %q; known: %s", domain.ErrUnknownMechanism, id, knownList(table))
 	}
-	return build(deps)
+	return r.construct(deps)
 }
 
 // knownIDs returns the table's IDs sorted by their canonical spelling (the stable order the
 // dispatch tiebreak also keys on, D4), so error messages and listings are deterministic.
-func knownIDs(table map[domain.MechanismID]constructor) []domain.MechanismID {
+func knownIDs(table map[domain.MechanismID]row) []domain.MechanismID {
 	ids := make([]domain.MechanismID, 0, len(table))
 	for id := range table {
 		ids = append(ids, id)
@@ -132,7 +162,7 @@ func knownIDs(table map[domain.MechanismID]constructor) []domain.MechanismID {
 
 // knownList renders the table's IDs as a comma-separated string for an unknown-id error. An empty
 // catalogue (no Mechanism ported yet) renders "(none)" rather than an empty tail.
-func knownList(table map[domain.MechanismID]constructor) string {
+func knownList(table map[domain.MechanismID]row) string {
 	ids := knownIDs(table)
 	if len(ids) == 0 {
 		return "(none)"

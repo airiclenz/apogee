@@ -9,14 +9,23 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// read_repeat registers the redundant-re-read interceptor in the catalogue constructor table
-// (Phase-4 item 11, Wave 3 history-aware family). Default-off (D1). It is ported from apogee-sim
+// read_repeat registers the redundant-re-read interceptor's catalogue row (Phase-4 item 11, Wave 3
+// history-aware family). Default-off (D1). It is ported from apogee-sim
 // internal/proxy/read_repeat_interceptor.go @pin: when the model's whole response is reads of files
 // it already read successfully in a recent Turn, the contents are already in context, so it retries
 // in place with a "stop re-reading, proceed" hint.
 func init() {
-	catalogue[readRepeatID] = newReadRepeat
-	descriptors[readRepeatID] = readRepeatDescriptor
+	register(row{
+		descriptor: readRepeatDescriptor,
+		// Ordering runs read_repeat BEFORE tool_loop_interceptor and validate in the post-response cascade
+		// (apogee-sim response_analysis.go:54-94 @pin: the sim checks repeat-reads first, then the
+		// tool-loop, then validate, so the earliest match wins and short-circuits the rest — read_repeat is
+		// the HIGHEST priority). This contradicts catalogue Table A's "After validate" cell for read_repeat
+		// (a Table-A defect surfaced 2026-07-04; see the plan item-11 NOTES); the sim source is the
+		// behaviour ground truth (D7 as amended), so apogee follows the source's priority order.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{toolLoopInterceptorID, validateID}},
+		construct: newReadRepeat,
+	})
 }
 
 const readRepeatID domain.MechanismID = "read_repeat"
@@ -43,12 +52,8 @@ var readRepeatDescriptor = domain.MechanismDescriptor{
 // Descriptor returns read_repeat's static catalogue descriptor.
 func (readRepeatMechanism) Descriptor() domain.MechanismDescriptor { return readRepeatDescriptor }
 
-// Ordering runs read_repeat BEFORE tool_loop_interceptor and validate in the post-response cascade
-// (apogee-sim response_analysis.go:54-94 @pin: the sim checks repeat-reads first, then the
-// tool-loop, then validate, so the earliest match wins and short-circuits the rest — read_repeat is
-// the HIGHEST priority). This contradicts catalogue Table A's "After validate" cell for read_repeat
-// (a Table-A defect surfaced 2026-07-04; see the plan item-11 NOTES); the sim source is the
-// behaviour ground truth (D7 as amended), so apogee follows the source's priority order.
+// Ordering returns the edges read_repeat's catalogue row declares (see init) — the row is the
+// source of record; this method is the domain.Mechanism remnant the registry still reads.
 func (readRepeatMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{Before: []domain.MechanismID{toolLoopInterceptorID, validateID}}
 }

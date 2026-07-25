@@ -9,14 +9,21 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// toolfilter registers the tool-menu narrowing pre-request Mechanism in the catalogue constructor
-// table (Phase-4 item 10, Wave 3 request shapers). Default-off (D1) — the config surface builds it
+// toolfilter registers the tool-menu narrowing pre-request Mechanism's catalogue row (Phase-4 item
+// 10, Wave 3 request shapers). Default-off (D1) — the config surface builds it
 // only when the `mechanisms:` block enables it. It is ported from apogee-sim
 // internal/toolfilter/toolfilter.go @pin: a relevance-scored reduction of the tool menu for small
 // models, activating only when the menu is large (30+ tools) or the model has hallucinated a tool.
 func init() {
-	catalogue[toolFilterID] = newToolFilter
-	descriptors[toolFilterID] = toolFilterDescriptor
+	register(row{
+		descriptor: toolFilterDescriptor,
+		// Ordering declares toolfilter Before decompose (catalogue Table A: "trim the menu before the
+		// user-message rewrite"). decompose landed in item 12, so the edge names its canonical const like
+		// every other constraint in the package — the raw "decompose" literal this edge carried while the
+		// Mechanism was still absent was the one rename-fragile cross-reference left in the catalogue.
+		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{decomposeID}},
+		construct: newToolFilter,
+	})
 }
 
 const toolFilterID domain.MechanismID = "toolfilter"
@@ -78,11 +85,10 @@ var toolFilterDescriptor = domain.MechanismDescriptor{
 // Descriptor returns toolfilter's static catalogue descriptor.
 func (toolFilterMechanism) Descriptor() domain.MechanismDescriptor { return toolFilterDescriptor }
 
-// Ordering declares toolfilter Before decompose (catalogue Table A: "trim the menu before the
-// user-message rewrite"). decompose lands in item 12; until then the edge names an absent
-// Mechanism and MechanismRegistry.Ordered ignores it, so declaring it now is forward-compatible.
+// Ordering returns the edge toolfilter's catalogue row declares (see init) — the row is the source
+// of record; this method is the domain.Mechanism remnant the registry still reads.
 func (toolFilterMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{"decompose"}}
+	return domain.OrderingConstraints{Before: []domain.MechanismID{decomposeID}}
 }
 
 // PreRequest narrows the tool menu when it is large or the model has hallucinated a tool, keeping

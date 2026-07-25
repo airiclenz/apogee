@@ -11,11 +11,20 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// autofix registers the formatter-repair Mechanism in the catalogue constructor table (Phase-4
-// item 5). Default-off (D1).
+// autofix registers the formatter-repair Mechanism's catalogue row (Phase-4 item 5). Default-off
+// (D1).
 func init() {
-	catalogue[autofixID] = newAutofix
-	descriptors[autofixID] = autofixDescriptor
+	register(row{
+		descriptor: autofixDescriptor,
+		// Ordering runs autofix after validate and before syntax (catalogue Table A): the sim repairs
+		// before it corrects (response_analysis.go:72-88 @pin — detect → tryAutoFix →
+		// correct-the-remainder), so syntax's retry covers only what a formatter could not fix.
+		ordering: domain.OrderingConstraints{
+			After:  []domain.MechanismID{validateID},
+			Before: []domain.MechanismID{syntaxID},
+		},
+		construct: newAutofix,
+	})
 }
 
 // formatterTimeout bounds an external formatter subprocess so a hung tool cannot stall the Turn.
@@ -116,9 +125,8 @@ var autofixDescriptor = domain.MechanismDescriptor{
 // Descriptor returns autofix's static catalogue descriptor.
 func (autofixMechanism) Descriptor() domain.MechanismDescriptor { return autofixDescriptor }
 
-// Ordering runs autofix after validate and before syntax (catalogue Table A): the sim repairs
-// before it corrects (response_analysis.go:72-88 @pin — detect → tryAutoFix →
-// correct-the-remainder), so syntax's retry covers only what a formatter could not fix.
+// Ordering returns the edges autofix's catalogue row declares (see init) — the row is the source
+// of record; this method is the domain.Mechanism remnant the registry still reads.
 func (autofixMechanism) Ordering() domain.OrderingConstraints {
 	return domain.OrderingConstraints{
 		After:  []domain.MechanismID{validateID},

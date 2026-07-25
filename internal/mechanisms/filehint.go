@@ -13,15 +13,17 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// filehint registers the workspace-file-hint pre-request Mechanism in the catalogue constructor
-// table (Phase-4 item 10, Wave 3 request shapers). Default-off (D1) — the config surface builds it
+// filehint registers the workspace-file-hint pre-request Mechanism's catalogue row (Phase-4 item
+// 10, Wave 3 request shapers). Default-off (D1) — the config surface builds it
 // only when the `mechanisms:` block enables it. It is ported from apogee-sim
 // internal/filehint/filehint.go + internal/proxy/file_hint_detector.go @pin: after the model lists
 // a directory but before it reads anything, it scores the listed files against the user's prompt
 // and injects a role-safe hint suggesting the most relevant files to read first.
 func init() {
-	catalogue[fileHintID] = newFileHint
-	descriptors[fileHintID] = fileHintDescriptor
+	register(row{
+		descriptor: fileHintDescriptor,
+		construct:  newFileHint,
+	})
 }
 
 const fileHintID domain.MechanismID = "filehint"
