@@ -36,7 +36,7 @@ func TestDescendantLabelDecision(t *testing.T) {
 		},
 		{
 			name:              "own_low_prior_still_passes_through_the_journal",
-			prior:             fileSDDL, // journalLabelEntry decides what the entry may say
+			prior:             fileSDDL, // recordEntry decides what the entry may say
 			wantShouldJournal: true,
 			wantShouldLabel:   true,
 		},

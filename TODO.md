@@ -686,8 +686,8 @@ inside the module instead of in three cooperating call sites. What landed:
 - **`internal/platform/wintoken_windows.go`** — **101 lines**, the restricted low-integrity
   token mint, the one concern in the old file that is about the token rather than the box.
 
-**Two files in `internal/platform` are still over the ~400-line guideline. Neither is a finding
-— do not re-file them:**
+**Three files under `internal/platform` are still over the ~400-line guideline. None of them is a
+finding — do not re-file them:**
 
 - `confiner_windows_test.go` — **1377 lines**, over **by decision** (plan decision D7). It is
   the Windows-tagged lifecycle suite that asserts against real SACLs, real junctions and real
@@ -697,3 +697,11 @@ inside the module instead of in three cooperating call sites. What landed:
 - `host.go` — **434 lines**, pre-existing and **out of that plan's scope**: it is the untagged
   host rule table (`hostRules`, `split`, `Contains`, the POSIX/Windows tables), last changed in
   `019d93c`, before any of the split work. If it is ever picked up it wants its own entry.
+- `winlabel/journal_test.go` — **433 lines**, over **by decision** (owner call on the plan's
+  follow-up). It is the journal's untagged decision suite: nine functions covering the round trip
+  and the accessors, the atomic publish and its temp debris, the sibling scan, both halves of the
+  residue report, and the two fold-injected entry helpers (`recordEntry`, `unwindEntry`). They
+  share one vocabulary and one set of Windows path spellings, so splitting them for 33 lines
+  would scatter the journal-before-label invariant (ADR 0020 §2) across several suites. It is
+  also the only proof of that invariant's decision half on a machine that cannot write a real
+  SACL, which is exactly the property the module split was for.
