@@ -89,27 +89,17 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	return a, nil
 }
 
-// libraryMechanismID is the one catalogued ID whose presence in Config.EnableMechanisms makes the
-// engine build and Load a Library store into Deps (only `library` reads Deps.Library; every other
-// Mechanism ignores it). The catalogue owns the canonical constant (unexported there); this is the
-// loop's copy of the same literal, guarded by the tests asserting a non-`library` arm never wires a
-// store.
-const libraryMechanismID domain.MechanismID = "library"
-
 // buildEnabledMechanisms builds each Mechanism named on cfg.EnableMechanisms and Adds it into
 // registry — the merge target: the caller's Config.Mechanisms, or the fresh registry newAgent made
 // when that was nil — so catalogued Mechanisms and any pre-registered experimental hooks coexist in
 // one arm (ADR 0015 §2, locked decision 2). This is the single build path from Config to the live
 // registry: cmd/apogee/wire.go now only turns config.yaml into the Config.EnableMechanisms ID list
 // and leaves construction to here (ADR 0015 §1). IDs are built in sorted canonical order so a
-// build/register error is deterministic, and Deps are derived here: a Library store rooted at
-// Config.LibraryDir and Loaded ONLY when `library` is enabled (never an ambient ~/.apogee — ADR
-// 0001; a corrupt/absent store degrades to empty and never blocks construction, the store-persist
-// posture that already surfaces soft store failures to stderr), the model Fingerprint resolved
-// once, LookPath defaulted to exec.LookPath (nil), and the GrammarConstraint seam left inert. An
-// unknown ID (Build wraps domain.ErrUnknownMechanism), an ID listed twice or already pre-built into
-// the registry (the already-registered rejection), and a hook-less Mechanism all propagate as
-// construction failures.
+// build/register error is deterministic, and Deps are derived once by deriveDeps from what the
+// enabled ROWS declare they need (mechanisms.DepsNeeded) — so the build loop below is uniform for
+// every ID and names no Mechanism. An unknown ID (Build wraps domain.ErrUnknownMechanism), an ID
+// listed twice or already pre-built into the registry (the already-registered rejection), and a
+// hook-less Mechanism all propagate as construction failures.
 // An empty list builds nothing (the default-off posture untouched); the ordering, incompatibility,
 // and requirements gates then run over the merged registry unchanged.
 func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) error {
@@ -120,8 +110,33 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 	ids := slices.Clone(cfg.EnableMechanisms)
 	slices.Sort(ids)
 
+	deps := deriveDeps(cfg, mechanisms.DepsNeeded(ids))
+
+	for _, id := range ids {
+		m, err := mechanisms.Build(id, deps)
+		if err != nil {
+			return err
+		}
+		if err := registry.Add(m); err != nil {
+			return fmt.Errorf("apogee: enable mechanism %q: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// deriveDeps turns Config into the collaborators the enabled catalogue rows asked for, deriving each
+// one only when needs says some row actually reads it. This is the ADR 0015 §2 split in code: the
+// ENGINE derives Deps from Config — the store construction, the degrade notice and the identity
+// ladder all live here, outside internal/mechanisms — while the CATALOGUE declares which rows need
+// what (mechanisms.DepNeeds). A second Deps-bearing Mechanism therefore adds a flag and a row field,
+// never a branch in this package naming a Mechanism ID.
+//
+// A Library store is rooted at Config.LibraryDir and Loaded only for a needs.Library arm (never an
+// ambient ~/.apogee — ADR 0001). LookPath is left nil (the exec.LookPath default) and
+// GrammarConstraint inert: neither is derived from Config, so neither has a DepNeeds flag.
+func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	var deps mechanisms.Deps
-	if slices.Contains(ids, libraryMechanismID) {
+	if needs.Library {
 		store := library.NewStore(cfg.LibraryDir)
 		if err := store.Load(); err != nil {
 			// A broken/absent Library never blocks startup: Load leaves the store empty-and-usable on
@@ -141,17 +156,7 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 			ProbeDir: library.ProbeDir(cfg.ConfigDir),
 		})
 	}
-
-	for _, id := range ids {
-		m, err := mechanisms.Build(id, deps)
-		if err != nil {
-			return err
-		}
-		if err := registry.Add(m); err != nil {
-			return fmt.Errorf("apogee: enable mechanism %q: %w", id, err)
-		}
-	}
-	return nil
+	return deps
 }
 
 // resolveTools picks the Agent's tool set: an explicitly injected Config.Tools wins;

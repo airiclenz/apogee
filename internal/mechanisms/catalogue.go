@@ -19,11 +19,11 @@ import (
 // wires, not part of the loop's construction surface.
 type Deps struct {
 	// Library is the confidence-tagged observation store the library observe/inject Mechanism reads
-	// and writes (Phase-4 item 14; the store type landed in item 13). It is nil unless the `library`
-	// Mechanism is enabled — the engine's buildEnabledMechanisms (internal/agent/loop.go, the single
-	// Deps-deriving build path since the ADR 0015 wire.go collapse) constructs and Loads the store under
-	// Config.LibraryDir and injects it here only then, so a config without `library` builds no store.
-	// newLibrary refuses a nil store (errLibraryStoreRequired).
+	// and writes (Phase-4 item 14; the store type landed in item 13). It is nil unless a row that
+	// declares needs.Library is enabled — the engine's deriveDeps (internal/agent/construct.go, the
+	// single Deps-deriving path since the ADR 0015 wire.go collapse) constructs and Loads the store
+	// under Config.LibraryDir and injects it here only then, so a config without `library` builds no
+	// store. newLibrary refuses a nil store (errLibraryStoreRequired).
 	Library *library.Store
 
 	// Fingerprint is the resolved model identity the library Mechanism keys its store reads and writes
@@ -46,12 +46,29 @@ type Deps struct {
 	// llama.cpp WITHOUT native tool-calls (`proxy.go:625-634` @pin). apogee has no such
 	// backend-capability probe wired yet, and the provider wire itself carries no
 	// `response_format` field yet (`internal/agent/loop.go` toProviderRequest drops SetExtra —
-	// "response_format is a Phase-4 concern"), so buildEnabledMechanisms (internal/agent/loop.go — the
-	// single Deps-deriving build path since the ADR 0015 wire.go collapse) never populates this and
+	// "response_format is a Phase-4 concern"), so deriveDeps (internal/agent/construct.go — the
+	// single Deps-deriving path since the ADR 0015 wire.go collapse) never populates this and
 	// grammar no-ops on every current backend (catalogue Table B: "may no-op on all current apogee
 	// backends"). It is an inert forward seam like Library: a future backend probe populates it,
 	// and grammar's fire path is exercised today only by tests that inject it true.
 	GrammarConstraint bool
+}
+
+// DepNeeds is which construction-injected collaborators a set of enabled rows requires, so the
+// engine derives exactly those and nothing else. It is the catalogue's half of the ADR 0015 §2
+// split: the engine still derives Deps from Config, but WHICH Deps a run needs is declared by the
+// rows themselves (row.needs, ORed by DepsNeeded) rather than by an engine-side branch naming a
+// Mechanism ID.
+//
+// Library means BOTH Deps.Library (the observation store) and Deps.Fingerprint (the model identity
+// it keys on): they are resolved together, and only the library Mechanism reads either, so one flag
+// covers the pair.
+//
+// The struct grows with Deps: a future Deps field that must be DERIVED — as opposed to nil-defaulted
+// like LookPath or left inert like GrammarConstraint — adds a flag here, and the row that needs it
+// declares it.
+type DepNeeds struct {
+	Library bool
 }
 
 // constructor builds one catalogued Mechanism's HOOK from the injected Deps (D3) — the behaviour
@@ -73,6 +90,10 @@ type row struct {
 	// (ADR 0003). The zero value declares no edge, which is what most rows want, so it is omitted
 	// from those rows' literals.
 	ordering domain.OrderingConstraints
+	// needs declares which derived Deps this row's constructor reads (D4). The zero value needs
+	// nothing — which is what all but the library row want, so those literals omit the field — and the
+	// engine derives only what the enabled rows between them ask for (DepsNeeded).
+	needs DepNeeds
 	// construct builds the Mechanism's hook — its behaviour — from the injected Deps (D3).
 	construct constructor
 }
@@ -122,6 +143,25 @@ func Build(id domain.MechanismID, deps Deps) (domain.RegisteredMechanism, error)
 // KnownIDs returns the canonical IDs of every buildable Mechanism, sorted — the catalogue the
 // config surface (and its unknown-ID error) reports as the valid `mechanisms:` keys.
 func KnownIDs() []domain.MechanismID { return knownIDs(catalogue) }
+
+// DepsNeeded returns the union of the needs declared by every catalogued row named in ids — the
+// exact set of collaborators the engine must derive to build that Mechanism set, and nothing more.
+// It answers the engine's question ("what does this arm need?") from the catalogue, so no caller has
+// to know that `library` is the one row wanting a store.
+//
+// An ID absent from the catalogue is skipped silently: Build is the single place an unknown ID is
+// reported, and it reports it loudly a moment later, so failing here would only duplicate that.
+func DepsNeeded(ids []domain.MechanismID) DepNeeds {
+	var needs DepNeeds
+	for _, id := range ids {
+		r, ok := catalogue[id]
+		if !ok {
+			continue
+		}
+		needs.Library = needs.Library || r.needs.Library
+	}
+	return needs
+}
 
 // Descriptors returns every catalogued Mechanism's static descriptor, sorted by canonical ID and
 // duplicate-free — the metadata the public surface (CataloguedMechanisms, ADR 0015 §3) exposes

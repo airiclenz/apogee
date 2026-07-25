@@ -337,3 +337,38 @@ func TestRegisterRejectsDuplicateAndEmptyID(t *testing.T) {
 		t.Errorf("table holds %d rows; want only the first accepted row", len(table))
 	}
 }
+
+// DepsNeeded answers the engine's "what must I derive for this arm?" from the rows themselves, so
+// the build path carries no Mechanism ID literal: an arm of rows that declare nothing needs nothing
+// derived, and one containing `library` — the single row declaring needs — asks for the store (and
+// the Fingerprint it keys on). An ID absent from the catalogue contributes nothing rather than
+// failing here: Build is the one place an unknown ID is reported, loudly, a moment later.
+func TestDepsNeeded(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		ids  []domain.MechanismID
+		want DepNeeds
+	}{
+		"no mechanisms enabled": {ids: nil, want: DepNeeds{}},
+		"a row declaring no needs": {
+			ids:  []domain.MechanismID{"validate"},
+			want: DepNeeds{},
+		},
+		"library declares the store": {
+			ids:  []domain.MechanismID{"validate", "library"},
+			want: DepNeeds{Library: true},
+		},
+		"an uncatalogued ID is skipped": {
+			ids:  []domain.MechanismID{"not_a_real_mechanism"},
+			want: DepNeeds{},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := DepsNeeded(tc.ids); got != tc.want {
+				t.Errorf("DepsNeeded(%v) = %+v; want %+v", tc.ids, got, tc.want)
+			}
+		})
+	}
+}

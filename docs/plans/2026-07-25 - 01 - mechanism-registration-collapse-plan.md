@@ -443,9 +443,21 @@ new exported symbol. Commit:
 
 ---
 
-## 5. A catalogue row declares its Deps — `internal/mechanisms` + `internal/agent/construct.go`
+## 5. A catalogue row declares its Deps — `internal/mechanisms` + `internal/agent/construct.go` — ✅ DONE (2026-07-25)
 
 Closes problems 4 and 5: the duplicate ID literal and the engine's hardcoded special case.
+
+NOTES (2026-07-25): three doc comments in `internal/mechanisms` named the Deps-deriving path as
+"`buildEnabledMechanisms` (internal/agent/loop.go)" — `Deps.Library`, `Deps.GrammarConstraint` and
+`library.go`'s `init()` doc. Each now names `deriveDeps` (internal/agent/construct.go) and, for the
+library pair, the row's `needs` declaration. Beyond the item's literal text, but they are exactly
+the sentences this item makes false (the file pointer was already stale from the earlier
+loop.go → construct.go split).
+
+NOTES (2026-07-25): the third test bullet's corrupt-store arm already exists as
+`internal/agent/library_corrupt_store_test.go`'s `TestEnableMechanisms_CorruptLibraryStoreDegradesToEmpty`
+(construction succeeds, exactly one stderr degrade notice, empty store injects nothing). Verified
+passing against the moved `deriveDeps` path and reused rather than duplicated, as the bullet directs.
 
 - **`internal/mechanisms/catalogue.go`:**
   - **`type DepNeeds struct{ Library bool }`** — *which construction-injected collaborators a set of

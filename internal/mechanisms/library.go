@@ -19,8 +19,9 @@ var errLibraryStoreRequired = errors.New("apogee: library mechanism requires a L
 // library registers the cross-session learning Mechanism's catalogue row (Phase-4 item 14, the
 // Library's two loop-facing halves). Default-off (D1) — the config surface
 // builds it only when the `mechanisms:` block enables it, and it needs the Library store +
-// resolved fingerprint injected at construction (D3, derived by buildEnabledMechanisms in
-// internal/agent/loop.go — the single build path since the ADR 0015 wire.go collapse). It is ported from
+// resolved fingerprint injected at construction (D3) — which is what the row's `needs` field below
+// declares, and what deriveDeps in internal/agent/construct.go derives on the strength of that
+// declaration (the single build path since the ADR 0015 wire.go collapse). It is ported from
 // apogee-sim internal/library/{observer,transform}.go @pin.
 //
 // The catalogue lists a SINGLE `library` row (Table A) whose hook point is "pre-request (inject);
@@ -37,7 +38,11 @@ func init() {
 		// review-fixes item 11 / option A): the inject side shapes the system prompt before toolfilter
 		// narrows the tool menu, matching the sim's cot → library → filter Transform order. The observe
 		// (post-response) side is a pure reader and carries no ordering edge.
-		ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}},
+		ordering: domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}},
+		// The one row that needs derived Deps: the observation store AND the model Fingerprint it
+		// keys on (one flag, since they are resolved together and only this Mechanism reads either).
+		// Declaring it here is what keeps the engine's build loop free of a `library` special case.
+		needs:     DepNeeds{Library: true},
 		construct: newLibrary,
 	})
 }
