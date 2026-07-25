@@ -285,9 +285,19 @@ func scrubURLError(err error, rawURL string) string {
 		if ue.Err != nil {
 			cause = ue.Err.Error()
 		}
-		return strings.TrimSpace(ue.Op) + ": " + redactSubstring(cause, rawURL)
+		return strings.TrimSpace(ue.Op) + ": " + redactRequestURL(cause, rawURL)
 	}
-	return redactSubstring(err.Error(), rawURL)
+	return redactRequestURL(err.Error(), rawURL)
+}
+
+// redactRequestURL removes the request URL from s in BOTH the form the caller supplied and its
+// whitespace-trimmed form. The trimmed form matters because url-safety parses the TRIMMED URL
+// (security/urlsafety.go) and quotes it in its "unparseable url" reason — so a model passing
+// " http://exa mple.com/?key=SECRET" (note the leading space) would otherwise get a message
+// keyed on a string that never matches, leaking the key (M2).
+func redactRequestURL(s, rawURL string) string {
+	s = redactSubstring(s, rawURL)
+	return redactSubstring(s, strings.TrimSpace(rawURL))
 }
 
 // redactSubstring removes any occurrence of secret from s (defence-in-depth in case the

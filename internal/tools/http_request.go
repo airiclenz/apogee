@@ -76,16 +76,17 @@ var deniedRequestHeaders = map[string]bool{
 
 // HTTPRequest performs a general http(s) request (method, headers, body) and returns the
 // response status, a stable header subset, and the (capped) body. It is an ExternalEffectTool
-// of kind network, filtered by the same URLGuard (scheme/host + SSRF floor, pre-flight and at
-// dial time) as web_fetch. Stateless across Turns (ADR 0008).
+// of kind network that reaches the network ONLY through the embedded network funnel, the same
+// way web_fetch does — the funnel applies url-safety and carries the url-filter marker
+// dispatch trusts (network.go). Stateless across Turns (ADR 0008).
 type HTTPRequest struct {
 	toolSpec
-	guard security.URLGuard
+	networkTool
 }
 
-// NewHTTPRequest returns an http_request tool that filters every URL through guard.
+// NewHTTPRequest returns an http_request tool whose funnel filters every URL through guard.
 func NewHTTPRequest(guard security.URLGuard) *HTTPRequest {
-	return &HTTPRequest{toolSpec: httpRequestSpec, guard: guard}
+	return &HTTPRequest{toolSpec: httpRequestSpec, networkTool: networkTool{guard: guard}}
 }
 
 // ExternalEffect reports that http_request reaches the network (kind network).
@@ -114,82 +115,80 @@ func (t *HTTPRequest) Execute(ctx context.Context, call domain.ToolCall) (domain
 		return errorResult(call.ID, fmt.Sprintf("unsupported HTTP method %q", method)), nil
 	}
 
-	if err := t.guard.CheckContext(ctx, args.URL); err != nil {
-		return errorResult(call.ID, "url blocked by url-safety: "+err.Error()), nil
+	// The header filter runs BEFORE the funnel: a call it rejects must reach no host.
+	header, errMsg := applyRequestHeaders(args.Headers)
+	if errMsg != "" {
+		return errorResult(call.ID, errMsg), nil
 	}
 
 	var bodyReader io.Reader
 	if args.Body != "" {
 		bodyReader = strings.NewReader(args.Body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, args.URL, bodyReader)
-	if err != nil {
-		return errorResult(call.ID, "could not build request: "+err.Error()), nil
-	}
-	if errMsg := applyRequestHeaders(req, args.Headers); errMsg != "" {
-		return errorResult(call.ID, errMsg), nil
-	}
 
-	client := newHTTPClient(t.guard, clampTimeout(args.TimeoutSeconds))
-	resp, err := client.Do(req)
+	// The funnel owns url-safety (pre-flight and at dial time), the client, the timeout
+	// ceiling, the request and the host-scoped failure message; the tool only renders.
+	resp, msg, err := t.do(ctx, netRequest{
+		url:     args.URL,
+		method:  method,
+		body:    bodyReader,
+		header:  header,
+		timeout: clampTimeout(args.TimeoutSeconds),
+	})
 	if err != nil {
-		if ctx.Err() != nil {
-			return domain.ToolResult{}, ctx.Err()
-		}
-		if networkURLError(err) {
-			return errorResult(call.ID, "url blocked by url-safety: "+err.Error()), nil
-		}
-		return errorResult(call.ID, "request failed: "+err.Error()), nil
+		return domain.ToolResult{}, err
 	}
-	defer resp.Body.Close()
-
-	body, truncated := readCappedBody(resp.Body)
-	return okResult(call.ID, renderRequestResult(resp, body, truncated)), nil
+	if msg != "" {
+		return errorResult(call.ID, msg), nil
+	}
+	return okResult(call.ID, renderRequestResult(resp)), nil
 }
 
-// applyRequestHeaders sets the caller-supplied headers on req after filtering: a header on the
-// hop-by-hop / framing deny-list (incl. a forged Host) is rejected, the total count is capped at
-// maxRequestHeaders, and each value is capped at maxRequestHeaderValueBytes. It returns a
-// non-empty error message for a rejected/over-limit header (surfaced to the model as a result
-// error) and "" on success. The filter is tighten-only — it only ever removes a model's reach.
-func applyRequestHeaders(req *http.Request, headers map[string]string) (errMsg string) {
+// applyRequestHeaders filters the caller-supplied headers and returns the header block the
+// funnel sends: a header on the hop-by-hop / framing deny-list (incl. a forged Host) is
+// rejected, the total count is capped at maxRequestHeaders, and each value is capped at
+// maxRequestHeaderValueBytes. A rejected/over-limit header yields a non-empty error message
+// (surfaced to the model as a result error, with no request made) and no header block. The
+// filter is tighten-only — it only ever removes a model's reach.
+func applyRequestHeaders(headers map[string]string) (header http.Header, errMsg string) {
 	if len(headers) > maxRequestHeaders {
-		return fmt.Sprintf("too many request headers: %d (max %d)", len(headers), maxRequestHeaders)
+		return nil, fmt.Sprintf("too many request headers: %d (max %d)", len(headers), maxRequestHeaders)
 	}
+	header = make(http.Header, len(headers))
 	for k, v := range headers {
 		canonical := http.CanonicalHeaderKey(strings.TrimSpace(k))
 		if canonical == "" {
-			return "empty header name is not allowed"
+			return nil, "empty header name is not allowed"
 		}
 		if deniedRequestHeaders[canonical] {
-			return fmt.Sprintf("header %q may not be set by http_request (it is transport-controlled or unsafe to override)", canonical)
+			return nil, fmt.Sprintf("header %q may not be set by http_request (it is transport-controlled or unsafe to override)", canonical)
 		}
 		if len(v) > maxRequestHeaderValueBytes {
-			return fmt.Sprintf("header %q value too large: %d bytes (max %d)", canonical, len(v), maxRequestHeaderValueBytes)
+			return nil, fmt.Sprintf("header %q value too large: %d bytes (max %d)", canonical, len(v), maxRequestHeaderValueBytes)
 		}
-		req.Header.Set(canonical, v)
+		header.Set(canonical, v)
 	}
-	return ""
+	return header, ""
 }
 
 // renderRequestResult formats the response for the model: status, a stable (sorted) header
 // list, and the (capped) body.
-func renderRequestResult(resp *http.Response, body string, truncated bool) string {
+func renderRequestResult(resp netResponse) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "HTTP %s\n", resp.Status)
+	fmt.Fprintf(&b, "HTTP %s\n", resp.status)
 
-	keys := make([]string, 0, len(resp.Header))
-	for k := range resp.Header {
+	keys := make([]string, 0, len(resp.header))
+	for k := range resp.header {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s: %s\n", k, strings.Join(resp.Header[k], ", "))
+		fmt.Fprintf(&b, "%s: %s\n", k, strings.Join(resp.header[k], ", "))
 	}
 
 	b.WriteString("\n")
-	b.WriteString(body)
-	if truncated {
+	b.WriteString(resp.body)
+	if resp.truncated {
 		fmt.Fprintf(&b, "\n\n[response truncated at %d bytes]", maxNetworkResponseBytes)
 	}
 	return b.String()

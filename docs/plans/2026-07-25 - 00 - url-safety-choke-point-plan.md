@@ -181,7 +181,25 @@ Commit: `feat(tools): url-filtered network funnel — the marker rides with the 
 
 ---
 
-## 2. `web_fetch` and `http_request` onto the funnel
+## 2. `web_fetch` and `http_request` onto the funnel — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): four deviations/additions. (a) the renderers are **not** literally untouched:
+`renderFetchResult` / `renderRequestResult` now take a single `netResponse` instead of
+`(*http.Response, body, truncated)` — the funnel never yields an `*http.Response`, so the
+signature had to move; the formatting logic is unchanged line for line (only field accessors:
+`resp.Status`→`resp.status`, `resp.Header`→`resp.header`). (b) `applyRequestHeaders` now takes only
+the map and **returns** `(http.Header, errMsg)` instead of mutating a request — the form
+`netRequest.header` needs; its deny-list, count cap and value cap are unchanged. Side effect: the
+header filter now runs *before* url-safety (it used to run after the tool's own `CheckContext`), so
+a rejected header block short-circuits before any guard/DNS work — same messages, same
+"request never went out" guarantee. (c) `timeout` is passed as `clampTimeout(args.TimeoutSeconds)`,
+the funnel's own seconds-typed entry point (defined in `network.go`), rather than converting
+`TimeoutSeconds` inline: identical resolution (the funnel's `clampDuration` re-run is idempotent),
+and it keeps `clampTimeout` the live `http_request` entry point item 1's funnel test documents.
+(d) fixed the M2 residual item 1's verifier flagged, now that `do` is model-reachable: url-safety
+parses the **trimmed** URL and quotes it in its "unparseable url" reason, so `scrubURLError`
+redacts both the raw and the trimmed form (new `redactRequestURL` helper in `network.go`);
+regression case in the new `network_test.go` table, verified to fail without the fix.
 
 The simple pair — both do check → client → do → render. All in `internal/tools/web_fetch.go` and
 `internal/tools/http_request.go`.

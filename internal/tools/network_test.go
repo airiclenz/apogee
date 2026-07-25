@@ -291,6 +291,65 @@ func TestHTTPRequest_BlockedURLIsResultError(t *testing.T) {
 	}
 }
 
+// ---- web_fetch + http_request: the M2 generalization ------------------------
+
+// TestNetworkTools_FailureMessagesDoNotLeakKey is the M2 regression for the simple pair: now
+// that web_fetch and http_request reach the network only through the funnel, every failure
+// message names the bare HOST and never the (possibly key-bearing) request URL — the
+// protection that used to be web_search's private discipline (web_search_redaction_test.go).
+// The whitespace case is the one url-safety trims: it parses the TRIMMED URL and quotes that
+// back in its "unparseable url" reason, so redaction must cover the trimmed form too.
+func TestNetworkTools_FailureMessagesDoNotLeakKey(t *testing.T) {
+	t.Parallel()
+
+	// A reachable server closed immediately, so the request fails at the transport with a
+	// *url.Error embedding the full request URL (host + query + key).
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	closedURL := srv.URL + "/x?key=" + secretKey
+	srv.Close()
+
+	cases := []struct {
+		name string
+		// guard is the tool's url-safety policy; the zero value keeps the SSRF floor ON.
+		guard security.URLGuard
+		url   string
+		// host is the bare host the message must still name for diagnosability; "" when the
+		// URL is unparseable and there is no host to name.
+		host string
+	}{
+		{"blocked by the SSRF floor", security.URLGuard{}, "http://127.0.0.1:9/x?key=" + secretKey, "127.0.0.1"},
+		{"transport failure", loopbackGuard(), closedURL, "127.0.0.1"},
+		{"unparseable url with leading whitespace", loopbackGuard(), " http://exa mple.com/?key=" + secretKey, ""},
+	}
+	makeTool := map[string]func(security.URLGuard) domain.Tool{
+		"web_fetch":    func(g security.URLGuard) domain.Tool { return NewWebFetch(g) },
+		"http_request": func(g security.URLGuard) domain.Tool { return NewHTTPRequest(g) },
+	}
+
+	for name, newTool := range makeTool {
+		for _, tc := range cases {
+			t.Run(name+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				res, err := newTool(tc.guard).Execute(context.Background(), domain.ToolCall{
+					ID: "c1", Tool: name, Arguments: jsonArgs(t, map[string]any{"url": tc.url}),
+				})
+				if err != nil {
+					t.Fatalf("unexpected Go error: %v", err)
+				}
+				if !res.IsError {
+					t.Fatalf("want a result error, got %q", res.Content)
+				}
+				if strings.Contains(res.Content, secretKey) {
+					t.Fatalf("API key LEAKED into the %s failure message: %q", name, res.Content)
+				}
+				if tc.host != "" && !strings.Contains(res.Content, tc.host) {
+					t.Errorf("message should name the bare host %q for diagnosability: %q", tc.host, res.Content)
+				}
+			})
+		}
+	}
+}
+
 // ---- web_search ------------------------------------------------------------
 
 // TestWebSearch_EmptyEndpointDefaultsToDuckDuckGo is deliberately white-box and does NOT

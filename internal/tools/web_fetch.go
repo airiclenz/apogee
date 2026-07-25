@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -30,17 +29,18 @@ type webFetchArgs struct {
 // WebFetch performs a single GET against an http(s) URL and returns the response status and
 // body (capped). It is an ExternalEffectTool of kind network: the disposition auto-runs it in
 // Auto (url-filtered) and routes it through the injected ExternalEffects boundary for the
-// bench. Every URL passes the URLGuard (scheme/host allow-deny + the resolved-IP SSRF floor)
-// before the request and at dial time. Stateless across Turns (ADR 0008).
+// bench. It reaches the network ONLY through the embedded network funnel, which is what
+// applies url-safety and what carries the url-filter marker dispatch trusts (network.go).
+// Stateless across Turns (ADR 0008).
 type WebFetch struct {
 	toolSpec
-	guard security.URLGuard
+	networkTool
 }
 
-// NewWebFetch returns a web_fetch tool that filters every URL through guard (the host's
-// url-safety policy plus the default-on SSRF floor).
+// NewWebFetch returns a web_fetch tool whose funnel filters every URL through guard (the
+// host's url-safety policy plus the default-on SSRF floor).
 func NewWebFetch(guard security.URLGuard) *WebFetch {
-	return &WebFetch{toolSpec: webFetchSpec, guard: guard}
+	return &WebFetch{toolSpec: webFetchSpec, networkTool: networkTool{guard: guard}}
 }
 
 // ExternalEffect reports that web_fetch reaches the network — the kind the disposition keys
@@ -62,45 +62,29 @@ func (t *WebFetch) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, "url is required"), nil
 	}
 
-	// Pre-flight url-safety (scheme/host + the resolved-IP SSRF floor). The dial-time floor
-	// (SafeDialControl, inside the client) is the rebinding backstop.
-	if err := t.guard.CheckContext(ctx, args.URL); err != nil {
-		return errorResult(call.ID, "url blocked by url-safety: "+err.Error()), nil
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, args.URL, nil)
+	// The funnel owns url-safety (pre-flight and at dial time), the client, the request and
+	// the host-scoped failure message; web_fetch only says what to fetch and renders.
+	resp, msg, err := t.do(ctx, netRequest{url: args.URL})
 	if err != nil {
-		return errorResult(call.ID, "could not build request: "+err.Error()), nil
+		return domain.ToolResult{}, err
 	}
-
-	client := newHTTPClient(t.guard, defaultNetworkTimeout)
-	resp, err := client.Do(req)
-	if err != nil {
-		if ctx.Err() != nil {
-			return domain.ToolResult{}, ctx.Err()
-		}
-		if networkURLError(err) {
-			return errorResult(call.ID, "url blocked by url-safety: "+err.Error()), nil
-		}
-		return errorResult(call.ID, "request failed: "+err.Error()), nil
+	if msg != "" {
+		return errorResult(call.ID, msg), nil
 	}
-	defer resp.Body.Close()
-
-	body, truncated := readCappedBody(resp.Body)
-	return okResult(call.ID, renderFetchResult(resp, body, truncated)), nil
+	return okResult(call.ID, renderFetchResult(resp)), nil
 }
 
 // renderFetchResult formats the GET response for the model: a status line, the resolved
 // content type, and the (capped) body.
-func renderFetchResult(resp *http.Response, body string, truncated bool) string {
+func renderFetchResult(resp netResponse) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "HTTP %s\n", resp.Status)
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
+	fmt.Fprintf(&b, "HTTP %s\n", resp.status)
+	if ct := resp.header.Get("Content-Type"); ct != "" {
 		fmt.Fprintf(&b, "Content-Type: %s\n", ct)
 	}
 	b.WriteString("\n")
-	b.WriteString(body)
-	if truncated {
+	b.WriteString(resp.body)
+	if resp.truncated {
 		fmt.Fprintf(&b, "\n\n[response truncated at %d bytes]", maxNetworkResponseBytes)
 	}
 	return b.String()
