@@ -57,6 +57,33 @@ func TestIsURLFilteredNetworker_NonCarrier(t *testing.T) {
 	}
 }
 
+// TestDefaultTools_EveryNetworkToolIsURLFiltered is the "impossible to forget" property for
+// Apogee's OWN tools, and the reason the funnel exists: it walks the default tool set and
+// requires every tool that declares domain.EffectNetwork to carry the url-filter marker. A
+// future built-in network tool that hand-rolls its own http.Client (skipping networkTool.do,
+// and with it the URLGuard) fails HERE rather than silently auto-running unattended in Auto,
+// which is what dispatch does for the vouched-for class. It also fails if a marker assertion
+// in network.go is deleted while the tool keeps embedding the funnel — the assertion block is
+// documentation, this walk is the guarantee.
+func TestDefaultTools_EveryNetworkToolIsURLFiltered(t *testing.T) {
+	t.Parallel()
+
+	network := 0
+	for _, tool := range DefaultToolsWithHost(t.TempDir(), HostTools{}) {
+		ext, ok := tool.(domain.ExternalEffectTool)
+		if !ok || ext.ExternalEffect() != domain.EffectNetwork {
+			continue
+		}
+		network++
+		if !IsURLFilteredNetworker(tool) {
+			t.Errorf("%q declares EffectNetwork but carries no url-filter marker: it must reach the network through the funnel (embed networkTool and call do)", tool.Name())
+		}
+	}
+	if network == 0 {
+		t.Fatal("no EffectNetwork tool in the default set — the walk would prove nothing; check DefaultToolsWithHost")
+	}
+}
+
 // TestNetworkFunnel_DoSuccess covers the happy path: the funnel sends the caller's method,
 // body and headers, and returns the wire facts (status, status code, header, body) with no
 // failure message and no Go error.

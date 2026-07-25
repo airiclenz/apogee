@@ -56,11 +56,12 @@ const (
 // receives the query as the `q` GET parameter (the common shape for a search backend; a
 // host whose endpoint differs can front it with a thin adapter): an HTML response is
 // cleaned into title/url/snippet results, a JSON/text response passes through verbatim. It
-// is an ExternalEffectTool of kind network, filtered by the same URLGuard + SSRF floor as
-// the other network tools. Stateless across Turns.
+// is an ExternalEffectTool of kind network that reaches the network ONLY through the
+// embedded network funnel — the funnel applies url-safety and carries the url-filter marker
+// dispatch trusts (network.go). Stateless across Turns.
 type WebSearch struct {
 	toolSpec
-	guard    security.URLGuard
+	networkTool
 	endpoint string
 	provider searchProvider
 	disabled bool // the endpoint was the off sentinel — Execute reports gracefully, no request
@@ -78,9 +79,9 @@ func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
 	endpoint = strings.TrimSpace(endpoint)
 	switch strings.ToLower(endpoint) {
 	case "":
-		return &WebSearch{toolSpec: webSearchSpec, guard: guard, endpoint: defaultSearchEndpoint, provider: providerDuckDuckGo}
+		return &WebSearch{toolSpec: webSearchSpec, networkTool: networkTool{guard: guard}, endpoint: defaultSearchEndpoint, provider: providerDuckDuckGo}
 	case "off", "none", "disabled":
-		return &WebSearch{toolSpec: webSearchSpec, guard: guard, disabled: true}
+		return &WebSearch{toolSpec: webSearchSpec, networkTool: networkTool{guard: guard}, disabled: true}
 	}
 	if u, err := url.Parse(endpoint); err != nil || u.Host == "" {
 		if healed, herr := url.Parse("https://" + endpoint); herr == nil && healed.Host != "" {
@@ -91,7 +92,7 @@ func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
 	if u, err := url.Parse(endpoint); err == nil && strings.EqualFold(u.Hostname(), defaultSearchHost) {
 		provider = providerDuckDuckGo
 	}
-	return &WebSearch{toolSpec: webSearchSpec, guard: guard, endpoint: endpoint, provider: provider}
+	return &WebSearch{toolSpec: webSearchSpec, networkTool: networkTool{guard: guard}, endpoint: endpoint, provider: provider}
 }
 
 // ExternalEffect reports that web_search reaches the network (kind network).
@@ -118,6 +119,14 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return okResult(call.ID, "web search is disabled on this host (web-search-endpoint: off); web_search is unavailable."), nil
 	}
 
+	// endpointHost is the bare host of the configured endpoint — the ONLY part of the
+	// endpoint safe to surface to the model. The constructed reqURL carries the query and
+	// may carry a config'd API key in its parameters (the endpoint "preserves any
+	// parameters it already carries"); it must never reach a model-facing or logged string
+	// (security-review M2). It rides along as the funnel's safeLabel, so every failure
+	// message the funnel renders names this host and nothing else.
+	endpointHost := safeHost(t.endpoint)
+
 	// The DuckDuckGo provider carries the query in a POST form body, so its reqURL is the
 	// bare endpoint: DDG's HTML front-end answers a GET with its bot-challenge ("anomaly")
 	// page — results come only over POST, the way its own search form submits. A custom
@@ -127,65 +136,50 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		var err error
 		reqURL, err = buildSearchURL(t.endpoint, args.Query)
 		if err != nil {
-			return errorResult(call.ID, "could not build search url: "+err.Error()), nil
+			return errorResult(call.ID, "could not build search url for host "+endpointHost+": "+scrubURLError(err, t.endpoint)), nil
 		}
-	}
-	// endpointHost is the bare host of the configured endpoint — the ONLY part of the
-	// endpoint safe to surface to the model. The constructed reqURL carries the query and
-	// may carry a config'd API key in its parameters (the endpoint "preserves any
-	// parameters it already carries"); it must never reach a model-facing or logged string
-	// (security-review M2). Every error below renders endpointHost or a URL-scrubbed error,
-	// never reqURL.
-	endpointHost := safeHost(t.endpoint)
-
-	if err := t.guard.CheckContext(ctx, reqURL); err != nil {
-		return errorResult(call.ID, "search endpoint blocked by url-safety (host "+endpointHost+")"), nil
 	}
 
 	method := http.MethodGet
 	var reqBody io.Reader
+	var header http.Header
 	if t.provider == providerDuckDuckGo {
 		method = http.MethodPost
 		reqBody = strings.NewReader(url.Values{"q": {args.Query}}.Encode())
-	}
-	req, err := http.NewRequestWithContext(ctx, method, reqURL, reqBody)
-	if err != nil {
-		return errorResult(call.ID, "could not build search request for host "+endpointHost), nil
-	}
-	if t.provider == providerDuckDuckGo {
 		// Browser-like headers: DuckDuckGo's HTML front-end serves challenge pages to bare
 		// clients far more often. Scoped to the built-in provider so a custom backend sees
 		// the same request it always did (a content-negotiating backend must keep returning
 		// its clean JSON/text). No Accept-Encoding — Go's transport only transparently
 		// un-gzips when it set that header itself.
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-		req.Header.Set("Accept", "text/html")
-		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+		header = http.Header{}
+		header.Set("Content-Type", "application/x-www-form-urlencoded")
+		header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+		header.Set("Accept", "text/html")
+		header.Set("Accept-Language", "en-US,en;q=0.9")
 	}
 
-	client := newHTTPClient(t.guard, defaultNetworkTimeout)
-	resp, err := client.Do(req)
+	// The funnel owns url-safety (pre-flight and at dial time), the client, the request and
+	// the host-scoped, URL-scrubbed failure message; web_search keeps only what genuinely
+	// differs — its non-2xx policy and its rendering.
+	resp, msg, err := t.do(ctx, netRequest{
+		url:       reqURL,
+		method:    method,
+		body:      reqBody,
+		header:    header,
+		safeLabel: endpointHost,
+	})
 	if err != nil {
-		if ctx.Err() != nil {
-			return domain.ToolResult{}, ctx.Err()
-		}
-		if networkURLError(err) {
-			return errorResult(call.ID, "search endpoint blocked by url-safety (host "+endpointHost+")"), nil
-		}
-		// A transport error's text (*url.Error) embeds the FULL request URL — which here
-		// carries the query and any API key — so scrub the URL out before surfacing it.
-		return errorResult(call.ID, "search request to host "+endpointHost+" failed: "+scrubURLError(err, reqURL)), nil
+		return domain.ToolResult{}, err
 	}
-	defer resp.Body.Close()
-
-	body, truncated := readCappedBody(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if msg != "" {
+		return errorResult(call.ID, msg), nil
+	}
+	if resp.statusCode < 200 || resp.statusCode >= 300 {
 		// Non-2xx is a failed search, surfaced with only status + host: the body of a
 		// rate-limit or challenge page is noise, and the URL must stay scrubbed (M2).
-		return errorResult(call.ID, "search endpoint returned HTTP "+resp.Status+" (host "+endpointHost+")"), nil
+		return errorResult(call.ID, "search endpoint returned HTTP "+resp.status+" (host "+endpointHost+")"), nil
 	}
-	return okResult(call.ID, renderSearch(t.provider, resp, body, args.Query, truncated)), nil
+	return okResult(call.ID, renderSearch(t.provider, resp, args.Query)), nil
 }
 
 // buildSearchURL appends the query as the `q` parameter to the configured endpoint,

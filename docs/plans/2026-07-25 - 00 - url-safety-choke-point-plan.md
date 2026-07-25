@@ -241,7 +241,28 @@ internal/tools/http_request.go` returns **nothing**; both files shrink. Commit:
 
 ---
 
-## 3. `web_search` onto the funnel, and the marker assertions
+## 3. `web_search` onto the funnel, and the marker assertions — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): four deviations plus one corrected plan assumption. (a) `renderSearch` is **not**
+literally untouched: it now takes `(provider, netResponse, query)` instead of
+`(provider, *http.Response, body, query, truncated)` — the funnel never yields an `*http.Response`,
+and body/truncated already ride on `netResponse` (same move item 2 made for `renderFetchResult`);
+`renderSearchResult(netResponse)` follows, the formatting logic is unchanged line for line, and
+`web_search_render.go` drops its now-unused `net/http` import. Consequently
+`web_search_render_test.go`'s two direct `renderSearch` call sites were repointed (2 lines, a
+compile necessity, not a behaviour edit); every assertion in it is unchanged. (b) same for
+`network_test.go:445`'s white-box literal `&WebSearch{guard: …}` → `&WebSearch{networkTool:
+networkTool{guard: …}, …}` — the embed forces it. (c) M2 residual fixed in the one message the
+funnel does not own: `"could not build search url: "+err.Error()` echoed `url.Parse`'s error, which
+embeds the **configured, possibly key-bearing** endpoint, so it now reads `"could not build search
+url for host <endpointHost>: "+scrubURLError(err, t.endpoint)`. (d) the `WebSearch` doc comment drops
+"filtered by the same URLGuard + SSRF floor as the other network tools" for "reaches the network ONLY
+through the embedded network funnel", mirroring item 2's pair. Corrected assumption: the acceptance's
+"the registry-walk test fails if any assertion is removed" does **not** hold — the marker rides the
+`networkTool` embed, so deleting a `_ urlFilteredNetworker` assertion changes nothing at runtime (the
+assertion block is documentation; a comment above it now says so). The walk fails when a built-in
+tool does not route through the funnel, proven by temporarily appending an unvouched `EffectNetwork`
+tool to `DefaultToolsWithHost` (test failed naming it, then reverted).
 
 The delicate one — it has the disabled sentinel, two provider request shapes, a non-2xx policy of
 its own, and it is where the M2 scrubbing came from. All in `internal/tools/web_search.go`.

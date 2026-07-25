@@ -442,7 +442,7 @@ func TestWebSearch_DuckDuckGoProviderPosts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := &WebSearch{guard: loopbackGuard(), endpoint: srv.URL, provider: providerDuckDuckGo}
+	tool := &WebSearch{networkTool: networkTool{guard: loopbackGuard()}, endpoint: srv.URL, provider: providerDuckDuckGo}
 	res, err := tool.Execute(context.Background(), domain.ToolCall{
 		ID: "c1", Tool: "web_search", Arguments: jsonArgs(t, map[string]any{"query": "golang docs"}),
 	})

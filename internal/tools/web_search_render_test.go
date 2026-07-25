@@ -71,15 +71,15 @@ func TestParseDDGResults_Fixture(t *testing.T) {
 // rate-limit/consent page) renders "No results" — never its stripped text.
 func TestRenderSearch_DuckDuckGoAlwaysStructured(t *testing.T) {
 	t.Parallel()
-	resp := &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Header: http.Header{}}
+	resp := netResponse{status: "200 OK", statusCode: http.StatusOK, header: http.Header{}, body: ddgFixture}
 
-	out := renderSearch(providerDuckDuckGo, resp, ddgFixture, "golang docs", false)
+	out := renderSearch(providerDuckDuckGo, resp, "golang docs")
 	if !strings.Contains(out, "1. Go Documentation & Guides") || !strings.Contains(out, "https://go.dev/doc/") {
 		t.Errorf("structured render missing numbered title/url: %q", out)
 	}
 
-	challenge := `<html><body><p>Unfortunately, bots use DuckDuckGo too.</p></body></html>`
-	out = renderSearch(providerDuckDuckGo, resp, challenge, "golang docs", false)
+	resp.body = `<html><body><p>Unfortunately, bots use DuckDuckGo too.</p></body></html>`
+	out = renderSearch(providerDuckDuckGo, resp, "golang docs")
 	if out != "No results found for: golang docs" {
 		t.Errorf("an anchor-less DDG page must render 'No results', got: %q", out)
 	}

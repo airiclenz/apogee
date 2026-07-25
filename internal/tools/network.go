@@ -309,11 +309,19 @@ func redactSubstring(s, secret string) string {
 	return strings.ReplaceAll(s, secret, "[redacted-url]")
 }
 
+// The marker assertions are the compile-time half of the funnel contract: each of Apogee's
+// own network tools carries urlFilteredNetworker, which it can only obtain by embedding
+// networkTool (and therefore by reaching the network through do). Deleting an assertion does
+// not silently un-vouch a tool: TestDefaultTools_EveryNetworkToolIsURLFiltered walks the
+// default set and fails on any EffectNetwork tool without the marker.
 var (
 	_ domain.Tool               = (*WebFetch)(nil)
 	_ domain.ExternalEffectTool = (*WebFetch)(nil)
+	_ urlFilteredNetworker      = (*WebFetch)(nil)
 	_ domain.Tool               = (*HTTPRequest)(nil)
 	_ domain.ExternalEffectTool = (*HTTPRequest)(nil)
+	_ urlFilteredNetworker      = (*HTTPRequest)(nil)
 	_ domain.Tool               = (*WebSearch)(nil)
 	_ domain.ExternalEffectTool = (*WebSearch)(nil)
+	_ urlFilteredNetworker      = (*WebSearch)(nil)
 )

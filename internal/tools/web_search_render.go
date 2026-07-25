@@ -3,7 +3,6 @@ package tools
 import (
 	"fmt"
 	"html"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -52,28 +51,31 @@ type searchResult struct {
 //     first (covers a self-hosted DDG mirror), generic tag-stripping otherwise.
 //   - custom endpoint, non-HTML response: verbatim pass-through — the backend's own clean
 //     JSON/text document, exactly as before.
-func renderSearch(provider searchProvider, resp *http.Response, body, query string, truncated bool) string {
+//
+// resp is what the network funnel brought back (network.go): the wire facts plus the already
+// capped body, since the funnel — not the tool — owns the request.
+func renderSearch(provider searchProvider, resp netResponse, query string) string {
 	if provider == providerDuckDuckGo {
-		results := parseDDGResults(body)
+		results := parseDDGResults(resp.body)
 		if len(results) == 0 {
 			return "No results found for: " + query
 		}
 		return renderStructuredResults(results)
 	}
-	if contentLooksHTML(resp.Header.Get("Content-Type"), body) {
-		if results := parseDDGResults(body); len(results) > 0 {
+	if contentLooksHTML(resp.header.Get("Content-Type"), resp.body) {
+		if results := parseDDGResults(resp.body); len(results) > 0 {
 			return renderStructuredResults(results)
 		}
-		cleaned := cleanHTMLText(body)
+		cleaned := cleanHTMLText(resp.body)
 		if cleaned == "" {
 			return "No results found for: " + query
 		}
-		if truncated {
+		if resp.truncated {
 			cleaned += fmt.Sprintf("\n\n[results truncated at %d bytes]", maxNetworkResponseBytes)
 		}
 		return cleaned
 	}
-	return renderSearchResult(resp, body, truncated)
+	return renderSearchResult(resp)
 }
 
 // parseDDGResults extracts structured results from a DuckDuckGo-shaped HTML page: result
@@ -162,11 +164,11 @@ func renderStructuredResults(results []searchResult) string {
 
 // renderSearchResult is the verbatim pass-through for a custom endpoint's non-HTML (clean)
 // response: a status line and the (capped) raw body, the backend's own result document.
-func renderSearchResult(resp *http.Response, body string, truncated bool) string {
+func renderSearchResult(resp netResponse) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "HTTP %s\n\n", resp.Status)
-	b.WriteString(body)
-	if truncated {
+	fmt.Fprintf(&b, "HTTP %s\n\n", resp.status)
+	b.WriteString(resp.body)
+	if resp.truncated {
 		fmt.Fprintf(&b, "\n\n[results truncated at %d bytes]", maxNetworkResponseBytes)
 	}
 	return b.String()
