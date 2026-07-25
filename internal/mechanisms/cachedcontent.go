@@ -33,7 +33,9 @@ import (
 func init() {
 	register(row{
 		descriptor: cachedContentDescriptor,
-		construct:  newCachedContentIntercept,
+		// No ordering edge (the descriptor's incompatibility edges are the only constraint):
+		// cached_content_intercept is the sole pre-tool-exec Mechanism in this wave.
+		construct: newCachedContentIntercept,
 	})
 }
 
@@ -63,15 +65,6 @@ var cachedContentDescriptor = domain.MechanismDescriptor{
 	Capability:       domain.CapProactiveNudge,
 	Suppression:      domain.SuppressStrikesThree,
 	IncompatibleWith: []domain.MechanismID{readLoopID, readRepeatID},
-}
-
-// Descriptor returns cached_content_intercept's static catalogue descriptor.
-func (cachedContentMechanism) Descriptor() domain.MechanismDescriptor { return cachedContentDescriptor }
-
-// Ordering declares no positive edge (the incompatibility edges above are the only constraint):
-// cached_content_intercept is the sole pre-tool-exec Mechanism in this wave.
-func (cachedContentMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
 }
 
 // PreToolExec caps a redundant re-read of an unchanged file (apogee-sim detectCachedReread @pin,

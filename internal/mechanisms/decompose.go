@@ -198,15 +198,6 @@ var decomposeDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns decompose's static catalogue descriptor.
-func (decomposeMechanism) Descriptor() domain.MechanismDescriptor { return decomposeDescriptor }
-
-// Ordering returns the edge decompose's catalogue row declares (see init) — the row is the source
-// of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (decomposeMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}}
-}
-
 // PreRequest collapses complex multi-step prompts still sitting in history and hints the single next
 // actionable step of the current prompt, faithfully reproducing apogee-sim Decomposer.Transform's
 // control flow @pin. All conversation reads happen before any mutation so the decision is taken

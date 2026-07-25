@@ -46,17 +46,6 @@ var syntaxDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns syntax's static catalogue descriptor.
-func (syntaxMechanism) Descriptor() domain.MechanismDescriptor { return syntaxDescriptor }
-
-// Ordering returns the edges syntax's catalogue row declares (see init) — the row is the source of
-// record; this method is a remnant of the self-describing interface; nothing reads it.
-func (syntaxMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{
-		After: []domain.MechanismID{validateID, autofixID},
-	}
-}
-
 // PostResponse checks the syntax of every write tool call's content and, on any error, retries in
 // place with a correction — the loop re-streams the corrected request in the same Turn (R1). A
 // response with no correctable write content is a no-op.

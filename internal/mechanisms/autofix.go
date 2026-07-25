@@ -122,18 +122,6 @@ var autofixDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns autofix's static catalogue descriptor.
-func (autofixMechanism) Descriptor() domain.MechanismDescriptor { return autofixDescriptor }
-
-// Ordering returns the edges autofix's catalogue row declares (see init) — the row is the source
-// of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (autofixMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{
-		After:  []domain.MechanismID{validateID},
-		Before: []domain.MechanismID{syntaxID},
-	}
-}
-
 // PostResponse attempts a repair of every syntax-broken write tool call, writing each improved
 // payload back to the call the loop will dispatch. The decision is ActionIntercept when at least
 // one call was repaired (the response was altered in place), and a no-op decision otherwise —

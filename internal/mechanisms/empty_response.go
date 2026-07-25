@@ -12,7 +12,9 @@ import (
 func init() {
 	register(row{
 		descriptor: emptyResponseRecoveryDescriptor,
-		construct:  newEmptyResponseRecovery,
+		// No ordering edge (catalogue Table A: "none — 2-retry cap, per-Turn cooldown"): the
+		// off-ramp fires on empty replies independently of the response-repair cascade.
+		construct: newEmptyResponseRecovery,
 	})
 }
 
@@ -41,17 +43,6 @@ var emptyResponseRecoveryDescriptor = domain.MechanismDescriptor{
 	ID:          emptyResponseRecoveryID,
 	Capability:  domain.CapOffRamp,
 	Suppression: domain.SuppressExempt,
-}
-
-// Descriptor returns empty_response_recovery's static catalogue descriptor.
-func (emptyResponseRecoveryMechanism) Descriptor() domain.MechanismDescriptor {
-	return emptyResponseRecoveryDescriptor
-}
-
-// Ordering declares no constraints (catalogue Table A: "none — 2-retry cap, per-Turn cooldown"):
-// the off-ramp fires on empty replies independently of the response-repair cascade.
-func (emptyResponseRecoveryMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
 }
 
 // completionCheckNudge is the correction the retried request carries, ported verbatim from

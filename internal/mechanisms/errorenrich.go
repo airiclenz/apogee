@@ -16,7 +16,9 @@ import (
 func init() {
 	register(row{
 		descriptor: errorEnrichmentDescriptor,
-		construct:  newErrorEnrichment,
+		// No ordering edge (catalogue Table A: "none"): error_enrichment classifies read-vs-write
+		// from the originating call and stands alone at post-tool-result.
+		construct: newErrorEnrichment,
 	})
 }
 
@@ -98,17 +100,6 @@ var errorEnrichmentDescriptor = domain.MechanismDescriptor{
 	ID:          errorEnrichmentID,
 	Capability:  domain.CapResponseRepair,
 	Suppression: domain.SuppressStrikesThree,
-}
-
-// Descriptor returns error_enrichment's static catalogue descriptor.
-func (errorEnrichmentMechanism) Descriptor() domain.MechanismDescriptor {
-	return errorEnrichmentDescriptor
-}
-
-// Ordering declares no constraints (catalogue Table A: "none"): error_enrichment classifies read-
-// vs-write from the originating call and stands alone at post-tool-result.
-func (errorEnrichmentMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
 }
 
 // PostToolResult appends the enrichment hint to a write-tool error result when an earlier write to

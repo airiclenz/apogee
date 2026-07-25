@@ -82,15 +82,6 @@ var toolFilterDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns toolfilter's static catalogue descriptor.
-func (toolFilterMechanism) Descriptor() domain.MechanismDescriptor { return toolFilterDescriptor }
-
-// Ordering returns the edge toolfilter's catalogue row declares (see init) — the row is the source
-// of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (toolFilterMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{decomposeID}}
-}
-
 // PreRequest narrows the tool menu when it is large or the model has hallucinated a tool, keeping
 // the recently-used tools whole and the top-scored remainder up to the keep limit. It is a no-op —
 // booking no fire (the loop keys acted fires on Request.Revision, R4) — when filtering is not

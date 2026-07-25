@@ -15,7 +15,9 @@ import (
 func init() {
 	register(row{
 		descriptor: truncateHistoryDescriptor,
-		construct:  newTruncateHistory,
+		// No ordering edge (catalogue Table A: "none — cut only at AssistantBoundaries(), never
+		// PrefixEnd()"): the truncator rewrites history independently of any other Mechanism.
+		construct: newTruncateHistory,
 	})
 }
 
@@ -66,17 +68,6 @@ var truncateHistoryDescriptor = domain.MechanismDescriptor{
 	ID:          truncateHistoryID,
 	Capability:  domain.CapProactiveNudge,
 	Suppression: domain.SuppressStrikesThree,
-}
-
-// Descriptor returns truncate_history's static catalogue descriptor.
-func (truncateHistoryMechanism) Descriptor() domain.MechanismDescriptor {
-	return truncateHistoryDescriptor
-}
-
-// Ordering declares no constraints (catalogue Table A: "none — cut only at AssistantBoundaries(),
-// never PrefixEnd()"): the truncator rewrites history independently of any other Mechanism.
-func (truncateHistoryMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
 }
 
 // RewriteHistory drops the middle of conv, keeping the protected prefix and the last keepLastTurns

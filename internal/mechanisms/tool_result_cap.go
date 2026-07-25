@@ -63,15 +63,6 @@ var toolResultCapDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns tool_result_cap's static catalogue descriptor.
-func (toolResultCapMechanism) Descriptor() domain.MechanismDescriptor { return toolResultCapDescriptor }
-
-// Ordering returns the edge tool_result_cap's catalogue row declares (see init) — the row is the
-// source of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (toolResultCapMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{After: []domain.MechanismID{decomposeID}}
-}
-
 // PreRequest caps each oversized tool result in req, protecting the most recent tool-call Turn.
 // maxChars is the per-result ceiling derived from the Budget; a zero ceiling (the window is
 // unknown, so the Budget carries no allocation) is a no-op, matching the generative Compaction

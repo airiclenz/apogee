@@ -213,11 +213,12 @@ func TestPreRequestOrderingSeeds(t *testing.T) {
 	}
 }
 
-// Every catalogued Mechanism has a static descriptor row keyed by its own ID, Descriptors() is
-// sorted and duplicate-free, and each built instance's Descriptor() equals its static row — so the
-// harvestable metadata (ADR 0015 §3) can never drift from the Mechanism it describes. The row is the
-// SINGLE source: the same package-level value the init() registered and the instance's Descriptor()
-// returns.
+// Every catalogued Mechanism has a static descriptor row keyed by its own ID, and Descriptors() is
+// sorted and duplicate-free — the contract the public CataloguedMechanisms() query (ADR 0015 §3)
+// rests on. The drift this test once guarded — a built instance's Descriptor() disagreeing with its
+// static row — is now UNREPRESENTABLE: the row registered in the Mechanism's init() is the single
+// source of its metadata, and Build joins it to the hook once, so there is no second copy to
+// disagree.
 func TestDescriptorsMatchCatalogue(t *testing.T) {
 	t.Parallel()
 
@@ -253,9 +254,10 @@ func TestDescriptorsMatchCatalogue(t *testing.T) {
 		if row.ID != id {
 			t.Errorf("descriptor row for catalogue key %q has ID %q", id, row.ID)
 		}
-		// The built instance's descriptor equals its static row (equality by construction). library
-		// needs its store injected (D3, catalogue_test fake-Deps pattern); every other Mechanism
-		// builds with benign zero Deps.
+		// What Build hands the registry carries the same descriptor Descriptors() harvested, so the
+		// pre-build metadata query and the post-build registry agree. library needs its store
+		// injected (D3, catalogue_test fake-Deps pattern); every other Mechanism builds with benign
+		// zero Deps.
 		deps := Deps{}
 		if id == libraryID {
 			deps = Deps{Library: library.NewStore(t.TempDir())}
@@ -267,20 +269,6 @@ func TestDescriptorsMatchCatalogue(t *testing.T) {
 		}
 		if got := m.Descriptor; !reflect.DeepEqual(got, row) {
 			t.Errorf("Build(%q).Descriptor = %+v; want its static row %+v", id, got, row)
-		}
-		// The hook's own Descriptor() — the remnant of the self-describing interface, deleted once
-		// nothing reads it — still answers with the same row, so nothing drifted when the metadata
-		// moved off the instance. Asserted through an ad-hoc interface because the registry no
-		// longer names one.
-		described, ok := m.Hook.(interface {
-			Descriptor() domain.MechanismDescriptor
-		})
-		if !ok {
-			t.Errorf("Build(%q).Hook carries no Descriptor method", id)
-			continue
-		}
-		if got := described.Descriptor(); !reflect.DeepEqual(got, row) {
-			t.Errorf("Build(%q).Hook.Descriptor() = %+v; want its static row %+v", id, got, row)
 		}
 	}
 }

@@ -47,15 +47,6 @@ var toolLoopDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns tool_loop_interceptor's static catalogue descriptor.
-func (toolLoopMechanism) Descriptor() domain.MechanismDescriptor { return toolLoopDescriptor }
-
-// Ordering returns the edge tool_loop_interceptor's catalogue row declares (see init) — the row is
-// the source of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (toolLoopMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{validateID}}
-}
-
 // PostResponse retries in place with a loop-breaking directive when the response repeats the exact
 // tool calls of the immediately-previous assistant Turn (apogee-sim detectToolCallLoop +
 // retryWithToolLoopDirective @pin). Delivery is ActionRetry{Inject} (R1): the loop re-streams,

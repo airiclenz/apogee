@@ -22,7 +22,9 @@ import (
 func init() {
 	register(row{
 		descriptor: fileHintDescriptor,
-		construct:  newFileHint,
+		// No ordering edge (catalogue Table A: "none (greenfield-suppressed internally)"): the hint
+		// injector is a request-prep step with no hard order against the other shapers.
+		construct: newFileHint,
 	})
 }
 
@@ -69,15 +71,6 @@ var fileHintDescriptor = domain.MechanismDescriptor{
 	ID:          fileHintID,
 	Capability:  domain.CapProactiveNudge,
 	Suppression: domain.SuppressStrikesThree,
-}
-
-// Descriptor returns filehint's static catalogue descriptor.
-func (fileHintMechanism) Descriptor() domain.MechanismDescriptor { return fileHintDescriptor }
-
-// Ordering declares no constraints (catalogue Table A: "none (greenfield-suppressed internally)"):
-// the hint injector is a request-prep step with no hard order against the other shapers.
-func (fileHintMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
 }
 
 // PreRequest injects a role-safe file hint when the model has listed a directory it has not yet

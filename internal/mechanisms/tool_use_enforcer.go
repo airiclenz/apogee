@@ -13,7 +13,9 @@ import (
 func init() {
 	register(row{
 		descriptor: toolUseEnforcerDescriptor,
-		construct:  newToolUseEnforcer,
+		// No ordering edge (catalogue Table A: "none — 3-retry cap is its throttle"): the off-ramp
+		// fires on narration independently of the response-repair cascade.
+		construct: newToolUseEnforcer,
 	})
 }
 
@@ -41,17 +43,6 @@ var toolUseEnforcerDescriptor = domain.MechanismDescriptor{
 	ID:          toolUseEnforcerID,
 	Capability:  domain.CapOffRamp,
 	Suppression: domain.SuppressExempt,
-}
-
-// Descriptor returns tool_use_enforcer's static catalogue descriptor.
-func (toolUseEnforcerMechanism) Descriptor() domain.MechanismDescriptor {
-	return toolUseEnforcerDescriptor
-}
-
-// Ordering declares no constraints (catalogue Table A: "none — 3-retry cap is its throttle"): the
-// off-ramp fires on narration independently of the response-repair cascade.
-func (toolUseEnforcerMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
 }
 
 // PostResponse retries in place with a "use a tool" correction when the model narrated instead

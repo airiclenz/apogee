@@ -48,15 +48,6 @@ var validateDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns validate's static catalogue descriptor.
-func (validateMechanism) Descriptor() domain.MechanismDescriptor { return validateDescriptor }
-
-// Ordering returns the edges validate's catalogue row declares (see init) — the row is the source
-// of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (validateMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{syntaxID, autofixID}}
-}
-
 // PostResponse validates the response's tool calls and, on any error, retries in place with a
 // correction — the loop re-streams the corrected request in the same Turn (R1). A response with
 // no tool calls, or with only valid calls, is a no-op.

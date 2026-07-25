@@ -388,9 +388,29 @@ deleted or weakened in this item** — if one cannot be preserved, stop and flag
 
 ---
 
-## 4. Delete the dead metadata methods — `internal/mechanisms` (21 files)
+## 4. Delete the dead metadata methods — `internal/mechanisms` (21 files) — ✅ DONE (2026-07-25)
 
 Pure subtraction, confined to one package. After item 3 nothing calls these.
+
+NOTES (2026-07-25): the `constructor` typedef and all 21 constructor signatures were ALREADY
+`func(Deps) (any, error)` — item 3 changed them there, as its own NOTES record. This item's second
+bullet is therefore recorded and skipped, exactly as the bullet's parenthetical allows; no
+constructor was edited.
+NOTES (2026-07-25): the 13 `Ordering()` methods whose rationale item 1 had already moved to their
+rows carried only a pointer comment ("a remnant of the self-describing interface; nothing reads
+it"), so those comments went with their methods. The other **8** — the rows that omit the
+`ordering` field — carried a catalogue Table A rationale for having *no* edge (e.g.
+truncate_history's *"none — cut only at AssistantBoundaries(), never PrefixEnd()"*), which lives
+nowhere else. Rather than lose it, each moved onto its row where the omitted `ordering` field would
+sit, in the same shape item 1 used for the non-empty ones, reworded from "Ordering declares no
+constraints" to "No ordering edge". That is the item's only addition (35 inserted lines); the
+files are cachedcontent, empty_response, errorenrich, filehint, grammar, readloop,
+tool_use_enforcer, truncate_history.
+NOTES (2026-07-25): no *type*-level doc comment needed rephrasing — none claimed the Mechanism
+"supplies" its descriptor; the surviving mentions ("the descriptor's strikes-3 policy routes self-
+regulation…") describe the descriptor's content, not where it lives, and stay true.
+NOTES (2026-07-25): actual `git diff --stat` on `internal/mechanisms`: **20 files changed, 35
+insertions(+), 235 deletions(-)** — a net **−200** lines, matching the item's estimate.
 
 - Delete all **21** `Descriptor()` and **21** `Ordering()` methods.
 - `constructor` becomes `func(Deps) (any, error)` and the 21 constructors return `any` — they

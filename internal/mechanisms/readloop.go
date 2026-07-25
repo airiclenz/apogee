@@ -21,7 +21,10 @@ import (
 func init() {
 	register(row{
 		descriptor: readLoopDescriptor,
-		construct:  newReadLoop,
+		// No ordering edge (catalogue Table A: the descriptor's incompatibility edges are the only
+		// constraint); read_loop is a request-prep injector with no hard order against the other
+		// pre-request shapers.
+		construct: newReadLoop,
 	})
 }
 
@@ -51,14 +54,6 @@ var readLoopDescriptor = domain.MechanismDescriptor{
 	// may be enabled at a time (the sim's per-request exclusivity becomes per-config).
 	IncompatibleWith: []domain.MechanismID{cachedContentInterceptID, readRepeatID},
 }
-
-// Descriptor returns read_loop's static catalogue descriptor.
-func (readLoopMechanism) Descriptor() domain.MechanismDescriptor { return readLoopDescriptor }
-
-// Ordering declares no positive edge (catalogue Table A: the incompatibility edges above are the
-// only constraint); read_loop is a request-prep injector with no hard order against the other
-// pre-request shapers.
-func (readLoopMechanism) Ordering() domain.OrderingConstraints { return domain.OrderingConstraints{} }
 
 // PreRequest injects the appropriate read-loop hint, role-safe and idempotent, when the model is
 // failing to read the same file repeatedly (greenfield or normal) or re-reading the same file

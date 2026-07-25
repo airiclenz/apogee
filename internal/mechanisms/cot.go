@@ -128,17 +128,6 @@ var toolUseDirectiveDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns tool_use_directive's static catalogue descriptor.
-func (toolUseDirectiveMechanism) Descriptor() domain.MechanismDescriptor {
-	return toolUseDirectiveDescriptor
-}
-
-// Ordering returns the edge tool_use_directive's catalogue row declares (see init) — the row is
-// the source of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (toolUseDirectiveMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
-}
-
 // PreRequest injects the tool-use directive when the user asked for an action (not analysis), tools
 // are available, and the model has neither written a file nor used any tool yet (apogee-sim
 // wantToolUse @pin). It books no fire (Request.Revision, R4) when the condition does not hold or the
@@ -168,15 +157,6 @@ var stallNudgeDescriptor = domain.MechanismDescriptor{
 	Capability:       domain.CapProactiveNudge,
 	Suppression:      domain.SuppressStrikesThree,
 	IncompatibleWith: []domain.MechanismID{listNudgeID},
-}
-
-// Descriptor returns stall_nudge's static catalogue descriptor.
-func (stallNudgeMechanism) Descriptor() domain.MechanismDescriptor { return stallNudgeDescriptor }
-
-// Ordering returns the edge stall_nudge's catalogue row declares (see init) — the row is the
-// source of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (stallNudgeMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }
 
 // PreRequest injects the stall directive when an action request has stalled — read-only for at least
@@ -210,15 +190,6 @@ var listNudgeDescriptor = domain.MechanismDescriptor{
 	Capability:       domain.CapProactiveNudge,
 	Suppression:      domain.SuppressStrikesThree,
 	IncompatibleWith: []domain.MechanismID{stallNudgeID},
-}
-
-// Descriptor returns list_nudge's static catalogue descriptor.
-func (listNudgeMechanism) Descriptor() domain.MechanismDescriptor { return listNudgeDescriptor }
-
-// Ordering returns the edge list_nudge's catalogue row declares (see init) — the row is the source
-// of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (listNudgeMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
 }
 
 // PreRequest injects the list nudge when an analysis request has listed directories but read no

@@ -19,7 +19,9 @@ import (
 func init() {
 	register(row{
 		descriptor: grammarDescriptor,
-		construct:  newGrammar,
+		// No ordering edge (catalogue Table A: "none — backend-capability gated"): the grammar
+		// constraint is derived from the tool menu independently of any other shaper.
+		construct: newGrammar,
 	})
 }
 
@@ -54,15 +56,6 @@ var grammarDescriptor = domain.MechanismDescriptor{
 	ID:          grammarID,
 	Capability:  domain.CapProactiveNudge,
 	Suppression: domain.SuppressStrikesThree,
-}
-
-// Descriptor returns grammar's static catalogue descriptor.
-func (grammarMechanism) Descriptor() domain.MechanismDescriptor { return grammarDescriptor }
-
-// Ordering declares no constraints (catalogue Table A: "none — backend-capability gated"): the
-// grammar constraint is derived from the tool menu independently of any other shaper.
-func (grammarMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{}
 }
 
 // PreRequest sets a json_schema `response_format` constraining the model to a valid tool call over

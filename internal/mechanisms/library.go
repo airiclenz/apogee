@@ -126,15 +126,6 @@ var libraryDescriptor = domain.MechanismDescriptor{
 	Suppression: domain.SuppressStrikesThree,
 }
 
-// Descriptor returns library's static catalogue descriptor.
-func (*libraryMechanism) Descriptor() domain.MechanismDescriptor { return libraryDescriptor }
-
-// Ordering returns the edge library's catalogue row declares (see init) — the row is the source of
-// record; this method is a remnant of the self-describing interface; nothing reads it.
-func (*libraryMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{toolFilterID}}
-}
-
 // PreRequest injects qualifying observations into the system prompt when the fingerprint clears the
 // confidence gate (apogee-sim Injector.Transform @pin). It books a fire only when it actually injects
 // (AppendToSystem bumps Revision), so a gated-off or empty-query pass is not a fire (R4).

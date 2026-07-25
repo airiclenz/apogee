@@ -112,17 +112,6 @@ var guidedDecompositionDescriptor = domain.MechanismDescriptor{
 	Requires:         []domain.MechanismID{toolResultCapID},
 }
 
-// Descriptor returns guided_decomposition's static catalogue descriptor.
-func (guidedDecompositionMechanism) Descriptor() domain.MechanismDescriptor {
-	return guidedDecompositionDescriptor
-}
-
-// Ordering returns the edge guided_decomposition's catalogue row declares (see init) — the row is
-// the source of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (guidedDecompositionMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{After: []domain.MechanismID{toolFilterID}}
-}
-
 // PreRequest injects the enumeration steer on an oversized primary call so the model first plans the
 // work as a numbered list of self-contained subtasks (ADR 0014 §2/§5). It fires only on MEASURED
 // signals (no verb heuristics) and only where a fan-out is meaningful and not already under way:

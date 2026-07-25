@@ -49,15 +49,6 @@ var readRepeatDescriptor = domain.MechanismDescriptor{
 	IncompatibleWith: []domain.MechanismID{cachedContentInterceptID},
 }
 
-// Descriptor returns read_repeat's static catalogue descriptor.
-func (readRepeatMechanism) Descriptor() domain.MechanismDescriptor { return readRepeatDescriptor }
-
-// Ordering returns the edges read_repeat's catalogue row declares (see init) — the row is the
-// source of record; this method is a remnant of the self-describing interface; nothing reads it.
-func (readRepeatMechanism) Ordering() domain.OrderingConstraints {
-	return domain.OrderingConstraints{Before: []domain.MechanismID{toolLoopInterceptorID, validateID}}
-}
-
 // PostResponse retries in place with a "you already read these" hint when every requested tool call
 // is a read of a file read successfully in a recent Turn (apogee-sim detectRepeatReads +
 // retryWithReadRepeatHint @pin). Delivery is ActionRetry{Inject} (R1, the amended C5): the loop
