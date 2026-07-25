@@ -259,6 +259,38 @@ type ToolCall = domain.ToolCall
 // ToolResult is what a tool returns to the loop (pre tool-result-capping).
 type ToolResult = domain.ToolResult
 
+// ToolSummary is the sealed sum type of the structured outcome a built-in tool may
+// attach to its ToolResult beside the prose Content — the facts a host renders without
+// parsing text written for the model. Like Event, the sealing marker stays unexported in
+// internal/domain: an embedder can READ every variant and ADD none. Attaching one is
+// optional, so a tool that emits no summary (every embedder tool does) renders through
+// the prose path exactly as before.
+type ToolSummary = domain.ToolSummary
+
+// ReadSpan is read_file's summary: the 1-based inclusive line span returned, and the
+// file's total line count.
+type ReadSpan = domain.ReadSpan
+
+// WroteBytes is write_file's summary: the number of bytes written.
+type WroteBytes = domain.WroteBytes
+
+// ListedEntries is list_dir's summary: the directory's total entry count and how many
+// the listing skipped.
+type ListedEntries = domain.ListedEntries
+
+// MatchedLines is grep's summary: the total number of matching lines, zero included.
+type MatchedLines = domain.MatchedLines
+
+// DiffStat is view_diff's summary: the lines the diff adds and removes.
+type DiffStat = domain.DiffStat
+
+// SearchHits is web_search's summary: the number of structured results returned.
+type SearchHits = domain.SearchHits
+
+// OpenedFile is open_file's summary: the file body's line count and where an optional
+// locate term was found.
+type OpenedFile = domain.OpenedFile
+
 // ToolRegistry is the injectable set of available tools.
 type ToolRegistry = domain.ToolRegistry
 

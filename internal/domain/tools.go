@@ -100,6 +100,15 @@ type ToolResult struct {
 	CallID  string
 	Content string
 	IsError bool
+	// Summary is the OPTIONAL structured half of the outcome, for a host that renders
+	// this result (toolsummary.go). Nil — the default, and what an embedder's tool
+	// always returns — means there is nothing but the prose: the host reads Content.
+	//
+	// It describes what the TOOL DID, not what the text says, so text rewriting never
+	// invalidates it: a Mechanism that edits Content on the PostToolResult seam, and the
+	// loop's own clampToolResult elision of an oversized result, both leave the summary
+	// true. It is view-facing only — the model reads Content — and is never persisted.
+	Summary ToolSummary
 }
 
 // ToolRegistry is the injectable set of available tools (ADR 0001 — injectable, no

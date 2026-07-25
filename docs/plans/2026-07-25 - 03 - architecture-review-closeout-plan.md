@@ -205,7 +205,14 @@ lines**, so `foldStats` sits in a god-file it has nothing to do with.
 
 ---
 
-## 1. `domain.ToolSummary` — the sealed sum and the optional field
+## 1. `domain.ToolSummary` — the sealed sum and the optional field — ✅ DONE (2026-07-25)
+
+NOTES (2026-07-25): `TestToolResultZeroValueHasNoSummary` pins the "unchanged in every other
+field" half with a three-field `ToolResult` composite literal rather than with "the existing
+constructors": `okResult`/`errorResult` live in `internal/tools`, which imports `domain`, so
+`domain`'s own test cannot call them without an import cycle, and calling them from a new
+`internal/tools` test would break this item's "no file outside `internal/domain` and
+`apogee.go` changed" acceptance. Item 2's per-tool tests exercise the constructor path.
 
 **What:**
 
