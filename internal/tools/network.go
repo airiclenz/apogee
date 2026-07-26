@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -338,10 +339,10 @@ func scrubURLError(err error, rawURL string) string {
 }
 
 // redactRequestURL removes the request URL from s in BOTH the form the caller supplied and its
-// whitespace-trimmed form. The trimmed form matters because url-safety parses the TRIMMED URL
-// (security/urlsafety.go) and quotes it in its "unparseable url" reason — so a model passing
-// " http://exa mple.com/?key=SECRET" (note the leading space) would otherwise get a message
-// keyed on a string that never matches, leaking the key (M2).
+// whitespace-trimmed form. The trimmed form matters because url-safety normalises the TRIMMED
+// URL (security/urlsafety.go), so a nested error keyed on that form — from a model passing
+// " http://exa mple.com/?key=SECRET" (note the leading space) — would otherwise be matched
+// against a string that never appears, leaking the key (M2).
 func redactRequestURL(s, rawURL string) string {
 	s = redactSubstring(s, rawURL)
 	return redactSubstring(s, strings.TrimSpace(rawURL))
@@ -349,11 +350,24 @@ func redactRequestURL(s, rawURL string) string {
 
 // redactSubstring removes any occurrence of secret from s (defence-in-depth in case the
 // URL leaks into a nested error's text), returning the cleaned string.
+//
+// It strips the %q-QUOTED form of secret as well as the raw one, because a plain substring
+// search is exactly what an escaping formatter defeats (M-2): fmt's %q — which Go's own
+// *url.Error uses to embed the URL in its text — escapes control characters, so a URL carrying
+// an interior control byte appears as `…?key=SECRET\x01x` with a LITERAL backslash-x that the
+// raw byte sequence never matches. strconv.Quote applies the identical escaping, so its inner
+// form (the quoted string without its surrounding quotes) is the string to search for. When
+// nothing needed escaping the two forms are the same and the second pass is skipped.
 func redactSubstring(s, secret string) string {
 	if secret == "" {
 		return s
 	}
-	return strings.ReplaceAll(s, secret, "[redacted-url]")
+	s = strings.ReplaceAll(s, secret, "[redacted-url]")
+	quoted := strconv.Quote(secret)
+	if inner := quoted[1 : len(quoted)-1]; inner != secret {
+		s = strings.ReplaceAll(s, inner, "[redacted-url]")
+	}
+	return s
 }
 
 // The marker assertions are the compile-time half of the funnel contract: each of Apogee's

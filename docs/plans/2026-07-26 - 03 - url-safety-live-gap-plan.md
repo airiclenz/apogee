@@ -719,7 +719,39 @@ Commit: `fix(tools): normalise the request URL once so the guard checks what is 
 
 ---
 
-## 9. M-2 — stop `%q` escaping from defeating the URL redaction
+## 9. M-2 — stop `%q` escaping from defeating the URL redaction — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): Both halves of the item's fix were taken — `CheckContext` returns a bare
+`fmt.Errorf("%w: unparseable url", ErrURLBlocked)` (the parse error's text is not interpolated at
+all, the first of the two alternatives the item offers), **and** `redactSubstring` now strips
+`strconv.Quote(secret)`'s inner form as well as the raw one. **Mutation check (performed, three
+ways):** reverting the `%v` interpolation ALONE leaves every test green, and reverting
+`redactSubstring` ALONE leaves every test green — each half independently defeats the leak, so
+neither is pinned by the funnel tests on its own; that is why the item's `redactSubstring` unit
+case matters, and it is the one thing that goes **red** under the second mutation. Reverting
+**both** goes red on exactly the audit's string —
+`"url blocked by url-safety (host the requested host): unparseable url: parse
+\"http://example.com/search?key=SUPER-SECRET-API-KEY-1234\\x01x\": net/url: invalid control
+character in URL"` — in three places: the new funnel row and both `web_fetch` / `http_request` rows.
+Four departures from the item's literal text: (1) **the `web_search` configured-endpoint path was
+already safe** and the leak is NOT reachable there, contrary to the item's prose —
+`web_search.go:141` feeds `scrubURLError` the raw `*url.Error` that `buildSearchURL` returns, so
+`errors.As` succeeds and the message is rebuilt from `ue.Op` + cause, which carries no URL; an
+unparseable endpoint also never reaches `do` (`buildSearchURL` fails first, and the DDG-provider
+branch that skips it requires a parseable endpoint). The live leak is the funnel's `CheckContext`
+path, i.e. the model-supplied URL of `web_fetch` / `http_request`. The requested
+`web_search_redaction_test.go` case is added anyway as the guardrail it is — it passes before and
+after, and pins the `errors.As` reconstruction that keeps it safe. (2)
+`TestNetworkFunnel_DoBlockedURLDoesNotLeakKey` became table-driven (floor row + control-character
+row) and its assertions moved into a shared `assertNoKeyInAnyForm` helper — key AND request URL,
+raw AND `%q`-escaped, which is the "neither raw nor `strconv.Quote`d form" the item asks for — reused
+by the `web_search` case. (3) One row beyond the item's list, in `network_test.go`'s
+`TestNetworkTools_FailureMessagesDoNotLeakKey`: the end-to-end proof through the real tools' results,
+and a test the item's own acceptance command already runs. (4) Doc comments that the change made
+false were corrected: `Check`'s "a parse error for a malformed one", `redactRequestURL`'s trimmed-form
+rationale (url-safety no longer quotes anything back — the trimmed pass now stands on nested-error
+defence in depth alone) and the stale sentence in `TestNetworkTools_FailureMessagesDoNotLeakKey`'s
+comment. No doc under `docs/design/` and no ADR was touched; CHANGELOG carries the user-facing entry.
 
 **Ordering:** normalisation group — lands **before** the parked url-safety config key
 (`TODO.md:285`), with items 8 and 10.

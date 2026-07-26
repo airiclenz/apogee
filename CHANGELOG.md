@@ -228,6 +228,17 @@ point is a **minor** bump, not a breaking change.
   configuration populates `AllowHosts`/`DenyHosts` yet, so this was **latent rather than live** — it
   is fixed ahead of the config key that would make it live.
 
+- **A URL that does not parse no longer carries an API key out to the model.** Every network-tool
+  failure names the bare host and scrubs the request URL out of the cause, because that URL may hold
+  a configured API key. url-safety's *"unparseable url"* reason defeated the scrubbing: it quoted the
+  parse error back, and Go quotes a URL with `%q`, which **escapes** it — so a URL carrying an
+  interior ASCII control character (the ends are trimmed; the middle is not) reached the model as
+  `…?key=SECRET\x01x` with a literal backslash-x, which the redaction — searching for the real
+  bytes — could not find. `web_fetch` and `http_request` take that URL straight from the model, so
+  one control character was enough to read back any key a caller had put in it. url-safety now
+  reports the bare reason and never quotes the URL at all, and the redaction additionally strips a
+  URL's escaped spelling wherever an error text quotes one.
+
 - **The ask and approval prompts escape-strip all model-authored text before rendering.** The ask
   question and its choices, and the approval tool name, reason, and arguments, are stripped of the
   terminal escape (`ESC`) byte at the point they enter the popup, closing a gap where untrusted

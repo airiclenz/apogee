@@ -74,10 +74,12 @@ func (g URLGuard) WithResolver(r func(ctx context.Context, host string) ([]net.I
 var defaultURLSchemes = []string{"http", "https"}
 
 // Check parses raw and reports whether the URL passes the guard, returning an
-// ErrURLBlocked-wrapped error (naming the reason) for a rejected URL and a parse error
-// for a malformed one. It runs the string-level scheme/host checks and the resolved-IP
-// SSRF floor (resolving with context.Background()); CheckContext threads a caller's ctx
-// for cancellable resolution. No network beyond DNS resolution is touched.
+// ErrURLBlocked-wrapped error (naming the reason) for a rejected URL and for a malformed
+// one — the latter a bare "unparseable url", because the parse error's own text quotes the
+// URL back and a quoted URL defeats the caller's redaction (M-2, see CheckContext). It runs
+// the string-level scheme/host checks and the resolved-IP SSRF floor (resolving with
+// context.Background()); CheckContext threads a caller's ctx for cancellable resolution. No
+// network beyond DNS resolution is touched.
 func (g URLGuard) Check(raw string) error {
 	return g.CheckContext(context.Background(), raw)
 }
@@ -92,7 +94,15 @@ func (g URLGuard) Check(raw string) error {
 func (g URLGuard) CheckContext(ctx context.Context, raw string) error {
 	u, err := NormalizeURL(raw)
 	if err != nil {
-		return fmt.Errorf("%w: unparseable url: %v", ErrURLBlocked, err)
+		// The parse error's own text is deliberately NOT interpolated (M-2). url.Error
+		// stringifies as `parse "<url>": <cause>` with a %q verb, and %q ESCAPES what it
+		// quotes — so a URL carrying an interior ASCII control character rode out as
+		// `…?key=SECRET\x01x` with a LITERAL backslash-x, which the funnel's substring
+		// redaction (tools/network.go) searches for as raw bytes and therefore never matched:
+		// the key reached the model. The cause names nothing the caller cannot state itself —
+		// the reason is that the URL did not parse — so the reason is a constant here and the
+		// URL never enters the error text at all.
+		return fmt.Errorf("%w: unparseable url", ErrURLBlocked)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("%w: url has no host", ErrURLBlocked)

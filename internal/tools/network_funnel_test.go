@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -466,23 +467,124 @@ func TestBlockedMessage_StatesTheBlockOnce(t *testing.T) {
 // TestNetworkFunnel_DoBlockedURLDoesNotLeakKey is the M2 generalization for the block path:
 // the protection that used to be web_search's private discipline now belongs to every tool
 // routed through the funnel — a key-bearing URL is named by host only.
+//
+// The second row is M-2. A URL carrying an INTERIOR ASCII control character (TrimSpace strips
+// only the ends) does not parse, and url-safety's reason used to interpolate the parse error —
+// a *url.Error whose text embeds the URL under a %q verb. %q ESCAPES the control byte, so the
+// funnel's redaction searched the message for a raw byte sequence that was no longer in it and
+// the key rode out to the model intact. Both rows therefore assert the key and the URL are
+// absent in the escaped spelling as well as the raw one.
 func TestNetworkFunnel_DoBlockedURLDoesNotLeakKey(t *testing.T) {
 	t.Parallel()
 
-	_, msg, err := newFunnelTool(security.URLGuard{}).do(context.Background(), netRequest{
-		url: "http://127.0.0.1:9/search?key=" + secretKey,
-	})
-	if err != nil {
-		t.Fatalf("unexpected Go error: %v", err)
+	cases := []struct {
+		name string
+		url  string
+		// host is the bare host the message must still name for diagnosability; "" when the
+		// URL does not parse and there is no host to name.
+		host string
+	}{
+		{
+			name: "blocked by the SSRF floor",
+			url:  "http://127.0.0.1:9/search?key=" + secretKey,
+			host: "127.0.0.1",
+		},
+		{
+			name: "unparseable through an interior control character",
+			url:  "http://example.com/search?key=" + secretKey + "\x01x",
+		},
 	}
-	if msg == "" {
-		t.Fatal("a floor-blocked URL must produce a failure message")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, msg, err := newFunnelTool(security.URLGuard{}).do(context.Background(), netRequest{url: tc.url})
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			if msg == "" {
+				t.Fatal("a blocked URL must produce a failure message")
+			}
+			assertNoKeyInAnyForm(t, msg, tc.url)
+			if tc.host != "" && !strings.Contains(msg, tc.host) {
+				t.Errorf("block message should name the bare host %q: %q", tc.host, msg)
+			}
+		})
 	}
-	if strings.Contains(msg, secretKey) {
-		t.Fatalf("API key LEAKED into the funnel's block message: %q", msg)
+}
+
+// assertNoKeyInAnyForm fails when msg carries the API key or the request URL, in either its raw
+// form or the form a %q verb writes it as. Checking only the raw form is what M-2 slipped
+// through: the leaking message contained the URL, but spelled with the control byte escaped.
+func assertNoKeyInAnyForm(t *testing.T, msg, rawURL string) {
+	t.Helper()
+	for _, secret := range []string{secretKey, rawURL} {
+		if strings.Contains(msg, secret) {
+			t.Fatalf("%q LEAKED raw into the message: %q", secret, msg)
+		}
+		quoted := strconv.Quote(secret)
+		if strings.Contains(msg, quoted[1:len(quoted)-1]) {
+			t.Fatalf("%q LEAKED in its %%q-escaped form into the message: %q", secret, msg)
+		}
 	}
-	if !strings.Contains(msg, "127.0.0.1") {
-		t.Errorf("block message should name the bare host: %q", msg)
+}
+
+// TestRedactSubstring_StripsTheQuotedFormToo pins the defence-in-depth half of M-2 at its own
+// seam: a plain substring search is defeated by any formatter that ESCAPES what it prints, and
+// Go's *url.Error embeds the request URL under %q. redactSubstring must therefore strip the
+// quoted spelling as well as the raw one — the surrounding quotes are the formatter's, not the
+// secret's, so they stay.
+func TestRedactSubstring_StripsTheQuotedFormToo(t *testing.T) {
+	t.Parallel()
+
+	secret := "http://example.com/?key=" + secretKey + "\x01x"
+
+	cases := []struct {
+		name   string
+		in     string
+		secret string
+		want   string
+	}{
+		{
+			name:   "the raw form is stripped",
+			in:     "cause: " + secret,
+			secret: secret,
+			want:   "cause: [redacted-url]",
+		},
+		{
+			name:   "the %q-escaped form is stripped",
+			in:     fmt.Sprintf("parse %q: net/url: invalid control character in URL", secret),
+			secret: secret,
+			want:   `parse "[redacted-url]": net/url: invalid control character in URL`,
+		},
+		{
+			name:   "a secret needing no escaping is unaffected by the second pass",
+			in:     "Get \"http://example.com/?key=" + secretKey + "\": dial failed",
+			secret: "http://example.com/?key=" + secretKey,
+			want:   `Get "[redacted-url]": dial failed`,
+		},
+		{
+			name:   "an empty secret redacts nothing",
+			in:     "no url here",
+			secret: "",
+			want:   "no url here",
+		},
+		{
+			name:   "an absent secret leaves the text alone",
+			in:     "no url here",
+			secret: secret,
+			want:   "no url here",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := redactSubstring(tc.in, tc.secret); got != tc.want {
+				t.Errorf("redactSubstring() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

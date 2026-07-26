@@ -297,8 +297,11 @@ func TestHTTPRequest_BlockedURLIsResultError(t *testing.T) {
 // that web_fetch and http_request reach the network only through the funnel, every failure
 // message names the bare HOST and never the (possibly key-bearing) request URL — the
 // protection that used to be web_search's private discipline (web_search_redaction_test.go).
-// The whitespace case is the one url-safety trims: it parses the TRIMMED URL and quotes that
-// back in its "unparseable url" reason, so redaction must cover the trimmed form too.
+// The two unparseable rows are the ones that used to escape: url-safety interpolated the parse
+// error, whose *url.Error text quotes the URL back under %q — harmless-looking for the
+// whitespace row (the quoted form equals the trimmed one, which redaction covers) and a live
+// key leak for the control-character row, where %q escapes the byte and the raw substring
+// search finds nothing (M-2).
 func TestNetworkTools_FailureMessagesDoNotLeakKey(t *testing.T) {
 	t.Parallel()
 
@@ -320,6 +323,7 @@ func TestNetworkTools_FailureMessagesDoNotLeakKey(t *testing.T) {
 		{"blocked by the SSRF floor", security.URLGuard{}, "http://127.0.0.1:9/x?key=" + secretKey, "127.0.0.1"},
 		{"transport failure", loopbackGuard(), closedURL, "127.0.0.1"},
 		{"unparseable url with leading whitespace", loopbackGuard(), " http://exa mple.com/?key=" + secretKey, ""},
+		{"unparseable url with an interior control character", loopbackGuard(), "http://example.com/?key=" + secretKey + "\x01x", ""},
 	}
 	makeTool := map[string]func(security.URLGuard) domain.Tool{
 		"web_fetch":    func(g security.URLGuard) domain.Tool { return NewWebFetch(g) },

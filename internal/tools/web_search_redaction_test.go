@@ -66,3 +66,25 @@ func TestWebSearch_BlockedEndpointDoesNotLeakAPIKey(t *testing.T) {
 		t.Fatalf("API key LEAKED into web_search block error: %q", res.Content)
 	}
 }
+
+// TestWebSearch_UnparseableEndpointDoesNotLeakAPIKey is the M-2 half on the configured
+// endpoint — the string that most plausibly carries a host's API key. An endpoint that does
+// not parse (one interior ASCII control character is enough; TrimSpace strips only the ends)
+// still has to reach the model as a failure, and that failure must name the host alone. The
+// escaped spelling is asserted too, because %q is how Go embeds a URL in a *url.Error and
+// escaping is precisely what defeated the funnel's substring redaction.
+func TestWebSearch_UnparseableEndpointDoesNotLeakAPIKey(t *testing.T) {
+	t.Parallel()
+
+	endpoint := "http://search.example.com/s?key=" + secretKey + "\x01x"
+	res, err := NewWebSearch(loopbackGuard(), endpoint).Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_search", Arguments: jsonArgs(t, map[string]any{"query": "needle"}),
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("an unparseable endpoint must surface as a result error; got %q", res.Content)
+	}
+	assertNoKeyInAnyForm(t, res.Content, endpoint)
+}
