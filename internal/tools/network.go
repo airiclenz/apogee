@@ -152,11 +152,15 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		label = safeHost(req.url)
 	}
 
-	// Normalise ONCE, here, and use the result for BOTH the guard and the request: the guard
-	// must judge the string the transport actually dials, or its verdict is about a different
-	// name than the one reached (M-1). NormalizeURL is the guard's own normal form, so an
-	// unparseable URL needs no second wording here — it is passed through untouched and the
-	// CheckContext below refuses it with the guard's message.
+	// Normalise ONCE, here, and use the result for the guard, the request AND every failure
+	// message's URL scrub: the guard must judge the string the transport actually dials, or
+	// its verdict is about a different name than the one reached (M-1), and the scrub must
+	// strip the spelling an error can actually embed — below this line every error arises
+	// from target, never from the raw req.url, so scrubbing the raw form would search for a
+	// string the message need not contain (item 18 of the 2026-07-26 plan). NormalizeURL is
+	// the guard's own normal form, so an unparseable URL needs no second wording here — it
+	// is passed through untouched (target stays req.url, which is then also the string the
+	// request would carry) and the CheckContext below refuses it with the guard's message.
 	target := req.url
 	if normalized, err := security.NormalizeURL(req.url); err == nil {
 		target = normalized.String()
@@ -182,7 +186,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return netResponse{}, "", ctxErr
 		}
-		return netResponse{}, blockedMessage(label, err, req.url), nil
+		return netResponse{}, blockedMessage(label, err, target), nil
 	}
 
 	// The client's Timeout is the same budget restated. Its clock starts at client.Do, so it is
@@ -209,7 +213,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	// caller's ctx, so a caller cancellation still reaches the in-flight request.
 	httpReq, err := http.NewRequestWithContext(rctx, method, target, req.body)
 	if err != nil {
-		return netResponse{}, "could not build request for host " + label + ": " + scrubURLError(err, req.url), nil
+		return netResponse{}, "could not build request for host " + label + ": " + scrubURLError(err, target), nil
 	}
 	if len(req.header) > 0 {
 		httpReq.Header = req.header.Clone()
@@ -223,10 +227,10 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		if networkURLError(err) {
 			// The dial-time floor refused the CONNECTED IP (the rebinding backstop); it
 			// surfaces wrapped inside the transport error chain.
-			return netResponse{}, blockedMessage(label, err, req.url), nil
+			return netResponse{}, blockedMessage(label, err, target), nil
 		}
 		// A transport error's text (*url.Error) embeds the FULL request URL — scrub it.
-		return netResponse{}, "request to host " + label + " failed: " + scrubURLError(err, req.url), nil
+		return netResponse{}, "request to host " + label + " failed: " + scrubURLError(err, target), nil
 	}
 	defer resp.Body.Close()
 
@@ -240,7 +244,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return netResponse{}, "", ctxErr
 		}
-		return netResponse{}, "response from host " + label + " was cut short: " + scrubURLError(err, req.url), nil
+		return netResponse{}, "response from host " + label + " was cut short: " + scrubURLError(err, target), nil
 	}
 	return netResponse{
 		status:     resp.Status,

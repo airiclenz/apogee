@@ -528,8 +528,15 @@ func TestBlockedMessage_StatesTheBlockOnce(t *testing.T) {
 // only the ends) does not parse, and url-safety's reason used to interpolate the parse error —
 // a *url.Error whose text embeds the URL under a %q verb. %q ESCAPES the control byte, so the
 // funnel's redaction searched the message for a raw byte sequence that was no longer in it and
-// the key rode out to the model intact. Both rows therefore assert the key and the URL are
+// the key rode out to the model intact. Every row therefore asserts the key and the URL are
 // absent in the escaped spelling as well as the raw one.
+//
+// The third row is item 18 of the 2026-07-26 plan: do scrubs its messages against the
+// NORMALISED url — the string the request is built from — so an error whose text embeds that
+// form (rather than the raw spelling the model used) is redacted too. Latent today: every
+// shipped error that embeds a URL is a *url.Error, whose URL is dropped wholesale before
+// redaction. The row is a guardrail against the divergence becoming reachable, not a
+// regression proof.
 func TestNetworkFunnel_DoBlockedURLDoesNotLeakKey(t *testing.T) {
 	t.Parallel()
 
@@ -539,6 +546,12 @@ func TestNetworkFunnel_DoBlockedURLDoesNotLeakKey(t *testing.T) {
 		// host is the bare host the message must still name for diagnosability; "" when the
 		// URL does not parse and there is no host to name.
 		host string
+		// normalized is the post-NormalizeURL spelling when it differs from url — the form
+		// the request carries, which the message must not leak either. "" ⇒ same as url.
+		normalized string
+		// guard drives the row's failure; the zero value is the floor-on guard the plain
+		// rows need.
+		guard security.URLGuard
 	}{
 		{
 			name: "blocked by the SSRF floor",
@@ -549,13 +562,28 @@ func TestNetworkFunnel_DoBlockedURLDoesNotLeakKey(t *testing.T) {
 			name: "unparseable through an interior control character",
 			url:  "http://example.com/search?key=" + secretKey + "\x01x",
 		},
+		{
+			// Item 18's guardrail: the raw spelling diverges from the normalised one
+			// (upper-case host, trailing root dot), and the failure is a NON-*url.Error
+			// whose own text embeds the NORMALISED url — the form the request carries, and
+			// a form a scrub keyed on the raw string never matches. The injected resolver
+			// simulates such a nested error; no shipped error shape produces one today, so
+			// this row pins a latent path, it does not reproduce a live leak.
+			name:       "non-url.Error embedding the normalised form",
+			url:        "http://EXAMPLE.COM./search?key=" + secretKey,
+			host:       "EXAMPLE.COM.",
+			normalized: "http://example.com/search?key=" + secretKey,
+			guard: security.URLGuard{}.WithResolver(func(context.Context, string) ([]net.IP, error) {
+				return nil, errors.New("upstream refused http://example.com/search?key=" + secretKey)
+			}),
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, msg, err := newFunnelTool(security.URLGuard{}).do(context.Background(), netRequest{url: tc.url})
+			_, msg, err := newFunnelTool(tc.guard).do(context.Background(), netRequest{url: tc.url})
 			if err != nil {
 				t.Fatalf("unexpected Go error: %v", err)
 			}
@@ -563,6 +591,9 @@ func TestNetworkFunnel_DoBlockedURLDoesNotLeakKey(t *testing.T) {
 				t.Fatal("a blocked URL must produce a failure message")
 			}
 			assertNoKeyInAnyForm(t, msg, tc.url)
+			if tc.normalized != "" {
+				assertNoKeyInAnyForm(t, msg, tc.normalized)
+			}
 			if tc.host != "" && !strings.Contains(msg, tc.host) {
 				t.Errorf("block message should name the bare host %q: %q", tc.host, msg)
 			}

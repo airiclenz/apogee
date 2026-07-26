@@ -407,6 +407,18 @@ point is a **minor** bump, not a breaking change.
   as before, and nothing is redacted: a response header is response *content*. The request side was
   already bounded; this closes the response side. The funnel itself is untouched.
 
+- **Network-failure messages now scrub the request URL in the spelling the request actually
+  carries.** Every funnel failure names the bare host and strips the (possibly key-bearing) request
+  URL out of the underlying cause — but the scrub matched the URL as the *model* spelled it, while
+  the request itself is built from the normalised form (trimmed, host lower-cased and IDNA-mapped,
+  root dot dropped). A cause embedding the normalised spelling of a divergently-spelled URL would
+  therefore have ridden out, key and all, past a redaction searching for a string the message never
+  contained — the same check-one-string/use-another asymmetry already closed on the guard/dial
+  seam, left standing on the message seam. **Latent rather than live:** every shipped error that
+  embeds a URL is a transport error whose URL is dropped wholesale before redaction, so no key
+  leaked; the gap is closed ahead of any error shape that would make it real. Failure messages
+  still name the host exactly as the caller spelled it, and no message wording changes.
+
 ## [0.8.0] — 2026-07-23
 
 *Release version **reset from the `1.x` line to `0.8.0`.** The `1.x` numbering overstated

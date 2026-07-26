@@ -1519,7 +1519,17 @@ Commit: `fix(present): stop a model-chosen file name from injecting a command on
 
 ---
 
-## 18. Item 9's verifier — align the string the funnel scrubs against with the string it dials
+## 18. Item 9's verifier — align the string the funnel scrubs against with the string it dials — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **First offered shape taken** (pass the normalised string; `redactRequestURL`
+unchanged): all five `blockedMessage`/`scrubURLError` calls in `do` now receive `target` — which
+already falls back to `req.url` when `NormalizeURL` fails — so the string scrubbed is the string
+dialled; `grep -n "req.url" internal/tools/network.go` shows only `safeHost`'s label (kept
+un-normalised per this item) and the normalisation input. This closes a **latent** divergence —
+**no live leak was fixed**: every error reaching those sites today is a `*url.Error` whose URL is
+dropped wholesale before redaction. The new table row (a non-`*url.Error` embedding the normalised
+form, produced by an injected resolver, plus a `normalized` assertion column) is a **guardrail,
+not a regression proof**; it was confirmed to FAIL against the pre-fix call sites.
 
 **Provenance:** raised by item 9's verifier. **Hardening only** — it is *not reachable today*, and
 the item's `NOTES` must say so rather than claim a live leak was fixed.
