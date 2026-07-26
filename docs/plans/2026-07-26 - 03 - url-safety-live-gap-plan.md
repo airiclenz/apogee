@@ -1349,7 +1349,20 @@ Commit: `docs(tools,mcp): correct the read-only and SSRF-floor claims the url-sa
 
 ---
 
-## 16. Item 13's asymmetric twin — `http_request` renders the whole header block raw and uncapped
+## 16. Item 13's asymmetric twin — `http_request` renders the whole header block raw and uncapped — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): The extracted core is `neuterInert(raw, capBytes, label)` in `web_fetch.go`
+beside `redirectTarget` (the item names no file for it); it keeps the cut-and-mark inside — the
+marker is `[<label> truncated at N bytes]` — so `redirectTarget`'s output stays byte-identical
+with `label="location"`. Caps chosen (the item fixes none): per rendered name/value 4096 bytes
+(`maxResponseHeaderValueBytes`, the request side's mirror), whole block 64 KiB
+(`maxResponseHeaderBlockBytes`); block marker `[header block truncated at 65536 bytes]`, already-
+rendered lines kept. One edge beyond the literal text: a header NAME that neuters away to nothing
+drops its line (there is no line to hang a value on; unreachable through net/http, which refuses
+such names). **Mutation check (performed by implementer):** re-rendering the raw `resp.header[k]`
+value sent `TestHTTPRequest_HostileResponseHeadersAreRenderedInert` and
+`TestHTTPRequest_OversizedHeaderBlockIsCappedAndMarked` red while
+`TestHTTPRequest_PlainHeadersRenderUnchanged` stayed green; restored, all green.
 
 **Provenance:** flagged by **both** item 13's implementer and its verifier as the twin of the shape
 item 13 fixed for `web_fetch`; **no item in this plan owned it**. Item 13's own `NOTES` names the

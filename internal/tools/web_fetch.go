@@ -114,17 +114,12 @@ func renderFetchResult(resp netResponse) string {
 // there is nothing to render: a non-3xx status (a Location beside a 200 is not a redirect and is
 // not shown), a missing header, or a value that neuters away to nothing.
 //
-// The value is SERVER-chosen — the one piece of attacker-influenced text this render lifts out of
-// the body and into the header block the model reads as fact — so it is neutered first, in the
-// directive-inert shape library.SanitizeContent applies to untrusted stored text: control (Cc),
-// format (Cf), private-use (Co) and surrogate (Cs) runes are dropped and whitespace runs folded to
-// a single space. net/http already refuses a C0 byte inside a response header value, and Go's
-// client refuses a Location it cannot parse before CheckRedirect is ever consulted — but an
-// obs-fold continuation line and a bidi override survive both, and a right-to-left override earns
-// its keep precisely on a URL the model is invited to FOLLOW. Folding keeps the whole value rather
-// than cutting at the first space: a URI carries no raw space, but the servers that emit an
-// unencoded one would then be answered with a WRONG target, and folded text can only ever sit
-// inside this one line — it can open neither a header line nor a body of its own.
+// The value is SERVER-chosen — attacker-influenced text this render lifts out of the body and
+// into the header block the model reads as fact — so it goes through neuterInert first. net/http
+// already refuses a C0 byte inside a response header value, and Go's client refuses a Location it
+// cannot parse before CheckRedirect is ever consulted — but an obs-fold continuation line and a
+// bidi override survive both, and a right-to-left override earns its keep precisely on a URL the
+// model is invited to FOLLOW.
 //
 // Nothing is redacted out of it. The Location is response content, like the body beside it, and the
 // funnel's M2 rule is about failure messages naming the REQUEST url; a canonicalising redirect
@@ -136,10 +131,25 @@ func redirectTarget(resp netResponse) string {
 	if resp.statusCode < 300 || resp.statusCode > 399 {
 		return ""
 	}
-	raw := resp.header.Get("Location")
+	return neuterInert(resp.header.Get("Location"), maxLocationBytes, "location")
+}
 
+// neuterInert returns raw response-header text in the directive-inert shape
+// library.SanitizeContent applies to untrusted stored text: control (Cc), format (Cf),
+// private-use (Co) and surrogate (Cs) runes are dropped, and whitespace runs are folded to a
+// single space. Folding keeps the whole value rather than cutting at the first space: a URI
+// carries no raw space, but the servers that emit an unencoded one would then be answered with a
+// WRONG target, and folded text can only ever sit inside its one rendered line — it can open
+// neither a header line nor a body of its own. The result is capped at capBytes because the
+// response HEADER block is outside maxNetworkResponseBytes (net/http accepts a 10 MiB one by
+// default), so an unbounded value would be a way around the body cap; a longer value is cut and
+// MARKED "[<label> truncated at <capBytes> bytes]" rather than dropped, so the model is told the
+// text was too long to be trusted whole instead of being handed a silent stub. Shared by every
+// render that lifts server-chosen header text into the block the model reads as fact:
+// redirectTarget here and http_request's whole header block (renderRequestResult).
+func neuterInert(raw string, capBytes int, label string) string {
 	var b strings.Builder
-	b.Grow(min(len(raw), maxLocationBytes))
+	b.Grow(min(len(raw), capBytes))
 	cut, prevSpace := false, false
 	for _, r := range raw {
 		switch {
@@ -153,16 +163,16 @@ func redirectTarget(resp netResponse) string {
 		default:
 			prevSpace = false
 		}
-		if b.Len()+utf8.RuneLen(r) > maxLocationBytes {
+		if b.Len()+utf8.RuneLen(r) > capBytes {
 			cut = true
 			break
 		}
 		b.WriteRune(r)
 	}
 
-	loc := strings.TrimSpace(b.String())
-	if loc == "" || !cut {
-		return loc
+	s := strings.TrimSpace(b.String())
+	if s == "" || !cut {
+		return s
 	}
-	return fmt.Sprintf("%s [location truncated at %d bytes]", loc, maxLocationBytes)
+	return fmt.Sprintf("%s [%s truncated at %d bytes]", s, label, capBytes)
 }

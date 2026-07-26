@@ -374,6 +374,20 @@ point is a **minor** bump, not a breaking change.
   before, and an escape still surfaces as "outside the workspace" rather than being disguised as a
   missing file.
 
+- **`http_request`'s response headers now reach the model neutralised and bounded, like
+  `web_fetch`'s redirect target.** The tool rendered every response header sorted but **verbatim
+  and uncapped** — and the header block sits *outside* the 2 MB response cap (the transport accepts
+  a 10 MiB one by default), so a hostile server answering a one-byte body under a huge header block
+  handed the model exactly what the body cap exists to refuse, and a header value carrying a bidi
+  override, zero-width characters or a CRLF-folded fake status line landed raw in a block the model
+  reads as the server's own facts. Every rendered header name and value now goes through the same
+  neutralisation as `web_fetch`'s `Location` — control, bidi-override and zero-width characters
+  stripped, whitespace folded so nothing can open a line of its own — with each value cut at 4 KB
+  and the block as a whole at 64 KB, every cut visibly marked rather than silently shortened.
+  Ordinary headers (`Content-Type: text/html; charset=utf-8`, a normal `Date`) render byte for byte
+  as before, and nothing is redacted: a response header is response *content*. The request side was
+  already bounded; this closes the response side. The funnel itself is untouched.
+
 ## [0.8.0] — 2026-07-23
 
 *Release version **reset from the `1.x` line to `0.8.0`.** The `1.x` numbering overstated

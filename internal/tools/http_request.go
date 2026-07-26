@@ -171,8 +171,27 @@ func applyRequestHeaders(headers map[string]string) (header http.Header, errMsg 
 	return header, ""
 }
 
+// maxResponseHeaderValueBytes caps a single rendered response header name or value. The response
+// HEADER block is outside maxNetworkResponseBytes — the transport accepts a 10 MiB one by
+// default, so a hostile server answering a one-byte body under a 9 MiB header block would
+// otherwise hand the model what the body cap exists to refuse. The request side's mirror is
+// maxRequestHeaderValueBytes (same value); web_fetch's single-header precedent is
+// maxLocationBytes.
+const maxResponseHeaderValueBytes = 4096
+
+// maxResponseHeaderBlockBytes caps the rendered response header block as a whole, so many
+// under-cap values cannot add up to the flood a single value may not be. A cut block keeps the
+// lines already rendered and is MARKED — a truncated render must be visibly truncated, never a
+// silent stub.
+const maxResponseHeaderBlockBytes = 64 * 1024
+
 // renderRequestResult formats the response for the model: status, a stable (sorted) header
-// list, and the (capped) body.
+// list, and the (capped) body. Every response header is SERVER-chosen text lifted out of the
+// body and into a block the model reads as fact, so each rendered name and value goes through
+// neuterInert (web_fetch.go) — the directive-inert shape redirectTarget applies to Location — and
+// is capped per value and over the block as a whole: a bidi override, a zero-width rune or a
+// CRLF/obs-fold-folded fake status line does not survive the render, no value opens a line of
+// its own, and an oversized header block cannot route around the body cap.
 func renderRequestResult(resp netResponse) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "HTTP %s\n", resp.status)
@@ -182,9 +201,20 @@ func renderRequestResult(resp netResponse) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var block strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s: %s\n", k, strings.Join(resp.header[k], ", "))
+		name := neuterInert(k, maxResponseHeaderValueBytes, "name")
+		if name == "" {
+			continue // a name that neuters away to nothing leaves no line to hang a value on
+		}
+		line := name + ": " + neuterInert(strings.Join(resp.header[k], ", "), maxResponseHeaderValueBytes, "value") + "\n"
+		if block.Len()+len(line) > maxResponseHeaderBlockBytes {
+			fmt.Fprintf(&block, "[header block truncated at %d bytes]\n", maxResponseHeaderBlockBytes)
+			break
+		}
+		block.WriteString(line)
 	}
+	b.WriteString(block.String())
 
 	b.WriteString("\n")
 	b.WriteString(resp.body)
