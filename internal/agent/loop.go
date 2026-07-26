@@ -646,10 +646,12 @@ func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 
 // readFileRef resolves one workspace-relative reference to its bounded content. An empty
 // WorkspaceDir means no file tools are wired, so references cannot be honoured. The size is
-// checked by statting within the workspace fence BEFORE the read, so a hostile @ref cannot
-// force a huge file fully into memory before being rejected — the read_file tool's
-// stat-then-read discipline (the cap used to be checked only after SafeReadFile had already
-// materialized the whole file).
+// checked by statting within the workspace fence BEFORE the read, so an oversized @ref is
+// refused without being pulled into memory — the read_file tool's stat-then-read discipline
+// (the cap used to be checked only after SafeReadFile had already materialized the whole
+// file). The stat and the read pin their own roots, so the pair is not race-free against a
+// name flipped in between (see the SCOPE note in security/safeio.go): the cap binds ordinary
+// oversized refs, not an adversary who can rename inside the workspace.
 func (a *Agent) readFileRef(ref string) (string, error) {
 	if a.cfg.WorkspaceDir == "" {
 		return "", errors.New("no workspace is configured for file references")

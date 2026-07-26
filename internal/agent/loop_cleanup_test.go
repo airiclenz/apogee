@@ -145,8 +145,9 @@ func TestStepInjectsSkillsThenFilesThenText(t *testing.T) {
 
 // TestReadFileRefRefusesOversizeRef proves an @ref past the size cap is refused (surfaced as a
 // loop ErrorEvent, injecting nothing) — and, per the item-8 fix, the refusal is decided by a
-// stat BEFORE the read, so the huge file is never materialized. A sparse file (Truncate, no
-// bytes written) exercises the cap without a 10 MiB write.
+// stat BEFORE the read, so an oversized ref that is not concurrently renamed is never
+// materialized. A sparse file (Truncate, no bytes written) exercises the cap without a
+// 10 MiB write.
 func TestReadFileRefRefusesOversizeRef(t *testing.T) {
 	dir := t.TempDir()
 	f, err := os.Create(filepath.Join(dir, "big.bin"))

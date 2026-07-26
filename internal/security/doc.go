@@ -14,6 +14,8 @@
 //     which operate via an os.Root pinned at the workspace root so the validated path IS
 //     the path written — an escaping-symlink component (incl. one swapped in concurrently
 //     by a confined subprocess) is refused, not followed (closes the H1 symlink-swap race).
+//     That guarantee is PATH RESOLUTION, per call: it does not make a caller's separate
+//     stat-then-read size bound race-free (see the SCOPE note in safeio.go).
 //   - URL-safety (URLGuard): scheme/host allow-deny for the network tools
 //     (web-fetch / http-request, P3.11), deny-first precedence.
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
