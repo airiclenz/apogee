@@ -239,6 +239,27 @@ point is a **minor** bump, not a breaking change.
   reports the bare reason and never quotes the URL at all, and the redaction additionally strips a
   URL's escaped spelling wherever an error text quotes one.
 
+- **The SSRF floor now denies the NAT64 *local-use* prefix outright.** A NAT64 translator carries a
+  real IPv4 destination inside an IPv6 address, so the floor decodes that embedded v4 and re-checks
+  it against every private range — but it did so only for the well-known prefix `64:ff9b::/96`.
+  RFC 8215 reserves a second one, `64:ff9b:1::/48`, *specifically* for translating to non-global
+  (private) IPv4 space, and it was not covered at all: on an IPv6-only network running such a
+  translator — a realistic enterprise or mobile setup — `http://[64:ff9b:1::a9fe:a9fe]/` reached the
+  cloud metadata service at 169.254.169.254, and `[64:ff9b:1::7f00:1]` reached loopback, neither of
+  which the same address under the well-known prefix could. The local-use prefix is **not** decoded
+  the way the well-known one is: RFC 8215 fixes no translation prefix length, so the embedded v4's
+  bit offset is the operator's choice (RFC 6052's `/48`, `/56`, `/64` and `/96` forms put it in four
+  different places) and the leftover suffix bits are caller-controlled — a decode that reads one
+  fixed offset is a guess, and a wrong guess reads a public-looking value while the gateway forwards
+  to a private one. The whole `/48` is reserved local-use space with no legitimate public
+  destination, so the **entire range** is denied, including an address embedding a public v4.
+  Denied outright alongside it: 6to4 (`2002::/16`), the IPv4-compatible form `::a.b.c.d` and
+  deprecated site-local (`fec0::/10`) — all obsolete, all able to front a v4 destination, and none
+  a legitimate target for a coding-agent fetch. The **well-known** prefix `64:ff9b::/96` keeps its
+  decode unchanged (RFC 6052 fixes it at `/96`, so the embedded v4 is unambiguously the low 32
+  bits), and an address there embedding a public v4 still passes. The floor remains tighten-only and
+  no other range moved.
+
 - **The ask and approval prompts escape-strip all model-authored text before rendering.** The ask
   question and its choices, and the approval tool name, reason, and arguments, are stripped of the
   terminal escape (`ESC`) byte at the point they enter the popup, closing a gap where untrusted

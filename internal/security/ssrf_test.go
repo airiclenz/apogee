@@ -91,6 +91,28 @@ func TestURLGuard_SSRFFloor(t *testing.T) {
 		// A NAT64 address embedding a PUBLIC v4 is a legitimate NAT64 target → passes.
 		{"nat64 embeds public", "http://[64:ff9b::5db8:d822]", nil, false, false}, // 93.184.216.34
 
+		// RFC 8215 NAT64 local-use prefix (64:ff9b:1::/48) — the sibling prefix an operator
+		// uses precisely to translate to NON-global v4, so it is the one most likely to front
+		// a private target on an IPv6-only network. Denied OUTRIGHT, not decoded: RFC 8215
+		// fixes no translation length, so the v4 can sit at four different bit offsets.
+		{"nat64 local-use /96-style loopback", "http://[64:ff9b:1::7f00:1]", nil, true, true},     // 127.0.0.1
+		{"nat64 local-use /96-style imds", "http://[64:ff9b:1::a9fe:a9fe]", nil, true, true},      // 169.254.169.254
+		{"nat64 local-use /96-style private", "http://[64:ff9b:1::c0a8:1]", nil, true, true},      // 192.168.0.1
+		{"nat64 local-use /96-style public v4", "http://[64:ff9b:1::5db8:d822]", nil, true, true}, // 93.184.216.34
+		// The exact bypass a low-32-bit-only decode leaves open: a /64-style translator inside
+		// the /48 puts the v4 at bits 72-103, so the low 32 bits read a public 254.0.0.0 while
+		// the gateway forwards to the IMDS at 169.254.169.254.
+		{"nat64 local-use /64-style imds", "http://[64:ff9b:1:abcd:a9:fea9:fe00:0]", nil, true, true},
+		// The same evasion via the /48- and /56-style embeddings, whose trailing suffix bits are
+		// attacker-controlled and here crafted non-zero so no incidental zero-suffix read helps.
+		{"nat64 local-use /48-style imds, crafted suffix", "http://[64:ff9b:1:a9fe:a9:fe11:2233:4455]", nil, true, true},
+		{"nat64 local-use /56-style imds, crafted suffix", "http://[64:ff9b:1:22a9:fe:a9fe:9988:7766]", nil, true, true},
+
+		// The obsolete v6 transition / site-local ranges, denied outright.
+		{"6to4", "http://[2002:7f00:1::1]", nil, true, true},
+		{"ipv4-compatible", "http://[::7f00:1]", nil, true, true},
+		{"site-local", "http://[fec0::1]", nil, true, true},
+
 		// TEST-NET / benchmark documentation ranges — never a legitimate fetch target.
 		{"test-net-1", "http://192.0.2.1", nil, true, true},
 		{"test-net-2", "http://198.51.100.1", nil, true, true},
@@ -390,6 +412,44 @@ func TestIPBlockedByFloor(t *testing.T) {
 		{"nat64 embeds imds 169.254.169.254", "64:ff9b::a9fe:a9fe", true},
 		{"nat64 embeds cgnat 100.64.0.1", "64:ff9b::6440:1", true},
 		{"nat64 embeds public 93.184.216.34", "64:ff9b::5db8:d822", false},
+
+		// M-3: the RFC 8215 NAT64 LOCAL-USE prefix 64:ff9b:1::/48 is denied WHOLESALE, not
+		// decoded. RFC 8215 fixes no translation prefix length, so the embedded v4 sits at a
+		// different bit offset for each of RFC 6052's /48, /56, /64 and /96 forms and the
+		// leftover suffix bits are attacker-controlled — any single decode guesses at the
+		// operator's translator, and a wrong guess reads a public-looking value while the
+		// gateway forwards to a private one. The whole /48 is reserved local-use space with no
+		// legitimate public destination, so the range goes rather than a decode of it.
+		{"nat64 local-use /96-style loopback 127.0.0.1", "64:ff9b:1::7f00:1", true},
+		{"nat64 local-use /96-style imds 169.254.169.254", "64:ff9b:1::a9fe:a9fe", true},
+		{"nat64 local-use /96-style private 192.168.0.1", "64:ff9b:1::c0a8:1", true},
+		{"nat64 local-use /96-style private 10.0.0.1", "64:ff9b:1::a00:1", true},
+		{"nat64 local-use /96-style cgnat 100.64.0.1", "64:ff9b:1::6440:1", true},
+		// The bypass a low-32-bit-only decode left open (found by the M-3 verifier): a /64-style
+		// translator inside the /48 puts the v4 at bits 72-103, so the low 32 bits read a public
+		// 254.0.0.0 while the gateway forwards to the IMDS at 169.254.169.254.
+		{"nat64 local-use /64-style imds 169.254.169.254", "64:ff9b:1:abcd:a9:fea9:fe00:0", true},
+		// The /48- and /56-style embeddings of the same IMDS address, with a CRAFTED non-zero
+		// suffix so nothing is caught incidentally by a zero suffix reading as 0.0.0.0.
+		{"nat64 local-use /48-style imds, crafted suffix", "64:ff9b:1:a9fe:a9:fe11:2233:4455", true},
+		{"nat64 local-use /56-style imds, crafted suffix", "64:ff9b:1:22a9:fe:a9fe:9988:7766", true},
+		// The /48-style embedding of 127.0.0.1 with a zero suffix — blocked by the wholesale
+		// deny, not (as a low-32-bit decode would have it) by reading the zero suffix as 0.0.0.0.
+		{"nat64 local-use /48-style loopback, zero suffix", "64:ff9b:1:7f00:0:100::", true},
+		// A local-use address embedding a PUBLIC v4 is denied too — the deny is the whole /48.
+		{"nat64 local-use /96-style public 93.184.216.34", "64:ff9b:1::5db8:d822", true},
+		// The boundary control: a neighbour just outside the local-use /48 is not caught by it.
+		{"just outside the local-use /48 (public)", "64:ff9b:2::7f00:1", false},
+
+		// M-3: the obsolete v6 transition / site-local ranges, denied outright (no coding-agent
+		// fetch legitimately targets them, and each can still carry traffic to a v4 destination).
+		{"6to4 embedding loopback", "2002:7f00:1::1", true},
+		{"6to4 embedding a public v4", "2002:5db8:d822::1", true},
+		{"just outside 6to4 (public)", "2003::1", false},
+		{"ipv4-compatible loopback", "::7f00:1", true},
+		{"ipv4-compatible public", "::5db8:d822", true},
+		{"site-local low", "fec0::1", true},
+		{"site-local high", "feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", true},
 
 		// SEC-01: TEST-NET / benchmark documentation ranges.
 		{"test-net-1", "192.0.2.1", true},

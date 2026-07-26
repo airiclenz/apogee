@@ -797,7 +797,38 @@ Commit: `fix(security): keep the unparseable-url error from leaking a key-bearin
 
 ---
 
-## 10. M-3 — decode the RFC 8215 NAT64 local-use prefix in the SSRF floor
+## 10. M-3 — decode the RFC 8215 NAT64 local-use prefix in the SSRF floor — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **The local-use prefix is DENIED WHOLESALE, not decoded — a ratified departure
+from this item's literal "decode the embedded v4 from the low 32 bits" text.** The first attempt
+implemented that text and **failed independent verification**: RFC 8215 fixes no translation prefix
+length, so a `/64`-style translator inside `64:ff9b:1::/48` puts the v4 at bits 72-103, and the
+low-32 read there sees a *public* value while the gateway forwards to the private target — the
+verifier demonstrated this item's own IMDS scenario still succeeding via
+`http://[64:ff9b:1:abcd:a9:fea9:fe00:0]/latest/meta-data/`. The `/48` and `/56` suffix bits are
+likewise caller-controlled, so the first attempt's incidental "zero suffix reads as 0.0.0.0"
+coverage was defeated by a crafted non-zero suffix. The owner ratified the wholesale deny: the whole
+`/48` is reserved local-use space with no legitimate public destination, so no bit-offset decode is
+attempted for it and it joins `floorDeniedV6Nets` beside the three prefixes the item's Fix line
+authorises (6to4 `2002::/16`, IPv4-compatible `::/96`, site-local `fec0::/10`). The **well-known**
+prefix `64:ff9b::/96` keeps its decode untouched — RFC 6052 *does* fix that one at `/96`, so the low
+32 bits are unambiguous and there is no suffix to craft; `nat64WellKnownPrefix` is therefore back to
+a single var rather than the first attempt's slice. Consequences: a local-use address embedding a
+**public** v4 is now blocked too (the deny is the range), and `ErrSSRFBlocked`'s model-facing
+parenthetical names `NAT64-local-use` alongside `NAT64-embedded`/`obsolete-v6` (no test pins the
+full sentinel string). **Mutation check (mandatory, performed):** the rows were written and run
+**first** against the pre-fix floor — the four new evasion rows went red in *both* tables
+(`Check("http://[64:ff9b:1:abcd:a9:fea9:fe00:0]") = nil, want blocked`, plus the crafted-suffix
+`/48` `64:ff9b:1:a9fe:a9:fe11:2233:4455` and `/56` `64:ff9b:1:22a9:fe:a9fe:9988:7766` forms and the
+flipped public-v4 row), and the boundary controls (`64:ff9b:2::7f00:1`, `2003::1`, the well-known
+`64:ff9b::5db8:d822` public passthrough) stayed green throughout; after the fix all are green, as
+are `TestURLGuard_FloorIsTightenOnly`, `go test ./...` and `go test -race ./...`. The floor's
+self-documentation was corrected everywhere it claimed a decode of the local-use prefix — the
+package comment, `ipBlockedByFloor`'s doc comment, `resolveAndCheckFloor`'s literal-forms note, and
+`CONTEXT.md`'s url-safety paragraph — and the CHANGELOG entry was rewritten (its earlier "Both
+prefixes are now decoded the same way" was untrue). `docs/design/technical-design.md:200` also names
+the well-known prefix but is deliberately **left alone**: that cell is a historical record of what
+the P3.11 / SEC-01 pass landed, and it remains true of that pass.
 
 **Ordering:** normalisation group — lands **before** the parked url-safety config key
 (`TODO.md:285`), with items 8 and 9.

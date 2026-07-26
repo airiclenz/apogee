@@ -258,8 +258,13 @@ Go 1.26 `os.Root` pinned at the workspace root — `security.SafeWriteFile`/`Saf
 escaping symlink component swapped after the check is refused at write/read time), **url-safety**
 (the network tools' `URLGuard` — scheme/host allow-deny plus a **default-on SSRF floor** that denies
 loopback / private / IMDS / link-local **plus** RFC-6598 CGNAT `100.64/10`, the whole `0.0.0.0/8`,
-TEST-NET / benchmark ranges, and NAT64-embedded private/loopback `64:ff9b::/96` **by resolved IP**,
-re-checked at dial time so DNS-rebinding is closed; tighten-only, never dissolvable by config —
+TEST-NET / benchmark ranges, NAT64-embedded private/loopback under the `64:ff9b::/96` well-known
+prefix (decoded, since RFC 6052 fixes it at `/96`), and — denied **wholesale**, since no decode of
+them is sound or wanted — the RFC 8215 NAT64 local-use prefix `64:ff9b:1::/48` (which fixes no
+translation length, so the embedded v4's bit offset is the operator's choice) plus the obsolete v6
+transition / site-local ranges (6to4 `2002::/16`, IPv4-compatible `::a.b.c.d`, `fec0::/10`) — all
+**by resolved IP**, re-checked at dial time so DNS-rebinding is closed; tighten-only, never
+dissolvable by config —
 and applied through the **one network funnel** every one of Apogee's own network tools reaches the
 network through, so such a tool cannot reach the network unfiltered, and one that does not route
 through it is not vouched for and gates), tool-argument-guard (incl. the **Dangerous-action guard**

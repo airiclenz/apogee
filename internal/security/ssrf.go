@@ -18,8 +18,13 @@ import (
 // link-local, the RFC-1918 private ranges, IPv6 unique-local, RFC-6598 carrier-grade
 // NAT (100.64.0.0/10), the whole 0.0.0.0/8 "this host/network" block, the TEST-NET /
 // benchmark documentation ranges, and the embedded v4 inside a NAT64 well-known-prefix
-// address. It is judged by the RESOLVED IP, not the hostname string, so `http://localhost`
-// and a DNS name that resolves to a private IP are both caught.
+// (64:ff9b::/96, RFC 6052) address. Four v6 ranges are denied WHOLESALE rather than decoded,
+// because no fetch legitimately targets them and any embedded-v4 decode would be a guess: the
+// RFC 8215 NAT64 local-use prefix 64:ff9b:1::/48 (which exists specifically to translate to
+// non-global v4, but fixes no translation length, so the v4's bit offset is the operator's
+// choice), 6to4 2002::/16, the IPv4-compatible form ::/96, and site-local fec0::/10. It is
+// judged by the RESOLVED IP, not the hostname string, so `http://localhost` and a DNS name
+// that resolves to a private IP are both caught.
 //
 // One precision note: a numeric IP encoding the stdlib does NOT parse — decimal
 // (`http://2130706433`), octal (`http://0177.0.0.1`), or hex (`http://0x7f.0.0.1`) — is
@@ -27,8 +32,8 @@ import (
 // falls through to DNS resolution, where the Go resolver does not perform inet_aton-style
 // numeric decoding and returns a resolution failure, so the URL is blocked as
 // unresolvable. The floor is the bound for every form net.ParseIP DOES decode (dotted-quad
-// v4, v6 literals, v4-mapped and the NAT64 well-known prefix); the numeric-encoding safety
-// rests on resolution failing, not on the floor.
+// v4, v6 literals, v4-mapped and the NAT64 prefixes); the numeric-encoding safety rests on
+// resolution failing, not on the floor.
 //
 // The floor is a FLOOR: a URLGuard with DenyIPFloor() on (the default) cannot have it
 // dissolved by configuration — config can only ADD denials (more DenyHosts / a
@@ -46,7 +51,7 @@ import (
 // in a blocked range). It wraps ErrURLBlocked so a single errors.Is(err, ErrURLBlocked)
 // at the tool boundary catches every url-safety rejection, while a caller that wants to
 // distinguish the floor specifically can match ErrSSRFBlocked.
-var ErrSSRFBlocked = fmt.Errorf("%w: blocked by the SSRF floor (resolved IP is loopback/private/link-local/metadata/CGNAT/0.0.0.0-8/test-net/NAT64-embedded)", ErrURLBlocked)
+var ErrSSRFBlocked = fmt.Errorf("%w: blocked by the SSRF floor (resolved IP is loopback/private/link-local/metadata/CGNAT/0.0.0.0-8/test-net/NAT64-embedded/NAT64-local-use/obsolete-v6)", ErrURLBlocked)
 
 // ipResolver resolves a host to its IP addresses. It is a package var (defaulting to the
 // real net resolver) so a test can inject a deterministic resolver and the SSRF tests stay
@@ -65,10 +70,40 @@ var defaultIPResolver = func(ctx context.Context, host string) ([]net.IP, error)
 }
 
 // nat64WellKnownPrefix is the IANA NAT64 well-known prefix 64:ff9b::/96 (RFC 6052). A NAT64
-// gateway maps the embedded IPv4 (the low 32 bits) onto a real v4 destination, so an address
-// in this prefix that embeds a private/loopback v4 reaches that v4 target — a pivot the floor
-// must decode and re-check rather than treat as an opaque (public-looking) v6 address.
+// gateway maps the embedded IPv4 onto a real v4 destination, so an address in this prefix that
+// embeds a private/loopback v4 reaches that v4 target — a pivot the floor must decode and
+// re-check rather than treat as an opaque (public-looking) v6 address. Decoding is sound HERE
+// and only here: RFC 6052 fixes this prefix at /96, so the embedded v4 is unambiguously the low
+// 32 bits and there is no suffix left for a caller to craft. Its local-use sibling
+// 64:ff9b:1::/48 (RFC 8215) has no fixed translation length, so it is NOT decoded — it is denied
+// outright in floorDeniedV6Nets.
 var nat64WellKnownPrefix = mustCIDR("64:ff9b::/96")
+
+// floorDeniedV6Nets are the IPv6 ranges the floor denies OUTRIGHT rather than decoding an
+// embedded v4 out of them:
+//
+//   - the RFC 8215 NAT64 local-use prefix 64:ff9b:1::/48, reserved precisely so an operator may
+//     translate to NON-global (private) IPv4 space — the exact pivot the floor exists to deny.
+//     RFC 8215 fixes NO translation prefix length inside it, so where the v4 sits depends on the
+//     operator's translator: RFC 6052's /48, /56, /64 and /96 forms put it at four different bit
+//     offsets, and the leftover suffix bits are caller-controlled. Any single decode therefore
+//     GUESSES, and a wrong guess reads a public-looking value while the gateway forwards to a
+//     private one (e.g. 64:ff9b:1:abcd:a9:fea9:fe00:0 is a /64-style embedding of the IMDS whose
+//     low 32 bits read 254.0.0.0). The whole /48 is reserved local-use space with no legitimate
+//     public destination, so the range goes rather than a decode of it.
+//   - 6to4 (RFC 3056, deprecated by RFC 7526) and the IPv4-compatible form ::a.b.c.d (RFC 4291
+//     §2.5.5.1, deprecated — and NOT normalized by net.IP.To4, which decodes only the ::ffff:
+//     mapped form), both of which carry an IPv4 destination a relay or a legacy host may still
+//     act on.
+//   - the deprecated site-local range (RFC 3879), which is private address space by definition.
+//
+// None is a legitimate target for a coding-agent fetch, so precision favours safety.
+var floorDeniedV6Nets = []*net.IPNet{
+	mustCIDR("64:ff9b:1::/48"), // RFC 8215 NAT64 local-use prefix (no fixed translation length)
+	mustCIDR("2002::/16"),      // 6to4 — embeds a v4 endpoint in bits 16-47
+	mustCIDR("::/96"),          // IPv4-compatible IPv6 (::a.b.c.d)
+	mustCIDR("fec0::/10"),      // site-local unicast
+}
 
 // floorDeniedV4Nets are the IPv4 ranges the floor denies beyond what the stdlib net.IP
 // predicate helpers (IsLoopback/IsPrivate/…) already cover: RFC-6598 carrier-grade NAT, the
@@ -100,16 +135,27 @@ func mustCIDR(cidr string) *net.IPNet {
 // fe80::/10), the RFC-1918 private ranges (10/8, 172.16/12, 192.168/16), IPv6 unique-local
 // (fc00::/7), the unspecified address (0.0.0.0, ::), RFC-6598 carrier-grade NAT (100.64.0.0/10),
 // the whole 0.0.0.0/8 block, the TEST-NET / benchmark ranges, the IPv4-mapped form of any of the
-// above, and the v4 embedded in a NAT64 well-known-prefix (64:ff9b::/96) address. An
-// untrusted/unroutable address is treated as blocked (precision favours safety — a coding agent
-// never legitimately fetches these).
+// above, the v4 embedded in a NAT64 well-known-prefix (64:ff9b::/96) address, and — denied
+// wholesale, not decoded — the RFC 8215 NAT64 local-use prefix 64:ff9b:1::/48 plus the obsolete
+// v6 transition / site-local ranges. An untrusted/unroutable address is treated as blocked
+// (precision favours safety — a coding agent never legitimately fetches these).
 func ipBlockedByFloor(ip net.IP) bool {
 	if ip == nil {
 		return true // an unparseable address is not safe to reach
 	}
+	// The v6 ranges denied outright (the RFC 8215 NAT64 local-use /48 and the obsolete transition
+	// / site-local ranges) — checked before the v4-mapped normalization below, which would
+	// replace a 16-byte address with a 4-byte one these v6 nets cannot match.
+	for _, n := range floorDeniedV6Nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
 	// A NAT64 well-known-prefix address (64:ff9b::/96) carries a real IPv4 destination in its
 	// low 32 bits; decode it and re-run the v4 checks so an embedded private/loopback target is
 	// caught (its To4() is nil and the v6 predicates say "public", so it would otherwise pass).
+	// The indexing is safe: Contains is true only for a 16-byte address, since it compares
+	// against a 16-byte v6 network number.
 	if nat64WellKnownPrefix.Contains(ip) {
 		if embedded := net.IPv4(ip[12], ip[13], ip[14], ip[15]); ipBlockedByFloor(embedded) {
 			return true
@@ -145,10 +191,10 @@ func ipBlockedByFloor(ip net.IP) bool {
 // reaching out blind.
 func (g URLGuard) resolveAndCheckFloor(ctx context.Context, host string) error {
 	// A bare IP literal (any form net.ParseIP decodes — dotted-quad v4, a v6 literal, the
-	// v4-mapped form, the NAT64 well-known prefix) needs no DNS: classify it directly. A
-	// numeric-only encoding net.ParseIP does NOT decode (decimal/octal/hex inet_aton forms)
-	// is left to the resolver below, which fails to resolve it and so blocks it as
-	// unresolvable — see the package comment.
+	// v4-mapped form, either NAT64 prefix) needs no DNS: classify it directly. A numeric-only
+	// encoding net.ParseIP does NOT decode (decimal/octal/hex inet_aton forms) is left to the
+	// resolver below, which fails to resolve it and so blocks it as unresolvable — see the
+	// package comment.
 	if ip := net.ParseIP(host); ip != nil {
 		if ipBlockedByFloor(ip) {
 			return fmt.Errorf("%w: %s", ErrSSRFBlocked, ip)
