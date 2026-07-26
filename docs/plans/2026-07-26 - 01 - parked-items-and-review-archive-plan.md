@@ -132,7 +132,7 @@ them. Commit: `docs(reviews): audit the live url-safety gap`.
 
 ---
 
-## 2. Park `Request.InjectContext` in `TODO.md` as a grill brief
+## 2. Park `Request.InjectContext` in `TODO.md` as a grill brief — ✅ DONE (2026-07-26)
 
 **What:** a new `TODO.md` section in the file's existing entry style (H2 title, `**Status:**
 parked 2026-07-26`, then the design substance). It must record enough that a later grill
