@@ -743,7 +743,7 @@ moment to give `ConfineWritablePaths` its first writer.
 
 **Status:** CLOSED 2026-07-25. Recorded 2026-07-22 (Phase 5 review-fixes follow-up) as a shape
 observation flagged for **`/improve-codebase-architecture`**; picked up as candidate **05** of
-`docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md` and landed by
+`docs/reviews/archived/2026-07-24 - 00 - architecture-deepening-review.md` and landed by
 `docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md` (7 items).
 
 The figures this entry quoted were **stale**: 581/572 at the time of writing, but

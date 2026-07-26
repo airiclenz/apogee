@@ -4,7 +4,7 @@ Date: 2026-07-24
 Session type: **review only** (`/improve-codebase-architecture`). No code changed, no plan
 written, no ADR/CONTEXT edit made. Deliverable is this handoff + the HTML report beside it.
 
-**Companion artifact (the visuals):** `docs/reviews/2026-07-24 - 00 - architecture-deepening-review.html`
+**Companion artifact (the visuals):** `docs/reviews/archived/2026-07-24 - 00 - architecture-deepening-review.html`
 — before/after diagrams for every candidate. This markdown is the pick-up-the-work doc; the
 HTML is the illustrated version. (The original was written to a session scratchpad, which is
 ephemeral — this copy is the durable one.)
@@ -31,9 +31,11 @@ smaller deepenings landed 2026-07-25/26, all via
 `docs/plans/archived/2026-07-25 - 03 - architecture-review-closeout-plan.md` (its item 8 —
 `read_file`/`open_file` — via that plan's own follow-on,
 `2026-07-26 - 00 - land-item8-close-size-window-plan.md`; see the cards and the
-smaller-deepenings list for what was built). **The ledger is empty as of 2026-07-26** — the only
-parked items are the `/code-audit` on the live url-safety gap and the un-grilled
-`Request.InjectContext` (see *Recommended next step*).
+smaller-deepenings list for what was built). **The ledger is empty as of 2026-07-26**, and as of the
+same day both parked items have their disposition: the `/code-audit` on the live url-safety gap
+**ran** (`docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`), and
+`Request.InjectContext` is **parked in `TODO.md`** as a grill brief (see *Recommended next step*).
+This doc is a closed record, not anyone's to-do list.
 
 ## The spine is already deep — leave it alone
 
@@ -97,8 +99,12 @@ Explore agents and should be spot-checked before acting.
   **unexported url-filter marker**, and the ladder split `classNetwork` (marked ⇒ auto-runs in Auto)
   from `classThirdPartyNetwork` (unmarked ⇒ gates, reason `unfiltered network reach`), so
   "url-filtered" is now true by construction. Recorded in **ADR 0012 amendment 2026-07-25** +
-  `confinement-execution-contract.md` §4. The separate `/code-audit` on the *live* gap is still
-  worth running; the shape now gives it one place to look.
+  `confinement-execution-contract.md` §4. The separate `/code-audit` on the *live* gap **ran
+  2026-07-26** — `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`. Verdict: the hole
+  this card named is **closed at the funnel**, but the "url-filtered" promise is defeated one rung
+  up, in `classifyTool`'s ordering (a self-declared `ReadOnly()` is consulted before any unfakeable
+  marker). 4 High + 10 Medium findings, each awaiting an owner decision in that report; nothing
+  from them is owed to this card.
 
 ### 03 — Hand the view structured tool results · **Strong** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/tui/toolpresent.go` (regexes ✓L243–246: `reReadRange`, `reWriteBytes`,
@@ -436,6 +442,9 @@ carries its ✅ note.
   chat-template role-safety policy inside a `domain` data type; the engine/`context` layer owns
   role-alternation. Flagged, **not** recommended without a grill; the current placement is
   defensible.
+  **PARKED 2026-07-26** — carried into `TODO.md` (§ *`Request.InjectContext` placement*) as a
+  grill brief, so this record stops being the question's only home. The verdict above is unchanged:
+  the grill (`grill-with-docs`) is a future owner session, and nothing moves before it.
 
 ## State of the tree
 
@@ -522,11 +531,23 @@ correctness question the audit answers, and it now has one place to look.
 
 *As of 2026-07-26 (close):* **the ledger is empty — nothing from this review is left to pick up.**
 All seven candidates and the four smaller deepenings are landed and their plan docs archived. The
-only items this review still parks, deliberately: the **`/code-audit`** on the *live* url-safety
-gap (the shape fix landed with candidate 02; whether any registered path reaches the network
-unfiltered is a correctness question the audit answers, with one place to look), and
-**`Request.InjectContext`** (*Speculative*, reopens an ADR 0010 line — still not recommended
-without a grill; the current placement is defensible).
+two items this review parked are now dispositioned, which is what let this doc move to
+`docs/reviews/archived/`:
+
+- **The `/code-audit` on the *live* url-safety gap — RAN 2026-07-26.** Report:
+  `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`. Verdict in one line: the hole
+  candidate 02 named is **closed at the funnel** (`networkTool.do` is the single path to the
+  network and the marker is genuinely unfakeable), but the Auto ladder's "url-filtered" promise is
+  **defeated one rung up** — `classifyTool` consults a self-declared `ReadOnly()` before any
+  unfakeable marker. 4 High + 10 Medium findings, each an open owner decision (fix now / accept /
+  defer) recorded in that report, not here.
+- **`Request.InjectContext` — PARKED 2026-07-26 in `TODO.md`** (§ *`Request.InjectContext`
+  placement*) as a grill brief carrying the whole design, so nothing is re-derived. The verdict is
+  unchanged and is *not* decided here: *Speculative*, reopens an ADR 0010 line, still not
+  recommended without an owner grill (`grill-with-docs`); the current placement is defensible.
+
+Neither item lives in this doc any more. Nothing in `docs/reviews/archived/` is anyone's to-do
+list, and that now holds for this review.
 
 ## Suggested skills
 
@@ -540,4 +561,5 @@ without a grill; the current placement is defensible).
   `/implement-plan` house format (numbered `## N.` H2 items with What/Tests/Acceptance/commit).
   Then `/implement-plan` executes it item-by-item.
 - **`/code-audit`** — for candidate 02's live url-safety gap (correctness), separate from the
-  shape fix.
+  shape fix. ✅ **Ran 2026-07-26** —
+  `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`; nothing left to run from here.

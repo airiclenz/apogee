@@ -152,7 +152,21 @@ edits) changed. Commit: `docs(todo): park Request.InjectContext with its grill b
 
 ---
 
-## 3. Archive the 2026-07-24 review
+## 3. Archive the 2026-07-24 review — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): three judgment calls beyond the item's literal text. (a) The dispositions were
+written into **four** places, not just the dated close: the header ledger line (L34–36), the dated
+close under *Recommended next step*, **candidate 02's card note** ("the separate `/code-audit` … is
+still worth running") and the **`InjectContext` smaller-deepening card**, plus the *Suggested
+skills* `/code-audit` bullet — each of those named a parked item as open, and whole-plan
+verification 2 requires the archived doc to name no open item without its disposition. (b) The
+review's own **companion-artifact line** (L7, pointing at its `.html`) was repointed to the
+archived path so it still resolves after the `git mv`; the `.html` itself is untouched (D3).
+(c) The only surviving un-archived-path spellings outside `archived/` are in **this plan file** —
+its `Source:` line (a provenance record, exactly like the archived plans' own `Source:` lines) and
+the two places that quote the grep pattern itself, which cannot be rewritten. This file lands in
+`docs/plans/archived/` at whole-plan verification step 4, after which the acceptance grep is
+literally clean.
 
 Depends on items 1 and 2 — the review archives only once neither parked item lives solely
 inside it.
