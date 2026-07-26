@@ -353,6 +353,21 @@ one level down (D2), for free, with no threading.
 > tool **without** the marker is the new **3p-net** class and **gates** in Auto, with its own gate
 > reason. Tighten-only; `confine=false` is unaffected.
 
+> **Amended 2026-07-26 (the RO row is a floor, not a trump card; url-safety live-gap audit H-1).**
+> The **RO** row applies **only to a tool carrying no other class marker**. A tool that declares
+> itself read-only **and** is also subproc / net / 3p-net / mcp / WS-write takes **that class's
+> row**, in every mode — the marker is unfakeable by construction, `ReadOnly()` is a bare
+> self-declaration, and the declaration can never outrank a structural fact about what the tool
+> does (ADR 0012's core invariant: never both unsupervised *and* unbounded). `classifyTool`
+> expresses this through its check ORDER: every marker is consulted first and **RO is the terminal
+> floor**, reached only by a tool no marker claimed. The declaration keeps its other jobs — Plan
+> mode's menu filter and Ask-Before's harmless-read skip still read it. Two shipped built-ins move
+> as a result: `git_diff_range` and `diagnostics` declare read-only **and** launch an OS subprocess
+> (the system `git`, the Go toolchain), so they now ride the **subproc** row — `confine` in Auto
+> with the caps-insufficient `gate` fallback, `gate` on the middle rungs, `refuse` in Plan (they
+> stay in Plan's read-only menu, which is a UX affordance; the class is the boundary). Tighten-only
+> in every cell; `confine=false` is unaffected.
+
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:
 
@@ -371,7 +386,9 @@ computed in a fixed, load-bearing order:
    `Gate` always means the Approver is actually consulted; a `Gate` takes its `Reason` + `CacheKey`;
    every `Confine` takes its box + a precomputed runtime `fallback` (both detailed after the table).
 
-Tool-classes: **RO** = `IsReadOnly`; **WS-write** = `workspaceScopedWriter` (§3); **subproc** =
+Tool-classes: **RO** = `IsReadOnly` **and no other marker** — the terminal floor (a tool that also
+carries a marker below takes that class's row, amendment 2026-07-26); **WS-write** =
+`workspaceScopedWriter` (§3); **subproc** =
 shell/exec subprocess tool (`terminal`/`python-exec`/`git`); **net** = `ExternalEffectTool` of kind
 `network` carrying the `urlFilteredNetworker` marker (Apogee's own — the marker is obtainable only by
 embedding `internal/tools`' network funnel, so it cannot exist without the `URLGuard`); **3p-net** =
@@ -385,17 +402,20 @@ Ladder-leaf outcomes: **run** = execute directly, no gate, no `Confine`; **confi
 
 | tool-class | Plan | Ask-Before | Allow-Edits | Auto · `confine=true` | Auto · `confine=false` |
 |---|---|---|---|---|---|
-| **RO** | run | run | run | run | run |
+| **RO** (and no other marker) | run | run | run | run | run |
 | **WS-write**, target **in** workspace | refuse | gate | **run** | **run** (path-safety-bounded) | run |
 | **WS-write**, target **out** of workspace | refuse | gate | gate | **gate** | run |
-| **subproc** (caps sufficient) | refuse | gate | gate | **confine** | run |
-| **subproc** (caps **insufficient**) | refuse | gate | gate | **gate** ("confine if you can, gate if you can't") | run |
+| **subproc** (caps sufficient) | refuse² | gate | gate | **confine** | run |
+| **subproc** (caps **insufficient**) | refuse² | gate | gate | **gate** ("confine if you can, gate if you can't") | run |
 | **net** (`web-fetch`/`http-request`) | refuse¹ | gate | gate | **run** (url-safety filtered) | run |
 | **3p-net** (no url-filter marker) | refuse¹ | gate | gate | **gate** (URLs unfiltered) | run |
 | **mcp** | refuse¹ | gate | gate | **gate** (server-grain allow-for-session) | run |
 | **3p-write** (can't vouch for scoping) | refuse | gate | gate | **gate** | run |
 
 ¹ Plan filters to RO tools, so net / 3p-net / mcp tools are not even offered; a defensive call refuses.
+² A subprocess tool that also *declares* `ReadOnly()` (`git_diff_range`, `diagnostics`) **is** offered in
+Plan's menu — the filter reads the declaration — but its class is subproc, so the call refuses
+(amendment 2026-07-26). The menu is a UX affordance; the class is the boundary.
 `confine=false` is global-config-only, VM-only, prints a per-session startup warning, and **never**
 escapes the dangerous-action floor.
 

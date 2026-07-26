@@ -45,6 +45,11 @@ func TestResolve_LadderTable(t *testing.T) {
 	mcp := externalTool{name: "github", kind: domain.EffectMCP}
 	sub := &subprocTool{name: "terminal"}
 	tpw := thirdPartyWriter{name: "weird"}
+	// The RO-plus-marker pair: a tool that DECLARES itself read-only while carrying an
+	// unfakeable marker. The marker outranks the declaration (§4 amended 2026-07-26), so these
+	// ride the subproc / 3p-net rows in every column — never the RO row's five runs.
+	roSub := &subprocTool{name: "git_diff_range", readOnly: true}
+	roNet := externalTool{name: "ro_net", kind: domain.EffectNetwork, readOnly: true}
 
 	const badMode = domain.Mode("bogus") // an off-ladder mode ⇒ Ask-Before default
 
@@ -120,6 +125,28 @@ func TestResolve_LadderTable(t *testing.T) {
 		{"3p/auto-confine", tpw, domain.ModeAuto, true, true, true, resolveGate, "write", security.AuditAllowed},
 		{"3p/auto-noconfine", tpw, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
 		{"3p/unknown-mode", tpw, badMode, true, true, true, resolveGate, "write", security.AuditAllowed},
+
+		// read-only DECLARATION + subprocess MARKER (git_diff_range / diagnostics) — the marker
+		// wins in all five columns: Plan refuses it (the menu still offers it, the ladder does
+		// not run it), the middle rungs gate it, Auto confines it (or gates it when the caps are
+		// insufficient), and "I am the sandbox" still runs everything.
+		{"RO+subproc/plan", roSub, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
+		{"RO+subproc/ask-before", roSub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+		{"RO+subproc/allow-edits", roSub, domain.ModeAllowEdits, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+		{"RO+subproc/auto-confine-caps-suff", roSub, domain.ModeAuto, true, true, true, resolveConfine, "", security.AuditAllowed},
+		{"RO+subproc/auto-confine-caps-insuff", roSub, domain.ModeAuto, true, false, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+		{"RO+subproc/auto-noconfine", roSub, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
+		{"RO+subproc/unknown-mode", roSub, badMode, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+
+		// read-only DECLARATION + EffectNetwork (a host-registered tool that only GETs URLs) —
+		// the effect kind wins, so it takes the 3p-net row and gates in Auto rather than
+		// reaching unfiltered URLs unattended.
+		{"RO+3p-net/plan", roNet, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
+		{"RO+3p-net/ask-before", roNet, domain.ModeAskBefore, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
+		{"RO+3p-net/allow-edits", roNet, domain.ModeAllowEdits, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
+		{"RO+3p-net/auto-confine", roNet, domain.ModeAuto, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
+		{"RO+3p-net/auto-noconfine", roNet, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
+		{"RO+3p-net/unknown-mode", roNet, badMode, true, true, true, resolveGate, "unfiltered network reach", security.AuditAllowed},
 	}
 
 	for _, tc := range cases {

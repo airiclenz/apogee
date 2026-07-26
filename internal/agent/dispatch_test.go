@@ -65,6 +65,10 @@ func (c *fakeConfiner) confineCount() int {
 // tool-builds-and-runs-the-cmd model (§2.2), so "ran under Confine" is observable.
 type subprocTool struct {
 	name string
+	// readOnly is the SELF-DECLARATION a tool makes about itself. A subprocess launcher may
+	// honestly declare it (git_diff_range and diagnostics do — a diff and a vet write
+	// nothing), which is exactly the case classifyTool must not let outrank the marker.
+	readOnly bool
 
 	mu         sync.Mutex
 	ran        int
@@ -75,7 +79,7 @@ type subprocTool struct {
 func (t *subprocTool) Name() string            { return t.name }
 func (t *subprocTool) Description() string     { return t.name + " (subprocess)" }
 func (t *subprocTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
-func (t *subprocTool) ReadOnly() bool          { return false }
+func (t *subprocTool) ReadOnly() bool          { return t.readOnly }
 func (t *subprocTool) Subprocess() bool        { return true }
 
 func (t *subprocTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
@@ -99,16 +103,20 @@ func (t *subprocTool) confinedOK() bool {
 	return t.sawHandle && t.confineErr == nil
 }
 
-// externalTool is a fake ExternalEffectTool of a configurable kind (network / mcp).
+// externalTool is a fake ExternalEffectTool of a configurable kind (network / mcp). readOnly is
+// the self-declaration a host-registered tool may make honestly — a tool that only GETs URLs
+// writes nothing — and which must not outrank its effect kind in the classification.
 type externalTool struct {
-	name string
-	kind domain.ExternalEffectKind
-	ran  *int
+	name     string
+	kind     domain.ExternalEffectKind
+	readOnly bool
+	ran      *int
 }
 
 func (t externalTool) Name() string                              { return t.name }
 func (t externalTool) Description() string                       { return t.name + " (external)" }
 func (t externalTool) Schema() json.RawMessage                   { return json.RawMessage(`{"type":"object"}`) }
+func (t externalTool) ReadOnly() bool                            { return t.readOnly }
 func (t externalTool) ExternalEffect() domain.ExternalEffectKind { return t.kind }
 func (t externalTool) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if t.ran != nil {
@@ -171,6 +179,17 @@ func TestClassifyTool(t *testing.T) {
 		{"mcp", externalTool{name: "github", kind: domain.EffectMCP}, classMCP},
 		{"subprocess", &subprocTool{name: "terminal"}, classSubprocess},
 		{"third-party writer", thirdPartyWriter{name: "weird"}, classThirdPartyWrite},
+		// The unfakeable markers outrank the self-declared ReadOnly (§4 amended 2026-07-26):
+		// classReadOnly is the terminal floor, reached only by a tool NO marker claimed. A tool
+		// that declares itself read-only and also reaches the network / launches a subprocess
+		// is classified by what it does, so it can never be both unsupervised and unbounded.
+		{"read-only + network declaration", externalTool{name: "ro-net", kind: domain.EffectNetwork, readOnly: true}, classThirdPartyNetwork},
+		{"read-only + mcp declaration", externalTool{name: "ro-mcp", kind: domain.EffectMCP, readOnly: true}, classMCP},
+		{"read-only + subprocess marker", &subprocTool{name: "ro-subproc", readOnly: true}, classSubprocess},
+		// The two shipped built-ins that carry the pair, through the real tools: a read-only
+		// declaration plus an OS-subprocess launch (git, the Go toolchain).
+		{"git_diff_range (real)", tools.NewGitDiffRange(ws), classSubprocess},
+		{"diagnostics (real)", tools.NewDiagnostics(ws), classSubprocess},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

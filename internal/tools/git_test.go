@@ -103,12 +103,16 @@ func TestGit_Markers(t *testing.T) {
 		t.Error("git_commit must be a SubprocessTool")
 	}
 
+	// git_diff_range carries BOTH: the read-only declaration (what keeps it in Plan mode's
+	// menu) and the subprocess marker (what classifies the call). The marker outranks the
+	// declaration — confinement-execution-contract §4, amended 2026-07-26 — so dropping
+	// either one moves the call's class; the agent-side pin is TestClassifyTool.
 	dr := NewGitDiffRange(root)
 	if !domain.IsReadOnly(dr) {
 		t.Error("git_diff_range must be ReadOnly (a diff is harmless inspection)")
 	}
 	if !domain.IsSubprocessTool(dr) {
-		t.Error("git_diff_range must still be a SubprocessTool")
+		t.Error("git_diff_range must still be a SubprocessTool (it launches the system git)")
 	}
 }
 

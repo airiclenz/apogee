@@ -136,11 +136,14 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		"terminal":    false,
 		"python_exec": false,
 		// Git tools (P3.9): branch/commit mutate the repo (write-capable); diff-range is a
-		// harmless read (read-only, runs in Plan).
+		// harmless read. Its read-only DECLARATION is what keeps it in Plan mode's menu — it
+		// no longer decides the class, because the subprocess marker outranks it (§4 amended
+		// 2026-07-26), so the call itself is confined/gated as a subprocess.
 		"git_branch":     false,
 		"git_commit":     false,
 		"git_diff_range": true,
-		// Diagnostics (P3.10): inspects only — read-only, runs in Plan.
+		// Diagnostics (P3.10): inspects only — read-only, same declaration-vs-marker split as
+		// git_diff_range (the go vet half shells out, so the call takes the subprocess row).
 		"diagnostics": true,
 		// Network tools (P3.11): external-effect, write-capable (the loop gates/auto-runs them
 		// by effect kind, not read-only) — they must NOT declare read-only.

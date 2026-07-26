@@ -158,6 +158,32 @@ point is a **minor** bump, not a breaking change.
 
 ### Security
 
+- **A tool's blast-radius class is now decided by what it *does*, not by what it *says* about
+  itself.** The per-call classification consulted a tool's own `ReadOnly()` declaration **before**
+  any of the structural markers, so a tool that declared itself read-only took the read-only row and
+  auto-ran in **every** mode — including Plan, and including Auto with no confinement and no
+  approval — however much reach it actually had. The markers are unfakeable by construction (a
+  network tool cannot carry the url-filter marker without routing through the guarded funnel); the
+  declaration is a bare claim a tool makes about itself, and it won. Now every marker is consulted
+  first and read-only is the **terminal floor**, reached only by a tool no marker claimed. Two
+  consequences:
+  - **A host-registered tool that reaches the network can no longer buy itself the read-only row by
+    declaring `ReadOnly() == true`.** It takes a network class: url-filtered if it routes through
+    Apogee's funnel, otherwise gated in Auto like any other unvouched-for network reach.
+  - **`git_diff_range` and `diagnostics` are classified as the subprocess launchers they are.** Both
+    write nothing — the declaration is honest — but one runs the system `git` and the other shells
+    out to `go vet`, which compiles the workspace's source, resolves modules from `GOPROXY` and
+    honours a `toolchain` directive in the repo's own `go.mod`. They previously ran raw, outside any
+    confinement box, in every mode. In Auto they are now **confined** like `terminal` (and gated
+    where the host cannot confine), on the middle rungs they **ask**, and in Plan a call is
+    **refused** — they stay in Plan's tool menu, which is a convenience filter, but the class is the
+    boundary.
+
+  Tighten-only: no call that previously asked or was confined now runs freely, and the tools that
+  carry no marker (`read_file`, `grep`, `view_diff`, `open_file`, `list_dir`, `ask_user`,
+  `present_document`) are untouched. See `docs/design/confinement-execution-contract.md` §4
+  (amendment 2026-07-26).
+
 - **The ask and approval prompts escape-strip all model-authored text before rendering.** The ask
   question and its choices, and the approval tool name, reason, and arguments, are stripped of the
   terminal escape (`ESC`) byte at the point they enter the popup, closing a gap where untrusted

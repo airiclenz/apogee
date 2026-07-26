@@ -27,14 +27,14 @@ import (
 // clear "no diagnostics available" result when none is present (§3a — an
 // enhancement, never a hard dependency, never an error).
 //
-// The tool is ReadOnly() — it only inspects, never mutates — so the disposition
-// runs it freely in every mode (including Plan). It is also a SubprocessTool
-// (domain.SubprocessTool) because the go vet / linter half shells out; read-only
-// wins over the subprocess class in the disposition (the disposition runs it,
-// never confines it), but the marker keeps the classification honest and lets the
-// shared runSubprocess honour a confinement handle if one is installed — exactly
-// like git_diff_range (P3.9). It is stateless across Turns (ADR 0008): a fresh
-// parse / a fresh process per call, no persistent state.
+// The tool is ReadOnly() — it only inspects, never mutates — which keeps it in Plan
+// mode's menu. It is also a SubprocessTool (domain.SubprocessTool) because the go
+// vet / linter half shells out, and THAT marker is what classifies the call: the
+// unfakeable marker outranks the self-declaration (confinement-execution-contract
+// §4, amended 2026-07-26), so the call takes the subprocess row — confined in Auto
+// (the shared runSubprocess honours the handle the disposition installs), gated
+// below it — exactly like git_diff_range (P3.9). It is stateless across Turns (ADR
+// 0008): a fresh parse / a fresh process per call, no persistent state.
 
 // vetTimeout bounds a single go vet (or external linter) invocation. Vetting a
 // single package is local and quick, so a short ceiling is ample and a hung
@@ -76,20 +76,21 @@ func NewDiagnostics(root string) *Diagnostics {
 	return &Diagnostics{toolSpec: diagnosticsSpec, root: root}
 }
 
-// ReadOnly reports that diagnostics performs no writes — it only inspects — so the
-// disposition runs it freely in every mode (including Plan).
+// ReadOnly reports that diagnostics performs no writes — it only inspects — which is
+// what keeps it in Plan mode's tool menu. It is NOT what classifies the call: the
+// Subprocess marker below outranks this declaration.
 func (t *Diagnostics) ReadOnly() bool { return true }
 
 // Subprocess reports that diagnostics may launch an OS subprocess (go vet / an
-// external linter). It is read-only, so the disposition runs it freely (read-only
-// wins over the subprocess class), but the marker keeps the classification honest
-// (domain.SubprocessTool).
+// external linter). The unfakeable marker OUTRANKS the read-only self-declaration in
+// the per-call classification (confinement-execution-contract §4, amended
+// 2026-07-26), so the call takes the subprocess row: confined in Auto, gated below it.
 func (t *Diagnostics) Subprocess() bool { return true }
 
 // Execute diagnoses the file at the requested path. An invalid path, a path escape,
 // or an unsupported language are surfaced as results (the last as a graceful "no
-// diagnostics available", not an error); only ctx cancellation is a Go error (this
-// tool is read-only and never confines).
+// diagnostics available", not an error); the Go error is reserved for ctx
+// cancellation and a confinement-unavailable demotion (the runSubprocess contract).
 func (t *Diagnostics) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -176,8 +177,9 @@ func goSyntaxDiagnostics(abs string) string {
 
 // runGoVet runs `go vet` on the package containing abs, under the vet timeout. It
 // returns the formatted findings, whether vet reported any problem (a non-zero exit
-// with output), and a non-nil error ONLY for ctx cancellation (so the read-only
-// diagnosis can degrade rather than fail). go vet writes findings to stderr and
+// with output), and a non-nil error ONLY for ctx cancellation or a
+// confinement-unavailable demotion (so an ordinary vet failure degrades rather than
+// failing the diagnosis). go vet writes findings to stderr and
 // exits non-zero when it finds problems; a clean package exits zero with no output.
 func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, hadFindings bool, err error) {
 	// Vet the package directory (go vet operates on packages, not single files), so
@@ -191,8 +193,9 @@ func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, h
 	}
 	res, runErr := runSubprocess(ctx, spec)
 	if runErr != nil {
-		// ctx cancellation (or a confinement-unavailable demotion, which cannot
-		// happen here because diagnostics is read-only and never confined).
+		// ctx cancellation, or a confinement-unavailable demotion (diagnostics takes
+		// the subprocess class, so dispatch does confine it — the demote signal must
+		// reach dispatch rather than being swallowed as a finding).
 		return "", false, runErr
 	}
 	out := strings.TrimSpace(res.combinedOutput)
@@ -228,7 +231,8 @@ const (
 // detectLanguage infers the language from the file extension. Only Go has a
 // built-in (dependency-free) provider today; other extensions resolve to
 // langUnknown and degrade gracefully (an optional external linter can be added per
-// language later without changing the disposition — the tool stays read-only).
+// language later without changing the disposition — the tool already carries the
+// subprocess marker the classification keys on).
 func detectLanguage(abs string) language {
 	switch strings.ToLower(filepath.Ext(abs)) {
 	case ".go":

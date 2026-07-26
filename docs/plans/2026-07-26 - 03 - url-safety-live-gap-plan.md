@@ -115,7 +115,29 @@ Nothing in this plan lands that config key.
 
 ---
 
-## 1. H-1 — `classifyTool` consults the unfakeable markers before the self-declaration
+## 1. H-1 — `classifyTool` consults the unfakeable markers before the self-declaration — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): Owner's design call taken as given — (A) reorder so RO is the terminal floor,
+(B) both built-ins on the `subproc` row, (C) Plan's menu filter and both `ReadOnly()` declarations
+untouched, (D) dated `>` amendment under §4 plus the reworded `Tool-classes:` line. Four
+departures from the item's literal text: (1) the "new in `internal/tools`" classifier test lives
+in `internal/agent` instead — `classifyTool` is unexported there and `internal/tools` cannot
+import `internal/agent` (import cycle), so `TestClassifyTool` gained rows for the REAL
+`tools.NewGitDiffRange` / `tools.NewDiagnostics` (exactly the `tools.NewWriteFile(ws)` mirror the
+item names), while `internal/tools`' `TestGit_Markers` / `TestDiagnostics_Markers` keep the marker
+pins and now point at the agent-side test. (2) `TestDiagnostics_ReadOnlyDoesNotConfine` is renamed
+`TestDiagnostics_RunsWithoutAConfinementHandle` — its assertions are unchanged and still valuable
+(the tool must never REQUIRE a handle, since every rung below Auto still runs it without one), but
+the old name asserted the falsehood the fix removes. (3) `TestDefaultTools_DeclareReadOnlyNature`
+keeps every assertion byte-for-byte; only its "runs in Plan" comments are reworded to the
+declaration-vs-marker split. (4) Doc comments that stated the old precedence in prose are
+corrected where they had become false: `internal/tools/git.go` and `internal/tools/diagnostics.go`
+("read-only wins over the subprocess class", "never confines — it is read-only") and
+`resolution.go`'s Plan-rung comment. `docs/design/technical-design.md:196` carries the same stale
+claim and was deliberately LEFT ALONE — this item's acceptance forbids touching any other doc
+under `docs/design/`; it needs a follow-up. Plan-mode behaviour is now: both tools are still
+offered in the menu (the filter reads `ReadOnly()`) and a call refuses — the owner's (C) accepted
+that, and §4's new footnote ² records it.
 
 **Design call:** the audit gives two shapes and does not choose between them, and the disposition
 of the two affected built-ins is an owner call, not an implementer's. Stop and ask:

@@ -438,19 +438,21 @@ func NewGitDiffRange(root string) *GitDiffRange {
 	return &GitDiffRange{toolSpec: gitDiffRangeSpec, root: root}
 }
 
-// ReadOnly reports that git_diff_range performs no writes — it runs in Plan and is
-// never gated/confined as a write (a diff is harmless inspection).
+// ReadOnly reports that git_diff_range performs no writes (a diff is harmless
+// inspection), which is what keeps it in Plan mode's tool menu. It is NOT what
+// classifies the call: the Subprocess marker below outranks this declaration.
 func (t *GitDiffRange) ReadOnly() bool { return true }
 
 // Subprocess reports that git_diff_range launches an OS subprocess (the system
-// git). It is read-only, so the disposition runs it freely (read-only wins over the
-// subprocess class), but the marker keeps the classification honest.
+// git). The unfakeable marker OUTRANKS the read-only self-declaration in the
+// per-call classification (confinement-execution-contract §4, amended 2026-07-26),
+// so the call takes the subprocess row: confined in Auto, gated below it.
 func (t *GitDiffRange) Subprocess() bool { return true }
 
 // Execute runs the three-dot diff between the validated refs through the system
 // git. A missing git, an invalid/missing ref, a path escape, or a git failure are
-// surfaced as results; only ctx cancellation is a Go error (this tool never
-// confines — it is read-only).
+// surfaced as results; the Go error is reserved for ctx cancellation and a
+// confinement-unavailable demotion (the runSubprocess contract).
 func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err

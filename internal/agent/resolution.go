@@ -213,14 +213,13 @@ func resolve(in resolutionInput) resolution {
 }
 
 // toolClass is the blast-radius class the ladder keys on (confinement-execution-contract §4).
-// The order is significant: read-only wins (a read never gates), then the unfakeable
-// workspace-scoped-writer marker, then vouched-for network (the unfakeable url-filter marker),
-// then a network tool Apogee cannot vouch for, then MCP, then the subprocess marker, and
-// finally a write-capable tool Apogee cannot vouch for (3p-write).
+// classifyTool decides which one a tool takes; the classes themselves are just the list, and
+// the load-bearing part is the CHECK ORDER there — every unfakeable marker is consulted before
+// the self-declared read-only floor.
 type toolClass int
 
 const (
-	classReadOnly          toolClass = iota // IsReadOnly
+	classReadOnly          toolClass = iota // IsReadOnly and NO other marker (the terminal floor)
 	classWorkspaceWrite                     // workspaceScopedWriter marker (Apogee's own write)
 	classNetwork                            // network + urlFilteredNetworker marker (Apogee's own)
 	classThirdPartyNetwork                  // network, no url-filter marker (unfiltered URLs — gates)
@@ -229,10 +228,22 @@ const (
 	classThirdPartyWrite                    // write-capable, none of the above (can't vouch for scoping)
 )
 
-// classifyTool maps a tool onto its blast-radius class. The classes are checked in a fixed
-// priority so a tool implementing several markers resolves deterministically: read-only first
-// (harmless), then Apogee's own writer, then the external kinds, then the confinable subprocess
-// surface, else a third-party in-process writer.
+// classifyTool maps a tool onto its blast-radius class. The check order IS the invariant: every
+// marker that is unfakeable by construction is consulted first — Apogee's own workspace-scoped
+// writer, then the external-effect kinds (the network kind splitting on the url-filter marker),
+// then the subprocess marker — and classReadOnly is the TERMINAL FLOOR, reached only by a tool
+// that no marker claimed. A tool that carries neither a marker nor a read-only declaration is a
+// third-party in-process writer.
+//
+// ReadOnly() is a bare SELF-DECLARATION, so it can never outrank a structural fact about what
+// the tool does (ADR 0012 Amendment 2026-07-25(a): classification keys on the marker). A tool
+// declaring itself read-only that also launches an OS subprocess (git_diff_range, diagnostics)
+// is classified by the subprocess it launches and is confined/gated accordingly; one declaring
+// itself read-only that also reaches the network takes a network class and is url-filtered or
+// gated. Otherwise a call could be both unsupervised and unbounded — the one thing ADR 0012's
+// core invariant forbids. The declaration keeps its own job: it is what Plan mode's menu filter
+// (loop.go) and Ask-Before's harmless-read skip read, and it still decides the floor for the
+// tools no marker claims (read_file, grep, view_diff, open_file, list_dir, ask_user).
 //
 // The network kind splits on the url-filter marker: an EffectNetwork tool that routes through
 // internal/tools' network funnel is classNetwork (Apogee vouches that every outbound URL passed
@@ -240,9 +251,6 @@ const (
 // classThirdPartyNetwork — its URLs are unfiltered, so it gates instead of reaching the network
 // unattended (ADR 0012 Amendment 2026-07-25, the network analogue of classThirdPartyWrite).
 func classifyTool(tool domain.Tool) toolClass {
-	if domain.IsReadOnly(tool) {
-		return classReadOnly
-	}
 	if tools.IsWorkspaceScopedWriter(tool) {
 		return classWorkspaceWrite
 	}
@@ -258,6 +266,9 @@ func classifyTool(tool domain.Tool) toolClass {
 	if domain.IsSubprocessTool(tool) {
 		return classSubprocess
 	}
+	if domain.IsReadOnly(tool) {
+		return classReadOnly
+	}
 	return classThirdPartyWrite
 }
 
@@ -270,7 +281,10 @@ func resolveLadder(in resolutionInput) resolution {
 
 	switch in.mode {
 	case domain.ModePlan:
-		// Plan filters the menu to read-only tools; anything else is refused defensively.
+		// Plan runs the read-only floor and nothing else. The menu filter (loop.go) keeps most
+		// other tools out of sight, but a tool that DECLARES itself read-only while carrying a
+		// marker — a read-only subprocess launcher, say — is still offered and is refused here:
+		// the class, not the self-declaration, is the boundary.
 		if class == classReadOnly {
 			return resolution{kind: resolveRun}
 		}

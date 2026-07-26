@@ -67,6 +67,9 @@ func TestDiagnostics_Markers(t *testing.T) {
 	if !domain.IsReadOnly(d) {
 		t.Error("diagnostics must be read-only (it only inspects)")
 	}
+	// As with git_diff_range, the read-only declaration keeps diagnostics in Plan mode's menu
+	// while the subprocess marker is what classifies the call (§4 amended 2026-07-26 — the
+	// unfakeable marker outranks the self-declaration); TestClassifyTool pins the class.
 	if !domain.IsSubprocessTool(d) {
 		t.Error("diagnostics must declare SubprocessTool (the go vet / linter half shells out)")
 	}
@@ -217,11 +220,13 @@ func TestDiagnostics_CleanGoFilePassesVet(t *testing.T) {
 	}
 }
 
-func TestDiagnostics_ReadOnlyDoesNotConfine(t *testing.T) {
-	// diagnostics is read-only, so the disposition never installs a confinement handle.
-	// Even if one is present, the tool must not require it: a vet finding still reports
-	// without the Confiner being load-bearing. Force the toolchain-absent branch so this
-	// stays deterministic and toolchain-free; the syntax half proves the read path runs.
+func TestDiagnostics_RunsWithoutAConfinementHandle(t *testing.T) {
+	// diagnostics takes the SUBPROCESS class (§4 amended 2026-07-26), so Auto installs a
+	// confinement handle — but every other rung runs it without one (an approved gate,
+	// "I am the sandbox", the library seam). The tool must therefore never REQUIRE the
+	// handle: the diagnosis still reports with no Confiner in play. Force the
+	// toolchain-absent branch so this stays deterministic and toolchain-free; the syntax
+	// half proves the read path runs.
 	withFakeGo(t, false, "")
 	dir := t.TempDir()
 	writeGoFile(t, dir, "clean.go", "package main\n\nfunc main() {}\n")
