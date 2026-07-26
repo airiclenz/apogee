@@ -1,7 +1,12 @@
 # Plan — Close the architecture deepening review: structured tool results, one Event fold, four small deepenings
 
 **Date:** 2026-07-25
-**Status:** READY (scope and the two shape decisions resolved with the owner 2026-07-25).
+**Status:** **LIVE, NOT ARCHIVED — executed 2026-07-25/26. Items 1–7, 9 and 10 landed; item 8 was
+attempted twice, failed verification both times and was then SKIPPED by the owner, and its
+implementation is still sitting UNCOMMITTED in the working tree.** This document is the resume
+state: the per-item ledger, the four landed follow-up fixes, the open nit-grade findings and the
+outstanding owner calls are in **Execution state (2026-07-26)** below. (Scope and the two shape
+decisions were resolved with the owner 2026-07-25 — the original READY state.)
 **Source:** the **whole remaining** ledger of
 `docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md` — candidate **03**
 ("Hand the view structured tool results", *Strong*, the review's own top remaining pick),
@@ -9,7 +14,8 @@ candidate **06** ("Decode each engine Event once", *Worth exploring*), and the *
 smaller deepenings still open (`workspaceWriteTarget` helper, `read_file` →
 `SafeStat`/`SafeReadFile`, the POSIX `Confine` argv-wrap helper, the self-regulator read
 model). Candidates 01, 02, 04, 05 and 07 landed 2026-07-24/25; the session-store lifecycle
-was absorbed by ADR 0022. **When this plan is done the review's ledger is empty.**
+was absorbed by ADR 0022. **When this plan is done the review's ledger is empty** — it is not yet,
+because item 8 is open (see **Execution state**).
 **Track:** post-`v0.8.0` architecture deepening — the fifth and final card set off the
 2026-07-24 review.
 **Public API:** items 1–5 are **additive** to the public surface (`apogee.ToolSummary` plus
@@ -39,6 +45,98 @@ GOOS=darwin go test -c -o /dev/null ./internal/platform
 **Items are independent below the group boundary.** 1 → 2 → 3 → 4 → 5 is a chain (03);
 6 stands alone (06); 7, 8, 9, 10 stand alone and in any order. `/implement-plan` may stop
 after any completed item and the tree is coherent.
+
+---
+
+## Execution state (2026-07-26)
+
+**Nine of the ten items landed**, each on its own green gate and each verified by an independent
+agent before its commit, in plan order:
+
+| item | commit | what landed |
+| --- | --- | --- |
+| 1 | `d964460` | `domain.ToolSummary` — the sealed sum, the optional `ToolResult` field, the root aliases |
+| 2 | `05aa0a0` | `read_file`, `write_file`, `list_dir`, `grep` attach their summary |
+| 3 | `5463257` | `view_diff`, `web_search`, `open_file` attach their summary |
+| 4 | `551abac` | the view reads fields; the regexes and prose sniffers are gone |
+| 5 | `8b1e980` | CONTEXT.md, the ADR 0002 + 0011 notes, CHANGELOG, both `doc.go`s, candidate 03's card |
+| 6 | `6c1f458` | one `foldEvent` owns the Event fold and its order |
+| 7 | `13681f4` | one shared `pathArgWriteTarget` body behind the four markers |
+| 8 | — | **NOT LANDED — skipped by the owner; see item 8's status record** |
+| 9 | `f013d4d` | one POSIX argv-wrap helper for landlock and seatbelt |
+| 10 | `b9578a0` | the self-regulator's read model |
+
+Each landed item's own `NOTES` block records the deviations its implementer made and its verifier
+accepted, so the ✅ markers are not the whole record.
+
+### Follow-up fixes, landed after the items
+
+Four defects raised while the run was reviewed, each fixed and committed on its own:
+
+- **`a73eed8`** — `domain.ListedEntries.Skipped`'s doc comment described the wrong mechanism. It is
+  the **clamped pagination offset** `list_dir` applied, not the `maxDirEntries` truncation cap.
+- **`c218670`** — item 7's `TestWriteTargetsAgreeOnPath` was not actually the rename guard the item
+  claimed: it drove hand-written calls, so a tool renaming its `path` field would not have failed
+  it. Rebuilt to construct each call **from the tool's own args struct**, plus a schema/tag
+  agreement test (`TestWriteToolsDeclarePathArgument`) and a coverage test asserting every marker
+  carrier in `DefaultTools` has a probe. `pathArgWriteTarget`'s comment, which item 7 left claiming
+  the old test kept the spelling true, was corrected in the same commit — item 7's own brief and
+  `NOTES` below still describe the original hand-written table, so read them against `c218670`.
+- **`f45a30a`** — `internal/security/safeio.go` claimed "an oversized or hostile file is rejected
+  without being materialized". It is not: the **size** bound has a stat→read check/use window,
+  because `SafeStat` and `SafeReadFile` each open their own `os.Root`. The doc is now scoped to the
+  **root-pinned path-resolution** guarantee, which does hold, and the window is stated with its
+  measurement. `internal/security/doc.go`, `internal/agent/loop.go` and its test comment repeated
+  the same claim and were corrected too.
+- **`cfcb2a4`** — item 4's own acceptance grep was unsatisfiable: `diffDetail` substring-matches
+  `diffDetailCap`, the constant the item mandates keeping, so the check could never come back
+  empty. The grep now uses `-rnw` (recorded in item 4's Acceptance).
+
+### Raised after the follow-ups, NOT fixed (nit-grade)
+
+Recorded rather than fixed: none changes behaviour, and each is a one-line doc correction for a
+later pass.
+
+- **`internal/domain/toolsummary.go` L54–57** — the same comment `a73eed8` fixed is still loose
+  about `Total`: it reads "how many entries the directory holds in total", but the number is the
+  **collected** count, after the hidden/`node_modules` filter and the `maxDirEntries` per-directory
+  cap (`list_dir.go` L112–116, L140).
+- **`internal/security/safeio.go` L37** — the new SCOPE paragraph's "**849 of 4000**" over-bound
+  reads is one probe's figure; an independent probe of the same window measured **136–160 of 4000**.
+  What the number supports (the window exists) is not in doubt; the figure is probe-specific and
+  reads as if it were a constant.
+- **`internal/tools/workspace_scoped_test.go`** — `c218670`'s reflect walk (`pathField`,
+  `argJSONNames`) inspects **top-level fields only**, so an args struct that embedded its path field
+  would fail the guard loudly rather than pass it silently; and its coverage guard iterates
+  `DefaultTools`, so a marker-carrying writer registered only through `HostTools` would escape it.
+  **No such tool exists today** — this is a note for whoever adds one.
+- **`internal/skills/load.go` L21, L140–141** — cites `read_file`'s "stat-or-limit-before-
+  materialize discipline" as the model for its own `io.LimitReader` path. That path is sound (one
+  handle, bounded read); the citation is worth a word **if item 8 is ever revived**, because what
+  `read_file` actually does is the two-handle stat-then-read `f45a30a` scoped down.
+
+### Not archived, and what is still open
+
+- **This plan is deliberately NOT archived.** Whole-plan verification step 10 ends in the archive,
+  and item 8 is open, so the plan stays in `docs/plans/` as the resume state. A later
+  `/implement-plan` run skips items 1–7, 9 and 10 on their ✅ markers and picks up at item 8's
+  status record.
+- **No whole-plan verification result is recorded here.** Two of its steps have a known state:
+  - **Step 8 — `VERSION` is an owner call and was untouched by this run.** The step asks to confirm
+    `VERSION` (`v0.8.4`) is bumped **or** to record deliberately that the bump rides the next
+    release; neither was recorded. `VERSION` read `v0.8.4` before item 1 (`1c81eaf`, 2026-07-25) and
+    reads `v0.8.4` still, so this plan's additive public surface (items 1–5, a **minor** bump under
+    ADR 0010 per the header above) currently rides a version cut before it existed. Whether that is
+    right is the owner's call, not the implementer's.
+  - **Step 10 — the review's ledger is only part-updated and cannot be declared empty.** Item 5
+    (`8b1e980`) gave candidate **03** its ✅ LANDED note; `docs/reviews/2026-07-24 - 00 -
+    architecture-deepening-review.md` still lists candidate **06** and all four smaller deepenings
+    as *PLANNED (not yet built)*, and the "Recommended next step" section is unrewritten. Item 8 is
+    one of those four, so the ledger cannot honestly be emptied until item 8 lands or is dropped on
+    the record.
+- **The owner's manual verification (last section) is not recorded as done.** Nothing in the run
+  substitutes for it — item 4's pin proves the strings match the table, not that the table matched
+  reality, and item 6's ordering change is invisible to every test that drives `Update`.
 
 ---
 
@@ -609,6 +707,14 @@ it as a silent side effect of the collapse. `write_file`'s longer marker comment
 full and gains one clause saying the method stays per-type *because* the marker is the method
 set, which is the question a reader now has when the body is one line.
 
+FOLLOW-UP (2026-07-26, `c218670`): the `TestWriteTargetsAgreeOnPath` described below was **not** the
+rename guard this item claimed — it drove hand-written `{"path":…}` calls, so a tool renaming its
+path field would not have failed it. It was rebuilt to marshal each call from the tool's **own** args
+struct, joined by `TestWriteToolsDeclarePathArgument` (schema + struct tag) and
+`TestWriteTargetProbesCoverEveryWriter` (every marker carrier in `DefaultTools` has a probe), and
+`pathArgWriteTarget`'s comment was corrected to name both. The *Tests* paragraph below is the
+original brief; the guard that exists is the rebuilt one.
+
 **What:**
 
 - **`internal/tools/workspace_scoped.go`** — one helper beside `resolveTargetUnbounded` (L58):
@@ -643,7 +749,90 @@ if a tool ever renames its path argument, this fails instead of the marker silen
 
 ---
 
-## 8. `read_file` and `open_file` read through the TOCTOU-safe primitives
+## 8. `read_file` and `open_file` read through the TOCTOU-safe primitives — ⚠️ NOT LANDED (SKIPPED by the owner 2026-07-26)
+
+**STATUS (2026-07-26): attempted twice, failed verification both times, then SKIPPED by the owner
+rather than retried a third time. Nothing from this item is committed.** Its implementation is
+sitting **UNCOMMITTED in the working tree**: `internal/tools/read_file.go`,
+`internal/tools/open_file.go`, `internal/tools/path_safety.go`, `internal/tools/read_file_test.go`,
+`internal/tools/open_file_test.go`, plus a `CHANGELOG.md` `Unreleased → Security` bullet. Whoever
+resumes has two honest choices: fix the three sentences named below and re-verify, or revert those
+files and drop the item on the record. **The brief below (What / Error-message parity / Tests /
+Acceptance) is the original 2026-07-25 text and is unchanged — read it together with this record,
+because execution disproved part of it** (see *What execution disproved in the brief*).
+
+**Already proven, and to be kept by any later attempt:**
+
+- **The code half is right — the TOCTOU path-resolution hole is genuinely closed.** An independent
+  re-check of a racing component-swap probe measured **0** escapes through the pinned-root path over
+  2,000–3,000 racing reads, against **4,326** leaked reads through the old
+  `resolveInRoot → os.Stat → os.ReadFile` trio. This item's own probe, measuring at the tool
+  boundary, saw **16–18** leaks per 2,000 reads through the old trio and **0** after. The leak rate
+  depends on the probe's timing; that it is non-zero before and zero after does not.
+- **The behaviour tightening stays** — owner decision taken after attempt 1: *"fix the claims, keep
+  the tightening"*. An in-root symlink whose target is spelled as an **absolute** path is now refused
+  even when that target is inside the workspace (`os.Root` resolves relative components only); it
+  read fine before. Relative in-root symlinks — as the named file and as a directory component —
+  still read. Both halves are pinned by tests in the uncommitted work.
+
+**What a third attempt must fix — three sentences that still over-claim.** Attempt 2 failed
+verification on exactly these, and they are still in the uncommitted tree:
+
+- `CHANGELOG.md` **L176–177** — "the size check and the read that follows it resolve against one
+  pinned root, so there is no window between them".
+- `internal/tools/read_file.go` **L54–55** and `internal/tools/open_file.go` **L57–58** — "The stat
+  that bounds the file by size and the read that materialises it resolve against the same pinned
+  root, so there is no check/use gap between them."
+- **Why they are false:** the **size** bound still has a check/use window. `safeStat` and
+  `safeReadFile` each open their **own** `os.Root`, so flipping an in-root name between a small file
+  and an 11 MB file mid-call yields a successful read past `maxFileReadBytes` — reproduced in 4 runs
+  out of 10, and again independently at 136–160 over-bound reads per 4,000. Only **path resolution**
+  is window-free; the same correction landed for the primitives themselves in `f45a30a`.
+- **The remedy identified:** scope the sentence to path resolution and drop "the same pinned root" —
+  there are two handles, opened at different moments. A **real** fix for the window itself would be
+  ONE handle for both steps (`r.Open(rel)`, `Stat` the `*os.File`, then read through
+  `io.LimitReader(f, cap+1)`), which is a change to `internal/security`'s caller contract, not a
+  tweak to this item. Decide that before re-opening the item.
+
+**What execution disproved in the brief below** — established by running the old trio and the new one
+over the same inputs, so a later attempt must not re-assert the brief's parity claim:
+
+- The brief's "Error-message parity" section is **wrong about the static case**: the old
+  `resolveInRoot → os.Stat → os.ReadFile` trio **did refuse** a *static* workspace component
+  symlinked outside the workspace (`resolveInRoot` resolves symlinks and rejected it at check time),
+  so the escape was not "a case the old code did not detect at all". Only the **racy** half was ever
+  exploitable. Consequently the two symlink tests the brief's *Tests* section asks for **pass against
+  the pre-change code** — they are a boundary pin, not a proof of gain, and the uncommitted tests'
+  doc comments now say so.
+- "Every other message is unchanged" is inaccurate too — **two** messages changed: a symlink-shaped
+  escape renders `…: statat <path>: path escapes from parent` after the uniform prefix where the old
+  check rendered `…: "<path>"`, and a read that fails **after** the size check now reports
+  `file not found: <path>` (via `readFileErrorMessage`) instead of the raw OS error. Traversal,
+  out-of-root absolute paths, missing files, directories, oversized files and successful reads are
+  byte-identical.
+
+**How the uncommitted implementation departs from the brief's literal text** — recorded so a later
+attempt does not rediscover it; none of this is what failed verification:
+
+- (a) The stat goes through a new package-local `safeStat(input, root)` alias in `path_safety.go`
+  rather than calling `security.SafeStat(t.root, args.Path)` directly. `path_safety.go` exists
+  precisely to give the built-in tools one set of names with one argument order, and the literal form
+  would have put `security.SafeStat(t.root, args.Path)` two lines above
+  `safeReadFile(args.Path, t.root)` — the same two arguments in opposite orders inside one function,
+  a transposition waiting to happen. Neither read tool imports `internal/security`, matching every
+  other file tool.
+- (b) A **CHANGELOG `Unreleased → Security` bullet** was added, which the item does not list: unlike
+  item 7 this item *changes behaviour a user can observe* (an in-workspace absolute-target symlink is
+  now refused, and the racy swap is no longer followed), and the repo records fence changes there. It
+  is the bullet whose L176–177 sentence must be fixed.
+- (c) The escape assertion in both new tests matches `ErrPathEscape.Error()` inside the result
+  content rather than `errors.Is` — the tool boundary renders the refusal as an IsError result
+  string, so the sentinel's own text is the strongest form available there.
+- (d) Tests added beyond the brief's list, to pin what the change genuinely does rather than what it
+  inherited: `RefusesComponentSwappedMidRead` (the racy half, via a shared
+  `escapesUnderComponentSwap` helper), `RefusesAbsoluteInRootSymlink` (the narrowing) and
+  `ReadsRelativeInRootSymlink` (its positive control), on both tools. The first two fail against the
+  pre-change code and pass against this one — checked by reverting the two sources and re-running.
 
 **What:**
 
@@ -809,6 +998,13 @@ report the count straight in the commit body); `go test ./internal/agent/...` gr
 ---
 
 ## Whole-plan verification (run after item 10, before declaring done)
+
+**Not completed — the plan is not done (see Execution state, 2026-07-26).** The steps below are the
+original close-out and are unchanged. Known state: **step 6** does not pass on `main` (item 8 is not
+landed, so `read_file.go` and `open_file.go` still call `os.Stat`/`os.ReadFile` at HEAD — the grep is
+empty only in the uncommitted working tree); **step 8**'s `VERSION` decision is an outstanding owner
+call; **step 10**'s ledger rewrite and the archive it ends with are blocked on item 8. The remaining
+steps are unrun or unrecorded.
 
 1. **Full gate**, all five commands, plus item 9's two `GOOS=darwin` commands.
 2. **The regexes are gone:**
