@@ -10,10 +10,12 @@
 # Every line below is commented out, so out of the box this file changes nothing — it is
 # a documented starting point. Uncomment a line and edit it to make it your default.
 
+# =============================================================================
 # The local OpenAI-compatible LLM server URL.
 #   flag: --endpoint   env: APOGEE_ENDPOINT
 # endpoint: http://192.168.64.1:1111
 
+# =============================================================================
 # A short, friendly name for the upstream host, shown in the status footer. Leave it unset
 # and apogee shows the endpoint's host instead. Config-file only (no flag or env).
 # host-alias: my-box
@@ -24,6 +26,7 @@
 #   flag: --model      env: APOGEE_MODEL
 # model: qwen2.5-coder
 
+# =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).
 #   plan        — read-only: no writes, no command execution
 #   ask-before  — every write, command, and external reach needs your approval (the default)
@@ -37,6 +40,7 @@
 #   flag: --mode       env: APOGEE_MODE
 # mode: ask-before
 
+# =============================================================================
 # Auto's blast radius (only meaningful in --mode auto). GLOBAL-CONFIG-ONLY: there is no flag
 # or env, and a project config cannot loosen it — editing THIS file is the deliberate
 # acknowledgement. Default: true.
@@ -49,6 +53,7 @@
 # `/confine off --save` command records for you rather than making you edit this by hand.
 # confine-to-workspace: true
 
+# =============================================================================
 # Machines you have acknowledged as disposable: on a host listed here, auto mode runs
 # UNCONFINED — the same loosen as confine-to-workspace: false above, but scoped to one
 # machine instead of every machine this file travels to. GLOBAL-CONFIG-ONLY, for the same
@@ -72,6 +77,7 @@
 #     acknowledged: "2026-07-21"         # when you made the call — for your future self
 #     note: "disposable container, landlock unavailable"
 
+# =============================================================================
 # Search endpoint for the web_search tool. With no endpoint set, web_search uses DuckDuckGo
 # (HTML, no API key needed) — it works out of the box. Set it to `off` to disable web search,
 # or point it at your own search backend, which receives the query as the `q` URL parameter
@@ -80,6 +86,7 @@
 # metadata addresses are always blocked, by resolved IP) applies regardless.
 # web-search-endpoint: https://search.example.com/search
 
+# =============================================================================
 # External MCP (Model Context Protocol) servers to connect on startup. Default-EMPTY: with no
 # servers listed, the MCP feature is dormant (no connections, no error). Each server's tools are
 # discovered at startup and offered to the model, named "<server-name>__<tool>". Config-file only.
@@ -104,6 +111,7 @@
 #     transport: streamable-http         # sse | streamable-http: a remote http(s) server
 #     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)
 
+# =============================================================================
 # Discover skills from the workspace's bare skills/ folder, in addition to the global library
 # (~/.apogee/skills) and the project's .apogee/skills (both always loaded). A skill is a folder
 # containing a SKILL.md (YAML frontmatter — id/name, displayName, summary/description — plus a
@@ -111,6 +119,7 @@
 # message. Config-file only (no flag or env). Default: true.
 # use-project-skills: true
 
+# =============================================================================
 # Automatic context Compaction: when the conversation history outgrows its share of the model's
 # context window, apogee summarises the older turns into a compact brief (the same fold the
 # /compact command runs) before the next request, so a long session does not overflow the window.
@@ -122,6 +131,7 @@
 # or env). Default: true.
 # auto-compact: true
 
+# =============================================================================
 # The model's context window in tokens. Leave it unset and apogee discovers the window from the
 # server at startup — for a pinned model above too. Set it only when your server does not advertise
 # a window, or to start a pinned model offline. It drives the Budget and the automatic compaction
@@ -129,6 +139,7 @@
 # only (no flag or env).
 # context-window: 32768
 
+# =============================================================================
 # How a finished document is shown to you. The model calls `present_document` after writing a
 # deliverable (a report, a diagram, an HTML summary), and apogee decides how to surface it —
 # the model never reasons about your platform. Config-file only (no flag or env).
@@ -166,6 +177,7 @@
 # Network; Safari tends to work straight away. Try the URL in Safari before suspecting apogee —
 # and the path line in the transcript works regardless.
 
+# =============================================================================
 # How the terminal UI presents itself. Today that is the status-line spinner — the animation you
 # watch while a turn runs. Config-file only (no flag or env).
 #
@@ -196,10 +208,12 @@
 #   spinner: snake         # snake | glitter | classic
 #   spinner-color: true    # the 8s colour loop; false = your terminal's own text colour
 
+# =============================================================================
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false
 
+# =============================================================================
 # Catalogued small-model Mechanisms to enable, by canonical ID (Phase 4). Config-file only (no
 # flag or env). Each Mechanism ships OFF by default — enabled only once its A/B bench run has
 # proven it a win — so this block is how you opt one in. Map each ID to true to enable it; an
@@ -227,6 +241,7 @@
 #   truncate_history: false     # explicitly off (the default) — shown for reference
 #   guided_decomposition: true  # oversized task → serialized sub_agent fan-out (needs tool_result_cap)
 
+# =============================================================================
 # Validated sets (ADR 0016): per-model Mechanism sets bench-proven SAFE (non-inferior to
 # --bypass) on a specific model. When the model apogee resolves at startup matches an entry —
 # shipped with the binary, or your own under ~/.apogee/validated/ — the set applies
