@@ -430,7 +430,27 @@ Commit: `test(tools): pin the dial-time SSRF floor through the funnel's own clie
 
 ---
 
-## 5. M-7 — pin that the host-supplied `URLGuard` reaches all three network tools
+## 5. M-7 — pin that the host-supplied `URLGuard` reaches all three network tools — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **Mutation check (mandatory, performed):** each of the three call sites at
+`internal/tools/registry.go:101-103` was changed to `security.URLGuard{}` in turn; each time the new
+test went **red for exactly that tool's row** and green for the other two. Recorded as a second
+observation (item 4's precedent): under the `web_fetch` mutation, **no other test in
+`./internal/tools/` fails** — the audit's claim that the threading was carried by nothing is
+confirmed, not assumed. Three departures from the item's literal text, all additive: (1) the row
+asserts the **deny wording** (`is denied`) on top of "an error result naming url-safety" — this is
+the load-bearing half, because the dropped-guard zero value *also* refuses `blocked.example`, via
+the floor's `could not resolve host`, so a refusal-only assertion would have stayed green through
+the exact regression the item exists to catch. (2) The table is *required* to cover every
+`EffectNetwork` tool in the default set (a walk mirroring
+`TestDefaultTools_EveryNetworkToolIsURLFiltered`), which turns the item's "a future fourth network
+tool is a one-line addition" into a forced one rather than a remembered one. (3) `web_search` takes
+no model-supplied URL, so its row reaches the denied host through
+`HostTools.WebSearchEndpoint: "https://blocked.example/s"` — the only URL that tool ever requests.
+The recipe's `publicStub` resolver is injected as written and keeps the green path hermetic (the
+deny fires string-level, ahead of any resolution — the suite makes no DNS lookup; only the mutated
+build does). No production code and no doc was touched, CHANGELOG deliberately included: like item
+4, this adds a regression net for behaviour that is already correct and already shipped.
 
 **What:** `internal/tools/registry.go:101-103` threads `NewWebFetch(host.URLGuard)` and its two
 siblings, and **no test asserts it**. `internal/tools/registry_test.go` covers names, menu order,
