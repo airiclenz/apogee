@@ -12,6 +12,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -92,13 +94,13 @@ func TestSelfRegulatorFireJudgedByNextTurn(t *testing.T) {
 	r.recordFire("x")
 	r.noteToolError()
 	r.endTurn()
-	if got := r.strikes["x"]; got != 0 {
+	if got := r.observed().Strikes["x"]; got != 0 {
 		t.Fatalf("Turn N's own outcome struck its fires (strikes=%d); judgment is next-Turn", got)
 	}
 	// Turn N+1: harmful with no fires of its own — NOW x's pending fire is struck.
 	r.noteToolError()
 	r.endTurn()
-	if got := r.strikes["x"]; got != 1 {
+	if got := r.observed().Strikes["x"]; got != 1 {
 		t.Fatalf("strikes[x] = %d after a harmful Turn N+1, want 1", got)
 	}
 }
@@ -151,19 +153,20 @@ func TestSelfRegulatorNeutralFreezes(t *testing.T) {
 	r.recordFire("x")
 	r.noteToolError()
 	r.endTurn()
-	if r.strikes["x"] != 1 || r.harmfulStreak != 2 {
-		t.Fatalf("precondition: strikes[x]=%d streak=%d, want 1/2", r.strikes["x"], r.harmfulStreak)
+	if before := r.observed(); before.Strikes["x"] != 1 || before.HarmfulStreak != 2 {
+		t.Fatalf("precondition: strikes[x]=%d streak=%d, want 1/2", before.Strikes["x"], before.HarmfulStreak)
 	}
 	// A neutral Turn (no signals): freeze.
 	r.recordFire("x")
 	r.endTurn()
-	if got := r.strikes["x"]; got != 1 {
+	after := r.observed()
+	if got := after.Strikes["x"]; got != 1 {
 		t.Errorf("a neutral Turn changed strikes[x] to %d, want frozen at 1", got)
 	}
-	if got := r.harmfulStreak; got != 2 {
+	if got := after.HarmfulStreak; got != 2 {
 		t.Errorf("a neutral Turn changed the streak to %d, want frozen at 2", got)
 	}
-	if r.budgetTripped {
+	if after.BudgetTripped {
 		t.Error("a neutral Turn tripped the Turn Budget")
 	}
 }
@@ -194,7 +197,7 @@ func TestSelfRegulatorExemptNeverSuppressed(t *testing.T) {
 		r.noteToolError()
 		r.endTurn()
 	}
-	if !r.budgetTripped {
+	if !r.observed().BudgetTripped {
 		t.Fatal("precondition: the Turn Budget should have tripped")
 	}
 	if r.suppress(m) {
@@ -208,13 +211,13 @@ func TestSelfRegulatorTurnBudgetTripsAndClears(t *testing.T) {
 	y := regRow("y")
 	exempt := regRow("e", domain.SuppressExempt)
 	for i := 0; i < turnBudgetLimit; i++ {
-		if r.budgetTripped {
+		if r.observed().BudgetTripped {
 			t.Fatalf("Turn Budget tripped early after %d harmful Turns", i)
 		}
 		r.noteToolError()
 		r.endTurn()
 	}
-	if !r.budgetTripped {
+	if !r.observed().BudgetTripped {
 		t.Fatalf("Turn Budget did not trip after %d harmful Turns", turnBudgetLimit)
 	}
 	if !r.suppress(y) {
@@ -226,7 +229,7 @@ func TestSelfRegulatorTurnBudgetTripsAndClears(t *testing.T) {
 	// A productive Turn clears the global withdrawal.
 	r.noteRead(domain.ToolCall{Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)})
 	r.endTurn()
-	if r.budgetTripped {
+	if r.observed().BudgetTripped {
 		t.Fatal("a productive Turn did not clear the Turn Budget")
 	}
 	if r.suppress(y) {
@@ -281,11 +284,65 @@ func TestSelfRegulatorDiscardLeavesPendingInPlace(t *testing.T) {
 	r.discardTurn() // the Turn with y's fire is cancelled — y evaporates, x stays pending
 	r.noteToolError()
 	r.endTurn() // the harmful re-attempt judges the pending set
-	if got := r.strikes["x"]; got != 1 {
+	judged := r.observed()
+	if got := judged.Strikes["x"]; got != 1 {
 		t.Errorf("strikes[x] = %d, want 1 (pending fires survive a discarded Turn)", got)
 	}
-	if got := r.strikes["y"]; got != 0 {
+	if got := judged.Strikes["y"]; got != 0 {
 		t.Errorf("strikes[y] = %d, want 0 (a discarded Turn's own fires are not judged)", got)
+	}
+}
+
+// TestObservedIsASnapshot proves the read model is a copy, not a window into the regulator:
+// mutating the map and the slice it hands back cannot reach the tracked state, a second read
+// still reports the truth, and the regulator keeps deciding from its own state afterwards.
+func TestObservedIsASnapshot(t *testing.T) {
+	r := newSelfRegulator()
+	// Two Mechanisms fire every Turn and every Turn is harmful, so both strike out — with more
+	// than one withdrawal, Suppressed's sort order is observable too.
+	for i := 0; i < adaptiveSuppressStrikes+1; i++ {
+		r.recordFire("y")
+		r.recordFire("x")
+		r.noteToolError()
+		r.endTurn()
+	}
+	want := selfRegView{
+		Strikes:       map[domain.MechanismID]int{"x": adaptiveSuppressStrikes, "y": adaptiveSuppressStrikes},
+		Suppressed:    []domain.MechanismID{"x", "y"},
+		HarmfulStreak: adaptiveSuppressStrikes + 1,
+	}
+	snap := r.observed()
+	if !maps.Equal(snap.Strikes, want.Strikes) || !slices.Equal(snap.Suppressed, want.Suppressed) ||
+		snap.BudgetTripped != want.BudgetTripped || snap.HarmfulStreak != want.HarmfulStreak {
+		t.Fatalf("observed() = %+v, want %+v (Suppressed sorted)", snap, want)
+	}
+
+	// Clobber every field the view handed out, including through the shared reference types.
+	snap.Strikes["x"] = 99
+	delete(snap.Strikes, "y")
+	snap.Suppressed[0] = "clobbered"
+	snap.BudgetTripped = true
+	snap.HarmfulStreak = 0
+
+	again := r.observed()
+	if !maps.Equal(again.Strikes, want.Strikes) || !slices.Equal(again.Suppressed, want.Suppressed) ||
+		again.BudgetTripped != want.BudgetTripped || again.HarmfulStreak != want.HarmfulStreak {
+		t.Errorf("a mutated view changed the regulator: observed() = %+v, want %+v", again, want)
+	}
+	if !r.suppress(regRow("x")) {
+		t.Error("a mutated view re-opened a withdrawn Mechanism")
+	}
+
+	// And the regulator still decides from its own state: one more harmful Turn strikes the
+	// pending fires and advances the real streak.
+	r.noteToolError()
+	r.endTurn()
+	after := r.observed()
+	if got := after.Strikes["x"]; got != adaptiveSuppressStrikes+1 {
+		t.Errorf("strikes[x] = %d after another harmful Turn, want %d", got, adaptiveSuppressStrikes+1)
+	}
+	if got := after.HarmfulStreak; got != adaptiveSuppressStrikes+2 {
+		t.Errorf("harmfulStreak = %d after another harmful Turn, want %d", got, adaptiveSuppressStrikes+2)
 	}
 }
 
@@ -334,7 +391,7 @@ func TestExemptFiresThroughSuppression(t *testing.T) {
 	for i := 0; i < turns; i++ {
 		stepOnce(t, a, "go")
 	}
-	if !a.tracker.budgetTripped {
+	if !a.tracker.observed().BudgetTripped {
 		t.Error("the Turn Budget did not trip on an all-harmful (empty-response) session")
 	}
 	if fired != turns {
@@ -362,10 +419,11 @@ func TestPureQAndANeverStrikesNorTrips(t *testing.T) {
 		t.Errorf("Mechanism dispatched %d times across %d neutral Turns, want %d (a Q&A session must not withdraw it)",
 			fired, turns, turns)
 	}
-	if a.tracker.budgetTripped {
+	observed := a.tracker.observed()
+	if observed.BudgetTripped {
 		t.Error("a pure Q&A session tripped the Turn Budget")
 	}
-	if got := a.tracker.strikes["nudge"]; got != 0 {
+	if got := observed.Strikes["nudge"]; got != 0 {
 		t.Errorf("a pure Q&A session accrued %d strikes, want 0", got)
 	}
 }
@@ -399,7 +457,7 @@ func TestNoOpInvocationNotBooked(t *testing.T) {
 	if got := a.tracker.fireCounts["watcher"]; got != 0 {
 		t.Errorf("Fired(watcher) = %d, want 0 (fired counts actions, not invocations)", got)
 	}
-	if got := a.tracker.strikes["watcher"]; got != 0 {
+	if got := a.tracker.observed().Strikes["watcher"]; got != 0 {
 		t.Errorf("strikes[watcher] = %d, want 0 (an unbooked invocation is never judged)", got)
 	}
 }
@@ -471,7 +529,7 @@ func TestToolErrorsTripBudgetAndWithdrawAtDispatch(t *testing.T) {
 		runExchange(t, a, "poke it")
 	}
 
-	if !a.tracker.budgetTripped {
+	if !a.tracker.observed().BudgetTripped {
 		t.Fatalf("the Turn Budget did not trip after %d erroring-tool Turns", turnBudgetLimit)
 	}
 	// The trip lands at the end of the last error Turn, so the non-exempt Mechanism missed
@@ -526,14 +584,18 @@ func TestProductiveTurnClearsThroughDispatch(t *testing.T) {
 	if ran != 1 {
 		t.Fatalf("read_file ran %d times, want 1", ran)
 	}
-	if a.tracker.budgetTripped {
+	cleared := a.tracker.observed()
+	if cleared.BudgetTripped {
 		t.Error("the productive tool Turn did not clear the Turn Budget")
 	}
-	if got := a.tracker.harmfulStreak; got != 0 {
+	if got := cleared.HarmfulStreak; got != 0 {
 		t.Errorf("harmfulStreak = %d after the productive Turn, want 0", got)
 	}
-	if got := a.tracker.strikes["nudge"]; got != 0 {
+	if got := cleared.Strikes["nudge"]; got != 0 {
 		t.Errorf("strikes[nudge] = %d after the productive Turn, want 0", got)
+	}
+	if len(cleared.Suppressed) != 0 {
+		t.Errorf("Suppressed = %v after the productive Turn, want none re-opened", cleared.Suppressed)
 	}
 	// The Turn after the productive one dispatched the re-opened Mechanism (the tool Turn
 	// itself still had it withdrawn under the tripped budget).
@@ -614,7 +676,7 @@ func TestCancelledTurnReattemptRegainsNovelty(t *testing.T) {
 	if ran != 2 {
 		t.Errorf("read_file ran %d times, want 2 (the re-attempt re-read it)", ran)
 	}
-	if a.tracker.budgetTripped {
+	if a.tracker.observed().BudgetTripped {
 		t.Error("the re-attempt did not clear the Turn Budget; the rolled-back read lost its novelty credit")
 	}
 }

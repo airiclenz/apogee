@@ -749,7 +749,22 @@ that is the acceptance oracle for "the wrapper moved, the argv did not".
 
 ---
 
-## 10. The self-regulator gets a read model
+## 10. The self-regulator gets a read model — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): three notes, two of them additions beyond the item's literal text. (a)
+`TestObservedIsASnapshot` strikes out **two** Mechanisms rather than one, so it also pins
+`Suppressed`'s documented sort order and that `suppress()` still reports the withdrawal after the
+view is clobbered — the "sorted, for a deterministic read" promise is otherwise unobservable, since
+no migrated read site reads `Suppressed` at all. (b) `TestProductiveTurnClearsThroughDispatch`
+gained **one** assertion (`len(cleared.Suppressed) == 0`): the clear-path's re-opening was only
+observable there through `fired`, and the read model is what makes it readable as data. No
+pre-existing expectation changed anywhere. (c) Assertions that read two or more fields bind one
+`observed()` snapshot to a local (`before`/`after`/`judged`/`cleared`, …) instead of calling
+`observed()` per field — the point of a snapshot is that the fields are read together. For the
+acceptance grep: it returns **10** arrange-side writes, every one an assignment — 6 in
+`selfreg_test.go` (L522–525, L612–613) and 4 in `wave1delivery_test.go` (L365–366, L403–404). No
+CHANGELOG entry: internal test-ergonomics only, no observable behaviour change (matching items 7
+and 9).
 
 The plan's weakest item by the review's own rating (*Speculative, test-only*) — last,
 independent, and droppable (D10).

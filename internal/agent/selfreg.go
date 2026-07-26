@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/airiclenz/apogee/internal/domain"
+import (
+	"slices"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
 
 // Self-regulation (CONTEXT: Self-regulation; plan item 3, amended by phase-4-review-fixes
 // item 4 — R3/R4) is the per-Session safety net that keeps a Mechanism from hurting the model —
@@ -178,6 +182,47 @@ func (r *selfRegulator) judgment() turnJudgment {
 	default:
 		return judgedNeutral
 	}
+}
+
+// selfRegView is the self-regulator's observed state: what it has decided so far, as data. It
+// exists so a reader — a test today, a status view or an audit surface later — does not have to
+// reach through unexported fields to see what the regulator is doing. It carries the DECIDED
+// state only: the per-Turn scratch (the fired sets, the pending judgment, the proxy-signal flags)
+// is mid-Turn bookkeeping, not an observation.
+type selfRegView struct {
+	// Strikes is each Mechanism's consecutive-harmful-judgment count; a Mechanism with no
+	// strikes is absent rather than zero.
+	Strikes map[domain.MechanismID]int
+	// Suppressed lists the Mechanisms Adaptive Suppression has withdrawn for the Session,
+	// sorted, for a deterministic read.
+	Suppressed []domain.MechanismID
+	// BudgetTripped is the global Turn-Budget withdrawal; HarmfulStreak is the harmful-Turn
+	// count that raises it (turnBudgetLimit).
+	BudgetTripped bool
+	HarmfulStreak int
+}
+
+// observed returns the regulator's decided state as a SNAPSHOT: the map is copied and the slice
+// is freshly built, so a caller can neither mutate the regulator through the view nor see it
+// change afterwards. Reading is always safe — the regulator is driven from the single Step
+// goroutine, so a caller on that goroutine is the only one that can observe it at all.
+func (r *selfRegulator) observed() selfRegView {
+	v := selfRegView{
+		Strikes:       make(map[domain.MechanismID]int, len(r.strikes)),
+		Suppressed:    make([]domain.MechanismID, 0, len(r.suppressed)),
+		BudgetTripped: r.budgetTripped,
+		HarmfulStreak: r.harmfulStreak,
+	}
+	for id, n := range r.strikes {
+		v.Strikes[id] = n
+	}
+	for id, withdrawn := range r.suppressed {
+		if withdrawn {
+			v.Suppressed = append(v.Suppressed, id)
+		}
+	}
+	slices.Sort(v.Suppressed)
+	return v
 }
 
 // endTurn resolves a COMPLETED Turn: it first judges the pending set — the PREVIOUS Turn's
