@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -562,6 +563,79 @@ func TestDisposition_RuntimeConfineUnavailable_DemotesToApproval(t *testing.T) {
 			t.Error("a demoted call with no Approver must produce an error result")
 		}
 	})
+}
+
+// ----------------------------------------------------------------------------
+// The Approver seam — a Gate is fail-closed on every way it can fail
+// ----------------------------------------------------------------------------
+
+// TestDispatch_ApproverErrorRefuses pins the fail-closed decision for an Approver that
+// ERRORS when consulted — a prompt closed under it, a UI that has gone away. An approval
+// that could not be obtained is NOT "no objection": the call is refused, never run, and the
+// refusal is recorded. The Approver is the sole human-in-the-loop for every gated class, so a
+// refactor reading the error as an allow would silently turn every gate into an unattended
+// auto-run (contract §4: "a Gate always means the Approver is actually consulted").
+//
+// This is a DIFFERENT path from the no-Approver-at-all rule, which the resolver folds to a
+// Refuse before dispatch ever runs (TestResolve_NilApproverGateRefuses, resolution_test.go):
+// here an Approver is configured, is consulted, and fails.
+func TestDispatch_ApproverErrorRefuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tool string
+		kind domain.ExternalEffectKind
+	}{
+		// MCP is the class the finding names; the unvouched-network gate is the one this
+		// audit exists to check (ADR 0012 Amendment 2026-07-25). Both hang off this Approver.
+		{name: "mcp tool", tool: "github", kind: domain.EffectMCP},
+		{name: "unfiltered network tool", tool: "3p-net", kind: domain.EffectNetwork},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			ran := 0
+			conf := &fakeConfiner{caps: capsBoth()}
+			cfg := autoConfig(sink, conf, true, externalTool{name: tt.tool, kind: tt.kind, ran: &ran})
+			// The decision is ALLOW alongside the error: a broken Approver's verdict is
+			// meaningless, so the error — not the value beside it — must decide the call.
+			approver := &fakeApprover{decision: domain.ApprovalAllow, err: errors.New("prompt closed")}
+			cfg.Approver = approver
+
+			ag := driveToolCall(t, cfg, sink, "c1", tt.tool, `{}`)
+
+			if approver.calls != 1 {
+				t.Fatalf("Approver consulted %d times, want 1 (this class must gate in Auto/confine=true)", approver.calls)
+			}
+			if ran != 0 {
+				t.Errorf("tool ran %d times after an erroring Approver, want 0 — an approval that could not be obtained is a refusal", ran)
+			}
+			res, ok := lastToolResult(sink.events)
+			if !ok {
+				t.Fatal("no ToolResult recorded")
+			}
+			if !res.IsError || !strings.Contains(res.Content, "denied by approver") {
+				t.Errorf("result = %+v, want an IsError result naming the approver denial", res)
+			}
+			// The failure itself is surfaced, so a gate that could not be obtained is visible
+			// rather than silently indistinguishable from a human saying no.
+			if !errorEventContaining(sink.events, "approver: prompt closed") {
+				t.Error("no ErrorEvent carried the Approver's failure")
+			}
+			// Fail-closed is only half the promise: the refusal is audit-recorded as a
+			// BLOCKED call, not dropped.
+			recs := ag.guards.Audit.Records()
+			if len(recs) != 1 {
+				t.Fatalf("audit records = %d, want 1 (the blocked call)", len(recs))
+			}
+			if r := recs[0]; r.Tool != tt.tool || r.CallID != "c1" || !r.IsError ||
+				!strings.Contains(r.Result, "denied by approver") {
+				t.Errorf("audit record = %+v, want the blocked call's refusal", r)
+			}
+		})
+	}
 }
 
 // ----------------------------------------------------------------------------

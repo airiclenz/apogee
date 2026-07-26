@@ -492,7 +492,30 @@ Commit: `test(tools): pin the host URLGuard threading into every network tool`
 
 ---
 
-## 6. M-8 — pin the fail-closed decision for an erroring Approver
+## 6. M-8 — pin the fail-closed decision for an erroring Approver — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **Mutation check (mandatory, performed):** the error branch's
+`return false, dispatchDone` at `internal/agent/dispatch.go:278` was changed to `return true`; both
+new subtests went **red** on exactly the assertions the item names — *"tool ran 1 times after an
+erroring Approver, want 0"*, a clean non-error result, and an audit record reading
+`IsError:false Result:ran` instead of the refusal; restored, green, and green under
+`go test -race ./...`. Recorded as a second observation (items 4/5 precedent): under the mutation
+**no other test in the whole repo fails** — the audit's claim that this path was carried by nothing
+is confirmed, not assumed. Three departures from the item's literal text, all additive: (1) the
+test is table-driven over **two** gated classes — the recipe's MCP tool in Auto/`confine=true`, plus
+the `unfiltered network reach` gate the item's own prose names as the one this audit exists to
+check — since both hang off the same single Approver and the second row is one table entry. (2) One
+assertion beyond the item's list: the `ErrorEvent` carrying `approver: prompt closed` must be
+emitted, so the whole branch (`:272-279`) is pinned rather than only its return value — a gate that
+could not be obtained must be visible, not silently indistinguishable from a human saying no. (3)
+"audit-recorded as blocked" is asserted on the audit **ring record**'s error result (`IsError` plus
+the refusal text) rather than on its `Decision`, because a denied gate carries the guard's
+pass-through `allowed` decision by design (`resolution.go`'s `finishGate`) — the record's error
+result is what distinguishes a blocked call from an executed one. The `fakeApprover`'s `decision` is
+set to `ApprovalAllow` beside the error, so the row also proves the error outranks the meaningless
+verdict returned with it. No production code and no doc was touched, CHANGELOG deliberately
+included: like items 4 and 5, this adds a regression net for behaviour that is already correct and
+already shipped.
 
 **What:** `internal/agent/dispatch.go:272-279` — an Approver returning an error emits an
 `ErrorEvent` and returns `(false, dispatchDone)`, so `executeGate` refuses. Correct — and
