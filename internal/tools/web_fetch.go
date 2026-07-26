@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -74,13 +76,31 @@ func (t *WebFetch) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	return okResult(call.ID, renderFetchResult(resp)), nil
 }
 
+// maxLocationBytes caps the redirect target rendered to the model. The response HEADER block is
+// outside maxNetworkResponseBytes (net/http accepts a 10 MiB header block by default) and Location
+// is the one header web_fetch surfaces, so an unbounded value would be a way around the body cap.
+// No followable URL comes near this; a longer one is cut and MARKED rather than dropped, so the
+// model is told the target was too long to be trusted whole instead of being handed a silent stub.
+const maxLocationBytes = 2048
+
 // renderFetchResult formats the GET response for the model: a status line, the resolved
-// content type, and the (capped) body.
+// content type, the redirect target on a 3xx, and the (capped) body.
 func renderFetchResult(resp netResponse) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "HTTP %s\n", resp.status)
 	if ct := resp.header.Get("Content-Type"); ct != "" {
 		fmt.Fprintf(&b, "Content-Type: %s\n", ct)
+	}
+	// The funnel deliberately does not follow redirects — one could carry a vetted request to an
+	// unvetted host (network.go's CheckRedirect) — and the whole justification for refusing is that
+	// the model can follow it ITSELF through a fresh, re-checked call. That is only true if the
+	// model is told where the redirect points, and a 3xx body is usually empty: without this line an
+	// http→https or trailing-slash canonicalisation leaves a small model holding `HTTP 302 Found`
+	// and no way forward (M-6). Rendering the target follows nothing — the next call is a whole new
+	// one, pre-flight-checked and dial-checked like any other. http_request never had the gap: its
+	// sorted header block already carries Location.
+	if loc := redirectTarget(resp); loc != "" {
+		fmt.Fprintf(&b, "Location: %s\n", loc)
 	}
 	b.WriteString("\n")
 	b.WriteString(resp.body)
@@ -88,4 +108,61 @@ func renderFetchResult(resp netResponse) string {
 		fmt.Fprintf(&b, "\n\n[response truncated at %d bytes]", maxNetworkResponseBytes)
 	}
 	return b.String()
+}
+
+// redirectTarget returns the model-facing form of a 3xx response's Location header, or "" when
+// there is nothing to render: a non-3xx status (a Location beside a 200 is not a redirect and is
+// not shown), a missing header, or a value that neuters away to nothing.
+//
+// The value is SERVER-chosen — the one piece of attacker-influenced text this render lifts out of
+// the body and into the header block the model reads as fact — so it is neutered first, in the
+// directive-inert shape library.SanitizeContent applies to untrusted stored text: control (Cc),
+// format (Cf), private-use (Co) and surrogate (Cs) runes are dropped and whitespace runs folded to
+// a single space. net/http already refuses a C0 byte inside a response header value, and Go's
+// client refuses a Location it cannot parse before CheckRedirect is ever consulted — but an
+// obs-fold continuation line and a bidi override survive both, and a right-to-left override earns
+// its keep precisely on a URL the model is invited to FOLLOW. Folding keeps the whole value rather
+// than cutting at the first space: a URI carries no raw space, but the servers that emit an
+// unencoded one would then be answered with a WRONG target, and folded text can only ever sit
+// inside this one line — it can open neither a header line nor a body of its own.
+//
+// Nothing is redacted out of it. The Location is response content, like the body beside it, and the
+// funnel's M2 rule is about failure messages naming the REQUEST url; a canonicalising redirect
+// legitimately echoes that url, and blanking it would hand back a target that cannot be followed.
+// The rendering stays web_fetch's rather than the funnel's for a related reason: web_search's
+// endpoint may carry a config'd API key, and a search endpoint that redirects must not get to hand
+// that key back (TestWebSearch_RedirectDoesNotRenderTheLocation).
+func redirectTarget(resp netResponse) string {
+	if resp.statusCode < 300 || resp.statusCode > 399 {
+		return ""
+	}
+	raw := resp.header.Get("Location")
+
+	var b strings.Builder
+	b.Grow(min(len(raw), maxLocationBytes))
+	cut, prevSpace := false, false
+	for _, r := range raw {
+		switch {
+		case unicode.IsSpace(r):
+			if prevSpace {
+				continue
+			}
+			r, prevSpace = ' ', true
+		case unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Co, unicode.Cs):
+			continue
+		default:
+			prevSpace = false
+		}
+		if b.Len()+utf8.RuneLen(r) > maxLocationBytes {
+			cut = true
+			break
+		}
+		b.WriteRune(r)
+	}
+
+	loc := strings.TrimSpace(b.String())
+	if loc == "" || !cut {
+		return loc
+	}
+	return fmt.Sprintf("%s [location truncated at %d bytes]", loc, maxLocationBytes)
 }

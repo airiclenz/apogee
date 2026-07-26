@@ -192,6 +192,21 @@ point is a **minor** bump, not a breaking change.
   reported to the model as a blocked URL (the call failed, the conversation continues); a
   cancellation by *you* is still raised as a cancellation, so the Turn rolls back.
 
+- **`web_fetch` now shows where a refused redirect points, so a redirected page is no longer a dead
+  end.** Apogee deliberately does not follow redirects — one could carry a URL-checked request on to
+  an unchecked (private) host — and the justification has always been that the model can follow it
+  *itself* with a fresh, fully re-checked call. It could not: the result carried the status line and
+  the content type and dropped the `Location` header, so an ordinary `http`→`https` or
+  trailing-slash canonicalisation handed the model `HTTP 302 Found`, an empty body and no way
+  forward. A 3xx response now renders its target (`http_request` always did — it prints the whole
+  header block). **Nothing follows anything**: the redirect policy, the pre-flight check and the
+  dial-time SSRF floor are untouched, and the next call is checked exactly like the first. Because
+  the target is text the *server* chose, it is neutralised on the way out — control, bidi-override
+  and zero-width characters are stripped, whitespace is folded, and an oversized value is cut at 2 KB
+  and marked, so a hostile server cannot spoof a URL you read or flood the model past the response
+  cap through a header. `web_search` still reports a redirecting endpoint as status + host only,
+  which keeps a configured search API key out of the answer.
+
 ### Security
 
 - **A tool's blast-radius class is now decided by what it *does*, not by what it *says* about

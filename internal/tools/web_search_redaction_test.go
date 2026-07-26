@@ -88,3 +88,39 @@ func TestWebSearch_UnparseableEndpointDoesNotLeakAPIKey(t *testing.T) {
 	}
 	assertNoKeyInAnyForm(t, res.Content, endpoint)
 }
+
+// TestWebSearch_RedirectDoesNotRenderTheLocation is the credential half of M-6. web_fetch now
+// renders a refused redirect's Location so the model can follow it — but that Location is
+// server-chosen text, and a search endpoint's request URL carries the host's API key. A search
+// backend that answers 3xx with the request URL echoed back (the shape a canonicalising redirect
+// takes) would hand that key straight back to the model if the rendering lived in the FUNNEL
+// instead of in web_fetch's own renderer. web_search's non-2xx policy is status + host, and
+// nothing about M-6 moves it.
+func TestWebSearch_RedirectDoesNotRenderTheLocation(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Echo the full request URL — key and all — as the redirect target.
+		w.Header().Set("Location", "https://search.example.com"+r.URL.String())
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	endpoint := srv.URL + "/s?key=" + secretKey
+	res, err := NewWebSearch(loopbackGuard(), endpoint).Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_search", Arguments: jsonArgs(t, map[string]any{"query": "needle"}),
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("a 302 from the search endpoint must surface as a result error; got %q", res.Content)
+	}
+	if strings.Contains(res.Content, "Location") {
+		t.Errorf("web_search must not render a redirect target: %q", res.Content)
+	}
+	assertNoKeyInAnyForm(t, res.Content, endpoint)
+	if !strings.Contains(res.Content, "127.0.0.1") {
+		t.Errorf("the failure should still name the bare endpoint host: %q", res.Content)
+	}
+}

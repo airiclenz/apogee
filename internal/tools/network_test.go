@@ -132,6 +132,180 @@ func TestWebFetch_DoesNotFollowRedirectToPrivate(t *testing.T) {
 	if !strings.Contains(res.Content, "HTTP 302") {
 		t.Errorf("expected the raw 302 (no auto-follow), got: %q", res.Content)
 	}
+	// The no-follow policy's own rationale is that the model can follow the redirect itself
+	// through a fresh, re-checked call — which needs the target (M-6). Refusing to follow and
+	// then hiding where it pointed leaves a 302 with an empty body and no way forward.
+	if !strings.Contains(res.Content, "Location: http://169.254.169.254/latest/meta-data/") {
+		t.Errorf("the refused redirect's target must be rendered, got: %q", res.Content)
+	}
+}
+
+// TestWebFetch_RendersRedirectLocation pins WHEN the redirect target is rendered: on any 3xx that
+// carries one, never beside a 200 (a Location there is not a redirect), and with no stray line when
+// a 3xx carries none — a 3xx without Location is legal and observed in the wild.
+func TestWebFetch_RendersRedirectLocation(t *testing.T) {
+	t.Parallel()
+
+	const target = "https://example.com/next?a=1"
+	cases := []struct {
+		name     string
+		status   int
+		location string
+		want     bool
+	}{
+		{"301 moved permanently", http.StatusMovedPermanently, target, true},
+		{"302 found", http.StatusFound, target, true},
+		{"303 see other", http.StatusSeeOther, target, true},
+		{"307 temporary redirect", http.StatusTemporaryRedirect, target, true},
+		{"308 permanent redirect", http.StatusPermanentRedirect, target, true},
+		{"a relative target is rendered as sent", http.StatusFound, "/canonical/", true},
+		{"3xx with no location", http.StatusFound, "", false},
+		{"200 carrying a location header", http.StatusOK, target, false},
+		{"404 carrying a location header", http.StatusNotFound, target, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.location != "" {
+					w.Header().Set("Location", tc.location)
+				}
+				w.Header().Set("Content-Type", "text/plain")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte("body"))
+			}))
+			defer srv.Close()
+
+			res, err := NewWebFetch(loopbackGuard()).Execute(context.Background(), domain.ToolCall{
+				ID: "c1", Tool: "web_fetch", Arguments: jsonArgs(t, map[string]any{"url": srv.URL}),
+			})
+			if err != nil {
+				t.Fatalf("Execute Go error: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("result is error: %q", res.Content)
+			}
+			if got := strings.Contains(res.Content, "Location: "+tc.location); got != tc.want {
+				t.Errorf("rendered Location = %v, want %v; result: %q", got, tc.want, res.Content)
+			}
+			if !tc.want && strings.Contains(res.Content, "Location") {
+				t.Errorf("no Location line may be rendered here: %q", res.Content)
+			}
+			// A missing Location must leave the header block as it always was — no blank line
+			// where the value would have gone.
+			if strings.Contains(res.Content, "\n\n\n") {
+				t.Errorf("a stray empty line entered the render: %q", res.Content)
+			}
+		})
+	}
+}
+
+// TestWebFetch_HostileRedirectLocationIsRenderedInert is the adversarial half of M-6: the Location
+// is SERVER-chosen text promoted out of the body into the header block the model reads as fact, so
+// it must reach the model inert. net/http refuses a C0 byte in a header value and Go's client
+// refuses an unparseable Location before CheckRedirect is consulted, but a fold/CRLF-mapped space,
+// a bidi override and an unbounded length all survive that — and the header block sits outside the
+// body cap.
+func TestWebFetch_HostileRedirectLocationIsRenderedInert(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		location    string
+		wantAbsent  []string
+		wantPresent []string
+	}{
+		{
+			// Go's server maps CR/LF in a header value to spaces, so this arrives folded rather
+			// than as a second header line; the fold must stay inside the Location line.
+			name:        "crlf header injection",
+			location:    "https://a.example/\r\nX-Injected: yes",
+			wantAbsent:  []string{"\nX-Injected"},
+			wantPresent: []string{"Location: https://a.example/ X-Injected: yes"},
+		},
+		{
+			name:        "a fake status line in the value stays on the value's line",
+			location:    "https://a.example/ HTTP 200 OK",
+			wantAbsent:  []string{"\nHTTP 200 OK"},
+			wantPresent: []string{"Location: https://a.example/ HTTP 200 OK"},
+		},
+		{
+			// A right-to-left override and a zero-width space spoof what a reader sees of a URL
+			// the model is invited to follow.
+			name:        "bidi override and zero-width characters",
+			location:    "https://a.example/‮gnp.exe​",
+			wantAbsent:  []string{"‮", "​"},
+			wantPresent: []string{"Location: https://a.example/gnp.exe"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res := fetchWithLocation(t, tc.location)
+			for _, s := range tc.wantAbsent {
+				if strings.Contains(res.Content, s) {
+					t.Errorf("hostile Location survived into the render (%q): %q", s, res.Content)
+				}
+			}
+			for _, s := range tc.wantPresent {
+				if !strings.Contains(res.Content, s) {
+					t.Errorf("want %q in the render, got: %q", s, res.Content)
+				}
+			}
+			// Whatever the value, the header block is the status line, the content type and at
+			// most one Location line — never a line the server smuggled in.
+			head, _, _ := strings.Cut(res.Content, "\n\n")
+			if lines := strings.Split(head, "\n"); len(lines) != 3 {
+				t.Errorf("header block = %q, want exactly 3 lines", head)
+			}
+		})
+	}
+
+	// The response header block is outside the body cap (net/http accepts a 10 MiB one), so an
+	// oversized Location would otherwise be a way to flood the model's context past it.
+	t.Run("an oversized location is capped and marked", func(t *testing.T) {
+		t.Parallel()
+		res := fetchWithLocation(t, "https://a.example/"+strings.Repeat("x", 64*1024))
+		if !strings.Contains(res.Content, "[location truncated at 2048 bytes]") {
+			t.Errorf("an oversized Location must be marked as cut: %q", truncateForLog(res.Content))
+		}
+		head, _, _ := strings.Cut(res.Content, "\n\n")
+		if len(head) > maxLocationBytes+256 {
+			t.Errorf("header block is %d bytes, want it bounded by the location cap", len(head))
+		}
+	})
+}
+
+// fetchWithLocation runs web_fetch against a server answering 302 with the given Location.
+func fetchWithLocation(t *testing.T, location string) domain.ToolResult {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", location)
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	res, err := NewWebFetch(loopbackGuard()).Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_fetch", Arguments: jsonArgs(t, map[string]any{"url": srv.URL}),
+	})
+	if err != nil {
+		t.Fatalf("Execute Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("result is error: %q", res.Content)
+	}
+	return res
+}
+
+// truncateForLog keeps a failure message readable when the value under test is huge.
+func truncateForLog(s string) string {
+	if len(s) <= 200 {
+		return s
+	}
+	return s[:200] + "…"
 }
 
 // ---- http_request ----------------------------------------------------------

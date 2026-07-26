@@ -1018,7 +1018,36 @@ Commit: `fix(tools): bound the pre-flight DNS resolution by the resolved request
 
 ---
 
-## 13. M-6 — show the model where a refused redirect points
+## 13. M-6 — show the model where a refused redirect points — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): One departure from the item's literal text, additive and tighten-only: the
+`Location` is not rendered RAW. It is server-chosen text, and this render is the one place it is
+lifted out of the body and into the header block the model reads as fact, so `redirectTarget`
+(unexported, in `web_fetch.go`) neuters it first — control (Cc), format (Cf), private-use (Co) and
+surrogate (Cs) runes dropped and whitespace runs folded, the same directive-inert shape
+`library.SanitizeContent` uses — and caps it at `maxLocationBytes` (2048), marking a cut value. Both
+halves were established by experiment, not assumed: `net/http` refuses a C0 byte in a response
+header value and Go's client refuses a Location it cannot parse *before* `CheckRedirect` is
+consulted, but a bidi override / zero-width character passes both, an obs-fold (or a CRLF the server
+maps to spaces) folds injected text into the value, and the header block sits OUTSIDE
+`maxNetworkResponseBytes` (net/http accepts a 10 MiB one), so an unbounded Location was a way around
+the body cap. Folding rather than cutting at the first space is deliberate — a truncated target
+would be a WRONG URL for the servers that emit an unencoded space, and folded text can open neither
+a header line nor a body of its own. **Nothing is redacted** out of the value: the Location is
+response content like the body beside it, the funnel's M2 rule is about failure messages naming the
+REQUEST url, and a canonicalising redirect legitimately echoes that url — blanking it would hand
+back a target that cannot be followed. Two additions beyond the item's three required tests, both
+demanded by this item's leak surface: `TestWebFetch_HostileRedirectLocationIsRenderedInert` (CRLF
+injection, a fake status line in the value, bidi + zero-width, an oversized value) and — in
+`web_search_redaction_test.go` — `TestWebSearch_RedirectDoesNotRenderTheLocation`, the credential
+half: web_search's endpoint may carry a config'd API key and a search backend answering 3xx with the
+request URL echoed back would hand it straight to the model if the rendering had gone into the
+FUNNEL instead of into web_fetch's own renderer; its non-2xx policy stays status + host.
+**Mutation check (performed, both halves):** (A) with the render deleted, all three required cases go
+red plus the extended `TestWebFetch_DoesNotFollowRedirectToPrivate`; (B) with the raw
+`resp.header.Get("Location")` rendered instead of `redirectTarget`, the bidi/zero-width row, the
+whitespace-fold row and the oversize row go red (`header block is 65604 bytes`) — restored, green,
+including `go test -race ./...`. `network.go` is untouched: no `CheckRedirect` code moved.
 
 **What:** `internal/tools/network.go:236-241` justifies the no-follow policy with *"The model sees
 the redirect `Location` and can choose to follow it through a fresh, re-checked call"* — but
