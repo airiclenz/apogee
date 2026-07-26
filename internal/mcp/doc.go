@@ -19,13 +19,20 @@
 //     effect kind, so the dispatch disposition gates them through Approval in Auto
 //     (server-grain allow-for-session), and they route through Config.ExternalEffects
 //     when the host injects a stub (the bench's deterministic, process-free swap).
-//   - A network-transported server (SSE / streamable-http) rides the same default-on
-//     SSRF floor as the native network tools (security.URLGuard): the configured
-//     endpoint URL is checked before connecting and the connected IP is re-validated
-//     at dial time, so a server URL resolving to loopback / IMDS / a private range is
-//     refused (DNS-rebinding closed). A stdio server is a LOCAL launched subprocess —
-//     a different trust model (the host chose the command), so no URL floor applies,
-//     but the launched tool calls still gate through Approval exactly the same way.
+//   - A network-transported server (SSE / streamable-http) rides the host's
+//     security.URLGuard scheme/host allow-deny before connecting, and dials PINNED to
+//     the configured endpoint's own resolved addresses: those pass at dial time, and
+//     every other address still meets the resolved-IP SSRF floor (DNS-rebinding
+//     closed), so a rebind or a redirect pointing that connection at a DIFFERENT
+//     private address is refused. The endpoint itself is deliberately EXEMPT from the
+//     floor — it is config-file-only and never model-supplied, so a localhost / LAN
+//     MCP server is an ordinary, supported configuration (ADR 0012, Amendment
+//     (2026-07-26)); the floor stays blanket over everything the model drives.
+//     Redirects are not followed, the same policy the native network tools apply, so a
+//     server that redirects must be configured at its final URL. A stdio server is a
+//     LOCAL launched subprocess — a different trust model (the host chose the
+//     command), so no URL check applies, but the launched tool calls still gate
+//     through Approval exactly the same way.
 //
 // # Lifecycle
 //

@@ -1083,7 +1083,63 @@ Commit: `fix(tools): render the refused redirect's Location so the model can fol
 
 ---
 
-## 14. M-10 — the SSRF floor over a user-typed MCP endpoint
+## 14. M-10 — the SSRF floor over a user-typed MCP endpoint — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): Owner's design call taken as given — (A) EXEMPT the configured endpoint from the
+pre-flight resolved-IP floor, keeping scheme/host allow-deny (an `mcp-servers:` endpoint is
+config-file-only and never model-supplied, so the anti-model floor is the wrong control there);
+(B) the dial-time control becomes ENDPOINT-AWARE rather than blanket or dropped — required, since a
+pre-flight exemption alone is a no-op against a blanket `SafeDialControl`; (C) docs AND a dated
+ADR 0012 amendment in the same commit, since Amendment (2026-07-25)(d)'s *"stays where it is"* is
+the line this contradicts; (D) adopt the funnel's no-follow `CheckRedirect` WITHOUT consolidating
+the two client builders; (E) folded in by the owner — `checkEndpoint` validated the normalised form
+and handed the SDK the RAW `cfg.Endpoint`, the same check-one-string/dial-another divergence item 8
+removed from the funnel. Eleven departures/decisions worth naming: (1) **"refuse everything else" at
+dial is implemented as "permit the endpoint's own resolved addresses, and judge every other address
+by the floor exactly as before"**, not as pin-only. The purpose clause the owner wrote names *a
+DIFFERENT private IP*, which this catches exactly; pin-only would additionally break a public MCP
+server whose name rotates across a CDN's addresses mid-session, for no security gain (a public
+address is not an SSRF pivot, and the floor never bounded one). The ONLY thing exempted anywhere is
+the endpoint's own addresses. (2) One new exported symbol, `security.PinnedDialControl(ctx, host)`,
+in an **internal** package — judged *not* a Public-API change on item 8's precedent (ADR 0010 makes
+the public API the root `apogee` facade; `internal/*` is not importable by embedders), and no facade
+symbol, alias or `apogee.go` edit is involved. It is unit-tested where it lives
+(`internal/security/ssrf_test.go`: pinned/unpinned/public/v4-mapped rows, the three fail-closed
+no-addresses cases, IP-literal-needs-no-lookup, floor-off) **and** end-to-end through the real built
+transport (`internal/mcp/transport_test.go`). (3) The pre-flight exemption needed **no** new API and
+**no** new config key (the plan permitted one): it is the existing `DisableIPFloor()` at ONE call
+site, whose doc comment now names that single production use. (4) `SafeDialControl` and the new
+pinned control share one `dialAddressIP` helper, and `resolveAndCheckFloor`'s resolve block was
+extracted as `resolveHost` and shared with pinning — a divergence between the two controls, or
+between the check-time and pin-time lookups, would itself be the security bug; behaviour and item
+7's pinned reason strings (`could not resolve host` / `resolved to no addresses`) are byte-identical.
+(5) `checkEndpoint` now returns the normalised `*url.URL` and reports an unparseable endpoint with
+its own constant wording (`mcp: server %q has an unparseable endpoint`) instead of deferring to the
+guard as `do` does — a configured endpoint may carry a token in its query and `url.Parse`'s error
+quotes the URL back (item 9's reasoning); the outcome, a refusal, is unchanged. (6) An **unresolvable**
+endpoint is now refused by the PIN instead of by the pre-flight floor — the same fail-closed
+outcome by a different path, pinned by `TestBuildTransport_UnresolvableEndpointFailsClosed`, because
+an endpoint whose addresses are unknown has nothing to exempt. (7) Existing test revisited, not
+deleted: `TestBuildTransport_HTTPEndpointBlockedBySSRFFloor` → `…BlockedByURLSafety`, now driving a
+**denied host** (the half that survives) instead of a loopback endpoint (the half the amendment
+reverses); the loopback case reappears as a positive in `transport_test.go`. (8) Pinning is
+**address-grain, not address+port** — a second service on the same pinned IP would be dialable if
+something pointed the transport at it; nothing does (redirects are not followed), and a port-grain
+pin would break a server that legitimately moves ports mid-session. (9) Docs beyond the item's named
+set were corrected because they stated the now-false *"rides the same SSRF floor"* claim:
+`CONTEXT.md`, `docs/design/mcp-client.md` and the MCP-client row of `docs/design/technical-design.md`
+(one clause each). `docs/design/confinement-execution-contract.md` was **not** touched — item 1 owns
+§4 and the **mcp** row is unmoved. (10) The two client builders are **not** consolidated (explicitly
+out of scope); `newGuardedHTTPClient`'s doc comment now records why it is long-lived where the
+funnel's is per-call, and that the seam is a deepening candidate. (11) **Mutation checks (performed,
+four):** blanket-permitting the pinned control turns the rebind and unpinned-private rows **red**
+(*"a rebound connect succeeded"*, and a 10 s dial timeout instead of a floor refusal); deleting
+`CheckRedirect` turns the redirect test red (*"status = 200; want the 302 itself"*, target fetched 1
+time); handing the SDK `cfg.Endpoint` again turns the normalisation test red (*"SDK endpoint = "  http://MCP.Example.COM./sse  ""*);
+and restoring `guard.CheckContext` on the pre-flight turns all six loopback/LAN rows red with the
+floor's own message. Restored, all green, including `go test -race ./...`. The positive pin case
+carries its own negative control (*"the blanket floor would have refused it"*), so it cannot pass by
+the floor being absent.
 
 **Design call:** the audit reports this as **"warrants revisiting"**, not as a defect — the current
 behaviour **is** documented (`cmd/apogee/defaults/config.yaml:89-90`, `internal/mcp/doc.go:22-28`)

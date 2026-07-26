@@ -300,16 +300,20 @@ func TestBuildTransport_StdioRequiresCommand(t *testing.T) {
 	}
 }
 
-// TestBuildTransport_HTTPEndpointBlockedBySSRFFloor proves an SSE / streamable-http server whose
-// endpoint resolves to a forbidden address (loopback here) is refused by the default-on SSRF
-// floor before any connection is made — the same floor the native network tools ride.
-func TestBuildTransport_HTTPEndpointBlockedBySSRFFloor(t *testing.T) {
+// TestBuildTransport_HTTPEndpointBlockedByURLSafety proves an SSE / streamable-http server whose
+// endpoint the host's url-safety policy denies is refused before any connection is made. Until
+// 2026-07-26 this test asserted the same of a LOOPBACK endpoint, which the resolved-IP SSRF floor
+// refused; a configured endpoint is now exempt from that floor (ADR 0012, Amendment 2026-07-26),
+// so the denial asserted here is the scheme/host one — which is unchanged. The exemption's own
+// bound (pinning) and the loopback case live in transport_test.go.
+func TestBuildTransport_HTTPEndpointBlockedByURLSafety(t *testing.T) {
+	guard := security.URLGuard{DenyHosts: []string{"blocked.example"}}.WithResolver(publicResolver)
 	for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
 		t.Run(string(transport), func(t *testing.T) {
-			cfg := ServerConfig{Name: "local", Transport: transport, Endpoint: "http://127.0.0.1:9/mcp"}
-			_, err := buildTransport(context.Background(), cfg, security.URLGuard{})
+			cfg := ServerConfig{Name: "local", Transport: transport, Endpoint: "https://blocked.example/mcp"}
+			_, err := buildTransport(context.Background(), cfg, guard)
 			if err == nil {
-				t.Fatalf("%s endpoint to loopback built without error, want SSRF-floor block", transport)
+				t.Fatalf("%s endpoint to a denied host built without error, want a url-safety block", transport)
 			}
 			if !strings.Contains(err.Error(), "url-safety") {
 				t.Errorf("error = %v, want a url-safety block", err)

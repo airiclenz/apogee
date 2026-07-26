@@ -309,8 +309,11 @@ surfaces them into the registry as `ExternalEffectTool` of kind **`mcp`** named 
 An MCP server is an **external, untrusted** process Apogee **cannot confine**, so its tools always
 **gate through Approval in Auto** under `confine-to-workspace=true` (the per-tool teeth above) — and
 their description / schema / result are untrusted data shown to the model, never executed. An http(s)
-server (sse / streamable-http) passes the same **url-safety SSRF floor** as the network tools; a
-stdio server is a trusted local launch (no URL floor), its calls still gate. **Resume reconnects
+server (sse / streamable-http) passes **url-safety**'s scheme/host allow-deny and dials **pinned to
+the configured endpoint's own addresses** — the endpoint is exempt from the resolved-IP SSRF floor
+(you named it in your own config; the floor is the anti-*model* control), while any *other* private
+address that connection is pointed at is still refused, and redirects are not followed (ADR 0012,
+Amendment 2026-07-26); a stdio server is a trusted local launch (no URL check), its calls still gate. **Resume reconnects
 fresh** — no server-side state is restored (ADR 0008). The *client shape* is
 [docs/design/mcp-client.md](docs/design/mcp-client.md); the *gating* is ADR 0004/0008/0012.
 _Avoid_: "MCP plugin", "MCP proxy" (it is a client; there is no proxy).

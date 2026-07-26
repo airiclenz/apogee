@@ -35,12 +35,17 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   (server-grain "allow for session"), and it routes through `Config.ExternalEffects` when the host
   injects a stub (the bench's deterministic, process-free swap). This is **distinct from `network`-
   kind** tools, which auto-run url-filtered — MCP is unfenceable, so it asks.
-- **A network-transported server rides the SSRF floor.** An SSE / streamable-http server's endpoint
-  passes the same default-on, resolved-IP `security.URLGuard` floor the native network tools use:
-  the URL is checked before connecting and the connected IP is re-validated at dial time (DNS-
-  rebinding closed), so a server URL resolving to loopback / IMDS / a private range is refused. A
-  **stdio** server is a local launched subprocess — the host chose the command, a different trust
-  model — so no URL floor applies; its tool calls still gate through Approval in Auto exactly the same.
+- **A network-transported server is url-safety-checked and dial-pinned.** An SSE / streamable-http
+  server's endpoint passes `security.URLGuard`'s scheme/host allow-deny before connecting, and the
+  connection dials under a control **pinned** to that endpoint's own resolved addresses: those pass,
+  every other address still meets the resolved-IP SSRF floor (DNS-rebinding closed), and redirects
+  are not followed. The endpoint itself is **exempt from the floor** — it is config-file-only and
+  never model-supplied, so a localhost / LAN server is a supported configuration rather than a fatal
+  startup error, while a rebind or a redirect to a *different* private address stays refused
+  ([ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md),
+  Amendment 2026-07-26). A **stdio** server is a local launched subprocess — the host chose the
+  command, a different trust model — so no URL check applies; its tool calls still gate through
+  Approval in Auto exactly the same.
 
 Every tool **description, schema, and result** the client surfaces is untrusted input: it is passed
 to the model and rendered, **never executed or interpreted** as a command by Apogee.

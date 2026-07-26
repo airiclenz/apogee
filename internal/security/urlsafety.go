@@ -58,6 +58,14 @@ type URLGuard struct {
 // ONLY way to disable the floor (the floor is on for the zero value and survives any config
 // merge), used by a test or a deliberately-unfenced embedder. A config layer cannot reach
 // this — it is a code-level opt-out, not a configuration key.
+//
+// One production path takes it deliberately and at ONE call: internal/mcp checks a configured
+// server endpoint through a floor-disabled copy, because a `mcp-servers:` endpoint is the
+// user's own config-file address and is never model-supplied, so the anti-model floor is the
+// wrong control over it (ADR 0012, Amendment (2026-07-26)). The copy is used for that one
+// scheme/host check and threaded nowhere: the connection itself dials under
+// PinnedDialControl, which permits that endpoint's own addresses and keeps the floor over
+// every other one.
 func (g URLGuard) DisableIPFloor() URLGuard {
 	g.disableFloor = true
 	return g

@@ -354,6 +354,121 @@ func TestSafeDialControl_RebindClosesTOCTOU(t *testing.T) {
 	}
 }
 
+// TestPinnedDialControl_PermitsOnlyTheEndpointsOwnAddresses pins the control that makes the
+// MCP endpoint's floor exemption safe (ADR 0012, Amendment 2026-07-26): the addresses the
+// configured host itself resolves to pass even though the floor denies them, and EVERY other
+// address is judged by the floor exactly as SafeDialControl judges it. The second half is what
+// keeps a rebind or a redirect to a different private address refused; without it the exemption
+// would be "private addresses are fine on this connection".
+func TestPinnedDialControl_PermitsOnlyTheEndpointsOwnAddresses(t *testing.T) {
+	t.Parallel()
+
+	// The endpoint is a name resolving to a private address — the localhost/LAN MCP server case.
+	g := URLGuard{}.WithResolver(fixedResolver(net.ParseIP("192.168.64.1")))
+	ctrl, err := g.PinnedDialControl(context.Background(), "mcp.local")
+	if err != nil {
+		t.Fatalf("PinnedDialControl: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		address   string
+		wantBlock bool
+	}{
+		{"the pinned private address is permitted", "192.168.64.1:7331", false},
+		{"the pinned address on another port is permitted", "192.168.64.1:9999", false},
+		{"the pinned address in v4-mapped form is permitted", "[::ffff:192.168.64.1]:7331", false},
+		{"a DIFFERENT private address is blocked", "192.168.64.2:7331", true},
+		{"loopback is blocked", "127.0.0.1:7331", true},
+		{"the IMDS is blocked", "169.254.169.254:80", true},
+		{"a public address is permitted, as the floor permits it", "93.184.216.34:443", false},
+		{"a non-IP dial address is blocked", "not-an-ip:80", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ctrl("tcp", tc.address, syscallRawConnNil())
+			if tc.wantBlock {
+				if err == nil {
+					t.Fatalf("control(%q) = nil, want blocked", tc.address)
+				}
+				if !errors.Is(err, ErrSSRFBlocked) {
+					t.Errorf("control(%q) err = %v, want ErrSSRFBlocked", tc.address, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("control(%q) = %v, want permitted", tc.address, err)
+			}
+		})
+	}
+}
+
+// TestPinnedDialControl_PinsAnIPLiteralWithoutResolving proves an IP-literal endpoint is pinned
+// directly: no lookup happens (the resolver here would fail the build if one did), because the
+// address is already the answer.
+func TestPinnedDialControl_PinsAnIPLiteralWithoutResolving(t *testing.T) {
+	t.Parallel()
+
+	g := URLGuard{}.WithResolver(stubResolver(nil, errNoSuchHost))
+	ctrl, err := g.PinnedDialControl(context.Background(), "127.0.0.1")
+	if err != nil {
+		t.Fatalf("PinnedDialControl on an IP literal: %v; want no resolution at all", err)
+	}
+	if err := ctrl("tcp", "127.0.0.1:7331", syscallRawConnNil()); err != nil {
+		t.Errorf("control(pinned loopback) = %v, want permitted", err)
+	}
+	if err := ctrl("tcp", "127.0.0.2:7331", syscallRawConnNil()); err == nil {
+		t.Error("control(a different loopback address) = nil, want blocked")
+	}
+}
+
+// TestPinnedDialControl_FailsClosedWithoutAddressesToPin pins the fail-closed direction: an
+// endpoint whose addresses cannot be learned has nothing to exempt, so no control is returned
+// and the caller must refuse the connection rather than dial it unpinned.
+func TestPinnedDialControl_FailsClosedWithoutAddressesToPin(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		resolver func(context.Context, string) ([]net.IP, error)
+		host     string
+	}{
+		{"resolution failure", stubResolver(nil, errNoSuchHost), "nowhere.example"},
+		{"empty answer", stubResolver([]net.IP{}, nil), "nowhere.example"},
+		{"no host at all", fixedResolver(net.ParseIP("93.184.216.34")), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctrl, err := URLGuard{}.WithResolver(tc.resolver).PinnedDialControl(context.Background(), tc.host)
+			if err == nil {
+				t.Fatal("PinnedDialControl returned a control, want an error")
+			}
+			if ctrl != nil {
+				t.Error("PinnedDialControl returned both a control and an error")
+			}
+			if !errors.Is(err, ErrURLBlocked) {
+				t.Errorf("err = %v, want ErrURLBlocked", err)
+			}
+		})
+	}
+}
+
+// TestPinnedDialControl_FloorOff confirms a floor-disabled guard pins nothing and permits
+// everything — the same nil-safety SafeDialControl offers, and with no lookup performed.
+func TestPinnedDialControl_FloorOff(t *testing.T) {
+	t.Parallel()
+
+	ctrl, err := URLGuard{}.DisableIPFloor().WithResolver(stubResolver(nil, errNoSuchHost)).
+		PinnedDialControl(context.Background(), "mcp.local")
+	if err != nil {
+		t.Fatalf("floor-off PinnedDialControl: %v; want no resolution and no error", err)
+	}
+	if err := ctrl("tcp", "127.0.0.1:80", syscallRawConnNil()); err != nil {
+		t.Errorf("floor-off control should permit loopback; got %v", err)
+	}
+}
+
 // TestSafeDialControl_FloorOff confirms a floor-disabled guard's control permits everything
 // (so an embedder that opted out is not surprised by a dial-time block).
 func TestSafeDialControl_FloorOff(t *testing.T) {

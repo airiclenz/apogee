@@ -158,6 +158,35 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **An MCP server on `localhost` or your LAN now connects — it used to stop apogee from starting.**
+  A `mcp-servers:` entry with an endpoint like `http://127.0.0.1:7331/mcp` or
+  `http://192.168.64.1:7331/mcp` — the ordinary way to run an MCP server — was refused by the
+  resolved-IP SSRF floor before any connection was made. Because connecting the configured set is
+  all-or-nothing and an MCP failure is fatal, that one entry meant **apogee would not start**, with
+  no way to allow it from configuration. That floor exists to stop the *model* pivoting to internal
+  addresses; an MCP endpoint is one **you** type into your own `~/.apogee/config.yaml` and is never
+  model-supplied, so it is now exempt from it — exactly as the LLM `endpoint:` already was. What
+  does **not** loosen:
+  - **Your own host allow/deny policy still applies** to the endpoint, and everything the model
+    drives (`web_fetch`, `http_request`, `web_search`) keeps the blanket floor, unchanged, pre-flight
+    and at dial time.
+  - **The connection is pinned to that endpoint's own addresses.** A DNS rebind, or anything else
+    that points that transport at a *different* private address, is still refused at dial. The
+    exemption is the one address you named, not "private addresses are fine here". An endpoint whose
+    addresses cannot be resolved fails the connect rather than dialling unpinned.
+  - **Redirects are no longer followed on an MCP transport.** The MCP client had every part of the
+    network tools' HTTP client except their no-follow redirect policy, so it auto-followed a
+    redirect that could carry a vetted connection to a host the endpoint check never saw. Configure
+    a redirecting server at the URL it redirects to.
+  - **The endpoint handed to the MCP SDK is now the same string url-safety checked** (normalised
+    once — trimmed, host lower-cased and IDNA-mapped, a trailing root dot dropped) instead of the
+    raw configured text, closing the same check-one-string/dial-another gap already closed for the
+    network tools.
+
+  MCP tools themselves are untouched: an MCP tool still asks for approval in Auto, per server, as it
+  always has. See [ADR 0012](docs/adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)
+  (amendment 2026-07-26).
+
 - **A network response cut short mid-body no longer reads to the model as a complete one.** The
   network funnel read the response body and **discarded the read error**, while its "response
   truncated" marker was raised by the 2 MiB cap alone — so a server that streamed slowly past the

@@ -86,9 +86,13 @@
 #
 # An MCP server is an EXTERNAL, untrusted process Apogee cannot confine — so its tools ALWAYS ask
 # for approval in auto mode (confine-to-workspace: true), the same as any unfenceable reach. A
-# server reached over http(s) (sse / streamable-http) passes the same SSRF floor as the network
-# tools (loopback / private / metadata endpoints are refused). A stdio server is a local process
-# you launch — you chose the command — so no URL floor applies; its tools still ask in auto.
+# server reached over http(s) (sse / streamable-http) may live on localhost or your LAN: you named
+# the address here, so it is exempt from the SSRF floor the network tools ride (that floor exists
+# to stop the MODEL reaching internal addresses). The connection is PINNED to that endpoint's own
+# addresses — any OTHER private address it is later pointed at is still refused — and redirects
+# are not followed, so configure a redirecting server at the URL it redirects to. A stdio server
+# is a local process you launch — you chose the command — so no URL check applies; its tools still
+# ask in auto.
 #
 # mcp-servers:
 #   - name: github                       # the prefix on each tool's name; must be unique
@@ -98,7 +102,7 @@
 #     env: ["GITHUB_TOKEN=…"]            # stdio: optional KEY=VALUE environment entries
 #   - name: docs
 #     transport: streamable-http         # sse | streamable-http: a remote http(s) server
-#     endpoint: https://mcp.example.com/ # the server URL (passes the SSRF floor)
+#     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)
 
 # Discover skills from the workspace's bare skills/ folder, in addition to the global library
 # (~/.apogee/skills) and the project's .apogee/skills (both always loaded). A skill is a folder

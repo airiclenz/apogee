@@ -46,6 +46,13 @@ import (
 // closes that hole by re-validating the ACTUAL connected IP at dial time (the address
 // the OS hands the connect syscall), so the floor holds even against a rebinding name.
 // The pre-flight Check is the cheap first line; the dial-time control is the real bound.
+//
+// PinnedDialControl is the same bound with ONE address carved out of it: the addresses a
+// caller-named host resolves to at build time are permitted, everything else is judged by the
+// floor. It serves a connection whose destination is a HOST decision rather than a model's
+// (the configured MCP endpoint — see ADR 0012's Amendment (2026-07-26)), and it is deliberately
+// pinned rather than blanket-disabled, so a rebind or a redirect to a DIFFERENT private address
+// on that same connection is still refused.
 
 // ErrSSRFBlocked is returned when an address is denied by the SSRF floor (a resolved IP
 // in a blocked range). It wraps ErrURLBlocked so a single errors.Is(err, ErrURLBlocked)
@@ -202,16 +209,9 @@ func (g URLGuard) resolveAndCheckFloor(ctx context.Context, host string) error {
 		return nil
 	}
 
-	resolve := g.resolver
-	if resolve == nil {
-		resolve = defaultIPResolver
-	}
-	ips, err := resolve(ctx, host)
+	ips, err := g.resolveHost(ctx, host)
 	if err != nil {
-		return fmt.Errorf("%w: could not resolve host %q: %v", ErrURLBlocked, host, err)
-	}
-	if len(ips) == 0 {
-		return fmt.Errorf("%w: host %q resolved to no addresses", ErrURLBlocked, host)
+		return err
 	}
 	for _, ip := range ips {
 		if ipBlockedByFloor(ip) {
@@ -219,6 +219,26 @@ func (g URLGuard) resolveAndCheckFloor(ctx context.Context, host string) error {
 		}
 	}
 	return nil
+}
+
+// resolveHost resolves host through the guard's injected resolver (the real net resolver when
+// none is injected), failing CLOSED: a lookup error and an empty answer are both ErrURLBlocked
+// errors, because a host whose addresses are unknown cannot be judged and must not be reached
+// blind. It is the one lookup both the pre-flight floor and the pinned dial control share, so
+// the two can never disagree about what a name resolves to or about how a failure reads.
+func (g URLGuard) resolveHost(ctx context.Context, host string) ([]net.IP, error) {
+	resolve := g.resolver
+	if resolve == nil {
+		resolve = defaultIPResolver
+	}
+	ips, err := resolve(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not resolve host %q: %v", ErrURLBlocked, host, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("%w: host %q resolved to no addresses", ErrURLBlocked, host)
+	}
+	return ips, nil
 }
 
 // SafeDialControl returns a net.Dialer Control hook that re-validates the ACTUAL connected
@@ -233,14 +253,8 @@ func (g URLGuard) SafeDialControl() func(network, address string, c syscall.RawC
 	if !g.floorEnabled() {
 		return func(string, string, syscall.RawConn) error { return nil }
 	}
-	return func(network, address string, _ syscall.RawConn) error {
-		host, _, err := net.SplitHostPort(address)
-		if err != nil {
-			// No port to split (shouldn't happen for a dialed address); fall back to the
-			// whole address so a malformed value fails closed rather than open.
-			host = address
-		}
-		ip := net.ParseIP(host)
+	return func(_, address string, _ syscall.RawConn) error {
+		ip := dialAddressIP(address)
 		if ip == nil {
 			return fmt.Errorf("%w: dial address %q is not an IP", ErrSSRFBlocked, address)
 		}
@@ -249,6 +263,80 @@ func (g URLGuard) SafeDialControl() func(network, address string, c syscall.RawC
 		}
 		return nil
 	}
+}
+
+// PinnedDialControl is the ENDPOINT-AWARE form of SafeDialControl: it permits the addresses
+// host itself resolves to — even ones the floor denies — and applies the floor, unchanged, to
+// every other address.
+//
+// It exists for the one address a caller has already made a HOST trust decision about. A
+// configured MCP endpoint is named in the user's own config file and is never model-supplied,
+// so the floor — the anti-MODEL control — is the wrong bound over it (ADR 0012, Amendment
+// 2026-07-26); the user asking for http://192.168.64.1:7331/mcp means that address and nothing
+// else. Pinning is what keeps the exemption honest: only the endpoint's OWN resolved addresses
+// are exempt, so a redirect, an SSE endpoint event, or a DNS rebind pointing the transport at a
+// DIFFERENT private address is still refused by the floor. Every model-driven path keeps the
+// blanket SafeDialControl.
+//
+// host is resolved ONCE, here, through the guard's resolver (ctx bounds the lookup), so the
+// permitted set is fixed before any connection is made and nothing the transport learns later
+// can widen it. An IP-literal host needs no lookup. A host that cannot be resolved, or that
+// resolves to nothing, is an ErrURLBlocked error rather than an unpinned control — an endpoint
+// whose addresses are unknown cannot be pinned, and refusing to build the client is the
+// fail-closed direction (it is also what the pre-flight floor did for the same cause).
+//
+// With the floor off (DisableIPFloor) it resolves nothing and returns a Control that permits
+// everything, exactly as SafeDialControl does.
+func (g URLGuard) PinnedDialControl(ctx context.Context, host string) (func(network, address string, c syscall.RawConn) error, error) {
+	if !g.floorEnabled() {
+		return func(string, string, syscall.RawConn) error { return nil }, nil
+	}
+	if host == "" {
+		return nil, fmt.Errorf("%w: no host to pin", ErrURLBlocked)
+	}
+	var pinned []net.IP
+	if ip := net.ParseIP(host); ip != nil {
+		pinned = []net.IP{ip}
+	} else {
+		ips, err := g.resolveHost(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		pinned = ips
+	}
+
+	floor := g.SafeDialControl()
+	return func(network, address string, c syscall.RawConn) error {
+		if ip := dialAddressIP(address); ip != nil && containsIP(pinned, ip) {
+			return nil
+		}
+		return floor(network, address, c)
+	}, nil
+}
+
+// dialAddressIP extracts the IP a dial Control was handed, returning nil when the address is
+// not one (which every caller treats as blocked). It is shared by both controls so the blanket
+// and the pinned form can never disagree about which address they are judging.
+func dialAddressIP(address string) net.IP {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		// No port to split (shouldn't happen for a dialed address); fall back to the
+		// whole address so a malformed value fails closed rather than open.
+		host = address
+	}
+	return net.ParseIP(host)
+}
+
+// containsIP reports whether ip is one of list, comparing with net.IP.Equal so a 4-byte and a
+// 16-byte spelling of the same address match (the resolver and the dialer need not agree on the
+// representation for a pin to hold).
+func containsIP(list []net.IP, ip net.IP) bool {
+	for _, p := range list {
+		if p.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // floorEnabled reports whether the SSRF floor is active for this guard. The floor is ON by

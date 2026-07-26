@@ -253,3 +253,58 @@ Implementation lives in [`docs/plans/2026-07-25 - 00 - url-safety-choke-point-pl
 the class row and gate reason are in
 [`docs/design/confinement-execution-contract.md`](../design/confinement-execution-contract.md) §4,
 and CONTEXT.md's **Confinement** and **Safety guardrails** entries carry the prose.
+
+## Amendment (2026-07-26) — the SSRF floor is the anti-*model* control, so a configured MCP endpoint is exempt from it and pinned instead
+
+**Why now.** The amendment above says the MCP transport's connect-time endpoint check *"stays where
+it is"*. Where it is turned out to be wrong, and this amendment is the line that changes. The check
+ran the **resolved-IP SSRF floor** over the `endpoint:` a user typed into their own
+`~/.apogee/config.yaml`, so `http://127.0.0.1:7331/mcp` or `http://192.168.64.1:7331/mcp` — the
+ordinary way to run an MCP server — was refused as loopback/private. `Connect` is all-or-nothing and
+`cmd/apogee` treats an MCP failure as fatal, so **apogee would not start**, and there was no config
+escape (`DisableIPFloor` is deliberately code-level only). The asymmetry was sharp: the LLM
+`endpoint:` — the same category of user-chosen, config-supplied, routinely private address, and the
+shipped template's own default — is dialled with an unguarded client.
+
+**(a) The floor is scoped to what the model drives.** The SSRF floor exists to stop a
+prompt-injected **model** pivoting to loopback / IMDS / the LAN. An `mcp-servers:` endpoint is
+config-file-only (a project config cannot set it) and is never model-supplied, so the floor is the
+wrong control over it: it does not bound a model, it overrides a **host** decision the user already
+made. The pre-flight check on a configured endpoint therefore runs **scheme/host allow-deny only**
+— the user's own policy still applies, including a `DenyHosts` entry — and not the resolved-IP
+floor. Nothing model-driven changes: `web_fetch` / `http_request` / `web_search`, and every future
+model-supplied URL, keep the blanket floor pre-flight **and** at dial.
+
+**(b) The dial-time control becomes endpoint-aware, not absent.** Exempting the pre-flight alone
+would have been a no-op — the dial control refused every private address, so a localhost server
+still could not connect — and dropping it would have made the endpoint a hole. Instead the MCP
+transport dials under a control **pinned** to the endpoint's own resolved addresses
+(`URLGuard.PinnedDialControl`): those pass, and **every other address on that connection still meets
+the floor**. A DNS rebind, an SSE `endpoint` event, or a redirect pointing that transport at a
+DIFFERENT private address is refused exactly as before. The carve-out is one address the user named,
+not "private addresses are fine on this connection". The addresses are resolved once, at connect,
+so nothing the transport learns later can widen the set, and an endpoint that cannot be resolved is
+a connect-time error rather than an unpinned connection.
+
+**(c) Redirects on an MCP transport are no longer followed.** The MCP client's HTTP client
+reproduced the funnel's builder field-for-field but omitted its `CheckRedirect` policy, so MCP
+transports auto-followed redirects while Apogee's own tools refuse to. A redirect could carry a
+vetted connection to a host the endpoint's string-level allow/deny decision never saw. It now
+returns the redirect response instead of following it, on the funnel's own reasoning. A server that
+redirects must be configured at the URL it redirects to.
+
+**(d) Everything else in this ADR is untouched.** The per-call disposition of an **MCP tool** is not
+in question: the `mcp` class still gates through Approval in Auto with its server-grain
+allow-for-session cache (contract §4's **mcp** row, unmoved). This amendment is about the
+**connection** to a configured server, not about what its tools may do. `confine-to-workspace` is
+unaffected, and subprocess network reach remains out of scope.
+
+**The trade-off.** A user who types a private `endpoint:` reaches that address, which is the
+intent — the same standing their `model.endpoint:` and their stdio `command:` already have. What is
+NOT accepted is that trust widening past the address they named, which is what the pin prevents.
+The floor remains a floor everywhere it bounds a model.
+
+Implementation lives in [`docs/plans/2026-07-26 - 03 - url-safety-live-gap-plan.md`](../plans/2026-07-26%20-%2003%20-%20url-safety-live-gap-plan.md)
+(item 14); the client shape is in
+[`docs/design/mcp-client.md`](../design/mcp-client.md), and `internal/mcp`'s package
+documentation carries the trust boundary in prose.

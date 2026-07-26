@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/security"
@@ -18,11 +20,20 @@ import (
 // ----------------------------------------------------------------------------
 //
 // A ServerConfig names one transport; buildTransport turns it into the SDK Transport the
-// Client connects through. The two HTTP transports (SSE / streamable-http) ride the
-// security.URLGuard SSRF floor: the endpoint URL is checked BEFORE connecting and the
-// connected IP is re-validated at DIAL time (DNS-rebinding closed), exactly as the native
-// network tools are (the trust boundary in doc.go). A stdio server is a LOCAL launched
-// subprocess — the host chose the command, a different trust model — so no URL floor applies.
+// Client connects through. The two HTTP transports (SSE / streamable-http) ride
+// security.URLGuard's scheme/host allow-deny before connecting, and dial under a control that
+// PINS the configured endpoint's own resolved addresses — permitting them, and keeping the SSRF
+// floor over every other address the transport is later pointed at. A stdio server is a LOCAL
+// launched subprocess — the host chose the command, a different trust model — so no URL floor
+// applies.
+//
+// Why the endpoint is exempt from the resolved-IP floor while the native network tools are not
+// (ADR 0012, Amendment (2026-07-26)): the floor is the anti-MODEL control — it stops a
+// prompt-injected model pivoting to loopback / IMDS / the LAN. An `mcp-servers:` endpoint is
+// config-file-only and never model-supplied, and a local or LAN MCP server (`http://127.0.0.1:…`,
+// `http://192.168.x.y:…`) is the ordinary case, which the blanket floor made unusable AND fatal
+// at startup. Pinning is what keeps the carve-out honest: it is one address the user named, not
+// "private addresses are fine on this connection".
 
 // Transport identifies which MCP transport a configured server speaks.
 type Transport string
@@ -33,10 +44,10 @@ const (
 	// tools still gate through Approval in Auto.
 	TransportStdio Transport = "stdio"
 	// TransportSSE connects to a remote server over the 2024-11-05 SSE transport at an http(s)
-	// Endpoint, filtered by the SSRF floor.
+	// Endpoint, filtered by url-safety and pinned to the endpoint's own addresses.
 	TransportSSE Transport = "sse"
 	// TransportStreamableHTTP connects to a remote server over the streamable-http transport at
-	// an http(s) Endpoint, filtered by the SSRF floor.
+	// an http(s) Endpoint, filtered and pinned the same way.
 	TransportStreamableHTTP Transport = "streamable-http"
 )
 
@@ -59,17 +70,19 @@ type ServerConfig struct {
 	Args    []string
 	Env     []string
 
-	// Endpoint is the http(s) URL of an SSE / streamable-http server. It passes the SSRF floor
-	// before connecting (loopback / IMDS / private ranges denied by resolved IP).
+	// Endpoint is the http(s) URL of an SSE / streamable-http server. It passes the host's
+	// scheme/host allow-deny before connecting, and its own resolved addresses are what the
+	// connection is pinned to — a private endpoint is allowed (you named it), any OTHER private
+	// address on that connection is not.
 	Endpoint string
 }
 
-// buildTransport constructs the SDK Transport for cfg, applying the SSRF floor to the two HTTP
+// buildTransport constructs the SDK Transport for cfg, applying url-safety to the two HTTP
 // transports. guard carries the host's url-safety policy plus the default-on, resolved-IP SSRF
-// floor; it is checked pre-flight here (with ctx bounding the floor's DNS resolution) and
-// re-checked at dial time via the http.Client's SafeDialControl (closing DNS-rebinding). An
-// unknown transport, a missing command/endpoint, or an endpoint the floor rejects is a
-// connect-time error (the Client surfaces it per server).
+// floor; the endpoint is checked pre-flight here for scheme/host (with ctx bounding the DNS
+// lookup that pins it) and the connection dials under PinnedDialControl. An unknown transport, a
+// missing or unparseable endpoint, an endpoint url-safety denies, and an endpoint that cannot be
+// resolved are all connect-time errors (the Client surfaces them per server).
 func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
 	switch cfg.Transport {
 	case TransportStdio:
@@ -109,52 +122,104 @@ func buildStdioTransport(cfg ServerConfig) (mcpsdk.Transport, error) {
 	return &mcpsdk.CommandTransport{Command: cmd}, nil
 }
 
-// buildSSETransport builds an SSE client transport after vetting the endpoint through the SSRF
-// floor, with an http.Client whose dial-time control re-validates the connected IP.
+// buildSSETransport builds an SSE client transport after vetting the endpoint, over an
+// http.Client pinned to that endpoint's own addresses.
 func buildSSETransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
-	if err := checkEndpoint(ctx, cfg, guard); err != nil {
+	endpoint, client, err := vetEndpoint(ctx, cfg, guard)
+	if err != nil {
 		return nil, err
 	}
 	return &mcpsdk.SSEClientTransport{
-		Endpoint:   cfg.Endpoint,
-		HTTPClient: newGuardedHTTPClient(guard),
+		Endpoint:   endpoint,
+		HTTPClient: client,
 	}, nil
 }
 
-// buildStreamableTransport builds a streamable-http client transport after vetting the endpoint
-// through the SSRF floor, with the same dial-time-guarded http.Client.
+// buildStreamableTransport builds a streamable-http client transport the same way — same vetting,
+// same pinned client.
 func buildStreamableTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
-	if err := checkEndpoint(ctx, cfg, guard); err != nil {
+	endpoint, client, err := vetEndpoint(ctx, cfg, guard)
+	if err != nil {
 		return nil, err
 	}
 	return &mcpsdk.StreamableClientTransport{
-		Endpoint:   cfg.Endpoint,
-		HTTPClient: newGuardedHTTPClient(guard),
+		Endpoint:   endpoint,
+		HTTPClient: client,
 	}, nil
 }
 
-// checkEndpoint refuses an empty endpoint and runs the pre-flight url-safety check (scheme/host
-// allow-deny + the resolved-IP SSRF floor) on an HTTP-transported server's endpoint, so a server
-// URL resolving to loopback / IMDS / a private range is rejected before any connection is made.
-// ctx bounds the floor's DNS resolution so a slow/blocked lookup during connect is cancellable.
-func checkEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard) error {
-	if strings.TrimSpace(cfg.Endpoint) == "" {
-		return fmt.Errorf("mcp: %s server %q has no endpoint configured", cfg.Transport, cfg.Name)
+// vetEndpoint turns a configured HTTP endpoint into the two things an SDK transport needs: the
+// ONE normalised endpoint string and the http.Client to speak it over. Both come from the same
+// checked form, which is the point — the SDK used to be handed the RAW cfg.Endpoint while the
+// guard judged the normalised one, the same check-one-string/dial-another divergence the native
+// funnel removed (M-1). Whatever this returns as the endpoint is exactly what url-safety
+// approved.
+func vetEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (string, *http.Client, error) {
+	u, err := checkEndpoint(ctx, cfg, guard)
+	if err != nil {
+		return "", nil, err
 	}
-	if err := guard.CheckContext(ctx, cfg.Endpoint); err != nil {
-		return fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", cfg.Name, err)
+	// Pin the connection to the endpoint's own resolved addresses. This is where a private
+	// endpoint becomes reachable — and where a redirect or a rebind to a DIFFERENT private
+	// address stays refused. An endpoint that cannot be resolved fails the connect here, as it
+	// did under the pre-flight floor.
+	control, err := guard.PinnedDialControl(ctx, u.Hostname())
+	if err != nil {
+		return "", nil, fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", cfg.Name, err)
 	}
-	return nil
+	return u.String(), newGuardedHTTPClient(control), nil
 }
 
-// newGuardedHTTPClient builds the http.Client the HTTP transports use, whose dialer re-checks the
-// ACTUAL connected IP against the SSRF floor at dial time (the DNS-rebinding TOCTOU defence) — the
-// same construction the native network tools use, kept here so an MCP HTTP connection can never
-// skip the dial-time floor.
-func newGuardedHTTPClient(guard security.URLGuard) *http.Client {
+// checkEndpoint refuses an empty or unparseable endpoint, runs the pre-flight url-safety check
+// on an HTTP-transported server's endpoint, and returns the ONE normalised form the transport is
+// to be given.
+//
+// The check is scheme/host allow-deny ONLY: the guard's resolved-IP SSRF floor is deliberately
+// disabled for it (the single production use of DisableIPFloor). The floor exists to stop the
+// MODEL pivoting to internal addresses; an `mcp-servers:` endpoint is config-file-only, so the
+// floor there refused the user's own localhost/LAN server and — Connect being all-or-nothing —
+// made apogee fail to start, with no config escape. The user's allow/deny host policy still
+// applies, and the connection is pinned to this endpoint's addresses by vetEndpoint. See ADR
+// 0012, Amendment (2026-07-26).
+//
+// ctx is threaded into the guard for the same reason it always was — a check that resolves is a
+// check that can hang — even though the floorless form performs no lookup itself. The one lookup
+// this path now makes is pinning's, in vetEndpoint, under the same ctx.
+func checkEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (*url.URL, error) {
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		return nil, fmt.Errorf("mcp: %s server %q has no endpoint configured", cfg.Transport, cfg.Name)
+	}
+	u, err := security.NormalizeURL(cfg.Endpoint)
+	if err != nil {
+		// The parse error's own text is deliberately NOT interpolated: it quotes the endpoint
+		// back, and a configured endpoint may carry a token in its query — the same reasoning
+		// security's own bare "unparseable url" rests on.
+		return nil, fmt.Errorf("mcp: server %q has an unparseable endpoint", cfg.Name)
+	}
+	if err := guard.DisableIPFloor().CheckContext(ctx, u.String()); err != nil {
+		return nil, fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", cfg.Name, err)
+	}
+	return u, nil
+}
+
+// newGuardedHTTPClient builds the http.Client the HTTP transports use: control is the dial-time
+// check on the ACTUAL connected IP (PinnedDialControl — the endpoint's own addresses pass, every
+// other address meets the SSRF floor), so an MCP HTTP connection can never skip it.
+//
+// Redirects are NOT followed, the same policy the native network tools apply: a redirect could
+// send a vetted connection to an unvetted host, sidestepping the endpoint check. The dial-time
+// control would still refuse a private redirect target, but a string-level allow/deny decision
+// is made once, on the endpoint, and auto-following would step around it. A server that
+// redirects must be configured at the URL it redirects to.
+//
+// (internal/tools builds the same shape per CALL and drains its pool on the way out; this one is
+// long-lived on purpose — it is a session-long server connection, not a one-shot tool call. The
+// two builders are deliberately NOT consolidated here; that seam is an architecture-deepening
+// candidate, not this change.)
+func newGuardedHTTPClient(control func(network, address string, c syscall.RawConn) error) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
-		Control: guard.SafeDialControl(), // re-validate the connected IP — closes DNS-rebinding
+		Control: control,
 	}
 	return &http.Client{
 		Transport: &http.Transport{
@@ -164,6 +229,9 @@ func newGuardedHTTPClient(guard security.URLGuard) *http.Client {
 			IdleConnTimeout:       30 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}
 }
