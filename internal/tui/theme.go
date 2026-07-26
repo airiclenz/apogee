@@ -42,6 +42,10 @@ var (
 	colGauge = lipgloss.Color("#7c7cf0") // context-fill gauge bar — periwinkle (llama-launcher look)
 
 	colSelection = lipgloss.Color("#3a5fcd") // mouse drag-selection highlight background — blue
+
+	colSpinner1 = lipgloss.Color("#8668ff")
+	colSpinner2 = lipgloss.Color("#19a946")
+	colSpinner3 = lipgloss.Color("#ffbf00")
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a

@@ -264,7 +264,7 @@ const spinnerColorPeriod = 8 * time.Second
 // than re-typed as hex literals, so a palette edit moves the loop with it. Palette stops rather
 // than a raw hue circle is the point: the footer's autonomy-mode markers and the orange code accent
 // are already on screen, and a full hue sweep would collide with them.
-var spinnerStops = buildSpinnerStops(colGauge, colModePlan, colModeAllowEdits)
+var spinnerStops = buildSpinnerStops(colSpinner1, colSpinner2, colSpinner3)
 
 // buildSpinnerStops converts palette colours into the space the blend works in, once, at package
 // init.
