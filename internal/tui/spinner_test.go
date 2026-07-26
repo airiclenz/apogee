@@ -230,6 +230,160 @@ func TestSnakeCycles(t *testing.T) {
 	}
 }
 
+// glitterTroughFrame and glitterPeakFrame are where one breath bottoms out and tops out. The sine
+// starts mid-rise at frame 0, so the peak is a quarter of a breath in and the trough three quarters —
+// which is why reading the breath FROM the trough is what makes "swells, then falls" a statement
+// about a whole period rather than about the arbitrary point the counter happens to start on.
+const (
+	glitterTroughFrame = 3 * glitterFramesPerBreath / 4
+	glitterPeakFrame   = glitterFramesPerBreath / 4
+)
+
+// cellDots counts the dots one rendered braille cell lights, decoding the rune back through
+// brailleBitPositions — the test's own copy of the block's dot numbering — so the count is
+// independent of the population count production sorted the buckets with.
+func cellDots(t *testing.T, r rune) int {
+	t.Helper()
+
+	mask := r - brailleBase
+	if mask < 0 || mask > 0xFF {
+		t.Fatalf("%U is outside the braille block", r)
+	}
+	dots := 0
+	for bit := range brailleBitPositions {
+		if mask&bit != 0 {
+			dots++
+		}
+	}
+	return dots
+}
+
+// TestGlitterDensityBreathes proves the breath is one clean swell and fall per period rather than
+// jitter: read from its trough the density climbs to a solid eight dots and falls back to one, moving
+// only in the direction of the arc it is on (rounding makes plateaus, never a reversal), and the next
+// breath repeats it exactly. It also pins the floor at 1 — a 0-dot cell would blink the spinner out
+// mid-run and read as a stall.
+func TestGlitterDensityBreathes(t *testing.T) {
+	t.Parallel()
+
+	const breath = glitterFramesPerBreath
+	if got := glitterDensity(glitterTroughFrame, breath); got != 1 {
+		t.Errorf("density at the trough (frame %d) = %d, want 1 — the breath must not blank the cell",
+			glitterTroughFrame, got)
+	}
+	if got := glitterDensity(glitterPeakFrame, breath); got != brailleDots {
+		t.Errorf("density at the peak (frame %d) = %d, want the block's full %d",
+			glitterPeakFrame, got, brailleDots)
+	}
+
+	peak := glitterTroughFrame + breath/2 // the same phase as glitterPeakFrame, one breath on
+	for frame := glitterTroughFrame; frame < peak; frame++ {
+		if next, cur := glitterDensity(frame+1, breath), glitterDensity(frame, breath); next < cur {
+			t.Fatalf("density fell %d→%d over frames %d→%d, inside the swell", cur, next, frame, frame+1)
+		}
+	}
+	for frame := peak; frame < glitterTroughFrame+breath; frame++ {
+		if next, cur := glitterDensity(frame+1, breath), glitterDensity(frame, breath); next > cur {
+			t.Fatalf("density rose %d→%d over frames %d→%d, inside the fall", cur, next, frame, frame+1)
+		}
+	}
+
+	for frame := 0; frame < breath; frame++ {
+		got, want := glitterDensity(frame+breath, breath), glitterDensity(frame, breath)
+		if got != want {
+			t.Errorf("frame %d of the next breath = %d, want frame %d's %d — the breath must close",
+				frame+breath, got, frame, want)
+		}
+	}
+}
+
+// TestGlitterCellMatchesDensity proves the breath actually governs the glyph across several breaths:
+// both cells of every frame light exactly the number of dots that frame's density calls for. A pick
+// from the wrong bucket would still sparkle but would not breathe. It goes through newSpinnerAnim so
+// the registry wiring is covered too — an unregistered style falls back to classic's single cell and
+// fails the cell count.
+func TestGlitterCellMatchesDensity(t *testing.T) {
+	t.Parallel()
+
+	s := newSpinnerAnim(SpinnerGlitter, false)
+	for frame := 0; frame < 3*glitterFramesPerBreath; frame++ {
+		s.frame = frame
+		cells := []rune(s.glyph())
+		if len(cells) != glitterCells {
+			t.Fatalf("frame %d is %d cells, want the %d that glitter paints", frame, len(cells), glitterCells)
+		}
+		want := glitterDensity(frame, glitterFramesPerBreath)
+		for cell, r := range cells {
+			if got := cellDots(t, r); got != want {
+				t.Errorf("frame %d cell %d (%U) lights %d dots, want the breath's %d", frame, cell, r, got, want)
+			}
+		}
+	}
+
+	// The peak's bucket holds only ⣿, so the swell tops out on a solid pair — the effect's visual
+	// anchor, and the proof the density really does reach the top of the block.
+	s.frame = glitterPeakFrame
+	if got, want := s.glyph(), "⣿⣿"; got != want {
+		t.Errorf("the peak frame %d = %q, want the solid %q", glitterPeakFrame, got, want)
+	}
+}
+
+// TestGlitterIsPure proves the glyph is a pure function of the frame, which is what lets the
+// animation ride on a value-copied Model (ADR 0011): rendering the same frame twice, or rendering it
+// from a second independent copy, gives the same cells. A *rand.Rand here would advance per render
+// and per copy, so the spinner would depend on how often View happened to run.
+func TestGlitterIsPure(t *testing.T) {
+	t.Parallel()
+
+	first := newSpinnerAnim(SpinnerGlitter, false)
+	second := newSpinnerAnim(SpinnerGlitter, false)
+	for frame := 0; frame < glitterFramesPerBreath; frame++ {
+		first.frame, second.frame = frame, frame
+		once, twice := first.glyph(), first.glyph()
+		if once != twice {
+			t.Fatalf("frame %d rendered %q then %q — the glyph is not pure in the frame", frame, once, twice)
+		}
+		if other := second.glyph(); other != once {
+			t.Fatalf("frame %d rendered %q on one copy and %q on another", frame, once, other)
+		}
+	}
+}
+
+// TestGlitterSparkles guards the requirement that separates glitter from a pulse: the glyph re-rolls
+// every frame, so a short run of frames shows many different cells even while the density barely
+// moves. This is the test that fails if the effect ever regresses to a static or slowly-changing
+// pair — the specific thing the owner asked to avoid. It pins the slow half of the contrast too, so a
+// breath cannot quietly shorten to the point where the two rates stop contrasting.
+func TestGlitterSparkles(t *testing.T) {
+	t.Parallel()
+
+	const (
+		window     = 20 // consecutive frames — one second at glitter's rate
+		wantGlyphs = 10
+	)
+
+	s := newSpinnerAnim(SpinnerGlitter, false)
+	if got, want := s.interval(), time.Second/20; got != want {
+		t.Errorf("glitter interval = %v, want %v (the fast half of the contrast)", got, want)
+	}
+	if got, want := time.Duration(glitterFramesPerBreath)*s.interval(), 6*time.Second; got != want {
+		t.Errorf("one breath spans %v at the registered rate, want %v (the slow half)", got, want)
+	}
+
+	seen := make(map[string]bool, window)
+	for frame := 0; frame < window; frame++ {
+		s.frame = frame
+		if dots := glitterDensity(frame, glitterFramesPerBreath); dots < 2 {
+			t.Fatalf("frame %d breathes at %d dots — too sparse a bucket to prove a re-roll", frame, dots)
+		}
+		seen[s.glyph()] = true
+	}
+	if len(seen) < wantGlyphs {
+		t.Errorf("%d consecutive frames produced only %d distinct glyphs, want at least %d — the spinner would read as a pulse, not as glitter",
+			window, len(seen), wantGlyphs)
+	}
+}
+
 // TestSpinnerTickChainGeneration proves the guard the bubbles widget's tag mechanism gave for
 // free: only the live chain's ticks advance the spinner. Without it, re-arming while a tick is
 // still in flight (an approval answered, an ask replied to) leaves two chains running and the

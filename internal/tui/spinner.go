@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"math"
+	"math/bits"
 	"strings"
 	"time"
 
@@ -96,6 +98,11 @@ var brailleDotBits = [2][4]rune{
 	{0x08, 0x10, 0x20, 0x80}, // the cell's right column: dots 4, 5, 6, 8
 }
 
+// brailleDots is how many dots one cell of the block can light: eight, in its 8-dot form. It is both
+// the width of a cell's mask in bits and the top of the density scale the glitter style breathes
+// along, which is why the block spans 2^brailleDots cells.
+const brailleDots = 8
+
 // snakeRing walks the outer ring of the 4-column × 4-row dot grid that two braille cells form side
 // by side, clockwise from the top-left, as (col, row) with cols 0–1 in the left cell and cols 2–3
 // in the right. The frames are DERIVED from this table rather than hand-written — the table is the
@@ -127,6 +134,100 @@ func snakeGlyph(frame int) string {
 	return string(cells[:])
 }
 
+// glitterBreath is one full swell-and-fall of the glitter style's density. It is deliberately slow
+// against the rate the glyph itself re-rolls at: a slow breath with a slow glyph is a pulse, and the
+// CONTRAST between the two — a six-second swell under a cell that changes every frame — is what
+// makes this style read as glitter.
+const glitterBreath = 6 * time.Second
+
+// glitterInterval re-rolls the glyph twenty times a second: the fast half of that contrast, up from
+// classic's ten. View composes pre-rendered viewport rows, so the extra repaints cost little — but
+// the rate lives here as one named constant so backing it off is a one-line edit.
+const glitterInterval = time.Second / 20
+
+// glitterFramesPerBreath is how many frames one breath spans at this style's rate — 120, so the
+// density creeps through the whole swell while the pair of cells is re-rolled 120 times.
+const glitterFramesPerBreath = int(glitterBreath / glitterInterval)
+
+// glitterCells is how many braille cells a glitter frame paints: two, side by side, each rolled
+// independently. It is also the style's width in terminal columns, one per cell.
+const glitterCells = 2
+
+// brailleByDots buckets the braille block, U+2800 through U+28FF, by how many of a cell's dots are
+// lit — the density sort. brailleByDots[n] holds every cell of density n, so the animation asks for a
+// density and never needs to know a glyph. The bucket sizes are the binomials 1, 8, 28, 56, 70, 56,
+// 28, 8, 1; the last holds only ⣿, which is why the breath tops out on a solid pair of cells.
+var brailleByDots = buildBrailleByDots()
+
+// buildBrailleByDots sorts the block by density, once, at package init. A cell is brailleBase plus
+// the mask of the dots it lights, so a population count over the mask IS the cell's density.
+func buildBrailleByDots() [brailleDots + 1][]rune {
+	var buckets [brailleDots + 1][]rune
+	for mask := 0; mask < 1<<brailleDots; mask++ {
+		density := bits.OnesCount8(uint8(mask))
+		buckets[density] = append(buckets[density], rune(brailleBase+mask))
+	}
+	return buckets
+}
+
+// glitterDensityScale maps the sine's 0..2 swing onto the block's density range: half the eight-dot
+// span, so 1 + round(scale × (1 + sin)) is 1 at the trough and brailleDots at the peak.
+const glitterDensityScale = float64(brailleDots-1) / 2
+
+// glitterDensity is the breath: a sine over one framesPerBreath period, mapped onto 1..brailleDots
+// dots. It never reaches 0 — a blank cell mid-run reads as a stalled spinner, not as a dim one. The
+// period is a parameter rather than the constant so a test can breathe in its own number of frames.
+func glitterDensity(frame, framesPerBreath int) int {
+	phase := 2 * math.Pi * float64(frame%framesPerBreath) / float64(framesPerBreath)
+	return 1 + int(math.Round(glitterDensityScale*(1+math.Sin(phase))))
+}
+
+// glitterFrameStride and glitterCellStride spread the (frame, cell) pair across the 64-bit space
+// before the finaliser mixes it — the golden-ratio odd constant for the frame, a second odd constant
+// for the cell — so consecutive frames, and the two cells of one frame, do not pick neighbouring
+// members of the same bucket.
+const (
+	glitterFrameStride = 0x9E3779B97F4A7C15
+	glitterCellStride  = 0xBF58476D1CE4E5B9
+)
+
+// glitterCell picks this frame's glyph for one cell out of the bucket the breath currently calls for.
+// The pick is a HASH of (frame, cell), not a draw from a *rand.Rand: the Model is value-copied on
+// every Update (ADR 0011), so an RNG handle would be shared across the copies and advance from the
+// ones Update discards — the same frame would then paint differently depending on how often View
+// ran. A hash keeps every frame a pure function of frame: reproducible in a test, stable under the
+// copy. dots must be a density the block has cells for, 0..brailleDots, which is all glitterDensity
+// ever yields; frame is never negative (arm zeroes it and a tick only increments it).
+func glitterCell(frame, cell, dots int) rune {
+	bucket := brailleByDots[dots]
+	pick := splitmix64(uint64(frame)*glitterFrameStride + uint64(cell)*glitterCellStride)
+	return bucket[pick%uint64(len(bucket))]
+}
+
+// splitmix64 is SplitMix64's finaliser — the avalanche step that turns a strided counter into a
+// well-spread 64-bit value. Only the mixing function, not the generator: it holds no state, so it
+// stays a pure function of its input, which is what the value-copied Model needs. The shift and
+// multiply constants are the published ones and mean nothing on their own.
+func splitmix64(x uint64) uint64 {
+	x ^= x >> 30
+	x *= 0xBF58476D1CE4E5B9
+	x ^= x >> 27
+	x *= 0x94D049BB133111EB
+	x ^= x >> 31
+	return x
+}
+
+// glitterGlyph paints glitter's frame n: both cells at the density the breath is on, each rolled
+// independently, so the pair sparkles while the density swells and falls underneath it.
+func glitterGlyph(frame int) string {
+	dots := glitterDensity(frame, glitterFramesPerBreath)
+	var cells [glitterCells]rune
+	for cell := range cells {
+		cells[cell] = glitterCell(frame, cell, dots)
+	}
+	return string(cells[:])
+}
+
 // spinnerSpec is one style's animation, as data: how long a single frame is held, how many
 // terminal columns its glyph occupies, and the pure function that paints frame n.
 type spinnerSpec struct {
@@ -140,6 +241,7 @@ type spinnerSpec struct {
 // build parses without yet having an animation for it; [spinnerAnim.spec] resolves it to classic.
 var spinnerSpecs = map[SpinnerStyle]spinnerSpec{
 	SpinnerSnake:   {interval: snakeInterval, width: 2, glyph: snakeGlyph},
+	SpinnerGlitter: {interval: glitterInterval, width: glitterCells, glyph: glitterGlyph},
 	SpinnerClassic: {interval: classicInterval, width: 1, glyph: classicGlyph},
 }
 

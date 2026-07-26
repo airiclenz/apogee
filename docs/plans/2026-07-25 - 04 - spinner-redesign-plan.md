@@ -305,7 +305,21 @@ Two notes for the implementer:
 
 ---
 
-## 3. The glitter style (owner idea 1) — slow breath, fast sparkle
+## 3. The glitter style (owner idea 1) — slow breath, fast sparkle — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): three deviations from the literal item text, none behavioural.
+(a) The 20 fps constant is named `glitterInterval`, not `glitterFPS`: it holds a
+`time.Duration` (`time.Second / 20`) and sits beside the existing `classicInterval` /
+`snakeInterval`, which `spinnerSpecs` reads as `interval:` — a duration named `FPS` reads as
+the number 20. Its comment still states the rate and that backing it off is a one-line edit.
+(b) The sketch's literal `3.5` is the named constant `glitterDensityScale =
+float64(brailleDots-1) / 2` (numerically identical, single rounding either way), so the
+mapping is tied to the block's eight dots rather than to a bare number; the new
+`brailleDots = 8` sits with `brailleBase`/`brailleDotBits` as a block fact.
+(c) `TestGlitterDensityBreathes` checks the swell/fall monotonicity **from the trough**
+(three quarters of a breath in): the sketch's phase starts at a zero crossing, so frame 0 is
+mid-rise and a "rises then falls" check anchored at frame 0 would be rise-fall-rise. The test
+pins the trough (1 dot), the peak (8 dots), one direction per arc, and periodicity.
 
 **What.** Sort the whole `U+2800`–`U+28FF` block by density (dots lit) into buckets, then paint
 two cells per frame with a *pseudo-random* member of the bucket the breath currently calls for.
