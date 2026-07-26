@@ -303,7 +303,28 @@ Commit: `fix(present): bound the OS-handler launch to a renderable-extension all
 
 ---
 
-## 3. H-3 — the funnel discards the body-read error, so a truncated response reads as complete
+## 3. H-3 — the funnel discards the body-read error, so a truncated response reads as complete — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): Of the two shapes the item offers for a non-cancellation read error, the
+**message shape** was taken (`"response from host … was cut short: …"`) rather than
+`truncated = true`: the renderers are out of scope by the item's own text, so the existing marker
+would have had to keep saying `[response truncated at 2097152 bytes]` over a body that never
+reached the cap — a second wrong answer in place of the first. The cap path is unchanged and still
+returns a clean `truncated` with a nil error. Three departures worth naming: (1) the two cut-short
+cases live in one new table-driven `TestNetworkFunnel_DoCutShortBodyIsNeverASilentSuccess` rather
+than two separate tests, sharing a `writePartialBody` handler helper (headers + a first chunk under
+a `Content-Length` that promises more), and they also assert the M2 discipline on the new message
+(key-bearing URL in, host-only message out). (2) The ctx-during-body subtest cancels 50 ms after
+the handler flushes its headers — the deterministic signal available is server-side, and the
+assertion is contract-correct for both interleavings, so an early cancel degrades the subtest to
+the already-covered in-flight case rather than flaking. (3) `do`'s three-shape doc comment and
+`readCappedBody`'s doc comment were corrected where the change made them false; no other file, and
+no doc under `docs/design/`, was touched. **Mutation check (mandatory, performed):** with
+`internal/tools/network.go` reverted to the pre-fix code (`git checkout --`), all three new cases
+go **red** — `cancelled while the body streams` reports `err = <nil>, want context.Canceled`, and
+both cut-short cases report a silent `200 OK` carrying `body:"first chunk" truncated:false`;
+restored, all green, including `TestNetworkFunnel_DoCapsBody` and
+`go test -race ./internal/tools/... -run 'TestNetworkFunnel_' -count=2`.
 
 **What:** `readCappedBody` drops the read error at `internal/tools/network.go:249-256`
 (`data, _ := io.ReadAll(limited)`), and `do` at `:179`

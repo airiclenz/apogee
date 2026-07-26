@@ -156,6 +156,18 @@ point is a **minor** bump, not a breaking change.
   box; and an over-tall body is capped to the live screen budget with an explicit `… (+N more
   lines)` marker, so the input box the answer is typed into is never pushed off-screen.
 
+### Fixed
+
+- **A network response cut short mid-body no longer reads to the model as a complete one.** The
+  network funnel read the response body and **discarded the read error**, while its "response
+  truncated" marker was raised by the 2 MiB cap alone — so a server that streamed slowly past the
+  request timeout, or a connection reset mid-body, came back as a plain `HTTP 200 OK` carrying only
+  the first chunk, with nothing to say the rest was missing. `web_fetch`, `http_request` and
+  `web_search` now report a cut-short body as a failure the model can see (*"response from host
+  <host> was cut short: …"*, host-only as every funnel message is), and a body cut short by the
+  **caller's** cancellation is raised as a cancellation, so the Turn is rolled back instead of
+  completing over a half-read page. The 2 MiB cap is unchanged and still a clean, marked truncation.
+
 ### Security
 
 - **A tool's blast-radius class is now decided by what it *does*, not by what it *says* about

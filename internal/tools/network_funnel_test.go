@@ -162,6 +162,85 @@ func TestNetworkFunnel_DoCapsBody(t *testing.T) {
 	}
 }
 
+// TestNetworkFunnel_DoCutShortBodyIsNeverASilentSuccess covers the wrong-answer class the body
+// read used to hide: the read error was discarded and `truncated` is set by the 2 MiB cap
+// ALONE, so a response cut short mid-stream came back as a plain 200 carrying the first chunk
+// with nothing to say it was incomplete — the model then reasons over a partial page as if it
+// were the whole one. Both triggers must surface a failure the model can see; neither is ctx
+// cancellation (the caller's ctx is alive), so neither is a Go error.
+func TestNetworkFunnel_DoCutShortBodyIsNeverASilentSuccess(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		timeout time.Duration
+	}{
+		{
+			// The connection dies mid-body: the response promises more than it delivers, so
+			// the client's body read fails with an unexpected EOF after the first chunk.
+			name: "connection dies mid-body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				writePartialBody(w)
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					return // a short write against the promised length aborts it anyway
+				}
+				_ = conn.Close()
+			},
+		},
+		{
+			// The server streams past the resolved timeout: http.Client.Timeout covers the
+			// BODY read too, so the request "succeeds" and the body ends mid-stream.
+			name: "server streams past the resolved timeout",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				writePartialBody(w)
+				<-r.Context().Done() // never finish the body; the client's own budget ends this
+			},
+			timeout: 250 * time.Millisecond,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(tc.handler)
+			defer srv.Close()
+
+			resp, msg, err := newFunnelTool(loopbackGuard()).do(context.Background(), netRequest{
+				url:     srv.URL + "/page?key=" + secretKey,
+				timeout: tc.timeout,
+			})
+			if err != nil {
+				t.Fatalf("a cut-short body is not caller cancellation, so it must not be a Go error: %v", err)
+			}
+			if msg == "" {
+				t.Fatalf("a body cut short mid-read read as a complete response: no failure message, resp = %+v", resp)
+			}
+			if !strings.Contains(msg, "cut short") {
+				t.Errorf("message should say the response was cut short: %q", msg)
+			}
+			if !strings.Contains(msg, "127.0.0.1") {
+				t.Errorf("message should name the bare host for diagnosability: %q", msg)
+			}
+			if strings.Contains(msg, secretKey) {
+				t.Fatalf("API key LEAKED into the cut-short message: %q", msg)
+			}
+			if resp.statusCode != 0 || resp.body != "" || resp.truncated {
+				t.Errorf("a cut-short read must yield the zero netResponse, never a silent partial; got %+v", resp)
+			}
+		})
+	}
+}
+
+// writePartialBody puts a response on the wire that promises far more body than it sends, so
+// whatever ends the connection next leaves the client's body read short.
+func writePartialBody(w http.ResponseWriter) {
+	w.Header().Set("Content-Length", "4096")
+	_, _ = w.Write([]byte("first chunk"))
+	w.(http.Flusher).Flush()
+}
+
 // TestNetworkFunnel_DoBlockedURL proves url-safety is applied BY THE FUNNEL: with the
 // default (floor-on) guard a loopback URL never reaches the network, and the caller gets a
 // ready-to-surface message, an empty netResponse and a nil Go error (ADR 0007).
@@ -310,8 +389,10 @@ func TestNetworkFunnel_DoUsesSafeLabel(t *testing.T) {
 }
 
 // TestNetworkFunnel_DoCancelledCtxIsGoError proves ADR 0007 holds at the funnel: ctx
-// cancellation is the ONLY thing do reports as a Go error — before the request and while it
-// is in flight — never as a model-facing message.
+// cancellation is the ONLY thing do reports as a Go error — before the request, while it is in
+// flight, and while the BODY streams — never as a model-facing message. The third case is the
+// one that used to escape: the body read's error was discarded, so a cancelled caller got a
+// nil error over a half-read body and the Turn was never rolled back.
 func TestNetworkFunnel_DoCancelledCtxIsGoError(t *testing.T) {
 	t.Parallel()
 
@@ -348,6 +429,37 @@ func TestNetworkFunnel_DoCancelledCtxIsGoError(t *testing.T) {
 		_, msg, err := newFunnelTool(loopbackGuard()).do(ctx, netRequest{url: srv.URL})
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("err = %v, want context.Canceled", err)
+		}
+		if msg != "" {
+			t.Errorf("cancellation must not be a model-facing message; got %q", msg)
+		}
+	})
+
+	t.Run("cancelled while the body streams", func(t *testing.T) {
+		t.Parallel()
+		streaming := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writePartialBody(w) // headers and a first chunk out, the rest never sent
+			close(streaming)
+			<-r.Context().Done()
+		}))
+		defer srv.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			<-streaming
+			// The headers are on the wire, so do is already past client.Do; the short pause
+			// lets it reach the body read, which is the path this subtest exists for. An
+			// early cancel would merely re-cover the in-flight case above — the assertion
+			// holds for both interleavings, so the test cannot flake either way.
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		_, msg, err := newFunnelTool(loopbackGuard()).do(ctx, netRequest{url: srv.URL})
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled — a body cut short by the CALLER's cancellation is ADR 0007's Go-error shape, so the Turn rolls back", err)
 		}
 		if msg != "" {
 			t.Errorf("cancellation must not be a model-facing message; got %q", msg)

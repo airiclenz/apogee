@@ -122,9 +122,9 @@ type netResponse struct {
 //
 //   - (resp, "", nil) — the request completed with ANY status; a non-2xx is the tool's own
 //     policy to decide, not the funnel's;
-//   - (netResponse{}, msg, nil) — a blocked URL, a request-build failure, or a transport
-//     failure, where msg is a ready-to-surface message the tool hands to errorResult
-//     verbatim;
+//   - (netResponse{}, msg, nil) — a blocked URL, a request-build failure, a transport failure,
+//     or a body cut short mid-read, where msg is a ready-to-surface message the tool hands to
+//     errorResult verbatim;
 //   - (netResponse{}, "", err) — ctx cancellation ONLY (ADR 0007: a tool returns a Go error
 //     for nothing else).
 //
@@ -176,7 +176,18 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	}
 	defer resp.Body.Close()
 
-	body, truncated := readCappedBody(resp.Body)
+	body, truncated, err := readCappedBody(resp.Body)
+	if err != nil {
+		// A body cut short mid-read carries no marker of its own — truncated is set by the
+		// cap alone — so the wire facts would read to the model as a COMPLETE response.
+		// Caller cancellation comes first and keeps ADR 0007's Go-error shape, so the Turn
+		// rolls back; every other cause (the client timeout, which covers the body read, or a
+		// mid-body reset) is the model-facing message shape.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return netResponse{}, "", ctxErr
+		}
+		return netResponse{}, "response from host " + label + " was cut short: " + scrubURLError(err, req.url), nil
+	}
 	return netResponse{
 		status:     resp.Status,
 		statusCode: resp.StatusCode,
@@ -242,17 +253,21 @@ func newHTTPClient(guard security.URLGuard, timeout time.Duration) *http.Client 
 	}
 }
 
-// readCappedBody reads at most maxNetworkResponseBytes from r, reporting whether the body was
-// truncated so the result can say so. It never returns the read error as a tool failure — a
-// partial body is still useful to the model — except for ctx cancellation, which the caller
-// detects separately.
-func readCappedBody(r io.Reader) (body string, truncated bool) {
+// readCappedBody reads at most maxNetworkResponseBytes from r. It reports truncated when the
+// CAP ended the read — a deliberately bounded but otherwise clean result the renderers mark —
+// and returns a non-nil error when the read FAILED before the cap. The error is the caller's
+// to surface rather than this function's to swallow: a body cut short by the client timeout, a
+// mid-body reset or a cancelled ctx sets no truncation flag, so a discarded error is exactly
+// how a partial response comes to read as a complete one.
+func readCappedBody(r io.Reader) (body string, truncated bool, err error) {
 	limited := io.LimitReader(r, maxNetworkResponseBytes+1)
-	data, _ := io.ReadAll(limited)
+	data, err := io.ReadAll(limited)
 	if len(data) > maxNetworkResponseBytes {
-		return string(data[:maxNetworkResponseBytes]), true
+		// The cap holds a full result either way, so a reader that failed on the very byte
+		// that reached the cap changes nothing the model can see.
+		return string(data[:maxNetworkResponseBytes]), true, nil
 	}
-	return string(data), false
+	return string(data), false, err
 }
 
 // networkURLError reports whether err is a url-safety rejection (the pre-flight Check or the
