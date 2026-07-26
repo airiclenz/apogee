@@ -110,7 +110,7 @@ type theme struct {
 	popupBody     lipgloss.Style // a popup's wrapped body block (renderPopup): normal white on black — between presentTitle (bold) and statusFaint (chrome) in the hierarchy
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
-	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so the glyph keeps the terminal's text colour (spinner.go)
+	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
 	chromeRule    lipgloss.Style // the footer's border hairlines (dark gray on black): its runes, corners, and │ bars
 	topDivider    lipgloss.Style // the ▔ top-edge hairline above the status line — a dimmer rule (colDimGray) so it recedes

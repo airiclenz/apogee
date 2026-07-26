@@ -2,12 +2,15 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"math/bits"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
 // ----------------------------------------------------------------------------
@@ -245,6 +248,63 @@ var spinnerSpecs = map[SpinnerStyle]spinnerSpec{
 	SpinnerClassic: {interval: classicInterval, width: 1, glyph: classicGlyph},
 }
 
+// The colour loop is ORTHOGONAL to the glyph animation: it is a flag on [spinnerAnim], never a
+// property of a style, so all three styles × colour on/off are valid combinations and every one of
+// them renders. [spinnerAnim.view] is the single place the two compose — nothing below branches on
+// the style to decide a colour, and no style carries one of its own.
+
+// spinnerColorPeriod is one full lap of the colour loop in wall-clock time. It is the same eight
+// seconds under every style: the period is the constant and the frame count is derived from the
+// style's own interval (framesPerColorLoop), so a faster style takes more, smaller colour steps
+// rather than a shorter lap.
+const spinnerColorPeriod = 8 * time.Second
+
+// spinnerStops are the loop's waypoints: colGauge's periwinkle → colModePlan's turquoise →
+// colModeAllowEdits' blue, and back to periwinkle. They are read off the palette variables rather
+// than re-typed as hex literals, so a palette edit moves the loop with it. Palette stops rather
+// than a raw hue circle is the point: the footer's autonomy-mode markers and the orange code accent
+// are already on screen, and a full hue sweep would collide with them.
+var spinnerStops = buildSpinnerStops(colGauge, colModePlan, colModeAllowEdits)
+
+// buildSpinnerStops converts palette colours into the space the blend works in, once, at package
+// init.
+func buildSpinnerStops(palette ...color.Color) []colorful.Color {
+	stops := make([]colorful.Color, 0, len(palette))
+	for _, c := range palette {
+		stop, ok := colorful.MakeColor(c)
+		if !ok {
+			// Unreachable: MakeColor refuses only a fully transparent colour, and every stop is an
+			// opaque hex literal in this package. It degrades to black instead of panicking because
+			// a spinner in the wrong tone is a cosmetic fault, while a panic in a package
+			// initialiser would take the binary down before it draws anything.
+			stop = colorful.Color{}
+		}
+		stops = append(stops, stop)
+	}
+	return stops
+}
+
+// spinnerColor is the frame's foreground: the closed loop through spinnerStops, blended in Oklch.
+// BlendOkLch keeps chroma up across the arcs where an sRGB lerp desaturates the midpoints into mud.
+// The loop closes — the last stop blends back into the first — so there is no seam at the wrap.
+//
+// framesPerLoop is how many of the caller's frames one lap spans (framesPerColorLoop) and must be
+// positive; frame is never negative (arm zeroes it and a tick only increments it).
+//
+// A deliberate caveat: this codebase does no terminal-profile detection — quantisation happens
+// downstream in colorprofile — so on a 256-colour terminal the gradient steps visibly and on a
+// 16-colour one it collapses to a couple of tones. Turning the loop off is the answer for those
+// terminals, not a narrower gradient here.
+func spinnerColor(frame, framesPerLoop int) color.Color {
+	// Where this frame sits on the loop, measured in arcs: 0 at the first stop, 1 at the second,
+	// len(spinnerStops) back at the first. Taking the frame modulo the lap keeps pos below the stop
+	// count, so arc indexes a real stop and the remainder is the fraction along the arc leaving it.
+	pos := float64(frame%framesPerLoop) / float64(framesPerLoop) * float64(len(spinnerStops))
+	arc := int(pos)
+	from, to := spinnerStops[arc], spinnerStops[(arc+1)%len(spinnerStops)]
+	return lipgloss.Color(from.BlendOkLch(to, pos-float64(arc)).Hex())
+}
+
 // spinnerAnim is the animation state carried on the value-copied Model (ADR 0011): plain ints,
 // no RNG handle, no self-referential type. It is the whole spinner — the widget it replaced held
 // its frame counter and its chain bookkeeping the same way.
@@ -278,12 +338,24 @@ func (s spinnerAnim) interval() time.Duration { return s.spec().interval }
 // glyph is this frame's braille cell(s), pure in [spinnerAnim.frame].
 func (s spinnerAnim) glyph() string { return s.spec().glyph(s.frame) }
 
-// view paints this frame's glyph for the status line: the theme's spinner field — the status
-// bar's black background with no foreground of its own, so the glyph keeps the terminal's own
-// text colour. This is the single place the glyph animation and its colour compose, so no style
-// carries a colour of its own and nothing branches on the style to decide one.
+// framesPerColorLoop is how many of THIS style's frames one colour lap spans: 80 at classic's
+// 10 fps, 96 at snake's 12, 160 at glitter's 20. Deriving the count from the style's interval is
+// what keeps the loop's wall-clock period at spinnerColorPeriod under every style, so selecting a
+// faster animation does not speed the colour up with it.
+func (s spinnerAnim) framesPerColorLoop() int { return int(spinnerColorPeriod / s.interval()) }
+
+// view paints this frame's glyph for the status line, on the theme's spinner field — the status
+// bar's black background. This is the single place the glyph animation and the colour loop compose:
+// the two are orthogonal settings, so no style carries a colour of its own and nothing here
+// branches on the style to decide one. Uncoloured, the field adds no foreground at all and the
+// glyph keeps the terminal's own text colour — byte for byte what the pre-plan spinner rendered
+// (TestSpinnerClassicUncolouredIsUnchanged), which is why this branch paints on spinnerBase rather
+// than through the status bar's faint grey.
 func (s spinnerAnim) view(th theme) string {
-	return th.spinnerBase.Render(s.glyph())
+	if !s.color {
+		return th.spinnerBase.Render(s.glyph())
+	}
+	return th.spinnerBase.Foreground(spinnerColor(s.frame, s.framesPerColorLoop())).Render(s.glyph())
 }
 
 // arm opens a fresh tick chain: a new generation, back at frame 0, with the first tick

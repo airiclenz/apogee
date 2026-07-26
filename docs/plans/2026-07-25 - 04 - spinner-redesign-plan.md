@@ -375,7 +375,26 @@ say so in its comment.
 
 ---
 
-## 4. The soft colour loop (owner idea 3)
+## 4. The soft colour loop (owner idea 3) — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): four deviations from the literal item text.
+(a) The uncoloured branch of `view` keeps **`th.spinnerBase`**, not the sketch's `th.statusBar`:
+`statusBar` adds a faint foreground, which would break item 1's byte-identical pin
+(`TestSpinnerClassicUncolouredIsUnchanged`) and item 5's "exactly the pre-plan look" row. This
+was raised by item 1's implementer, confirmed independently, and authorized before this item ran.
+(b) Consequently `TestSpinnerColorOffIsFaint` landed as **`TestSpinnerColorOffPaintsNoForeground`**
+— with `spinnerBase` there is no faint grey to assert, only the absence of any per-frame
+foreground — and the orthogonality table's "colour off ⇒ faint grey" row asserts the bare field
+instead.
+(c) The stops are read off the palette **variables** (`colGauge`, `colModePlan`,
+`colModeAllowEdits`) through `colorful.MakeColor`, rather than re-typed as hex strings for
+`colorful.Hex`: same three colours, but one source of truth, so a palette edit moves the loop
+with it instead of silently diverging from it.
+(d) `TestSpinnerColorPeriodIsEightSeconds` asserts the lap is within a **microsecond** of 8 s
+rather than exactly equal, and additionally pins the exact frame counts (96 / 160 / 80):
+`snakeInterval` is `time.Second / 12` = 83.333333 ms after integer-nanosecond truncation, so
+snake's 96 frames land 32 ns short of 8 s and a literal `==` is unsatisfiable. A loop that really
+drifted with the frame rate would miss by whole seconds.
 
 **What.** An 8-second closed loop through three colours **already in the palette**
 (`internal/tui/theme.go:24-47`), blended in Oklch:

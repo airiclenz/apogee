@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"fmt"
+	"image/color"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
 // ----------------------------------------------------------------------------
@@ -381,6 +385,222 @@ func TestGlitterSparkles(t *testing.T) {
 	if len(seen) < wantGlyphs {
 		t.Errorf("%d consecutive frames produced only %d distinct glyphs, want at least %d — the spinner would read as a pulse, not as glitter",
 			window, len(seen), wantGlyphs)
+	}
+}
+
+// oklabDistance measures how far apart two rendered colours are perceptually, decoding them back
+// into Oklab — the space the loop is blended in — so "soft" and "visits its stops" are judged in the
+// terms the gradient was built in rather than in raw sRGB, where equal steps do not look equal.
+func oklabDistance(t *testing.T, first, second color.Color) float64 {
+	t.Helper()
+
+	from, ok := colorful.MakeColor(first)
+	if !ok {
+		t.Fatalf("%v is not a convertible colour — a transparent spinner would render as nothing", first)
+	}
+	to, ok := colorful.MakeColor(second)
+	if !ok {
+		t.Fatalf("%v is not a convertible colour — a transparent spinner would render as nothing", second)
+	}
+	l1, a1, b1 := from.OkLab()
+	l2, a2, b2 := to.OkLab()
+	return math.Sqrt((l1-l2)*(l1-l2) + (a1-a2)*(a1-a2) + (b1-b2)*(b1-b2))
+}
+
+const (
+	// spinnerStopTolerance is how close the loop has to pass to each palette stop, in Oklab. It is
+	// not zero because a stop lands exactly on a frame only when the lap's frame count divides by
+	// the number of stops (96 does; 80 and 160 do not), and because every frame is quantised to a
+	// hex triple on its way out. The measured worst case is 0.003.
+	spinnerStopTolerance = 0.01
+
+	// spinnerSoftStep is the largest Oklab step allowed between consecutive frames — the "soft" in
+	// the requirement. The measured worst case is 0.015, on classic's 80-frame lap (the coarsest of
+	// the three rates); the stops themselves sit ~0.23 apart, so a stop list with a discontinuity or
+	// a seam at the wrap overshoots this by an order of magnitude.
+	spinnerSoftStep = 0.03
+)
+
+// TestSpinnerColorLoops proves the colour path is a closed loop through the palette rather than a
+// sweep that snaps back: the frame after a full lap is the frame the lap started on, and the loop
+// really does visit all three stops on the way round.
+func TestSpinnerColorLoops(t *testing.T) {
+	t.Parallel()
+
+	for _, style := range spinnerStyleNames {
+		t.Run(string(style), func(t *testing.T) {
+			t.Parallel()
+
+			loop := newSpinnerAnim(style, true).framesPerColorLoop()
+			if got, want := spinnerColor(loop, loop), spinnerColor(0, loop); got != want {
+				t.Errorf("frame %d is %v, want frame 0's %v — the loop must close on itself", loop, got, want)
+			}
+
+			for i, stop := range spinnerStops {
+				closest := math.MaxFloat64
+				for frame := 0; frame < loop; frame++ {
+					if d := oklabDistance(t, spinnerColor(frame, loop), stop); d < closest {
+						closest = d
+					}
+				}
+				if closest > spinnerStopTolerance {
+					t.Errorf("the lap's closest approach to stop %d (%s) is %.4f, want within %.4f — the loop must actually reach its palette stops",
+						i, stop.Hex(), closest, spinnerStopTolerance)
+				}
+			}
+		})
+	}
+}
+
+// TestSpinnerColorIsSoft is the "soft" in the requirement: no two consecutive frames are far enough
+// apart to read as a change of colour rather than a drift. Sweeping one frame past the lap covers
+// the step across the wrap, which is where a stop list that does not close would show a seam.
+func TestSpinnerColorIsSoft(t *testing.T) {
+	t.Parallel()
+
+	for _, style := range spinnerStyleNames {
+		t.Run(string(style), func(t *testing.T) {
+			t.Parallel()
+
+			loop := newSpinnerAnim(style, true).framesPerColorLoop()
+			for frame := 0; frame < loop; frame++ {
+				step := oklabDistance(t, spinnerColor(frame, loop), spinnerColor(frame+1, loop))
+				if step > spinnerSoftStep {
+					t.Errorf("frames %d→%d jump %.4f in Oklab, want at most %.4f — the drift must be too slow to read as a step",
+						frame, frame+1, step, spinnerSoftStep)
+				}
+			}
+		})
+	}
+}
+
+// TestSpinnerColorOffPaintsNoForeground proves the loop is genuinely off when it is off, for every
+// style including classic: the glyph is painted on the bare spinner field, so it keeps the
+// terminal's own text colour and emits no per-frame foreground of any kind. This is the escape
+// hatch a 16-colour terminal relies on, and — with classic — the pre-plan look.
+func TestSpinnerColorOffPaintsNoForeground(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme()
+	for _, style := range spinnerStyleNames {
+		t.Run(string(style), func(t *testing.T) {
+			t.Parallel()
+
+			s := newSpinnerAnim(style, false)
+			// Two laps of the colour loop: long enough that a foreground creeping in at some phase
+			// of the (absent) gradient would show up.
+			for frame := 0; frame < 2*s.framesPerColorLoop(); frame++ {
+				s.frame = frame
+				if got, want := s.view(th), th.spinnerBase.Render(s.glyph()); got != want {
+					t.Fatalf("frame %d renders %q, want the bare field's %q — colour off must add no foreground",
+						frame, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestSpinnerColorIsOrthogonalToStyle is the table over all six combinations — three styles ×
+// colour on and off — and it is the test that fails if anyone later keys the colour off the style.
+// Both axes are checked at once: the glyph is the style's own on every frame whatever the colour
+// setting, and the colour is applied (on) or entirely absent (off) whatever the style.
+func TestSpinnerColorIsOrthogonalToStyle(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme()
+	for _, style := range spinnerStyleNames {
+		for _, colour := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/colour=%t", style, colour), func(t *testing.T) {
+				t.Parallel()
+
+				s := newSpinnerAnim(style, colour)
+				bare := newSpinnerAnim(style, false)
+				loop := s.framesPerColorLoop()
+				// A third of a lap apart, so a working loop is on a different tone at each one.
+				frames := [3]int{0, loop / 3, 2 * loop / 3}
+
+				for _, frame := range frames {
+					s.frame, bare.frame = frame, frame
+					glyph := spinnerSpecs[style].glyph(frame)
+					if got := s.glyph(); got != glyph {
+						t.Errorf("frame %d glyph = %q, want %s's own %q — the colour setting must not touch the animation",
+							frame, got, style, glyph)
+					}
+					rendered := s.view(th)
+					if !strings.Contains(rendered, glyph) {
+						t.Errorf("frame %d renders %q, which does not carry %s's glyph %q", frame, rendered, style, glyph)
+					}
+					if colour {
+						if rendered == bare.view(th) {
+							t.Errorf("frame %d renders identically with the loop on and off — %s never gets a colour",
+								frame, style)
+						}
+						continue
+					}
+					if want := th.spinnerBase.Render(glyph); rendered != want {
+						t.Errorf("frame %d renders %q, want the bare field's %q — %s must stay uncoloured",
+							frame, rendered, want, style)
+					}
+				}
+
+				if !colour {
+					return
+				}
+				// With the loop on, three frames a third of a lap apart carry three tones, each
+				// further from the others than a single soft step.
+				for i := 0; i < len(frames); i++ {
+					for j := i + 1; j < len(frames); j++ {
+						apart := oklabDistance(t, spinnerColor(frames[i], loop), spinnerColor(frames[j], loop))
+						if apart <= spinnerSoftStep {
+							t.Errorf("frames %d and %d are only %.4f apart in Oklab — a third of a lap apart the loop must have moved",
+								frames[i], frames[j], apart)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// spinnerLoopFrames is how many frames each style spends on one colour lap: the counts that make
+// three different frame rates share one wall-clock period. They are written out rather than derived
+// so a change to a style's interval that reshapes the loop fails here instead of quietly retiming it.
+var spinnerLoopFrames = map[SpinnerStyle]int{
+	SpinnerSnake:   96,  // 12 fps
+	SpinnerGlitter: 160, // 20 fps
+	SpinnerClassic: 80,  // 10 fps
+}
+
+// TestSpinnerColorPeriodIsEightSeconds proves the loop is timed in seconds rather than in frames:
+// each style spends a different number of frames on a lap, and every lap still takes the same eight
+// seconds, so selecting a faster animation does not speed the colour up with it.
+func TestSpinnerColorPeriodIsEightSeconds(t *testing.T) {
+	t.Parallel()
+
+	if spinnerColorPeriod != 8*time.Second {
+		t.Fatalf("spinnerColorPeriod = %v, want the eight seconds the design calls for", spinnerColorPeriod)
+	}
+
+	// The slack absorbs integer-nanosecond truncation in the intervals themselves and nothing more:
+	// snake's time.Second/12 is 83.333333ms, a third of a nanosecond short, so its 96 frames land
+	// 32ns under the period. A loop that actually drifted with the frame rate would miss by seconds.
+	const slack = time.Microsecond
+
+	for style, want := range spinnerLoopFrames {
+		t.Run(string(style), func(t *testing.T) {
+			t.Parallel()
+
+			s := newSpinnerAnim(style, true)
+			loop := s.framesPerColorLoop()
+			if loop != want {
+				t.Errorf("%s spends %d frames on a colour lap, want %d at its %v interval",
+					style, loop, want, s.interval())
+			}
+			if diff := time.Duration(loop)*s.interval() - spinnerColorPeriod; diff < -slack || diff > slack {
+				t.Errorf("%s's lap takes %v, want %v (±%v) — the styles' differing rates must not drift the period",
+					style, time.Duration(loop)*s.interval(), spinnerColorPeriod, slack)
+			}
+		})
 	}
 }
 
