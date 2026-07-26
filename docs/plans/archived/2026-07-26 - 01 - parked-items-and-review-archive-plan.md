@@ -118,7 +118,7 @@ scope wherever the code actually makes them possible — but the skill's bar hol
 speculative findings, every finding carries `file:line` evidence and a concrete failure
 scenario, noise aggressively filtered.
 
-**Deliverable:** `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md` — the
+**Deliverable:** `docs/reviews/archived/2026-07-26 - 00 - url-safety-live-gap-audit.md` — the
 code-audit skill's report format, opening with a one-paragraph verdict (hole confirmed
 closed / findings enumerated), citing the review card it discharges by its archived path
 (`docs/reviews/archived/2026-07-24 - 00 - …`, per D5).

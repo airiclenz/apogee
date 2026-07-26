@@ -7,7 +7,7 @@ dispatching those three; the other eleven items are pre-decided by the audit and
 escalation. *(This line describes items 1–14 as the plan was written; all three calls were
 answered and all fourteen landed on 2026-07-26 — see the dated **Status** block below, which is
 current and also covers the follow-up items 15–20.)*
-**Source:** `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md` — the `/code-audit` on
+**Source:** `docs/reviews/archived/2026-07-26 - 00 - url-safety-live-gap-audit.md` — the `/code-audit` on
 the *live* url-safety gap, itself the discharge of candidate 02 of
 `docs/reviews/archived/2026-07-24 - 00 - architecture-deepening-review.md`. Every finding below
 is that audit's, in that audit's own **Recommended Action Order**; nothing here is new analysis.
@@ -56,10 +56,51 @@ is recorded so its reasoning is not lost, **not** queued for execution. None of 
 a `Design call:` line: items 15 and 20 each hold an **in-item adjudication** the implementer
 resolves itself and records in its dated `NOTES`, which is not an owner escalation.
 
-**Not yet run.** The *Whole-plan verification* H2 below (all **7** steps, including the tighten-only
-proof, the §4-single-owner check and the CHANGELOG/CONTEXT sweep) has **not** been run, and neither
-have the owner's *Manual verification* checks. This plan is therefore **not** ready to archive, and
-the source audit stays out of `docs/reviews/archived/`.
+**CLOSED OUT 2026-07-26 — the *Whole-plan verification* H2 below has been run end-to-end, and this
+plan is archived.** Step by step, with what was actually observed:
+
+1. **Full gate green**, `-race` run **twice** in a row: `gofmt -l .` empty, `go vet ./...` clean,
+   `go test ./...` ok in all 22 packages, `go test -race ./...` ok twice, `GOOS=windows go build
+   ./...` and `GOOS=darwin go build ./...` both clean.
+2. **Tighten-only proof — holds.** The only class/ladder change in the whole plan is item 1's, and
+   it is a *reordering*: `classifyTool` now consults every unfakeable marker first and
+   `classReadOnly` is the terminal floor, which can only move a tool from the RO row's
+   `run | run | run | run | run` **onto a stricter row** — no cell moves toward `run` in any mode,
+   and §4's table cells are byte-identical apart from the two `refuse²` footnote markers. Item 14's
+   MCP-endpoint exemption moves **no ladder cell** (mcp still gates in Auto) and pairs the
+   pre-flight exemption with a *pinned* dial plus a no-follow redirect policy, so it is not a
+   ladder loosening. `confine-to-workspace: false` still returns its verdict **before** the class
+   switch — `resolution.go`'s `resolveLadderAuto` returns `resolveRun` at its first statement,
+   ahead of `switch class`.
+3. **§4 has exactly one owner — confirmed.** `git log --oneline 7c35413..HEAD --
+   docs/design/confinement-execution-contract.md` returns exactly one commit, `46570a2` (item 1).
+4. **The normalisation runway is clear.** Items 8, 9 and 10 are landed and green. The closeout note
+   is written into `TODO.md`'s *Dedicated url-safety config key* entry: the key is now a smaller,
+   safer change (host matching is already normalised by `security.NormalizeURL`), and the one
+   remaining trap — the duplicated `HostTools` composition — is named there as a deferred
+   architecture candidate rather than a blocker.
+5. **Every deviation is recorded** — items 1–18 and 20 each carry a dated `NOTES (2026-07-26)` line
+   under their heading; item 19 is the owner's deferral and lands nothing.
+6. **CHANGELOG / CONTEXT sweep done.** Every user-facing item (1, 2, 3, 8, 9, 10, 11, 12, 13, 14,
+   16, 17, 18, 20) touched `CHANGELOG.md`; items 4–7 are regression nets for already-shipped
+   behaviour and 15 is a doc correction, so their omission is deliberate and recorded in their own
+   `NOTES`. **`CONTEXT.md` was swept for prose item 1's classification change makes stale and
+   nothing needed changing:** the vouching clause (*"a third-party tool of either kind, whose
+   scoping Apogee cannot vouch for, gates"*) and the *Confinement* / safety-guardrails entries
+   describe blast-radius classes, never the RO-first check order, so item 1 makes them **more**
+   true rather than stale; the *Plan* entry (*"read-only; no writes or command execution"*) is now
+   accurate where it was previously overstated, and the two `ReadOnly` mentions are `ask_user`,
+   which carries no marker and still runs in Plan. CONTEXT.md's SSRF-floor, MCP-endpoint and rung-1
+   sentences were already corrected in-flight by items 10, 14, 15 and 2.
+7. **Archived.** The source audit (`docs/reviews/archived/2026-07-26 - 00 - url-safety-live-gap-audit.md`)
+   carries a dated `## Disposition (2026-07-26 — close)` block giving every one of its 14 findings'
+   dispositions and re-parking action-order entry 8, and moved into `docs/reviews/archived/`; this
+   plan moved into `docs/plans/archived/`.
+
+**Still owner-pending — the *Manual verification* H2 at the foot of this file.** The live Auto run
+after item 1, item 14's startup check against the real MCP endpoint, and item 2's real-desktop
+degrade check need hardware and a running model and were **not** run as part of this closeout. They
+are not blockers on the archive: every automated acceptance in this plan is green.
 
 **Retroactive ratifications (owner, 2026-07-26).** Two new exported symbols landed **without** the
 stop-and-ask this plan's intro requires — `security.NormalizeURL` (item 8) and
@@ -1747,8 +1788,8 @@ Commit: `fix(present): make the renderable-extension set and its stated rule agr
 6. **CHANGELOG.md** carries the fixes; **CONTEXT.md** is checked for prose that item 1's
    classification change makes stale (the vouching clause and the Confinement / Safety-guardrails
    entries).
-7. Archive the source audit (`docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md` →
-   `docs/reviews/archived/`) once every finding is landed, accepted or re-parked with its
+7. Archive the source audit (`2026-07-26 - 00 - url-safety-live-gap-audit.md`, from `docs/reviews/`
+   into `docs/reviews/archived/`) once every finding is landed, accepted or re-parked with its
    disposition written into the report — `docs/reviews/archived/`'s rule is that nothing in it is
    anyone's to-do list. Then archive **this** plan under `docs/plans/archived/`.
    Commit: `docs(plans): archive the url-safety live-gap plan`.

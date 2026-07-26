@@ -304,7 +304,7 @@ intent — the same standing their `model.endpoint:` and their stdio `command:` 
 NOT accepted is that trust widening past the address they named, which is what the pin prevents.
 The floor remains a floor everywhere it bounds a model.
 
-Implementation lives in [`docs/plans/2026-07-26 - 03 - url-safety-live-gap-plan.md`](../plans/2026-07-26%20-%2003%20-%20url-safety-live-gap-plan.md)
+Implementation lives in [`docs/plans/archived/2026-07-26 - 03 - url-safety-live-gap-plan.md`](../plans/archived/2026-07-26%20-%2003%20-%20url-safety-live-gap-plan.md)
 (item 14); the client shape is in
 [`docs/design/mcp-client.md`](../design/mcp-client.md), and `internal/mcp`'s package
 documentation carries the trust boundary in prose.

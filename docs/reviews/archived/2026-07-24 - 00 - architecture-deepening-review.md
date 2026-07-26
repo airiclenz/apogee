@@ -33,7 +33,7 @@ smaller deepenings landed 2026-07-25/26, all via
 `2026-07-26 - 00 - land-item8-close-size-window-plan.md`; see the cards and the
 smaller-deepenings list for what was built). **The ledger is empty as of 2026-07-26**, and as of the
 same day both parked items have their disposition: the `/code-audit` on the live url-safety gap
-**ran** (`docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`), and
+**ran** (`docs/reviews/archived/2026-07-26 - 00 - url-safety-live-gap-audit.md`), and
 `Request.InjectContext` is **parked in `TODO.md`** as a grill brief (see *Recommended next step*).
 This doc is a closed record, not anyone's to-do list.
 
@@ -100,7 +100,7 @@ Explore agents and should be spot-checked before acting.
   from `classThirdPartyNetwork` (unmarked ⇒ gates, reason `unfiltered network reach`), so
   "url-filtered" is now true by construction. Recorded in **ADR 0012 amendment 2026-07-25** +
   `confinement-execution-contract.md` §4. The separate `/code-audit` on the *live* gap **ran
-  2026-07-26** — `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`. Verdict: the hole
+  2026-07-26** — `docs/reviews/archived/2026-07-26 - 00 - url-safety-live-gap-audit.md`. Verdict: the hole
   this card named is **closed at the funnel**, but the "url-filtered" promise is defeated one rung
   up, in `classifyTool`'s ordering (a self-declared `ReadOnly()` is consulted before any unfakeable
   marker). 4 High + 10 Medium findings, each awaiting an owner decision in that report; nothing
@@ -535,7 +535,7 @@ two items this review parked are now dispositioned, which is what let this doc m
 `docs/reviews/archived/`:
 
 - **The `/code-audit` on the *live* url-safety gap — RAN 2026-07-26.** Report:
-  `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`. Verdict in one line: the hole
+  `docs/reviews/archived/2026-07-26 - 00 - url-safety-live-gap-audit.md`. Verdict in one line: the hole
   candidate 02 named is **closed at the funnel** (`networkTool.do` is the single path to the
   network and the marker is genuinely unfakeable), but the Auto ladder's "url-filtered" promise is
   **defeated one rung up** — `classifyTool` consults a self-declared `ReadOnly()` before any
@@ -562,4 +562,4 @@ list, and that now holds for this review.
   Then `/implement-plan` executes it item-by-item.
 - **`/code-audit`** — for candidate 02's live url-safety gap (correctness), separate from the
   shape fix. ✅ **Ran 2026-07-26** —
-  `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md`; nothing left to run from here.
+  `docs/reviews/archived/2026-07-26 - 00 - url-safety-live-gap-audit.md`; nothing left to run from here.

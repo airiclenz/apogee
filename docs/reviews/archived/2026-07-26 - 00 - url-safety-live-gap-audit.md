@@ -412,3 +412,43 @@ adversarial tests, at both the resolver and the dispatch level. The M2 key-scrub
 proven across the pre-flight-block, dial-time-block and transport-failure shapes for all three
 tools. No flaky patterns, sleep-synchronisation, hardcoded ports, or mocks-testing-mocks were found
 anywhere in the audited tests.
+
+## Disposition (2026-07-26 — close)
+
+**Every finding in this report is landed.** They were executed as items **1–14** of
+`docs/plans/archived/2026-07-26 - 03 - url-safety-live-gap-plan.md`, in this report's own
+*Recommended Action Order*, each on its own green gate and each independently verified — commits
+`46570a2` (H-1) through `6013817` (M-10). That plan is complete and archived; its items carry the
+per-item `NOTES` recording every departure from the written text, including the owner's answers to
+the three design calls (H-1, H-2, M-10) and the two retroactively ratified internal exported symbols
+(`security.NormalizeURL`, `security.PinnedDialControl`).
+
+| Finding | Disposition |
+|---|---|
+| **H-1** self-declared `ReadOnly()` outranks the markers | **Fixed** — `classifyTool` now consults every unfakeable marker first and `classReadOnly` is the *terminal floor*; `git_diff_range` and `diagnostics` ride the **subproc** row. Contract **§4** amended (dated `>` block + footnote ²); tighten-only in every cell. |
+| **H-2** `present_document` → OS handler | **Fixed** — rung 1's launch is bounded by `present.OpenerRenderable` (a curated display-only extension set); a non-renderable extension degrades to rung 0. ADR 0019 amended. |
+| **H-3** discarded body-read error | **Fixed** — `readCappedBody` returns its error; a cut-short body reports `…was cut short: …` and an in-flight cancellation returns the Go-error shape (ADR 0007). |
+| **H-4** dial-time floor never exercised | **Fixed (test)** — `TestNetworkFunnel_DialTimeFloorBlocksAfterPreflightPasses`, mutation-checked against a deleted `Control` hook. |
+| **M-1** guard checks a different string than is dialled | **Fixed** — one `security.NormalizeURL`, called by `CheckContext` *and* the funnel; the request is built from the normalised URL. |
+| **M-2** `%q` defeats the URL redaction | **Fixed** — the unparseable-url error no longer carries the URL; extended by item 18 so the funnel scrubs against the string it actually dials. |
+| **M-3** RFC 8215 NAT64 local-use prefix | **Fixed** — `64:ff9b:1::/48` denied **wholesale** (no decode is sound), plus 6to4, IPv4-compatible and site-local. |
+| **M-4** per-call transport leak | **Fixed** — `defer client.CloseIdleConnections()`. The *hoist* (pooling) half was **deferred** — see below. |
+| **M-5** resolve outside the timeout budget | **Fixed** — one shared deadline covers resolve, dial and body. |
+| **M-6** refused redirect hides its target | **Fixed** — the `Location` is rendered for the model. |
+| **M-7** host `URLGuard` threading unpinned | **Fixed (test)** — `TestNewDefaultRegistryWithHost_ThreadsURLGuardIntoNetworkTools`, mutation-checked per tool. |
+| **M-8** erroring Approver unpinned | **Fixed (test)** — `TestDispatch_ApproverErrorRefuses`, mutation-checked. |
+| **M-9** floor fail-closed + numeric encodings unpinned | **Fixed (test)** — both fail-closed blocks and all four numeric forms, mutation-checked. |
+| **M-10** SSRF floor over a user-typed MCP endpoint | **Fixed (policy call, owner)** — the *configured* endpoint is exempt from the pre-flight floor and its dial is **pinned to that endpoint's own addresses**; any other private address on that connection is still refused and redirects are not followed. The two docs this report flagged (`cmd/apogee/defaults/config.yaml`, `internal/mcp/doc.go`) were corrected. |
+
+**Action-order entry 8 — the `/improve-codebase-architecture` candidate — is NOT closed here and is
+not this report's to-do any more.** The duplicated `HostTools` composition
+(`internal/agent/construct.go` / `cmd/apogee/wire.go`) and the duplicated guarded-client builder
+(`internal/tools/network.go` / `internal/mcp/transport.go`) were **out of scope by the plan's own
+ruling** and remain a deepening candidate. The owner **deferred** them on 2026-07-26 to an
+architecture pass, together with M-4's hoisted-transport half and its recorded counterweight (a
+pooled connection skips the dial-time re-check on later calls); the whole brief, including the
+rebuttals and the counterweight, is written down as **item 19** of the archived plan, and
+`internal/mcp/transport.go`'s own doc comment records that the seam is a deepening candidate. Item
+19 is the only thing from this report's scope that did not land, and it was never a defect.
+
+Nothing in `docs/reviews/archived/` is anyone's to-do list, and that now holds for this report.

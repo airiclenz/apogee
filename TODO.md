@@ -306,6 +306,21 @@ the key selects or disables a provider rather than enabling the tool).
 floor, a config url-safety layer may only **tighten** (add `DenyHosts`, narrow `AllowHosts`) —
 it can never remove the SSRF floor or widen the scheme set past the safe default.
 
+**The runway is now clear (2026-07-26) — this is a smaller, safer change than it was.** The
+normalisation group of the url-safety live-gap audit landed first, on purpose: this key is what
+populates `AllowHosts`/`DenyHosts` and would have converted three then-latent defects into live
+ones the day it shipped. All three are fixed (`docs/plans/archived/2026-07-26 - 03 -
+url-safety-live-gap-plan.md`, items **8–10**): the URL is normalised **once** by
+`security.NormalizeURL` and the guard now matches the same string the transport dials (trim, IDNA,
+lowercase, one trailing dot stripped — so appending a dot no longer defeats a `DenyHosts` entry),
+the unparseable-url error no longer leaks a key-bearing URL, and the RFC 8215 NAT64 local-use
+prefix is denied. Whoever builds this key inherits a host-matching path that is already correct;
+it needs no normalisation work of its own. **The remaining trap is unchanged and is not this
+plan's:** `HostTools` is composed in two places (`internal/agent/construct.go` and
+`cmd/apogee/wire.go`, the engine-side one unexported), so a new `HostTools` field must be added in
+**both** or it is silently dropped on one path. That duplication is a deferred
+`/improve-codebase-architecture` candidate, not a blocker.
+
 ---
 
 ## An embedder cannot register a *vouched-for* network tool (export the network funnel?)
