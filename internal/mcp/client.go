@@ -40,9 +40,11 @@ type Client struct {
 }
 
 // Connect dials every configured server in order, lists each server's tools, and returns a
-// Client owning the live sessions. guard carries the host's url-safety policy plus the
-// default-on SSRF floor applied to the HTTP transports (a stdio server is a trusted local
-// launch — no URL floor; see the trust boundary in doc.go).
+// Client owning the live sessions. guard carries the host's url-safety policy applied to the
+// HTTP transports — scheme/host allow-deny over the configured endpoint, which is exempt from
+// the resolved-IP SSRF floor and dialled pinned to its own resolved addresses instead, the
+// floor still binding every other address on that connection (a stdio server is a trusted
+// local launch — no URL check; see the trust boundary in doc.go).
 //
 // With no servers configured it returns a dormant Client (no error): the MCP feature is simply
 // off. A single server's failure (bad transport, blocked endpoint, unreachable process) is

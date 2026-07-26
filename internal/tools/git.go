@@ -19,10 +19,12 @@ import (
 // Three one-shot tools shell out to the system `git` (§3a — a convenience dep,
 // detected on PATH and degrading gracefully when absent, never a hard
 // dependency). They are SubprocessTools (domain.SubprocessTool): the dispatch
-// disposition runs the write-capable ones (git_branch, git_commit) under
-// Confiner.Confine in Auto and gates them when fs-confinement is unavailable
-// ("confine if you can, gate if you can't"); git_diff_range is ReadOnly() so it
-// runs freely. All three are stateless across Turns (ADR 0008 — a fresh git
+// disposition runs all three under Confiner.Confine in Auto and gates them when
+// fs-confinement is unavailable ("confine if you can, gate if you can't").
+// git_diff_range also declares ReadOnly(), but the unfakeable subprocess marker
+// outranks that self-declaration (confinement-execution-contract §4, amended
+// 2026-07-26) — the declaration only keeps it in Plan mode's menu, where a call
+// still refuses. All three are stateless across Turns (ADR 0008 — a fresh git
 // process per call), path-scope their inputs to the workspace root, and run with
 // a scrubbed, allowlisted environment so a stray inherited variable cannot change
 // git's behaviour.

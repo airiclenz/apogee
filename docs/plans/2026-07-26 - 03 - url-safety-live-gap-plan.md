@@ -1242,7 +1242,28 @@ keeps today's behaviour.)*
 
 ---
 
-## 15. Follow-up (items 1, 10, 14) — correct the doc and comment claims those fixes made stale
+## 15. Follow-up (items 1, 10, 14) — correct the doc and comment claims those fixes made stale — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **ADJUDICATION — `technical-design.md:200` is a CURRENT-STATE claim; the four
+wholesale denies were ADDED.** Reasoning, on the row's own terms: §5's table header says *"Spine of
+the TDD: each component, **what's decided**, what's undesigned"* — present tense — and the table's
+own convention is to stay current by APPENDING dated pass markers, never by freezing a cell: item
+14 already updated this same table's MCP-client row when its state changed, and this item corrects
+the Tools row on exactly that reading. Treating the Security-guardrails row alone as a frozen
+historical record would leave the TDD's deny-list understating what the floor denies — the very
+prose-behind-the-code defect this item removes. Item 10's NOTES' reading ("true of that pass")
+is accurate about sentence attribution but not about the row's job. The addition is one dated
+sentence in the existing hardening-sentence style, after the SEC-02 note; per item 10's ratified
+outcome it says **wholesale, not decoded** for the `/48` (no decode is claimed) and that only the
+well-known `/96` keeps its RFC 6052 decode. §4 is NOT implicated — the contract says nothing about
+the floor's range list — so `confinement-execution-contract.md` is untouched. Deviations: (1)
+`client.go`'s stdio parenthetical also changed "no URL floor" → "no URL check" — with the endpoint
+now exempt from the floor, the old contrast word restated a blanket floor over HTTP that no longer
+exists; same sentence, one word. (2) `git.go`'s corrected claim spans the comment's lines 21–27
+(the old ":25" clause was mid-sentence; correcting it required rewording the sentence around it).
+CHANGELOG deliberately omitted: doc/comment-only, no behaviour. Verifier caveat: the acceptance's
+`grep -n "deliberately included"` self-matches its OWN quoted search string at plan line ~1322;
+no dated `NOTES` line matches, which is what the check is for.
 
 **Provenance:** item 1's own `NOTES` (which deliberately left `docs/design/technical-design.md:196`
 alone, because that item's acceptance forbade touching a second file under `docs/design/`), item

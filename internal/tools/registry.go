@@ -60,7 +60,9 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // The execution tools (P3.8 — terminal, python_exec) and the git tools (P3.9 —
 // git_branch, git_commit, git_diff_range) follow; they are SubprocessTools the
 // disposition confines in Auto (or gates when confinement is unavailable), not
-// workspace-scoped writers (git_diff_range is read-only and runs freely). The
+// workspace-scoped writers (git_diff_range declares ReadOnly(), but the subprocess
+// marker outranks the declaration — it too is confined or gated, and the
+// declaration only keeps it in Plan's menu, where a call refuses). The
 // diagnostics tool (P3.10) closes the file/exec set: a read-only SubprocessTool that checks
 // Go in-process (plus optional go vet) and degrades gracefully for other languages. The
 // network/host tools (P3.11) and the sub_agent recursion point (P3.13) follow; sub_agent
