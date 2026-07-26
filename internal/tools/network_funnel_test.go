@@ -693,10 +693,13 @@ func TestNetworkFunnel_DoUsesSafeLabel(t *testing.T) {
 }
 
 // TestNetworkFunnel_DoCancelledCtxIsGoError proves ADR 0007 holds at the funnel: ctx
-// cancellation is the ONLY thing do reports as a Go error — before the request, while it is in
-// flight, and while the BODY streams — never as a model-facing message. The third case is the
-// one that used to escape: the body read's error was discarded, so a cancelled caller got a
-// nil error over a half-read body and the Turn was never rolled back.
+// cancellation is the ONLY thing do reports as a Go error — before the request, during the
+// PRE-FLIGHT's resolve, while the request is in flight, and while the BODY streams — never as
+// a model-facing message. Two of those used to escape: the body read's error was discarded, so
+// a cancelled caller got a nil error over a half-read body and the Turn was never rolled back;
+// and the pre-flight now runs on a ctx DERIVED from the request budget (M-5), so a cancellation
+// arriving during the resolve reaches the guard as an unresolvable host and would otherwise
+// come back as a blocked-URL message.
 func TestNetworkFunnel_DoCancelledCtxIsGoError(t *testing.T) {
 	t.Parallel()
 
@@ -739,6 +742,27 @@ func TestNetworkFunnel_DoCancelledCtxIsGoError(t *testing.T) {
 		}
 	})
 
+	t.Run("cancelled during the pre-flight resolve", func(t *testing.T) {
+		t.Parallel()
+		resolving := make(chan struct{})
+		guard := security.URLGuard{}.WithResolver(blackHoleResolver(resolving))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			<-resolving // the lookup is under way, so the cancellation lands inside the check
+			cancel()
+		}()
+
+		_, msg, err := newFunnelTool(guard).do(ctx, netRequest{url: "http://black-hole.example/"})
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled — the pre-flight's ctx is derived from the caller's, so its cancellation must stay ADR 0007's Go error and not read as a blocked URL", err)
+		}
+		if msg != "" {
+			t.Errorf("cancellation must not be a model-facing message; got %q", msg)
+		}
+	})
+
 	t.Run("cancelled while the body streams", func(t *testing.T) {
 		t.Parallel()
 		streaming := make(chan struct{})
@@ -771,10 +795,28 @@ func TestNetworkFunnel_DoCancelledCtxIsGoError(t *testing.T) {
 	})
 }
 
+// blackHoleResolver is a host→IP resolver that never answers — the hermetic stand-in for a name
+// delegated to a black-holing nameserver, where the ONLY thing that can end the lookup is the ctx
+// it was handed. It closes started (when non-nil) as the lookup begins, for a test that must act
+// while the pre-flight is inside it.
+func blackHoleResolver(started chan struct{}) func(context.Context, string) ([]net.IP, error) {
+	return func(ctx context.Context, _ string) ([]net.IP, error) {
+		if started != nil {
+			close(started)
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+}
+
 // TestNetworkFunnel_TimeoutResolution pins the timeout contract the funnel applies to
 // netRequest.timeout: unset (≤ 0) resolves to the default, an over-ceiling request is
-// clamped DOWN (never raised), and the seconds-typed clampTimeout resolves identically —
-// one ceiling, both entry points. Asserted on the resolution, not on wall-clock timing.
+// clamped DOWN (never raised), the seconds-typed clampTimeout resolves identically —
+// one ceiling, both entry points — and the resolved budget covers the PRE-FLIGHT's DNS
+// resolution, not just the HTTP exchange. The first three are asserted on the resolution
+// rather than on wall-clock timing; the fourth is asserted against the budget itself.
+// That the budget is SHARED with the request rather than re-issued to it is the separate
+// claim TestNetworkFunnel_OneBudgetCoversResolveAndRequest pins.
 func TestNetworkFunnel_TimeoutResolution(t *testing.T) {
 	t.Parallel()
 
@@ -803,4 +845,111 @@ func TestNetworkFunnel_TimeoutResolution(t *testing.T) {
 			t.Errorf("clampTimeout(%d) = %v, want %v (same ceiling on both paths)", seconds, got, want)
 		}
 	}
+
+	// The budget is not the HTTP exchange's alone (M-5): the pre-flight's DNS resolution used to
+	// run on the RAW caller ctx, so the SSRF floor's lookup was bounded only by the system
+	// resolver's retry schedule — `options timeout:30 attempts:5` in /etc/resolv.conf makes a
+	// black-holed name block for MINUTES — on top of the HTTP timeout, and http_request's
+	// `timeout_seconds: 1` did not bound it at all. Dispatch adds no per-tool deadline, so
+	// nothing else would have. The assertion is against the budget, not a wall-clock sleep.
+	t.Run("the pre-flight resolve runs under the resolved budget", func(t *testing.T) {
+		t.Parallel()
+
+		const budget = 200 * time.Millisecond
+		guard := security.URLGuard{}.WithResolver(blackHoleResolver(nil))
+
+		// A watchdog rather than a deadline on the caller's own ctx: the caller's ctx must still
+		// be ALIVE when do returns (half of what is asserted below), and an unbounded pre-flight
+		// has to fail this case rather than hang it.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		watchdog := time.AfterFunc(40*budget, cancel)
+		defer watchdog.Stop()
+
+		start := time.Now()
+		_, msg, err := newFunnelTool(guard).do(ctx, netRequest{url: "http://black-hole.example/", timeout: budget})
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("err = %v, want nil — a budget spent inside the pre-flight is the funnel's OWN bound, so it is the message shape; only the caller's cancellation is a Go error (ADR 0007)", err)
+		}
+		if !strings.Contains(msg, "url blocked by url-safety") || !strings.Contains(msg, context.DeadlineExceeded.Error()) {
+			t.Errorf("msg = %q, want a url-safety message naming %q", msg, context.DeadlineExceeded)
+		}
+		if elapsed > 20*budget {
+			t.Errorf("do took %v for a %v budget — the pre-flight resolve is outside the budget", elapsed, budget)
+		}
+		if ctx.Err() != nil {
+			t.Errorf("the CALLER's ctx ended (%v) — the budget must ride a ctx derived from it, never the caller's own", ctx.Err())
+		}
+	})
+}
+
+// TestNetworkFunnel_OneBudgetCoversResolveAndRequest pins the SHARED deadline (M-5): the
+// resolved timeout is ONE budget spent BETWEEN resolve, dial and body, not a fresh copy issued
+// to each phase. A per-phase form — a derived ctx for the pre-flight and a fresh client Timeout
+// for the request — bounds every phase and still lets a call cost the SUM of them, so a one
+// second ask took ~1.7 s with a 0.7 s lookup and maxNetworkTimeout was no ceiling on a CALL.
+// The bound is therefore wall-clock, and it is the whole point of the item: a request that asks
+// for one second takes about one second whatever the endpoint's DNS does.
+//
+// Both slow halves are hermetic and reach no network. The pre-flight is slowed by the guard's
+// injected resolver, which eats most of the budget and then answers PUBLIC so the check PASSES
+// (a failing check would never reach the request, and would prove nothing). The dial is hung at
+// the transport's own name resolution — the one seam the funnel does not inject — by pointing
+// the Go resolver's DNS dialer at a socket that never answers.
+//
+// That override is process-global, which is why this test is deliberately NOT parallel: Go runs
+// the serial tests to completion before it resumes any parallel one, so nothing else is in
+// flight while it is installed. Nothing else in this package resolves a name through DNS in any
+// case — the funnel tests use httptest's 127.0.0.1 literals, "localhost" (answered from
+// /etc/hosts by the files-first lookup order), or an injected guard resolver.
+func TestNetworkFunnel_OneBudgetCoversResolveAndRequest(t *testing.T) {
+	const (
+		budget = 600 * time.Millisecond
+		lookup = 500 * time.Millisecond // most of the budget, spent before the request starts
+	)
+
+	restore := net.DefaultResolver
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true, // Dial is the GO resolver's seam; a cgo resolver would ignore it
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			<-ctx.Done() // the transport's lookup never answers: the hanging dial
+			return nil, ctx.Err()
+		},
+	}
+	t.Cleanup(func() { net.DefaultResolver = restore })
+
+	guard := security.URLGuard{}.WithResolver(func(ctx context.Context, _ string) ([]net.IP, error) {
+		select {
+		case <-time.After(lookup):
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil // public: the floor passes
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+
+	start := time.Now()
+	resp, msg, err := newFunnelTool(guard).do(context.Background(), netRequest{
+		url:     "http://slow-dns.example/page",
+		timeout: budget,
+	})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("err = %v, want nil — a spent budget is the funnel's OWN bound, so it is the message shape; only caller cancellation is a Go error (ADR 0007)", err)
+	}
+	if msg == "" {
+		t.Fatalf("a call that never reached a server must report a failure; got resp %+v", resp)
+	}
+	if strings.Contains(msg, "url blocked by url-safety") {
+		t.Fatalf("the pre-flight must PASS or this test proves nothing about the REQUEST's deadline: %q", msg)
+	}
+	if elapsed < lookup {
+		t.Fatalf("do returned in %v, before the %v lookup could have finished — the test is not exercising the pre-flight it claims to", elapsed, lookup)
+	}
+	if slack := 250 * time.Millisecond; elapsed > budget+slack {
+		t.Errorf("do took %v for a %v budget with a %v lookup: the request was given a budget of its OWN instead of sharing the pre-flight's (per-phase worst case %v)", elapsed, budget, lookup, lookup+budget)
+	}
+	t.Logf("slow lookup %v + hanging dial under a %v budget: do returned in %v", lookup, budget, elapsed)
 }

@@ -936,7 +936,50 @@ Commit: `fix(tools): release the funnel's transport instead of leaking one per c
 
 ---
 
-## 12. M-5 — put the pre-flight DNS resolution under the same timeout budget
+## 12. M-5 — put the pre-flight DNS resolution under the same timeout budget — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26, second attempt — supersedes the first attempt's per-phase note): the first
+attempt read the item's `Fix:` line literally and derived `rctx` for the **pre-flight only**,
+leaving `newHTTPClient` to hand the request a *fresh copy* of the same budget. Every phase was
+then bounded but the CALL was not: a 1 s ask with a 0.7 s lookup measured **1.703 s**, so
+`maxNetworkTimeout` was still no ceiling on a call and the attempt's own CHANGELOG claim ("a
+request that asks for one second takes about one second") was false. Independent verification
+failed it, and the owner ratified the shared-deadline reading of the item's own words — "so one
+budget covers resolve + dial + body". **What landed:** `budget := clampDuration(req.timeout)` is
+hoisted once; `rctx, cancelBudget := context.WithTimeout(ctx, budget)` is started BEFORE the
+pre-flight; and `rctx` is threaded into **both** `CheckContext` and
+`http.NewRequestWithContext` (`network.go:210`), so resolve + dial + body spend ONE deadline
+between them. `newHTTPClient` keeps the same budget as its client `Timeout`: its clock starts at
+`client.Do`, so it is always the looser bound and can only serve as a backstop — documented as
+such rather than left to be read as a second budget. Two further departures from the item's
+literal text, both carried over from the first attempt and re-verified under the shared deadline:
+(1) on a `CheckContext` error the funnel re-checks the **caller's** `ctx.Err()` first and returns
+ADR 0007's Go-error shape for it, keeping the message shape for a spent budget — the item's own
+interaction note made mechanical, and *tightening*, since a caller cancellation during the
+pre-flight used to return `(msg, nil)` and leave the Turn un-rolled-back; (2) that brings a fourth
+subtest to `TestNetworkFunnel_DoCancelledCtxIsGoError` ("cancelled during the pre-flight resolve")
+beside the budget subtest in `TestNetworkFunnel_TimeoutResolution`, both driven by one hermetic
+`blackHoleResolver` helper. **New test (the item's Tests line could not pin the shared half):**
+`TestNetworkFunnel_OneBudgetCoversResolveAndRequest` drives a slow-but-SUCCESSFUL pre-flight
+(injected guard resolver, 500 ms, answers public) plus a hanging dial under a 600 ms budget and
+asserts wall clock. The hanging dial is hermetic — no network, no privileges — by pointing the Go
+resolver's DNS `Dial` at a socket that never answers; that is the one seam the funnel does not
+inject, so it is `net.DefaultResolver`, a process global, which is why this test alone is **not**
+`t.Parallel()` (Go finishes the serial tests before resuming any parallel one, and nothing else in
+the package resolves a name through DNS). It measured **601 ms** for the 600 ms budget.
+**Mutation check (mandatory, performed, both halves, each run over the WHOLE repo):** (A) putting
+the request back on the caller's ctx (`NewRequestWithContext(ctx, …)`) turns the new test **red**
+at **1.103 s** — the per-phase sum, exactly the defect verification caught — and **no other test
+in the repo fails**, confirming the bound was carried by nothing before. (B) deleting the
+caller-`ctx.Err()` branch turns the pre-flight cancellation subtest **red** on both assertions
+(nil error plus `url blocked by url-safety (host black-hole.example): … context canceled`), again
+with no other failure repo-wide. Restored and green, including `go test -race
+./internal/tools/... -run 'TestNetworkFunnel_' -count=5` (0.60–0.61 s each run, no flake). Doc
+comments were corrected to the shared-deadline wording (`defaultNetworkTimeout`, `do`'s
+three-shape comment, `newHTTPClient`'s timeout paragraph); no doc under `docs/design/` and no ADR
+mentions this bound, so none was touched. The CHANGELOG entry was rewritten to say a single
+SHARED deadline and that the two-minute ceiling bounds a whole call — the claim the first
+attempt's code did not support.
 
 **What:** `internal/tools/network.go:146` runs `n.guard.CheckContext(ctx, req.url)` on the **raw
 caller ctx**, *before* `newHTTPClient` at `:150`. The floor's `LookupIPAddr`

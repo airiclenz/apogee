@@ -178,6 +178,20 @@ point is a **minor** bump, not a breaking change.
   call returns. Nothing about url-safety changes: the dial-time SSRF control, the no-follow redirect
   policy and the timeout ceiling are untouched.
 
+- **A network tool's timeout now covers its DNS lookup, so a black-holed hostname can no longer hang
+  a Turn for minutes.** Before reaching out, every `web_fetch` / `http_request` / `web_search` call
+  resolves the host to check it against the SSRF floor — and that lookup ran outside the request
+  timeout, bounded only by the machine's own resolver configuration. A name delegated to a
+  nameserver that silently drops queries therefore blocked for `timeout × attempts × nservers` (the
+  default is roughly 10 seconds; `options timeout:30 attempts:5` in `/etc/resolv.conf` makes it
+  minutes) **on top of** the HTTP timeout, and `http_request`'s own `timeout_seconds` did not bound
+  it at all. The resolved timeout is now a single deadline **shared** by lookup, dial and body —
+  one budget spent between the phases, not a fresh allowance handed to each — so a request that
+  asks for one second takes about one second whatever the endpoint's DNS does, and the two-minute
+  ceiling bounds a whole call rather than each of its halves. A budget spent in the lookup is
+  reported to the model as a blocked URL (the call failed, the conversation continues); a
+  cancellation by *you* is still raised as a cancellation, so the Turn rolls back.
+
 ### Security
 
 - **A tool's blast-radius class is now decided by what it *does*, not by what it *says* about

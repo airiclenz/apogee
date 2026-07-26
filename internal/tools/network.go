@@ -42,8 +42,14 @@ import (
 const maxNetworkResponseBytes = 2 * 1024 * 1024
 
 // defaultNetworkTimeout bounds a single network call so a slow/hung endpoint never wedges a
-// Turn. http_request may lower it via its timeout_seconds argument; it never raises it past
-// the ceiling.
+// Turn. It is ONE budget over the whole call — the pre-flight's DNS resolution, the dial and
+// the body read share a single deadline, they do not each get a copy — so a call can never
+// cost more than the resolved timeout and maxNetworkTimeout is a real ceiling on it. The
+// lookup is inside the budget because it is otherwise bounded only by the SYSTEM resolver
+// configuration: a host delegated to a black-holing nameserver blocks for
+// timeout × attempts × nservers (minutes, with `options timeout:30 attempts:5`) that no
+// request timeout would bound (M-5). http_request may lower the budget via its
+// timeout_seconds argument; it never raises it past the ceiling.
 const (
 	defaultNetworkTimeout = 30 * time.Second
 	maxNetworkTimeout     = 120 * time.Second
@@ -120,8 +126,10 @@ type netResponse struct {
 
 // do is the single path from a tool to the network: it normalises the URL once, applies
 // url-safety to that one form (pre-flight and, through the client, at dial time), builds and
-// sends the request from the same form, and reads the capped body. It returns exactly one of
-// three shapes:
+// sends the request from the same form, and reads the capped body. The resolved timeout is
+// ONE deadline shared by every phase — the pre-flight's DNS lookup, the dial and the body
+// read — so no phase is unbounded and no phase gets a budget of its own. It returns exactly
+// one of three shapes:
 //
 //   - (resp, "", nil) — the request completed with ANY status; a non-2xx is the tool's own
 //     policy to decide, not the funnel's;
@@ -154,13 +162,34 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		target = normalized.String()
 	}
 
+	// ONE deadline for the whole call. rctx is started here, before the pre-flight, and carries
+	// the request too, so resolve + dial + body cost one budget BETWEEN them rather than one
+	// each. The check ran on the RAW caller ctx before, so the floor's LookupIPAddr was bounded
+	// only by the system resolver's own retry schedule — on top of the HTTP timeout, and
+	// unbounded by http_request's timeout_seconds (M-5). Dispatch adds no per-tool deadline, so
+	// this is the only place the bound can be applied.
+	budget := clampDuration(req.timeout)
+	rctx, cancelBudget := context.WithTimeout(ctx, budget)
+	defer cancelBudget()
+
 	// Pre-flight url-safety (scheme/host + the resolved-IP SSRF floor). The dial-time floor
 	// (SafeDialControl, inside the client) is the rebinding backstop below.
-	if err := n.guard.CheckContext(ctx, target); err != nil {
+	if err := n.guard.CheckContext(rctx, target); err != nil {
+		// A budget that ran out inside the pre-flight is the FUNNEL's own bound, so it stays the
+		// model-facing message shape — the caller's ctx is alive and the Turn continues. Only the
+		// CALLER's cancellation is ADR 0007's Go-error shape, and rctx carries that too, so the
+		// two causes are told apart here rather than both reading as a blocked URL.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return netResponse{}, "", ctxErr
+		}
 		return netResponse{}, blockedMessage(label, err, req.url), nil
 	}
 
-	client := newHTTPClient(n.guard, clampDuration(req.timeout))
+	// The client's Timeout is the same budget restated. Its clock starts at client.Do, so it is
+	// always the LOOSER of the two bounds and rctx — running since before the pre-flight — is
+	// what actually ends a call; it stays as the backstop for a transport that somehow outlives
+	// its request context.
+	client := newHTTPClient(n.guard, budget)
 	// The client is built per call, so its pooled connection would OUTLIVE it: net/http keeps
 	// an idle connection — and the readLoop/writeLoop goroutines that pin the transport with
 	// it — alive for IdleConnTimeout after do returns. Network tools auto-run unattended in
@@ -175,7 +204,10 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	if method == "" {
 		method = http.MethodGet
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, target, req.body)
+	// rctx, not ctx: the request runs under the deadline the pre-flight has already spent part
+	// of, which is what makes the budget shared rather than per-phase (M-5). It derives from the
+	// caller's ctx, so a caller cancellation still reaches the in-flight request.
+	httpReq, err := http.NewRequestWithContext(rctx, method, target, req.body)
 	if err != nil {
 		return netResponse{}, "could not build request for host " + label + ": " + scrubURLError(err, req.url), nil
 	}
@@ -250,6 +282,10 @@ func blockedReason(err error, rawURL string) string {
 // dial time against the guard's SSRF floor (the DNS-rebinding defence), with the given
 // overall timeout. It is the single place the network tools obtain a client so the dial-time
 // floor is never accidentally skipped.
+//
+// The timeout is a backstop, not the operative bound: do runs the request under a context whose
+// deadline is the same budget started BEFORE the pre-flight lookup, so that deadline always
+// falls first (M-5).
 //
 // The client is per CALL — the timeout is the caller's — which is why do drains its connection
 // pool on the way out; nothing here may outlive the request. (internal/mcp builds the same
