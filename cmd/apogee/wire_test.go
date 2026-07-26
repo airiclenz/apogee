@@ -210,6 +210,45 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 	}
 }
 
+// The resolved `ui:` block reaches the renderer: runRoot hands opts.ui's two values to
+// tui.Options as Spinner and SpinnerColor. They are threaded INDEPENDENTLY — the colour flag is
+// not derived from the style and the style not from the flag — so the table walks the combination
+// that would pass if either were folded into the other (a non-default style with the loop off) as
+// well as the plain default.
+func TestRunRootThreadsSpinnerOptions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		ui   uiSettings
+	}{
+		{name: "the resolved default: snake with the colour loop on", ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true}},
+		{name: "a named style with the loop off travels as both", ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false}},
+		{name: "classic with the loop on — the old glyphs, the new colours", ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &recordingLauncher{}
+			opts := options{
+				endpoint:  "http://127.0.0.1:1111",
+				model:     "fake",
+				mode:      "ask-before",
+				workspace: t.TempDir(),
+				ui:        tt.ui,
+			}
+			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+				t.Fatalf("runRoot: %v", err)
+			}
+			if rec.opts.Spinner != tt.ui.spinner {
+				t.Errorf("tui.Options.Spinner = %q; want the resolved %q", rec.opts.Spinner, tt.ui.spinner)
+			}
+			if rec.opts.SpinnerColor != tt.ui.spinnerColor {
+				t.Errorf("tui.Options.SpinnerColor = %v; want the resolved %v", rec.opts.SpinnerColor, tt.ui.spinnerColor)
+			}
+		})
+	}
+}
+
 // The two Auto startup lines are mirror branches at the same site and never both fire:
 // confine=false is the blanket-loosen WARNING, confine=true on an unfenceable backend is the
 // degradation notice. The degraded cell is host-dependent (this machine's real backend decides

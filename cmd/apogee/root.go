@@ -93,6 +93,12 @@ type options struct {
 	// runRoot turns it into this host's actual mechanisms (presentationRungs) and installs them on
 	// the TUI bridge, which is what supplies Config.Presenter and registers present_document.
 	present presentSettings
+
+	// ui is the resolved `ui:` block — the status-line spinner's animation and its colour loop.
+	// Loaded from the config file only, like present above. applyConfig sets it from the resolved
+	// settings (already validated against the styles this build knows); runRoot hands both values
+	// straight to the renderer as tui.Options.
+	ui uiSettings
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

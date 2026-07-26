@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"image/color"
 	"math"
@@ -685,5 +686,44 @@ func TestParseSpinnerStyle(t *testing.T) {
 				t.Errorf("error %q does not name the known style %q", err, style)
 			}
 		}
+	}
+}
+
+// TestNewModelSelectsTheConfiguredSpinner pins the construction seam the `ui:` config block feeds:
+// newModel carries Options.Spinner and Options.SpinnerColor onto the Model's animation, both of
+// them, independently — the table walks all six combinations, so folding the colour flag into the
+// style (or reading one off the other) fails here rather than in a live run. The zero Options are
+// covered too: cmd/apogee always resolves a real style, so the zero value reaches only hand-built
+// test Options, where it must stay the one-column uncoloured classic cell the rest of this
+// package's status-line tests are written against.
+func TestNewModelSelectsTheConfiguredSpinner(t *testing.T) {
+	t.Parallel()
+
+	for _, style := range spinnerStyleNames {
+		for _, colour := range []bool{false, true} {
+			opts := testOpts
+			opts.Spinner, opts.SpinnerColor = style, colour
+			m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+			if m.spin.style != style {
+				t.Errorf("newModel with Spinner %q built the animation for %q", style, m.spin.style)
+			}
+			if m.spin.color != colour {
+				t.Errorf("newModel with SpinnerColor %v built the animation with color = %v (style %q)",
+					colour, m.spin.color, style)
+			}
+			if got, want := m.spin.glyph(), spinnerSpecs[style].glyph(0); got != want {
+				t.Errorf("newModel with Spinner %q renders %q at frame 0; want that style's own %q", style, got, want)
+			}
+		}
+	}
+
+	// Zero Options: no style named, no colour asked for — the still, uncoloured spinner the
+	// hand-built test Options in this package rely on (classic, one column, no foreground).
+	m := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	if m.spin.color {
+		t.Error("zero Options built a coloured spinner; the colour loop must be opt-in")
+	}
+	if got, want := m.spin.view(m.th), m.th.spinnerBase.Render(legacyClassicFrames[0]); got != want {
+		t.Errorf("zero Options render %q at frame 0; want the bare classic cell %q", got, want)
 	}
 }

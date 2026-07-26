@@ -13,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/tui"
 	"gopkg.in/yaml.v3"
 )
 
@@ -112,6 +113,12 @@ type settings struct {
 	// desktop simply opens the deliverable — with no command override, an ephemeral doc-server
 	// port, and a detected advertise host.
 	present presentSettings
+
+	// ui is the resolved `ui:` block: how the terminal UI presents itself — today the status-line
+	// spinner's animation and its colour loop. File-only (no flag/env, like the blocks above), and
+	// its defaults are the renderer's own (defaultUISettings): the default style with the colour
+	// loop on. The composition root hands both values to the TUI as Options.
+	ui uiSettings
 }
 
 // presentSettings is the resolved `present:` block (ADR 0019), in the form the composition root
@@ -151,6 +158,48 @@ func (p presentSettings) validate() error {
 	if p.port < 0 || p.port > 65535 {
 		return fmt.Errorf("apogee: invalid present.port %d: want a TCP port in 0-65535 "+
 			"(0 — the default — takes an ephemeral port)", p.port)
+	}
+	return nil
+}
+
+// uiSettings is the resolved `ui:` block, in the form the composition root hands the renderer
+// (wire.go's tui.Options). It is one struct rather than loose fields on settings for the same
+// reason presentSettings is: the keys describe ONE subsystem and travel together, from the on-disk
+// block through resolution to the wire.
+//
+// The two are deliberately INDEPENDENT keys. The colour loop is not a property of a style and is
+// not folded into the style name: it applies to whichever style spinner names, so all three styles
+// × colour on/off are valid combinations. Nothing here or downstream may key one off the other.
+type uiSettings struct {
+	// spinner names the status-line animation. It is carried as read (a name this build may not
+	// know) until validate parses it, so an unknown style is a startup error naming the key rather
+	// than a silent fall back to the default.
+	spinner tui.SpinnerStyle
+	// spinnerColor runs the slow colour loop over whichever style spinner names. Default true;
+	// false leaves the glyph in the terminal's own text colour, which is the escape hatch for a
+	// terminal whose colour depth turns the gradient into steps.
+	spinnerColor bool
+}
+
+// defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
+// style, with the colour loop on. The style is ASKED of internal/tui (ParseSpinnerStyle's documented
+// "" ⇒ the default) rather than restated here, so the vocabulary and its default stay in the one
+// package that owns them — the same reason validate does not list the valid names.
+func defaultUISettings() uiSettings {
+	// ParseSpinnerStyle errors only on a style it does not know; "" is the request for the default,
+	// so this cannot fail.
+	style, _ := tui.ParseSpinnerStyle("")
+	return uiSettings{spinner: style, spinnerColor: true}
+}
+
+// validate rejects a ui block naming a spinner style this build has no animation for. Catching it
+// here makes a typo a startup error that names the key; left to the renderer it would silently
+// resolve to some other style, and the user would be left wondering why their setting did nothing.
+// The valid set comes from internal/tui, which owns the vocabulary — this only adds the key the bad
+// value was read from, which that package cannot know.
+func (u uiSettings) validate() error {
+	if _, err := tui.ParseSpinnerStyle(string(u.spinner)); err != nil {
+		return fmt.Errorf("apogee: invalid ui.spinner: %w", err)
 	}
 	return nil
 }
@@ -218,6 +267,11 @@ type layer struct {
 	// like mechanisms). A nil pointer means the source configures no `present:` block, so
 	// resolution keeps the defaults (auto-open on, an ephemeral port, a detected host).
 	present *presentSettings
+
+	// ui is set only by the FILE layer (the UI's own presentation is config'd, no flag/env — like
+	// present). A nil pointer means the source configures no `ui:` block, so resolution keeps the
+	// defaults (the renderer's default spinner style, colour loop on).
+	ui *uiSettings
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -236,7 +290,7 @@ type layer struct {
 // surface established: a data defect degrades, it never blocks startup).
 func resolveSettings(file, env, flag layer, hostID string) (settings, []string) {
 	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true,
-		validatedSetsEnable: true, present: presentSettings{autoOpen: true}}
+		validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: defaultUISettings()}
 	// file-only (ADR 0012 + its 2026-07-21 amendment); env/flag never carry either, so the
 	// invocation environment can neither flip the flag nor name a host.
 	s.unconfinedHosts = file.unconfinedHosts
@@ -265,6 +319,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	}
 	if file.present != nil { // file-only (ADR 0019); env/flag never carry the presentation block
 		s.present = *file.present
+	}
+	if file.ui != nil { // file-only; env/flag never carry the UI block
+		s.ui = *file.ui
 	}
 	for _, l := range []layer{file, env, flag} {
 		if l.endpoint != nil {
@@ -413,6 +470,11 @@ type fileConfig struct {
 	// zero setting — which would read as `auto-open: false` and silently disable the rung the
 	// whole feature exists for.
 	Present *presentConfig `yaml:"present"`
+	// UI configures how the terminal UI presents itself — today the status-line spinner's animation
+	// and its colour loop. File-only (no flag/env), like the blocks above. Absent ⇒ the renderer's
+	// default style with the colour loop on. A pointer so an absent block falls through to those
+	// defaults rather than being an explicit zero setting, which would read as `spinner-color: false`.
+	UI *uiConfig `yaml:"ui"`
 }
 
 // unconfinedHost is one Host acknowledgement (CONTEXT: Host acknowledgement): the user's
@@ -459,6 +521,35 @@ func (p presentConfig) toPresentSettings() presentSettings {
 	s := presentSettings{autoOpen: true, command: p.Command, port: p.Port, host: p.Host}
 	if p.AutoOpen != nil {
 		s.autoOpen = *p.AutoOpen
+	}
+	return s
+}
+
+// uiConfig is the on-disk schema for the `ui:` block. It mirrors uiSettings with yaml tags;
+// toUISettings maps it across so the on-disk shape and the resolved value stay independently
+// evolvable (as presentConfig does for presentSettings).
+type uiConfig struct {
+	// Spinner names the status-line animation — snake | glitter | classic. Empty ⇒ the default.
+	// It stays a raw string here: uiSettings.validate parses it once, so an unknown name reaches
+	// startup as an error rather than being quietly dropped at the yaml seam.
+	Spinner string `yaml:"spinner"`
+	// SpinnerColor gates the colour loop over whichever style Spinner names — an INDEPENDENT key,
+	// not a property of a style. A pointer so an explicit `spinner-color: false` is distinguishable
+	// from an absent key (which keeps the default true).
+	SpinnerColor *bool `yaml:"spinner-color"`
+}
+
+// toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
+// the block leaves out. A block that sets one key therefore leaves the other at its default, which
+// is what keeps the two axes independent from the on-disk shape onward: naming a style does not turn
+// the colour loop off, and turning the loop off does not change the style.
+func (u uiConfig) toUISettings() uiSettings {
+	s := defaultUISettings()
+	if u.Spinner != "" {
+		s.spinner = tui.SpinnerStyle(u.Spinner) // validated by uiSettings.validate, not here
+	}
+	if u.SpinnerColor != nil {
+		s.spinnerColor = *u.SpinnerColor
 	}
 	return s
 }
@@ -580,6 +671,10 @@ func (fc fileConfig) layer() layer {
 	if fc.Present != nil {
 		p := fc.Present.toPresentSettings()
 		l.present = &p
+	}
+	if fc.UI != nil {
+		u := fc.UI.toUISettings()
+		l.ui = &u
 	}
 	return l
 }
@@ -711,6 +806,12 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := s.present.validate(); err != nil {
 		return err
 	}
+	// A ui block naming a spinner style this build has no animation for is the same kind of loud
+	// startup error: silently resolving it to another style would leave the user staring at a
+	// spinner their config did not ask for, with nothing pointing at the typo.
+	if err := s.ui.validate(); err != nil {
+		return err
+	}
 	opts.endpoint = s.endpoint
 	opts.model = s.model
 	opts.mode = s.mode
@@ -728,6 +829,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.validatedSetsEnable = s.validatedSetsEnable
 	opts.validatedSetsAlias = s.validatedSetsAlias
 	opts.present = s.present
+	opts.ui = s.ui
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

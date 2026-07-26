@@ -147,7 +147,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		notify:       notify,
 		promptEditor: newPromptEditor(),
 		viewport:     vp,
-		spin:         newSpinnerAnim(SpinnerClassic, false),
+		spin:         newSpinnerAnim(opts.Spinner, opts.SpinnerColor),
 		th:           th,
 		state:        stateIdle,
 	}

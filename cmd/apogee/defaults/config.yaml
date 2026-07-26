@@ -166,6 +166,36 @@
 # Network; Safari tends to work straight away. Try the URL in Safari before suspecting apogee —
 # and the path line in the transcript works regardless.
 
+# How the terminal UI presents itself. Today that is the status-line spinner — the animation you
+# watch while a turn runs. Config-file only (no flag or env).
+#
+# The two keys are INDEPENDENT: `spinner` picks the glyph animation, `spinner-color` says whether
+# it drifts through colour, and the colour loop applies to whichever style you name. Setting one
+# key leaves the other at its default. Defaults: snake, with the colour loop on.
+#
+#   snake    — a six-dot snake runs the outer ring of a 4x4 dot grid (two braille cells side by
+#              side), one lap a second. Two columns wide.
+#   glitter  — two braille cells re-roll twenty times a second while the number of lit dots
+#              breathes in and out over six seconds, swelling to a solid ⣿⣿ and falling away
+#              again. Two columns wide.
+#   classic  — the single cell ⣾⣽⣻⢿⡿⣟⣯⣷ appears to rotate, ten frames a second: the spinner
+#              apogee has always shown, kept as a permanent choice rather than a fallback.
+#              One column wide.
+#
+# The colour loop is a soft eight-second lap through three colours already on this screen —
+# periwinkle → turquoise → blue → back — blended so no step is visible. The lap takes eight
+# seconds under every style. With `spinner-color: false` the glyph keeps your terminal's own text
+# colour: `classic` with the loop off is exactly the status line apogee rendered before these
+# styles existed, and `classic` with it on is those same glyphs in the new colours.
+#
+# CAVEAT: apogee does not detect your terminal's colour depth. On a 256-colour terminal the
+# gradient steps visibly, and on a 16-colour one it collapses to a couple of tones — that is what
+# `spinner-color: false` is for.
+#
+# ui:
+#   spinner: snake         # snake | glitter | classic
+#   spinner-color: true    # the 8s colour loop; false = your terminal's own text colour
+
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false

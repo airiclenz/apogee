@@ -311,6 +311,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Workspace:     roots.workspace,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
+		// The resolved `ui:` block: which animation paints the status-line spinner and whether its
+		// colour loop runs. Two independent values, resolved and validated by applyConfig, so the
+		// renderer selects rather than parses.
+		Spinner:      opts.ui.spinner,
+		SpinnerColor: opts.ui.spinnerColor,
 		// The single source of truth (the embedded top-level VERSION file). Version carries the
 		// full string (provenance included) that /version prints and --version mirrors; BaseVersion
 		// is the release version alone (no provenance), the clean value the start-up box displays.

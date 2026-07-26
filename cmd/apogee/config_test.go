@@ -13,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 func strptr(s string) *string { return &s }
@@ -22,6 +23,12 @@ func intptr(i int) *int       { return &i }
 // noNotify drops applyConfig's soft startup notices — the tests below assert resolved
 // values, not the wording (resolveConfineToWorkspace's own table covers the notices).
 func noNotify(string) {}
+
+// wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
+// default spinner style with its colour loop on. It is spelled out rather than taken from
+// defaultUISettings, so a change to either shipped default shows up here as a failure instead of
+// silently agreeing with itself.
+var wantUIDefault = uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true}
 
 // testHostID is the machine identity injected into resolveSettings so the Host
 // acknowledgement ladder is pinned off whatever host the tests happen to run on.
@@ -44,103 +51,103 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}{
 		{
 			name: "all empty → defaults",
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "file fills every field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan"), bypass: boolptr(true)},
-			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "env beats file, file fills the rest",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file")},
 			env:  layer{endpoint: strptr("http://env")},
-			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "flag beats env beats file, per field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan")},
 			env:  layer{endpoint: strptr("http://env"), model: strptr("m-env")},
 			flag: layer{endpoint: strptr("http://flag")},
-			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "explicit false in a higher layer overrides true below it",
 			file: layer{bypass: boolptr(true)},
 			flag: layer{bypass: boolptr(false)},
-			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "confine-to-workspace is file-only and defaults true",
 			file: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "use-project-skills is file-only and defaults true",
 			file: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "use-project-skills is NOT set by env or flag (file-only)",
 			env:  layer{useProjectSkills: boolptr(false)},
 			flag: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "auto-compact is file-only and defaults true",
 			file: layer{autoCompact: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: false, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: false, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "auto-compact is NOT set by env or flag (file-only)",
 			env:  layer{autoCompact: boolptr(false)},
 			flag: layer{autoCompact: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "context-window is file-only (default 0 ⇒ discover)",
 			file: layer{contextWindow: intptr(65536)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, contextWindow: 65536},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault, contextWindow: 65536},
 		},
 		{
 			name: "context-window is NOT set by env or flag (file-only)",
 			env:  layer{contextWindow: intptr(65536)},
 			flag: layer{contextWindow: intptr(65536)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "confine-to-workspace is NOT loosenable by env or flag (global-config-only)",
 			env:  layer{confineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
 			flag: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "a matching unconfined-hosts entry resolves confine-to-workspace to false",
 			file: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true},
+			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault,
 				unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
 		},
 		{
 			name: "unconfined-hosts is NOT settable by env or flag (global-config-only)",
 			env:  layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
 			flag: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "web-search endpoint is file-only (default empty)",
 			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, webSearchEndpoint: "https://search.example.com"},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault, webSearchEndpoint: "https://search.example.com"},
 		},
 		{
 			name: "mcp servers are file-only (default empty)",
 			file: layer{mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
 		},
 		{
 			name: "mcp servers are NOT settable by env or flag (file-only)",
 			env:  layer{mcpServers: []mcp.ServerConfig{{Name: "fromenv"}}},
 			flag: layer{mcpServers: []mcp.ServerConfig{{Name: "fromflag"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "model profile is file-only (default zero)",
@@ -148,7 +155,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 				ToolCallFormat: apogee.FormatMarkdownFenced,
 				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, profile: apogee.ModelProfile{
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault, profile: apogee.ModelProfile{
 				ToolCallFormat: apogee.FormatMarkdownFenced,
 				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
@@ -157,30 +164,56 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "model profile is NOT settable by env or flag (file-only)",
 			env:  layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatCustomRegex}},
 			flag: layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "mechanisms are file-only (default empty)",
 			file: layer{mechanisms: map[string]bool{"validate": true, "syntax": false}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, mechanisms: map[string]bool{"validate": true, "syntax": false}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mechanisms: map[string]bool{"validate": true, "syntax": false}},
 		},
 		{
 			name: "mechanisms are NOT settable by env or flag (file-only)",
 			env:  layer{mechanisms: map[string]bool{"fromenv": true}},
 			flag: layer{mechanisms: map[string]bool{"fromflag": true}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "the present block is file-only (all four keys)",
 			file: layer{present: &presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "10.0.0.2"}},
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true,
-				present: presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "10.0.0.2"}},
+				present: presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "10.0.0.2"}, ui: wantUIDefault},
 		},
 		{
 			name: "present is NOT settable by env or flag (file-only ⇒ auto-open stays on)",
 			env:  layer{present: &presentSettings{autoOpen: false, port: 1}},
 			flag: layer{present: &presentSettings{autoOpen: false, port: 2}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+		},
+		{
+			name: "the ui block is file-only (both keys)",
+			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false)}}.layer(),
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true},
+				ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false}},
+		},
+		{
+			// The two keys are independent: naming a style says nothing about the colour loop.
+			name: "ui with only spinner: set → the colour loop stays at its default",
+			file: fileConfig{UI: &uiConfig{Spinner: "classic"}}.layer(),
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true},
+				ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true}},
+		},
+		{
+			// …and the other way round: turning the loop off does not change which style paints.
+			name: "ui with only spinner-color: false → the style stays at its default",
+			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}}.layer(),
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true},
+				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false}},
+		},
+		{
+			name: "ui is NOT settable by env or flag (file-only ⇒ the defaults hold)",
+			env:  layer{ui: &uiSettings{spinner: tui.SpinnerClassic}},
+			flag: layer{ui: &uiSettings{spinner: tui.SpinnerGlitter}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 	}
 	for _, tt := range tests {
@@ -654,6 +687,117 @@ func TestApplyConfigPresentPortRangeErrors(t *testing.T) {
 		opts := options{configDir: home}
 		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 			t.Errorf("applyConfig with present.port %s: %v", port, err)
+		}
+	}
+}
+
+// The ui config block parses into opts.ui: both keys, file-only like the blocks around it, so the
+// composition root can hand the renderer a style and a colour flag it never has to parse.
+func TestApplyConfigUI(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	const configYAML = `ui:
+  spinner: glitter
+  spinner-color: false
+`
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+
+	want := uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false}
+	if opts.ui != want {
+		t.Errorf("opts.ui = %+v; want %+v", opts.ui, want)
+	}
+}
+
+// The two ui keys are INDEPENDENT, from the on-disk block onward: a block that names a style leaves
+// the colour loop at its default, and one that turns the loop off leaves the style at its default.
+// This is the reason spinner-color is a pointer on the on-disk schema — `spinner: classic` alone
+// must not read as "and no colour", which is a different look from what was asked for.
+func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		yaml string
+		want uiSettings
+	}{
+		{
+			name: "only spinner: → the colour loop stays on",
+			yaml: "ui:\n  spinner: classic\n",
+			want: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true},
+		},
+		{
+			name: "only spinner-color: false → the style stays the default",
+			yaml: "ui:\n  spinner-color: false\n",
+			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.yaml), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			opts := options{configDir: home}
+			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if opts.ui != tt.want {
+				t.Errorf("opts.ui = %+v; want %+v", opts.ui, tt.want)
+			}
+		})
+	}
+}
+
+// With no ui block at all, the renderer's own defaults stand: the default spinner style with its
+// colour loop on. This is the anchor for "an absent block changes nothing".
+func TestApplyConfigNoUIDefaults(t *testing.T) {
+	t.Parallel()
+	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if opts.ui != wantUIDefault {
+		t.Errorf("opts.ui = %+v; want %+v (no block ⇒ the default style, colour loop on)", opts.ui, wantUIDefault)
+	}
+}
+
+// A ui.spinner naming a style this build has no animation for is a loud startup error that names
+// the key AND lists the styles that would have worked — not a silent fall back, which would leave
+// the user watching a spinner their config did not ask for with nothing pointing at the typo. The
+// valid set comes from internal/tui (ParseSpinnerStyle), so this also pins that the message the
+// user sees carries it.
+func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("ui:\n  spinner: sparkle\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+	if err == nil {
+		t.Fatal("applyConfig with ui.spinner: sparkle: want an error, got nil")
+	}
+	for _, want := range []string{"ui.spinner", "sparkle", "snake", "glitter", "classic"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q; want it to contain %q", err, want)
+		}
+	}
+
+	// Every style this build knows is accepted, so the check rejects only what it should.
+	for _, style := range []tui.SpinnerStyle{tui.SpinnerSnake, tui.SpinnerGlitter, tui.SpinnerClassic} {
+		home := t.TempDir()
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("ui:\n  spinner: "+string(style)+"\n"), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		opts := options{configDir: home}
+		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+			t.Errorf("applyConfig with ui.spinner: %s: %v", style, err)
 		}
 	}
 }

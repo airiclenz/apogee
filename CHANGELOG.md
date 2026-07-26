@@ -64,6 +64,29 @@ point is a **minor** bump, not a breaking change.
   [ADR 0011](docs/adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md)'s 2026-07-25
   notes). Summaries are never persisted and never sent to the model.
 
+- **The status-line spinner is now selectable, and can drift through colour.** A new file-only `ui:`
+  block in `~/.apogee/config.yaml` carries two **independent**, fully optional keys: `spinner`
+  (`snake` | `glitter` | `classic`) picks the animation shown while a turn runs, and `spinner-color`
+  says whether it is coloured. `snake` — the new default — walks a six-dot snake around the outer
+  ring of a 4x4 dot grid (two braille cells side by side), one lap a second; `glitter` re-rolls two
+  braille cells twenty times a second while the number of lit dots breathes in and out over six
+  seconds, swelling to a solid `⣿⣿` and falling away again; `classic` is the single rotating cell
+  `⣾⣽⣻⢿⡿⣟⣯⣷` apogee has always shown, kept as a **permanent** choice rather than a fallback. The
+  colour loop is a soft eight-second lap through three colours already in the palette (periwinkle →
+  turquoise → blue), blended in Oklch so there is no visible step or seam at the wrap, and it takes
+  eight seconds under every style.
+
+  Because the two keys are independent, all six combinations work: `spinner: classic` with
+  `spinner-color: false` is byte-for-byte the status line apogee rendered before this change, and
+  `classic` with the loop on is those same glyphs in the new colours. Both keys are config-file only
+  (no flag or env), an absent block resolves exactly as a run does today apart from the default
+  style, and an unknown style name is a loud startup error naming `ui.spinner` and listing the styles
+  this build knows. apogee does no terminal-profile detection, so on a 256-colour terminal the
+  gradient steps and on a 16-colour one it collapses — `spinner-color: false` is the escape hatch.
+  The animation is also now apogee's own rather than a `bubbles` spinner widget: every frame is a pure
+  function of a frame counter, which is what the value-copied Model of
+  [ADR 0011](docs/adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md) requires.
+
 ### Changed
 
 - **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**

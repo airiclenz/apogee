@@ -465,7 +465,33 @@ new colours** (proof the two axes are independent).
 
 ---
 
-## 5. Config plumbing — the `ui:` block
+## 5. Config plumbing — the `ui:` block — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): five deviations from the literal item text, none behavioural except (a).
+(a) The working tree's uncommitted `# ====` divider lines above 19 comment blocks in
+`cmd/apogee/defaults/config.yaml` were REVERTED (`git checkout --`) before the `ui:` block was
+written: they are not this item's work, not the committed file's convention (blocks are separated
+by a blank line), and keeping them would have put 19 cosmetic hunks in item 5's commit. The new
+block follows the existing style.
+(b) The template's prose says `spinner-color: false` leaves the glyph in **your terminal's own text
+colour**, not the sketch's "the status bar's faint grey": item 4's authorized deviation renders the
+uncoloured branch through `th.spinnerBase` (background only, no foreground), so "faint grey" would
+be false — and the "exactly the pre-plan look" row depends on it being false.
+(c) `tui.Options.Spinner` documents its zero value as **classic** — `spinnerAnim.spec`'s registry
+fallback, landed under item 1 — not "the default (snake)" as this item's text says. `wire.go` always
+sets a resolved style, so the zero value reaches only hand-built test `Options`, where the
+one-column uncoloured classic cell is what keeps this package's existing status-line geometry tests
+passing untouched.
+(d) The `ui:` defaults live in ONE helper, `defaultUISettings()`, read by both the `resolveSettings`
+base literal and `toUISettings`, instead of restating `{spinner: "snake", spinnerColor: true}` at
+both sites as the `present:` precedent does — and the style itself is asked of
+`tui.ParseSpinnerStyle("")` rather than re-typed, so the vocabulary AND its default stay in the one
+package that owns them (`uiSettings.validate` lists no names for the same reason).
+(e) Two additions beyond the item's test/doc list: `TestNewModelSelectsTheConfiguredSpinner`
+(`internal/tui/spinner_test.go`) pins the construction seam over all six style × colour combinations
+plus zero `Options`, since `wire_test` only proves the values reach `Options`; and the user-facing
+CHANGELOG entry for the whole feature landed here (item 6's enumerated doc list does not include the
+CHANGELOG, and items 1–4 added none).
 
 **What.** A new **file-only** `ui:` block — no flag, no env, per the newer-key convention
 documented on `autoCompact` / `contextWindow` / `mcpServers` / `present` in

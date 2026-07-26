@@ -144,6 +144,20 @@ type Options struct {
 	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
+	// Spinner is the status-line animation the `ui.spinner` config key selected. It is a SELECTION,
+	// already validated by the binary (cmd/apogee's uiSettings.validate calls ParseSpinnerStyle), so
+	// the renderer never parses a name. The zero value is not one of the styles: it resolves to
+	// classic, the animation with no registry entry falls back to (spinnerAnim.spec). cmd/apogee
+	// always sets a real style, so the zero value only reaches hand-built test Options — where the
+	// one-column classic cell is what the existing status-line geometry tests expect.
+	Spinner SpinnerStyle
+
+	// SpinnerColor runs the spinner's slow colour loop. It is INDEPENDENT of Spinner — the loop
+	// applies to whichever style is selected, and no style carries a colour of its own — so all
+	// three styles × colour on/off are valid. The zero value, false, is no colour loop: the glyph
+	// keeps the terminal's own text colour, which is also the pre-styles look under classic.
+	SpinnerColor bool
+
 	// Version is the resolved FULL build version (apogee.Version, read from the embedded VERSION
 	// file plus build provenance), read only by the /version command — it mirrors what --version
 	// prints. The start-up box reads BaseVersion instead, so the TUI never imports the source.
