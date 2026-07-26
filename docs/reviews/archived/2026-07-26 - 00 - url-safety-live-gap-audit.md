@@ -15,6 +15,9 @@ contract is authoritative on the *how*.
 **Discharges:** the `/code-audit` on the *live* url-safety gap parked by candidate 02 of
 `docs/reviews/archived/2026-07-24 - 00 - architecture-deepening-review.md` — the shape fix landed
 2026-07-25; this audit is the independent check on the hole itself.
+**Status (2026-07-26):** closed — every H/M finding is fixed. One *non-defect* follow-up is
+**deferred** to an architecture pass: M-4's hoisted-transport half and the duplicated guarded-client
+builder, carried as item 19 of the archived plan. See [Disposition](#disposition-2026-07-26--close).
 
 ## Executive Summary
 
@@ -415,7 +418,8 @@ anywhere in the audited tests.
 
 ## Disposition (2026-07-26 — close)
 
-**Every finding in this report is landed.** They were executed as items **1–14** of
+**Every finding in this report is landed — one non-defect follow-up is deferred (item 19, below).**
+The findings were executed as items **1–14** of
 `docs/plans/archived/2026-07-26 - 03 - url-safety-live-gap-plan.md`, in this report's own
 *Recommended Action Order*, each on its own green gate and each independently verified — commits
 `46570a2` (H-1) through `6013817` (M-10). That plan is complete and archived; its items carry the
