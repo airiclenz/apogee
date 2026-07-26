@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -265,6 +267,81 @@ func TestNetworkFunnel_DoBlockedURL(t *testing.T) {
 	if resp.status != "" || resp.statusCode != 0 || resp.body != "" || resp.header != nil {
 		t.Errorf("a blocked call must yield the zero netResponse; got %+v", resp)
 	}
+}
+
+// TestNetworkFunnel_DialTimeFloorBlocksAfterPreflightPasses drives the half of url-safety the
+// rest of the suite never exercises: a URL that PASSES the pre-flight Check and is stopped at
+// CONNECT. Every other funnel test either turns the floor off (loopbackGuard) or is refused
+// pre-flight, so the dial-time Control hook installed at newHTTPClient — the DNS-rebinding
+// backstop, and the floor's real bound (security/ssrf.go: "the pre-flight Check is the cheap
+// first line; the dial-time control is the real bound") — was carried by nothing. A refactor
+// that dropped the hook, swapped in a shared client or wrapped the transport left the whole
+// suite green while a prompt-injected model regained an IMDS/loopback path in Auto.
+//
+// The rebinding is simulated without a rebinding nameserver: the guard's injected resolver
+// answers PUBLIC for the pre-flight, while the transport resolves the same name for real and
+// connects to loopback — precisely the check-time/connect-time split the hook exists to close.
+// The load-bearing assertion is that the handler is NEVER reached: an error message alone would
+// still pass if the connection had been made and then judged.
+func TestNetworkFunnel_DialTimeFloorBlocksAfterPreflightPasses(t *testing.T) {
+	t.Parallel()
+
+	var reached atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached.Add(1)
+		_, _ = w.Write([]byte("the private page"))
+	}))
+	defer srv.Close()
+
+	// The floor stays ON (the zero guard); only host resolution is injected, and it lies the way
+	// a rebinding name does — one public answer at check time.
+	guard := security.URLGuard{}.WithResolver(func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+	// The server binds 127.0.0.1; addressing it by NAME is what gets past the pre-flight, since
+	// an IP-literal host is classified directly and never reaches the injected resolver.
+	reqURL := "http://localhost:" + serverPort(t, srv) + "/page?key=" + secretKey
+
+	if err := guard.CheckContext(context.Background(), reqURL); err != nil {
+		t.Fatalf("the pre-flight must PASS or this test proves nothing about the DIAL-time floor: %v", err)
+	}
+
+	res, err := NewWebFetch(guard).Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_fetch", Arguments: jsonArgs(t, map[string]any{"url": reqURL}),
+	})
+	if err != nil {
+		t.Fatalf("a dial-time block is not caller cancellation, so it must not be a Go error: %v", err)
+	}
+	if got := reached.Load(); got != 0 {
+		t.Errorf("the handler was reached %d time(s): a connection to the private address must never be MADE, whatever the result then says", got)
+	}
+	if !res.IsError {
+		t.Fatalf("a name that resolves public at check time and loopback at connect time must be refused at the dial: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "SSRF floor") {
+		t.Errorf("the refusal must come from the SSRF floor, not from an incidental transport failure: %q", res.Content)
+	}
+	if got := strings.Count(res.Content, "url blocked by url-safety"); got != 1 {
+		t.Errorf("blocked result states the block %d times, want exactly 1: %q", got, res.Content)
+	}
+	if got := strings.Count(res.Content, "localhost"); got != 1 {
+		t.Errorf("blocked result names the host %d times, want exactly 1: %q", got, res.Content)
+	}
+	if strings.Contains(res.Content, secretKey) || strings.Contains(res.Content, reqURL) {
+		t.Fatalf("the request URL rode out to the model on the dial-time path (M2): %q", res.Content)
+	}
+}
+
+// serverPort is srv's listening port, the piece needed to re-address a httptest server by NAME
+// rather than by the 127.0.0.1 literal it reports.
+func serverPort(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL %q: %v", srv.URL, err)
+	}
+	return u.Port()
 }
 
 // TestBlockedMessage_StatesTheBlockOnce pins the wording of a url-safety block: the message

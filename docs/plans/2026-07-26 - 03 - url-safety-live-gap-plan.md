@@ -369,7 +369,27 @@ Commit: `fix(tools): surface the funnel's body-read error instead of a silent pa
 
 ---
 
-## 4. H-4 — pin the dial-time SSRF floor through the funnel's own client
+## 4. H-4 — pin the dial-time SSRF floor through the funnel's own client — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **Mutation check (mandatory, performed):** the `Control: guard.SafeDialControl()`
+line — now at `internal/tools/network.go:234`, not `:223`, after item 3's landing — was deleted and
+the new test went **red** on exactly the assertion the item names: *"the handler was reached 1
+time(s)"*, with the result a plain `HTTP 200 OK` carrying the private page; restored, green, and
+green under `go test -race ./internal/tools/... -run 'TestNetworkFunnel_' -count=2`. Recorded as a
+second observation: with the hook deleted, **no other test in `./internal/tools/` fails** — the
+audit's claim that the installation was carried by nothing is confirmed, not assumed. Three
+departures from the item's literal text, all additive: (1) the rebinding is simulated **without a
+rebinding nameserver** — the injected resolver answers a public IP for the pre-flight while the
+transport resolves the same name for real, so the check-time/connect-time split is genuine; the
+request is addressed `http://localhost:<port>` because an IP-literal host is classified directly and
+never reaches the injected resolver, and hermeticity rests on `localhost` resolving through the
+hosts file (no DNS, no network). (2) Two assertions beyond the item's list: the message must name
+the **SSRF floor** (so an incidental transport failure cannot pass for a floor refusal, which is
+what makes the mutation check tight) and must state the block exactly once, matching
+`TestBlockedMessage_StatesTheBlockOnce`'s wording pin. (3) One test-only helper, `serverPort`, was
+added beside the test to re-address an `httptest` server by name. No production code, and no doc,
+was touched — CHANGELOG deliberately included: this item adds a regression net for behaviour that
+is already correct and already shipped, so there is no user-facing change to record.
 
 **What:** `SafeDialControl` is tested only as a bare function called directly with an address
 string (`internal/security/ssrf_test.go:146`, `TestSafeDialControl_RebindClosesTOCTOU`). **No test
