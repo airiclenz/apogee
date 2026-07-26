@@ -184,6 +184,23 @@ point is a **minor** bump, not a breaking change.
   `present_document`) are untouched. See `docs/design/confinement-execution-contract.md` §4
   (amendment 2026-07-26).
 
+- **`present_document` no longer hands the OS an arbitrary model-named file to launch.** On a local
+  desktop the tool auto-opens the presented document (rung 1 of the presentation ladder) with
+  `open`, `cmd /c start ""` or `xdg-open` — and on every desktop it is the **extension** that
+  chooses which program runs. The path was fenced to the workspace and had to be a regular file,
+  but the *name* was the model's, so presenting `report.command`, `report.bat`, `notes.hta` or
+  `report.desktop` executed it with the user's full privileges outside any confinement box (in Auto
+  the model can write such a file in-workspace first; in Plan a checked-in `build.bat` in a hostile
+  repo is enough). The launch is now bounded by an **allow-list of extensions an OS handler renders
+  rather than runs** — documents, images and text (`.pdf`, `.docx`, `.md`, `.png`, `.csv`, `.html`,
+  … ), deliberately wider than the browser-renderable set the remote rung serves, and with the
+  macro-enabled office formats and everything script-shaped left out. Anything else builds **no
+  command at all** and degrades to the baseline rung: the path is still shown in the transcript for
+  the user to open themselves, the tool result still reads `shown`, and the call is not an error.
+  A configured `present.command` is unchanged — it names one application, so the extension selects
+  nothing there. See [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md) (amendment
+  2026-07-26).
+
 - **The ask and approval prompts escape-strip all model-authored text before rendering.** The ask
   question and its choices, and the approval tool name, reason, and arguments, are stripped of the
   terminal escape (`ESC`) byte at the point they enter the popup, closing a gap where untrusted

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,9 +12,10 @@ import (
 )
 
 // ErrNoOpener is the sentinel Open returns when this machine has nothing to hand a document
-// to: an OS with no known opener command, or a Linux session with no display server behind it
-// (see HasDesktop). It is a NORMAL outcome rather than a failure — the caller degrades to the
-// baseline rung, which is the rung that is never wrong, and says so in the transcript
+// to: an OS with no known opener command, a Linux session with no display server behind it
+// (see HasDesktop), or a document whose extension is not one an OS handler should be handed
+// (see OpenerRenderable). It is a NORMAL outcome rather than a failure — the caller degrades to
+// the baseline rung, which is the rung that is never wrong, and says so in the transcript
 // (ADR 0019 §4). Callers test for it with errors.Is, because "there was nothing to open into"
 // has to read differently from "an opener was tried and it failed".
 var ErrNoOpener = errors.New("present: no opener available on this platform")
@@ -40,8 +42,8 @@ type Runner func(name string, args ...string) error
 
 // Opener is the presentation ladder's rung 1 and rung 3 (ADR 0019): the host's act of handing a
 // finished document to the desktop application that knows how to show it — the default browser
-// for HTML, the OS-associated app for everything else, or the one application the user named in
-// present.command.
+// for HTML, the OS-associated app for every other extension rung 1 will hand over
+// (OpenerRenderable), or the one application the user named in present.command.
 //
 // It decides only WHAT to run; whether an opener should run at all is the ladder's call, because
 // that answer needs the locality fact this type deliberately does not consult (rung 1 is right
@@ -104,6 +106,19 @@ func (o Opener) Open(path string) error {
 // argv builds the exact command line for this machine, the configured override first because it
 // is the user speaking about their own desktop and outranks anything this package can infer.
 //
+// Rung 1's OS table is bounded twice: by the MACHINE (HasDesktop) and by the DOCUMENT
+// (OpenerRenderable). The second bound is the one that keeps the launch honest — on every
+// desktop it is the EXTENSION that picks the program, so handing the handler a model-chosen
+// extension is handing it a model-chosen program. A refused extension yields no argv at all and
+// reads as ErrNoOpener, so the ladder degrades to the baseline rung exactly as it does for a
+// headless session (ADR 0019 §4, amended 2026-07-26).
+//
+// The bound stops at rung 3 on purpose: a present.command template names ONE application, so the
+// extension selects nothing there, and narrowing the user's own configured opener to a curated
+// list would refuse the source files and odd formats they configured it for. ADR 0019 §5's
+// reasoning holds on that rung — present.command is the user's own configuration, with the same
+// standing as their shell.
+//
 // The OS table is the one every desktop documents: `open <path>` on macOS, `cmd /c start ""
 // <path>` on Windows (start's first quoted argument is the window TITLE, and omitting it makes
 // start read the path as one), `xdg-open <path>` on Linux. Windows ships unexercised until the
@@ -111,6 +126,9 @@ func (o Opener) Open(path string) error {
 func (o Opener) argv(path string) ([]string, error) {
 	if template := strings.TrimSpace(o.CommandOverride); template != "" {
 		return overrideArgv(template, path)
+	}
+	if !OpenerRenderable(path) {
+		return nil, ErrNoOpener
 	}
 	if !HasDesktop(o.GOOS, o.Env) {
 		return nil, ErrNoOpener
@@ -129,6 +147,89 @@ func (o Opener) argv(path string) ([]string, error) {
 		// running an argv nobody wrote.
 		return nil, ErrNoOpener
 	}
+}
+
+// openerRenderableExts is rung 1's allow-list: the extensions whose desktop handler RENDERS the
+// document rather than executing it. It is what bounds the launch, and the bound is the whole
+// point — the model chooses the document and the extension chooses the program, so an unbounded
+// `open <path>` is `run <path>` the moment the model writes report.command, report.bat or
+// notes.hta (audit 2026-07-26 H-2, under ADR 0012's invariant that an unattended call has a
+// bounded blast radius).
+//
+// It is an ALLOW-list because the deny side is unbounded and OS-specific — Windows executes
+// everything on PATHEXT plus .hta/.scr/.msi/.reg/.lnk, macOS has .command/.terminal/.app/.scpt,
+// Linux has .desktop — and a list of what must never run is a list somebody is always one entry
+// behind on. An extension earns a place here only when its default handler DISPLAYS the file,
+// which is what excludes scripts, installers, shortcuts and the macro-enabled office formats
+// (.docm/.xlsm/.pptm), and why a file with NO extension is refused too: an executable text file
+// with a shebang is exactly what a content-sniffing xdg-open would hand to a shell.
+//
+// It is deliberately WIDER than rung 2's browser set (browserRenderableExts, internal/tui) —
+// an OS handler shows the .docx, .png and .md a browser would download or render as source, and
+// opening a deliverable in the application that knows it is rung 1's whole value. Rung 2's four
+// extensions are a subset of this set, pinned by a test in internal/tui.
+var openerRenderableExts = map[string]bool{
+	// Text and markup: the shapes a Skill's own deliverables come in.
+	".txt":      true,
+	".text":     true,
+	".md":       true,
+	".markdown": true,
+	".rst":      true,
+	".adoc":     true,
+	".log":      true,
+	".csv":      true,
+	".tsv":      true,
+	".json":     true,
+	".xml":      true,
+	".yaml":     true,
+	".yml":      true,
+	".toml":     true,
+	".html":     true,
+	".htm":      true,
+	".xhtml":    true,
+	".svg":      true,
+
+	// Documents: the formats an office or reader application owns.
+	".pdf":  true,
+	".rtf":  true,
+	".epub": true,
+	".doc":  true,
+	".docx": true,
+	".odt":  true,
+	".xls":  true,
+	".xlsx": true,
+	".ods":  true,
+	".ppt":  true,
+	".pptx": true,
+	".odp":  true,
+
+	// Images: a diagram or screenshot is a deliverable too.
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".gif":  true,
+	".webp": true,
+	".bmp":  true,
+	".tif":  true,
+	".tiff": true,
+	".avif": true,
+	".heic": true,
+}
+
+// OpenerRenderable reports whether path is a document rung 1 may hand to this machine's OS
+// handler (see openerRenderableExts for the rule the set follows). Anything else — an
+// executable extension, an unknown one, or none at all — is refused, and Open reports
+// ErrNoOpener so the ladder degrades to the baseline transcript rung rather than launching a
+// program the model named by choosing a file name.
+//
+// It is exported so the bound is a stated, testable part of this package's contract rather than
+// a hidden filter: a host wiring its own presentation ladder asks the same question, and rung
+// 2's narrower browser set is a subset of the answer.
+//
+// The extension is lowercased first, so a Windows-authored REPORT.HTML is the same document as
+// report.html — and REPORT.BAT is refused exactly like report.bat.
+func OpenerRenderable(path string) bool {
+	return openerRenderableExts[strings.ToLower(filepath.Ext(path))]
 }
 
 // overrideArgv turns a present.command template into an argv for path. The template is split

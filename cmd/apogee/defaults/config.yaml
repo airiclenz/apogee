@@ -134,7 +134,9 @@
 # WezTerm, kitty) make it cmd/ctrl+clickable. Above that baseline:
 #
 #   - running on your own desktop → apogee opens the document in the associated application
-#     (HTML in your default browser). This is the `auto-open` key below.
+#     (HTML in your default browser). This is the `auto-open` key below. Only documents get
+#     opened — reports, images, text; anything the OS would RUN rather than show (a .bat, a
+#     .command, a .desktop) is left as a path in the transcript, for you to open deliberately.
 #   - running over SSH (a devbox, a VM, a container) → apogee serves browser-renderable documents
 #     (.html/.htm/.svg/.pdf) from a small built-in server and prints the URL beside the path, so
 #     one cmd+click opens it in the browser on YOUR machine. It never auto-opens on the remote

@@ -139,6 +139,10 @@ func (p *uiPresenter) climb(ctx context.Context, req domain.PresentRequest) (dom
 // than downloads (ADR 0019 §2). The doc server is deliberately extension-AGNOSTIC — it will serve
 // anything it is handed — so the judgement of what is worth a URL lives here, with the ladder, and
 // a later markdown→HTML rung is a change to this set rather than to the server.
+//
+// It is the narrow half of a pair: rung 1's own set (present.OpenerRenderable, the launch bound
+// added 2026-07-26) is wider, because an OS handler shows the .docx and .png a browser would only
+// download. This set must stay a SUBSET of that one, which a test in this package pins.
 var browserRenderableExts = map[string]bool{
 	".html": true,
 	".htm":  true,

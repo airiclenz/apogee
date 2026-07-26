@@ -221,7 +221,32 @@ Commit: `fix(agent): classify on the unfakeable marker before the self-declared 
 
 ---
 
-## 2. H-2 — `present_document` hands a model-chosen file to the OS handler outside any box
+## 2. H-2 — `present_document` hands a model-chosen file to the OS handler outside any box — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): Owner's design call taken as given — (A) extension allow-list in the opener,
+no gating `toolClass`, no §4 row, `docs/design/confinement-execution-contract.md` untouched; (B)
+one new exported symbol, `present.OpenerRenderable`, carrying rung 1's own WIDER curated set
+(documents, images, text — 39 extensions), with `internal/tui`'s `browserRenderableExts` left
+exactly as it was; (C) dated `## Amendment (2026-07-26)` on ADR 0019 in the house style ADR 0012's
+amendments use. Four departures from the item's literal text: (1) **the bound stops at rung 3** —
+`overrideArgv` (a configured `present.command`) is NOT extension-checked, because that template
+names ONE application so the extension selects nothing there, narrowing it would refuse the source
+files and odd formats the user configured it for, and ADR 0019 §5's "the user's own configuration,
+the same standing as their shell" governs that rung; the owner's (B)/(C) name **rung 1** twice and
+the item's own citation is `opener.go:119-131`, the OS-table branch, so rung 1 is what is bounded.
+The carve-out is stated in the ADR amendment (d→c), in `argv`'s doc comment, and pinned by
+`TestOpenerCommandOverrideIsNotExtensionBounded`. (2) A refused extension reports the EXISTING
+`ErrNoOpener` rather than a new sentinel — only one new exported symbol was authorized, and the
+ladder already degrades that sentinel to rung 0; `ErrNoOpener`'s doc comment now names the third
+cause, and the transcript reason stays "no opener on this machine". (3) Two extra tests beyond the
+item's list: `TestOpenerRenderableAllowsDocumentsAndRefusesPrograms` (the predicate's rule, both
+directions) and — in `internal/tui` — `TestBrowserRenderableIsASubsetOfTheOpenerSet`, which is the
+only place decision (B)'s subset invariant can actually be read off the real rung-2 set, plus one
+ladder row in `TestPresenterLadderPicksRung` proving a local darwin desktop still refuses a
+`.bat`. (4) Docs that the change made incomplete were corrected: `CONTEXT.md`'s rung-1 sentence,
+the user-facing rung-1 sentence in `README.md` and in the shipped `cmd/apogee/defaults/config.yaml`
+template (one clause each, since `present.auto-open`'s documented behaviour narrowed), and the doc
+comments on `Opener` and `browserRenderableExts`. No `docs/design/` file was touched.
 
 **Design call:** the audit gives two alternatives and explicitly calls the disposition *"a separate
 owner decision"*. Stop and ask: (a) **extension allow-list in the opener**, degrading to the

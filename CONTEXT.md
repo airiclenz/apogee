@@ -555,7 +555,9 @@ runs *in addition to* rung 0, never instead of it. **Rung 0 (baseline, always)**
 transcript entry carrying the workspace-relative path as **plain text on its own line**
 (cmd+clickable in Zed/VS Code/iTerm2/WezTerm/kitty, copyable everywhere else); it is the rung
 that is never wrong. **Rung 1 (local desktop)** — the OS opener auto-opens the file when the
-session is local (no `SSH_CONNECTION`/`SSH_TTY`/`SSH_CLIENT`) *and* a desktop is detected.
+session is local (no `SSH_CONNECTION`/`SSH_TTY`/`SSH_CLIENT`), a desktop is detected, *and* the
+extension is one an OS handler **renders rather than runs** (documents, images, text — its own
+allow-list, wider than rung 2's; a `report.bat` degrades to rung 0 instead of executing).
 **Rung 2 (remote + browser-renderable)** — the [doc server](#deliverables-and-presentation)
 serves the file and the URL joins the entry, also as plain text. **Rung 3** — the
 `present.command` config template replaces rung 1's opener. It **fails visible**: any rung above

@@ -160,7 +160,9 @@ it; the model never reasons about your platform.** Whatever it decides, the docu
 workspace-relative path is always printed in the transcript, which most terminals (Zed,
 VS Code, iTerm2, WezTerm, kitty) make cmd/ctrl+clickable. Above that baseline: on your
 own desktop the file is opened in its associated application (HTML in your default
-browser); over SSH — a devbox, a VM, a container — browser-renderable documents
+browser) — documents, images and text only, because anything the OS would *run* rather
+than show (a `.bat`, a `.command`, a `.desktop`) is left as a path for you to open
+deliberately; over SSH — a devbox, a VM, a container — browser-renderable documents
 (`.html`, `.htm`, `.svg`, `.pdf`) are served from a small built-in server and the URL is
 printed beside the path, so one cmd+click opens the document in the browser on *your*
 machine. Apogee never auto-opens on the remote box: there is no display there to open

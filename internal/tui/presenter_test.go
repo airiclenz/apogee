@@ -119,6 +119,7 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 
 	html := writeDoc(t, "review.html")
 	markdown := writeDoc(t, "review.md")
+	script := writeDoc(t, "review.bat")
 
 	tests := []struct {
 		name       string
@@ -150,6 +151,20 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 			name:       "local with nothing to open into degrades",
 			rungs:      func(t *testing.T) Presentation { return Presentation{Local: true, Opener: headlessOpener(t)} },
 			path:       markdown,
+			wantMethod: domain.PresentShown,
+			wantReason: "no opener on this machine",
+		},
+		{
+			// The document the OS handler would EXECUTE rather than show: rung 1 refuses it
+			// (present.OpenerRenderable) and the ladder degrades exactly as it does on a machine
+			// with nothing to open into, which is the same ErrNoOpener answer.
+			name: "a local desktop still refuses a document the handler would run",
+			rungs: func(t *testing.T) Presentation {
+				o := headlessOpener(t)
+				o.GOOS = "darwin" // a real desktop: only the extension keeps this from launching
+				return Presentation{Local: true, Opener: o}
+			},
+			path:       script,
 			wantMethod: domain.PresentShown,
 			wantReason: "no opener on this machine",
 		},
@@ -319,6 +334,22 @@ func TestBridgePresenterNilUntilInstalled(t *testing.T) {
 		t.Fatalf("Present: %v", err)
 	}
 	onlyPresented(t, prog) // the installed presenter shares the Bridge's programRef
+}
+
+// TestBrowserRenderableIsASubsetOfTheOpenerSet pins the relationship between the ladder's two
+// extension sets: rung 2 serves what a browser renders itself, rung 1 hands the OS handler the
+// wider set of what a desktop application renders (present.OpenerRenderable, the bound added
+// 2026-07-26). Rung 1 is the wider one BY CONSTRUCTION, so anything worth a URL on a remote
+// session must also be worth opening on a local one — a future rung-2 addition (markdown, say)
+// that rung 1 would refuse is a ladder that answers differently depending on where it runs.
+func TestBrowserRenderableIsASubsetOfTheOpenerSet(t *testing.T) {
+	t.Parallel()
+
+	for ext := range browserRenderableExts {
+		if !present.OpenerRenderable("report" + ext) {
+			t.Errorf("rung 2 serves %q but rung 1 refuses it — the browser set must stay a subset", ext)
+		}
+	}
 }
 
 // ----------------------------------------------------------------------------

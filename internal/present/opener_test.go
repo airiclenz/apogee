@@ -36,8 +36,20 @@ func (r *recordingRunner) only(t *testing.T) []string {
 // because argument boundaries are the one thing an opener can silently get wrong.
 const testDocPath = "/workspace/my reports/review.html"
 
+// docNamed returns testDocPath's directory with a different file name, so a table row can vary
+// the extension — the thing rung 1 now judges — without varying anything else.
+func docNamed(name string) string {
+	return "/workspace/my reports/" + name
+}
+
 // Each desktop OS has exactly one opener command line, and the argv is asserted literally —
 // these strings are the contract with three operating systems, not an implementation detail.
+//
+// The same table carries rung 1's other half: WHICH documents reach that command line at all.
+// The extension is what selects the program on every desktop, so a model that picks the file
+// name picks the program unless the launch is bounded — a refused extension must therefore
+// produce no argv at all (ErrNoOpener, degrade to the baseline rung), not a command that merely
+// goes unrun.
 func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 	t.Parallel()
 
@@ -45,7 +57,8 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 		name string
 		goos string
 		vars map[string]string
-		want []string
+		path string   // the document presented; empty means testDocPath
+		want []string // nil means the opener must refuse and run nothing
 	}{
 		{
 			name: "darwin opens with the LaunchServices opener",
@@ -69,22 +82,154 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 			vars: map[string]string{"WAYLAND_DISPLAY": "wayland-0"},
 			want: []string{"xdg-open", testDocPath},
 		},
+		{
+			// Rung 1's set is wider than rung 2's browser set on purpose: the OS handler is
+			// exactly what shows a word-processor document a browser would only download.
+			name: "darwin opens a word-processor document, which no browser renders",
+			goos: "darwin",
+			path: docNamed("review.docx"),
+			want: []string{"open", docNamed("review.docx")},
+		},
+		{
+			name: "windows opens an image",
+			goos: "windows",
+			path: docNamed("diagram.png"),
+			want: []string{"cmd", "/c", "start", "", docNamed("diagram.png")},
+		},
+		{
+			name: "linux opens the markdown a report is usually written in",
+			goos: "linux",
+			vars: map[string]string{"DISPLAY": ":0"},
+			path: docNamed("review.md"),
+			want: []string{"xdg-open", docNamed("review.md")},
+		},
+		{
+			name: "a Windows-authored upper-case name is the same document",
+			goos: "darwin",
+			path: docNamed("REVIEW.HTML"),
+			want: []string{"open", docNamed("REVIEW.HTML")},
+		},
+		{
+			name: "darwin refuses the double-clickable shell script",
+			goos: "darwin",
+			path: docNamed("review.command"),
+		},
+		{
+			name: "windows refuses a batch file",
+			goos: "windows",
+			path: docNamed("review.bat"),
+		},
+		{
+			name: "windows refuses an HTML application, which is script rather than markup",
+			goos: "windows",
+			path: docNamed("notes.hta"),
+		},
+		{
+			name: "an upper-case executable extension is refused just the same",
+			goos: "windows",
+			path: docNamed("REVIEW.BAT"),
+		},
+		{
+			name: "linux refuses a desktop entry",
+			goos: "linux",
+			vars: map[string]string{"DISPLAY": ":0"},
+			path: docNamed("review.desktop"),
+		},
+		{
+			// No extension means the handler is chosen by sniffing, and a shebang line sniffs
+			// as a program.
+			name: "a file with no extension is refused",
+			goos: "linux",
+			vars: map[string]string{"DISPLAY": ":0"},
+			path: docNamed("review"),
+		},
+		{
+			name: "an unknown extension is refused rather than guessed at",
+			goos: "darwin",
+			path: docNamed("review.sqlite3"),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			path := tt.path
+			if path == "" {
+				path = testDocPath
+			}
 			runner := &recordingRunner{}
 			opener := Opener{GOOS: tt.goos, Env: envFrom(tt.vars), Run: runner.run}
 
-			if err := opener.Open(testDocPath); err != nil {
-				t.Fatalf("Open() = %v, want no error", err)
+			err := opener.Open(path)
+			if tt.want == nil {
+				if !errors.Is(err, ErrNoOpener) {
+					t.Fatalf("Open(%q) = %v, want ErrNoOpener", path, err)
+				}
+				if len(runner.calls) != 0 {
+					t.Errorf("Open(%q) ran %v, want no argv built at all", path, runner.calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Open(%q) = %v, want no error", path, err)
 			}
 			if got := runner.only(t); !equalArgv(got, tt.want) {
-				t.Errorf("Open() ran %q, want %q", got, tt.want)
+				t.Errorf("Open(%q) ran %q, want %q", path, got, tt.want)
 			}
 		})
+	}
+}
+
+// OpenerRenderable is the bound itself, stated as a predicate so a host walking its own ladder
+// can ask the same question. The rule it encodes is "the default handler displays this, it does
+// not execute it" — so the whole executable family is out whatever the OS, and the document,
+// image and text formats a deliverable actually arrives in are in.
+func TestOpenerRenderableAllowsDocumentsAndRefusesPrograms(t *testing.T) {
+	t.Parallel()
+
+	renderable := []string{
+		"report.html", "report.htm", "report.xhtml", "diagram.svg", "report.pdf",
+		"report.md", "notes.txt", "data.csv", "data.json", "config.yaml", "notes.log",
+		"report.docx", "report.doc", "report.odt", "sheet.xlsx", "deck.pptx", "book.epub",
+		"shot.png", "photo.jpg", "photo.jpeg", "anim.gif", "shot.webp", "scan.tiff",
+	}
+	for _, name := range renderable {
+		if !OpenerRenderable(docNamed(name)) {
+			t.Errorf("OpenerRenderable(%q) = false, want true — it is a document, not a program", name)
+		}
+	}
+
+	programs := []string{
+		"report.command", "report.terminal", "report.app", "report.scpt", // macOS
+		"report.bat", "report.cmd", "report.com", "report.exe", "report.ps1", // Windows
+		"report.vbs", "notes.hta", "report.js", "report.scr", "report.msi", "report.reg", "report.lnk",
+		"report.desktop", "report.sh", "report.py", // Linux and friends
+		"report.docm", "sheet.xlsm", "deck.pptm", // macro-enabled office documents
+		"report", "report.", ".bashrc", // no usable extension at all
+	}
+	for _, name := range programs {
+		if OpenerRenderable(docNamed(name)) {
+			t.Errorf("OpenerRenderable(%q) = true, want false — an OS handler may run this", name)
+		}
+	}
+}
+
+// A present.command names ONE application, so the extension selects nothing on rung 3 and the
+// bound deliberately stops there (ADR 0019 §5, amendment 2026-07-26): narrowing the user's own
+// configured opener would refuse the source files and odd formats they configured it for.
+func TestOpenerCommandOverrideIsNotExtensionBounded(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingRunner{}
+	opener := Opener{GOOS: "darwin", CommandOverride: "zed {path}", Run: runner.run}
+	path := docNamed("main.go")
+
+	if err := opener.Open(path); err != nil {
+		t.Fatalf("Open(%q) = %v, want the user's own opener to run", path, err)
+	}
+	if got := runner.only(t); !equalArgv(got, []string{"zed", path}) {
+		t.Errorf("Open(%q) ran %q, want the configured application", path, got)
 	}
 }
 

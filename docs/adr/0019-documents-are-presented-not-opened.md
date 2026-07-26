@@ -168,3 +168,47 @@ All of these were rejected; the ladder above is what survived.
   backend) provides a real Windows harness — the same posture as `internal/platform`'s Windows
   stub, and stated rather than hidden. (2026-07-22: Phase 5 shipped; the live opener check is
   folded into the owner-run smoke passes.)
+
+## Amendment (2026-07-26) — rung 1's launch is bounded by an extension allow-list
+
+**Why now.** §5 above bounds the opener's blast radius **by what may be presented** — a path
+resolved inside the workspace root, confirmed to be a regular file, with no command from the model.
+The 2026-07-26 url-safety audit (finding H-2) showed that bound is one step short of what §5
+claims. Path-safety decides *which* file is handed over, but the model chooses the file's **name**,
+and on every desktop it is the **extension** that chooses the program: `open report.command`,
+`cmd /c start "" report.bat` and `xdg-open report.desktop` do not *show* those files, they **run**
+them, with the user's full privileges and outside any confinement box. In Auto the model can write
+such a file in-workspace (a `workspaceScopedWriter` auto-runs) and then present it; in Plan a
+checked-in `build.bat` in a hostile repo is enough. That is a model-chosen command by the back
+door, which is precisely what §5 says this ADR never does — so the sentence in §5 is kept and the
+code is made to deserve it.
+
+**(a) Rung 1 hands the OS handler only what an OS handler renders.** The launch is now bounded by
+an **extension allow-list**, `present.OpenerRenderable` (`internal/present`): documents, images and
+text — the formats whose default handler **displays** the file rather than executing it. An
+extension outside the set produces **no argv at all**; `Open` reports the existing `ErrNoOpener`, so
+the ladder degrades to **rung 0** — the transcript entry with the path — exactly as it already does
+for a session with no desktop. Nothing new is refused to the *user*: the path is still presented,
+and they open it themselves if they meant to.
+
+**(b) It is an allow-list, and it is wider than rung 2's.** The deny side is unbounded and
+OS-specific (Windows' whole `PATHEXT` plus `.hta`/`.scr`/`.msi`/`.reg`/`.lnk`, macOS'
+`.command`/`.terminal`/`.app`/`.scpt`, Linux' `.desktop`), so a list of what must never run is a
+list somebody is always one entry behind on. Rung 1's set is **its own** and deliberately **wider**
+than rung 2's four browser-renderable extensions (`.html`, `.htm`, `.svg`, `.pdf`), which stay where
+they are in `internal/tui`: an OS handler is exactly what shows the `.docx`, `.png` or `.md` a
+browser would only download, and opening a deliverable in the application that knows it is rung 1's
+whole value. Rung 2's set is a **subset** of rung 1's by construction, pinned by a test.
+
+**(c) The bound stops at rung 3.** A `present.command` template names **one** application, so the
+extension selects nothing there — the user's configured opener shows whatever it is given, and
+narrowing it to a curated list would refuse the source files and odd formats they configured it for.
+§5's reasoning stands unchanged on that rung: `present.command` is the **user's own** configuration,
+with the same standing as their shell.
+
+**(d) Nothing else about the ladder moves.** Rung 0 is unconditional as before, rung 2's set and the
+doc server's extension-agnostic serving are untouched, the tool result still names the outcome
+(`shown` for a refused extension, never an error — §4's degrade), and `present_document` remains
+mode-**independent** and outside the Approval gate. This amendment adds no tool class and no row to
+`docs/design/confinement-execution-contract.md` §4; the bound is a property of the mechanism, not a
+new disposition.

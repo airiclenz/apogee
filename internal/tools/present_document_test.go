@@ -39,12 +39,18 @@ func presentCall(t *testing.T, args map[string]string) domain.ToolCall {
 	return domain.ToolCall{ID: "c1", Tool: "present_document", Arguments: raw}
 }
 
-// presentWorkspace writes report.html into a fresh workspace and returns the root.
+// presentWorkspace writes report.html — and report.bat, the document rung 1 refuses to hand the
+// OS handler — into a fresh workspace and returns the root.
 func presentWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "report.html"), []byte("<h1>hi</h1>"), 0o600); err != nil {
-		t.Fatalf("seed report: %v", err)
+	for name, body := range map[string]string{
+		"report.html": "<h1>hi</h1>",
+		"report.bat":  "@echo off\r\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
 	}
 	return root
 }
@@ -54,6 +60,7 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 
 	for _, tc := range []struct {
 		name    string
+		file    string // the document presented; empty means report.html
 		outcome domain.PresentOutcome
 		want    string
 	}{
@@ -85,14 +92,28 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 			outcome: domain.PresentOutcome{Method: domain.PresentServed},
 			want:    "Presented report.html: the path is shown in the transcript for the user to open.",
 		},
+		{
+			// A document rung 1 refuses to hand the OS handler (present.OpenerRenderable, the
+			// launch bound added 2026-07-26) is a DEGRADE, not a refusal: the host answers
+			// "shown", the tool reports the baseline rung, and the call is not an error — the
+			// path really is in the transcript. Nothing was launched to report otherwise.
+			name:    "a non-renderable extension reads as the baseline rung, not an error",
+			file:    "report.bat",
+			outcome: domain.PresentOutcome{Method: domain.PresentShown, Location: "report.bat"},
+			want:    "Presented report.bat: the path is shown in the transcript for the user to open.",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
+			file := tc.file
+			if file == "" {
+				file = "report.html"
+			}
 			presenter := &scriptedPresenter{outcome: tc.outcome}
 			tool := NewPresentDocument(presentWorkspace(t), presenter)
 
-			res, err := tool.Execute(context.Background(), presentCall(t, map[string]string{"path": "report.html"}))
+			res, err := tool.Execute(context.Background(), presentCall(t, map[string]string{"path": file}))
 			if err != nil {
 				t.Fatalf("Execute returned a Go error: %v", err)
 			}
@@ -101,6 +122,9 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 			}
 			if res.Content != tc.want {
 				t.Errorf("result = %q, want %q", res.Content, tc.want)
+			}
+			if presenter.calls != 1 {
+				t.Errorf("presenter consulted %d times, want exactly 1 — rung 0 always runs", presenter.calls)
 			}
 		})
 	}
