@@ -4,7 +4,9 @@
 **Status:** READY *with three open design calls* — items **1 (H-1)**, **2 (H-2)** and **14 (M-10)**
 carry a `**Design call:**` line. The executing coordinator **stops and asks the owner** before
 dispatching those three; the other eleven items are pre-decided by the audit and need no
-escalation.
+escalation. *(This line describes items 1–14 as the plan was written; all three calls were
+answered and all fourteen landed on 2026-07-26 — see the dated **Status** block below, which is
+current and also covers the follow-up items 15–20.)*
 **Source:** `docs/reviews/2026-07-26 - 00 - url-safety-live-gap-audit.md` — the `/code-audit` on
 the *live* url-safety gap, itself the discharge of candidate 02 of
 `docs/reviews/archived/2026-07-24 - 00 - architecture-deepening-review.md`. Every finding below
@@ -33,6 +35,48 @@ file, a test that had to move, a wording change — lands as a dated
 `NOTES (YYYY-MM-DD): …` line **under that item's heading**, in the house convention the archived
 plans use. The plan file is the resume state and the record; an undocumented deviation is a
 verification failure.
+
+---
+
+## Status — where this plan stands (2026-07-26)
+
+**Items 1–14: COMPLETE.** Every one is implemented, independently verified and committed — see the
+`— ✅ DONE (2026-07-26)` marker and the dated `NOTES` line on each heading (commits `46570a2`
+through `6013817`). Items **10** and **12** each failed independent verification once and were
+retried; their `NOTES` record the **ratified** fixes and supersede the first attempts' notes.
+
+**Items 15–20: OPEN.** They are the findings this plan's own implementation and verification pass
+raised that **no item in 1–14 owned** — items 16, 17, 18 and 20 were each handed forward by an
+item's independent verifier, item 15 collects the stale doc and comment claims items 1, 10 and 14
+left behind, and item 19 is the owner's deferral. Each names its provenance in a `Provenance:` line
+under its heading, in place of the audit finding ID items 1–14 carry. They are in the same house
+format as items 1–14 and
+carry no `✅` marker. Item **19 is DEFERRED** by the owner (2026-07-26) to an architecture pass: it
+is recorded so its reasoning is not lost, **not** queued for execution. None of items 15–20 carries
+a `Design call:` line: items 15 and 20 each hold an **in-item adjudication** the implementer
+resolves itself and records in its dated `NOTES`, which is not an owner escalation.
+
+**Not yet run.** The *Whole-plan verification* H2 below (all **7** steps, including the tighten-only
+proof, the §4-single-owner check and the CHANGELOG/CONTEXT sweep) has **not** been run, and neither
+have the owner's *Manual verification* checks. This plan is therefore **not** ready to archive, and
+the source audit stays out of `docs/reviews/archived/`.
+
+**Retroactive ratifications (owner, 2026-07-26).** Two new exported symbols landed **without** the
+stop-and-ask this plan's intro requires — `security.NormalizeURL` (item 8) and
+`security.PinnedDialControl` (item 14). The owner **accepted both as they stand**: each lives in an
+**internal** package (not importable by an embedder, so not the public API ADR 0010 defines), no
+`apogee.go` facade symbol or alias was added, no ADR 0010 version bump is involved, each deviation
+is recorded in its item's dated `NOTES`, and item 14's ratified call (B) — an endpoint-aware dial
+control — made a cross-package symbol unavoidable. The intro's rule stands **unchanged** for items
+15–20: a new exported symbol is still a stop-and-ask.
+
+**Pending OWNER MANUAL CHECK — the live MCP endpoint (not a work item; the owner runs it).** Start
+`apogee` against `http://192.168.64.1:7331/mcp` and confirm it **connects** after item 14's
+pre-flight exemption and endpoint-aware dial pin. **Caveat, stated plainly:** item 14 also gave the
+MCP transports the funnel's **no-follow** `CheckRedirect` policy, so an MCP server that redirects —
+`/mcp` → `/mcp/` is the common case — must now be configured at its **final** URL, or the connect
+fails on the 3xx itself. That may be a configuration change the owner has to make *before* the
+check can pass, and a failure of this shape is not a regression in the exemption.
 
 ---
 
@@ -388,7 +432,7 @@ the **SSRF floor** (so an incidental transport failure cannot pass for a floor r
 what makes the mutation check tight) and must state the block exactly once, matching
 `TestBlockedMessage_StatesTheBlockOnce`'s wording pin. (3) One test-only helper, `serverPort`, was
 added beside the test to re-address an `httptest` server by name. No production code, and no doc,
-was touched — CHANGELOG deliberately included: this item adds a regression net for behaviour that
+was touched — CHANGELOG deliberately omitted: this item adds a regression net for behaviour that
 is already correct and already shipped, so there is no user-facing change to record.
 
 **What:** `SafeDialControl` is tested only as a bare function called directly with an address
@@ -449,7 +493,7 @@ no model-supplied URL, so its row reaches the denied host through
 `HostTools.WebSearchEndpoint: "https://blocked.example/s"` — the only URL that tool ever requests.
 The recipe's `publicStub` resolver is injected as written and keeps the green path hermetic (the
 deny fires string-level, ahead of any resolution — the suite makes no DNS lookup; only the mutated
-build does). No production code and no doc was touched, CHANGELOG deliberately included: like item
+build does). No production code and no doc was touched, CHANGELOG deliberately omitted: like item
 4, this adds a regression net for behaviour that is already correct and already shipped.
 
 **What:** `internal/tools/registry.go:101-103` threads `NewWebFetch(host.URLGuard)` and its two
@@ -514,7 +558,7 @@ pass-through `allowed` decision by design (`resolution.go`'s `finishGate`) — t
 result is what distinguishes a blocked call from an executed one. The `fakeApprover`'s `decision` is
 set to `ApprovalAllow` beside the error, so the row also proves the error outranks the meaningless
 verdict returned with it. No production code and no doc was touched, CHANGELOG deliberately
-included: like items 4 and 5, this adds a regression net for behaviour that is already correct and
+omitted: like items 4 and 5, this adds a regression net for behaviour that is already correct and
 already shipped.
 
 **What:** `internal/agent/dispatch.go:272-279` — an Approver returning an error emits an
@@ -576,7 +620,7 @@ rows pin branches rather than a blanket refusal. (4) A `net.ParseIP decodes none
 subtest pins the actual **premise** of the invariant at `ssrf.go:24-31` — the safety rests on
 resolution *because* the pre-flight cannot classify these forms directly; if the stdlib ever starts
 decoding them, that prose note (not only the test) needs revisiting. No production code and no doc
-was touched, CHANGELOG deliberately included: like items 4, 5 and 6, this adds a regression net for
+was touched, CHANGELOG deliberately omitted: like items 4, 5 and 6, this adds a regression net for
 behaviour that is already correct and already shipped.
 
 **What:** `internal/security/ssrf.go:163-169` holds the resolution-failure and empty-answer blocks,
@@ -1198,7 +1242,410 @@ keeps today's behaviour.)*
 
 ---
 
-## Whole-plan verification (run after item 14, before declaring done)
+## 15. Follow-up (items 1, 10, 14) — correct the doc and comment claims those fixes made stale
+
+**Provenance:** item 1's own `NOTES` (which deliberately left `docs/design/technical-design.md:196`
+alone, because that item's acceptance forbade touching a second file under `docs/design/`), item
+10's verifier (`technical-design.md:200`) and item 14's landing (`internal/mcp/client.go:44`). This
+item is **doc and comment only — no behaviour change**, and it must change no test.
+
+**What:** four stale claims in shipped files, plus an inverted word in this plan's own record that
+has already been corrected.
+
+- **`docs/design/technical-design.md:196`** (the *Tools (21)* row) still says of `diagnostics`:
+  *"`ReadOnly()` (runs in Plan) yet carries the `domain.SubprocessTool` marker (vet shells out) —
+  read-only wins in the disposition, so it runs freely and is never confined/gated (same shape as
+  `git_diff_range`)"*. Item 1 made every clause of that false: `classifyTool` now consults the
+  unfakeable markers **before** `IsReadOnly`, so `git_diff_range` and `diagnostics` take §4's
+  **subproc** row — confined in Auto, gated when fs-confinement is unavailable, **refused** in Plan.
+  Both are still *offered* in Plan's menu (the filter reads `ReadOnly()`), which §4's new footnote ²
+  records; the corrected text has to say both halves or it swaps one wrong claim for another.
+- **`internal/tools/git.go:25`** — *"git_diff_range is ReadOnly() so it runs freely"* — same cause.
+- **`internal/tools/registry.go:63`** — *"(git_diff_range is read-only and runs freely)"* — same
+  cause.
+- **`internal/mcp/client.go:43-44`** — `Connect`'s doc comment still says the guard carries *"the
+  default-on SSRF floor applied to the HTTP transports"*. Item 14 exempted the **configured
+  endpoint** from the pre-flight floor and replaced the blanket dial control with the endpoint-aware
+  pin, so the floor is no longer blanket over those transports. **One corrected clause**: the
+  comment already defers to `doc.go`, and `internal/mcp/doc.go:22-35` is already correct — do not
+  reword it, and do not restate its whole trust boundary here.
+- **Already applied on 2026-07-26 — NOTHING LEFT TO DO HERE, recorded so the record is complete:**
+  items **4, 5, 6 and 7**'s dated `NOTES` in this file each said the CHANGELOG was deliberately
+  *"included"* where every one of them meant *"omitted"* (commits `a6e52ce`, `5cb0003`, `a0988a7`
+  and `657041e` touch no CHANGELOG). All four were corrected in place, one word each, with
+  **nothing else** in any dated `NOTES` line changed. This bullet is history, not work.
+
+**ADJUDICATE — `docs/design/technical-design.md:200`.** The two verifiers read this line opposite
+ways and the item must settle it **before** editing anything:
+
+- item 10's verifier flagged the *Security guardrails* row as **stale**: it describes the SSRF
+  deny-list as the P3.11 / SEC-01 pass landed it, naming only the NAT64 **well-known** prefix
+  `64:ff9b::/96` as *"decoded and re-checked"*, and says nothing of the wholesale denies item 10
+  added (`64:ff9b:1::/48`, `2002::/16`, `::/96`, `fec0::/10`);
+- item 10's own `NOTES` took the opposite reading and left it alone deliberately — *"that cell is a
+  historical record of what the P3.11 / SEC-01 pass landed, and it remains true of that pass"*;
+- item 14's verifier read the same line as making **no MCP claim** and therefore unchanged by item
+  14. That is consistent with both readings — item 14's MCP correction landed in the **MCP-client**
+  row, not this one — so it settles nothing and must not be mistaken for a third vote.
+
+Decide it on the row's own terms: does §5's status table read as *what is decided today* (⇒ line 200
+gains the four new denies, in the existing P3-hardening sentence's style) or as *a dated record of
+each phase's landing* (⇒ leave it, and say so in this item's `NOTES` so the question is closed
+rather than re-raised a third time)? Either way the **wholesale-deny** wording is load-bearing: item
+10 denies the local-use `/48` **outright and does not decode it**, so any text added must not claim
+a decode.
+
+**Fix:** correct the four claims above (two prose clauses in `technical-design.md`'s Tools row and
+the two Go doc comments) and apply the adjudicated outcome for line 200. The
+`included` → `omitted` corrections in this plan file are **already done** — do not redo them. **§4
+(`docs/design/confinement-execution-contract.md`) is item 1's and stays shut** — its RO amendment
+and footnote ² already say the right thing. Reopen it **only** if the adjudication concludes §4
+itself is wrong, and that is a stop-and-ask, not an in-item edit.
+
+**Authoritative source:** ADR 0012 **Amendment (2026-07-25)(a)** and contract **§4** as item 1
+amended it (for the three read-only claims); ADR 0012 **Amendment (2026-07-26)** as item 14 added
+it, plus `internal/mcp/doc.go:22-35` (for the MCP clause). The **code is right in every case** —
+only the prose is behind it, which is what makes this doc-only.
+
+**Tests:** none, deliberately. This item changes no behaviour and must change no test. If a test has
+to move, that is the signal the item has strayed out of doc/comment scope — stop and ask.
+
+**Acceptance — a fresh verifier runs:**
+```
+gofmt -l . && go vet ./... && go test ./... && go test -race ./...
+git diff --stat
+```
+plus: `git diff` touches only doc files and Go **comment** lines (no statement changes, no test
+file); `grep -n "runs freely" internal/tools/git.go internal/tools/registry.go docs/design/technical-design.md`
+returns nothing about `git_diff_range` or `diagnostics`;
+`grep -n "SSRF floor applied to the HTTP transports" internal/mcp/client.go` returns nothing;
+`grep -n "deliberately included" "docs/plans/2026-07-26 - 03 - url-safety-live-gap-plan.md"` returns
+nothing; `git diff -- docs/design/confinement-execution-contract.md` is **empty** unless the
+adjudication licensed otherwise; and the adjudication's verdict and reasoning are written into this
+item's dated `NOTES`.
+
+Commit: `docs(tools,mcp): correct the read-only and SSRF-floor claims the url-safety fixes made stale`
+
+---
+
+## 16. Item 13's asymmetric twin — `http_request` renders the whole header block raw and uncapped
+
+**Provenance:** flagged by **both** item 13's implementer and its verifier as the twin of the shape
+item 13 fixed for `web_fetch`; **no item in this plan owned it**. Item 13's own `NOTES` names the
+surface it rests on: the response header block sits **outside** `maxNetworkResponseBytes` (net/http
+accepts a 10 MiB one by default), and a header value is server-chosen text lifted out of the body
+and into the block the model reads as fact.
+
+**What:** `renderRequestResult` (`internal/tools/http_request.go:174-195`) writes the status line and
+then **every** response header, sorted, verbatim —
+`fmt.Fprintf(&b, "%s: %s\n", k, strings.Join(resp.header[k], ", "))`. Two consequences, the same two
+item 13 closed for `Location`:
+
+- **The 2 MiB body cap is bypassed.** `maxNetworkResponseBytes` (`internal/tools/network.go:42`)
+  bounds only `resp.body`; the transport's own header allowance is 10 MiB, so a hostile server that
+  answers a one-byte body with a 9 MiB header block hands the model 9 MiB the cap exists to refuse.
+  The **request** side is already bounded (`maxRequestHeaders = 32`,
+  `maxRequestHeaderValueBytes = 4096`, `http_request.go:50,54`); the response side is not.
+- **Hostile header values reach the model unneutered.** Bidi overrides, zero-width characters and
+  other Cf/Co/Cs runes, and CRLF- or obs-fold-folded text all survive `net/http`'s parsing — item 13
+  established both halves by experiment, not by assumption — and land in a block the model reads as
+  the server's own facts, where a folded fake status line can pass for one.
+
+Item 13's *What* named `http_request` as the tool that *"never had the gap"*. That was true of the
+one header it was about, and is exactly why nobody looked at the other forty.
+
+**Fix:** apply item 13's treatment here. `redirectTarget` (`internal/tools/web_fetch.go:135-168`) is
+unexported in the **same package**, so the machinery already exists: extract its rune filter +
+whitespace fold + cut-and-mark core into an unexported helper over a bare string (leaving
+`redirectTarget` as the 3xx-gated wrapper that calls it), and run every rendered header **name and
+value** through it — the directive-inert shape `library.SanitizeContent`
+(`internal/library/store.go:335`) uses, which is the shape item 13 mirrored. Cap the rendered header
+block **as a whole** as well as per value, and **mark** a cut block rather than dropping it silently
+(item 13's rule: a truncated value must be visibly truncated, never a silent stub). **Redact
+nothing** — as in item 13, a response header is response *content*, and the funnel's M2 rule is
+about failure messages naming the **request** URL. `internal/tools/network.go` is untouched: this is
+a renderer change, and no `CheckRedirect` or cap constant moves.
+
+**Authoritative source:** the cap the funnel states at `internal/tools/network.go:42`, and
+web_fetch's own reasoning at `internal/tools/web_fetch.go:79-84` — *"the response HEADER block is
+outside `maxNetworkResponseBytes` … so an unbounded value would be a way around the body cap"* —
+which is a claim about the **transport**, not about one header. No disposition moves, so ADR 0012
+and §4 are not in question.
+
+**Tests** (`internal/tools/network_test.go`, beside the `TestHTTPRequest_` family at line 313):
+- a hostile-header case mirroring `TestWebFetch_HostileRedirectLocationIsRenderedInert`
+  (`network_test.go:210`) — a bidi override, a zero-width character, and a folded value carrying a
+  fake status line — asserting the rendered block carries none of them and that nothing in it opens
+  a line of its own;
+- an oversized-header-block case: the rendered result is **bounded** and carries the cut marker
+  (assert a byte count on the rendered block, the assertion item 13 used, not on the body);
+- a plain-header negative control: ordinary values render **unchanged** — this must not mangle
+  `Content-Type: text/html; charset=utf-8` or a normal `Date`;
+- `TestWebFetch_RendersRedirectLocation` (line 146) and
+  `TestWebFetch_HostileRedirectLocationIsRenderedInert` (line 210) stay green byte for byte — the
+  extraction of `redirectTarget`'s core must be behaviour-preserving.
+
+**Acceptance — a fresh verifier runs:**
+```
+go test ./internal/tools/... -run 'TestHTTPRequest_|TestWebFetch_' -v
+go test ./... && go test -race ./...
+```
+plus the **mutation check** this plan's regression items established: render the raw
+`resp.header[k]` value again, confirm the hostile and oversize cases go **red** and the plain-header
+control stays green, restore, confirm green — record both observations in the item's `NOTES`. And:
+`grep -n "resp.header\[k\]" internal/tools/http_request.go` shows the value passing through the
+neutering helper, `git diff -- internal/tools/network.go` is **empty**.
+
+Commit: `fix(tools): render http_request's response headers inert and capped`
+
+---
+
+## 17. Item 2's rung, a different vector — the Windows opener argv is command-injectable
+
+**Provenance:** raised by item 2's verifier as *worth its own item before Windows ships*. It is the
+**same rung** item 2 bounded and the allow-list does not close it, which is why it could not be
+folded into item 2.
+
+**What:** `internal/present/opener.go:140-141` returns `[]string{"cmd", "/c", "start", "", path}` on
+Windows, and `launchDetached` (`opener.go`, the `exec.Command(name, args...)` at the top of the
+function) runs it through a plain `exec.Command`. Go builds a Windows command line by joining the
+arguments and quoting one **only when it contains a space or a quote** (`syscall.EscapeArg`);
+`cmd.exe` then re-parses that line, where `&`, `|`, `^`, `<`, `>` and `%` are **syntax**. So a
+model-written file named `report&calc&.html`, in a workspace path that happens to contain no space,
+produces the line `cmd /c start "" C:\ws\report&calc&.html` — which cmd.exe splits into three
+commands and runs `calc`. **Item 2's allow-list does not reach it:** the extension is `.html`,
+squarely inside `OpenerRenderable`, and the injection rides the **rest of the name**. Windows ships
+unexercised today — `opener.go:124` says so in as many words — which is what makes this a *before it
+ships* item rather than a live exposure, and what makes it cheap to fix now.
+
+**Fix:** make the Windows rung immune to cmd.exe's grammar rather than trying to sanitise names for
+it. Shapes, best first: **(a)** drop `cmd /c start` and hand the path to a launcher that takes an
+**argv** rather than a command line — `rundll32 url.dll,FileProtocolHandler <path>`, or a
+`SysProcAttr.CmdLine` this package builds itself with the path quoted and `^`-escaped the way *cmd*
+(not `EscapeArg`) requires; **(b)** keep `cmd /c start` and refuse any name carrying a cmd
+metacharacter, degrading exactly as a refused extension does. Whichever is chosen, three bounds hold:
+it must **not weaken item 2's allow-list** (rung 1 stays extension-bounded, ADR 0019 Amendment
+(a)/(b) stand); it must **not** extend the bound to rung 3 (amendment (c) — a `present.command`
+template is the user's own configuration, with the standing of their shell); and a refusal must
+**degrade to the baseline transcript rung**, never surface as an error (amendment (d), §4's degrade)
+— reuse the existing `ErrNoOpener`, since a new sentinel would be a new exported symbol and that is
+a stop-and-ask.
+
+**Authoritative source:** **ADR 0019** and its **Amendment (2026-07-26)**, whose own words are that
+the model chooses the file's **name** and whose (a)–(d) fix what this rung may and may not do; ADR
+0012's invariant that an unattended call has a bounded blast radius is what makes an injected `calc`
+a defect rather than a curiosity.
+
+**Tests** (`internal/present/opener_test.go`):
+- extend `TestOpenerBuildsThePlatformCommand` (line 53) with `GOOS: "windows"` rows over hostile
+  names — `report&calc&.html`, `a|b.html`, `x^y.html`, `%TEMP%.html`, plus a name with a space and
+  one with a quote — asserting that what is produced cannot be reparsed by cmd.exe into a second
+  command, or (shape (b)) that **no argv is produced at all**;
+- `TestOpenerRenderableAllowsDocumentsAndRefusesPrograms` (line 188) and
+  `TestOpenerCommandOverrideIsNotExtensionBounded` (line 221) stay green — this item touches neither
+  the allow-list nor rung 3, and those two tests are what proves it;
+- a ladder row in `TestPresenterLadderPicksRung` (`internal/tui/presenter_test.go:117`) mirroring
+  item 2's `.bat` row: a hostile **name** on a windows desktop degrades to the transcript rung with
+  no launch.
+
+**Acceptance — a fresh verifier runs:**
+```
+go test ./internal/present/... -run 'TestOpener|TestLaunchDetached' -v
+go test ./internal/tui/... -run 'TestPresenterLadderPicksRung' -v
+go test ./... && go test -race ./...
+GOOS=windows go build ./... && GOOS=darwin go build ./...
+```
+plus: `grep -n "cmd\|CmdLine\|rundll32" internal/present/opener.go` shows the chosen shape;
+`git diff -- internal/present/opener.go` leaves `openerRenderableExts` and `overrideArgv`
+**untouched**; and if ADR 0019 needed a clause, the amendment is dated and names the rung it bounds.
+
+Commit: `fix(present): stop a model-chosen file name from injecting a command on Windows`
+
+---
+
+## 18. Item 9's verifier — align the string the funnel scrubs against with the string it dials
+
+**Provenance:** raised by item 9's verifier. **Hardening only** — it is *not reachable today*, and
+the item's `NOTES` must say so rather than claim a live leak was fixed.
+
+**What:** item 8 made `do` normalise once and build the request from `target`
+(`internal/tools/network.go:160-162` and `:210`), but every failure path still scrubs against the
+**raw** `req.url`: `network.go:185`, `:212`, `:226`, `:229` and `:243` all hand `req.url` to
+`blockedMessage` / `scrubURLError`. `redactRequestURL` (`network.go:396-399`) → `redactSubstring`
+(`network.go:411-421`)
+strips the string it is **given**, so an error text carrying the *normalised* form but not the raw
+one would ride out unredacted. It is unreachable today for exactly the reason the verifier gave:
+every error that reaches those lines is a `*url.Error`, and `scrubURLError`'s `errors.As` branch
+rebuilds the message from `ue.Op` plus the cause, dropping the URL before redaction is needed at
+all. It becomes reachable the moment normalisation diverges further from the raw string **and** a
+non-`*url.Error` embeds `target` in its own text — the same check-one-string / use-another shape
+item 8 removed from the guard/dial seam and left standing on the message seam.
+
+**Fix:** make the two one string. Pass the **normalised** `target` — falling back to `req.url` when
+`NormalizeURL` fails, which is the string the request would carry in that case anyway — to every
+`blockedMessage` / `scrubURLError` call in `do`; **or**, the belt-and-braces shape, have
+`redactRequestURL` strip **both** forms, the way item 9 made `redactSubstring` strip both the raw
+and the `strconv.Quote`d form. Nothing about the M2 wording moves: messages still name the bare host
+and nothing else, and `safeHost`'s label (`network.go:152`) stays **un-normalised** for item 8's
+stated reason — it feeds no request and no guard call, so it creates no divergence, and touching it
+would move message wording.
+
+**Authoritative source:** the funnel's M2 discipline, stated in the file at
+`internal/tools/network.go:141-144` — *"a key-bearing request URL can never ride out to the
+model"* — and item 8's own rule that the funnel must not hold two strings that can disagree.
+
+**Tests** (`internal/tools/network_funnel_test.go`):
+- extend `TestNetworkFunnel_DoBlockedURLDoesNotLeakKey` (line 533, table-driven since item 9) with a
+  row whose **normalised** form differs from the raw one (an upper-case host, a trailing dot, or
+  leading whitespace) and whose failure is produced by a **non-`*url.Error`**, asserting through the
+  existing `assertNoKeyInAnyForm` helper that the key appears in neither form;
+- every existing `TestNetworkFunnel_` case stays green — in particular
+  `TestNetworkFunnel_DoTrailingDotDoesNotEscapeTheDenyList` (line 445) and
+  `TestNetworkFunnel_DoDialsTheURLTheGuardChecked` (line 410), which pin the two halves of item 8
+  and must not be disturbed by a message-path change.
+
+**Acceptance — a fresh verifier runs:**
+```
+go test ./internal/tools/... -run 'TestNetworkFunnel_' -v
+go test -race ./internal/tools/... -run 'TestNetworkFunnel_' -count=2
+go test ./... && go test -race ./...
+```
+plus: `grep -n "req.url" internal/tools/network.go` shows no message path building on the
+un-normalised string (or shows `redactRequestURL` being given both forms), and the item's `NOTES`
+records plainly that this closes a **latent** divergence — no live leak was fixed, and the new row
+is a guardrail, not a regression proof.
+
+Commit: `fix(tools): redact the funnel's messages against the URL it actually dialled`
+
+---
+
+## 19. DEFERRED — hoist a per-tool transport and consolidate the two HTTP client builders
+
+**Status: DEFERRED by the owner on 2026-07-26 to an architecture pass. It is NOT next and must not
+be dispatched with items 15–18 and 20.** It is written down so the verifier's reasoning and its
+counterweight are not lost, and because it is the natural home for the *Out of scope* section's
+client-builder deepening candidate once that pass happens. **Nothing below is authorised to land
+from this plan.**
+
+**What:** item 11 fixed the per-call transport **leak** with `defer client.CloseIdleConnections()`
+in `do` — the first of the two alternatives its own text authorised — but the funnel still builds a
+fresh `*http.Transport` on every call (`newHTTPClient`, `internal/tools/network.go:294`) and
+therefore still pays a **fresh TCP+TLS handshake per call**, with network tools auto-running
+unattended in Auto and dozens of calls in a Turn the normal case. Item 11's verifier judged the
+**hoisted per-`networkTool` transport** the better shape and rebutted the reason item 11 gave for
+declining it: `networkTool` is **unexported** (`network.go:63-65`) and all **seven** construction
+sites are inside `internal/tools` (`web_fetch.go:45`, `http_request.go:89`, `web_search.go:82`,
+`:84`, `:95`, plus `network_funnel_test.go:39` and `network_test.go:623`), so a non-optional
+transport field behind a constructor cannot be missed by an outside caller; and the claimed
+`http.DefaultTransport` fallback risk **is not real**, because item 4's dial-time test
+(`TestNetworkFunnel_DialTimeFloorBlocksAfterPreflightPasses`) goes red the moment a lost
+`SafeDialControl` lets a connect through — that is precisely the mutation item 4 performed. Item 14
+left the second half standing: `internal/mcp/transport.go:219` (`newGuardedHTTPClient`) still
+reproduces the funnel's builder **field for field**, only the dial control differing, and its doc
+comment now records that the seam is a deepening candidate.
+
+**Fix (for the pass that eventually takes this on — NOT for this plan):** give `networkTool` a
+**non-optional** `transport *http.Transport` field populated by a constructor all seven sites call,
+build the client per call around that one transport with only `Client.Timeout` varying, and drop
+`defer client.CloseIdleConnections()` at the same moment (retaining the pool is the whole point, so
+leaving both in place would cancel the change). Then, and only then, fold
+`internal/mcp/transport.go`'s `newGuardedHTTPClient` and the funnel's `newHTTPClient` into one
+builder taking the dial control as a parameter — the seam this plan's *Out of scope* section rules
+belongs to `/improve-codebase-architecture`.
+
+**Counterweight — record it, do not lose it (item 11's verifier).** A **pooled** connection skips
+the **dial-time control re-check** on later calls: the control fires per *connect*, not per request.
+The pre-flight still runs on every call, so this is **not a regression** against today's guarantees
+— but it is a marginally wider TOCTOU window between the pre-flight and a reused connection, and the
+architecture pass must weigh it against the handshake cost rather than assume the hoist is free. Any
+hoist must also keep `Client.Timeout` **per call** (item 12's shared budget) and leave `Control`,
+`CheckRedirect` and `clampDuration` byte-identical.
+
+**Authoritative source:** nothing new — ADR 0012 Amendment (2026-07-25)(d) keeps the floor where it
+is, and this plan's *Out of scope* section already rules that consolidating the two client builders
+belongs to an `/improve-codebase-architecture` pass and not here. That standing ruling is why this
+is **deferred rather than dropped**.
+
+**Tests:** for whichever pass eventually takes this on, not for this plan — the transport is the
+**same pointer** across calls on one tool; per-call timeouts still vary
+(`TestNetworkFunnel_TimeoutResolution`); item 4's dial-time test stays meaningful; and item 11's
+`TestNetworkFunnel_DoReleasesTheConnectionItOpened` (line 178) changes shape if the pool is now
+deliberately **retained** — that change is itself a design call, not a test edit.
+
+**Acceptance:** none — this item is not to be executed from this plan. When the architecture pass
+picks it up it inherits this plan's per-item green gate and its tighten-only rule.
+
+Commit: none from this plan.
+
+---
+
+## 20. Item 2's residual risk — reconcile the renderable-extension set with the rule it is documented by
+
+**Provenance:** logged by item 2's verifier as **residual risk, not a defect** — there is no auto-run
+of a macro under default Office / LibreOffice macro security. It is one *"Enable Content"* click from
+execution, and `.csv` → Excel **DDE** is the same shape, which is why it is written down rather than
+waved through.
+
+**What:** the shipped rung-1 set and its stated rule do not agree, in three ways.
+
+- **Count.** `openerRenderableExts` (`internal/present/opener.go`, the `var` block that follows the
+  doc comment at `:158-171`) holds **40** entries; item 2's own `NOTES` in this file says *"39
+  extensions"*, and ADR 0019's amendment gives no number. The set is the fact and the `NOTES` is the
+  record, so the record is what is wrong.
+- **Rule vs. set.** The rule is stated at `internal/present/opener.go:158-166`: an extension earns a
+  place *"only when its default handler DISPLAYS the file"*, *"which is what excludes scripts,
+  installers, shortcuts and the macro-enabled office formats (.docm/.xlsm/.pptm)"*. The set
+  nonetheless admits the **macro-capable legacy** formats `.doc`, `.xls` and `.ppt`, whose handlers
+  will run macros carried in the very document the model wrote — the distinction the rule draws is
+  `.docx` vs `.docm`, and the pre-2007 formats sit on the wrong side of it. ADR 0019 **Amendment
+  (2026-07-26)(a)/(b)** states the same rule in prose (*"the formats whose default handler
+  **displays** the file rather than executing it"*) without naming the exclusion, so the ADR is
+  where whichever decision is taken has to end up being said.
+- **`.csv`.** The same shape by a different mechanism — a `.csv` opened by Excel is a DDE /
+  formula-injection surface — and, unlike `.doc`, a format a coding agent's deliverables genuinely
+  come in. It needs a ruling, not just a mention.
+
+**Fix:** decide **which side moves** and move exactly that one. **Either** drop `.doc`, `.xls` and
+`.ppt` from `openerRenderableExts` (and rule explicitly on `.csv`), **or** reword the rule at
+`opener.go:158-166` *and* ADR 0019's amendment so it says what the set actually is — display-by-
+default, macros not auto-run, one user click away, an accepted and stated risk. **Do not do half of
+each**; the whole point is that the set and its stated rule agree afterwards. The user-facing edge
+of the narrowing direction is cheap: a legacy deliverable degrades to the transcript rung, no error,
+the path still presented (amendment (a)). Rung 2's subset invariant
+(`TestBrowserRenderableIsASubsetOfTheOpenerSet`, `internal/tui/presenter_test.go:345`) must survive
+either way, and rung 3 stays unbounded (amendment (c)).
+
+**Authoritative source:** **ADR 0019 Amendment (2026-07-26)(a)** and **(b)** — the allow-list's rule
+and its deliberately-wider-than-rung-2 shape — under ADR 0012's bounded-blast-radius invariant. Note
+the boundary this plan sets: **widening** what may be presented is a loosening and out of scope by
+the *Out of scope* section's own rule, so only the narrowing direction, or a documentation change
+that admits the set exactly as it stands, is available here.
+
+**Tests** (`internal/present/opener_test.go`):
+- `TestOpenerRenderableAllowsDocumentsAndRefusesPrograms` (line 188) gains rows for whichever way
+  the decision goes — `.doc`, `.xls`, `.ppt` and `.csv` asserted on the side they land on, with
+  `.docm`, `.xlsm` and `.pptm` still **refused** either way;
+- a bare count assertion is **not** wanted: the corrected `NOTES` records the number, and a
+  magic-number test would go stale on the next legitimate addition;
+- `TestBrowserRenderableIsASubsetOfTheOpenerSet` (`internal/tui/presenter_test.go:345`) stays green,
+  and `TestPresenterLadderPicksRung`'s `.bat` row is untouched.
+
+**Acceptance — a fresh verifier runs:**
+```
+go test ./internal/present/... -run 'TestOpener' -v
+go test ./internal/tui/... -run 'TestBrowserRenderableIsASubsetOfTheOpenerSet|TestPresenterLadderPicksRung' -v
+go test ./... && go test -race ./...
+```
+plus: the set and **both** statements of its rule (`internal/present/opener.go:158-166` and ADR
+0019's amendment) are read side by side and shown to agree; the item's `NOTES` records **which side
+moved and why**; and item 2's *"39 extensions"* in this plan file is corrected to the real count in
+the same commit.
+
+Commit: `fix(present): make the renderable-extension set and its stated rule agree`
+
+---
+
+## Whole-plan verification (run after the last item lands, before declaring done)
 
 1. **Full gate green**, plus `go test -race ./...` twice in a row (items 3, 4, 11 and 12 all touch
    the funnel's concurrency-adjacent paths).
