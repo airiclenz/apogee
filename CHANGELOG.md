@@ -273,10 +273,12 @@ point is a **minor** bump, not a breaking change.
   the model can write such a file in-workspace first; in Plan a checked-in `build.bat` in a hostile
   repo is enough). The launch is now bounded by an **allow-list of extensions an OS handler renders
   rather than runs** — documents, images and text (`.pdf`, `.docx`, `.md`, `.png`, `.csv`, `.html`,
-  … ), deliberately wider than the browser-renderable set the remote rung serves, and with the
-  macro-enabled office formats and everything script-shaped left out. Anything else builds **no
-  command at all** and degrades to the baseline rung: the path is still shown in the transcript for
-  the user to open themselves, the tool result still reads `shown`, and the call is not an error.
+  … ), deliberately wider than the browser-renderable set the remote rung serves, and with every
+  office format whose container can carry a macro — `.docm`/`.xlsm`/`.pptm` **and** the pre-2007
+  binary `.doc`/`.xls`/`.ppt`, which have no macro-free variant — and everything script-shaped left
+  out. Anything else builds **no command at all** and degrades to the baseline rung: the path is
+  still shown in the transcript for the user to open themselves, the tool result still reads
+  `shown`, and the call is not an error.
   A configured `present.command` is unchanged — it names one application, so the extension selects
   nothing there. See [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md) (amendment
   2026-07-26).

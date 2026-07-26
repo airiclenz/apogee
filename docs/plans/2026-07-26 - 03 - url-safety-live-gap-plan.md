@@ -270,7 +270,8 @@ Commit: `fix(agent): classify on the unfakeable marker before the self-declared 
 NOTES (2026-07-26): Owner's design call taken as given — (A) extension allow-list in the opener,
 no gating `toolClass`, no §4 row, `docs/design/confinement-execution-contract.md` untouched; (B)
 one new exported symbol, `present.OpenerRenderable`, carrying rung 1's own WIDER curated set
-(documents, images, text — 39 extensions), with `internal/tui`'s `browserRenderableExts` left
+(documents, images, text — 40 extensions as shipped; the count corrected 2026-07-26 by item 20,
+which then dropped `.doc`/`.xls`/`.ppt`, leaving 37), with `internal/tui`'s `browserRenderableExts` left
 exactly as it was; (C) dated `## Amendment (2026-07-26)` on ADR 0019 in the house style ADR 0012's
 amendments use. Four departures from the item's literal text: (1) **the bound stops at rung 3** —
 `overrideArgv` (a configured `present.command`) is NOT extension-checked, because that template
@@ -1645,7 +1646,25 @@ Commit: none from this plan.
 
 ---
 
-## 20. Item 2's residual risk — reconcile the renderable-extension set with the rule it is documented by
+## 20. Item 2's residual risk — reconcile the renderable-extension set with the rule it is documented by — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): In-item adjudication — the SET moved, the rule stands. Dropped `.doc`/`.xls`/
+`.ppt` from `openerRenderableExts` (40 → 37 entries): the rule's own line is `.docx`-vs-`.docm`,
+and the pre-2007 binary formats, having no macro-free variant, sit on the `.docm` side of it —
+their handler runs document-carried macros on a single Enable-Content click; narrowing costs a
+legacy deliverable only the degrade to rung 0 (path still shown, result `shown`, no error), while
+rewording would have softened a defensible stated rule into accepted-risk prose, against the
+plan's tighten-only boundary. `.csv` ruled explicitly IN: plain text with no container for code,
+the residual spreadsheet formula/DDE surface is handler-specific and behind that application's own
+security prompts (DDE default-off/prompted since the 2017 mitigations), and `.csv` is a
+first-class coding-agent deliverable, which `.doc`/`.ppt` are not. The decision is stated in all
+three places: the rule comment on `openerRenderableExts`, a THIRD dated ADR 0019 amendment
+(appended in the house style rather than editing amendment (a)/(b) in place — the first amendment
+stays the record of what item 2 shipped), and the existing `[Unreleased]` CHANGELOG bullet's
+exclusion clause (amended in place, not a new bullet — same unreleased entry). Item 2's NOTES
+corrected: it shipped 40 extensions, not 39. Test rows added on both sides
+(`TestOpenerRenderableAllowsDocumentsAndRefusesPrograms`); no count assertion; the rung-2 subset
+test and `TestPresenterLadderPicksRung`'s `.bat` row are untouched and green.
 
 **Provenance:** logged by item 2's verifier as **residual risk, not a defect** — there is no auto-run
 of a macro under default Office / LibreOffice macro security. It is one *"Enable Content"* click from

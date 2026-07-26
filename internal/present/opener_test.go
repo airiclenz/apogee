@@ -253,14 +253,17 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 // OpenerRenderable is the bound itself, stated as a predicate so a host walking its own ladder
 // can ask the same question. The rule it encodes is "the default handler displays this, it does
 // not execute it" — so the whole executable family is out whatever the OS, and the document,
-// image and text formats a deliverable actually arrives in are in.
+// image and text formats a deliverable actually arrives in are in. The office rows pin the line
+// the rule draws — .docx vs .docm — with the pre-2007 binary formats, which have no macro-free
+// variant, on the .docm side of it (ADR 0019, third amendment 2026-07-26).
 func TestOpenerRenderableAllowsDocumentsAndRefusesPrograms(t *testing.T) {
 	t.Parallel()
 
 	renderable := []string{
 		"report.html", "report.htm", "report.xhtml", "diagram.svg", "report.pdf",
-		"report.md", "notes.txt", "data.csv", "data.json", "config.yaml", "notes.log",
-		"report.docx", "report.doc", "report.odt", "sheet.xlsx", "deck.pptx", "book.epub",
+		"report.md", "notes.txt", "data.json", "config.yaml", "notes.log",
+		"report.docx", "report.odt", "sheet.xlsx", "deck.pptx", "book.epub",
+		"data.csv", // ruled IN (ADR 0019, third amendment): plain text, no container for a macro
 		"shot.png", "photo.jpg", "photo.jpeg", "anim.gif", "shot.webp", "scan.tiff",
 	}
 	for _, name := range renderable {
@@ -275,6 +278,7 @@ func TestOpenerRenderableAllowsDocumentsAndRefusesPrograms(t *testing.T) {
 		"report.vbs", "notes.hta", "report.js", "report.scr", "report.msi", "report.reg", "report.lnk",
 		"report.desktop", "report.sh", "report.py", // Linux and friends
 		"report.docm", "sheet.xlsm", "deck.pptm", // macro-enabled office documents
+		"report.doc", "sheet.xls", "deck.ppt", // pre-2007 office: the one binary container carries macros too
 		"report", "report.", ".bashrc", // no usable extension at all
 	}
 	for _, name := range programs {

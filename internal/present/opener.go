@@ -170,9 +170,21 @@ func (o Opener) argv(path string) ([]string, error) {
 // everything on PATHEXT plus .hta/.scr/.msi/.reg/.lnk, macOS has .command/.terminal/.app/.scpt,
 // Linux has .desktop — and a list of what must never run is a list somebody is always one entry
 // behind on. An extension earns a place here only when its default handler DISPLAYS the file,
-// which is what excludes scripts, installers, shortcuts and the macro-enabled office formats
-// (.docm/.xlsm/.pptm), and why a file with NO extension is refused too: an executable text file
-// with a shebang is exactly what a content-sniffing xdg-open would hand to a shell.
+// which is what excludes scripts, installers, shortcuts and every office format whose container
+// can carry a macro: the macro-enabled OOXML formats (.docm/.xlsm/.pptm) and equally the
+// pre-2007 binary formats (.doc/.xls/.ppt), which have no macro-free variant — their handler
+// offers to run whatever the document carries on a single Enable Content click. The line the
+// set draws is .docx vs .docm, and the legacy trio sits on the .docm side of it (ADR 0019,
+// third amendment 2026-07-26). It is also why a file with NO extension is refused: an
+// executable text file with a shebang is exactly what a content-sniffing xdg-open would hand
+// to a shell.
+//
+// .csv stays IN, ruled explicitly by the same line (same amendment): a CSV is plain text with
+// no container for code, so there is nothing in the file its handler can be asked to run. The
+// residual surface — spreadsheet formula/DDE injection — exists only when the handler happens
+// to be a spreadsheet, and even there nothing reaches the OS without the user clicking through
+// that application's own security prompts; meanwhile .csv is a format a coding agent's
+// deliverables genuinely arrive in, which .doc and .ppt are not.
 //
 // It is deliberately WIDER than rung 2's browser set (browserRenderableExts, internal/tui) —
 // an OS handler shows the .docx, .png and .md a browser would download or render as source, and
@@ -199,17 +211,15 @@ var openerRenderableExts = map[string]bool{
 	".xhtml":    true,
 	".svg":      true,
 
-	// Documents: the formats an office or reader application owns.
+	// Documents: the formats an office or reader application owns. The pre-2007 binary
+	// formats (.doc/.xls/.ppt) are deliberately absent — see the macro rule above.
 	".pdf":  true,
 	".rtf":  true,
 	".epub": true,
-	".doc":  true,
 	".docx": true,
 	".odt":  true,
-	".xls":  true,
 	".xlsx": true,
 	".ods":  true,
-	".ppt":  true,
 	".pptx": true,
 	".odp":  true,
 
