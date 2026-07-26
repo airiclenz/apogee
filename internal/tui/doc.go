@@ -120,6 +120,30 @@
 // machine is untouched and only statusLine's running branch consults it. The per-tool verb it
 // renders comes from the same open registry toolpresent.go already keys by tool name.
 //
+// spinner.go paints the glyph that phrase runs beside, and the animation is this package's own
+// rather than a charm.land/bubbles/v2/spinner widget: the widget renders frames[i] through one
+// fixed style, which leaves no room for a glyph CHOSEN per frame or a colour COMPUTED per frame,
+// and the styles need both. Three animations live in one registry keyed by [SpinnerStyle] — snake
+// (six dots walking the outer ring of the 4×4 dot grid two braille cells form side by side, a lap
+// a second), glitter (the braille block sorted by density, re-rolled at 20 fps under a six-second
+// breath), and classic, the eight-cell rotation apogee shipped before, which stays a first-class
+// choice rather than a deprecated fallback — while the eight-second Oklch colour loop is a FLAG
+// beside the style, never a property of one, so all six style × colour combinations render and
+// [spinnerAnim.view] is the single place the two compose. cmd/apogee's file-only `ui:` block
+// selects both ([Options.Spinner], [Options.SpinnerColor]); theme.go keeps only the field the
+// glyph is painted on (spinnerBase), not the frames.
+//
+// Every frame is a pure function of a frame counter, and that is ADR 0011 rather than taste: the
+// Model is copied on every Update, so the animation state may hold no RNG handle — a *rand.Rand
+// would be shared across the copies and advance from the ones Update discards, so the same frame
+// would paint differently depending on how often View ran — which is why glitter HASHES
+// (frame, cell) into its density bucket instead of drawing from a generator, and why the state is
+// four plain ints. What the widget did give for free is chain safety: its TickMsg carried a tag,
+// so re-arming while a tick was still in flight could not leave two chains running. [spinnerAnim]
+// reproduces that as a generation counter — arm opens a new generation and the Update loop drops a
+// tick carrying an older one — which is what keeps the frame rate from doubling after an approval
+// prompt or an ask_user question re-arms the chain.
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the three
@@ -173,6 +197,20 @@
 // change, not a contract, and this package may reword without touching a tool.
 // toolsummary_pin_test.go executes all seven summary-bearing tools for real and asserts the
 // rendered line — the cross-package pin the old regexes never had.
+//
+// The rest of the package, one line each, so this narration names every file in it: tui.go is the
+// seam boundary the binary sees ([Run], [Options], and the [Engine], [SkillCatalog] and
+// [SessionHost] interfaces); bridge.go the late-bound programRef every seam sends the running
+// program through; sink.go the Event→Msg [teaSink]; messages.go the plain values those sends carry
+// into Update; approver.go and asker.go the two cross-goroutine rendezvous that park a Step on a
+// human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); worker.go the
+// cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the
+// layout, the status line and the footer; theme.go the palette, the marker glyphs, and the
+// lipgloss styles; transcript.go the append-only scrollback model and transcriptcodec.go its
+// versioned wire form inside a saved session record; sessions.go the /sessions history browser and
+// popup.go the one bordered pane every overlay — that browser, the autocomplete dropdown, the ask
+// and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
+// this narration.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole

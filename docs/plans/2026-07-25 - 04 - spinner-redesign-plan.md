@@ -555,7 +555,25 @@ move. Do not thread config into the theme.
 
 ---
 
-## 6. Documentation
+## 6. Documentation — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): three deviations from the literal item text, all documentation-only.
+(a) There is no "file list around L14-17" in `internal/tui/doc.go`, and doc.go never described
+theme.go as holding "the spinner frames" — that claim lived in theme.go's own header comment, which
+item 1 already corrected (it now points at spinner.go). The spinner narration therefore landed as
+two paragraphs beside activity.go's, the other status-line file, and it states there that theme.go
+keeps only `spinnerBase`, not the frames.
+(b) The acceptance "doc.go's narration names every non-test file" did **not** hold before this item:
+13 pre-existing files were never named (approver, asker, bridge, logo, messages, popup, sessions,
+sink, theme, transcript, transcriptcodec, tui, doc — several were present only as a symbol such as
+`[teaSink]` or `[theme]`). One added "the rest of the package, one line each" paragraph names them
+all, so `ls internal/tui/*.go` against doc.go now comes back clean.
+(c) `layout.md`: the sketch row became `  ⠉⠹ reading · main.go · 3s` (snake's frame 0) with **one
+padding space dropped**, so the two-column glyph leaves the gauge in the same columns and the
+sketch's 85-column width is unchanged. The `ui.spinner` note landed as a short new
+"## The status line's spinner" section at the end rather than in "the surrounding prose": the
+status-line row of the sketch has no prose of its own, and the file already annotates its sketch in
+trailing rule sections. The CHANGELOG was deliberately untouched — item 5 landed it (its NOTES (e)).
 
 **What.** The cross-cutting doc amendments this plan owes, gathered under one owning item
 (theme.go's own stale header comment is **not** here — item 1 owns it, next to the code it

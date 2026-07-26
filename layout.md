@@ -41,7 +41,7 @@
   chat content and the bottom prompt/information section like displayed here.
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-  ⣻ reading · main.go · 3s                                       16k 50% ██████     ]
+  ⠉⠹ reading · main.go · 3s                                      16k 50% ██████     ]
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Send a message… [Shift] + [Enter] creates a line break                              │
 │ This text box can be multiline. The text edit area auto increases height to         │
@@ -108,3 +108,25 @@ marker like any other detail line — nothing is clipped for alignment's sake.
 **Blank lines.** Exactly one empty line between blocks, never more. Assistant text is trimmed
 of its leading and trailing blank lines, and interior runs of two or more blank lines collapse
 to one — except inside a fenced code block, where blank lines are code and stay verbatim.
+
+---
+
+## The status line's spinner
+
+**Which animation.** The two braille cells opening the running status line above are the `snake`
+style, the default: six dots walking the outer ring of the 4×4 dot grid two cells form side by
+side, one lap a second. `ui.spinner` in `config.yaml` selects the animation — `snake`, `glitter`
+(a pair of cells re-rolled twenty times a second out of the braille block sorted by density,
+under a six-second swell to a solid `⣿⣿` and back), or `classic`, the single-cell `⣾⣽⣻⢿⡿⣟⣯⣷`
+rotation apogee shipped before and still supports. Only `classic` is one column wide; the other
+two are two, which shifts the activity phrase one column right of the sketch's older single-cell
+`⣻`. The phrase and the elapsed clock beside it are the same for every style.
+
+**Which colour.** `ui.spinner-color` runs a soft eight-second loop through three palette tones
+(periwinkle → turquoise → blue → back) over whichever style is selected; with it off, the glyph
+keeps the terminal's own text colour on the status bar's black field. The two keys are
+independent — every style renders both coloured and plain — so picking `classic` does not turn
+the loop off, and `classic` with the loop off is exactly the status line apogee rendered before
+the styles existed. The loop is quantised downstream by the terminal, so on a 256-colour
+terminal it steps visibly and on a 16-colour one it collapses to a couple of tones; that is what
+turning it off is for.
