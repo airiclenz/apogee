@@ -462,8 +462,11 @@ yet.
   a session written before this change still reopens identically.
 
 **Acceptance:** gates green;
-`grep -n "reReadRange\|reWriteBytes\|reListEntries\|reGrepMatches\|reSearchHit\|detailFromPattern\|grepDetail\|searchDetail\|openFileDetail\|diffDetail" internal/tui/`
-is **empty**; `grep -c "regexp" internal/tui/toolpresent.go` shows the import is **gone**;
+`grep -rnw "reReadRange\|reWriteBytes\|reListEntries\|reGrepMatches\|reSearchHit\|detailFromPattern\|grepDetail\|searchDetail\|openFileDetail\|diffDetail" internal/tui/`
+is **empty** — `-w` (whole word) is required, not decoration: without it `diffDetail` matches the
+`diffDetailCap` constant this item deliberately keeps, so the check could never pass; `-r` because
+the argument is a directory; `grep -c "regexp" internal/tui/toolpresent.go` shows the import is
+**gone**;
 `toolpresent_test.go`'s `wantDetail` literals are unchanged in the diff (check the diff, not
 the file). Commit: `refactor(tui): the view reads a tool's outcome instead of re-parsing it`.
 
