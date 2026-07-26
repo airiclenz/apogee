@@ -614,7 +614,45 @@ Commit: `test(security): pin the SSRF floor's fail-closed and numeric-encoding p
 
 ---
 
-## 8. M-1 — normalise the URL once, so the guard checks what the transport dials
+## 8. M-1 — normalise the URL once, so the guard checks what the transport dials — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): The normal form is defined **once**, in `internal/security` as the exported
+`NormalizeURL(raw) (*url.URL, error)`, and is called from both `URLGuard.CheckContext` and the top
+of `networkTool.do` — rather than being written inline in `do` as the item's literal text says.
+Two things forced it: (1) the item's own required `TestURLGuard_Check` rows demand that the **guard
+alone** block `https://example.com.` and a Unicode host, which is only true if `CheckContext`
+normalises; (2) `internal/mcp/transport.go:144` checks its endpoint through the same guard and then
+dials it through the MCP SDK, so a `internal/tools`-local normaliser would have left that path
+divergent. Writing it in both places is exactly the "second parse that can disagree" the item
+forbids. **Acceptance greps move accordingly:** `grep -n "TrimSpace\|ToASCII"
+internal/security/urlsafety.go` shows the single normalisation site; `grep -n "NormalizeURL"
+internal/tools/network.go` shows `do` calling it; `grep -n "req.url" internal/tools/network.go`
+shows the request built from `target` (the normalised string), not from `req.url`. Five further
+departures: (1) `security.NormalizeURL` is a **new exported symbol in an internal package** — judged
+*not* a Public-API change under the plan's intro, since ADR 0010 makes the public API the root
+`apogee` facade, `internal/*` is not importable by embedders, and no alias, `apogee.go` edit or ADR
+0010 bump is involved. (2) The dependency the item flagged was taken: `golang.org/x/net` is now a
+direct requirement, pinned at **v0.55.0** rather than `@latest` (v0.57.0), because v0.57.0 drags
+`golang.org/x/sys` from v0.45.0 to v0.47.0 and v0.55.0 is the newest release that leaves every
+existing requirement untouched; `golang.org/x/text v0.37.0` comes in indirect. No punycode was
+hand-rolled. (3) `idna.Lookup.ToASCII` is applied **only to a non-ASCII host**, and a mapping
+failure keeps the original — mirroring `net/http`'s `canonicalAddr`/`idnaASCII` exactly, so the
+checked name and the dialled name stay the same string even when IDNA refuses. (4) An unparseable
+URL is passed to `CheckContext` **unchanged** instead of getting its own wording in `do`: the guard
+already owns that message (and item 9 owns fixing it), so duplicating it in the funnel would have
+put item 9's fix out of reach. (5) `safeHost` — the host-only failure **label** — is deliberately
+left un-normalised: it feeds no request and no guard call, so it creates no check/dial divergence,
+and touching it would move M2 message wording. **Mutation check (performed, both halves):**
+(A) reverting `CheckContext` to `url.Parse(strings.TrimSpace(raw))` + `strings.ToLower(u.Hostname())`
+turns **four** new `TestURLGuard_Check` rows red (both root-dot rows, both Unicode rows) — the
+`upper-case host is denied` row stays green, correctly, because the pre-fix code already
+lower-cased; it guards the lowercase step surviving the move into `NormalizeURL`. (B) reverting
+`do` to check and build from `req.url` turns `TestNetworkFunnel_DoDialsTheURLTheGuardChecked` red on
+exactly the item's whitespace claim — *"could not build request for host LOCALHOST.: parse: first
+path segment in URL cannot contain colon"*. Recorded as a second observation:
+`TestNetworkFunnel_DoTrailingDotDoesNotEscapeTheDenyList` stays **green** under (B), because the
+guard's own normalisation already refuses it — the two tests pin different halves on purpose (the
+deny row pins the guard, the observed-`Host`-header row pins the funnel), and neither is redundant.
 
 **Ordering:** this item and items 9–10 are the **normalisation group** and **must land before** the
 parked url-safety config key at **`TODO.md:285`** ("Dedicated url-safety config key for the network

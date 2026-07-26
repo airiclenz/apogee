@@ -7,6 +7,9 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/net/idna"
 )
 
 // ----------------------------------------------------------------------------
@@ -80,13 +83,14 @@ func (g URLGuard) Check(raw string) error {
 }
 
 // CheckContext is Check with a caller-supplied ctx for the SSRF floor's host resolution, so
-// a slow/blocked DNS lookup is cancellable. It runs in order: parse, scheme allow, host
+// a slow/blocked DNS lookup is cancellable. It runs in order: normalise (NormalizeURL — the
+// guard judges the same string the transport dials), scheme allow, host
 // deny/allow (string-level), then the resolved-IP SSRF floor (the default-on tighten-only
 // safety net — loopback / IMDS / private / link-local denied by RESOLVED IP, ssrf.go). The
 // floor is the pre-flight half of the defence; SafeDialControl re-checks the connected IP at
 // dial time to close DNS-rebinding (ssrf.go).
 func (g URLGuard) CheckContext(ctx context.Context, raw string) error {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	u, err := NormalizeURL(raw)
 	if err != nil {
 		return fmt.Errorf("%w: unparseable url: %v", ErrURLBlocked, err)
 	}
@@ -99,7 +103,9 @@ func (g URLGuard) CheckContext(ctx context.Context, raw string) error {
 		return fmt.Errorf("%w: scheme %q is not permitted", ErrURLBlocked, scheme)
 	}
 
-	host := strings.ToLower(u.Hostname())
+	// Already lower-cased, IDNA-mapped and root-dot-stripped by NormalizeURL: the string
+	// matched here is the string the transport will dial.
+	host := u.Hostname()
 	if hostMatches(host, g.DenyHosts) {
 		return fmt.Errorf("%w: host %q is denied", ErrURLBlocked, host)
 	}
@@ -113,6 +119,67 @@ func (g URLGuard) CheckContext(ctx context.Context, raw string) error {
 		}
 	}
 	return nil
+}
+
+// NormalizeURL parses raw and returns it in the ONE form that both this guard and Go's
+// transport agree on, so a caller can check and then request the same string. Three
+// divergences made "the URL the guard judged" and "the URL the transport dialled" different
+// names before it existed:
+//
+//   - whitespace — the guard parsed the TRIMMED string while the request was built from the
+//     untrusted one, which then failed to parse at all;
+//   - Unicode — net/http's canonicalAddr runs a non-ASCII host through idna.Lookup.ToASCII
+//     before dialling, so http://ⓖxample.com/ was checked as "ⓖxample.com" and dialled as
+//     "gxample.com";
+//   - the DNS root dot — "evil.com." and "evil.com" resolve identically and virtually every
+//     virtual-host server accepts both, but they are different strings to a deny-list match,
+//     so appending one dot defeated a DenyHosts entry.
+//
+// The normal form is: whitespace-trimmed, host IDNA-mapped (only when non-ASCII, exactly as
+// net/http does, and left as-is when the mapping fails so the two still agree), lower-cased,
+// with a single trailing root dot removed. Everything else — scheme, userinfo, port, path,
+// query — is untouched. A parse failure is returned as-is; the caller decides the wording.
+func NormalizeURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, err
+	}
+
+	host := u.Hostname()
+	if host == "" {
+		return u, nil
+	}
+	if !isASCII(host) {
+		// net/http.canonicalAddr converts ONLY a non-ASCII host, and keeps the original when
+		// the conversion fails — mirroring that exactly is what keeps the checked name and
+		// the dialled name the same string whatever idna says.
+		if mapped, mapErr := idna.Lookup.ToASCII(host); mapErr == nil {
+			host = mapped
+		}
+	}
+	host = strings.ToLower(host)
+	if len(host) > 1 && strings.HasSuffix(host, ".") {
+		host = host[:len(host)-1]
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]" // an IPv6 literal keeps its brackets inside URL.Host
+	}
+	if port := u.Port(); port != "" {
+		host += ":" + port
+	}
+	u.Host = host
+	return u, nil
+}
+
+// isASCII reports whether s is entirely ASCII — the same test net/http applies before
+// deciding whether a host needs IDNA conversion at all.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // schemeAllowed reports whether scheme is in allow (or the http/https default when

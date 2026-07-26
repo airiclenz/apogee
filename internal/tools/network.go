@@ -93,10 +93,11 @@ func IsURLFilteredNetworker(t domain.Tool) bool {
 
 // netRequest is one outbound call as a tool describes it; the funnel — never the tool —
 // turns it into an http.Request, so neither the guard nor the timeout ceiling can be
-// skipped. url is the URL actually requested and may carry a query and a config'd API key,
-// so it is never surfaced: safeLabel is the host-only string every failure message names.
+// skipped. url is the URL as the tool spells it — the funnel normalises it once and both
+// checks and requests that one form — and it may carry a query and a config'd API key, so it
+// is never surfaced: safeLabel is the host-only string every failure message names.
 type netRequest struct {
-	url       string        // the URL actually requested (guard-checked; never surfaced)
+	url       string        // the URL the tool asks for (normalised, then guard-checked; never surfaced)
 	method    string        // empty ⇒ GET
 	body      io.Reader     // nil ⇒ no request body
 	header    http.Header   // nil ⇒ no caller-supplied headers
@@ -116,9 +117,10 @@ type netResponse struct {
 	truncated  bool
 }
 
-// do is the single path from a tool to the network: it applies url-safety (pre-flight and,
-// through the client, at dial time), builds and sends the request, and reads the capped
-// body. It returns exactly one of three shapes:
+// do is the single path from a tool to the network: it normalises the URL once, applies
+// url-safety to that one form (pre-flight and, through the client, at dial time), builds and
+// sends the request from the same form, and reads the capped body. It returns exactly one of
+// three shapes:
 //
 //   - (resp, "", nil) — the request completed with ANY status; a non-2xx is the tool's own
 //     policy to decide, not the funnel's;
@@ -141,9 +143,19 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 		label = safeHost(req.url)
 	}
 
+	// Normalise ONCE, here, and use the result for BOTH the guard and the request: the guard
+	// must judge the string the transport actually dials, or its verdict is about a different
+	// name than the one reached (M-1). NormalizeURL is the guard's own normal form, so an
+	// unparseable URL needs no second wording here — it is passed through untouched and the
+	// CheckContext below refuses it with the guard's message.
+	target := req.url
+	if normalized, err := security.NormalizeURL(req.url); err == nil {
+		target = normalized.String()
+	}
+
 	// Pre-flight url-safety (scheme/host + the resolved-IP SSRF floor). The dial-time floor
 	// (SafeDialControl, inside the client) is the rebinding backstop below.
-	if err := n.guard.CheckContext(ctx, req.url); err != nil {
+	if err := n.guard.CheckContext(ctx, target); err != nil {
 		return netResponse{}, blockedMessage(label, err, req.url), nil
 	}
 
@@ -153,7 +165,7 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	if method == "" {
 		method = http.MethodGet
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, req.url, req.body)
+	httpReq, err := http.NewRequestWithContext(ctx, method, target, req.body)
 	if err != nil {
 		return netResponse{}, "could not build request for host " + label + ": " + scrubURLError(err, req.url), nil
 	}

@@ -213,6 +213,21 @@ point is a **minor** bump, not a breaking change.
   nothing there. See [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md) (amendment
   2026-07-26).
 
+- **A URL is now normalised once, so url-safety judges the name the transport actually dials.** The
+  guard parsed the whitespace-trimmed URL and lower-cased its host before matching the allow/deny
+  lists, but the request was built from the string exactly as it arrived — and Go's transport
+  applies its own IDNA mapping before connecting. Three spellings therefore reached a host the guard
+  had judged under a *different* name: a **trailing DNS root dot** (`evil.com.` resolves exactly as
+  `evil.com` and virtually every virtual-host server accepts it, yet it matched no `DenyHosts` entry
+  spelled without the dot — one appended character defeated a denial), a **Unicode host**
+  (`http://ⓖxample.com/` was checked as `ⓖxample.com` and dialled as `gxample.com`), and
+  **leading/trailing whitespace** (checked trimmed, then unable to build the request at all). The
+  network funnel now normalises once — trim, IDNA-map a non-ASCII host exactly as `net/http` does,
+  lower-case, drop a single root dot — and both checks and requests that one form; the guard applies
+  the same normal form on its own, so the MCP endpoint check is covered too. No shipped
+  configuration populates `AllowHosts`/`DenyHosts` yet, so this was **latent rather than live** — it
+  is fixed ahead of the config key that would make it live.
+
 - **The ask and approval prompts escape-strip all model-authored text before rendering.** The ask
   question and its choices, and the approval tool name, reason, and arguments, are stripped of the
   terminal escape (`ESC`) byte at the point they enter the popup, closing a gap where untrusted

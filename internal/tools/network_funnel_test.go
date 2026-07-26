@@ -344,6 +344,75 @@ func serverPort(t *testing.T, srv *httptest.Server) string {
 	return u.Port()
 }
 
+// TestNetworkFunnel_DoDialsTheURLTheGuardChecked is the funnel half of the normalisation
+// group (M-1): the string the guard judged and the string the transport dials must be the
+// same one. The URL below is padded with whitespace, spells its host in upper case and ends
+// it with the DNS root dot — three spellings that used to diverge (the guard parsed the
+// TRIMMED url while the request was built from the padded one, which then failed to parse at
+// all). The proof is the server's OBSERVED Host header, not the funnel's internals.
+func TestNetworkFunnel_DoDialsTheURLTheGuardChecked(t *testing.T) {
+	t.Parallel()
+
+	var gotHost string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		_, _ = w.Write([]byte("normalised"))
+	}))
+	defer srv.Close()
+
+	// The server binds 127.0.0.1; addressing it by NAME is what makes the host spelling
+	// (case, root dot) observable — an IP literal has none of those forms.
+	port := serverPort(t, srv)
+	resp, msg, err := newFunnelTool(loopbackGuard()).do(context.Background(), netRequest{
+		url: "  http://LOCALHOST.:" + port + "/page  ",
+	})
+	if err != nil {
+		t.Fatalf("do Go error: %v", err)
+	}
+	if msg != "" {
+		t.Fatalf("a URL the guard passed must also BUILD: %q", msg)
+	}
+	if want := "localhost:" + port; gotHost != want {
+		t.Errorf("server saw Host %q, want %q — the transport must dial the normalised host the guard checked", gotHost, want)
+	}
+	if resp.body != "normalised" {
+		t.Errorf("resp body = %q, want %q", resp.body, "normalised")
+	}
+}
+
+// TestNetworkFunnel_DoTrailingDotDoesNotEscapeTheDenyList is the exposure the normalisation
+// closes, driven end to end: "localhost." resolves exactly as "localhost" does and virtually
+// every virtual-host server accepts it, but it matches no DenyHosts entry spelled without the
+// dot — so one appended character used to turn a denied host into a reachable one. The
+// load-bearing assertion is that the handler is NEVER reached.
+func TestNetworkFunnel_DoTrailingDotDoesNotEscapeTheDenyList(t *testing.T) {
+	t.Parallel()
+
+	var reached atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached.Add(1)
+		_, _ = w.Write([]byte("the denied page"))
+	}))
+	defer srv.Close()
+
+	guard := security.URLGuard{DenyHosts: []string{"localhost"}}.DisableIPFloor()
+	resp, msg, err := newFunnelTool(guard).do(context.Background(), netRequest{
+		url: "http://localhost.:" + serverPort(t, srv) + "/page",
+	})
+	if err != nil {
+		t.Fatalf("a blocked URL must not be a Go error: %v", err)
+	}
+	if got := reached.Load(); got != 0 {
+		t.Errorf("the handler was reached %d time(s): a denied host must never be CONNECTED to, however it is spelled", got)
+	}
+	if !strings.Contains(msg, "url-safety") || !strings.Contains(msg, "denied") {
+		t.Errorf("the refusal must come from the deny list, not from an incidental failure: %q", msg)
+	}
+	if resp.statusCode != 0 || resp.body != "" {
+		t.Errorf("a blocked call must yield the zero netResponse; got %+v", resp)
+	}
+}
+
 // TestBlockedMessage_StatesTheBlockOnce pins the wording of a url-safety block: the message
 // states "url blocked by url-safety" EXACTLY once. Every guard error already carries the
 // security.ErrURLBlocked sentinel text ("security: url blocked by url-safety") in its own
