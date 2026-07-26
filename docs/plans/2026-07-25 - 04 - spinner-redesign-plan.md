@@ -250,7 +250,7 @@ does today.
 
 ---
 
-## 2. The snake style (owner idea 2)
+## 2. The snake style (owner idea 2) — ✅ DONE (2026-07-26)
 
 **What.** Two braille cells side by side form a 4-column × 4-row dot grid; a 6-dot snake walks
 the 12 positions of its outer ring clockwise, one position per frame.

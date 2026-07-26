@@ -82,6 +82,51 @@ func classicGlyph(frame int) string {
 	return classicFrames[frame%len(classicFrames)]
 }
 
+// brailleBase is the braille block's origin: a cell is U+2800 plus the mask of the dots it lights,
+// so U+2800 on its own is the blank cell — a PAINTED cell with no dots, not a space, which is what
+// keeps a partly-empty frame from being trimmed as padding.
+const brailleBase = 0x2800
+
+// brailleDotBits maps a dot's place inside one braille cell — the cell's own column, then the row —
+// onto its bit in that cell's mask. The block numbers its dots down the left column and then down
+// the right (1,2,3 then 4,5,6) with the two low-vision dots 7 and 8 appended afterwards, which is
+// why the fourth row jumps to 0x40/0x80 instead of continuing the run.
+var brailleDotBits = [2][4]rune{
+	{0x01, 0x02, 0x04, 0x40}, // the cell's left column:  dots 1, 2, 3, 7
+	{0x08, 0x10, 0x20, 0x80}, // the cell's right column: dots 4, 5, 6, 8
+}
+
+// snakeRing walks the outer ring of the 4-column × 4-row dot grid that two braille cells form side
+// by side, clockwise from the top-left, as (col, row) with cols 0–1 in the left cell and cols 2–3
+// in the right. The frames are DERIVED from this table rather than hand-written — the table is the
+// documentation of the shape — and TestSnakeFrames pins the twelve glyphs it derives, so the
+// literals are the guard and this is the explanation.
+var snakeRing = [12]struct{ col, row int }{
+	{0, 0}, {1, 0}, {2, 0}, {3, 0}, // across the top, left to right
+	{3, 1}, {3, 2}, {3, 3}, // down the right edge
+	{2, 3}, {1, 3}, {0, 3}, // back across the bottom, right to left
+	{0, 2}, {0, 1}, // up the left edge, closing the lap
+}
+
+// snakeLength is how much of the ring is lit at once: six of its twelve positions, so the snake is
+// exactly half the ring and reads as one continuous arc with a visible gap behind its tail.
+const snakeLength = 6
+
+// snakeInterval gives the ring one lap a second — twelve positions, one position per frame.
+const snakeInterval = time.Second / time.Duration(len(snakeRing))
+
+// snakeGlyph paints snake's frame n: the six-position run of the ring starting at position n,
+// wrapping, folded back into the two braille cells that carry it. frame is never negative (arm
+// zeroes it and a tick only increments it), so the modulo needs no guard.
+func snakeGlyph(frame int) string {
+	cells := [2]rune{brailleBase, brailleBase}
+	for i := 0; i < snakeLength; i++ {
+		dot := snakeRing[(frame+i)%len(snakeRing)]
+		cells[dot.col/2] |= brailleDotBits[dot.col%2][dot.row]
+	}
+	return string(cells[:])
+}
+
 // spinnerSpec is one style's animation, as data: how long a single frame is held, how many
 // terminal columns its glyph occupies, and the pure function that paints frame n.
 type spinnerSpec struct {
@@ -94,6 +139,7 @@ type spinnerSpec struct {
 // the set TestSpinnerFrameWidth sweeps. A style declared above but absent here is a name this
 // build parses without yet having an animation for it; [spinnerAnim.spec] resolves it to classic.
 var spinnerSpecs = map[SpinnerStyle]spinnerSpec{
+	SpinnerSnake:   {interval: snakeInterval, width: 2, glyph: snakeGlyph},
 	SpinnerClassic: {interval: classicInterval, width: 1, glyph: classicGlyph},
 }
 

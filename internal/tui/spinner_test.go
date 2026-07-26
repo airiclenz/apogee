@@ -105,6 +105,131 @@ func TestSpinnerStyleFallsBackToClassic(t *testing.T) {
 	}
 }
 
+// snakeFrames are the twelve glyphs the ring derivation must produce, in order. They live in the
+// test rather than in spinner.go on purpose: snakeRing is the documentation of the shape and these
+// literals are the guard that the shape actually renders as intended, so a slip in the ring table,
+// the dot bits or the wrap would fail here instead of quietly changing the animation.
+var snakeFrames = []string{
+	"⠉⠹", "⠈⢹", "⠀⣹", "⢀⣸", "⣀⣰", "⣄⣠",
+	"⣆⣀", "⣇⡀", "⣏⠀", "⡏⠁", "⠏⠉", "⠋⠙",
+}
+
+// snakeInterior is the four inner positions of the 4×4 dot grid — everything the ring is not. The
+// grid holds sixteen positions and the ring is the other twelve, so "every lit dot is on the ring"
+// is exactly "no lit dot is one of these". Written out here rather than derived from snakeRing so
+// TestSnakeIsSixDotsOnTheRing checks the production table instead of restating it.
+var snakeInterior = map[[2]int]bool{
+	{1, 1}: true, {2, 1}: true, {1, 2}: true, {2, 2}: true,
+}
+
+// brailleBitPositions maps a cell mask's bits back onto the (column, row) each one lights, taken
+// from the Unicode block's own dot numbering rather than read off brailleDotBits, so the tests that
+// decode a rendered frame are independent of the table that encoded it.
+var brailleBitPositions = map[rune][2]int{
+	0x01: {0, 0}, 0x02: {0, 1}, 0x04: {0, 2}, 0x40: {0, 3},
+	0x08: {1, 0}, 0x10: {1, 1}, 0x20: {1, 2}, 0x80: {1, 3},
+}
+
+// litDots decodes one rendered snake frame into the grid positions it lights, as global (col, row)
+// with the left cell carrying cols 0–1 and the right cols 2–3.
+func litDots(t *testing.T, glyph string) [][2]int {
+	t.Helper()
+
+	cells := []rune(glyph)
+	if len(cells) != 2 {
+		t.Fatalf("glyph %q is %d cells, want the two that form the 4x4 grid", glyph, len(cells))
+	}
+	var dots [][2]int
+	for cell, r := range cells {
+		mask := r - brailleBase
+		if mask < 0 || mask > 0xFF {
+			t.Fatalf("cell %d of %q is %U, outside the braille block", cell, glyph, r)
+		}
+		for bit, pos := range brailleBitPositions {
+			if mask&bit != 0 {
+				dots = append(dots, [2]int{cell*2 + pos[0], pos[1]})
+			}
+		}
+	}
+	return dots
+}
+
+// TestSnakeFrames pins the twelve glyphs the ring derivation produces, in order, and the rate that
+// makes them one lap a second. It goes through newSpinnerAnim so the registry wiring is covered
+// too: a style that derives its frames correctly but is registered at the wrong interval — or not
+// registered at all, which falls back to classic — fails here.
+func TestSnakeFrames(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme()
+	s := newSpinnerAnim(SpinnerSnake, false)
+	if got, want := s.interval(), time.Second/12; got != want {
+		t.Errorf("snake interval = %v, want %v (twelve positions, one lap a second)", got, want)
+	}
+
+	for frame, want := range snakeFrames {
+		s.frame = frame
+		got := s.glyph()
+		if got != want {
+			t.Errorf("frame %d = %q, want %q", frame, got, want)
+		}
+		if width := ansi.StringWidth(got); width != 2 {
+			t.Errorf("frame %d is %d columns wide, want 2", frame, width)
+		}
+		if rendered := s.view(th); !strings.Contains(rendered, want) {
+			t.Errorf("frame %d renders %q, which does not carry the glyph %q", frame, rendered, want)
+		}
+	}
+}
+
+// TestSnakeIsSixDotsOnTheRing proves the animation is the walk it claims to be rather than twelve
+// glyphs that merely happen to look like one: every frame lights exactly six dots, and every one of
+// them is on the ring. An interior dot would break the illusion of a single arc travelling the edge.
+func TestSnakeIsSixDotsOnTheRing(t *testing.T) {
+	t.Parallel()
+
+	s := newSpinnerAnim(SpinnerSnake, false)
+	// Two laps: the frame counter only grows, so the wrap has to hold as well as the first pass.
+	for frame := 0; frame < 2*len(snakeRing); frame++ {
+		s.frame = frame
+		dots := litDots(t, s.glyph())
+		if len(dots) != snakeLength {
+			t.Errorf("frame %d lights %d dots, want the snake's %d", frame, len(dots), snakeLength)
+		}
+		for _, dot := range dots {
+			if snakeInterior[dot] {
+				t.Errorf("frame %d lights (%d,%d), which is inside the grid rather than on its ring",
+					frame, dot[0], dot[1])
+			}
+		}
+	}
+}
+
+// TestSnakeCycles proves the lap closes and never stalls: the twelve frames are all different — a
+// repeat would read as the snake pausing — and frame 12 is frame 0 again.
+func TestSnakeCycles(t *testing.T) {
+	t.Parallel()
+
+	s := newSpinnerAnim(SpinnerSnake, false)
+	seen := make(map[string]int, len(snakeRing))
+	for frame := 0; frame < len(snakeRing); frame++ {
+		s.frame = frame
+		glyph := s.glyph()
+		if prev, dup := seen[glyph]; dup {
+			t.Errorf("frame %d repeats frame %d's glyph %q — the snake would appear to stall",
+				frame, prev, glyph)
+		}
+		seen[glyph] = frame
+	}
+
+	s.frame = 0
+	first := s.glyph()
+	s.frame = len(snakeRing)
+	if got := s.glyph(); got != first {
+		t.Errorf("frame %d = %q, want frame 0's %q — the lap must close", len(snakeRing), got, first)
+	}
+}
+
 // TestSpinnerTickChainGeneration proves the guard the bubbles widget's tag mechanism gave for
 // free: only the live chain's ticks advance the spinner. Without it, re-arming while a tick is
 // still in flight (an approval answered, an ask replied to) leaves two chains running and the
