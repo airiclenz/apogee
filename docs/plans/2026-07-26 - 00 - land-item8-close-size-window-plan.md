@@ -309,7 +309,16 @@ reader, the `SafeStat` deletion, and the two `statat`→`openat` message deltas)
 
 ---
 
-## 3. Close the parent plan and the 2026-07-24 review
+## 3. Close the parent plan and the 2026-07-24 review — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): the parent's execution-state record was already committed as `704bd8c` before
+this run, so this commit carries only the close-out edits made here — the "until-now-uncommitted
+execution-state record" clause is moot. Beyond the named sections, stale mid-run lines that would
+have contradicted the close were dated-closed rather than left standing: the parent's header
+**Status:** line, its "Nine of the ten items landed" table intro, and a superseded-pointer before
+its verification preamble; and the review's title line and "Ledger" paragraph — the latter two
+deferred to this rewrite by the parent's item 5 NOTES (b). Item 2 was NOT dropped, so the
+bracketed clauses were used.
 
 Docs only. This is the parent's own close-out (its verification steps), runnable at last because
 item 8 is landed. **If the owner dropped item 2**, everything below still runs — the ledger and

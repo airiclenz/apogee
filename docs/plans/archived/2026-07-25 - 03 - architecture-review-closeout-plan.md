@@ -1,12 +1,14 @@
 # Plan — Close the architecture deepening review: structured tool results, one Event fold, four small deepenings
 
 **Date:** 2026-07-25
-**Status:** **LIVE, NOT ARCHIVED — executed 2026-07-25/26. Items 1–7, 9 and 10 landed; item 8 was
-attempted twice, failed verification both times and was then SKIPPED by the owner, and its
-implementation is still sitting UNCOMMITTED in the working tree.** This document is the resume
-state: the per-item ledger, the four landed follow-up fixes, the open nit-grade findings and the
-outstanding owner calls are in **Execution state (2026-07-26)** below. (Scope and the two shape
-decisions were resolved with the owner 2026-07-25 — the original READY state.)
+**Status:** **DONE & ARCHIVED (2026-07-26) — executed 2026-07-25/26.** Items 1–7, 9 and 10 landed
+in the recorded run; item 8 — attempted twice, failed verification both times, then SKIPPED by the
+owner — landed 2026-07-26 via its follow-on plan,
+`2026-07-26 - 00 - land-item8-close-size-window-plan.md` (see item 8's resolution note). The
+per-item ledger, the four landed follow-up fixes, the nit-grade findings and the outstanding owner
+calls are in **Execution state (2026-07-26)** below; the whole-plan verification results are the
+dated block in the verification section. (Scope and the two shape decisions were resolved with the
+owner 2026-07-25 — the original READY state.)
 **Source:** the **whole remaining** ledger of
 `docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md` — candidate **03**
 ("Hand the view structured tool results", *Strong*, the review's own top remaining pick),
@@ -50,8 +52,9 @@ after any completed item and the tree is coherent.
 
 ## Execution state (2026-07-26)
 
-**Nine of the ten items landed**, each on its own green gate and each verified by an independent
-agent before its commit, in plan order:
+**Nine of the ten items landed in the recorded run**, each on its own green gate and each verified
+by an independent agent before its commit, in plan order — and item 8 landed after it, 2026-07-26,
+via its follow-on plan, so all ten are now in:
 
 | item | commit | what landed |
 | --- | --- | --- |
@@ -62,7 +65,7 @@ agent before its commit, in plan order:
 | 5 | `8b1e980` | CONTEXT.md, the ADR 0002 + 0011 notes, CHANGELOG, both `doc.go`s, candidate 03's card |
 | 6 | `6c1f458` | one `foldEvent` owns the Event fold and its order |
 | 7 | `13681f4` | one shared `pathArgWriteTarget` body behind the four markers |
-| 8 | — | **NOT LANDED — skipped by the owner; see item 8's status record** |
+| 8 | `bd83326` + `c39e856` | landed 2026-07-26 via the follow-on plan: the fence with honest sentences, then one pinned handle closes the size window — see item 8's resolution note |
 | 9 | `f013d4d` | one POSIX argv-wrap helper for landlock and seatbelt |
 | 10 | `b9578a0` | the self-regulator's read model |
 
@@ -95,7 +98,9 @@ Four defects raised while the run was reviewed, each fixed and committed on its 
 ### Raised after the follow-ups, NOT fixed (nit-grade)
 
 Recorded rather than fixed: none changes behaviour, and each is a one-line doc correction for a
-later pass.
+later pass. **Annotated 2026-07-26:** two of the four — the safeio figure and the `load.go`
+citation — were resolved by `c39e856` (item 2 of item 8's follow-on plan); the `toolsummary.go`
+`Total` comment and the `workspace_scoped_test.go` notes remain open on this record.
 
 - **`internal/domain/toolsummary.go` L54–57** — the same comment `a73eed8` fixed is still loose
   about `Total`: it reads "how many entries the directory holds in total", but the number is the
@@ -104,7 +109,9 @@ later pass.
 - **`internal/security/safeio.go` L37** — the new SCOPE paragraph's "**849 of 4000**" over-bound
   reads is one probe's figure; an independent probe of the same window measured **136–160 of 4000**.
   What the number supports (the window exists) is not in doubt; the figure is probe-specific and
-  reads as if it were a constant.
+  reads as if it were a constant. **Resolved 2026-07-26 (`c39e856`):** the SCOPE paragraph was
+  rewritten for `SafeOpen`'s one-handle contract and the probe-specific figure went with it —
+  `grep -n "849" internal/security/safeio.go` is empty.
 - **`internal/tools/workspace_scoped_test.go`** — `c218670`'s reflect walk (`pathField`,
   `argJSONNames`) inspects **top-level fields only**, so an args struct that embedded its path field
   would fail the guard loudly rather than pass it silently; and its coverage guard iterates
@@ -113,9 +120,19 @@ later pass.
 - **`internal/skills/load.go` L21, L140–141** — cites `read_file`'s "stat-or-limit-before-
   materialize discipline" as the model for its own `io.LimitReader` path. That path is sound (one
   handle, bounded read); the citation is worth a word **if item 8 is ever revived**, because what
-  `read_file` actually does is the two-handle stat-then-read `f45a30a` scoped down.
+  `read_file` actually does is the two-handle stat-then-read `f45a30a` scoped down. **Resolved
+  2026-07-26 (`c39e856`):** `read_file` now opens, fstats and limit-reads through one handle, and
+  the citation reads "one-handle discipline" — true as written.
 
 ### Not archived, and what is still open
+
+**Update 2026-07-26: the plan is now closing.** Item 8 landed via its follow-on plan
+(`2026-07-26 - 00 - land-item8-close-size-window-plan.md`, commits `bd83326` + `c39e856`), the
+whole-plan verification is recorded in the dated results block of the verification section, the
+review's ledger rewrite (step 10) is done in the same commit as this note, and this document moves
+to `docs/plans/archived/`. The bullets below are the mid-run record, kept as written; of what they
+name, **two things remain outstanding and are the owner's**: the step-8 `VERSION` minor-bump call
+(recorded again, not taken, in the results block) and the manual TUI verification (last section).
 
 - **This plan is deliberately NOT archived.** Whole-plan verification step 10 ends in the archive,
   and item 8 is open, so the plan stays in `docs/plans/` as the resume state. A later
@@ -749,7 +766,7 @@ if a tool ever renames its path argument, this fails instead of the marker silen
 
 ---
 
-## 8. `read_file` and `open_file` read through the TOCTOU-safe primitives — ⚠️ NOT LANDED (SKIPPED by the owner 2026-07-26)
+## 8. `read_file` and `open_file` read through the TOCTOU-safe primitives — ✅ DONE (2026-07-26)
 
 **STATUS (2026-07-26): attempted twice, failed verification both times, then SKIPPED by the owner
 rather than retried a third time. Nothing from this item is committed.** Its implementation is
@@ -760,6 +777,16 @@ resumes has two honest choices: fix the three sentences named below and re-verif
 files and drop the item on the record. **The brief below (What / Error-message parity / Tests /
 Acceptance) is the original 2026-07-25 text and is unchanged — read it together with this record,
 because execution disproved part of it** (see *What execution disproved in the brief*).
+
+**RESOLUTION (2026-07-26): landed via the follow-on plan**
+(`2026-07-26 - 00 - land-item8-close-size-window-plan.md`), which took the remedy named below in
+both halves. The four over-claiming sentences — the three in this record plus a fourth it did not
+list, `internal/tools/path_safety.go`'s `safeStat` comment — were scoped to path resolution, and
+the item landed with no change beyond the twice-verified payload as **`bd83326`**; the size window
+itself was then closed by ONE handle — `security.SafeOpen` returns the pinned descriptor, the size
+check fstats it, the read drains it through `io.LimitReader(cap+1)`, and `SafeStat` is deleted
+with zero callers — as **`c39e856`**, the "real fix" this record named. Everything below this note
+is the mid-run record of the two failed attempts, kept as written.
 
 **Already proven, and to be kept by any later attempt:**
 
@@ -999,6 +1026,9 @@ report the count straight in the commit body); `go test ./internal/agent/...` gr
 
 ## Whole-plan verification (run after item 10, before declaring done)
 
+*(The paragraph below is the mid-run record; it is superseded by the dated results block after the
+steps.)*
+
 **Not completed — the plan is not done (see Execution state, 2026-07-26).** The steps below are the
 original close-out and are unchanged. Known state: **step 6** does not pass on `main` (item 8 is not
 landed, so `read_file.go` and `open_file.go` still call `os.Stat`/`os.ReadFile` at HEAD — the grep is
@@ -1033,6 +1063,42 @@ steps are unrun or unrecorded.
     section is rewritten to say the only thing still open from the 2026-07-24 review is the
     `/code-audit` on the live url-safety gap (plus `Request.InjectContext`, still deliberately
     un-grilled). Then archive this plan under `docs/plans/archived/`.
+
+### Results (2026-07-26 — run at last, after item 8 landed via its follow-on plan)
+
+Recorded against `main` at `c39e856` plus this commit's doc edits. Step 9's range is
+`d964460^..HEAD`, which includes the four follow-up fixes and item 8's two landing commits.
+
+1. **Full gate green** — all five commands plus item 9's two `GOOS=darwin` commands: `gofmt -l .`
+   empty; `go vet ./...` clean; `go test ./...` and `go test -race ./...` ok for every package;
+   `GOOS=windows` and `GOOS=darwin` builds ok; `GOOS=darwin go vet ./internal/platform/...` and
+   `GOOS=darwin go test -c ./internal/platform` ok.
+2. **The regexes are gone** — the step's grep over `internal/` returns nothing.
+3. **The view no longer parses results** — `grep -n "regexp" internal/tui/toolpresent.go` empty.
+4. **`toolsummary_pin_test.go` names all seven tools** — its case table and its coverage loop both
+   list `read_file`, `write_file`, `list_dir`, `grep`, `view_diff`, `web_search`, `open_file`.
+5. **One fold owner** — the only *calls* to `foldStats` / `transcript.apply(` / `foldActivity(` in
+   non-test files are `fold.go`'s; the remaining matches are `foldActivity`'s declaration and the
+   prose cross-references item 6's NOTES recorded.
+6. **Passes on `main` at last** — `grep -n "os.Stat\|os.ReadFile" internal/tools/read_file.go
+   internal/tools/open_file.go` is empty on a clean checkout of HEAD (item 8 landed as `bd83326`,
+   then `c39e856` replaced the stat-then-read pair with one pinned handle).
+7. **One argv wrapper** — the only `Setpgid` *assignment* is `confine_posix.go`'s
+   `setConfinedPgid`; the other matches are tests and the prose references item 9's NOTES recorded.
+8. **Outstanding owner call — recorded, not taken.** `VERSION` still reads `v0.8.4`; the additive
+   public surface of items 1–5 (`apogee.ToolSummary` and its seven variants, one optional
+   `ToolResult` field — a minor bump under ADR 0010) rides the next release unless the owner bumps
+   earlier. Nothing is decided here.
+9. **Line deltas per package, reported straight** (Go files, production / tests): `apogee.go`
+   +32 / — · `internal/domain` +96 / +80 · `internal/tools` +158 / +1,129 · `internal/tui`
+   +77 / +589 · `internal/agent` +63 / +63 · `internal/platform` +62 / +205 · `internal/security`
+   +24 / +104 · `internal/skills` +1 / —. The plan expected a net add and got one; the win is one
+   typed seam, one fold owner and four duplications removed — plus, beyond this plan's own brief,
+   the size-bound window closed through one pinned handle. Not a line count.
+10. **Done in the commit carrying this block** — the review's ledger holds ✅ notes for candidates
+    03 and 06 and all four smaller deepenings, its "Recommended next step" names only the two
+    parked items (the `/code-audit` on the live url-safety gap; the un-grilled
+    `Request.InjectContext`), and this plan is archived under `docs/plans/archived/`.
 
 ## Manual verification (owner — the automated suite cannot do this)
 

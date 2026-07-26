@@ -1,4 +1,4 @@
-# Handoff — Architecture deepening review: 7 candidates (01, 02, 04, 05 and 07 landed; 03 and 06 outstanding)
+# Handoff — Architecture deepening review: 7 candidates (all landed; ledger closed 2026-07-26)
 
 Date: 2026-07-24
 Session type: **review only** (`/improve-codebase-architecture`). No code changed, no plan
@@ -26,11 +26,14 @@ was folded into 04's plan as item 2, because a shared stack-validity checker is 
 Mechanism metadata is row-shaped, but it was built and committed standalone; **05 landed 2026-07-25**
 (`docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md`). Of the smaller
 deepenings, **session store lifecycle landed 2026-07-24** (absorbed by the session system, ADR 0022).
-**03 and 06 are still outstanding and un-grilled** — for each of
-those the next session's job is step 3 of the skill: pick a candidate,
-walk its design tree, and land side-effects inline (CONTEXT.md term if a deepened module names a new
-concept; an ADR if the owner rejects a candidate for a load-bearing reason; a saved plan doc if it
-graduates to implementation — see *Suggested skills*).
+**03 and 06 landed 2026-07-25** and the four remaining
+smaller deepenings landed 2026-07-25/26, all via
+`docs/plans/archived/2026-07-25 - 03 - architecture-review-closeout-plan.md` (its item 8 —
+`read_file`/`open_file` — via that plan's own follow-on,
+`2026-07-26 - 00 - land-item8-close-size-window-plan.md`; see the cards and the
+smaller-deepenings list for what was built). **The ledger is empty as of 2026-07-26** — the only
+parked items are the `/code-audit` on the live url-safety gap and the un-grilled
+`Request.InjectContext` (see *Recommended next step*).
 
 ## The spine is already deep — leave it alone
 
@@ -112,7 +115,7 @@ Explore agents and should be spot-checked before acting.
 - **Note:** additive to public `ToolResult` (minor bump under ADR 0010 stability; back-compatible
   with ADR 0002's open extension point — summary optional, prose fallback stays).
 - **Shape resolved 2026-07-25** →
-  `docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md`, items **1–5**. The summary is a
+  `docs/plans/archived/2026-07-25 - 03 - architecture-review-closeout-plan.md`, items **1–5**. The summary is a
   **sealed sum** in `domain` (`ToolSummary` + seven variants), sealed the way `Event` is, so an
   embedder can *read* every variant and *add* none. **Seven** tools carry one — the ones whose
   outcome the view re-derives (`read_file`, `write_file`, `list_dir`, `grep`, `view_diff`,
@@ -326,7 +329,7 @@ Explore agents and should be spot-checked before acting.
     owner call at close — recorded rather than split). That `TODO.md` entry — the one this
     card was raised against — is now closed, with its stale 581/572 figures corrected.
 
-### 06 — Decode each engine Event once · **Worth exploring**
+### 06 — Decode each engine Event once · **Worth exploring** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/tui/model.go` (`foldStats`), `transcript.go` (`apply`), `activity.go`
   (`foldActivity`).
 - **Problem:** one `domain.Event` folded through 3 independent type-switches in 3 files, with a
@@ -335,8 +338,8 @@ Explore agents and should be spot-checked before acting.
   edits with no compiler nudge.
 - **Deepening:** decode each Event once into a typed view-delta the 3 consumers read; ordering
   becomes data flow, exhaustive switch makes a missed fold a compile nudge. Strengthens ADR 0011.
-- **Shape resolved 2026-07-25, PLANNED (not yet built)** →
-  `docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md`, item **6**. The owner chose the
+- **Shape resolved 2026-07-25** →
+  `docs/plans/archived/2026-07-25 - 03 - architecture-review-closeout-plan.md`, item **6**. The owner chose the
   **narrower** of the two shapes: one `foldEvent` owner (a new `internal/tui/fold.go`, taking
   `foldStats` out of the 1,772-line `model.go`) that runs the three folds in order and **passes**
   `hasOpenToolCall()` into `foldActivity` as a parameter — the ordering becomes a data dependency
@@ -345,6 +348,19 @@ Explore agents and should be spot-checked before acting.
   delta struct would mirror all three consumers and hide nothing. The compile nudge comes instead
   from a variant-coverage test that parses `domain/events.go` for every `EventBase`-embedding type
   (the `winlabel/deps_test.go` idiom) and fails when one is missing from the fold table.
+- **LANDED 2026-07-25** (`6c1f458`, plan item 6). What was actually built, against the card's
+  sketch: a new `internal/tui/fold.go` owns the fold — `foldStats` moved out of `model.go`
+  (1,772 → 1,728 lines) and every engine Event enters the view through `m.foldEvent(e)`, which
+  runs `foldStats → transcript.apply → foldActivity` in one place and **passes**
+  `m.transcript.hasOpenToolCall()` into `foldActivity` as a parameter — the comment-only ordering
+  is now a data dependency, and `foldActivity` no longer reaches into the transcript at all. The
+  compile-adjacent nudge exists as planned: `fold_test.go`'s variant-coverage test parses
+  `domain/events.go` for every `EventBase`-embedding type, refuses to pass over zero parsed types,
+  fails when one is missing from its fold table, and drives **every** variant through `foldEvent`
+  with its expected effect — or its deliberate inertness — stated per row. One discovery worth
+  keeping (item 6's NOTES): `activity_test.go` already had a package-level `foldEvent` helper
+  duplicating the fold with a *different* fold set (no `foldStats`); it was deleted and its 14
+  call sites now go through the production owner, so no shadow fold survives to drift.
 
 ### 07 — One home for the Mechanism-stack validity rule · **Worth exploring** · ✅ **LANDED 2026-07-25**
 - **Files:** `internal/domain/registry.go` (`detectIncompatibility`, `detectRequirements`),
@@ -371,13 +387,18 @@ Explore agents and should be spot-checked before acting.
 
 ## Smaller deepenings (lower leverage; see HTML for the full list)
 
-All four still-open entries below are **PLANNED (not yet built)** as items 7–10 of
-`docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md`.
+The four entries that were still open all **landed 2026-07-25/26** as items 7–10 of
+`docs/plans/archived/2026-07-25 - 03 - architecture-review-closeout-plan.md` (item 8 via that
+plan's follow-on, `2026-07-26 - 00 - land-item8-close-size-window-plan.md`); each entry below
+carries its ✅ note.
 
 - **Self-regulator read model** *(Speculative, test-only)* — `selfreg.go` has no accessors; **32**
   test sites (re-counted 2026-07-25; the review said 22) poke
   `strikes`/`suppressed`/`budgetTripped`/`harmfulStreak`. Add an observed-state accessor.
   → **plan item 10**, recorded there as the plan's weakest and most droppable item.
+  ✅ **LANDED 2026-07-26** (`b9578a0`): `observed()` returns a `selfRegView` **snapshot** — copied
+  maps, `Suppressed` sorted for a deterministic read — and the assertion-side reach-ins migrated
+  to it; the 10 arrange-side writes that seed fixtures deliberately stay direct.
 - **Session store lifecycle** *(Speculative)* — ✅ **LANDED 2026-07-24**, absorbed by the session
   system (ADR 0022) rather than picked up as a deepening: `internal/session/store.go` (277 LOC) now
   owns `Save/List/Load/LoadPath/Delete/Rename` over id-addressed records. Nothing left to do.
@@ -385,13 +406,32 @@ All four still-open entries below are **PLANNED (not yet built)** as items 7–1
   (✓ 4 methods in 3 files); one path-arg helper collapses them. → **plan item 7** (the *methods*
   stay — the marker is a method set; only the bodies collapse, guarded by a test that all four
   agree on the same path).
+  ✅ **LANDED 2026-07-25** (`13681f4`, follow-up `c218670`): one `pathArgWriteTarget` body behind
+  the four marker methods; the follow-up rebuilt the rename guard to marshal each probe call from
+  the tool's **own** args struct, plus a schema/tag agreement test and a `DefaultTools` coverage
+  test, because the original hand-written table would not have caught a renamed path field.
 - **`read_file` → `SafeStat`/`SafeReadFile`** — the TOCTOU-safe primitive exists and is documented
   *for* read_file, but read_file still does `resolveInRoot → os.Stat → os.ReadFile`. → **plan item
   8**, deliberately widened to `open_file`, which carries the identical trio (`open_file.go`
   L65–84).
+  ✅ **LANDED 2026-07-26** (`bd83326` + `c39e856`, via item 8's follow-on plan
+  `2026-07-26 - 00 - land-item8-close-size-window-plan.md`, after two attempts failed verification
+  on over-claiming doc sentences and the owner skipped the item): both tools — the D9 widening to
+  `open_file` held — now read through the fence with the claims scoped honestly, and the
+  follow-through went **past** the card: `security.SafeOpen` gives ONE pinned handle for the size
+  check and the read (fstat the opened descriptor, drain it through `io.LimitReader(cap+1)`), so
+  the check/use window a `SafeStat`-shaped fix would have kept is closed at all three pair call
+  sites (both read tools and the agent's @ref reader), and `SafeStat` itself is **deleted** with
+  zero callers. The racing component-swap probe measured **0** escapes after, against thousands
+  through the old trio; an in-root symlink spelled with an absolute target is now refused (a
+  narrowing the owner kept on the record).
 - **POSIX `Confine` argv-wrap helper** — landlock + seatbelt share a verbatim cmd-rewrite skeleton;
   `wrapArgvUnderLauncher` + `setConfinedPgid` absorbs both. → **plan item 9**, in a `!windows`
   file (the only tag both backends compile under).
+  ✅ **LANDED 2026-07-26** (`f013d4d`): `internal/platform/confine_posix.go` holds both helpers
+  with the resolved-path and process-group rationale moved onto them; each backend keeps a bare
+  empty-argv guard so its error *ordering* is unchanged (the message itself is now the shared
+  `errNoArgv` sentinel), and the existing argv assertions in both backend tests passed unchanged.
 - **`Request.InjectContext` placement** *(Speculative — reopens an ADR-0010 line)* — encodes
   chat-template role-safety policy inside a `domain` data type; the engine/`context` layer owns
   role-alternation. Flagged, **not** recommended without a grill; the current placement is
@@ -437,6 +477,17 @@ them** — their evidence below is still review-session evidence and, apart from
 POSIX `Confine` argv-wrap duplication (landlock + seatbelt; untouched by 05, which is the Windows
 backend), and candidates 03 and 06 exactly as described.
 
+*As of 2026-07-26 (close):* **every candidate and every smaller deepening is landed and the tree
+is clean.** The close-out plan
+(`docs/plans/archived/2026-07-25 - 03 - architecture-review-closeout-plan.md`) executed
+2026-07-25/26: items 1–7, 9 and 10 each on its own green gate (`d964460` … `b9578a0`), four
+follow-up fixes (`a73eed8` · `c218670` · `f45a30a` · `cfcb2a4`), and item 8 — after two failed
+attempts and an owner SKIP — landed 2026-07-26 via its follow-on plan
+(`2026-07-26 - 00 - land-item8-close-size-window-plan.md`) as `bd83326` + `c39e856`. Still owed to
+the owner, recorded in the close-out plan's verification results: the `VERSION` minor-bump call
+for the additive `ToolSummary` surface, and the manual TUI drive of the seven summary-bearing
+tools.
+
 ## Recommended next step
 
 *Originally:* grill **candidate 01** (Turn lifecycle owner) first — highest leverage, the `resolve()`
@@ -449,7 +500,7 @@ ledger is clean — no plan is mid-flight.
 
 *As of 2026-07-25 (later the same day):* everything still outstanding — **03, 06 and all four
 remaining smaller deepenings** — is now written up as one close-out plan,
-`docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md` (10 items, to be executed with
+`docs/plans/archived/2026-07-25 - 03 - architecture-review-closeout-plan.md` (10 items, to be executed with
 `/implement-plan`). Nothing in it has been built yet. When it lands this review's ledger is empty
 except for the two items it deliberately parks: the `/code-audit` below, and
 `Request.InjectContext` (still un-grilled). The reasoning that follows is what that plan was
@@ -468,6 +519,14 @@ The outstanding cards are 03 and 06, and **03 is the strongest pick**:
 Also still open from candidate 02: the separate **`/code-audit`** on the *live* url-safety gap. The
 shape fix landed; whether any currently-registered path reaches the network unfiltered is a
 correctness question the audit answers, and it now has one place to look.
+
+*As of 2026-07-26 (close):* **the ledger is empty — nothing from this review is left to pick up.**
+All seven candidates and the four smaller deepenings are landed and their plan docs archived. The
+only items this review still parks, deliberately: the **`/code-audit`** on the *live* url-safety
+gap (the shape fix landed with candidate 02; whether any registered path reaches the network
+unfiltered is a correctness question the audit answers, with one place to look), and
+**`Request.InjectContext`** (*Speculative*, reopens an ADR 0010 line — still not recommended
+without a grill; the current placement is defensible).
 
 ## Suggested skills
 
