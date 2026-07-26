@@ -51,8 +51,10 @@ type WroteBytes struct{ Bytes int }
 
 func (WroteBytes) isToolSummary() {}
 
-// ListedEntries is list_dir's outcome: how many entries the directory holds in total,
-// and how many of them the listing skipped (the cap the tool applies to a large dir).
+// ListedEntries is list_dir's outcome: how many entries the directory holds in total, and
+// how many of them the listing skipped before the first one shown — the pagination offset
+// the tool's header states, clamped to Total. Skipped is NOT the tool's truncation cap on a
+// large directory; that is a separate mechanism, and no variant reports it.
 type ListedEntries struct{ Total, Skipped int }
 
 func (ListedEntries) isToolSummary() {}
