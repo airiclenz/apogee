@@ -4,14 +4,28 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"syscall"
 	"testing"
 )
 
 // fixedResolver maps a single host to ips so the SSRF tests stay hermetic (no real DNS).
 func fixedResolver(ips ...net.IP) func(context.Context, string) ([]net.IP, error) {
-	return func(context.Context, string) ([]net.IP, error) { return ips, nil }
+	return stubResolver(ips, nil)
 }
+
+// stubResolver is fixedResolver's error/empty-capable form: it answers every host with the
+// same (ips, err) pair, so a test can drive the floor's two fail-closed resolution branches —
+// a lookup failure (nil, errNoSuchHost) and an empty answer ([]net.IP{}, nil) — through the
+// same hermetic seam a normal answer uses.
+func stubResolver(ips []net.IP, err error) func(context.Context, string) ([]net.IP, error) {
+	return func(context.Context, string) ([]net.IP, error) { return ips, err }
+}
+
+// errNoSuchHost is the shape a resolver reports for a name that does not exist. It is the
+// answer the Go pure resolver gives for every inet_aton numeric encoding, and so the thing
+// ssrf.go's numeric-encoding note says the safety rests on.
+var errNoSuchHost = errors.New("lookup nowhere.example: no such host")
 
 func TestURLGuard_SSRFFloor(t *testing.T) {
 	t.Parallel()
@@ -109,6 +123,145 @@ func TestURLGuard_SSRFFloor(t *testing.T) {
 				t.Errorf("Check(%q) err = %v, want ErrSSRFBlocked", tc.url, err)
 			}
 		})
+	}
+}
+
+// TestURLGuard_FloorFailsClosedOnResolution pins the floor's two resolution fail-closed
+// branches in resolveAndCheckFloor: a host the resolver cannot resolve, and a host that
+// resolves to an empty answer, are both BLOCKED rather than handed on to the transport.
+// Neither was covered — fixedResolver never fails and never answers empty — so "improving DX"
+// by letting an unresolvable host through would have been a green change, and that edit is
+// precisely what turns a numeric-encoded loopback into a pre-flight pass (see
+// TestURLGuard_NumericEncodedHostsFailClosed).
+func TestURLGuard_FloorFailsClosedOnResolution(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		ips        []net.IP
+		resolveErr error
+		wantBlock  bool
+		wantReason string // the reason the model-facing message must name
+	}{
+		{
+			name:       "resolution failure is blocked",
+			resolveErr: errNoSuchHost,
+			wantBlock:  true,
+			wantReason: "could not resolve host",
+		},
+		{
+			name:       "empty answer is blocked",
+			ips:        []net.IP{},
+			wantBlock:  true,
+			wantReason: "resolved to no addresses",
+		},
+		{
+			// The negative control: the same seam with a real public answer passes, so the two
+			// rows above pin the fail-closed branches and not a blanket refusal.
+			name:      "public answer passes",
+			ips:       []net.IP{net.ParseIP("93.184.216.34")},
+			wantBlock: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			g := URLGuard{}.WithResolver(stubResolver(tc.ips, tc.resolveErr))
+
+			err := g.Check("https://nowhere.example/path")
+
+			if !tc.wantBlock {
+				if err != nil {
+					t.Fatalf("Check = %v, want nil (a public answer must pass)", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Check = nil, want blocked (%s)", tc.wantReason)
+			}
+			if !errors.Is(err, ErrURLBlocked) {
+				t.Errorf("Check err = %v, want ErrURLBlocked", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantReason) {
+				t.Errorf("Check err = %q, want it to name %q", err, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestURLGuard_NumericEncodedHostsFailClosed pins the invariant ssrf.go's package comment
+// states in prose and nobody asserted: a numeric-encoded host — decimal, octal, hex or the
+// short "127.1" inet_aton form — is blocked whatever the resolver makes of it. net.ParseIP
+// decodes none of these forms, so the pre-flight never classifies them directly and the safety
+// rests on what follows resolution; BOTH outcomes must fail closed:
+//
+//   - the Go pure resolver does no inet_aton decoding and reports "no such host" ⇒ blocked as
+//     unresolvable (ErrURLBlocked, not the floor);
+//   - a cgo/getaddrinfo resolver DOES decode it and answers 127.0.0.1 ⇒ blocked by the floor
+//     (ErrSSRFBlocked) — the case that matters most, because there the decoded address is a
+//     real loopback target rather than a name that goes nowhere.
+func TestURLGuard_NumericEncodedHostsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	// The classic inet_aton encodings of 127.0.0.1: decimal, octal, hex, short form.
+	numericForms := []string{"2130706433", "0177.0.0.1", "0x7f.0.0.1", "127.1"}
+
+	t.Run("net.ParseIP decodes none of these forms", func(t *testing.T) {
+		t.Parallel()
+		// The premise of ssrf.go's numeric-encoding note: because the pre-flight cannot
+		// classify these directly, resolution is the bound. If the stdlib ever starts decoding
+		// them, that note — not only this test — needs revisiting.
+		for _, host := range numericForms {
+			if ip := net.ParseIP(host); ip != nil {
+				t.Errorf("net.ParseIP(%q) = %v, want nil — ssrf.go's numeric-encoding note assumes these reach the resolver", host, ip)
+			}
+		}
+	})
+
+	modes := []struct {
+		name       string
+		resolve    func(context.Context, string) ([]net.IP, error)
+		wantFloor  bool   // the error must be ErrSSRFBlocked specifically
+		wantReason string // the reason the model-facing message must name
+	}{
+		{
+			name:       "go resolver reports no such host",
+			resolve:    stubResolver(nil, errNoSuchHost),
+			wantReason: "could not resolve host",
+		},
+		{
+			name:       "getaddrinfo decodes it to loopback",
+			resolve:    stubResolver([]net.IP{net.ParseIP("127.0.0.1")}, nil),
+			wantFloor:  true,
+			wantReason: "blocked by the SSRF floor",
+		},
+	}
+
+	for _, host := range numericForms {
+		for _, mode := range modes {
+			t.Run(host+" when the "+mode.name, func(t *testing.T) {
+				t.Parallel()
+
+				g := URLGuard{}.WithResolver(mode.resolve)
+
+				err := g.Check("http://" + host + "/")
+
+				if err == nil {
+					t.Fatalf("Check(http://%s/) = nil, want blocked", host)
+				}
+				if !errors.Is(err, ErrURLBlocked) {
+					t.Errorf("Check(http://%s/) err = %v, want ErrURLBlocked", host, err)
+				}
+				if mode.wantFloor && !errors.Is(err, ErrSSRFBlocked) {
+					t.Errorf("Check(http://%s/) err = %v, want ErrSSRFBlocked", host, err)
+				}
+				if !strings.Contains(err.Error(), mode.wantReason) {
+					t.Errorf("Check(http://%s/) err = %q, want it to name %q", host, err, mode.wantReason)
+				}
+			})
+		}
 	}
 }
 

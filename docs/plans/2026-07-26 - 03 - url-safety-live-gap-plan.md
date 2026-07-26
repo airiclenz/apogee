@@ -551,7 +551,33 @@ Commit: `test(agent): pin the fail-closed refusal when the Approver errors`
 
 ---
 
-## 7. M-9 — adversarial tests for the floor's fail-closed paths and the numeric-encoding family
+## 7. M-9 — adversarial tests for the floor's fail-closed paths and the numeric-encoding family — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **Mutation check (mandatory, performed):** both fail-closed blocks were
+mutated to `return nil` in turn. (A) the resolution-failure block (`internal/security/ssrf.go:164-166`)
+— the item's own *"improving DX by letting an unresolvable host through"* edit — turned the new
+tests **red** on exactly the assertions the item names: `resolution failure is blocked` reported
+`Check = nil, want blocked (could not resolve host)`, and **all four** numeric forms went red in the
+go-resolver mode (`Check(http://2130706433/) = nil, want blocked`, likewise `0177.0.0.1`,
+`0x7f.0.0.1`, `127.1`) — i.e. the classic decimal loopback becomes a pre-flight pass, the exact
+consequence the audit predicted. (B) the empty-answer block (`ssrf.go:167-169`) turned
+`empty answer is blocked` red. Restored, all green, including `go test -race ./...`. Recorded as a
+second observation (items 4/5/6 precedent): under **each** mutation, run over the **whole repo**, no
+test outside these two functions fails — the audit's claim that both branches were carried by
+nothing is confirmed, not assumed. Four departures from the item's literal text, all additive:
+(1) `fixedResolver` was extended by re-expressing it over a new `stubResolver(ips, err)` rather than
+by forking a second stub, so there is still exactly one resolver seam and the error/empty modes
+reach the floor through it. (2) Every blocked row also asserts the **reason** the model-facing
+message names (`could not resolve host` / `resolved to no addresses` / `blocked by the SSRF floor`)
+on top of `errors.Is(…, ErrURLBlocked)` — the load-bearing half, since both branches refuse and a
+refusal-only assertion could not tell the resolution block from the floor block, nor either from an
+incidental failure. (3) A `public answer passes` negative-control row proves the two fail-closed
+rows pin branches rather than a blanket refusal. (4) A `net.ParseIP decodes none of these forms`
+subtest pins the actual **premise** of the invariant at `ssrf.go:24-31` — the safety rests on
+resolution *because* the pre-flight cannot classify these forms directly; if the stdlib ever starts
+decoding them, that prose note (not only the test) needs revisiting. No production code and no doc
+was touched, CHANGELOG deliberately included: like items 4, 5 and 6, this adds a regression net for
+behaviour that is already correct and already shipped.
 
 **What:** `internal/security/ssrf.go:163-169` holds the resolution-failure and empty-answer blocks,
 and `ssrf.go:24-31` states the numeric-encoding invariant **in the code itself**:
