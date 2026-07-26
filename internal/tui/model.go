@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -75,7 +74,12 @@ type Model struct {
 
 	// Sub-models (Bubbles widgets). The input textarea lives on the embedded promptEditor above.
 	viewport viewport.Model
-	spinner  spinner.Model
+
+	// spin is the status-line spinner's animation state — the style, the colour flag, the frame
+	// counter, and the tick-chain generation (spinner.go). Plain ints in a plain value, so it is
+	// safe inside the value-copied Model, and every frame is a pure function of the counter rather
+	// than of an RNG handle a copy would share (ADR 0011).
+	spin spinnerAnim
 
 	// Lifecycle.
 	state      uiState
@@ -135,9 +139,6 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	vp := viewport.New()
 	vp.SoftWrap = true // wrap long transcript lines to the viewport width
 
-	sp := newBrailleSpinner()
-	sp.Style = lipgloss.NewStyle().Background(colBlack) // match the status bar's black field
-
 	m := Model{
 		parent:       parent,
 		eng:          eng,
@@ -146,7 +147,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		notify:       notify,
 		promptEditor: newPromptEditor(),
 		viewport:     vp,
-		spinner:      sp,
+		spin:         newSpinnerAnim(SpinnerClassic, false),
 		th:           th,
 		state:        stateIdle,
 	}
@@ -361,15 +362,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// scrollback, or note the failure with the view left untouched (sessions.go).
 		return m, m.resumeLoaded(msg)
 
-	case spinner.TickMsg:
-		// Keep the chain alive only while running; dropping the tick when idle lets it
-		// die naturally (the spinner's tag mechanism prevents a doubled chain on restart).
-		if m.state == stateRunning {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
+	case spinnerTickMsg:
+		// Keep the chain alive only while running, and only for the current generation: dropping
+		// the tick when idle lets the chain die naturally, and dropping a tick from a previous arm
+		// means a re-arm (an approval answered, an ask replied to) cannot leave two chains running
+		// and double the frame rate (spinner.go).
+		if m.state != stateRunning || msg.gen != m.spin.gen {
+			return m, nil
 		}
-		return m, nil
+		m.spin.frame++
+		return m, m.spin.tick()
 
 	case tea.MouseWheelMsg:
 		// The wheel scrolls the transcript in every state — unlike the keyboard path, which is
@@ -575,7 +577,8 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.pending.Reply <- decision
 		m.pending = nil
 		m.state = stateRunning
-		return m, m.spinner.Tick
+		tick := m.spin.arm()
+		return m, tick
 	}
 	return m.scrollViewport(msg)
 }
@@ -616,7 +619,8 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	// The request is away and nothing has come back yet: the honest phrase is "thinking" until
 	// the first Event re-derives it (activity.go).
 	m.setActivity(actThinking, "", 0)
-	return m, tea.Batch(cmd, m.spinner.Tick)
+	tick := m.spin.arm()
+	return m, tea.Batch(cmd, tick)
 }
 
 // skillDisplayNames resolves the attached skill IDs to their display names (falling back to the
@@ -727,7 +731,8 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			m.cancel = cancel
 			m.state = stateRunning
 			m.setActivity(actThinking, "", 0) // the resumed work is a request in flight (as in submit)
-			return m, tea.Batch(cmd, m.spinner.Tick)
+			tick := m.spin.arm()
+			return m, tea.Batch(cmd, tick)
 		}
 		// /continue carries any attached skills into the canned turn (the user lined them up
 		// before asking the model to keep going).
@@ -741,7 +746,8 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.cancel = cancel
 		m.state = stateRunning
 		m.setActivity(actThinking, "", 0) // a canned turn is still a request in flight (as in submit)
-		return m, tea.Batch(cmd, m.spinner.Tick)
+		tick := m.spin.arm()
+		return m, tea.Batch(cmd, tick)
 
 	case "clear", "new":
 		// /new is an alias of /clear: both start a fresh session — wipe the view, reset the engine's
@@ -772,7 +778,8 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.state = stateRunning
 		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
 		m.setActivity(actCompacting, "", 0)
-		return m, tea.Batch(cmd, m.spinner.Tick)
+		tick := m.spin.arm()
+		return m, tea.Batch(cmd, tick)
 
 	case "confine":
 		// Report or swap the blast radius. Synchronous and idle-safe like /clear: no upstream
@@ -808,7 +815,8 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	m.state = stateRunning
 	m.layout()
-	return m, m.spinner.Tick
+	tick := m.spin.arm()
+	return m, tick
 }
 
 // stopWorker cancels the in-flight worker. The worker honours the cancel at the next
@@ -1489,7 +1497,7 @@ func (m Model) statusLine() string {
 	left := m.th.statusBar.Render(bodyIndent)
 	switch m.state {
 	case stateRunning:
-		left += m.spinner.View() + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
+		left += m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
 	case stateAwaitingApproval:
 		left += m.th.statusBar.Render("approval needed")
 	case stateAwaitingAsk:

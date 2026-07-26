@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"time"
-
-	"charm.land/bubbles/v2/spinner"
 	lipgloss "charm.land/lipgloss/v2"
 )
 
@@ -11,10 +8,11 @@ import (
 // The theme (P2.7 — TUI presentation pass)
 // ----------------------------------------------------------------------------
 //
-// theme is the single place the look-and-feel lives: the palette, the marker glyphs, the
-// spinner frames, and the reusable lipgloss styles every renderer draws with. It is built
-// once in newModel and stored as a Model value field. A lipgloss.Style holds no
-// self-referential no-copy type (it is value-copy by design — its whole API returns new
+// theme is the single place the look-and-feel lives: the palette, the marker glyphs, and the
+// reusable lipgloss styles every renderer draws with — including spinnerBase, the field the
+// status-line spinner paints on (its frames and their timing live with the animation, in
+// spinner.go). It is built once in newModel and stored as a Model value field. A lipgloss.Style
+// holds no self-referential no-copy type (it is value-copy by design — its whole API returns new
 // Styles), so a theme of Styles is safe inside the value-copied Model (ADR 0011;
 // TestModelNoBuilderByValue guards the strings.Builder case structurally).
 
@@ -84,18 +82,6 @@ const bodyIndent = "  "
 // blank. TestTranscriptBodyLeavesRightGutter pins it against a really-composed View.
 const bodyRightGutter = 1
 
-// brailleFrames are the status-line spinner frames (a single braille cell that appears to
-// rotate), shown while a worker drives the Exchange.
-var brailleFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
-
-// newBrailleSpinner builds the status-line spinner from brailleFrames.
-func newBrailleSpinner() spinner.Model {
-	return spinner.New(spinner.WithSpinner(spinner.Spinner{
-		Frames: brailleFrames,
-		FPS:    time.Second / 10, //nolint:mnd // 10 fps, matching the bundled spinners
-	}))
-}
-
 // theme bundles the reusable styles. They are intentionally spare — a few colour and weight
 // cues — so the transcript stays legible under any terminal profile.
 type theme struct {
@@ -124,6 +110,7 @@ type theme struct {
 	popupBody     lipgloss.Style // a popup's wrapped body block (renderPopup): normal white on black — between presentTitle (bold) and statusFaint (chrome) in the hierarchy
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
+	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so the glyph keeps the terminal's text colour (spinner.go)
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
 	chromeRule    lipgloss.Style // the footer's border hairlines (dark gray on black): its runes, corners, and │ bars
 	topDivider    lipgloss.Style // the ▔ top-edge hairline above the status line — a dimmer rule (colDimGray) so it recedes
@@ -180,6 +167,7 @@ func newTheme() theme {
 		popupBody:   lipgloss.NewStyle().Foreground(colWhite).Background(colBlack), // wrapped body prose: normal white, not bold (title) nor faint (chrome)
 		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
 		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
+		spinnerBase: lipgloss.NewStyle().Background(colBlack), // match the status bar's black field
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
 		chromeRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
 		topDivider:  lipgloss.NewStyle().Foreground(colDimGray).Background(colBlack),

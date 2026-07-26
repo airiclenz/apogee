@@ -132,7 +132,26 @@ territory are geometric, not cosmetic: `TestStatusLineAlignsWithTranscriptText`
 
 ---
 
-## 1. Own the spinner animation — drop `bubbles/spinner`, no visible change
+## 1. Own the spinner animation — drop `bubbles/spinner`, no visible change — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): three deviations from the literal item text, all additive.
+(a) `TestParseSpinnerStyle` — listed under item 5's tests — landed here in `spinner_test.go`
+instead, because item 1 is where `ParseSpinnerStyle` is introduced and an exported,
+error-returning function ships with its test; item 5 must NOT re-add it (duplicate test name).
+(b) The styles are a registry (`spinnerSpecs`, keyed by `SpinnerStyle`, holding
+`{interval, width, glyph func(frame int) string}`) rather than a switch: it gives item 1's
+`TestSpinnerFrameWidth` the "declared width" it asserts against, and items 2/3 add one entry
+each. A style the vocabulary knows but the registry has no animation for — snake and glitter
+until 2/3 land, and the zero value — resolves to classic (`spinnerAnim.spec`), so the status
+line can never render a blank column; `TestSpinnerStyleFallsBackToClassic` pins that.
+`ParseSpinnerStyle` still accepts all three names (the const block is the vocabulary), and
+`ParseSpinnerStyle("")` resolves to `snake`, the plan's stated default.
+(c) `view` renders through `th.spinnerBase` (background only, no foreground) for now, which is
+what makes the byte-identical pin hold. **Item 4 take note:** its sketched `!s.color` branch
+renders through `th.statusBar`, which ADDS a faint foreground and would break
+`TestSpinnerClassicUncolouredIsUnchanged` and item 5's "exactly the pre-plan look" row — keep
+`spinnerBase` for the uncoloured branch, or that acceptance criterion has to be renegotiated
+with the owner.
 
 **What.** New `internal/tui/spinner.go` + `internal/tui/spinner_test.go` holding the animation
 as pure functions plus a copy-safe value type. **Classic frames only in this item.** The swap
