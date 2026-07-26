@@ -148,6 +148,75 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 			goos: "darwin",
 			path: docNamed("review.sqlite3"),
 		},
+		{
+			// The Windows rung is the one that travels through a shell: cmd.exe re-parses the
+			// joined line, EscapeArg quotes an argument only when it holds a space or a quote,
+			// and `&` splits commands — so this space-free path reads back as three commands and
+			// the middle one runs. The NAME is therefore bounded on Windows: no argv at all.
+			name: "windows refuses a name cmd would split into a second command",
+			goos: "windows",
+			path: "/ws/report&calc&.html",
+		},
+		{
+			name: "windows refuses a pipe in a name",
+			goos: "windows",
+			path: docNamed("a|b.html"),
+		},
+		{
+			name: "windows refuses cmd's own escape character",
+			goos: "windows",
+			path: docNamed("x^y.html"),
+		},
+		{
+			// %TEMP% expands even inside the double quotes EscapeArg adds around a space-carrying
+			// path, so quoting is no defence against it.
+			name: "windows refuses a name that expands an environment variable",
+			goos: "windows",
+			path: docNamed("%TEMP%.html"),
+		},
+		{
+			// Go escapes an embedded quote as `\"`, which cmd's parser does not honour: the two
+			// disagree about where the quoted region ends, and everything after that is live.
+			name: "windows refuses a quote in a name",
+			goos: "windows",
+			path: docNamed(`re"port.html`),
+		},
+		{
+			// `;` is a cmd token delimiter: in an unquoted path it splits the line into TWO
+			// start arguments, and start resolves its first argument like a command name.
+			name: "windows refuses a cmd token delimiter in a name",
+			goos: "windows",
+			path: "/ws/a;b.html",
+		},
+		{
+			// `!` fires when delayed expansion is switched on machine-wide (a registry key, not
+			// a choice this process makes), so it is refused rather than depended on.
+			name: "windows refuses a delayed-expansion trigger in a name",
+			goos: "windows",
+			path: docNamed("hello!.html"),
+		},
+		{
+			// The bound refuses cmd's grammar, not every unusual character: a space is quoted by
+			// EscapeArg and inert inside the quotes, so the common case keeps opening.
+			name: "windows still opens a name with a space",
+			goos: "windows",
+			path: docNamed("annual report.html"),
+			want: []string{"cmd", "/c", "start", "", docNamed("annual report.html")},
+		},
+		{
+			name: "windows still opens parentheses, which are literal mid-argument",
+			goos: "windows",
+			path: docNamed("report(1).html"),
+			want: []string{"cmd", "/c", "start", "", docNamed("report(1).html")},
+		},
+		{
+			// The name bound is Windows' alone: `open` receives the path as one execve argument
+			// with no shell in between, so the same name is just a file name on macOS.
+			name: "darwin opens the name windows refuses, because no shell re-parses it",
+			goos: "darwin",
+			path: docNamed("report&calc&.html"),
+			want: []string{"open", docNamed("report&calc&.html")},
+		},
 	}
 
 	for _, tt := range tests {
@@ -224,6 +293,25 @@ func TestOpenerCommandOverrideIsNotExtensionBounded(t *testing.T) {
 	runner := &recordingRunner{}
 	opener := Opener{GOOS: "darwin", CommandOverride: "zed {path}", Run: runner.run}
 	path := docNamed("main.go")
+
+	if err := opener.Open(path); err != nil {
+		t.Fatalf("Open(%q) = %v, want the user's own opener to run", path, err)
+	}
+	if got := runner.only(t); !equalArgv(got, []string{"zed", path}) {
+		t.Errorf("Open(%q) ran %q, want the configured application", path, got)
+	}
+}
+
+// The name bound stops at rung 3 exactly as the extension bound does (ADR 0019, both 2026-07-26
+// amendments): a present.command names ONE application and is launched without cmd.exe anywhere
+// near it, so the user's configured opener still shows a file whose name the Windows OS table
+// refuses.
+func TestOpenerCommandOverrideIsNotNameBounded(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingRunner{}
+	opener := Opener{GOOS: "windows", CommandOverride: "zed {path}", Run: runner.run}
+	path := docNamed("report&calc&.html")
 
 	if err := opener.Open(path); err != nil {
 		t.Fatalf("Open(%q) = %v, want the user's own opener to run", path, err)

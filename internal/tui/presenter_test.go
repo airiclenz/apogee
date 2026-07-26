@@ -120,6 +120,7 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 	html := writeDoc(t, "review.html")
 	markdown := writeDoc(t, "review.md")
 	script := writeDoc(t, "review.bat")
+	injected := writeDoc(t, "report&calc&.html")
 
 	tests := []struct {
 		name       string
@@ -165,6 +166,20 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 				return Presentation{Local: true, Opener: o}
 			},
 			path:       script,
+			wantMethod: domain.PresentShown,
+			wantReason: "no opener on this machine",
+		},
+		{
+			// The name cmd.exe would re-parse as a second command: rung 1's Windows opener
+			// refuses it (the extension is fine — the injection rides the rest of the name) and
+			// the ladder degrades exactly as it does for a document the handler would run.
+			name: "a windows desktop still refuses a name cmd.exe would parse",
+			rungs: func(t *testing.T) Presentation {
+				o := headlessOpener(t)
+				o.GOOS = "windows" // a real desktop: only the NAME keeps this from launching
+				return Presentation{Local: true, Opener: o}
+			},
+			path:       injected,
 			wantMethod: domain.PresentShown,
 			wantReason: "no opener on this machine",
 		},

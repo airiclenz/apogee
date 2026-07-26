@@ -13,8 +13,9 @@ import (
 
 // ErrNoOpener is the sentinel Open returns when this machine has nothing to hand a document
 // to: an OS with no known opener command, a Linux session with no display server behind it
-// (see HasDesktop), or a document whose extension is not one an OS handler should be handed
-// (see OpenerRenderable). It is a NORMAL outcome rather than a failure — the caller degrades to
+// (see HasDesktop), a document whose extension is not one an OS handler should be handed
+// (see OpenerRenderable), or — on Windows alone — a path whose name cmd.exe would read as its
+// own syntax (see cmdSafe). It is a NORMAL outcome rather than a failure — the caller degrades to
 // the baseline rung, which is the rung that is never wrong, and says so in the transcript
 // (ADR 0019 §4). Callers test for it with errors.Is, because "there was nothing to open into"
 // has to read differently from "an opener was tried and it failed".
@@ -123,6 +124,12 @@ func (o Opener) Open(path string) error {
 // <path>` on Windows (start's first quoted argument is the window TITLE, and omitting it makes
 // start read the path as one), `xdg-open <path>` on Linux. Windows ships unexercised until the
 // merge plan's Phase 5 provides a real Windows harness — stated in ADR 0019 rather than hidden.
+//
+// The Windows line is the one rung that travels through a SHELL — cmd.exe re-parses the joined
+// command line — so it alone carries a third bound, on the NAME: a path holding a character cmd
+// reads as syntax (cmdSafe) builds no argv and degrades exactly like a refused extension
+// (ADR 0019, second amendment 2026-07-26). macOS and Linux need no name bound, because `open`
+// and `xdg-open` receive the path as one execve argument with no shell in between.
 func (o Opener) argv(path string) ([]string, error) {
 	if template := strings.TrimSpace(o.CommandOverride); template != "" {
 		return overrideArgv(template, path)
@@ -138,6 +145,9 @@ func (o Opener) argv(path string) ([]string, error) {
 	case "darwin":
 		return []string{"open", path}, nil
 	case "windows":
+		if !cmdSafe(path) {
+			return nil, ErrNoOpener
+		}
 		return []string{"cmd", "/c", "start", "", path}, nil
 	case "linux":
 		return []string{"xdg-open", path}, nil
@@ -230,6 +240,40 @@ var openerRenderableExts = map[string]bool{
 // report.html — and REPORT.BAT is refused exactly like report.bat.
 func OpenerRenderable(path string) bool {
 	return openerRenderableExts[strings.ToLower(filepath.Ext(path))]
+}
+
+// cmdMetacharacters are the characters cmd.exe reads as its own syntax somewhere in the one
+// line rung 1's Windows opener hands it: the operators (`&`, `|`, `^`, `<`, `>`), the two
+// expansions (`%`, which fires even inside double quotes, and `!`, which fires when a
+// machine-wide registry key turns delayed expansion on), the quote itself (Go escapes an
+// embedded `"` as `\"`, which cmd's own parser does not honour — the two disagree about where
+// the quoted region ends, and everything after that is live syntax), and the token delimiters
+// (`;`, `,`, `=` — an unquoted path holding one splits into TWO start arguments, and start
+// resolves its first argument like a command name, PATHEXT and all).
+//
+// A space is deliberately absent: Go double-quotes an argument carrying one (syscall.EscapeArg),
+// and this set is exactly the set that stays live inside — or breaks out of — those quotes.
+// Parentheses are absent too: they are literal to cmd mid-argument once this set is refused,
+// and `report(1).html` is a name real deliverables have.
+const cmdMetacharacters = "&|^<>%\"!;,="
+
+// cmdSafe reports whether path can ride `cmd /c start "" <path>` without cmd.exe reading any of
+// it as grammar rather than file name. Go joins an argv into one command line and cmd.exe
+// RE-PARSES it, so on Windows — and only there — the model-chosen name is a third bound beside
+// the machine and the extension: a refusal here is what keeps `report&calc&.html` in a
+// space-free workspace path from reading back as three commands. Control characters are refused
+// with the metacharacters (`\r` and `\n` end a cmd command the way `&` does); a refused path
+// degrades to the baseline rung via ErrNoOpener, never an error.
+func cmdSafe(path string) bool {
+	if strings.ContainsAny(path, cmdMetacharacters) {
+		return false
+	}
+	for _, r := range path {
+		if r < ' ' {
+			return false
+		}
+	}
+	return true
 }
 
 // overrideArgv turns a present.command template into an argv for path. The template is split

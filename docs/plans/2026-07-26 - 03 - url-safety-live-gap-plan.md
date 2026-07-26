@@ -1434,7 +1434,29 @@ Commit: `fix(tools): render http_request's response headers inert and capped`
 
 ---
 
-## 17. Item 2's rung, a different vector — the Windows opener argv is command-injectable
+## 17. Item 2's rung, a different vector — the Windows opener argv is command-injectable — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): **Shape (b) taken, deliberately over the item's "best first" (a):** the OS
+table keeps `cmd /c start ""` and the windows case refuses, via the new unexported `cmdSafe`, any
+path carrying a character cmd.exe can read as grammar, degrading through the existing
+`ErrNoOpener`. (a) was rejected on its own merits, not skipped: `rundll32
+url.dll,FileProtocolHandler` receives its tail as ONE raw string through an undocumented parser —
+with the space-carrying paths `EscapeArg` quotes (the suite's canonical path has a space), its
+quoted-path behaviour cannot be verified on any harness this repo has (the Windows opener ships
+unexercised, the item's own words), and rundll32 exits 0 either way, which silences the
+fail-visible half `launchDetached` exists for; the `SysProcAttr.CmdLine` sub-shape is Windows-only
+compilation that the argv seam every opener test pins through cannot see. Two departures from the
+item's literal text, both additive: (1) the refused set is wider than the item's named
+`& | ^ < > %` — also `"` (EscapeArg emits `\"`, which cmd's parser does not honour, so the two
+disagree where the quoted region ends), `!` (live under machine-wide delayed expansion, a registry
+key not this process's choice), the token delimiters `; , =` (an unquoted path holding one splits
+into two `start` arguments, and start resolves its FIRST argument like a command name, PATHEXT and
+all), and ASCII control characters; a space and parentheses deliberately stay open-able, each
+pinned by a row. (2) One extra test, `TestOpenerCommandOverrideIsNotNameBounded`, pins the item's
+rung-3 bound exactly the way item 2's `TestOpenerCommandOverrideIsNotExtensionBounded` pins the
+extension twin. ADR 0019 gained its second dated 2026-07-26 amendment (why-now + (a) bound /
+(b) space-and-parens / (c) other rungs untouched), and a CHANGELOG Security entry sits beside item
+2's. `openerRenderableExts` and `overrideArgv` are untouched, as the acceptance requires.
 
 **Provenance:** raised by item 2's verifier as *worth its own item before Windows ships*. It is the
 **same rung** item 2 bounded and the allow-list does not close it, which is why it could not be

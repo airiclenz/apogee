@@ -281,6 +281,25 @@ point is a **minor** bump, not a breaking change.
   nothing there. See [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md) (amendment
   2026-07-26).
 
+- **A model-chosen file *name* can no longer smuggle a command through the Windows opener.** The
+  allow-list above bounds which program the extension selects; on Windows the launch itself still
+  travelled through a **shell**. The auto-open rung there is `cmd /c start "" <path>`, Go joins
+  that argv into one command line quoting an argument only when it holds a space or a quote, and
+  cmd.exe **re-parses** the joined line — where `&`, `|`, `^`, `<`, `>` and `%` are syntax. So
+  presenting `report&calc&.html` from a space-free workspace path — an extension squarely inside
+  the allow-list — read back as three commands and ran the middle one with the user's full
+  privileges, outside any confinement box: the injection rode the rest of the name, not the
+  extension. The Windows rung now refuses a path carrying any character cmd.exe can read as
+  grammar — the operators, the `%`/`!` expansions (live even inside quotes / under machine-wide
+  delayed expansion), an embedded quote, the `;`/`,`/`=` delimiters that would split an unquoted
+  path into two `start` arguments, and control characters. A refused name builds **no command at
+  all** and degrades exactly as a refused extension does: the path is still shown in the
+  transcript and the result reads `shown`. Names with spaces or parentheses still open, macOS and
+  Linux need no name bound (`open` and `xdg-open` take the path as one argv element, no shell),
+  and a configured `present.command` is untouched. The Windows opener ships unexercised, so this
+  closes the hole before it is live. See
+  [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md) (second amendment 2026-07-26).
+
 - **A URL is now normalised once, so url-safety judges the name the transport actually dials.** The
   guard parsed the whitespace-trimmed URL and lower-cased its host before matching the allow/deny
   lists, but the request was built from the string exactly as it arrived — and Go's transport
