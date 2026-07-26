@@ -164,6 +164,132 @@ func TestOpenFile_LineCountMatchesTheRenderedBody(t *testing.T) {
 	}
 }
 
+// TestOpenFile_RefusesEscapingSymlink is open_file's half of the STATIC fence pin: a
+// workspace path component that is a symlink pointing OUTSIDE the workspace is refused with
+// the uniform ErrPathEscape message rather than "file not found", and nothing from outside
+// reaches the result.
+//
+// As on the read_file side this is a boundary pin, not new behaviour — the former
+// resolveInRoot → os.Stat → os.ReadFile trio also refused this static case at check time,
+// so the test passes against the pre-change code. What this item changed for open_file is
+// pinned by TestOpenFile_RefusesComponentSwappedMidRead and
+// TestOpenFile_RefusesAbsoluteInRootSymlink.
+func TestOpenFile_RefusesEscapingSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(outsideMarker), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "ssh")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result, err := NewOpenFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "ssh/id_rsa"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true: the read followed a symlink out of the workspace (content: %q)", result.Content)
+	}
+	if !strings.Contains(result.Content, ErrPathEscape.Error()) {
+		t.Errorf("content %q does not carry the ErrPathEscape message %q", result.Content, ErrPathEscape.Error())
+	}
+	if strings.Contains(result.Content, outsideMarker) {
+		t.Errorf("content leaked the file outside the workspace: %q", result.Content)
+	}
+}
+
+// TestOpenFile_RefusesComponentSwappedMidRead is the behaviour open_file gained (D9): a
+// workspace component swapped to an outside-pointing symlink while the call is in flight no
+// longer redirects the read, because the stat that bounds the file and the read that
+// materialises it resolve against one pinned root. It fails against the pre-change code.
+func TestOpenFile_RefusesComponentSwappedMidRead(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	escapes := escapesUnderComponentSwap(t, NewOpenFile(root), root, 2000)
+
+	if escapes != 0 {
+		t.Errorf("%d of 2000 reads returned the file outside the workspace, want 0", escapes)
+	}
+}
+
+// TestOpenFile_RefusesAbsoluteInRootSymlink pins open_file's half of the narrowing: an
+// in-workspace symlink whose target is spelled as an ABSOLUTE path is refused even when the
+// target is inside the workspace, because the pinned root resolves relative components
+// only. It read fine before; the tightening is recorded in the CHANGELOG, and relative
+// in-workspace symlinks still read (TestOpenFile_ReadsRelativeInRootSymlink).
+func TestOpenFile_RefusesAbsoluteInRootSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "real.txt")
+	if err := os.WriteFile(target, []byte("inside the workspace"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result, err := NewOpenFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "link.txt"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true: the absolute-target symlink narrowing is gone (content: %q)", result.Content)
+	}
+	if !strings.Contains(result.Content, ErrPathEscape.Error()) {
+		t.Errorf("content %q does not carry the ErrPathEscape message %q", result.Content, ErrPathEscape.Error())
+	}
+}
+
+// TestOpenFile_ReadsRelativeInRootSymlink is the positive control bounding that narrowing: a
+// RELATIVE in-workspace symlink, as the target file and as a directory component, still
+// opens exactly as it did before.
+func TestOpenFile_ReadsRelativeInRootSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sub", "real.txt"), []byte("inside the workspace"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("sub", "real.txt"), filepath.Join(root, "file_link.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := os.Symlink("sub", filepath.Join(root, "dir_link")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	for _, path := range []string{"file_link.txt", "dir_link/real.txt"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := NewOpenFile(root).Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": path}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("IsError = true on an in-workspace relative symlink (content: %q)", result.Content)
+			}
+			if !strings.Contains(result.Content, "inside the workspace") {
+				t.Errorf("content %q does not carry the linked file's body", result.Content)
+			}
+		})
+	}
+}
+
 func TestOpenFile_ToolErrors(t *testing.T) {
 	t.Parallel()
 

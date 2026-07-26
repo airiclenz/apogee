@@ -164,6 +164,42 @@ point is a **minor** bump, not a breaking change.
   model output reached the screen raw. Stripping removes only the `ESC` byte, so the raw tool name
   the human approves is still shown verbatim.
 
+- **`read_file` and `open_file` now read *through* the workspace fence instead of around it, closing
+  a symlink-swap race.** Both tools checked the path first and then read it with a plain
+  stat-and-read, which re-walked the path and followed symlinks a second time. A workspace component
+  that already *was* a symlink pointing outside the workspace was refused by that check — that half
+  was never exploitable — but a component swapped to an outside-pointing symlink **after the check
+  and before the read** was followed, and the outside file was read. That is a swap a write-capable
+  confined subprocess can perform, and in a racing swap loop the old path returned the outside file
+  on a small fraction of reads, reproducibly. Both tools now stat and read through a root pinned at
+  the workspace directory, the mechanism the write tools adopted when the same race was closed on
+  the write side (the security-review checkpoint after `v1.0.0`): path resolution is pinned for
+  both the size check and the read, and the same racing loop now returns the outside file **zero**
+  times (the size bound itself is still decided from a separate stat and keeps a check/use window,
+  so it refuses ordinary oversized files, not a file swapped mid-call by an adversary who can
+  rename inside the workspace).
+
+  Three behaviour changes come with it:
+  - **An in-workspace symlink whose target is spelled as an absolute path is now refused, even when
+    that target is inside the workspace** — it reports `security: path resolves outside the
+    workspace root: …` where it previously read the linked file. The pinned root resolves relative
+    components only and cannot honour an absolute target, and the workspace fence is tighten-only,
+    so this narrowing is kept deliberately rather than worked around. **Relative** in-workspace
+    symlinks — as the named file or as a directory component — read exactly as before.
+  - **A symlink-shaped escape now carries the pinned root's own detail** after the uniform prefix
+    (`security: path resolves outside the workspace root: statat ssh/id_rsa: path escapes from
+    parent`) where it used to carry the requested path (`…: "ssh/id_rsa"`). A `../` traversal or an
+    absolute path outside the workspace is still caught before any descriptor is opened and its
+    message is byte-identical to before.
+  - **A read that fails after the size check passed now reports `file not found: <path>`** — the
+    phrasing the write tools already use — instead of the raw OS error (for example `open
+    /ws/socket: no such device or address`).
+
+  Everything else is untouched: a successful read, a missing file, a directory, an oversized file,
+  and a traversal or out-of-workspace absolute path produce the same result and the same message as
+  before, and an escape still surfaces as "outside the workspace" rather than being disguised as a
+  missing file.
+
 ## [0.8.0] — 2026-07-23
 
 *Release version **reset from the `1.x` line to `0.8.0`.** The `1.x` numbering overstated

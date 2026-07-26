@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -48,6 +47,21 @@ func (t *ReadFile) ReadOnly() bool { return true }
 // Execute reads the file named in call.Arguments and returns its content, honouring
 // ctx cancellation. Bad arguments, a missing file, an oversized file, or a path that
 // escapes the root are reported as IsError results, not Go errors.
+//
+// The workspace fence is enforced at STAT and READ time through an os.Root pinned at
+// t.root, so a path component swapped to point outside the root — including a concurrent
+// swap by a confined subprocess mid-call — is refused rather than followed (security
+// review H1). Path RESOLUTION is what the pinned roots make window-free: the stat and
+// the read each open their own root, so the size bound still has a check/use window
+// between the two calls — it refuses ordinary oversized files, not a name flipped
+// mid-call by an adversary who can rename inside the workspace (see the SCOPE note in
+// internal/security/safeio.go).
+//
+// The pinned root resolves RELATIVE components only, so an in-root symlink whose target is
+// spelled as an absolute path is refused even when that target is inside the root. That is
+// narrower than the former resolveInRoot + unfenced stat + unfenced read trio, which read
+// such a link; the fence is tighten-only, so the narrowing is kept and recorded in the
+// CHANGELOG (Unreleased → Security). Relative in-root symlinks read as they did before.
 func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -61,14 +75,9 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, "path is required"), nil
 	}
 
-	path, err := resolveInRoot(args.Path, t.root)
+	info, err := safeStat(args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return errorResult(call.ID, "file not found: "+args.Path), nil
+		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
 	if info.IsDir() {
 		return errorResult(call.ID, "not a file: "+args.Path), nil
@@ -77,9 +86,9 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, fmt.Sprintf("file too large: %d bytes (max %d)", info.Size(), maxFileReadBytes)), nil
 	}
 
-	content, err := os.ReadFile(path)
+	content, err := safeReadFile(args.Path, t.root)
 	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
+		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
 
 	text, span := renderFile(args.Path, string(content), args)

@@ -41,6 +41,16 @@ func safeReadFile(input, root string) ([]byte, error) {
 	return security.SafeReadFile(root, input)
 }
 
+// safeStat returns input's metadata within root through the shared TOCTOU-safe guard,
+// with the workspace fence enforced at STAT time (os.Root-pinned), replacing the former
+// resolveInRoot+os.Stat pair. The metadata describes what the name resolved to at STAT
+// time only — the read that follows opens its own root — so a size bound decided from
+// this stat binds ordinary oversized files, not a name flipped between the two calls
+// (see the SCOPE note in internal/security/safeio.go).
+func safeStat(input, root string) (os.FileInfo, error) {
+	return security.SafeStat(root, input)
+}
+
 // readFileErrorMessage renders a safeReadFile failure for the model: a path that escapes
 // the workspace surfaces the uniform escape message (not "file not found", which would
 // hide the refusal), while any other read error (a genuinely missing file) keeps the

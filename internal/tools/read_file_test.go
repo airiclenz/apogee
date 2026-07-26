@@ -21,6 +21,74 @@ func callWith(t *testing.T, id string, args map[string]any) domain.ToolCall {
 	return domain.ToolCall{ID: id, Arguments: raw}
 }
 
+// outsideMarker is the body of the file OUTSIDE the workspace: a result carrying it escaped.
+const outsideMarker = "PRIVATE KEY"
+
+// escapesUnderComponentSwap reads "ssh/id_rsa" through tool (constructed on root) n times
+// while a concurrent goroutine flips the "ssh" component between a directory INSIDE the
+// workspace and one outside it — the swap a write-capable confined subprocess can perform
+// between a check and a use. It returns how many results carried the outside file's
+// content; any non-zero count is a fence crossing. Both symlink targets are RELATIVE, so the
+// count isolates the swap from the absolute-target narrowing the two
+// RefusesAbsoluteInRootSymlink tests pin. The old resolveInRoot → os.Stat → os.ReadFile
+// trio leaks here (its check-time verdict is stale by the time it reads); a read pinned to
+// an os.Root cannot, so a zero count is deterministic rather than lucky.
+func escapesUnderComponentSwap(t *testing.T, tool domain.Tool, root string, n int) int {
+	t.Helper()
+
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(outsideMarker), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	inside := filepath.Join(root, "inside")
+	if err := os.Mkdir(inside, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inside, "id_rsa"), []byte("SAFE"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	relOutside, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	link := filepath.Join(root, "ssh")
+	if err := os.Symlink("inside", link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	stop, swapped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(swapped)
+		targets := [2]string{"inside", relOutside}
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.Remove(link)
+			_ = os.Symlink(targets[i%2], link)
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-swapped
+	}()
+
+	escapes := 0
+	for i := 0; i < n; i++ {
+		result, err := tool.Execute(context.Background(),
+			callWith(t, "c1", map[string]any{"path": "ssh/id_rsa"}))
+		if err != nil {
+			t.Fatalf("Execute returned a Go error: %v", err)
+		}
+		if strings.Contains(result.Content, outsideMarker) {
+			escapes++
+		}
+	}
+	return escapes
+}
+
 func TestReadFile_Execute(t *testing.T) {
 	t.Parallel()
 
@@ -164,6 +232,134 @@ func TestReadFile_Execute_ErrorCarriesNoSummary(t *testing.T) {
 	}
 	if result.Summary != nil {
 		t.Errorf("Summary = %#v, want nil on a failed call", result.Summary)
+	}
+}
+
+// TestReadFile_Execute_RefusesEscapingSymlink pins the STATIC half of the fence at the tool
+// boundary: a workspace component that is a symlink pointing OUTSIDE the workspace is refused
+// with the uniform ErrPathEscape message, and nothing from outside reaches the result.
+//
+// This is a boundary pin, not new behaviour: the former resolveInRoot → os.Stat →
+// os.ReadFile trio refused this case too (resolveInRoot resolves symlinks and rejected the
+// escape at check time), so the test passes against the pre-change code. It is kept because
+// the check-time pre-pass is gone — the refusal must now come from the os.Root-pinned stat, and
+// this pin fails if that stat is ever replaced by an unfenced one. What this change actually
+// gained is pinned by TestReadFile_Execute_RefusesComponentSwappedMidRead (the racy half, which
+// the old trio followed) and TestReadFile_Execute_RefusesAbsoluteInRootSymlink (the narrowing).
+func TestReadFile_Execute_RefusesEscapingSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(outsideMarker), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "ssh")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result, err := NewReadFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "ssh/id_rsa"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true: the read followed a symlink out of the workspace (content: %q)", result.Content)
+	}
+	if !strings.Contains(result.Content, ErrPathEscape.Error()) {
+		t.Errorf("content %q does not carry the ErrPathEscape message %q", result.Content, ErrPathEscape.Error())
+	}
+	if strings.Contains(result.Content, outsideMarker) {
+		t.Errorf("content leaked the file outside the workspace: %q", result.Content)
+	}
+}
+
+// TestReadFile_Execute_RefusesComponentSwappedMidRead is the behaviour read_file gained by
+// reading through the fence rather than around it: a workspace component swapped to an
+// outside-pointing symlink while the call is in flight no longer redirects the read. The old
+// trio validated the path and then re-walked it, so a swap landing in that window was followed;
+// the pinned root has no such window. This test fails against the pre-change code.
+func TestReadFile_Execute_RefusesComponentSwappedMidRead(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	escapes := escapesUnderComponentSwap(t, NewReadFile(root), root, 2000)
+
+	if escapes != 0 {
+		t.Errorf("%d of 2000 reads returned the file outside the workspace, want 0", escapes)
+	}
+}
+
+// TestReadFile_Execute_RefusesAbsoluteInRootSymlink pins the one narrowing this change
+// carries: an in-workspace symlink whose target is spelled as an ABSOLUTE path is refused
+// even when that target is inside the workspace, because the pinned root resolves relative
+// components only. Such a link read fine before; the fence is tighten-only, so the
+// narrowing is kept and recorded in the CHANGELOG. Relative in-workspace symlinks still
+// read (TestReadFile_Execute_ReadsRelativeInRootSymlink).
+func TestReadFile_Execute_RefusesAbsoluteInRootSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "real.txt")
+	if err := os.WriteFile(target, []byte("inside the workspace"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result, err := NewReadFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "link.txt"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true: the absolute-target symlink narrowing is gone (content: %q)", result.Content)
+	}
+	if !strings.Contains(result.Content, ErrPathEscape.Error()) {
+		t.Errorf("content %q does not carry the ErrPathEscape message %q", result.Content, ErrPathEscape.Error())
+	}
+}
+
+// TestReadFile_Execute_ReadsRelativeInRootSymlink bounds that narrowing: a RELATIVE
+// in-workspace symlink, as the named file and as a directory component, reads as before.
+func TestReadFile_Execute_ReadsRelativeInRootSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sub", "real.txt"), []byte("inside the workspace"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("sub", "real.txt"), filepath.Join(root, "file_link.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := os.Symlink("sub", filepath.Join(root, "dir_link")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	for _, path := range []string{"file_link.txt", "dir_link/real.txt"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := NewReadFile(root).Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": path}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("IsError = true on an in-workspace relative symlink (content: %q)", result.Content)
+			}
+			if !strings.Contains(result.Content, "inside the workspace") {
+				t.Errorf("content %q does not carry the linked file's body", result.Content)
+			}
+		})
 	}
 }
 
