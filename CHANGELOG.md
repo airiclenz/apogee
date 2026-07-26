@@ -168,6 +168,16 @@ point is a **minor** bump, not a breaking change.
   **caller's** cancellation is raised as a cancellation, so the Turn is rolled back instead of
   completing over a half-read page. The 2 MiB cap is unchanged and still a clean, marked truncation.
 
+- **A network call no longer leaves an open socket and two goroutines behind for half a minute.**
+  Every `web_fetch` / `http_request` / `web_search` call builds its own HTTP client, and nothing
+  released the connection pool afterwards — so Go kept the call's connection, and the two pump
+  goroutines that pin the whole transport with it, alive for the 30-second idle timeout after the
+  tool had already answered. Network tools auto-run unattended in Auto, where dozens of calls in a
+  Turn is ordinary, so a long agentic run accumulated a socket and two goroutines per call for no
+  benefit (a fresh handshake was paid every time regardless). The funnel now drains the pool as the
+  call returns. Nothing about url-safety changes: the dial-time SSRF control, the no-follow redirect
+  policy and the timeout ceiling are untouched.
+
 ### Security
 
 - **A tool's blast-radius class is now decided by what it *does*, not by what it *says* about

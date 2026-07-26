@@ -165,6 +165,62 @@ func TestNetworkFunnel_DoCapsBody(t *testing.T) {
 	}
 }
 
+// TestNetworkFunnel_DoReleasesTheConnectionItOpened pins the funnel's resource footprint (M-4):
+// the client is built per call, so its pooled connection — and the readLoop/writeLoop goroutines
+// that pin the whole transport with it — used to stay alive for IdleConnTimeout (30s) after do
+// returned. Network tools auto-run unattended in Auto, so dozens of calls in a Turn is the normal
+// case: the process accumulated an open socket plus two goroutines per call.
+//
+// A runtime.NumGoroutine() delta is flaky by nature, so the assertion is structural and made
+// where the leak is actually observable — the SERVER's connection bookkeeping. After N sequential
+// calls every connection the server saw must be closed; the socket is the thing that leaked, and
+// its two pump goroutines exit with it.
+func TestNetworkFunnel_DoReleasesTheConnectionItOpened(t *testing.T) {
+	t.Parallel()
+
+	const calls = 3
+
+	var opened, closed atomic.Int64
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("hello funnel"))
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			opened.Add(1)
+		case http.StateClosed, http.StateHijacked:
+			closed.Add(1)
+		}
+	}
+	srv.Start()
+	defer srv.Close()
+
+	tool := newFunnelTool(loopbackGuard())
+	for i := range calls {
+		resp, msg, err := tool.do(context.Background(), netRequest{url: srv.URL})
+		if err != nil || msg != "" {
+			t.Fatalf("call %d: do failed: msg=%q err=%v", i+1, msg, err)
+		}
+		if resp.body != "hello funnel" {
+			t.Fatalf("call %d: resp body = %q, want %q — the release must not cost the response", i+1, resp.body, "hello funnel")
+		}
+	}
+
+	// The close travels over the wire, so the server observes it shortly AFTER do returns —
+	// wait for the count rather than sleeping a fixed span. A leaked connection sits in its
+	// pool for IdleConnTimeout, far past this deadline, so the wait costs the green path
+	// milliseconds and never rescues the red one.
+	for deadline := time.Now().Add(5 * time.Second); closed.Load() < opened.Load() && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := opened.Load(); got < calls {
+		t.Fatalf("the server saw %d connection(s) for %d calls: the test needs at least one per call to prove anything", got, calls)
+	}
+	if got, want := closed.Load(), opened.Load(); got != want {
+		t.Errorf("%d of %d connection(s) released after the calls returned: a per-call transport that is never drained leaves an open socket and its two pump goroutines behind for IdleConnTimeout", got, want)
+	}
+}
+
 // TestNetworkFunnel_DoCutShortBodyIsNeverASilentSuccess covers the wrong-answer class the body
 // read used to hide: the read error was discarded and `truncated` is set by the 2 MiB cap
 // ALONE, so a response cut short mid-stream came back as a plain 200 carrying the first chunk

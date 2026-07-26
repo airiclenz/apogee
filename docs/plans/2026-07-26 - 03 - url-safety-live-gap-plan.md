@@ -872,7 +872,32 @@ Commit: `fix(security): decode the RFC 8215 NAT64 local-use prefix in the SSRF f
 
 ---
 
-## 11. M-4 — stop leaking a transport, an idle socket and two goroutines per network call
+## 11. M-4 — stop leaking a transport, an idle socket and two goroutines per network call — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): The item's **first** alternative was taken — `defer client.CloseIdleConnections()`
+in `do` — not the per-`networkTool` hoisted transport. Reason: `networkTool` is a VALUE struct built
+inline (`networkTool{guard: …}`) at several sites, so a transport field would be nil on any
+construction path that missed a constructor, and a nil `Transport` makes `http.Client` fall back to
+`http.DefaultTransport` — a silently unguarded dial with no `SafeDialControl`. The per-call
+`newHTTPClient` cannot fail open that way. Placement is load-bearing: the release is deferred
+**before** `resp.Body.Close()` so it runs **after** it (LIFO), and `Transport.CloseIdleConnections`
+additionally latches the transport into closing *newly* idle connections, so the connection the
+read-loop hands back a moment later closes too rather than racing the drain. `newHTTPClient`'s body
+(`Control:`, `CheckRedirect`, the timeout) is untouched; only its doc comment gained the per-call
+lifetime note. **Departure on the test:** the assertion is neither of the two the item lists (a
+counting `RoundTripper` seam, or a same-pointer transport) — both pin the *mechanism*, and the second
+is only available to the shape that was **not** taken.
+`TestNetworkFunnel_DoReleasesTheConnectionItOpened` pins the *outcome* where the leak is actually
+observable, on the server's own `ConnState` bookkeeping: after 3 sequential `do` calls every
+connection the server saw must be closed, waited for against a 5 s deadline rather than a sleep (the
+green path costs ~10 ms; a leaked connection sits in the pool for the 30 s idle timeout, far past
+it). **Mutation check (mandatory, performed):** deleting the `defer client.CloseIdleConnections()`
+line turns the new test **red** on exactly that count — *"0 of 3 connection(s) released after the
+calls returned"* — and, run over the **whole repo**, no other test fails, so the audit's claim that
+the per-call transport was carried by nothing is confirmed, not assumed; restored, green, including
+`go test -race ./internal/tools/... -run 'TestNetworkFunnel_' -count=2`. CHANGELOG carries the
+user-facing entry (unlike items 4–7 this changes runtime behaviour); no doc under `docs/design/` and
+no ADR was touched.
 
 **What:** `internal/tools/network.go:150` calls `newHTTPClient(...)` **inside `do`**, so every call
 allocates a fresh `*http.Transport` (`:220-243`), and nothing calls `CloseIdleConnections()`. Go

@@ -161,6 +161,15 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	}
 
 	client := newHTTPClient(n.guard, clampDuration(req.timeout))
+	// The client is built per call, so its pooled connection would OUTLIVE it: net/http keeps
+	// an idle connection — and the readLoop/writeLoop goroutines that pin the transport with
+	// it — alive for IdleConnTimeout after do returns. Network tools auto-run unattended in
+	// Auto, so dozens of calls in a Turn is the normal case, and the process would accumulate
+	// a socket plus two goroutines per call. Draining the pool bounds the funnel's footprint
+	// to the call itself. Deferred BEFORE the response body's Close so it runs AFTER it
+	// (LIFO), and a connection handed back to the pool a moment later still closes, because
+	// CloseIdleConnections also latches the transport into closing newly idle connections.
+	defer client.CloseIdleConnections()
 
 	method := req.method
 	if method == "" {
@@ -241,6 +250,11 @@ func blockedReason(err error, rawURL string) string {
 // dial time against the guard's SSRF floor (the DNS-rebinding defence), with the given
 // overall timeout. It is the single place the network tools obtain a client so the dial-time
 // floor is never accidentally skipped.
+//
+// The client is per CALL — the timeout is the caller's — which is why do drains its connection
+// pool on the way out; nothing here may outlive the request. (internal/mcp builds the same
+// shape but keeps it long-lived, which is right for a session-long server connection and wrong
+// for a one-shot tool call.)
 func newHTTPClient(guard security.URLGuard, timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
