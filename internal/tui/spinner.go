@@ -257,14 +257,14 @@ var spinnerSpecs = map[SpinnerStyle]spinnerSpec{
 // seconds under every style: the period is the constant and the frame count is derived from the
 // style's own interval (framesPerColorLoop), so a faster style takes more, smaller colour steps
 // rather than a shorter lap.
-const spinnerColorPeriod = 8 * time.Second
+const spinnerColorPeriod = 10 * time.Second
 
 // spinnerStops are the loop's waypoints: colGauge's periwinkle → colModePlan's turquoise →
 // colModeAllowEdits' blue, and back to periwinkle. They are read off the palette variables rather
 // than re-typed as hex literals, so a palette edit moves the loop with it. Palette stops rather
 // than a raw hue circle is the point: the footer's autonomy-mode markers and the orange code accent
 // are already on screen, and a full hue sweep would collide with them.
-var spinnerStops = buildSpinnerStops(colSpinner1, colSpinner2, colSpinner3)
+var spinnerStops = buildSpinnerStops(colSpinner1, colSpinner2, colSpinner3, colSpinner4)
 
 // buildSpinnerStops converts palette colours into the space the blend works in, once, at package
 // init.

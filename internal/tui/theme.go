@@ -46,6 +46,7 @@ var (
 	colSpinner1 = lipgloss.Color("#8668ff")
 	colSpinner2 = lipgloss.Color("#19a946")
 	colSpinner3 = lipgloss.Color("#ffbf00")
+	colSpinner4 = lipgloss.Color("#ff4a81")
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
