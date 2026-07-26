@@ -51,13 +51,12 @@ func (t *OpenFile) ReadOnly() bool { return true }
 // reported as IsError results, not Go errors. A successful read carries the body's line
 // count and the located lines as a domain.OpenedFile summary.
 //
-// The workspace fence is enforced at STAT and READ time through an os.Root pinned at
-// t.root, so a path component swapped to point outside the root — including a concurrent
-// swap by a confined subprocess mid-call — is refused rather than followed (security
-// review H1). Path RESOLUTION is what the pinned roots make window-free: the stat and
-// the read each open their own root, so the size bound still has a check/use window
-// between the two calls — it refuses ordinary oversized files, not a name flipped
-// mid-call by an adversary who can rename inside the workspace (see the SCOPE note in
+// The workspace fence is enforced at OPEN time through an os.Root pinned at t.root, so a
+// path component swapped to point outside the root — including a concurrent swap by a
+// confined subprocess mid-call — is refused rather than followed (security review H1).
+// The open, the size check and the read share ONE descriptor (readWorkspaceFileBounded),
+// so there is no check/use gap between them: a rename mid-call changes nothing the call
+// sees, and a file grown past the cap mid-read is refused (see the SCOPE note in
 // internal/security/safeio.go).
 //
 // As on read_file, the pinned root resolves RELATIVE components only: an in-root symlink
@@ -78,20 +77,9 @@ func (t *OpenFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, "path is required"), nil
 	}
 
-	info, err := safeStat(args.Path, t.root)
-	if err != nil {
-		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
-	}
-	if info.IsDir() {
-		return errorResult(call.ID, "not a file: "+args.Path), nil
-	}
-	if info.Size() > maxFileReadBytes {
-		return errorResult(call.ID, fmt.Sprintf("file too large: %d bytes (max %d)", info.Size(), maxFileReadBytes)), nil
-	}
-
-	content, err := safeReadFile(args.Path, t.root)
-	if err != nil {
-		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
+	content, failMessage := readWorkspaceFileBounded(args.Path, t.root)
+	if failMessage != "" {
+		return errorResult(call.ID, failMessage), nil
 	}
 
 	text, opened := renderOpenFile(args.Path, string(content), args.Locate)

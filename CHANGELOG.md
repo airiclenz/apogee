@@ -171,13 +171,13 @@ point is a **minor** bump, not a breaking change.
   was never exploitable — but a component swapped to an outside-pointing symlink **after the check
   and before the read** was followed, and the outside file was read. That is a swap a write-capable
   confined subprocess can perform, and in a racing swap loop the old path returned the outside file
-  on a small fraction of reads, reproducibly. Both tools now stat and read through a root pinned at
-  the workspace directory, the mechanism the write tools adopted when the same race was closed on
-  the write side (the security-review checkpoint after `v1.0.0`): path resolution is pinned for
-  both the size check and the read, and the same racing loop now returns the outside file **zero**
-  times (the size bound itself is still decided from a separate stat and keeps a check/use window,
-  so it refuses ordinary oversized files, not a file swapped mid-call by an adversary who can
-  rename inside the workspace).
+  on a small fraction of reads, reproducibly. Both tools now open the file through a root pinned at
+  the workspace directory — the mechanism the write tools adopted when the same race was closed on
+  the write side (the security-review checkpoint after `v1.0.0`) — and the size check and the read
+  share that one pinned handle: the size is taken from the very descriptor the content is then
+  read from, so there is no window between them, and the same racing loop now returns the outside
+  file **zero** times. The read itself is hard-bounded too, so a file grown past the size cap
+  mid-call is refused with the same "file too large" message instead of being materialised.
 
   Three behaviour changes come with it:
   - **An in-workspace symlink whose target is spelled as an absolute path is now refused, even when
@@ -187,13 +187,17 @@ point is a **minor** bump, not a breaking change.
     so this narrowing is kept deliberately rather than worked around. **Relative** in-workspace
     symlinks — as the named file or as a directory component — read exactly as before.
   - **A symlink-shaped escape now carries the pinned root's own detail** after the uniform prefix
-    (`security: path resolves outside the workspace root: statat ssh/id_rsa: path escapes from
+    (`security: path resolves outside the workspace root: openat ssh/id_rsa: path escapes from
     parent`) where it used to carry the requested path (`…: "ssh/id_rsa"`). A `../` traversal or an
     absolute path outside the workspace is still caught before any descriptor is opened and its
     message is byte-identical to before.
   - **A read that fails after the size check passed now reports `file not found: <path>`** — the
     phrasing the write tools already use — instead of the raw OS error (for example `open
     /ws/socket: no such device or address`).
+
+  The `@file` reference reader shares the same one-handle mechanism and cap discipline, and the
+  raw error its ErrorEvent surfaces for a symlink-shaped escape now carries the same `openat`
+  detail where it named the stat operation before.
 
   Everything else is untouched: a successful read, a missing file, a directory, an oversized file,
   and a traversal or out-of-workspace absolute path produce the same result and the same message as

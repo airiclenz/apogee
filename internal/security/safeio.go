@@ -27,19 +27,18 @@ import (
 // is the "check-and-use-the-same-fd" fix the security review (H1) calls for, portable
 // across all build targets (os.Root is stdlib, available on every GOOS).
 //
-// SCOPE — what is closed is PATH RESOLUTION, per call. What is NOT closed is the gap
-// BETWEEN two calls: each helper opens and closes its own os.Root, so a caller that stats
-// a file and then reads it (the stat-then-read size discipline the read tools use) holds no
-// handle across the pair — the read re-resolves the name from a fresh pinned root, and an
-// in-root name flipped in between is stat'd as one file and read as another. Measured
-// (2026-07-25, Linux probe): a 4-byte stat followed by an in-root symlink flip produced an
-// 11 MB SafeReadFile past a 10 MB caller bound, and racing a flipper against the pair put
-// 849 of 4000 reads over that bound — while the fence itself held (0 resolutions out of the
-// root). A size bound decided from a separate stat therefore rejects ordinary oversized
-// files; it is not a defence against an adversary who can rename inside the workspace. A
-// hard bound would need ONE handle for both steps (r.Open, Stat that *os.File, then read it
-// through an io.LimitReader), which is a change to the callers' contract, not to these
-// helpers.
+// SCOPE — what is closed is PATH RESOLUTION, per call, and — for a bounded read taken
+// through SafeOpen — the size bound's check/use gap too: the caller fstats the very
+// descriptor it then reads through an io.LimitReader, so the check and the use cannot
+// disagree about which file they describe, and no more than the caller's cap+1 bytes are
+// ever materialised even if the file grows mid-call. SafeReadFile remains UNBOUNDED by
+// contract (its callers read files they are about to rewrite whole); a caller needing a
+// bound must use SafeOpen. A bound decided from a SEPARATE stat call is no defence
+// against an adversary who can rename inside the workspace: the stat-first pattern this
+// package used to offer had exactly that window — an in-root name flipped between the
+// two calls was stat'd as one file and read as another, measured (2026-07-25, Linux
+// probe) and probe-dependent — which is why the stat primitive is gone and the one
+// primitive that serves a bounded read returns the pinned handle itself.
 //
 // The workspace boundary stays TIGHTEN-ONLY: these helpers refuse strictly MORE than
 // the old string-path I/O did (an escaping symlink that the old EvalSymlinks check could
@@ -90,8 +89,8 @@ func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
 // ErrPathEscape and the read is not performed.
 //
 // It applies no size bound of its own: the contents are whatever the name resolves to inside
-// the root at read time, however large. A bound the caller decided from an earlier SafeStat
-// does not carry over to this call — see the SCOPE note in the package header.
+// the root at read time, however large. A caller that needs a bound must use SafeOpen and
+// decide it from an fstat of the returned handle — see the SCOPE note in the package header.
 func SafeReadFile(root, input string) ([]byte, error) {
 	rel, err := rootRelative(input, root)
 	if err != nil {
@@ -110,20 +109,17 @@ func SafeReadFile(root, input string) ([]byte, error) {
 	return data, nil
 }
 
-// SafeStat returns the fs metadata for input (relative to root, or absolute-inside-root)
-// with the workspace fence enforced through an os.Root pinned at root, so a symlinked
-// component pointing outside the root is refused rather than followed. A path escape returns
-// an error wrapping ErrPathEscape and nothing is stat'd outside the root.
+// SafeOpen opens input (relative to root, or absolute-inside-root) for reading, with the
+// workspace fence enforced at OPEN time through an os.Root pinned at root, so a symlinked
+// component pointing outside the root is refused rather than followed. A path escape
+// returns an error wrapping ErrPathEscape and nothing is opened.
 //
-// Root-pinned path resolution is the whole guarantee. The metadata describes whatever the
-// name resolved to at stat time; it does not pin that file for a later call. The
-// stat-then-read discipline the read tools build on it (bound the size, then read) refuses
-// ordinary oversized files, but it is NOT a guarantee that an over-bound file is never
-// materialized: the SafeReadFile that follows re-resolves the name from its own pinned root,
-// so a name flipped in between is stat'd small and read large (measured — see the SCOPE note
-// in the package header). Closing that would take a single handle across both steps, which
-// these helpers do not offer.
-func SafeStat(root, input string) (os.FileInfo, error) {
+// The returned handle PINS THE FILE'S IDENTITY: what is statted and read through it is the
+// file that was opened, regardless of any rename after — which is what makes a size bound
+// decided from an fstat of this descriptor race-free (see the SCOPE note in the package
+// header). The caller owns Close and any size policy. The pinning root is closed before
+// return; a file opened through an os.Root stays valid after the root closes.
+func SafeOpen(root, input string) (*os.File, error) {
 	rel, err := rootRelative(input, root)
 	if err != nil {
 		return nil, err
@@ -134,11 +130,11 @@ func SafeStat(root, input string) (os.FileInfo, error) {
 	}
 	defer r.Close()
 
-	info, err := r.Stat(rel)
+	f, err := r.Open(rel)
 	if err != nil {
 		return nil, mapRootEscape(err)
 	}
-	return info, nil
+	return f, nil
 }
 
 // rootRelative validates that input stays within root (the same containment property

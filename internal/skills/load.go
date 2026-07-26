@@ -17,8 +17,9 @@ const skillFileName = "SKILL.md"
 
 // maxSkillFileBytes bounds a single SKILL.md read so a hostile repo cannot OOM discovery with
 // a giant marker file — the `.apogee/skills` dir is always scanned. Skills are prose
-// instructions; 1 MiB is far past any real one. Mirrors the read_file tool's
-// stat-or-limit-before-materialize discipline (internal/tools/read_file.go).
+// instructions; 1 MiB is far past any real one. Mirrors the read_file tool's one-handle
+// discipline — open, then read through a limit, never materialising past the cap
+// (internal/tools' readWorkspaceFileBounded).
 const maxSkillFileBytes = 1 << 20 // 1 MiB
 
 // maxSkills caps how many skills discovery loads across all source dirs, so a repo that plants

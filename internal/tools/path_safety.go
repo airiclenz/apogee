@@ -2,6 +2,8 @@ package tools
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 
 	"github.com/airiclenz/apogee/internal/security"
@@ -41,14 +43,67 @@ func safeReadFile(input, root string) ([]byte, error) {
 	return security.SafeReadFile(root, input)
 }
 
-// safeStat returns input's metadata within root through the shared TOCTOU-safe guard,
-// with the workspace fence enforced at STAT time (os.Root-pinned), replacing the former
-// resolveInRoot+os.Stat pair. The metadata describes what the name resolved to at STAT
-// time only — the read that follows opens its own root — so a size bound decided from
-// this stat binds ordinary oversized files, not a name flipped between the two calls
-// (see the SCOPE note in internal/security/safeio.go).
-func safeStat(input, root string) (os.FileInfo, error) {
-	return security.SafeStat(root, input)
+// safeOpen opens input for reading within root through the shared TOCTOU-safe guard, with
+// the workspace fence enforced at OPEN time (os.Root-pinned). The returned handle pins the
+// file's identity: what is statted and read through it is the file that was opened,
+// regardless of any rename after. The caller owns Close and any size policy.
+func safeOpen(input, root string) (*os.File, error) {
+	return security.SafeOpen(root, input)
+}
+
+// readWorkspaceFileBounded reads path within root through ONE pinned handle: open through
+// the fence, fstat the opened descriptor, refuse a directory or an over-cap size, then
+// read through a limit bounded to maxFileReadBytes+1 — the size check and the read cannot
+// disagree about which file they describe, and no more than the cap+1 bytes are ever
+// materialised even if the file grows mid-call (the growth backstop re-fstats the SAME fd
+// for the size it reports). On failure the second return is the model-facing message,
+// rendered exactly as the read tools rendered it before; on success it is empty.
+func readWorkspaceFileBounded(path, root string) ([]byte, string) {
+	f, err := safeOpen(path, root)
+	if err != nil {
+		return nil, readFileErrorMessage(err, path)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, readFileErrorMessage(err, path)
+	}
+	if info.IsDir() {
+		return nil, "not a file: " + path
+	}
+	if info.Size() > maxFileReadBytes {
+		return nil, fmt.Sprintf("file too large: %d bytes (max %d)", info.Size(), maxFileReadBytes)
+	}
+
+	data, within, err := readAllBounded(f, maxFileReadBytes)
+	if err != nil {
+		return nil, readFileErrorMessage(err, path)
+	}
+	if !within {
+		// The file grew past the cap between the fstat above and the read. Report the
+		// refusal with a fresh size from the same descriptor, falling back to the bytes
+		// actually drained if even that fstat fails.
+		size := int64(len(data))
+		if fresh, statErr := f.Stat(); statErr == nil {
+			size = fresh.Size()
+		}
+		return nil, fmt.Sprintf("file too large: %d bytes (max %d)", size, maxFileReadBytes)
+	}
+	return data, ""
+}
+
+// readAllBounded reads at most max bytes from r, reporting within=false when r holds more —
+// the max+1 idiom skills/load.go readBounded uses, here as its own step so the growth
+// backstop is table-testable without interleaving a writer. data holds what was drained
+// (max+1 bytes when within is false); a non-nil err is a genuine read failure, under which
+// within is meaningless.
+func readAllBounded(r io.Reader, max int64) (data []byte, within bool, err error) {
+	data, err = io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return nil, false, err
+	}
+	return data, int64(len(data)) <= max, nil
 }
 
 // readFileErrorMessage renders a safeReadFile failure for the model: a path that escapes

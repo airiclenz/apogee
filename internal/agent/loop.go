@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -617,9 +618,9 @@ func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 const maxRefFileBytes = 10 * 1024 * 1024
 
 // resolveFileRefs reads each @file reference within the workspace fence and returns the
-// content blocks to prepend to the user message. It reuses security.SafeReadFile — the
-// os.Root-pinned, TOCTOU-safe read the read_file tool uses — so a ref can never escape the
-// workspace (a symlink swapped mid-read is refused, not followed). A missing, escaping,
+// content blocks to prepend to the user message. Each ref is read through security.SafeOpen —
+// the os.Root-pinned, TOCTOU-safe open the read_file tool builds on — so a ref can never
+// escape the workspace (a symlink swapped mid-read is refused, not followed). A missing, escaping,
 // oversized, directory, or otherwise unreadable ref is surfaced as a loop ErrorEvent and
 // skipped: the Turn proceeds with whatever resolved, and a partly-consumed input is never
 // mistaken for working. The refs round-trip through a snapshot on UserInput, so a resumed
@@ -645,27 +646,42 @@ func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 }
 
 // readFileRef resolves one workspace-relative reference to its bounded content. An empty
-// WorkspaceDir means no file tools are wired, so references cannot be honoured. The size is
-// checked by statting within the workspace fence BEFORE the read, so an oversized @ref is
-// refused without being pulled into memory — the read_file tool's stat-then-read discipline
-// (the cap used to be checked only after SafeReadFile had already materialized the whole
-// file). The stat and the read pin their own roots, so the pair is not race-free against a
-// name flipped in between (see the SCOPE note in security/safeio.go): the cap binds ordinary
-// oversized refs, not an adversary who can rename inside the workspace.
+// WorkspaceDir means no file tools are wired, so references cannot be honoured. The size
+// check and the read share ONE pinned handle (security.SafeOpen): the cap is decided from
+// an fstat of the very descriptor the content is then read through, and the read itself is
+// hard-bounded to the cap, so an oversized @ref is refused without being pulled into
+// memory and a name flipped mid-call cannot swap a small stat for a large read — a file
+// grown past the cap mid-read is refused too, with a fresh fstat of the same fd (see the
+// SCOPE note in security/safeio.go).
 func (a *Agent) readFileRef(ref string) (string, error) {
 	if a.cfg.WorkspaceDir == "" {
 		return "", errors.New("no workspace is configured for file references")
 	}
-	info, err := security.SafeStat(a.cfg.WorkspaceDir, ref)
+	f, err := security.SafeOpen(a.cfg.WorkspaceDir, ref)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
 	if err != nil {
 		return "", err
 	}
 	if info.Size() > maxRefFileBytes {
 		return "", fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxRefFileBytes)
 	}
-	data, err := security.SafeReadFile(a.cfg.WorkspaceDir, ref)
+	data, err := io.ReadAll(io.LimitReader(f, maxRefFileBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if int64(len(data)) > maxRefFileBytes {
+		// The ref grew past the cap between the fstat and the read; re-fstat the same fd
+		// for the size the refusal reports, falling back to the bytes actually drained.
+		size := int64(len(data))
+		if fresh, statErr := f.Stat(); statErr == nil {
+			size = fresh.Size()
+		}
+		return "", fmt.Errorf("file too large: %d bytes (max %d)", size, maxRefFileBytes)
 	}
 	return string(data), nil
 }

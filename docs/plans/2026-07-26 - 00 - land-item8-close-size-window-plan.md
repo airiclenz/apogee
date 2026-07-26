@@ -205,7 +205,13 @@ narrowing and message deltas are recorded in the CHANGELOG bullet).
 
 ---
 
-## 2. One pinned handle from the size bound to the read — `security.SafeOpen`
+## 2. One pinned handle from the size bound to the read — `security.SafeOpen` — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): `readAllBounded` carries a third `error` return (a mid-read failure must
+propagate; the item authorises implementer-chosen signatures). The growth-backstop refusal is not
+deterministically reachable through `readWorkspaceFileBounded` (no seam between its fstat and its
+read to interleave a writer), so the item's authorised else-branch was taken: the bound-step table
+plus a direct fstat-oversize case on the shared body (`TestReadWorkspaceFileBounded_RefusesOversizeFile`).
 
 The real fix the parent's status record names: ONE handle for both steps, so the sentences item 1
 weakened become true in their strong form. Closes the window at all **three** pair call sites.

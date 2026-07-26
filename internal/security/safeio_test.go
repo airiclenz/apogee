@@ -2,6 +2,7 @@ package security
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -129,5 +130,108 @@ func TestSafeReadFile_ReadsWithinRoot(t *testing.T) {
 	}
 	if string(got) != "body" {
 		t.Errorf("content = %q, want %q", got, "body")
+	}
+}
+
+// TestSafeOpen_ReadsWithinRoot is the open positive control: the returned handle reads the
+// in-root file's content, and stays readable after SafeOpen's internal pinning root has
+// been closed (a file opened through an os.Root outlives the root).
+func TestSafeOpen_ReadsWithinRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("body"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	f, err := SafeOpen(root, "f.txt")
+	if err != nil {
+		t.Fatalf("SafeOpen within root: %v", err)
+	}
+	defer f.Close()
+
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read through the handle: %v", err)
+	}
+	if string(got) != "body" {
+		t.Errorf("content = %q, want %q", got, "body")
+	}
+}
+
+// TestSafeOpen_RejectsTraversal proves a "../" escape and an absolute path outside the
+// root are refused with ErrPathEscape before any fd is opened (the containment check),
+// matching the other Safe helpers.
+func TestSafeOpen_RejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, input := range []string{"../escape.txt", filepath.Join(filepath.Dir(root), "escape.txt")} {
+		if _, err := SafeOpen(root, input); !errors.Is(err, ErrPathEscape) {
+			t.Errorf("SafeOpen(%q) err = %v, want ErrPathEscape", input, err)
+		}
+	}
+}
+
+// TestSafeOpen_RefusesEscapingSymlink: a workspace component symlinked outside the root is
+// refused at open time rather than followed, so no handle onto an outside file ever exists.
+func TestSafeOpen_RefusesEscapingSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte("PRIVATE KEY"), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "ssh")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if _, err := SafeOpen(root, "ssh/id_rsa"); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("SafeOpen through escaping symlink err = %v, want ErrPathEscape", err)
+	}
+}
+
+// TestSafeOpen_HandleSurvivesRename is the identity pin — the deterministic proof of what
+// the racing swap probes could only show statistically: the handle SafeOpen returns is
+// bound to the file that was opened, not to its name. A rename over that name while the
+// handle is held (the adversarial flip the retired stat-first pattern lost to) changes
+// nothing the handle sees — fstat and read through it still describe the originally-opened
+// file, so a size bound decided from this descriptor cannot be bait-and-switched.
+func TestSafeOpen_HandleSurvivesRename(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("original A"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("impostor B, rather longer"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	f, err := SafeOpen(root, "a.txt")
+	if err != nil {
+		t.Fatalf("SafeOpen: %v", err)
+	}
+	defer f.Close()
+
+	// The flip: b.txt takes over a.txt's NAME while the handle is held.
+	if err := os.Rename(filepath.Join(root, "b.txt"), filepath.Join(root, "a.txt")); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatalf("fstat after rename: %v", err)
+	}
+	if want := int64(len("original A")); info.Size() != want {
+		t.Errorf("fstat size after rename = %d, want %d (the originally-opened file)", info.Size(), want)
+	}
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read after rename: %v", err)
+	}
+	if string(got) != "original A" {
+		t.Errorf("content after rename = %q, want %q (the originally-opened file)", got, "original A")
 	}
 }
