@@ -177,8 +177,15 @@ func TestLandlockConfineRejectsEmptyArgv(t *testing.T) {
 	// command line — the deterministic guard before any self-resolution.
 	c := &landlockConfiner{abi: 4}
 	cmd := &exec.Cmd{} // no Args
-	if err := c.Confine(context.Background(), domain.ConfinementBox{}, cmd); err == nil {
+	err := c.Confine(context.Background(), domain.ConfinementBox{}, cmd)
+	if err == nil {
 		t.Fatal("Confine with empty argv returned nil, want error")
+	}
+	// The message is the shared POSIX one (confine_posix.go's errNoArgv), and it must survive
+	// the guard being duplicated here to keep it ahead of the self-executable resolution:
+	// pinned on both backends so neither drifts after the argv wrap moved out of them.
+	if got, want := err.Error(), "apogee: confine: cmd has no argv"; got != want {
+		t.Errorf("error = %q, want %q", got, want)
 	}
 }
 

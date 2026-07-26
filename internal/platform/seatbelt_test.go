@@ -297,7 +297,34 @@ func TestSeatbeltConfineRejectsEmptyArgv(t *testing.T) {
 	// the deterministic guard runs before the presence check.
 	c := newSeatbeltConfiner(true)
 	cmd := &exec.Cmd{} // no Args
-	if err := c.Confine(context.Background(), domain.ConfinementBox{}, cmd); err == nil {
+	err := c.Confine(context.Background(), domain.ConfinementBox{}, cmd)
+	if err == nil {
 		t.Fatal("Confine with empty argv returned nil, want error")
+	}
+	// The message is the shared POSIX one (confine_posix.go's errNoArgv); pinning it here and
+	// in the landlock test is what keeps both backends reporting the same refusal after the
+	// argv wrap moved out of them.
+	if got, want := err.Error(), "apogee: confine: cmd has no argv"; got != want {
+		t.Errorf("error = %q, want %q", got, want)
+	}
+}
+
+func TestSeatbeltConfineEmptyArgvPrecedesPresenceProbe(t *testing.T) {
+	t.Parallel()
+
+	// The ordering the backend's own bare argv guard exists for: on a host WITHOUT
+	// sandbox-exec an argv-less cmd still reports the argv refusal rather than
+	// ErrConfinementUnavailable, so the caller is told what is wrong with the command it
+	// handed over instead of what is missing from the host.
+	c := newSeatbeltConfiner(false)
+	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: "/ws"}, &exec.Cmd{})
+	if err == nil {
+		t.Fatal("Confine with empty argv returned nil, want the argv error")
+	}
+	if got, want := err.Error(), "apogee: confine: cmd has no argv"; got != want {
+		t.Errorf("error = %q, want %q (the presence probe must not shadow it)", got, want)
+	}
+	if errors.Is(err, domain.ErrConfinementUnavailable) {
+		t.Errorf("error = %v, want the argv refusal rather than the presence failure", err)
 	}
 }

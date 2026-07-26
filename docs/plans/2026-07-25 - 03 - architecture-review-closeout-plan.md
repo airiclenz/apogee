@@ -676,7 +676,28 @@ skipped on hosts where the test cannot create a symlink.
 
 ---
 
-## 9. One POSIX argv-wrap helper for landlock and seatbelt
+## 9. One POSIX argv-wrap helper for landlock and seatbelt — ✅ DONE (2026-07-26)
+
+NOTES (2026-07-26): four deviations from the item's literal text, plus two notes for the verifier.
+(a) **seatbelt keeps a bare `if len(cmd.Args) == 0` guard too**, not just landlock: its argv check
+also precedes a host probe (`!c.present`), so removing it would turn an argv-less cmd on a host
+without sandbox-exec into `ErrConfinementUnavailable` — the same error-ordering argument the item
+makes for landlock's self-resolution, and `seatbelt_test.go`'s existing comment already claimed the
+ordering. New `TestSeatbeltConfineEmptyArgvPrecedesPresenceProbe` pins it. (b) The message is a
+package-level `errNoArgv` sentinel in `confine_posix.go` rather than three copies of the
+`fmt.Errorf` literal (helper + two retained guards); the string is **verbatim** unchanged and now
+exists once. (c) The item's "a test must pin the empty-argv error on **both** backends" is done by
+extending the two existing backend tests with an exact-message assertion — landlock's is
+linux-tagged, so a `!windows` file cannot reach `landlockConfiner` at all; no pre-existing
+assertion changed, and `confine_posix_test.go` stays about the two helpers only. (d) `seatbelt.go`'s
+file header gained one clause: `!windows` is now also the tag the shared wrap it calls needs.
+For the verifier: `grep -n "Setpgid" internal/platform/*.go` also matches **three prose
+references** — landlock's and seatbelt's `Confine` doc comments (both still accurate: `Confine`
+does put the child in its own group) and seatbelt's build-tag rationale, where the field name is
+the reason for the tag. The only **assignment** is `confine_posix.go`'s `setConfinedPgid`. Each
+backend lost **9** lines net (`landlock_linux.go` 336 → 327, `seatbelt.go` 223 → 214), not ~15,
+because the retained bare guard plus its four-line reason stays in each. No CHANGELOG entry: this
+is an internal refactor with no observable behaviour change, matching item 7.
 
 **What:**
 

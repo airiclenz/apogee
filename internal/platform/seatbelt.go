@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -36,7 +35,8 @@ import (
 // (seatbelt_darwin.go).
 //
 // This file is //go:build !windows (not darwin-only) so the hermetic tests run on the
-// Linux dev host: SysProcAttr.Setpgid (the process-group teardown contract, §2.4) is
+// Linux dev host, and !windows is also the tag the shared POSIX argv wrap it calls needs
+// (confine_posix.go): SysProcAttr.Setpgid (the process-group teardown contract, §2.4) is
 // POSIX-only and does not exist on Windows, whose own backend fences with a restricted
 // low-integrity token instead (ADR 0020). Only NewSeatbeltConfiner is selected per-OS (P3.4
 // picks it on darwin); on Linux this concrete type is compiled but never chosen as the
@@ -95,8 +95,12 @@ func (c *seatbeltConfiner) Capabilities() domain.ConfinementCaps {
 // can't" safety net (§2.2). ctx covers only this synchronous preparation; the run's
 // lifetime is governed by cmd's own context.
 func (c *seatbeltConfiner) Confine(_ context.Context, box domain.ConfinementBox, cmd *exec.Cmd) error {
+	// The argv guard runs before the presence check, so a cmd with no argv reports "no argv"
+	// on every host rather than becoming ErrConfinementUnavailable where sandbox-exec is
+	// absent. wrapArgvUnderLauncher guards the same condition with the same error; this one
+	// exists purely to keep that ordering.
 	if len(cmd.Args) == 0 {
-		return fmt.Errorf("apogee: confine: cmd has no argv")
+		return errNoArgv
 	}
 	if !c.present {
 		return fmt.Errorf("%w: sandbox-exec not present on this host", domain.ErrConfinementUnavailable)
@@ -109,25 +113,13 @@ func (c *seatbeltConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 
 	profile := seatbeltProfile(box)
 
-	// Launch the original command under the sandbox profiler; argv after the profile is
-	// the original command, run confined by sandbox-exec. Carry the RESOLVED program
-	// path (cmd.Path), not the bare cmd.Args[0], so the profiled child execs the same
-	// binary Go resolved (contract §2.3); fall back to Args[0] only if Path is unset.
-	prog := cmd.Path
-	if prog == "" {
-		prog = cmd.Args[0]
+	// Launch the original command under the sandbox profiler; argv after the profile is the
+	// original command, run confined by sandbox-exec. The wrap carries the resolved program
+	// path and the process-group rule for both POSIX backends (confine_posix.go).
+	if err := wrapArgvUnderLauncher(cmd, profiler, "-p", profile); err != nil {
+		return err
 	}
-	orig := append([]string{prog}, cmd.Args[1:]...)
-	cmd.Path = profiler
-	cmd.Args = append([]string{profiler, "-p", profile}, orig...)
-
-	// Setpgid puts the wrapped child and its descendants in one process group so the
-	// tool's negative-PID kill reaps the whole group (contract §2.4); the tool sets
-	// cmd.Cancel/WaitDelay (P3.8).
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.Setpgid = true
+	setConfinedPgid(cmd)
 	return nil
 }
 

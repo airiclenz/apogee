@@ -134,8 +134,12 @@ func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 // can't" safety net (§2.2). ctx covers only this synchronous preparation; the run's
 // lifetime is governed by cmd's own context.
 func (c *landlockConfiner) Confine(_ context.Context, box domain.ConfinementBox, cmd *exec.Cmd) error {
+	// The argv guard runs before the self-resolution below, so a cmd with no argv reports
+	// "no argv" rather than a resolution failure on a host that cannot resolve its own
+	// executable. wrapArgvUnderLauncher guards the same condition with the same error; this
+	// one exists purely to keep that ordering.
 	if len(cmd.Args) == 0 {
-		return fmt.Errorf("apogee: confine: cmd has no argv")
+		return errNoArgv
 	}
 
 	self := c.reexecPath
@@ -152,26 +156,14 @@ func (c *landlockConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 		return fmt.Errorf("apogee: confine: encode box: %w", err)
 	}
 
-	// Re-exec the apogee binary in __confined-exec mode; argv after "--" is the
-	// original command, run confined by the in-child half (ApplyLandlockAndExec).
-	// It must carry the RESOLVED program path (cmd.Path), not the bare cmd.Args[0]:
-	// the child re-execs via syscall.Exec, which does NO PATH lookup, so a bare
-	// "sh" would fail with ENOENT (contract §2.3).
-	prog := cmd.Path
-	if prog == "" {
-		prog = cmd.Args[0]
+	// Re-exec the apogee binary in __confined-exec mode; argv after "--" is the original
+	// command, run confined by the in-child half (ApplyLandlockAndExec). The wrap carries the
+	// resolved program path and the process-group rule for both POSIX backends
+	// (confine_posix.go).
+	if err := wrapArgvUnderLauncher(cmd, self, confinedExecSentinel, encoded, "--"); err != nil {
+		return err
 	}
-	orig := append([]string{prog}, cmd.Args[1:]...)
-	cmd.Path = self
-	cmd.Args = append([]string{self, confinedExecSentinel, encoded, "--"}, orig...)
-
-	// Setpgid puts the wrapped child and its descendants in one process group so the
-	// tool's negative-PID kill reaps the whole group (contract §2.4); the tool sets
-	// cmd.Cancel/WaitDelay (P3.8).
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.Setpgid = true
+	setConfinedPgid(cmd)
 	return nil
 }
 
