@@ -1,7 +1,13 @@
 # Plan — Redesign the status-line spinner: snake / glitter styles with a soft colour loop
 
 **Date:** 2026-07-25
-**Status:** READY (the three shape decisions resolved with the owner 2026-07-25 — see *Decisions taken*).
+**Status:** **DONE & ARCHIVED (2026-07-26) — executed 2026-07-26.** Items **1–6** landed and were
+verified; each carries its dated ✅ on its heading and, where it deviated, a `NOTES:` block. Item
+**7** — the *optional* `apogee spinner` preview command — was **SKIPPED by the owner** (the spinner
+was already verified working; preview tooling not needed), which the item itself names as a normal
+outcome rather than a failure: **no preview subcommand exists and none is owed.** (Scope and the
+three shape decisions were resolved with the owner 2026-07-25 — the original READY state; see
+*Decisions taken*.)
 **Source:** owner request, 2026-07-25 — three spinner ideas (density-sorted braille "glitter"
 that breathes; a 6-dot snake around a 4×4 dot grid built from two braille cells; a soft ~8s
 colour loop), plus the follow-up decisions below.
@@ -599,7 +605,7 @@ the package (check with `ls internal/tui/*.go`).
 
 ---
 
-## 7. (OPTIONAL) `apogee spinner` previews the animations
+## 7. (OPTIONAL) `apogee spinner` previews the animations — ⏭️ SKIPPED (2026-07-26, owner's call: the spinner was already verified working; preview tooling not needed)
 
 **What.** **Optional — the owner may skip this item outright**, and `/implement-plan` should
 treat a decision to skip it as a normal outcome, not a failure. It exists only because the two
