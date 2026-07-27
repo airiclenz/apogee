@@ -90,11 +90,16 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				// run's restore; doing that here would both break ADR 0021 §1's read-only
 				// pledge and revert-and-delete the journal the residue line above exists to
 				// report (ADR 0020 §2).
-				Confiner:           platform.NewReportConfiner(),
-				HostID:             platform.HostID(),
-				Workspace:          roots.workspace,
-				ConfigHome:         roots.config,
-				Endpoint:           opts.endpoint,
+				Confiner:   platform.NewReportConfiner(),
+				HostID:     platform.HostID(),
+				Workspace:  roots.workspace,
+				ConfigHome: roots.config,
+				Endpoint:   opts.endpoint,
+				// The resolved bearer token (`api-key:` / APOGEE_API_KEY, no flag): the
+				// probe must authenticate exactly as a session would, or a keyed server
+				// would be reported unreachable here and perfectly fine in a session. The
+				// report states its PRESENCE only; the value never reaches Host.
+				APIKey:             opts.apiKey,
 				ConfineToWorkspace: opts.confineToWorkspace,
 				Residue:            residue,
 			})

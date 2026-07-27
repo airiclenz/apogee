@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -40,7 +41,7 @@ func TestBeatCarriesDiscovery(t *testing.T) {
 		`{"data":[{"id":"model-a","name":"Model A","context_length":32768},{"id":"model-b","name":"Model B","context_length":8192}]}`,
 		`{"default_generation_settings":{"n_ctx":16384}}`)
 
-	beat := NewMonitor(srv.URL, "").Beat(context.Background())
+	beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
 	if !beat.Reachable || beat.Failure != "" {
 		t.Fatalf("Reachable = %v Failure = %q, want true / \"\"", beat.Reachable, beat.Failure)
@@ -68,7 +69,7 @@ func TestBeatHintPinsActiveWindow(t *testing.T) {
 
 	srv := discoveryServer(t, `{"data":[{"id":"small","context_length":4096},{"id":"large","context_length":128000}]}`, "")
 
-	beat := NewMonitor(srv.URL, "large").Beat(context.Background())
+	beat := NewMonitor(srv.URL, "large", "").Beat(context.Background())
 
 	// The config hint reaches discovery, so the ACTIVE model is the pinned one and the window
 	// is its own — not the first advertised model's.
@@ -82,12 +83,81 @@ func TestBeatHintVanishedFallsBack(t *testing.T) {
 
 	srv := discoveryServer(t, `{"data":[{"id":"served","context_length":4096},{"id":"other","context_length":8192}]}`, "")
 
-	beat := NewMonitor(srv.URL, "unloaded").Beat(context.Background())
+	beat := NewMonitor(srv.URL, "unloaded", "").Beat(context.Background())
 
 	// The pin is a hint, not a claim: once the server stops advertising it, the beat follows
 	// observed reality — the first model the server lists.
 	if beat.ActiveModel != "served" || beat.ContextWindow != 4096 {
 		t.Errorf("active = %q ctx = %d, want served / 4096", beat.ActiveModel, beat.ContextWindow)
+	}
+}
+
+// A keyed server answers /v1/models with 401 just as readily as it answers a chat call, so the
+// monitor's own client must carry the bearer token: without it the footer would report the
+// Upstream permanently unreachable under a session that is talking to it perfectly well.
+func TestMonitorSendsAPIKey(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var authorizations []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		authorizations = append(authorizations, r.Header.Get("Authorization"))
+		mu.Unlock()
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"model-a","context_length":4096}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	beat := NewMonitor(srv.URL, "", "tok").Beat(context.Background())
+
+	if !beat.Reachable {
+		t.Fatalf("Reachable = false against a keyed server (Failure = %q)", beat.Failure)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(authorizations) == 0 {
+		t.Fatal("the beat sent no request at all")
+	}
+	for i, got := range authorizations {
+		if got != "Bearer tok" {
+			t.Errorf("request %d carried Authorization %q, want %q", i, got, "Bearer tok")
+		}
+	}
+}
+
+// The keyless local server — the overwhelmingly common case — must stay byte-identical to what
+// it was before the key existed: an empty key sends no Authorization header at all, rather than
+// an empty or "Bearer " one a strict server could reject.
+func TestMonitorWithoutAPIKeySendsNoAuthHeader(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var authorized bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.Header["Authorization"]; ok {
+			mu.Lock()
+			authorized = true
+			mu.Unlock()
+		}
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"model-a","context_length":4096}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	if beat := NewMonitor(srv.URL, "", "").Beat(context.Background()); !beat.Reachable {
+		t.Fatalf("Reachable = false (Failure = %q)", beat.Failure)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if authorized {
+		t.Error("an empty api key still sent an Authorization header")
 	}
 }
 
@@ -98,7 +168,7 @@ func TestBeatUnreachableIsObservation(t *testing.T) {
 	endpoint := srv.URL
 	srv.Close() // nothing listens on that port any more
 
-	beat := NewMonitor(endpoint, "").Beat(context.Background())
+	beat := NewMonitor(endpoint, "", "").Beat(context.Background())
 
 	if beat.Reachable {
 		t.Fatalf("Reachable = true against a closed listener, want false")

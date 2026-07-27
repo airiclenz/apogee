@@ -23,6 +23,11 @@ type Inputs struct {
 	ConfigHome         string
 	Endpoint           string
 	ConfineToWorkspace bool
+	// APIKey is the resolved upstream bearer token, "" when none is configured. It is used to
+	// reach the endpoint exactly as a session would and is never carried into the Host: the
+	// report states only THAT a key exists, because "is my key even loaded?" is the first
+	// question behind a 401 and the answer must not print the secret to a terminal.
+	APIKey string
 	// Residue is the backend's outstanding disk mutation, "" when there is none — today
 	// only the Windows token backend has one to report (mandatory labels a killed run did
 	// not revert; ADR 0020 §2). It is injected like every other fact here: the report
@@ -45,6 +50,10 @@ type Host struct {
 	ConfigHome         string
 	Residue            string
 	Discovery          Discovery
+	// APIKeyConfigured reports whether an upstream bearer token was resolved — the PRESENCE
+	// of Inputs.APIKey and nothing more. The value never enters the report: a boolean is the
+	// whole of what a reader needs to tell "my key is not loaded" from "my key is wrong".
+	APIKeyConfigured bool
 }
 
 // GatherHost runs the host half of `apogee probe`: it reads the backend's capability matrix
@@ -67,7 +76,8 @@ func GatherHost(ctx context.Context, in Inputs) Host {
 		Workspace:          in.Workspace,
 		ConfigHome:         in.ConfigHome,
 		Residue:            in.Residue,
-		Discovery:          Discover(ctx, in.Endpoint),
+		APIKeyConfigured:   in.APIKey != "",
+		Discovery:          Discover(ctx, in.Endpoint, in.APIKey),
 	}
 }
 
@@ -135,10 +145,15 @@ func (h Host) confinedLine() string {
 		"                 (confine-to-workspace: false, or an unconfined-hosts entry for this host id)"
 }
 
-// upstreamLines render the endpoint block: the URL, whether GET /v1/models answered, what it
-// advertised, and whether llama.cpp's GET /props supplied a runtime context window. Each probe
-// reports its own outcome, so "the server is down" and "the server is not llama.cpp" cannot be
-// confused for one another.
+// upstreamLines render the endpoint block: the URL, whether an api key is configured, whether
+// GET /v1/models answered, what it advertised, and whether llama.cpp's GET /props supplied a
+// runtime context window. Each probe reports its own outcome, so "the server is down" and "the
+// server is not llama.cpp" cannot be confused for one another.
+//
+// The api-key line sits beside the endpoint in BOTH the reached and the unreached shape,
+// because it is the endpoint's credential either way: on a failure it separates "no key was
+// sent" from "the key was rejected", and on a success it confirms the run everyone is about to
+// trust was authenticated. It states presence only — the token itself is never rendered.
 func (h Host) upstreamLines() []string {
 	d := h.Discovery
 	if !d.Attempted {
@@ -150,6 +165,7 @@ func (h Host) upstreamLines() []string {
 	if !d.Reached {
 		return []string{
 			field("endpoint", d.Endpoint),
+			field("api key", h.apiKeyLine()),
 			field("reachable", "NO — GET /v1/models did not complete: "+d.Failure),
 			field("/props", "not probed (the model probe failed first)"),
 		}
@@ -169,10 +185,21 @@ func (h Host) upstreamLines() []string {
 
 	return []string{
 		field("endpoint", d.Endpoint),
+		field("api key", h.apiKeyLine()),
 		field("reachable", "yes — GET /v1/models answered"),
 		field("models", models),
 		field("/props", props),
 	}
+}
+
+// apiKeyLine states whether an upstream bearer token was resolved — never which one. "none" is
+// the ordinary local-server answer rather than a fault, so it names the two places a key comes
+// from instead of reading as a missing setting.
+func (h Host) apiKeyLine() string {
+	if h.APIKeyConfigured {
+		return "configured (sent as a bearer token)"
+	}
+	return "none — no api-key: in config.yaml and no APOGEE_API_KEY (a local server needs none)"
 }
 
 // field renders one "  label:        value" line, padded so the values align in a terminal.

@@ -303,7 +303,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// still serves that id, discovery resolves ITS window rather than the first advertised model's,
 	// which is the whole of the pinned-multi-model-server bug; once the pin vanishes from
 	// /v1/models the beat reports what is actually loaded and the rebind below follows it.
-	monitor := heartbeat.NewMonitor(opts.endpoint, opts.model)
+	// The resolved api key rides with it: the monitor talks to the same keyed server the
+	// session does, and a beat that could not authenticate would paint a permanently
+	// unreachable Upstream under a session that is working.
+	monitor := heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey)
 
 	// The `context-window:` pin, captured before anything can move it. Startup no longer probes, so
 	// a non-zero value here is the user's pin and nothing else — which is what lets rebindSpecFor

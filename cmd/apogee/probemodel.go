@@ -98,7 +98,8 @@ func probeModelCommand() *cobra.Command {
 			// a later OFFLINE session has in hand when it resolves identity.
 			label := opts.model
 			if label == "" {
-				info, derr := provider.NewClient(opts.endpoint, "").Discover(cmd.Context())
+				info, derr := provider.NewClient(opts.endpoint, "",
+					provider.WithAPIKey(opts.apiKey)).Discover(cmd.Context())
 				if derr != nil {
 					return derr
 				}
@@ -112,7 +113,12 @@ func probeModelCommand() *cobra.Command {
 				return errProbeModelNeedsLabel
 			}
 
-			client := provider.NewClient(opts.endpoint, label, provider.WithRequestTimeout(batteryRequestTimeout))
+			// The battery client, carrying the resolved bearer token exactly as the label
+			// discovery above does (`api-key:` / APOGEE_API_KEY; no flag — a secret does not
+			// belong in shell history). Both of this command's clients are keyed, so a keyed
+			// Upstream cannot refuse the probe while a session against it works.
+			client := provider.NewClient(opts.endpoint, label,
+				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(opts.apiKey))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
 				Endpoint: opts.endpoint,
 				Model:    label,

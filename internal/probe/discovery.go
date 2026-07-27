@@ -46,13 +46,19 @@ type Discovery struct {
 // wrong. The probes go through the same provider client the session uses (bounded by that
 // package's discovery timeout), so the report cannot describe a discovery the binary would not
 // actually perform.
-func Discover(ctx context.Context, endpoint string) Discovery {
+//
+// apiKey is the upstream bearer token ("" ⇒ no Authorization header, the keyless local
+// default). It is carried for the same reason the session and the heartbeat carry it: a keyed
+// server rejects an unauthenticated GET /v1/models, so a probe that omitted the key would
+// report a 401 the binary itself would never have hit. The value is used and never kept —
+// Discovery has no field for it; only the host report's presence line says it exists.
+func Discover(ctx context.Context, endpoint, apiKey string) Discovery {
 	if endpoint == "" {
 		return Discovery{}
 	}
 	d := Discovery{Endpoint: endpoint, Attempted: true}
 
-	info, err := provider.NewClient(endpoint, "").Discover(ctx)
+	info, err := provider.NewClient(endpoint, "", provider.WithAPIKey(apiKey)).Discover(ctx)
 	if err != nil {
 		d.Failure = err.Error()
 		return d

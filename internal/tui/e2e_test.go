@@ -409,7 +409,7 @@ func TestE2EColdStartHeartbeat(t *testing.T) {
 
 	opts := e2eOptions(srv.URL, workspace)
 	opts.Model, opts.ContextWindow = "", 0 // the cold start: nothing configured, nothing discovered
-	opts.Heartbeat = heartbeat.NewMonitor(srv.URL, "").Beat
+	opts.Heartbeat = heartbeat.NewMonitor(srv.URL, "", "").Beat
 	opts.Rebind = func(model string, window int) (RebindResult, error) {
 		if err := eng.Rebind(agent.RebindSpec{Model: model, MaxContextTokens: window}); err != nil {
 			return RebindResult{}, err

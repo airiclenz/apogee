@@ -161,6 +161,102 @@ func TestReportNoEndpointConfigured(t *testing.T) {
 	}
 }
 
+// "Is my key even loaded?" is the first question behind a 401, and the report answers it —
+// with a PRESENCE, never the value. The secret must not appear anywhere in the report, on a
+// reachable server or an unreachable one, and an absent key reads as the ordinary local
+// default rather than as a fault.
+func TestHostReportNamesAPIKeyPresence(t *testing.T) {
+	t.Parallel()
+	const secret = "sk-super-secret-token"
+
+	reachable := upstreamServer(t, openAIModels, llamaCppProps)
+	unreachable := upstreamServer(t, openAIModels, "")
+	closedURL := unreachable.URL
+	unreachable.Close() // the port is now closed: the probe's dial is refused
+
+	cases := []struct {
+		name       string
+		endpoint   string
+		apiKey     string
+		wantLine   string
+		unwantLine string
+	}{
+		{
+			name:       "reachable server with a key",
+			endpoint:   reachable.URL,
+			apiKey:     secret,
+			wantLine:   "api key:       configured (sent as a bearer token)",
+			unwantLine: "none —",
+		},
+		{
+			name:       "reachable server without a key",
+			endpoint:   reachable.URL,
+			wantLine:   "api key:       none —",
+			unwantLine: "configured (sent as a bearer token)",
+		},
+		{
+			// The shape the line exists for: the probe failed, and the reader has to tell
+			// "no key was sent" apart from "the key was rejected".
+			name:       "unreachable server with a key",
+			endpoint:   closedURL,
+			apiKey:     secret,
+			wantLine:   "api key:       configured (sent as a bearer token)",
+			unwantLine: "none —",
+		},
+		{
+			name:       "unreachable server without a key",
+			endpoint:   closedURL,
+			wantLine:   "api key:       none —",
+			unwantLine: "configured (sent as a bearer token)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host := probe.GatherHost(context.Background(), probe.Inputs{
+				Confiner:           fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+				Endpoint:           tc.endpoint,
+				APIKey:             tc.apiKey,
+				ConfineToWorkspace: true,
+			})
+			report := host.Report()
+
+			if host.APIKeyConfigured != (tc.apiKey != "") {
+				t.Errorf("APIKeyConfigured = %v, want %v", host.APIKeyConfigured, tc.apiKey != "")
+			}
+			if !strings.Contains(report, tc.wantLine) {
+				t.Errorf("report does not state %q:\n%s", tc.wantLine, report)
+			}
+			if strings.Contains(report, tc.unwantLine) {
+				t.Errorf("report states the wrong api-key verdict %q:\n%s", tc.unwantLine, report)
+			}
+			// The whole point of a presence line: the token itself never reaches a terminal.
+			if strings.Contains(report, secret) {
+				t.Errorf("the report leaked the api key value:\n%s", report)
+			}
+		})
+	}
+}
+
+// With no endpoint there is nothing to authenticate to, so the block stays the two-line "nothing
+// to ask" shape — an api-key verdict about a server that was never contacted would be noise.
+func TestHostReportOmitsAPIKeyWithoutAnEndpoint(t *testing.T) {
+	t.Parallel()
+	report := probe.GatherHost(context.Background(), probe.Inputs{
+		Confiner:           fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		APIKey:             "sk-unused",
+		ConfineToWorkspace: true,
+	}).Report()
+
+	if strings.Contains(report, "api key:") {
+		t.Errorf("the no-endpoint report carries an api-key line:\n%s", report)
+	}
+	if strings.Contains(report, "sk-unused") {
+		t.Errorf("the report leaked the api key value:\n%s", report)
+	}
+}
+
 // The question the command exists for: on a host whose backend cannot fence, a confined Auto
 // gates every command — and the report closes with the SAME notice the session prints at
 // startup, so the off-session diagnosis and the in-session one are one sentence.

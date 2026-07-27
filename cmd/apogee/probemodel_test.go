@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +32,18 @@ func modelUpstream(t *testing.T) *httptest.Server {
 // on is whatever /v1/models names.
 func modelUpstreamAdvertising(t *testing.T, active string) *httptest.Server {
 	t.Helper()
+	return modelUpstreamRecording(t, active, nil)
+}
+
+// modelUpstreamRecording is modelUpstreamAdvertising with an Authorization recorder: every
+// request's header lands in auth (nil ⇒ record nothing). That is what proves the resolved api
+// key reaches BOTH clients this command builds — the label discovery and the battery — since
+// `probe model` has no --api-key flag to inspect and the two clients are otherwise invisible
+// from outside.
+func modelUpstreamRecording(t *testing.T, active string, auth *authLog) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth.record(r)
 		if r.URL.Path == "/v1/models" {
 			_, _ = w.Write([]byte(`{"data":[{"id":"` + active + `","context_length":4096}]}`))
 			return
@@ -68,6 +80,35 @@ func modelUpstreamAdvertising(t *testing.T, active string) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// authLog collects the Authorization header of every request a fake Upstream received, keyed by
+// the path that received it. The httptest handler runs on the server's own goroutines, so it is
+// guarded; the assertions read it once the command under test has returned. A nil *authLog
+// records nothing, which is what every fixture that does not care about auth passes.
+type authLog struct {
+	mu      sync.Mutex
+	entries []authEntry
+}
+
+type authEntry struct {
+	path   string
+	header string
+}
+
+func (a *authLog) record(r *http.Request) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.entries = append(a.entries, authEntry{path: r.URL.Path, header: r.Header.Get("Authorization")})
+}
+
+func (a *authLog) all() []authEntry {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]authEntry(nil), a.entries...)
 }
 
 func toolCallReply(id, name, args string) string {
@@ -623,6 +664,59 @@ func noticeContains(notices []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// Both clients `probe model` builds carry the key the config layer resolved: the label
+// discovery that names the model, and the battery that spends the tokens. Wiring only one of
+// them would leave the command failing against a keyed server for a reason the report cannot
+// explain. There is no --api-key flag by design, so the key arrives through config.yaml here —
+// the file layer, which is the same path a real user's keyed server takes.
+func TestProbeModelSendsTheConfiguredAPIKey(t *testing.T) {
+	t.Parallel()
+	auth := &authLog{}
+	srv := modelUpstreamRecording(t, "battery-model", auth)
+	configHome := t.TempDir()
+	writeProbeConfig(t, configHome, "api-key: probe-token\n")
+
+	// No --model, so the label discovery client runs too — the request that would 401 first
+	// on a keyed server.
+	_ = runProbeModel(t, configHome, "--endpoint", srv.URL)
+
+	entries := auth.all()
+	var sawDiscovery, sawBattery bool
+	for _, e := range entries {
+		if e.header != "Bearer probe-token" {
+			t.Errorf("request to %s carried Authorization %q, want %q", e.path, e.header, "Bearer probe-token")
+		}
+		switch e.path {
+		case "/v1/models":
+			sawDiscovery = true
+		case "/v1/chat/completions":
+			sawBattery = true
+		}
+	}
+	if !sawDiscovery {
+		t.Errorf("no discovery request was recorded (entries=%v)", entries)
+	}
+	if !sawBattery {
+		t.Errorf("no battery request was recorded (entries=%v)", entries)
+	}
+}
+
+// The keyless local server — the default — is unchanged: with no key configured, neither client
+// sends an Authorization header at all.
+func TestProbeModelWithoutAnAPIKeySendsNoAuthHeader(t *testing.T) {
+	t.Parallel()
+	auth := &authLog{}
+	srv := modelUpstreamRecording(t, "battery-model", auth)
+
+	_ = runProbeModel(t, t.TempDir(), "--endpoint", srv.URL)
+
+	for _, e := range auth.all() {
+		if e.header != "" {
+			t.Errorf("request to %s carried Authorization %q with no key configured", e.path, e.header)
+		}
+	}
 }
 
 // The model half never runs off an absent endpoint: with nothing to call there is no battery,

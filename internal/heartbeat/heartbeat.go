@@ -70,8 +70,15 @@ type Monitor struct {
 // while the server still serves that id, and falls back to the server's first advertised
 // model once the pin vanishes from /v1/models — the pin is a hint about reality, never a
 // claim that overrides it.
-func NewMonitor(endpoint, modelHint string) *Monitor {
-	return &Monitor{client: provider.NewClient(endpoint, modelHint)}
+//
+// apiKey is the upstream bearer token ("" on a keyless local server, which sends no auth
+// header at all). It rides every beat, because a keyed server answers /v1/models with 401
+// just as readily as it answers a chat call: a monitor without the key would report the
+// Upstream permanently unreachable while the session talks to it perfectly well. The endpoint
+// never changes mid-session (ADR 0024), so this one key holds for the Monitor's whole life —
+// a model rebind reuses the same client through SetModel and therefore the same key.
+func NewMonitor(endpoint, modelHint, apiKey string) *Monitor {
+	return &Monitor{client: provider.NewClient(endpoint, modelHint, provider.WithAPIKey(apiKey))}
 }
 
 // Beat performs one observation and reports what answered. It never returns an error (see
