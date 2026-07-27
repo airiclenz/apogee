@@ -83,7 +83,7 @@ Dead code: `provider.ServerManager` (`server.go`) — never constructed in produ
 
 ---
 
-## 1. `internal/heartbeat` — the Beat observation and the discovery-backed Monitor
+## 1. `internal/heartbeat` — the Beat observation and the discovery-backed Monitor — ✅ DONE (2026-07-27)
 
 **What.** New package `internal/heartbeat` (files `heartbeat.go`, `heartbeat_test.go`, ~80 lines production code). It owns the domain noun, the cadence, and the production beat source over `provider.Client.Discover` — constructed **with the config model hint** (the B1 fix). Package doc states the probe/heartbeat distinction (ADR 0021 / CONTEXT.md: probe diagnoses once on demand; the heartbeat observes continuously).
 
