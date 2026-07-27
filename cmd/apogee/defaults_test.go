@@ -113,6 +113,25 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	}
 }
 
+// The template documents the upstream api key where a reader meets the endpoint: the key's own
+// spelling, its environment variable, and the two facts a secret in a plain-text file needs
+// (the env var wins; restrict the file otherwise). It stays a COMMENTED example — the
+// behaviour-neutrality above already pins that the seeded file resolves no key.
+func TestEmbeddedDefaultConfigDocumentsTheAPIKey(t *testing.T) {
+	t.Parallel()
+	template := string(defaultConfigYAML)
+	for _, want := range []string{
+		"# api-key:",     // the config key itself, as a commented example
+		"APOGEE_API_KEY", // the environment variable that overrides it
+		"no flag",        // why the third precedence layer is deliberately absent
+		"plain text",     // the shared-machine caveat
+	} {
+		if !strings.Contains(template, want) {
+			t.Errorf("embedded template does not mention %q; the api-key block is missing or reworded", want)
+		}
+	}
+}
+
 // seedDefaultConfig honours an explicit --config home and seeds the embedded template there.
 func TestSeedDefaultConfigHonoursConfigFlag(t *testing.T) {
 	t.Parallel()

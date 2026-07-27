@@ -11,8 +11,9 @@ A terminal-based coding agent built for **small, locally-run LLMs** (~4B–35B).
 Apogee is a single, cross-platform tool that drops into any IDE's integrated
 terminal — or any standalone terminal — on Windows, macOS, and Linux. It runs
 against any OpenAI-compatible LLM server (llama.cpp, Ollama, LM Studio, vLLM), so
-your code stays on your machine, no API key is required for local models, and you
-get a full agentic tool-use loop with sensible guardrails.
+your code stays on your machine, a local model needs no API key (and a keyed
+server is one `api-key:` away), and you get a full agentic tool-use loop with
+sensible guardrails.
 
 ## What this repo is
 
@@ -115,7 +116,9 @@ overrides the built-in default. A documented starter `config.yaml` is written to
 there as a commented example, with one exception — `system-prompt-text:`, the
 default system prompt, ships active. Some settings are **file-only** (no flag or
 env) — the system prompt, the model profile, MCP servers, web-search endpoint,
-and the small-model mechanisms.
+and the small-model mechanisms — and one, the upstream `api-key:`, has a file key
+and an environment variable but deliberately **no flag** (see
+[The upstream API key](#the-upstream-api-key)).
 
 Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
 until its A/B bench run proves it a win, so enabling one is a deliberate config
@@ -155,6 +158,35 @@ key, in tokens) only when your server does not advertise a window, or when its n
 wrong for how you run it; that key is a **pin** the heartbeat never overrides. With no
 window known, the Budget and automatic compaction stay inactive and apogee says so in the
 transcript the moment it binds a model without one.
+
+### The upstream API key
+
+A local server usually wants no credentials, but some do: llama.cpp started with
+`--api-key`, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. Give
+apogee that token and it rides **every** wire to the endpoint as
+`Authorization: Bearer <key>` — your conversation, the ten-second heartbeat, and
+both halves of `apogee probe` — so a keyed server never leaves the footer stuck
+on a `401` while the session works.
+
+```yaml
+# ~/.apogee/config.yaml
+api-key: sk-my-server-token
+```
+
+```console
+$ APOGEE_API_KEY=sk-my-server-token apogee
+```
+
+The environment variable **overrides** the file, and there is **no `--api-key`
+flag** on purpose: a secret typed on the command line lands in your shell history
+and in `ps` output on every OS. Leave the key unset — the local default — and no
+`Authorization` header is sent at all, exactly as before this key existed.
+
+The value is never displayed: `apogee probe` reports only *whether* a key was
+resolved (`api key: configured (sent as a bearer token)`), and the provider client
+redacts it from any error text the server echoes back. One caveat is yours to
+weigh: `config.yaml` is plain text, so on a shared machine prefer the environment
+variable, or restrict the file's permissions yourself.
 
 ### The system prompt
 

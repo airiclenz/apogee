@@ -172,6 +172,30 @@ point is a **minor** bump, not a breaking change.
   launch half will be rebuilt over the beat when that work lands. See
   [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md).
 
+- **A keyed server is now usable — the `api-key` setting.** A server that wants a bearer token
+  (llama.cpp started with `--api-key`, LM Studio, a remote vLLM, any keyed OpenAI-compatible
+  proxy) could not be driven at all: the provider client had always been able to send
+  `Authorization: Bearer …`, but nothing ever gave it a key. Now `api-key:` in
+  `~/.apogee/config.yaml` — or `APOGEE_API_KEY` in the environment, which **overrides** the file —
+  carries the token onto **every** wire that reaches the server: your conversation (sub-agents
+  included), the ten-second heartbeat, the `apogee probe` host report's reachability probe, and
+  `apogee probe model`'s battery. Partial wiring was the failure to avoid — a session that works
+  while the footer shows a permanent `401`.
+  - **There is deliberately no `--api-key` flag.** A secret typed on the command line lands in
+    your shell history and in `ps` output on every OS; the file and the environment variable
+    cover every invocation shape.
+  - **An unset key changes nothing.** Empty — the local-server default — sends no
+    `Authorization` header at all, so a keyless setup behaves exactly as it did before.
+  - **The value is never shown; its presence is.** `apogee probe`'s upstream block gained one
+    line reading `api key: configured (sent as a bearer token)` or naming the two places a key
+    would come from — because "is my key even loaded?" is the first question behind every 401 —
+    and the client already redacts the key from error text a server echoes back. The caveat is
+    documented rather than engineered around: `config.yaml` is plain text, so prefer the
+    environment variable on a shared machine, or restrict the file yourself.
+
+  For embedders this is **additive**: `apogee.Config` gains `APIKey`, passed straight to the
+  session's provider client.
+
 ### Changed
 
 - **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**
