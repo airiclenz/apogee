@@ -175,6 +175,7 @@ var (
 	_ = apogee.ErrUnknownMechanism
 	_ = apogee.ErrSessionVersion
 	_ = apogee.ErrInputPending
+	_ = apogee.ErrNoOpenExchange
 	_ = apogee.ErrDuplicateTool
 	_ = apogee.ErrInvalidTool
 

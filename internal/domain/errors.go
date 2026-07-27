@@ -53,6 +53,12 @@ var (
 	// ErrInputPending is returned by Submit when an Exchange is already in progress.
 	ErrInputPending = errors.New("apogee: cannot submit input mid-exchange")
 
+	// ErrNoOpenExchange is the mirror of ErrInputPending: it is returned by Interject
+	// when there is NO Exchange in flight to interject into. An interjection is a remark
+	// committed into a running Exchange at a between-Steps boundary; with nothing running
+	// the caller wants Submit, so the refusal is loud rather than a silent promotion.
+	ErrNoOpenExchange = errors.New("apogee: interject requires an open Exchange")
+
 	// ErrDuplicateTool is returned by ToolRegistry.Register when a tool with the same
 	// Name is already registered — the name is the model's stable handle, so a
 	// collision is a configuration error, not a silent overwrite.

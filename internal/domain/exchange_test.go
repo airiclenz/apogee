@@ -141,6 +141,8 @@ func TestCurrentExchange(t *testing.T) {
 				}
 
 				// Property pin: UserIndex equals what conversationView.LastUser reports.
+				// No fixture here carries an Interjection — that is the ONE deliberate
+				// divergence between the two derivations (TestCurrentExchangeSkipsInterjected).
 				wantIdx := -1
 				if _, i, ok := (conversationView{messages: tc.msgs}).LastUser(); ok {
 					wantIdx = i
@@ -151,6 +153,71 @@ func TestCurrentExchange(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCurrentExchangeSkipsInterjected pins the marker's whole point: a user message the
+// human interjected INTO a running Exchange joins that Exchange's body instead of opening a
+// new one, so every Mechanism reading the boundary keeps seeing the original ask. It is the
+// one deliberate divergence from conversationView.LastUser (which still reports the most
+// recent user message, interjected or not), so this fixture is kept out of TestCurrentExchange's
+// LastUser property pin on purpose.
+func TestCurrentExchangeSkipsInterjected(t *testing.T) {
+	t.Parallel()
+
+	interjected := func(content string) Message {
+		return Message{Role: RoleUser, Content: content, Interjected: true}
+	}
+
+	// The mid-run shape: the ask, a tool round, then the human's remark at the boundary.
+	msgs := []Message{
+		exUser("the ask"),
+		exAssistantCalls("c1"),
+		exToolResult("c1", "contents"),
+		interjected("also check the tests"),
+		exAssistant("will do"),
+	}
+
+	readers := map[string]messageReader{
+		"conversationView": conversationView{messages: msgs},
+		"Conversation":     NewConversation(msgs),
+	}
+	for name, reader := range readers {
+		e := CurrentExchange(reader)
+		if !e.Found() {
+			t.Fatalf("%s: Found() = false, want the opening ask", name)
+		}
+		if got := e.UserIndex(); got != 0 {
+			t.Errorf("%s: UserIndex() = %d, want 0 — the interjection moved the boundary", name, got)
+		}
+		if got := e.After(); !reflect.DeepEqual(got, msgs[1:]) {
+			t.Errorf("%s: After() = %v, want the whole Exchange body including the interjection", name, got)
+		}
+	}
+
+	t.Run("a later unmarked user message moves the opening as before", func(t *testing.T) {
+		t.Parallel()
+
+		next := append(append([]Message(nil), msgs...), exUser("the next ask"))
+		e := CurrentExchange(conversationView{messages: next})
+		if got, want := e.UserIndex(), len(next)-1; got != want {
+			t.Errorf("UserIndex() = %d, want %d — an ordinary user message must still open an Exchange", got, want)
+		}
+		if got := e.After(); got != nil {
+			t.Errorf("After() = %v, want nil", got)
+		}
+	})
+
+	t.Run("only interjected user messages means no Exchange", func(t *testing.T) {
+		t.Parallel()
+
+		e := CurrentExchange(conversationView{messages: []Message{
+			{Role: RoleSystem, Content: "sys"},
+			interjected("orphan remark"),
+		}})
+		if e.Found() || e.UserIndex() != -1 {
+			t.Errorf("Found() = %v, UserIndex() = %d, want false/-1 — an interjection never opens an Exchange", e.Found(), e.UserIndex())
+		}
+	})
 }
 
 func TestExchangeViewRangeAfterStops(t *testing.T) {

@@ -104,6 +104,58 @@ func TestRequestInjectContext(t *testing.T) {
 	})
 }
 
+// TestRequestInjectContextPreservesExchangeOpening pins the second place the Interjection
+// skip has to hold: InjectContext's insert anchor. The request shape is the one a mid-run
+// interjection produces — the ask, a tool round, then the human's remark at the tail. The
+// injected message is UNMARKED, so anchoring on the plain last user message would slot it
+// between the remark and the ask, making the injection itself the newest non-interjected
+// user message: the derived Exchange would collapse to the interjection alone and every
+// Mechanism scoped to the Exchange (guided decomposition's F1/F3 shared-context invariant
+// first among them) would lose the ask it shares context with.
+func TestRequestInjectContextPreservesExchangeOpening(t *testing.T) {
+	msgs := []Message{
+		{Role: RoleSystem, Content: "base"},
+		{Role: RoleUser, Content: "the ask"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Tool: "read"}}},
+		{Role: RoleTool, ToolCallID: "c1", Content: "file body"},
+		{Role: RoleUser, Content: "also check the tests", Interjected: true},
+	}
+	before := CurrentExchange(messageSlice(msgs))
+	if !before.Found() || msgs[before.UserIndex()].Content != "the ask" {
+		t.Fatalf("fixture wrong: opening index %d (found=%v)", before.UserIndex(), before.Found())
+	}
+
+	r := NewRequest("m", msgs, nil, Budget{}, 0, nil)
+	r.InjectContext("hint")
+	got := r.State().Messages
+
+	// [system, user(hint), user(the ask), assistant, tool, user(interjected)]
+	wantRoles := []Role{RoleSystem, RoleUser, RoleUser, RoleAssistant, RoleTool, RoleUser}
+	if have := roles(got); !equalRoles(have, wantRoles) {
+		t.Fatalf("roles = %v, want %v", have, wantRoles)
+	}
+
+	after := CurrentExchange(messageSlice(got))
+	if !after.Found() {
+		t.Fatal("no Exchange after the injection")
+	}
+	if c := got[after.UserIndex()].Content; c != "the ask" {
+		t.Errorf("Exchange opening = %q, want %q — the injection moved the boundary", c, "the ask")
+	}
+	if c := got[after.UserIndex()-1].Content; c != "hint" {
+		t.Errorf("message before the opening = %q, want the injected %q", c, "hint")
+	}
+	if got[after.UserIndex()-1].Interjected {
+		t.Error("the injected message is marked Interjected; only Agent.Interject sets the marker")
+	}
+
+	// The interjection stays inside the Exchange body, where the model still reads it.
+	body := after.After()
+	if len(body) == 0 || !body[len(body)-1].Interjected {
+		t.Errorf("Exchange body = %+v, want the interjection at its tail", body)
+	}
+}
+
 func TestRequestSetMessageContent(t *testing.T) {
 	r := sysUserReq(t)
 	r.SetMessageContent(1, "edited")
@@ -291,6 +343,76 @@ func TestMessageExtraRoundTrip(t *testing.T) {
 		}
 		if v, ok := m.Extra("logprobs"); !ok || string(v) != `{"x":1}` {
 			t.Errorf("unknown object sibling not collected: %q ok=%v", v, ok)
+		}
+	})
+}
+
+// TestMessageInterjectedRoundTripsJSON proves the marker survives a session snapshot without a
+// SessionVersion bump: it marshals as an omitempty sibling, decodes back, is absent from an
+// ordinary message's bytes, and decodes false from a payload written before the key existed —
+// all while the unknown-sibling passthrough keeps working alongside it.
+func TestMessageInterjectedRoundTripsJSON(t *testing.T) {
+	marked := Message{Role: RoleUser, Content: "also check the tests", Interjected: true}
+
+	data, err := json.Marshal(marked)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	const want = `{"role":"user","content":"also check the tests","interjected":true}`
+	if string(data) != want {
+		t.Errorf("marked Message JSON = %s, want %s", data, want)
+	}
+
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !got.Interjected || got.Content != marked.Content || got.Role != marked.Role {
+		t.Errorf("round-trip lost the marker or a known field: %+v", got)
+	}
+	if _, leaked := got.Extra("interjected"); leaked {
+		t.Error("the interjected key leaked into the Extra set — it is a known field")
+	}
+
+	t.Run("an ordinary message never emits the key", func(t *testing.T) {
+		plain, err := json.Marshal(Message{Role: RoleUser, Content: "the ask"})
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if bytes.Contains(plain, []byte("interjected")) {
+			t.Errorf("unmarked Message JSON = %s, want no interjected key", plain)
+		}
+	})
+
+	t.Run("a payload without the key decodes false", func(t *testing.T) {
+		var old Message
+		if err := json.Unmarshal([]byte(`{"role":"user","content":"the ask"}`), &old); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if old.Interjected {
+			t.Error("a pre-marker snapshot decoded Interjected = true")
+		}
+	})
+
+	t.Run("unknown siblings still pass through alongside the marker", func(t *testing.T) {
+		wire := []byte(`{"role":"user","content":"remark","interjected":true,"logprobs":{"x":1}}`)
+		var m Message
+		if err := json.Unmarshal(wire, &m); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if !m.Interjected {
+			t.Error("marker lost when unknown siblings were present")
+		}
+		if v, ok := m.Extra("logprobs"); !ok || string(v) != `{"x":1}` {
+			t.Errorf("unknown sibling not collected: %q ok=%v", v, ok)
+		}
+		again, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		const wantAgain = `{"role":"user","content":"remark","interjected":true,"logprobs":{"x":1}}`
+		if string(again) != wantAgain {
+			t.Errorf("re-marshal = %s, want %s", again, wantAgain)
 		}
 	})
 }

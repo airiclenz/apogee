@@ -31,6 +31,12 @@ import (
 //   - pendingInput : input Submitted but not yet consumed by a Step, so a Submit→Snapshot→
 //     Resume sequence does not silently drop the queued message.
 //
+// The per-message Interjected marker rides the conversation's own marshal as an omitempty
+// sibling, so it needs NO SessionVersion bump in either direction: a snapshot written before
+// the marker existed simply lacks the key (decoding false — no message was ever interjected),
+// and an older binary reading a newer snapshot preserves it as an unknown wire field and
+// writes it back untouched (domain.Message's Extra passthrough).
+//
 // The live delegates (Approver, Confiner, EventSink), the resolved tool/Mechanism
 // registries, and the allow-for-session approval cache are deliberately NOT serialized:
 // Resume re-supplies the delegates and registries afresh (ADR 0001), and a resumed Session

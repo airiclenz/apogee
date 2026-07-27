@@ -45,6 +45,14 @@ type Message struct {
 	ToolCalls  []ToolCall // RoleAssistant only
 	ToolCallID string     // RoleTool only — links the result to its ToolCall.ID
 
+	// Interjected marks a RoleUser message the human interjected INTO a running Exchange
+	// rather than one that opens an Exchange. It is set ONLY by Agent.Interject; every
+	// other user message leaves it false. The derived Exchange opening skips it
+	// (CurrentExchange, exchange.go), so a mid-Exchange message never moves the boundary
+	// the Mechanisms read. It is process-local: the wire projection maps fields
+	// explicitly, so the marker never reaches a provider request.
+	Interjected bool
+
 	// extra carries preserved unknown wire fields (reasoning_content, tool_choice,
 	// thinking, …) read through Extra. It is populated by Message's own JSON decoder
 	// (UnmarshalJSON collects unknown siblings) and by WithExtra; a Message built as a
@@ -87,11 +95,18 @@ type messageJSON struct {
 	Content    string     `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+
+	// Interjected is Apogee-owned, not an OpenAI wire field: it rides the session snapshot
+	// (the marker must survive save/restore) and never reaches a provider. omitempty keeps
+	// it absent from every ordinary message, so no SessionVersion bump is needed — an older
+	// snapshot simply lacks the key (decoding false) and an older binary round-trips it as
+	// an unknown sibling.
+	Interjected bool `json:"interjected,omitempty"`
 }
 
 // messageKnownKeys are the top-level JSON keys messageJSON owns; UnmarshalJSON strips them
 // so only genuinely-unknown siblings land in extra. Kept in sync with messageJSON's tags.
-var messageKnownKeys = []string{"role", "content", "tool_calls", "tool_call_id"}
+var messageKnownKeys = []string{"role", "content", "tool_calls", "tool_call_id", "interjected"}
 
 // isKnownMessageKey reports whether key is one messageJSON owns (so a same-named extra entry
 // is skipped on encode — the known field always wins a collision).
@@ -115,10 +130,11 @@ func isKnownMessageKey(key string) bool {
 // snapshot diff/hash relies on.
 func (m Message) MarshalJSON() ([]byte, error) {
 	known, err := json.Marshal(messageJSON{
-		Role:       m.Role,
-		Content:    m.Content,
-		ToolCalls:  m.ToolCalls,
-		ToolCallID: m.ToolCallID,
+		Role:        m.Role,
+		Content:     m.Content,
+		ToolCalls:   m.ToolCalls,
+		ToolCallID:  m.ToolCallID,
+		Interjected: m.Interjected,
 	})
 	if err != nil {
 		return nil, err
@@ -169,6 +185,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.Content = known.Content
 	m.ToolCalls = known.ToolCalls
 	m.ToolCallID = known.ToolCallID
+	m.Interjected = known.Interjected
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -250,7 +267,10 @@ type ConversationView interface {
 	Len() int
 	At(i int) Message
 	Range(fn func(i int, m Message) bool)
-	// LastUser returns the most recent user message and its index.
+	// LastUser returns the most recent user message and its index — an Interjection
+	// included. It is deliberately NOT the Exchange opening (CurrentExchange skips
+	// interjections): a Mechanism asking "what did the human last say" wants the
+	// remark, while one scoping itself to the Exchange derives the boundary instead.
 	LastUser() (msg Message, index int, ok bool)
 	// CallByID resolves a tool result to its originating call (for the name/args).
 	CallByID(id string) (call ToolCall, index int, ok bool)
@@ -392,8 +412,16 @@ func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 // system prompt if the conversation ends in a tool result (a user message after a
 // tool result breaks strict chat templates); appended at the end if it ends in an
 // assistant message (the retry-exchange shape — the correction answers the superseded
-// assistant message it follows, R1); otherwise inserted before the last user message.
-// With no user message present it appends at the end.
+// assistant message it follows, R1); otherwise inserted before the message that OPENS
+// the current Exchange. With no opening message present it appends at the end.
+//
+// The insert anchors on lastExchangeOpening (exchange.go), NOT on the last user message:
+// an Interjection is a user message committed INSIDE the running Exchange, and inserting
+// above it would make this request-scoped injection the newest non-interjected user
+// message — the derived opening — collapsing the Exchange every Mechanism reads down to
+// the interjection alone. Anchoring on the opening puts the injection exactly where it has
+// always gone (immediately before the human's ask, hence ahead of any interjection) and
+// moves no boundary.
 func (r *Request) InjectContext(text string) {
 	r.revision++
 	if n := len(r.messages); n > 0 && r.messages[n-1].Role == RoleTool {
@@ -405,7 +433,7 @@ func (r *Request) InjectContext(text string) {
 		r.messages = append(r.messages, msg)
 		return
 	}
-	idx := lastIndex(r.messages, RoleUser)
+	idx := lastExchangeOpening(messageSlice(r.messages))
 	if idx < 0 {
 		r.messages = append(r.messages, msg)
 		return

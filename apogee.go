@@ -506,6 +506,10 @@ var (
 	// ErrInputPending is returned by Submit when an Exchange is already in progress.
 	ErrInputPending = domain.ErrInputPending
 
+	// ErrNoOpenExchange is returned by Interject when no Exchange is in progress — the
+	// mirror of ErrInputPending. Match with errors.Is.
+	ErrNoOpenExchange = domain.ErrNoOpenExchange
+
 	// ErrDuplicateTool is returned by ToolRegistry.Register on a duplicate tool name.
 	ErrDuplicateTool = domain.ErrDuplicateTool
 
