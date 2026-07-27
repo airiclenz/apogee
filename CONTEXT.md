@@ -488,7 +488,10 @@ turn-local and attached to one message.
 A workspace file the user names with an `@path` token in their message. The loop resolves
 each reference at the start of the Turn — reading it within the workspace fence
 (`security.SafeReadFile`, `os.Root`-pinned) and injecting its content into the user message
-as that request's *file context* — and reports-and-skips a missing or escaping ref. Parsing
+as that request's *file context* — and reports-and-skips a missing or escaping ref. The token
+is **bare** (`@path`, a run of non-whitespace) or **quoted** (`@"path with spaces"` — `'` is
+accepted too, only `"` is ever produced), where the closing quote ends the token and an
+unterminated one runs to the end of that line; there are no escape sequences. Parsing
 the token is the TUI's job; resolution is the agent's.
 _Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
 

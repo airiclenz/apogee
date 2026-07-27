@@ -346,6 +346,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **An `@`-reference to a file whose name contains spaces now resolves — write it quoted,
+  `@"docs/my plan.md"`.** The reference was cut at its first whitespace and the opening quote rode
+  along into it, so `@"docs/plans/2026-07-23 - 04 - version-build-number-plan.md"` reached the loop
+  as `"docs/plans/2026-07-23` and could never resolve: a workspace file with a space in its name was
+  unreferenceable by any spelling. An `@` at a word boundary followed by a quote (`"` or `'` — every
+  shell takes either, so apogee does too) now opens a **quoted** reference that runs to its matching
+  quote, and ordinary prose may follow the closing quote; an unterminated quote runs to the end of
+  that line and never crosses a newline, so a stray quote cannot swallow the rest of a multi-line
+  message. There are no escape sequences — a name containing `"` is quoted with `'`, and vice versa.
+  Bare `@path` references, emails (`foo@bar.com`) and a mid-word `@` behave byte-for-byte as before,
+  and `@x` and `@"x"` are one reference rather than two. Resolution is unchanged: a reference still
+  arrives at the loop as a plain workspace-relative path, read within the workspace fence and
+  reported-and-skipped when it is missing.
+
+  The `@` autocomplete speaks the same grammar. It keeps completing **across** the spaces typed
+  inside a quoted reference (the overlay used to die at the first one), each row shows exactly what
+  accepting it will insert (`@"my plan.md"` for a spaced path, `@path` otherwise), accepting splices
+  the canonical double-quoted form whenever the path needs it — decided by the path, not by whether
+  you opened a quote yourself — and a fully typed quoted reference submits on `⏎` instead of
+  re-completing, in whichever of the two dialects you typed it.
+
 - **Selecting text no longer dies the moment the model streams — and the transcript is selectable in
   every state.** apogee captures the mouse (for scrolling and for click-to-position), which turns the
   terminal's own click-drag selection off, so selection is apogee's to implement — and it dropped

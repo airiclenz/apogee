@@ -103,7 +103,10 @@ next.
 ## In-chat commands
 
 Typing `/` in the prompt opens the command menu; `@` completes a workspace file
-path, and an `@path` in a message hands that file to the model.
+path, and an `@path` in a message hands that file to the model. A path containing
+spaces is written quoted — `@"docs/my plan.md"` (single quotes are accepted too) —
+and the autocomplete keeps completing across the spaces and inserts the quotes for
+you.
 
 | Command | Does |
 |---|---|

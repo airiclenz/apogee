@@ -92,7 +92,9 @@ NOTES (2026-07-27): the open-quote partial is `scanRefToken`'s path verbatim —
 
 ---
 
-## 3. Docs and the issue ledger
+## 3. Docs and the issue ledger — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): the `ISSUES.md` line carried `[P]` (Planned), not the `[A]` the item names — commit 32f0e1f moved it to Planned when this plan was filed. Flipped `[P]` → `[X]`, which is what the item's own acceptance grep (`^\- \[X\] File references`) asks for; the line's text is otherwise untouched.
 
 **What.**
 - `README.md:105-106`: extend the sentence — a path containing spaces is written quoted, `@"docs/my plan.md"`, and the autocomplete inserts the quotes for you.
