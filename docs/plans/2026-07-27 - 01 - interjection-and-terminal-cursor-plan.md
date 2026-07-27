@@ -215,7 +215,9 @@ NOTES (2026-07-27): three deviations from the item's literal text. (a) **`Init` 
 
 ---
 
-## 7. Transcript selection survives the stream — the keep-if-unchanged rule
+## 7. Transcript selection survives the stream — the keep-if-unchanged rule — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): two small deviations. (a) The predicate's parameters are named `oldLines, newLines` rather than the item's literal `old, new` — `new` is a predeclared identifier, and the repo's own precedent for a before/after pair spells them out (`rebindNote(oldModel, oldWindow, newModel, newWindow)`). The signature is otherwise exactly as written. (b) The narration sweep reached one comment beyond the item's list: `handleMouseRelease`'s doc said the post-copy highlight "stays until the next click, edit, or transcript change" — the last clause is precisely what this item falsifies, so it now names the keep-if-unchanged rule for the transcript span. `internal/tui/doc.go`'s `mouse.go` narration line is deliberately untouched (item 9's territory, and nothing in it is now false).
 
 **What.** Independent of items 1–6 (may run at any point, even first). `internal/tui/mouse.go`: `transcriptSel` gains `spanUnchanged(old, new []string) bool` — false when `!active` or the normalised span exceeds either slice, else string equality of every spanned line (`old[i] == new[i]` for `i` in `[top.line, bot.line]`); cols stay valid by construction (identical lines, identical widths). The package header's selection narration (`:14-31`) gains the survival sentence. `internal/tui/model.go` `refreshViewport` (`:1562-1586`): evaluate the predicate against the outgoing `m.lines` before `rendered.lines` replaces them; clear `transcriptSel` only when it fails — the mid-drag case and the lingering post-release highlight both ride the same rule. The `transcriptSel` field doc (`:116-120`) and the heartbeat fold's repaint-guard comment (`:401-407`) are rewritten: the beat guard stays (repaint economy) but is no longer what keeps a drag alive. Everything else — anchoring, highlight overlay, copy slicing, wheel-scroll survival — is untouched: the rule only decides WHEN the existing machinery lets go.
 

@@ -138,9 +138,11 @@ type Model struct {
 	tokPerSec float64
 
 	// transcriptSel is the transcript viewport's screen-space drag-selection (mouse.go), anchored
-	// in content coordinates into m.lines; the zero value is "no selection". It is cleared whenever
-	// the rendered lines regenerate (refreshViewport — a stream token, resize, or submit) so its
-	// content-anchored coords never index stale lines. It and sel never coexist (region arbitration).
+	// in content coordinates into m.lines; the zero value is "no selection". A re-render keeps it
+	// exactly while the lines it spans are unchanged (refreshViewport's keep-if-unchanged rule), so
+	// it outlives the stream appending below it and drops the moment its own ground moves — its
+	// content-anchored coords therefore never index lines that say something else. It and sel never
+	// coexist (region arbitration).
 	transcriptSel transcriptSel
 	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy and
 	// cleared by flashClearMsg after flashDuration.
@@ -475,9 +477,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		next, noted := m.foldBeat(msg.beat)
 		if noted {
-			// Only a beat that MOVED something — the offline state, or a binding — repaints;
-			// repainting on every beat would drop a live drag-selection (refreshViewport) every ten
-			// seconds.
+			// Only a beat that MOVED something — the offline state, or a binding — repaints: a beat
+			// that changed nothing has nothing to draw, so re-rendering the whole transcript every
+			// ten seconds would be work for its own sake. (It no longer costs a live drag-selection:
+			// a repaint that appends a note leaves the spanned lines alone, and refreshViewport's
+			// keep-if-unchanged rule keeps the selection through it. Economy, not correctness.)
 			next.refreshViewport()
 		}
 		return next, next.beatTick()
@@ -1723,11 +1727,19 @@ func (m *Model) inputRows() int {
 // reading history is not yanked back; submit re-arms it. The body is rendered to
 // transcriptWidth — the viewport's width less the right gutter — while the sticky-to-top offset
 // still measures against the viewport's own width, which is what soft-wraps the stored lines.
+//
+// It is also where a live transcript drag-selection lives or dies, by the keep-if-unchanged rule
+// (transcriptSel.spanUnchanged, mouse.go): the predicate is evaluated against the OUTGOING lines
+// before the fresh ones replace them, so a selection over settled text survives the repaint a
+// streamed token causes and one whose own lines were rewritten (the streaming tail, a rewrap) is
+// dropped instead of left pointing at text that has moved.
 func (m *Model) refreshViewport() {
 	rendered := m.transcript.renderView(m.th, m.transcriptWidth())
+	if !m.transcriptSel.spanUnchanged(m.lines, rendered.lines) {
+		m.transcriptSel = transcriptSel{} // the ground under the span moved: let go (mouse.go)
+	}
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.userBlocks = rendered.userBlocks
-	m.transcriptSel = transcriptSel{} // the rendered lines regenerated: content-anchored coords are stale (mouse.go)
 	if m.userScrolled {
 		m.viewport.SetContentLines(rendered.lines)
 		return

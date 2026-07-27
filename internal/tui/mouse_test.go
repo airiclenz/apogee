@@ -589,33 +589,231 @@ func TestTranscriptSelectionSurvivesWheelScroll(t *testing.T) {
 	}
 }
 
-// TestTranscriptSelectionClearsOnStreamToken checks the selection drops when the rendered lines
-// regenerate under a streamed token (its content-anchored coords would otherwise index stale lines).
-func TestTranscriptSelectionClearsOnStreamToken(t *testing.T) {
-	m := modelWithTranscript(t, "hello world")
+// ----------------------------------------------------------------------------
+// Keep-if-unchanged: a transcript selection survives the stream (mouse.go, refreshViewport)
+// ----------------------------------------------------------------------------
+
+// screenRow maps a rendered content line onto the viewport row it is drawn on, so a test can aim
+// the mouse at a line it located by CONTENT rather than by guessing at the scroll position.
+func screenRow(t *testing.T, m Model, line int) int {
+	t.Helper()
+	row := line - m.viewport.YOffset()
+	if row < 0 || row >= m.viewport.Height() {
+		t.Fatalf("content line %d is off screen (offset %d, height %d)", line, m.viewport.YOffset(), m.viewport.Height())
+	}
+	return row
+}
+
+// armTranscriptSelection drags across the settled user block — pinned to the viewport's top row by
+// sticky-to-top — and returns the model with that selection live.
+func armTranscriptSelection(t *testing.T, m Model) Model {
+	t.Helper()
 	m = step(t, m, leftClick(0, 0))
-	m = step(t, m, leftDrag(5, 0))
+	m = step(t, m, leftDrag(m.viewport.Width(), 0))
 	if !m.transcriptSel.active {
 		t.Fatal("precondition: no transcript selection armed")
 	}
-	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "hi"}})
-	if m.transcriptSel.active {
-		t.Fatal("a stream token did not clear the transcript selection")
+	return m
+}
+
+// TestTranscriptSelectionSurvivesStreamAppend is the keep-if-unchanged rule's headline case: a
+// selection over settled text lives through the repaint every streamed token causes, stays
+// highlighted while the reply grows beneath it, and copies exactly the text still on screen. It
+// replaces TestTranscriptSelectionClearsOnStreamToken, which pinned the old clear-on-every-repaint
+// behaviour a drag could not survive.
+func TestTranscriptSelectionSurvivesStreamAppend(t *testing.T) {
+	m := modelWithTranscript(t, "hello world")
+	m = armTranscriptSelection(t, m)
+
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "a streamed reply"}})
+	if !m.transcriptSel.active {
+		t.Fatal("a stream token dropped a selection over settled lines")
+	}
+	if !strings.Contains(m.View().Content, selectionBg) {
+		t.Fatal("the kept selection is no longer highlighted in the View")
+	}
+
+	m, cmd := stepCmd(t, m, leftRelease(m.viewport.Width(), 0))
+	if cmd == nil {
+		t.Fatal("release of the kept selection should return a copy Cmd, got nil")
+	}
+	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	if want := glyphUser + " hello world"; got != want {
+		t.Fatalf("copied %q, want %q — a kept selection must copy what is on screen", got, want)
 	}
 }
 
-// TestTranscriptSelectionClearsOnResize checks a window resize drops the selection (the lines
-// reflow to the new width, so the stored cells go stale) — the prompt selection clears the same way.
-func TestTranscriptSelectionClearsOnResize(t *testing.T) {
+// TestTranscriptSelectionDropsWhenSpanChanges is the rule's other half: a selection over the
+// still-moving streaming tail drops the moment the next token rewrites those lines — no highlight
+// left behind, and the release copies nothing.
+func TestTranscriptSelectionDropsWhenSpanChanges(t *testing.T) {
 	m := modelWithTranscript(t, "hello world")
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "half a"}})
+	row := screenRow(t, m, len(m.lines)-1) // the in-progress assistant buffer's last line
+
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(6, row))
+	if !m.transcriptSel.active {
+		t.Fatal("precondition: no transcript selection armed over the streaming tail")
+	}
+
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: " reply"}})
+	if m.transcriptSel.active {
+		t.Fatal("a selection whose own lines were rewritten must drop")
+	}
+	if strings.Contains(m.View().Content, selectionBg) {
+		t.Fatal("a dropped selection is still highlighted in the View")
+	}
+
+	m, cmd := stepCmd(t, m, leftRelease(6, row))
+	if cmd != nil {
+		t.Fatal("releasing a dropped selection should copy nothing, got a Cmd")
+	}
+	if m.flash != "" {
+		t.Fatalf("flash = %q, want empty after a dropped selection", m.flash)
+	}
+}
+
+// TestTranscriptMidDragSurvivesRepaint checks the drag itself lives through a repaint: motion,
+// a streamed token folded mid-drag, more motion, release — and the copy is the settled span, so
+// the drag never died and never lost its anchor.
+func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
+	m := modelWithTranscript(t, "hello world")
+	w := m.viewport.Width()
+
 	m = step(t, m, leftClick(0, 0))
 	m = step(t, m, leftDrag(5, 0))
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "tokens landing mid-drag"}})
 	if !m.transcriptSel.active {
-		t.Fatal("precondition: no transcript selection armed")
+		t.Fatal("a repaint between two drag motions killed the drag")
 	}
-	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	if m.transcriptSel.active {
-		t.Fatal("a resize did not clear the transcript selection")
+
+	m = step(t, m, leftDrag(w, 0)) // the drag carries on to the end of the row
+	m, cmd := stepCmd(t, m, leftRelease(w, 0))
+	if cmd == nil {
+		t.Fatal("release after a surviving drag should return a copy Cmd, got nil")
+	}
+	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	if want := glyphUser + " hello world"; got != want {
+		t.Fatalf("copied %q, want %q", got, want)
+	}
+}
+
+// TestTranscriptSelectionResize checks the rule against the two resizes: a width change rewraps
+// the lines under the span, so the selection drops; a height-only change re-renders to identical
+// lines, so it is kept. It replaces TestTranscriptSelectionClearsOnResize, which could not tell
+// the two apart because every repaint cleared.
+func TestTranscriptSelectionResize(t *testing.T) {
+	t.Run("a width change rewraps and drops it", func(t *testing.T) {
+		m := armTranscriptSelection(t, modelWithTranscript(t, "hello world"))
+		m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+		if m.transcriptSel.active {
+			t.Fatal("a rewrap did not drop the transcript selection")
+		}
+	})
+	t.Run("a height-only change keeps it", func(t *testing.T) {
+		m := armTranscriptSelection(t, modelWithTranscript(t, "hello world"))
+		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 30})
+		if !m.transcriptSel.active {
+			t.Fatal("a height-only resize dropped a selection whose lines are unchanged")
+		}
+	})
+}
+
+// TestTranscriptHighlightPersistsWhileStreaming checks the lingering post-copy highlight obeys the
+// same rule as a live drag: what was copied stays visibly marked while the reply streams below it.
+func TestTranscriptHighlightPersistsWhileStreaming(t *testing.T) {
+	m := armTranscriptSelection(t, modelWithTranscript(t, "hello world"))
+	m, cmd := stepCmd(t, m, leftRelease(m.viewport.Width(), 0))
+	if cmd == nil {
+		t.Fatal("precondition: the release did not copy")
+	}
+
+	for _, tok := range []string{"one ", "two ", "three"} {
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: tok}})
+	}
+	if !m.transcriptSel.active {
+		t.Fatal("the stream dropped the copied highlight")
+	}
+	if !strings.Contains(m.View().Content, selectionBg) {
+		t.Fatal("the copied span is no longer shaded in the View")
+	}
+}
+
+// TestNotedBeatRepaintKeepsSelection checks the heartbeat's repaint is now harmless to a selection:
+// a beat that MOVED something (the upstream going offline) appends its note and re-renders, and a
+// selection over the settled lines above it is untouched. The beat fold's repaint guard is economy
+// from here on, not what keeps a drag alive.
+func TestNotedBeatRepaintKeepsSelection(t *testing.T) {
+	m := wireHeartbeat(t, testOpts, &fakeHeartbeat{})
+	m.transcript.addUser("hello world", nil)
+	m.refreshViewport()
+	m = armTranscriptSelection(t, m)
+
+	before := len(noteTexts(m))
+	m = foldBeatMsg(t, m, downBeat("dial tcp: connection refused"))
+	if len(noteTexts(m)) == before {
+		t.Fatal("precondition: the beat noted nothing, so it never repainted")
+	}
+	if !m.transcriptSel.active {
+		t.Fatal("a noted-beat repaint dropped a selection over settled lines")
+	}
+}
+
+// TestSpanUnchangedTable is the predicate itself: what "the ground did not move" means, line by
+// line, independent of any repaint that consults it.
+func TestSpanUnchangedTable(t *testing.T) {
+	span := func(a, b contentCell) transcriptSel {
+		return transcriptSel{active: true, anchor: a, head: b}
+	}
+	cases := []struct {
+		name                string
+		sel                 transcriptSel
+		oldLines, nextLines []string
+		want                bool
+	}{
+		{
+			"an inactive selection has nothing to keep",
+			transcriptSel{anchor: contentCell{0, 0}, head: contentCell{1, 2}},
+			[]string{"a", "b"}, []string{"a", "b"}, false,
+		},
+		{
+			"an unchanged span is kept while the tail below it grows",
+			span(contentCell{0, 0}, contentCell{1, 2}),
+			[]string{"a", "b"}, []string{"a", "b", "c"}, true,
+		},
+		{
+			"one changed line inside the span drops it",
+			span(contentCell{0, 0}, contentCell{2, 1}),
+			[]string{"a", "b", "c"}, []string{"a", "X", "c"}, false,
+		},
+		{
+			"a change outside the span is none of its business",
+			span(contentCell{0, 0}, contentCell{1, 1}),
+			[]string{"a", "b", "c"}, []string{"a", "b", "X"}, true,
+		},
+		{
+			"a reversed anchor/head normalises to the same rows",
+			span(contentCell{2, 1}, contentCell{0, 0}),
+			[]string{"a", "b", "c"}, []string{"a", "X", "c"}, false,
+		},
+		{
+			"a span past the incoming lines drops it",
+			span(contentCell{0, 0}, contentCell{2, 1}),
+			[]string{"a", "b", "c"}, []string{"a", "b"}, false,
+		},
+		{
+			"a span past the outgoing lines drops it",
+			span(contentCell{0, 0}, contentCell{2, 1}),
+			[]string{"a", "b"}, []string{"a", "b", "c"}, false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.sel.spanUnchanged(c.oldLines, c.nextLines); got != c.want {
+				t.Fatalf("spanUnchanged(%q, %q) = %v, want %v", c.oldLines, c.nextLines, got, c.want)
+			}
+		})
 	}
 }
 

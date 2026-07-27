@@ -29,6 +29,14 @@ import (
 // soft-wraps are copied verbatim (the accepted terminal-native semantics, D4). The mouse
 // handlers arbitrate by region — a point in the input rect drives the editor, a point in the
 // viewport drives the transcript — so the two selections never coexist.
+//
+// A transcript selection SURVIVES a repaint by the keep-if-unchanged rule (transcriptSel.
+// spanUnchanged, applied in refreshViewport): it lives on exactly while every rendered line it
+// spans is identical before and after. The transcript is append-only at a fixed width, so a drag
+// over settled text keeps extending while the model streams new lines beneath it — and the moment
+// the text under the span does move (the streaming tail growing, a rewrap on resize, a tool call
+// joining its group) the selection drops rather than pointing at something else. That is what
+// makes copy equal sight: the release slices the very lines the rule protected.
 
 // cell is an absolute visual position inside the textarea content: row counts wrapped (visual)
 // lines from the top of the value; col is the display column within that row.
@@ -58,6 +66,34 @@ type contentCell struct{ line, col int }
 type transcriptSel struct {
 	active       bool
 	anchor, head contentCell
+}
+
+// spanUnchanged reports whether the selection's ground held still across a re-render: every line
+// it spans is identical in the outgoing lines and the incoming ones. It is the keep-if-unchanged
+// rule refreshViewport decides a selection's fate by — true keeps it, false drops it.
+//
+// An inactive selection has nothing to keep, so it reports false. A span reaching past either
+// slice reports false too: the lines it named are no longer all there, which is a change by any
+// reading. Only the LINE range is normalised (anchor above head or below it names the same rows),
+// and the columns need no re-check of their own — identical lines have identical widths, so a
+// column that was valid still is.
+func (s transcriptSel) spanUnchanged(oldLines, newLines []string) bool {
+	if !s.active {
+		return false
+	}
+	top, bot := s.anchor.line, s.head.line
+	if bot < top {
+		top, bot = bot, top
+	}
+	if top < 0 || bot >= len(oldLines) || bot >= len(newLines) {
+		return false
+	}
+	for i := top; i <= bot; i++ {
+		if oldLines[i] != newLines[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // flashClearMsg clears the transient status-line note (m.flash) once flashDuration elapses.
@@ -244,9 +280,11 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 
 // handleMouseRelease finalises a drag on whichever selection is live. A non-empty span is copied
 // to the system clipboard over OSC52 and a transient note confirms it; the highlight stays until
-// the next click, edit, or transcript change so the human sees what was taken. A bare click
-// (anchor == head) is not a selection and just leaves the caret/anchor where it landed. The
-// prompt copies the exact typed runes; the transcript copies the rendered text under the span.
+// the next click or edit — or, for a transcript span, until the lines under it change
+// (spanUnchanged) — so the human sees what was taken, even while the model keeps streaming beneath
+// it. A bare click (anchor == head) is not a selection and just leaves the caret/anchor where it
+// landed. The prompt copies the exact typed runes; the transcript copies the rendered text under
+// the span.
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.sel.active:
