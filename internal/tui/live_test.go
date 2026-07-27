@@ -31,6 +31,8 @@ import (
 //	make live-eval        # the same, with -count=1 and the default endpoint baked in
 //
 // APOGEE_LIVE_MODEL pins the model name; left empty, the model is discovered from the server.
+// APOGEE_API_KEY carries the upstream bearer token when the server under test is keyed (llama.cpp
+// `--api-key`, LM Studio, a remote vLLM); unset — the keyless local default — sends no auth header.
 //
 // The -count=1 is load-bearing — without it, this test caches across model swaps and lies.
 // `go test` caches a passing result keyed on the test binary, the cacheable command-line flags,
@@ -53,7 +55,7 @@ func TestE2ELiveModel(t *testing.T) {
 
 	model := os.Getenv("APOGEE_LIVE_MODEL")
 	if model == "" {
-		info, err := provider.NewClient(endpoint, "").Discover(ctx)
+		info, err := provider.NewClient(endpoint, "", provider.WithAPIKey(liveAPIKey())).Discover(ctx)
 		if err != nil {
 			t.Fatalf("discover model at %s: %v", endpoint, err)
 		}
@@ -65,7 +67,7 @@ func TestE2ELiveModel(t *testing.T) {
 	bridge := NewBridge()
 	h := newUIHarness()
 	bridge.Bind(h)
-	eng := newE2EEngine(t, endpoint, model, workspace, bridge.Sink(), bridge.Approver())
+	eng := newE2EEngine(t, endpoint, model, liveAPIKey(), workspace, bridge.Sink(), bridge.Approver())
 
 	m := step(t, newModel(ctx, eng, e2eOptions(endpoint, workspace), nil), tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -103,3 +105,12 @@ func TestE2ELiveModel(t *testing.T) {
 		t.Errorf("transcript does not show the Write File tool call")
 	}
 }
+
+// liveAPIKey is the upstream bearer token every gated live run carries — the discovery client
+// here and in the smoke test, and the Agent's own client behind both. These are tests, so they
+// read APOGEE_API_KEY straight from the environment rather than through cmd/apogee's settings
+// layers (`api-key:` in config.yaml, env > file); the env var is the half a test can honour
+// without importing the command's config machinery. Empty — the keyless local-server default —
+// sends no Authorization header at all, so an unkeyed run is byte-identical to one made before
+// the key existed.
+func liveAPIKey() string { return os.Getenv("APOGEE_API_KEY") }

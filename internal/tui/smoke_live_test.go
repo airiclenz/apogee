@@ -46,6 +46,8 @@ import (
 //
 // -count=1 is load-bearing for the same reason live_test.go documents: the live server's loaded
 // model is not a Go-visible input, so caching would replay a stale PASS across a model swap.
+// APOGEE_API_KEY carries the upstream bearer token when the server under test is keyed; unset —
+// the keyless local default — sends no auth header (liveAPIKey, live_test.go).
 func TestSmokeLiveProfileSeam(t *testing.T) {
 	endpoint := os.Getenv("APOGEE_LIVE_ENDPOINT")
 	if endpoint == "" {
@@ -56,7 +58,7 @@ func TestSmokeLiveProfileSeam(t *testing.T) {
 	if model == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		info, err := provider.NewClient(endpoint, "").Discover(ctx)
+		info, err := provider.NewClient(endpoint, "", provider.WithAPIKey(liveAPIKey())).Discover(ctx)
 		if err != nil {
 			t.Fatalf("discover model at %s: %v", endpoint, err)
 		}
@@ -239,12 +241,14 @@ func smokeCheckBToolCall(t *testing.T, endpoint, model string, profile domain.Mo
 // newSmokeEngine builds a real ask-before Agent bound to endpoint/model with the given profile
 // and an event sink — newE2EEngine's sibling, adding the Profile the seam under test needs. It
 // is ask-before so Check B's write gates through the (auto-allowing) smokeApprover, the headless
-// stand-in for a human pressing "a".
+// stand-in for a human pressing "a". It is reached only from the gated live smoke test, so it
+// resolves the upstream bearer token itself rather than taking it as a parameter.
 func newSmokeEngine(t *testing.T, endpoint, model, workspace string, sink domain.EventSink, approver domain.Approver, profile domain.ModelProfile) *agent.Agent {
 	t.Helper()
 	eng, err := agent.New(domain.Config{
 		Endpoint:     endpoint,
 		Model:        model,
+		APIKey:       liveAPIKey(),
 		Mode:         domain.ModeAskBefore,
 		Events:       sink,
 		Approver:     approver,

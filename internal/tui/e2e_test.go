@@ -261,12 +261,15 @@ func terminalResult(msg tea.Msg) domain.StepResult {
 // newE2EEngine builds a real ask-before Agent bound to endpoint/model, the default tool set
 // rooted at workspace, and the seam's sink/approver. The Agent is the concrete type the
 // narrow Engine interface abstracts — this is the binding cmd/apogee makes in production,
-// exercised here through the real provider client.
-func newE2EEngine(t *testing.T, endpoint, model, workspace string, sink domain.EventSink, approver domain.Approver) *agent.Agent {
+// exercised here through the real provider client. apiKey is the upstream bearer token that
+// client sends: the hermetic scripted servers need none and pass "" (empty sends no auth header,
+// exactly as before the key existed); only the gated live run keys it (liveAPIKey, live_test.go).
+func newE2EEngine(t *testing.T, endpoint, model, apiKey, workspace string, sink domain.EventSink, approver domain.Approver) *agent.Agent {
 	t.Helper()
 	eng, err := agent.New(domain.Config{
 		Endpoint:     endpoint,
 		Model:        model,
+		APIKey:       apiKey,
 		Mode:         domain.ModeAskBefore,
 		Events:       sink,
 		Approver:     approver,
@@ -315,7 +318,7 @@ func TestE2EConversationThroughTUI(t *testing.T) {
 	bridge := NewBridge()
 	h := newUIHarness()
 	bridge.Bind(h)
-	eng := newE2EEngine(t, srv.URL, "test-model", workspace, bridge.Sink(), bridge.Approver())
+	eng := newE2EEngine(t, srv.URL, "test-model", "", workspace, bridge.Sink(), bridge.Approver())
 
 	m := step(t, newModel(ctx, eng, e2eOptions(srv.URL, workspace), nil), tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -405,7 +408,7 @@ func TestE2EColdStartHeartbeat(t *testing.T) {
 	bridge := NewBridge()
 	h := newUIHarness()
 	bridge.Bind(h)
-	eng := newE2EEngine(t, srv.URL, "", workspace, bridge.Sink(), bridge.Approver())
+	eng := newE2EEngine(t, srv.URL, "", "", workspace, bridge.Sink(), bridge.Approver())
 
 	opts := e2eOptions(srv.URL, workspace)
 	opts.Model, opts.ContextWindow = "", 0 // the cold start: nothing configured, nothing discovered
@@ -499,7 +502,7 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	bridge1 := NewBridge()
 	h1 := newUIHarness()
 	bridge1.Bind(h1)
-	eng1 := newE2EEngine(t, srv.URL, "test-model", workspace, bridge1.Sink(), bridge1.Approver())
+	eng1 := newE2EEngine(t, srv.URL, "test-model", "", workspace, bridge1.Sink(), bridge1.Approver())
 
 	// The quit-time flush hands the conversation snapshot to the SessionHost seam. Capture it in
 	// memory (the store-backed host and its on-disk Record are item 5) and resume the Agent from
