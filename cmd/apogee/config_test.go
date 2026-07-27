@@ -691,6 +691,243 @@ func TestApplyConfigPresentPortRangeErrors(t *testing.T) {
 	}
 }
 
+// The three system-prompt keys parse into opts.systemPrompt (ADR 0023): the global prompt and the
+// per-model overrides, file-only like the blocks around them. This is the end-to-end proof that
+// the keys reach the composition root, which is where resolveSystemPrompt then selects one.
+func TestApplyConfigSystemPrompt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configYAML string
+		want       systemPromptSettings
+	}{
+		{
+			name:       "an inline prompt reaches the global source",
+			configYAML: "system-prompt-text: \"hi {{workspace}}\"\n",
+			want:       systemPromptSettings{global: promptSource{text: "hi {{workspace}}"}},
+		},
+		{
+			// Every key spelling at once, in the only shape that is legal: text and file at ONE
+			// level contradict each other (validate refuses that), so the global carries the file
+			// spelling and the per-model entries carry one each.
+			name: "a global file and both per-model spellings populate every field",
+			configYAML: `system-prompt-file: prompts/global.md
+system-prompt-models:
+  qwen2.5-coder:
+    system-prompt-text: "code first, prose second"
+  gpt-oss-20b:
+    system-prompt-file: ~/prompts/gpt-oss.md
+`,
+			want: systemPromptSettings{
+				global: promptSource{file: "prompts/global.md"},
+				models: map[string]promptSource{
+					"qwen2.5-coder": {text: "code first, prose second"},
+					"gpt-oss-20b":   {file: "~/prompts/gpt-oss.md"},
+				},
+			},
+		},
+		{
+			name:       "no system-prompt key leaves the zero value — no prompt",
+			configYAML: "model: fake\n",
+			want:       systemPromptSettings{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			opts := options{configDir: home}
+			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if !reflect.DeepEqual(opts.systemPrompt, tt.want) {
+				t.Errorf("opts.systemPrompt = %+v; want %+v", opts.systemPrompt, tt.want)
+			}
+		})
+	}
+}
+
+// The structural half of the system-prompt checks (ADR 0023): the contradictions that are defects
+// in the FILE, independent of this machine and of the model that will be resolved — so they are
+// refused for every level, including entries this host will never select. Whether a file reads and
+// whether its placeholders are known belong to the selected source alone (TestResolveSystemPrompt).
+func TestSystemPromptSettingsValidate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sp   systemPromptSettings
+		// wantErr are the substrings the message must carry; empty ⇒ the block must validate.
+		wantErr []string
+	}{
+		{name: "an inline prompt alone", sp: systemPromptSettings{global: promptSource{text: "hi"}}},
+		{name: "a file prompt alone", sp: systemPromptSettings{global: promptSource{file: "p.md"}}},
+		{name: "nothing configured at all", sp: systemPromptSettings{}},
+		{
+			name:    "both spellings at the global level",
+			sp:      systemPromptSettings{global: promptSource{text: "hi", file: "p.md"}},
+			wantErr: []string{"system-prompt-text", "system-prompt-file", "both"},
+		},
+		{
+			name:    "both spellings in one model entry",
+			sp:      systemPromptSettings{models: map[string]promptSource{"qwen2.5-coder": {text: "hi", file: "p.md"}}},
+			wantErr: []string{`system-prompt-models["qwen2.5-coder"]`, "system-prompt-text", "system-prompt-file"},
+		},
+		{
+			name:    "a model entry that sets neither spelling",
+			sp:      systemPromptSettings{models: map[string]promptSource{"qwen2.5-coder": {}}},
+			wantErr: []string{`system-prompt-models["qwen2.5-coder"]`, "neither"},
+		},
+		{
+			name: "a well-formed model entry beside a global prompt",
+			sp: systemPromptSettings{
+				global: promptSource{text: "hi"},
+				models: map[string]promptSource{"qwen2.5-coder": {file: "p.md"}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tt.sp.validate()
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("validate: %v; want the block to validate", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("validate: want an error, got nil")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q; want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// resolveSystemPrompt collapses the block into the ONE template this session runs with, for the
+// RESOLVED model (ADR 0023): whole-entry replacement on an exact model match, an inert entry for
+// every other model, `~` and apogee-home-relative file paths, and the two checks that belong to
+// the selected source alone — the file must read and the placeholders must be the known three.
+func TestResolveSystemPrompt(t *testing.T) {
+	// Deliberately NOT parallel: the `~` case redirects the environment os.UserHomeDir reads.
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)        // POSIX
+	t.Setenv("USERPROFILE", userHome) // Windows
+	home := t.TempDir()               // the apogee home a relative path resolves against
+	absFile := filepath.Join(t.TempDir(), "absolute.md")
+
+	files := map[string]string{
+		absFile: "from an absolute path",
+		filepath.Join(home, "prompts", "relative.md"):  "from the apogee home",
+		filepath.Join(userHome, "prompts", "user.md"):  "from the user home",
+		filepath.Join(home, "prompts", "per-model.md"): "the per-model file",
+	}
+	readFile := func(path string) ([]byte, error) {
+		if content, ok := files[path]; ok {
+			return []byte(content), nil
+		}
+		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist}
+	}
+
+	const model = "gpt-oss-20b"
+	tests := []struct {
+		name string
+		sp   systemPromptSettings
+		want string
+		// wantErr are the substrings the message must carry; empty ⇒ want must be returned.
+		wantErr []string
+	}{
+		{
+			name: "the global inline prompt is selected",
+			sp:   systemPromptSettings{global: promptSource{text: "hi {{workspace}}"}},
+			want: "hi {{workspace}}",
+		},
+		{
+			name: "a matching model entry replaces the global prompt",
+			sp: systemPromptSettings{
+				global: promptSource{text: "the global prompt"},
+				models: map[string]promptSource{model: {text: "the per-model prompt"}},
+			},
+			want: "the per-model prompt",
+		},
+		{
+			name: "a matching entry with only a file replaces a global text whole",
+			sp: systemPromptSettings{
+				global: promptSource{text: "the global prompt"},
+				models: map[string]promptSource{model: {file: "prompts/per-model.md"}},
+			},
+			want: "the per-model file",
+		},
+		{
+			name: "an entry naming another model is inert and its file is never read",
+			sp: systemPromptSettings{
+				global: promptSource{text: "the global prompt"},
+				models: map[string]promptSource{"some-other-model": {file: "prompts/absent.md"}},
+			},
+			want: "the global prompt",
+		},
+		{name: "no prompt configured anywhere", sp: systemPromptSettings{}, want: ""},
+		{
+			name: "an absolute file is read as written",
+			sp:   systemPromptSettings{global: promptSource{file: absFile}},
+			want: "from an absolute path",
+		},
+		{
+			name: "a relative file resolves against the apogee home",
+			sp:   systemPromptSettings{global: promptSource{file: filepath.Join("prompts", "relative.md")}},
+			want: "from the apogee home",
+		},
+		{
+			name: "a ~-prefixed file resolves against the user home",
+			sp:   systemPromptSettings{global: promptSource{file: "~/prompts/user.md"}},
+			want: "from the user home",
+		},
+		{
+			name:    "an unreadable selected file names the key and the path",
+			sp:      systemPromptSettings{global: promptSource{file: filepath.Join("prompts", "absent.md")}},
+			wantErr: []string{"system-prompt-file", filepath.Join(home, "prompts", "absent.md")},
+		},
+		{
+			name:    "an unknown placeholder names the source key and the known three",
+			sp:      systemPromptSettings{global: promptSource{text: "hi {{bogus}}"}},
+			wantErr: []string{"system-prompt-text", "{{bogus}}", "{{workspace}}", "{{datetime}}", "{{mode}}"},
+		},
+		{
+			name:    "an unknown placeholder in a model entry names that entry",
+			sp:      systemPromptSettings{models: map[string]promptSource{model: {text: "hi {{nope}}"}}},
+			wantErr: []string{`system-prompt-models["` + model + `"]`, "{{nope}}", "{{workspace}}"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveSystemPrompt(tt.sp, model, home, readFile)
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("resolveSystemPrompt: %v", err)
+				}
+				if got != tt.want {
+					t.Errorf("template = %q; want %q", got, tt.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("resolveSystemPrompt = %q; want an error", got)
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q; want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 // The ui config block parses into opts.ui: both keys, file-only like the blocks around it, so the
 // composition root can hand the renderer a style and a colour flag it never has to parse.
 func TestApplyConfigUI(t *testing.T) {

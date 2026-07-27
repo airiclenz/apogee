@@ -5,14 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
+	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/tui"
 	"gopkg.in/yaml.v3"
 )
@@ -114,6 +118,13 @@ type settings struct {
 	// port, and a detected advertise host.
 	present presentSettings
 
+	// systemPrompt is the resolved system-prompt block (ADR 0023): the global prompt (inline or
+	// a file) and the per-model overrides. File-only (no flag/env, like present above), and its
+	// zero value is no prompt at all — the promptless request apogee sent before ADR 0023. The
+	// composition root collapses it into the ONE template apogee.Config carries, with
+	// resolveSystemPrompt, AFTER model resolution: which entry applies is not known until then.
+	systemPrompt systemPromptSettings
+
 	// ui is the resolved `ui:` block: how the terminal UI presents itself — today the status-line
 	// spinner's animation and its colour loop. File-only (no flag/env, like the blocks above), and
 	// its defaults are the renderer's own (defaultUISettings): the default style with the colour
@@ -158,6 +169,64 @@ func (p presentSettings) validate() error {
 	if p.port < 0 || p.port > 65535 {
 		return fmt.Errorf("apogee: invalid present.port %d: want a TCP port in 0-65535 "+
 			"(0 — the default — takes an ephemeral port)", p.port)
+	}
+	return nil
+}
+
+// promptSource is one configured system prompt (ADR 0023) as the user wrote it: the template
+// inline (text) or the path of a file holding it (file). The two are mutually exclusive
+// spellings of one prompt — a level that sets both is a startup error (validate below) — and a
+// source with neither set configures no prompt.
+type promptSource struct {
+	text string
+	file string
+}
+
+// systemPromptSettings is the resolved system-prompt block (ADR 0023): the global prompt plus
+// the per-model overrides, keyed by the RESOLVED model name (the label the Validated-set surface
+// keys on too). It is one struct rather than three fields on settings for the same reason
+// presentSettings is: the keys describe ONE subsystem and travel together, from the on-disk block
+// through resolution to the composition root, where resolveSystemPrompt collapses them into the
+// single template apogee.Config carries.
+//
+// Selection is WHOLE-ENTRY replacement: an entry whose key is this session's model replaces the
+// global prompt entirely, so a per-model `system-prompt-file` does not inherit a global
+// `system-prompt-text`. An entry naming any other model is inert — the `unconfined-hosts`
+// posture: it describes a machine/model this run is not, so it is never selected and its file is
+// never read (it may only exist elsewhere).
+type systemPromptSettings struct {
+	global promptSource
+	models map[string]promptSource
+}
+
+// validate rejects a system-prompt block that is structurally impossible, at EVERY level —
+// including entries this host will never select. Setting both spellings at one level is a
+// contradiction (which prompt was meant?), and an entry setting neither is far more likely a YAML
+// indentation slip than a deliberate "this model gets nothing"; both are machine-independent
+// defects in the file itself, so they are caught at config time where the message can name the key.
+//
+// What is deliberately NOT checked here: whether a file reads, and whether a template's
+// placeholders are known. Those are properties of the SELECTED source only (resolveSystemPrompt),
+// because a non-matching per-model entry may name a file that exists on another machine — refusing
+// to start over it would make one global config unusable everywhere else.
+//
+// The entries are walked in sorted order so the entry a message names is the same one on every
+// run, rather than whichever the map happened to yield first.
+func (sp systemPromptSettings) validate() error {
+	if sp.global.text != "" && sp.global.file != "" {
+		return errors.New("apogee: system-prompt-text and system-prompt-file are both set: " +
+			"they are two spellings of one prompt — keep the inline text or the file, not both")
+	}
+	for _, model := range slices.Sorted(maps.Keys(sp.models)) {
+		src := sp.models[model]
+		switch {
+		case src.text != "" && src.file != "":
+			return fmt.Errorf("apogee: system-prompt-models[%q] sets both system-prompt-text and "+
+				"system-prompt-file: keep the inline text or the file, not both", model)
+		case src.text == "" && src.file == "":
+			return fmt.Errorf("apogee: system-prompt-models[%q] sets neither system-prompt-text nor "+
+				"system-prompt-file: give the entry a prompt, or remove it", model)
+		}
 	}
 	return nil
 }
@@ -268,6 +337,11 @@ type layer struct {
 	// resolution keeps the defaults (auto-open on, an ephemeral port, a detected host).
 	present *presentSettings
 
+	// systemPrompt is set only by the FILE layer (the system prompt is config'd, no flag/env —
+	// like present above). A nil pointer means the source sets none of the three system-prompt
+	// keys, so resolution keeps the zero value: no prompt, today's promptless request.
+	systemPrompt *systemPromptSettings
+
 	// ui is set only by the FILE layer (the UI's own presentation is config'd, no flag/env — like
 	// present). A nil pointer means the source configures no `ui:` block, so resolution keeps the
 	// defaults (the renderer's default spinner style, colour loop on).
@@ -319,6 +393,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	}
 	if file.present != nil { // file-only (ADR 0019); env/flag never carry the presentation block
 		s.present = *file.present
+	}
+	if file.systemPrompt != nil { // file-only (ADR 0023); env/flag never carry a system prompt
+		s.systemPrompt = *file.systemPrompt
 	}
 	if file.ui != nil { // file-only; env/flag never carry the UI block
 		s.ui = *file.ui
@@ -470,6 +547,20 @@ type fileConfig struct {
 	// zero setting — which would read as `auto-open: false` and silently disable the rung the
 	// whole feature exists for.
 	Present *presentConfig `yaml:"present"`
+	// SystemPromptText, SystemPromptFile and SystemPromptModels configure the system prompt
+	// (ADR 0023) — the template apogee renders fresh per request and sends as the first system
+	// message. File-only (no flag/env), like the blocks above; absent everywhere ⇒ no system
+	// prompt at all (the promptless request apogee sent before ADR 0023).
+	//
+	// The first two are mutually exclusive spellings of ONE prompt: inline text, or a file to
+	// read it from (`~` expands, and a relative path resolves against the apogee home this file
+	// lives in). SystemPromptModels keys the RESOLVED model name to an entry using those same two
+	// spellings; a matching entry REPLACES the global prompt whole, and an entry naming another
+	// model is inert. They are three top-level keys rather than one `system-prompt:` block
+	// because the common case — one inline prompt — is then one line, not three.
+	SystemPromptText   string                             `yaml:"system-prompt-text"`
+	SystemPromptFile   string                             `yaml:"system-prompt-file"`
+	SystemPromptModels map[string]systemPromptEntryConfig `yaml:"system-prompt-models"`
 	// UI configures how the terminal UI presents itself — today the status-line spinner's animation
 	// and its colour loop. File-only (no flag/env), like the blocks above. Absent ⇒ the renderer's
 	// default style with the colour loop on. A pointer so an absent block falls through to those
@@ -521,6 +612,31 @@ func (p presentConfig) toPresentSettings() presentSettings {
 	s := presentSettings{autoOpen: true, command: p.Command, port: p.Port, host: p.Host}
 	if p.AutoOpen != nil {
 		s.autoOpen = *p.AutoOpen
+	}
+	return s
+}
+
+// systemPromptEntryConfig is the on-disk schema for one `system-prompt-models:` entry (ADR 0023).
+// Its two keys are the SAME spellings as the top-level ones (owner decision: the inner text key is
+// `system-prompt-text`, not a bare `text`), so moving a prompt from the global keys into a
+// per-model entry is a re-indent rather than a rename, and neither spelling has to be learned twice.
+type systemPromptEntryConfig struct {
+	Text string `yaml:"system-prompt-text"`
+	File string `yaml:"system-prompt-file"`
+}
+
+// toSystemPromptSettings maps the three on-disk system-prompt keys onto the resolved value (the
+// toPresentSettings shape), mapping the per-model entries across one by one so the on-disk schema
+// and the resolved one stay independently evolvable. It applies no defaults and rejects nothing:
+// an empty source is simply "no prompt configured here", and the contradictions are
+// systemPromptSettings.validate's to name.
+func (fc fileConfig) toSystemPromptSettings() systemPromptSettings {
+	s := systemPromptSettings{global: promptSource{text: fc.SystemPromptText, file: fc.SystemPromptFile}}
+	if len(fc.SystemPromptModels) > 0 {
+		s.models = make(map[string]promptSource, len(fc.SystemPromptModels))
+		for model, e := range fc.SystemPromptModels {
+			s.models[model] = promptSource{text: e.Text, file: e.File}
+		}
 	}
 	return s
 }
@@ -672,6 +788,12 @@ func (fc fileConfig) layer() layer {
 		p := fc.Present.toPresentSettings()
 		l.present = &p
 	}
+	// Three top-level keys rather than a block, so the projection asks whether ANY of them is
+	// present: one inline prompt, one file, or a per-model map alone all configure the subsystem.
+	if fc.SystemPromptText != "" || fc.SystemPromptFile != "" || len(fc.SystemPromptModels) > 0 {
+		sp := fc.toSystemPromptSettings()
+		l.systemPrompt = &sp
+	}
 	if fc.UI != nil {
 		u := fc.UI.toUISettings()
 		l.ui = &u
@@ -812,6 +934,14 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := s.ui.validate(); err != nil {
 		return err
 	}
+	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
+	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of
+	// this machine and of which model this run resolves, so it is refused here for every level.
+	// Whether the SELECTED source's file reads and its placeholders are known is
+	// resolveSystemPrompt's job, after model resolution (ADR 0023).
+	if err := s.systemPrompt.validate(); err != nil {
+		return err
+	}
 	opts.endpoint = s.endpoint
 	opts.model = s.model
 	opts.mode = s.mode
@@ -829,6 +959,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.validatedSetsEnable = s.validatedSetsEnable
 	opts.validatedSetsAlias = s.validatedSetsAlias
 	opts.present = s.present
+	opts.systemPrompt = s.systemPrompt
 	opts.ui = s.ui
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
@@ -943,4 +1074,82 @@ func resolveContextWindow(ctx context.Context, opts *options, discover modelDisc
 		return
 	}
 	opts.contextWindow = got.contextWindow
+}
+
+// ----------------------------------------------------------------------------
+// System-prompt selection (ADR 0023: after the model is resolved)
+// ----------------------------------------------------------------------------
+
+// resolveSystemPrompt collapses the resolved system-prompt block into the ONE template
+// apogee.Config.SystemPrompt carries for this session's model. The composition root calls it
+// AFTER model resolution, because the per-model override keys on the RESOLVED model name — the
+// label discovery fills in when no model is configured — which is not known any earlier.
+//
+// Selection is whole-entry replacement: an entry keyed on model replaces the global prompt
+// entirely (a per-model file does not inherit a global text), and every other entry is inert —
+// never selected, and its file never read. home is the apogee home (the directory config.yaml
+// itself lives in), the base a relative system-prompt-file resolves against: the key lives in a
+// global file that travels with that home, so resolving against the workspace would break one
+// config across projects. readFile is injected so selection is testable without a filesystem.
+//
+// Everything that is only checkable for the SELECTED source happens here — the file must read,
+// and the template's placeholders must be the known three. Both errors name the config key the
+// prompt came from, because the same two spellings appear at every level.
+func resolveSystemPrompt(sp systemPromptSettings, model, home string, readFile func(string) ([]byte, error)) (string, error) {
+	src := sp.global
+	modelKey := "" // non-empty ⇒ the selected prompt came from a system-prompt-models entry
+	if m, ok := sp.models[model]; ok {
+		src, modelKey = m, model
+	}
+
+	template := src.text
+	if src.file != "" {
+		path, err := expandUserPath(src.file)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(home, path)
+		}
+		data, err := readFile(path)
+		if err != nil {
+			return "", fmt.Errorf("apogee: read %s %q: %w", systemPromptKey("system-prompt-file", modelKey), path, err)
+		}
+		template = string(data)
+	}
+	if err := prompt.Validate(template); err != nil {
+		field := "system-prompt-text"
+		if src.file != "" {
+			field = "system-prompt-file"
+		}
+		return "", fmt.Errorf("apogee: %s: %w", systemPromptKey(field, modelKey), err)
+	}
+	return template, nil
+}
+
+// systemPromptKey names a system-prompt key for an error message, qualified by the model when the
+// value came from a system-prompt-models entry — so the message points at the line to edit rather
+// than at one of the several places the same key spelling appears.
+func systemPromptKey(field, model string) string {
+	if model == "" {
+		return field
+	}
+	return fmt.Sprintf("system-prompt-models[%q].%s", model, field)
+}
+
+// expandUserPath expands a leading `~` (alone, or as `~/…`) to the user's home directory, so a
+// config may name a file the way the user would type it in a shell. Any other path is returned
+// unchanged — including one whose `~` is not leading, which is a legal filename character.
+func expandUserPath(p string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("apogee: resolve home directory for %q: %w", p, err)
+	}
+	if p == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, p[len("~/"):]), nil
 }

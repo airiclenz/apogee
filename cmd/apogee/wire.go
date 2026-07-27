@@ -161,6 +161,16 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		}()
 	}
 
+	// The system prompt this session runs with (ADR 0023), selected for the RESOLVED model: the
+	// root filled opts.model from discovery before calling runRoot, so a system-prompt-models
+	// entry keyed on the discovered name is matchable here and nowhere earlier. A selected file
+	// that cannot be read, or a template carrying an unknown placeholder, fails startup naming the
+	// config key — the prompt is structural configuration, not something to degrade quietly around.
+	sysPrompt, err := resolveSystemPrompt(opts.systemPrompt, opts.model, roots.config, os.ReadFile)
+	if err != nil {
+		return err
+	}
+
 	cfg := apogee.Config{
 		Endpoint:     opts.endpoint,
 		Model:        opts.model,
@@ -185,7 +195,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// resolved from config.yaml (file-only). A zero profile is native tool calls with no
 		// inline thinking, so an unconfigured model behaves exactly as today.
 		Profile: opts.profile,
-		Skills:  skillProvider,
+		// The configured system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per
+		// request and seeds as the first system message. Empty ⇒ no prompt: the request opens with
+		// the user's own message, exactly as it did before this key existed.
+		SystemPrompt: sysPrompt,
+		Skills:       skillProvider,
 		// The discovered runtime context window (0 when the server did not report one). It is the
 		// budget /compact and the automatic Compaction trigger bound their summary request against
 		// so compaction survives high fill (the summary call would otherwise overflow near n_ctx);

@@ -94,6 +94,13 @@ type options struct {
 	// the TUI bridge, which is what supplies Config.Presenter and registers present_document.
 	present presentSettings
 
+	// systemPrompt is the resolved system-prompt block (ADR 0023) — the global prompt (inline or
+	// a file) and the per-model overrides. Loaded from the config file only, like present above.
+	// applyConfig sets it from the resolved settings, having already refused the structural
+	// defects; runRoot collapses it into the one template for THIS session's model
+	// (resolveSystemPrompt, after model resolution) and folds that into apogee.Config.SystemPrompt.
+	systemPrompt systemPromptSettings
+
 	// ui is the resolved `ui:` block — the status-line spinner's animation and its colour loop.
 	// Loaded from the config file only, like present above. applyConfig sets it from the resolved
 	// settings (already validated against the styles this build knows); runRoot hands both values

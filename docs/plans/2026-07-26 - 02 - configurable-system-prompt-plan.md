@@ -384,7 +384,17 @@ absent whenever `SystemPrompt == ""`, which is every existing test).
 
 ---
 
-## 3. Config plumbing — the three file-only keys and post-resolution selection
+## 3. Config plumbing — the three file-only keys and post-resolution selection — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): one test-only deviation. `TestApplyConfigSystemPrompt`'s "a file with all
+three keys populates all fields" case cannot set all three literally — `system-prompt-text` +
+`system-prompt-file` at the GLOBAL level is exactly the contradiction `validate` refuses, so
+`applyConfig` would error. The case instead sets the global `system-prompt-file` plus a
+`system-prompt-models:` map whose two entries carry one spelling each, so every key spelling is
+still covered end to end. `resolveSystemPrompt`'s error wording is carried by an added unexported
+helper, `systemPromptKey`, which qualifies a key with `system-prompt-models[%q].` when the
+selected source came from the map (the plan's `system-prompt-models[%q]` form, with the field
+appended so the message names the exact line).
 
 **What.** The `present:`-precedent plumbing end to end, plus the per-model selection helper the
 composition root calls AFTER model resolution. All in `cmd/apogee` (files: `config.go`,

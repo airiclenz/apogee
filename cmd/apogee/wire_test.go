@@ -210,6 +210,60 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 	}
 }
 
+// runRoot resolves the configured system prompt (ADR 0023) for the RESOLVED model BEFORE it
+// constructs anything, so a defect in the selected source fails startup naming the config key
+// rather than silently sending no prompt. Both halves of the selected-source resolution are
+// exercised at the call site — an unreadable file and an unknown placeholder — which is what
+// proves the call is wired into the composition root at all (the gap TestResolveSystemPrompt,
+// which calls the helper directly, leaves open).
+func TestRunRootSystemPromptResolutionFails(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		sp   systemPromptSettings
+		// wantErr are the substrings the surfaced error must carry.
+		wantErr []string
+	}{
+		{
+			name:    "an unreadable global file",
+			sp:      systemPromptSettings{global: promptSource{file: filepath.Join("prompts", "absent-prompt.md")}},
+			wantErr: []string{"system-prompt-file", "absent-prompt.md"},
+		},
+		{
+			name:    "an unknown placeholder in the inline prompt",
+			sp:      systemPromptSettings{global: promptSource{text: "hi {{bogus}}"}},
+			wantErr: []string{"system-prompt-text", "{{bogus}}", "{{workspace}}"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &recordingLauncher{}
+			opts := options{
+				endpoint:     "http://127.0.0.1:1111",
+				model:        "fake",
+				mode:         "ask-before",
+				workspace:    t.TempDir(),
+				configDir:    t.TempDir(), // the apogee home a relative prompt path resolves against
+				systemPrompt: tt.sp,
+			}
+
+			err := runRoot(context.Background(), opts, rec.launch)
+			if err == nil {
+				t.Fatal("runRoot: want the system-prompt resolution error, got nil")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q; want it to contain %q", err, want)
+				}
+			}
+			if rec.called {
+				t.Error("the launcher ran; a system-prompt defect must fail startup before launch")
+			}
+		})
+	}
+}
+
 // The resolved `ui:` block reaches the renderer: runRoot hands opts.ui's two values to
 // tui.Options as Spinner and SpinnerColor. They are threaded INDEPENDENTLY — the colour flag is
 // not derived from the style and the style not from the flag — so the table walks the combination
