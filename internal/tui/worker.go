@@ -171,7 +171,8 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 // about the Exchange (no open Exchange, or an input carrying nothing), not about that one row, so
 // pressing on would only produce more of the same — and delivering row 3 after row 2 was refused
 // would reorder the human's remarks. The refused rows are not lost: they never appear in the report,
-// so the Model keeps them staged and the terminal flush sends them (ADR 0025). In the shipped wiring
+// so the Model keeps them staged and the Exchange's terminal fold sends them — flushed into a new
+// Exchange on a natural completion, held for the next ⏎ after a stop (ADR 0025). In the shipped wiring
 // the error cannot fire at all — stepToBoundary drains only once the Exchange is open — so this is
 // the honest degradation, not a live path.
 func deliverInterjections(eng Engine, box *interjectBox, notify func(tea.Msg)) {

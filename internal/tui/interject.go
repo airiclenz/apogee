@@ -48,7 +48,8 @@ type queuedInterjection struct {
 // A nil box is the "no worker to deliver to" state and is deliberately usable: push is a no-op and
 // drainAll yields nothing, so staging a row while /compact runs (a worker that drives no Exchange
 // and so takes no box) stages the display row without wedging it into a mailbox nobody empties.
-// Such a row reaches the model through the terminal flush instead.
+// Such a row reaches the model at the terminal boundary instead — flushed into a new Exchange on a
+// natural completion, held for the next ⏎ after a stop or a fault (flushAfterCompletion).
 type interjectBox struct {
 	mu    sync.Mutex
 	items []queuedInterjection
@@ -103,8 +104,9 @@ func (b *interjectBox) withdraw(id int) bool {
 //
 // The drain is unconditional: rows leave the mailbox even if a delivery later in the batch fails.
 // That is deliberate — the Model's display copy is the queue of record, and a row that did not
-// land simply stays on it (reported by the delivery Msg naming only what DID land) and reaches the
-// model through the terminal flush. A row is never silently lost, and never delivered twice.
+// land simply stays on it (reported by the delivery Msg naming only what DID land) and goes out at
+// the terminal boundary instead (flushAfterCompletion). A row is never silently lost, and never
+// delivered twice.
 func (b *interjectBox) drainAll() []queuedInterjection {
 	if b == nil {
 		return nil
@@ -222,6 +224,105 @@ func (m *Model) foldInterjected(items []queuedInterjection) {
 	}
 	m.pendingInterjections = kept
 	m.refreshViewport()
+}
+
+// ----------------------------------------------------------------------------
+// Flush and hold — what a terminal boundary does with whatever is still staged
+// ----------------------------------------------------------------------------
+
+// flushAfterCompletion is the terminal ruling for a NATURAL completion: an Exchange that reached
+// its own quiescent boundary, or a compaction that landed. Rows still staged there have run out of
+// boundaries to be delivered at — they were typed while the model wrote its final answer, or during
+// a /compact that drives no Exchange at all — so they go out now, as one new Exchange, rather than
+// waiting for a keypress the human has no reason to expect is needed (owner decision 1).
+//
+// done is the Cmd the terminal fold already produced (the idle session save, or tea.Quit), and it
+// rides out alongside the launch. That ordering matters and is already established by the time
+// this runs: saveAtIdle takes its engine Snapshot synchronously inside finishWorker, so the record
+// it persists is the COMPLETED Exchange, not the one this flush is about to open.
+//
+// A deferred quit wins outright. finishWorker returns tea.Quit for a quit requested while busy, and
+// launching a fresh Exchange into a program that is exiting would either be abandoned or delay the
+// exit; staged rows are session-ephemeral by decision (ADR 0025), so the honest outcome is to leave.
+func (m Model) flushAfterCompletion(done tea.Cmd) (tea.Model, tea.Cmd) {
+	if m.quitting || len(m.pendingInterjections) == 0 {
+		return m, done
+	}
+	next, cmd := m.flushInterjections()
+	return next, tea.Batch(done, cmd)
+}
+
+// flushInterjections opens a new Exchange carrying everything still staged and empties the queue.
+// It is the auto-send half of the contract; the idle ⏎ half lives in submit(), which joins the
+// editor's own text in last and shares the same composition (joinedInterjections) and the same
+// launch (launchExchange).
+//
+// It reads the editor NOT AT ALL. A completion can land while the human is mid-sentence, and a
+// half-typed line is not something they asked to send — it stays in the box, and the staged rows
+// (which they did press ⏎ on) are what goes.
+func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
+	text, refs := m.joinedInterjections(parsedInput{})
+	m.pendingInterjections = nil
+	m.userScrolled = false // the flushed prompt re-arms sticky-to-top, exactly as a typed one does
+	m.transcript.addUser(text, nil)
+	m.layout() // the strip above the box loses its rows; the new prompt pins to the top
+	return m.launchExchange(domain.UserInput{Text: text, FileRefs: refs})
+}
+
+// joinedInterjections composes the ONE unmarked user message a flush sends: the staged rows'
+// texts oldest first — the order the human wrote them — with tail's text last when a ⏎ on a
+// non-empty box is what triggered the flush, separated by blank lines. Their @file references are
+// unioned in the same order and de-duplicated, so a path named in two rows is resolved once.
+//
+// One message rather than several is the point: exactly one unmarked user message opens an
+// Exchange, so the derived opening (internal/domain) stays trivially correct and every mechanism
+// reading it sees the whole request as the shared context it is. Mid-run delivery is 1:1 for the
+// opposite reason — there the Exchange is already open and each remark lands at a distinct
+// boundary, which is what the transcript records.
+//
+// It joins each row's PARSED text, not the verbatim editor line kept for the Backspace pop: a row
+// delivered mid-run sends exactly that text, and a row that merely happened to be flushed instead
+// must not reach the model differently for it.
+func (m Model) joinedInterjections(tail parsedInput) (string, []string) {
+	texts := make([]string, 0, len(m.pendingInterjections)+1)
+	var refs []string
+	seen := make(map[string]bool)
+	add := func(text string, fileRefs []string) {
+		if text != "" {
+			texts = append(texts, text)
+		}
+		for _, ref := range fileRefs {
+			if !seen[ref] {
+				seen[ref] = true
+				refs = append(refs, ref)
+			}
+		}
+	}
+	for _, row := range m.pendingInterjections {
+		add(row.input.Text, row.input.FileRefs)
+	}
+	add(tail.text, tail.fileRefs)
+	return strings.Join(texts, "\n\n"), refs
+}
+
+// noteHeldQueue records that a stop or a loop error left the queue standing. It is called from the
+// two terminal folds that do NOT flush, so it fires exactly once per hold — at the transition into
+// it, never on the keypresses that follow — and says nothing at all when nothing is staged.
+func (m *Model) noteHeldQueue() {
+	if n := len(m.pendingInterjections); n > 0 {
+		m.transcript.addNote(heldNote(n))
+	}
+}
+
+// heldNote words the hold. Esc stops EVERYTHING, including what was waiting to go out (owner
+// decision 2), so the note has two jobs: say that nothing was sent, and say what will send it. The
+// count is the same one the status line carries, and the ⏎ it names is the ordinary send key on a
+// box the human may leave empty.
+func heldNote(n int) string {
+	if n == 1 {
+		return "1 queued message held — ⏎ sends it"
+	}
+	return fmt.Sprintf("%d queued messages held — ⏎ sends them", n)
 }
 
 // maxQueuedRows caps how many staged rows the strip above the input box shows at once. The strip

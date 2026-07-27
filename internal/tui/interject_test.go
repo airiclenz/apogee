@@ -666,6 +666,318 @@ func TestPlaceholderFollowsTheExchange(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// Flush orchestration — auto-send on a natural completion, hold on a stop (ADR 0025)
+// ----------------------------------------------------------------------------
+
+// heldModel leaves a model at idle with rows the queue is HOLDING: it opens an Exchange, stages
+// each text into it, then cancels — the Esc path, which by decision keeps the queue standing. The
+// engine it returns is scripted to complete any drive at once, so the flush Cmd can be drained.
+func heldModel(t *testing.T, texts ...string) (Model, *fakeEngine) {
+	t.Helper()
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	for _, text := range texts {
+		m = stageRow(t, m, text)
+	}
+	m = step(t, m, cancelledMsg{})
+	if m.state != stateIdle {
+		t.Fatalf("precondition: state = %v, want idle after the cancel", m.state)
+	}
+	if len(m.pendingInterjections) != len(texts) {
+		t.Fatalf("precondition: %d rows held, want %d — a stop must not flush", len(m.pendingInterjections), len(texts))
+	}
+	return m, eng
+}
+
+// lastEntry returns the transcript's tail entry — what the send or the fold just wrote.
+func lastEntry(t *testing.T, m Model) entry {
+	t.Helper()
+	if len(m.transcript.entries) == 0 {
+		t.Fatal("the transcript is empty")
+	}
+	return m.transcript.entries[len(m.transcript.entries)-1]
+}
+
+// TestExchangeDoneFlushesQueue is the auto-send: rows still staged when the Exchange completes
+// under its own power open the NEXT Exchange, as one message joining them oldest-first, with no
+// keypress in between.
+func TestExchangeDoneFlushesQueue(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	m = stageRow(t, m, "also check the tests")
+	m = stageRow(t, m, "and the docs")
+
+	next, cmd := stepCmd(t, m, exchangeDoneMsg{})
+
+	if next.state != stateRunning {
+		t.Fatalf("state = %v; want running — the flush opens a new Exchange", next.state)
+	}
+	if n := len(next.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %d; want the queue emptied by the flush", n)
+	}
+	const want = "also check the tests\n\nand the docs"
+	if e := lastEntry(t, next); e.kind != entryUser || e.text != want {
+		t.Errorf("tail entry = %+v; want one user block carrying %q", e, want)
+	}
+	drainCmd(t, next, cmd) // run the worker Cmd so Submit actually lands
+	if n := len(eng.submitted); n != 1 {
+		t.Fatalf("Submit calls = %d; want exactly one new Exchange", n)
+	}
+	if got := eng.submitted[0].Text; got != want {
+		t.Errorf("submitted text = %q; want the blank-line join in FIFO order", got)
+	}
+	if got := eng.interjections(); len(got) != 0 {
+		t.Errorf("Interject calls = %+v; a flushed message opens an Exchange, it does not interject", got)
+	}
+}
+
+// TestCompactDoneFlushes: a compaction is a natural completion too. /compact drives no Exchange
+// (it carries no mailbox), so a row typed while it runs has been waiting for exactly this boundary.
+func TestCompactDoneFlushes(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("/compact")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning || m.box != nil {
+		t.Fatalf("precondition: state = %v, box = %v; want a running compaction with no mailbox", m.state, m.box)
+	}
+	m = stageRow(t, m, "now the tests")
+
+	next, cmd := stepCmd(t, m, compactDoneMsg{})
+
+	if next.state != stateRunning {
+		t.Fatalf("state = %v; want running — the compaction's completion flushed the queue", next.state)
+	}
+	if n := len(next.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %d; want the queue emptied", n)
+	}
+	if e := lastEntry(t, next); e.kind != entryUser || e.text != "now the tests" {
+		t.Errorf("tail entry = %+v; want the flushed row as a user block", e)
+	}
+	drainCmd(t, next, cmd)
+	if n := len(eng.submitted); n != 1 || eng.submitted[0].Text != "now the tests" {
+		t.Errorf("submitted = %+v; want the single flushed message", eng.submitted)
+	}
+}
+
+// TestCancelHoldsWithSingleNote: Esc stops everything, the queue included. Nothing is sent, the
+// rows stay exactly where they were, and the hold is stated once — not once per keypress after it.
+func TestCancelHoldsWithSingleNote(t *testing.T) {
+	m := runningModel(t)
+	m = stageRow(t, m, "one")
+	m = stageRow(t, m, "two")
+
+	next, _ := stepCmd(t, m, cancelledMsg{})
+
+	if next.state != stateIdle {
+		t.Fatalf("state = %v; want idle — a stop launches nothing", next.state)
+	}
+	if n := len(next.pendingInterjections); n != 2 {
+		t.Fatalf("staged rows = %d; want both held by the stop", n)
+	}
+	note := heldNote(2)
+	if got := countNotes(next, note); got != 1 {
+		t.Errorf("hold note %q written %d times; want exactly once", note, got)
+	}
+	view := plain(next.View())
+	if !strings.Contains(view, note) {
+		t.Errorf("the hold note is missing from the transcript:\n%s", view)
+	}
+	if !strings.Contains(view, "2 queued") {
+		t.Errorf("the held count is missing from the idle status line:\n%s", view)
+	}
+	// Typing on does not re-state the hold: the note belongs to the transition, not to the state.
+	next = step(t, next, keyRune('x'))
+	if got := countNotes(next, note); got != 1 {
+		t.Errorf("hold note written %d times after a later keypress; want still once", got)
+	}
+}
+
+// TestErrorHolds: a loop fault holds the queue exactly as a stop does, and clearing the error
+// takes its own ⏎ — the first press dismisses, the second sends what was held.
+func TestErrorHolds(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	m = stageRow(t, m, "still worth sending")
+
+	m, _ = stepCmd(t, m, errMsg{Err: errors.New("upstream fell over")})
+
+	if m.state != stateErrored {
+		t.Fatalf("state = %v; want errored", m.state)
+	}
+	if n := len(m.pendingInterjections); n != 1 {
+		t.Fatalf("staged rows = %d; want the row held by the fault", n)
+	}
+	note := heldNote(1)
+	if got := countNotes(m, note); got != 1 {
+		t.Errorf("hold note %q written %d times; want exactly once", note, got)
+	}
+
+	m, cmd := stepCmd(t, m, keyEnter()) // first press: dismiss the error
+	if m.state != stateIdle {
+		t.Fatalf("state = %v; want idle once the error is dismissed", m.state)
+	}
+	if cmd != nil {
+		t.Error("dismissing the error launched something; the held queue waits for its own ⏎")
+	}
+	if n := len(m.pendingInterjections); n != 1 {
+		t.Fatalf("staged rows = %d; want the row still held after the dismissal", n)
+	}
+
+	m, cmd = stepCmd(t, m, keyEnter()) // second press: send it
+	if m.state != stateRunning {
+		t.Fatalf("state = %v; want running — the second ⏎ sends the held queue", m.state)
+	}
+	drainCmd(t, m, cmd)
+	if n := len(eng.submitted); n != 1 || eng.submitted[0].Text != "still worth sending" {
+		t.Errorf("submitted = %+v; want the held row sent by the second press", eng.submitted)
+	}
+}
+
+// TestIdleEnterEmptyInputSendsHeld: with rows held, ⏎ on an EMPTY box is a send, not a no-op.
+func TestIdleEnterEmptyInputSendsHeld(t *testing.T) {
+	m, eng := heldModel(t, "first", "second")
+
+	next, cmd := stepCmd(t, m, keyEnter())
+
+	if next.state != stateRunning {
+		t.Fatalf("state = %v; want running — ⏎ on a held queue sends it", next.state)
+	}
+	if n := len(next.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %d; want the queue emptied by the send", n)
+	}
+	const want = "first\n\nsecond"
+	if e := lastEntry(t, next); e.kind != entryUser || e.text != want {
+		t.Errorf("tail entry = %+v; want one user block carrying %q", e, want)
+	}
+	drainCmd(t, next, cmd)
+	if n := len(eng.submitted); n != 1 || eng.submitted[0].Text != want {
+		t.Errorf("submitted = %+v; want the join in FIFO order", eng.submitted)
+	}
+}
+
+// TestIdleEnterMergesEditorLast: what is in the box goes out WITH the held rows, and last — it is
+// the newest thing the human wrote. The @file references of both halves are unioned, once each.
+func TestIdleEnterMergesEditorLast(t *testing.T) {
+	m, eng := heldModel(t, "look at @a.go", "and @b.go")
+	m.input.SetValue("plus @a.go once more")
+
+	next, cmd := stepCmd(t, m, keyEnter())
+
+	const want = "look at @a.go\n\nand @b.go\n\nplus @a.go once more"
+	if e := lastEntry(t, next); e.kind != entryUser || e.text != want {
+		t.Errorf("tail entry = %+v; want the editor's text joined LAST: %q", e, want)
+	}
+	if got := next.input.Value(); got != "" {
+		t.Errorf("input = %q; want the box emptied by the send", got)
+	}
+	drainCmd(t, next, cmd)
+	if n := len(eng.submitted); n != 1 {
+		t.Fatalf("Submit calls = %d; want one merged message", n)
+	}
+	in := eng.submitted[0]
+	if in.Text != want {
+		t.Errorf("submitted text = %q; want %q", in.Text, want)
+	}
+	if !reflect.DeepEqual(in.FileRefs, []string{"a.go", "b.go"}) {
+		t.Errorf("submitted FileRefs = %v; want the union in first-seen order, de-duplicated", in.FileRefs)
+	}
+}
+
+// TestQuitDeferredBeatsFlush: a quit requested while the model works exits at the terminal fold.
+// It must not be overtaken by the flush — staged rows are session-ephemeral, and opening a fresh
+// Exchange into a program that is leaving would either be abandoned or delay the exit.
+func TestQuitDeferredBeatsFlush(t *testing.T) {
+	m := runningModel(t)
+	m = stageRow(t, m, "never sent")
+	m, quitCmd := ctrlCQuit(t, m)
+	if !m.quitting {
+		t.Fatal("precondition: the quit was not deferred to the terminal fold")
+	}
+	if quitCmd != nil {
+		t.Fatal("precondition: a busy quit returned a Cmd instead of deferring")
+	}
+
+	next, cmd := stepCmd(t, m, exchangeDoneMsg{})
+
+	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+		t.Fatalf("terminal Cmd = %T; want tea.Quit — the deferred exit outranks the flush", cmdMsg(cmd))
+	}
+	if next.state == stateRunning {
+		t.Error("the flush launched a new Exchange during a deferred quit")
+	}
+}
+
+// TestClearKeepsHeldRows: /clear starts a fresh session, and a held queue is not part of the
+// session it clears — the rows are outgoing input the human wrote and has not unwritten.
+func TestClearKeepsHeldRows(t *testing.T) {
+	m, _ := heldModel(t, "keep me")
+	m.input.SetValue("/clear")
+
+	next, cmd := stepCmd(t, m, keyEnter())
+
+	if cmd != nil {
+		t.Error("/clear returned a Cmd; it must stay synchronous and idle")
+	}
+	if n := len(next.pendingInterjections); n != 1 || next.pendingInterjections[0].raw != "keep me" {
+		t.Fatalf("staged rows = %+v; want the held row to survive the reset", next.pendingInterjections)
+	}
+	if got := plain(next.View()); !strings.Contains(got, "1 queued") {
+		t.Errorf("the fresh session forgot to say what is still queued:\n%s", got)
+	}
+}
+
+// TestEndToEndInterjectionScript is the whole feature in one fold-level script: two remarks typed
+// mid-run, one delivered at the boundary the worker passed, the other flushed when the Exchange
+// completes. The transcript must read in DELIVERY order — no duplicates, no reordering — because
+// that is the record's whole claim: what the model saw, and when.
+func TestEndToEndInterjectionScript(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("refactor the parser")
+	m, _ = stepCmd(t, m, keyEnter())
+
+	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: "turn one"}})
+	m = stageRow(t, m, "also check the tests")
+	m = stageRow(t, m, "and the docs")
+	m = step(t, m, interjectedMsg{items: m.pendingInterjections[:1]}) // the worker delivered the first
+	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: "turn two"}})
+
+	next, cmd := stepCmd(t, m, exchangeDoneMsg{}) // …and the second flushes here
+
+	want := []entry{
+		{kind: entryUser, text: "refactor the parser"},
+		{kind: entryAssistant, text: "turn one"},
+		{kind: entryInterjected, text: "also check the tests"},
+		{kind: entryAssistant, text: "turn two"},
+		{kind: entryUser, text: "and the docs"},
+	}
+	got := next.transcript.entries[1:] // entries[0] is the start-up box
+	if len(got) != len(want) {
+		t.Fatalf("transcript = %+v; want exactly %d entries after the start-up box", got, len(want))
+	}
+	for i := range want {
+		if got[i].kind != want[i].kind || got[i].text != want[i].text {
+			t.Fatalf("transcript[%d] = {kind:%v text:%q}; want {kind:%v text:%q}",
+				i, got[i].kind, got[i].text, want[i].kind, want[i].text)
+		}
+	}
+	if n := len(next.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %d; want none — one was delivered, one was flushed", n)
+	}
+	drainCmd(t, next, cmd)
+	if n := len(eng.submitted); n != 1 || eng.submitted[0].Text != "and the docs" {
+		t.Errorf("submitted = %+v; want the flushed remark as the new Exchange's opening message", eng.submitted)
+	}
+}
+
 // TestInterjectBoxRaceClean drives the one place the Update and worker goroutines share state:
 // pushes racing drains. Under -race it proves the mutex covers both sides, and the accounting
 // proves the box neither loses a row nor hands one out twice.

@@ -134,7 +134,8 @@ type turnSnapshotMsg struct {
 // moving the delivered ones into the transcript and leaving the rest staged. That is what makes a
 // failed delivery degrade to "held" rather than "lost" — a drain that delivered nothing still
 // sends the Msg (with no items), and the undelivered rows keep their place in the queue until the
-// terminal flush sends them. An empty drain sends no Msg at all.
+// Exchange's terminal fold rules on them (flushed on a natural completion, held after a stop or a
+// fault). An empty drain sends no Msg at all.
 type interjectedMsg struct {
 	items []queuedInterjection
 }

@@ -110,8 +110,10 @@ type Model struct {
 	// pendingInterjections is the display copy and the queue of record — a plain slice, safe in
 	// the copied Model. Rows are appended here and pushed to the box together; the worker's
 	// interjectedMsg then removes by id exactly the rows that were COMMITTED, so a row that did
-	// not land stays queued rather than vanishing. Rows are session-ephemeral: sessions record
-	// what was committed (ADR 0022), never what is still waiting to be sent.
+	// not land stays queued rather than vanishing. What is left when the Exchange ends is ruled on
+	// there: a natural completion flushes it into a new Exchange, a stop or a fault holds it for
+	// the next ⏎ (flushAfterCompletion / noteHeldQueue). Rows are session-ephemeral: sessions
+	// record what was committed (ADR 0022), never what is still waiting to be sent.
 	//
 	// interjectSeq mints those ids — a plain counter, incremented on the Update goroutine and
 	// never reset, so an id names one row for the life of the session and a delivery report can
@@ -336,7 +338,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case exchangeDoneMsg:
-		return m, m.finishWorker(stateIdle)
+		// The Exchange reached its quiescent boundary under its own power. That is the NATURAL
+		// completion the interjection contract releases a queue on (ADR 0025): anything the human
+		// typed while the model worked and the worker never got to deliver — rows staged while it
+		// wrote its final answer, with no further boundary to land at — opens the next Exchange
+		// from here, without a second keypress.
+		cmd := m.finishWorker(stateIdle)
+		return m.flushAfterCompletion(cmd)
 
 	case cancelledMsg:
 		// The worker cancelled at a quiescent boundary and has returned, so the engine is the
@@ -345,9 +353,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and the next /clear or message is rejected with ErrInputPending — the post-Esc wedge.
 		// The visible transcript is untouched (the "cancelled" note and any streamed partial
 		// stay in scrollback); only the model's memory drops the scrapped Exchange.
+		//
+		// A stop is NOT a completion, so a staged queue is held rather than flushed: Esc stops
+		// everything, including what was waiting to go out (ADR 0025). The note says so once, and
+		// ⏎ on the empty box is what sends it afterwards.
 		m.eng.AbortExchange()
 		m.transcript.addNote("cancelled")
 		cmd := m.finishWorker(stateIdle)
+		m.noteHeldQueue()
 		m.refreshViewport()
 		return m, cmd
 
@@ -358,10 +371,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// live path; but the moment Step *can* fault mid-Exchange, the engine would stay inExchange
 		// and the next /clear or message would be rejected with ErrInputPending — the same post-Esc
 		// wedge cancelledMsg already prevents. AbortExchange is a safe no-op at a quiescent boundary.
+		//
+		// A fault is not a completion either, so — exactly as on a cancel — a staged queue is held
+		// and noted rather than flushed: sending the human's remarks into the wreckage of a failed
+		// Exchange is not what they asked for (ADR 0025). Dismissing the error takes one ⏎ and
+		// sending the held queue the next.
 		m.eng.AbortExchange()
 		m.lastErr = msg.Err
 		m.transcript.addError("loop", msg.Err.Error(), 0)
 		cmd := m.finishWorker(stateErrored)
+		m.noteHeldQueue()
 		m.refreshViewport()
 		return m, cmd
 
@@ -371,6 +390,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// skip (conversation too small to fold) touched nothing, so leave the gauge as it was and
 		// say so plainly rather than claiming a compaction. A failure surfaces its reason as a note.
 		// Either way the worker is done: return to idle.
+		//
+		// A compaction that LANDED is a natural completion, so it flushes like an Exchange does: a
+		// row typed while /compact ran had no Exchange to be interjected into (the /compact worker
+		// drives none, so it carries no mailbox) and has been waiting for exactly this boundary.
+		// Only a stop or a fault holds — a cancelled compaction returns cancelledMsg, not this Msg.
 		switch {
 		case msg.Err != nil:
 			m.transcript.addNote("compact: " + msg.Err.Error())
@@ -382,7 +406,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmd := m.finishWorker(stateIdle)
 		m.refreshViewport()
-		return m, cmd
+		return m.flushAfterCompletion(cmd)
 
 	case interjectedMsg:
 		// The worker committed staged rows into the open Exchange at the boundary it just passed
@@ -493,9 +517,10 @@ const ctrlCQuitWindow = time.Second
 type ctrlCResetMsg struct{}
 
 // handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
-// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits. Enter submits at idle,
-// answers a pending ask, dismisses an error, and while a worker runs STAGES what was typed as an
-// interjection — launching nothing, so the single-worker invariant the seam relies on still
+// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits. Enter submits at idle — the
+// box plus any interjections a stop or an error left held, even on an empty box — answers a
+// pending ask, dismisses an error, and while a worker runs STAGES what was typed as an
+// interjection, launching nothing, so the single-worker invariant the seam relies on still
 // holds. Other keys feed the input wherever the box is editable (idle, ask, running —
 // inputEditable), and scroll the transcript at the inert states; PgUp/PgDn scroll in every state,
 // which is what a running Exchange leaves the keyboard for reading with (ADR 0025).
@@ -555,7 +580,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// Submit the typed answer back to the blocked ask_user tool (P3.11).
 			return m.submitAnswer()
 		case stateErrored:
-			// Dismiss the error and return to idle so the next message can be sent.
+			// Dismiss the error and return to idle so the next message can be sent. With a queue
+			// held by the fault (ADR 0025) that is deliberately TWO presses: this one clears the
+			// error, the next sends what was held. An error the human has not finished reading
+			// must not be answered by firing off their queued remarks.
 			m.lastErr = nil
 			m.state = stateIdle
 			return m, nil
@@ -685,24 +713,30 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // /command goes to runCommand; anything else is a message sent to the agent (with its @file
 // references extracted for the loop to resolve). It records the user message, switches to
 // running, stores the worker's CancelFunc (C4), and batches the worker Cmd with the spinner
-// tick. A blank message is ignored. Only reachable from stateIdle, so the single-worker
-// invariant holds.
+// tick. Only reachable from stateIdle, so the single-worker invariant holds.
+//
+// A queue held over from a stop or an error is itself something to send (ADR 0025), so ⏎ here is
+// never merely "send the box": the held rows go out with it as ONE message — them first, oldest
+// first, the box's own text last, because it is the newest thing the human wrote. That is also why
+// an EMPTY box is not always a no-op: with rows held, ⏎ is what sends them.
 func (m Model) submit() (tea.Model, tea.Cmd) {
 	parsed, attached := m.promptEditor.submitParse()
 	if parsed.kind == kindCommand {
 		return m.runCommand(parsed)
 	}
-	// Nothing to send only when there is neither text NOR an attached skill: an empty message
-	// with skills attached is a valid send (the skill bodies are the payload).
-	if parsed.text == "" && len(attached) == 0 {
+	held := len(m.pendingInterjections) > 0
+	// Nothing to send only when there is neither text NOR an attached skill NOR a held row: an
+	// empty message with skills attached is a valid send (the skill bodies are the payload), and so
+	// is a bare ⏎ on a queue waiting to go out.
+	if parsed.text == "" && len(attached) == 0 && !held {
 		return m, nil
 	}
 	if m.blockedUpstream() {
 		// There is nothing to send to. Refuse at the boundary and say why — and leave the typed
 		// message exactly where it is: the human wrote it, the server's absence is not their
 		// mistake, and re-typing it once the server comes back would be the actual insult. Nothing
-		// else about the state moves (no worker, no reset, no chip drop), so ⏎ once the heartbeat
-		// recovers sends the very same message.
+		// else about the state moves (no worker, no reset, no chip drop, and a held interjection
+		// queue stays held), so ⏎ once the heartbeat recovers sends the very same message.
 		m.transcript.addNote(m.upstreamBlockNote())
 		m.refreshViewport()
 		return m, nil
@@ -715,22 +749,43 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		m.eng.AbortExchange()
 		m.transcript.addNote("discarded the interrupted work — continuing fresh from your message")
 	}
+	text, refs := parsed.text, parsed.fileRefs
+	if held {
+		// The held rows and the box become one unmarked user message (joinedInterjections), which
+		// is what keeps the derived Exchange opening trivially correct: exactly one of them opens
+		// the Exchange, whether the human sent one message or five.
+		text, refs = m.joinedInterjections(parsed)
+		m.pendingInterjections = nil
+	}
 	m.promptEditor.reset() // empties the textarea, closes the overlay, drops the staged chips
 	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
-	m.transcript.addUser(parsed.text, m.skillDisplayNames(attached))
+	m.transcript.addUser(text, m.skillDisplayNames(attached))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
+	return m.launchExchange(domain.UserInput{Text: text, FileRefs: refs, SkillIDs: attached})
+}
 
-	// A fresh mailbox per Exchange: this worker is the only one that will ever drain it, and it
-	// dies with the Exchange (finishWorker clears it), so a row can never be delivered into an
-	// Exchange other than the one it was typed during.
+// launchExchange starts the worker over one Exchange and moves the Model into stateRunning: a
+// fresh mailbox for what the human types while it runs, the worker Cmd and the CancelFunc the stop
+// key calls (C4), the queue legend on the emptied box, the opening "thinking" phrase, and the
+// spinner tick — batched as the one Cmd the caller returns.
+//
+// It is the tail the two send paths share — a typed submit and an interjection flush — so a
+// message the queue sends enters exactly the state a typed one does. Everything upstream of it
+// stays the caller's: the parse, the upstream and InExchange guards, the transcript block, and
+// what happens to the editor (a flush at a natural completion deliberately leaves a half-typed
+// line alone).
+//
+// The mailbox is fresh per Exchange: this worker is the only one that will ever drain it, and it
+// dies with the Exchange (finishWorker clears it), so a row can never be delivered into an
+// Exchange other than the one it was typed during. The activity phrase is set here because the
+// request is away and nothing has come back yet — "thinking" holds until the first Event
+// re-derives it (activity.go).
+func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	m.box = newInterjectBox()
-	cmd, cancel := startExchange(m.parent, m.eng,
-		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached}, m.box, m.notify)
+	cmd, cancel := startExchange(m.parent, m.eng, in, m.box, m.notify)
 	m.cancel = cancel
 	m.state = stateRunning
 	m.setPlaceholder(runningPlaceholder) // the empty box now invites a queued message, not a send
-	// The request is away and nothing has come back yet: the honest phrase is "thinking" until
-	// the first Event re-derives it (activity.go).
 	m.setActivity(actThinking, "", 0)
 	tick := m.spin.arm()
 	return m, tea.Batch(cmd, tick)
@@ -801,6 +856,11 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
+	// A held interjection queue deliberately SURVIVES the reset (ADR 0025): staged rows are
+	// outgoing input, not context — the human wrote them and has not unwritten them — so /clear
+	// drops what the model remembers and leaves what is still waiting to be sent. The staged skill
+	// chips are the opposite case: they are attachments to a send that belonged to the session just
+	// abandoned.
 	m.pendingSkills = nil  // the staged chips belonged to the abandoned session
 	m.userScrolled = false // re-arm sticky-to-top: the fresh box pins to the top like a launch
 	m.ctxUsed = 0          // the gauge and throughput fall with the discarded conversation…
@@ -996,7 +1056,10 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.pendingAsk = nil
 	// The Exchange is over, so its mailbox has no reader left: drop it, and with it any row the
 	// worker had not drained by the time it unwound. Nothing is lost — the display queue
-	// (pendingInterjections) is the queue of record and still holds every undelivered row.
+	// (pendingInterjections) is the queue of record and still holds every undelivered row. What
+	// happens to those rows next is the CALLER's ruling, not this one's: a natural completion
+	// flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds them for
+	// the next ⏎ (noteHeldQueue) — ADR 0025.
 	m.box = nil
 	m.setPlaceholder(idlePlaceholder) // nothing is running: ⏎ sends again
 	m.genStart = time.Time{}
@@ -1033,6 +1096,11 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 // the moment it gains its teardown — cmd/apogee/wire.go). Arming quitting instead makes the
 // worker's single terminal Msg fire tea.Quit via finishWorker, once the goroutine has
 // unwound. Snapshotting the last boundary mid-run stays deferred (plan §6.1; handoff 16).
+//
+// Staged interjections do not hold the exit up and are not sent on the way out: they are
+// session-ephemeral by decision (ADR 0025 — a session records what was committed), so a quit
+// requested with rows queued simply exits, and the deferred exit beats the terminal fold's flush
+// (flushAfterCompletion).
 func (m Model) quit() (tea.Model, tea.Cmd) {
 	if m.busy() {
 		m.stopWorker()
