@@ -73,6 +73,22 @@ func TestExtractFileRefs(t *testing.T) {
 		{"mid-word @ is not a ref", "user@host path", nil},
 		{"trailing bare @ ignored", "ends with @", nil},
 		{"path with dots", "@./internal/x.go", []string{"./internal/x.go"}},
+		// Quoted refs — a path with spaces is unreachable without them (ISSUES [A]).
+		{
+			"quoted path with spaces",
+			`@"docs/plans/2026-07-23 - 04 - version-build-number-plan.md"`,
+			[]string{"docs/plans/2026-07-23 - 04 - version-build-number-plan.md"},
+		},
+		{"closing quote ends the token", `see @"a b.md", thanks`, []string{"a b.md"}},
+		{"single quotes accepted", "see @'a b.md' now", []string{"a b.md"}},
+		{"quoted without spaces", `@"main.go"`, []string{"main.go"}},
+		{"dedup across forms", `@x and @"x"`, []string{"x"}},
+		{"quoted then bare", `@"a b.md" and @main.go`, []string{"a b.md", "main.go"}},
+		{"unterminated quote runs to end", `@"a b`, []string{"a b"}},
+		{"unterminated quote stops at newline", "@\"a b\nnext @c.go line", []string{"a b", "c.go"}},
+		{"unterminated quote right-trimmed", "@\"a b  \t\nnext", []string{"a b"}},
+		{"empty quoted path ignored", `@"" here`, nil},
+		{"quoted email is still not a ref", `mail me at foo@"bar baz.com"`, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

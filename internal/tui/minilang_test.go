@@ -363,7 +363,7 @@ func TestContinueCommandLaunchesWorker(t *testing.T) {
 func TestMessageWithFileRefsSubmitsRefs(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()} // immediately ExchangeComplete when driven
 	m := newTestModelEng(t, eng, testOpts)
-	m.input.SetValue("review @main.go now")
+	m.input.SetValue(`review @main.go and @"docs/my plan.md" now`)
 	m, cmd := stepCmd(t, m, keyEnter())
 	if m.state != stateRunning {
 		t.Fatalf("state = %v, want running", m.state)
@@ -374,11 +374,12 @@ func TestMessageWithFileRefsSubmitsRefs(t *testing.T) {
 		t.Fatalf("Submit calls = %d, want 1", len(eng.submitted))
 	}
 	in := eng.submitted[0]
-	if in.Text != "review @main.go now" {
-		t.Errorf("submitted text = %q, want the literal message", in.Text)
+	if in.Text != `review @main.go and @"docs/my plan.md" now` {
+		t.Errorf("submitted text = %q, want the literal message (quoted @token included)", in.Text)
 	}
-	if !reflect.DeepEqual(in.FileRefs, []string{"main.go"}) {
-		t.Errorf("submitted FileRefs = %v, want [main.go]", in.FileRefs)
+	// The text keeps the literal tokens; the refs carry clean, unquoted paths.
+	if want := []string{"main.go", "docs/my plan.md"}; !reflect.DeepEqual(in.FileRefs, want) {
+		t.Errorf("submitted FileRefs = %v, want %v", in.FileRefs, want)
 	}
 }
 

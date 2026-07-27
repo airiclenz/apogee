@@ -51,7 +51,7 @@ GOOS=windows go build ./... && GOOS=darwin go build ./...
 
 ---
 
-## 1. The quote-aware token grammar — one scanner, wired into `extractFileRefs`
+## 1. The quote-aware token grammar — one scanner, wired into `extractFileRefs` — ✅ DONE (2026-07-27)
 
 **What.** `internal/tui/command.go`: add the single token scanner (decision 4) — e.g. `scanRefToken(s string, start int) (path string, end int)`, where `start` sits on the byte after `@`: if `s[start]` is `"` or `'`, the token runs to the next same quote on the same line (path = the inner text; end = past the closing quote), an unterminated quote runs to `\n`/end-of-string with the path right-trimmed of spaces and tabs (decision 3); otherwise today's rule verbatim (run of non-`isInputSpace` bytes). Rewrite `extractFileRefs` (`:172-193`) around it: the word-boundary gate (`:179`) and the dedup map stay exactly as they are; the literal token — quotes included — stays in the returned text (decision 5). Update the function's doc comment (`:166-171`) to state the full grammar: bare tokens, both quote characters, closing-quote-ends-token, unterminated-runs-to-end-of-line, no escapes.
 

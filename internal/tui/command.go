@@ -165,10 +165,17 @@ func parseConfine(args []string) (confineArgs, error) {
 
 // extractFileRefs scans s for @file references and returns s unchanged plus the referenced
 // workspace-relative paths. An @-ref is an "@" at the start of s or immediately after
-// whitespace, followed by one or more non-whitespace characters — so an email like
-// foo@bar.com (where "@" follows a non-space) is not a reference. The literal @token is left
-// in the text so the model sees what the human pointed at; the path (without the leading
-// "@") is collected, de-duplicated in first-seen order.
+// whitespace — so an email like foo@bar.com (where "@" follows a non-space) is not a
+// reference — followed by a token in one of two forms (scanRefToken owns the grammar):
+//
+//   - bare: a run of non-whitespace characters, @internal/agent/loop.go;
+//   - quoted: @"path with spaces" or @'path with spaces' — both quote characters are
+//     accepted, the closing quote ends the token so ordinary text may follow it, and an
+//     unterminated quote runs to the end of that line. There are no escape sequences.
+//
+// The literal @token — quotes included — is left in the text so the model sees what the human
+// pointed at; the path (without the "@" and without any quotes) is collected, de-duplicated in
+// first-seen order, so @x and @"x" collapse to one reference.
 func extractFileRefs(s string) (string, []string) {
 	var refs []string
 	seen := map[string]bool{}
@@ -179,17 +186,48 @@ func extractFileRefs(s string) (string, []string) {
 		if i > 0 && !isInputSpace(s[i-1]) { // not at a word boundary ⇒ not a ref (e.g. an email)
 			continue
 		}
-		j := i + 1
-		for j < len(s) && !isInputSpace(s[j]) {
-			j++
-		}
-		if path := s[i+1 : j]; path != "" && !seen[path] {
+		path, end := scanRefToken(s, i+1)
+		if path != "" && !seen[path] {
 			seen[path] = true
 			refs = append(refs, path)
 		}
-		i = j // resume scanning past this token
+		i = end - 1 // resume scanning past this token (the loop's own i++ lands on end)
 	}
 	return s, refs
+}
+
+// scanRefToken scans the token of an @file reference and reports the referenced path together
+// with the offset just past the token. start is the byte immediately after the "@"; the caller
+// owns the word-boundary rule.
+//
+// A token opening with a quote character (" or ') runs to the next occurrence of that same
+// character on the same line: the path is the text between the quotes, and the closing quote
+// ends the token — anything after it (a comma, more prose) is ordinary text again. An
+// unterminated quote runs to the end of the line ("\n") or of s, with the path right-trimmed of
+// spaces and tabs: a word-boundary @" is unambiguous intent, and a token never crosses a
+// newline, so a stray quote cannot swallow the rest of a multi-line message. There are no
+// escape sequences — a path containing " is quoted with ', and vice versa. Any other token is
+// the bare form: a run of non-whitespace bytes.
+func scanRefToken(s string, start int) (string, int) {
+	if start >= len(s) {
+		return "", start
+	}
+	if quote := s[start]; quote == '"' || quote == '\'' {
+		for j := start + 1; j < len(s); j++ {
+			switch s[j] {
+			case quote:
+				return s[start+1 : j], j + 1
+			case '\n':
+				return strings.TrimRight(s[start+1:j], " \t"), j
+			}
+		}
+		return strings.TrimRight(s[start+1:], " \t"), len(s)
+	}
+	j := start
+	for j < len(s) && !isInputSpace(s[j]) {
+		j++
+	}
+	return s[start:j], j
 }
 
 // isInputSpace reports whether b is an ASCII whitespace byte used as a token boundary.
