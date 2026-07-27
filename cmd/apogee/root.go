@@ -116,6 +116,12 @@ type options struct {
 	// settings (already validated against the styles this build knows); runRoot hands both values
 	// straight to the renderer as tui.Options.
 	ui uiSettings
+
+	// cursorShape is the resolved `cursor-shape:` key — the shape the prompt's caret is drawn with,
+	// as the user spelled it (empty ⇒ the renderer's default). Loaded from the config file only,
+	// like ui above, and already validated by applyConfig; runRoot parses it into the renderer's
+	// own tea.CursorShape for tui.Options.
+	cursorShape string
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

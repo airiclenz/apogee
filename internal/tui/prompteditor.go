@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
 	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // ----------------------------------------------------------------------------
@@ -73,11 +77,53 @@ const (
 	runningPlaceholder = "queue a message…  ⏎ queue · esc stop"
 )
 
+// cursorShapeNames is the vocabulary [ParseCursorShape] accepts, in the order its error lists
+// them, paired with the renderer constant each name means. Declared once so no caller re-types
+// the set — the spinnerStyleNames posture.
+var cursorShapeNames = []struct {
+	name  string
+	shape tea.CursorShape
+}{
+	{"block", tea.CursorBlock},
+	{"underline", tea.CursorUnderline},
+	{"bar", tea.CursorBar},
+}
+
+// defaultCursorShape is what an unset config value resolves to.
+const defaultCursorShape = tea.CursorBlock
+
+// ParseCursorShape maps a config value onto the shape the prompt's caret is drawn with. "" ⇒ the
+// default (block); an unknown value is an error naming the shapes. The caller names the key it read
+// the value from — this package does not know the config schema (as with [ParseSpinnerStyle], the
+// vocabulary lives here so the config layer validates against one source of truth).
+//
+// The set is closed at three because that is what a terminal cursor can be. Inheriting the shape
+// the terminal itself is configured with is deliberately NOT among them: a Bubble Tea program names
+// a shape on every frame and never emits the DECSCUSR reset while it runs, so there is nothing to
+// inherit back into — this key is the honest substitute (the terminal's own cursor returns on exit).
+func ParseCursorShape(s string) (tea.CursorShape, error) {
+	if s == "" {
+		return defaultCursorShape, nil
+	}
+	for _, c := range cursorShapeNames {
+		if s == c.name {
+			return c.shape, nil
+		}
+	}
+	names := make([]string, 0, len(cursorShapeNames))
+	for _, c := range cursorShapeNames {
+		names = append(names, c.name)
+	}
+	return defaultCursorShape, fmt.Errorf("unknown cursor shape %q (known shapes: %s)", s, strings.Join(names, ", "))
+}
+
 // newPromptEditor builds the idle input cluster: a focused, black-interior, auto-growing textarea
 // (its newline binding repurposed because plain Enter submits) and an empty workspace file cache.
-// The Focus Cmd is discarded here — the focus STATE is what matters at construction; the cursor's
-// blink Cmd is returned later by Model.Init.
-func newPromptEditor() promptEditor {
+// shape is the caret's shape: the widget's simulated cursor is retired here (steadyCursor) and
+// [Model.View] hands Bubble Tea the REAL terminal cursor at the caret instead, steady in that
+// shape. The Focus Cmd is discarded — the focus STATE is what matters at construction, and a
+// retired virtual cursor has no blink to schedule, so that Cmd is nil now anyway.
+func newPromptEditor(shape tea.CursorShape) promptEditor {
 	ta := textarea.New()
 	ta.Placeholder = idlePlaceholder
 	ta.Prompt = "" // the rounded border is the frame; no inline prompt gutter (layout.md)
@@ -88,6 +134,7 @@ func newPromptEditor() promptEditor {
 	// and alt+enter / ctrl+j are byte-distinct fallbacks that insert a newline everywhere.
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+j")
 	blackenInput(&ta)
+	steadyCursor(&ta, shape)
 	ta.Focus()
 	return promptEditor{input: ta, files: &fileCache{}}
 }

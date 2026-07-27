@@ -1071,6 +1071,67 @@ func TestApplyConfigNoUIDefaults(t *testing.T) {
 	}
 }
 
+// The `cursor-shape:` key resolves like the ui block beside it: a flat, file-only name carried raw
+// into opts (the composition root parses it once for the renderer), empty when the key is absent —
+// which is the request for the default, a steady block. An unknown name is a loud startup error
+// that names the key AND lists the shapes that would have worked, for the same reason a bad
+// spinner style is: silently drawing a block would leave the user wondering why their key did
+// nothing. The vocabulary comes from internal/tui (ParseCursorShape), so this also pins that the
+// message the user sees carries it.
+func TestCursorShapeConfigParses(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		yaml    string
+		want    string
+		wantErr []string // substrings the startup error must carry; nil ⇒ the config is accepted
+	}{
+		{name: "absent ⇒ empty, the request for the default", yaml: "", want: ""},
+		{name: "block", yaml: "cursor-shape: block\n", want: "block"},
+		{name: "underline", yaml: "cursor-shape: underline\n", want: "underline"},
+		{name: "bar", yaml: "cursor-shape: bar\n", want: "bar"},
+		{
+			name:    "an unknown shape errors, naming the key and the options",
+			yaml:    "cursor-shape: beam\n",
+			wantErr: []string{"cursor-shape", "beam", "block", "underline", "bar"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if tt.yaml != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.yaml), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+			opts := options{configDir: home}
+			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+			if len(tt.wantErr) > 0 {
+				if err == nil {
+					t.Fatalf("applyConfig with %q: want an error, got nil", tt.yaml)
+				}
+				for _, want := range tt.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %q; want it to contain %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if opts.cursorShape != tt.want {
+				t.Errorf("opts.cursorShape = %q; want %q", opts.cursorShape, tt.want)
+			}
+			// The renderer takes a shape, not a name: what the binary hands the TUI must parse.
+			if _, err := tui.ParseCursorShape(opts.cursorShape); err != nil {
+				t.Errorf("the resolved shape %q does not parse for the renderer: %v", opts.cursorShape, err)
+			}
+		})
+	}
+}
+
 // A ui.spinner naming a style this build has no animation for is a loud startup error that names
 // the key AND lists the styles that would have worked — not a silent fall back, which would leave
 // the user watching a spinner their config did not ask for with nothing pointing at the typo. The

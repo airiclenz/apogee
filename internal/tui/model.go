@@ -161,9 +161,9 @@ type Model struct {
 
 // newModel builds the initial idle Model. parent is the program context the worker derives
 // its cancellable child from (so a program-wide shutdown also cancels an in-flight
-// Exchange — C4). The input box is focused here, not in Init, because Init returns only a
-// Cmd: the focus *state* must be set on the stored widget, while Init returns the cursor's
-// blink Cmd.
+// Exchange — C4). The input box is focused here, not in Init: Init takes a COPY of the Model
+// and returns only a Cmd, so the focus *state* has to be set on the stored widget. The caret it
+// is focused for is the real terminal cursor in Options.CursorShape (newPromptEditor).
 func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.Msg)) Model {
 	th := newTheme()
 
@@ -176,7 +176,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		opts:         opts,
 		sessions:     opts.Sessions,
 		notify:       notify,
-		promptEditor: newPromptEditor(),
+		promptEditor: newPromptEditor(opts.CursorShape),
 		viewport:     vp,
 		spin:         newSpinnerAnim(opts.Spinner, opts.SpinnerColor),
 		th:           th,
@@ -243,14 +243,31 @@ func blackenInput(ta *textarea.Model) {
 	ta.SetStyles(s)
 }
 
-// Init starts the cursor blink and fires the first heartbeat. The window is sized by the first
-// WindowSizeMsg the program sends; nothing else needs an initial Cmd (the spinner ticks only while
-// running). The beat goes out immediately rather than after one Interval, because startup
-// discovery IS the first beat (the binary no longer probes before painting): the sooner it lands,
-// the sooner the footer stops saying "connecting…". With the monitor unwired beatCmd is nil and
-// tea.Batch collapses to the focus Cmd alone, so an unwired TUI behaves exactly as before.
+// steadyCursor retires the textarea's simulated cursor in favour of the terminal's own: the widget
+// stops painting a blinking block into its content (SetVirtualCursor(false)) and [Model.View] hands
+// Bubble Tea a real cursor at the caret instead, styled from here — which is what makes the caret
+// the one the human's terminal draws rather than an imitation of it (ISSUES: "I don't want anything
+// blinking"). shape is the `cursor-shape` config key's selection ([Options.CursorShape]); Blink is
+// false with no key of its own, because nothing in apogee blinks. Color is left nil deliberately: a
+// colour set here would override the cursor colour the terminal is configured with, and the shape is
+// the only axis this feature claims.
+func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
+	ta.SetVirtualCursor(false)
+	s := ta.Styles()
+	s.Cursor = textarea.CursorStyle{Shape: shape, Blink: false}
+	ta.SetStyles(s)
+}
+
+// Init fires the first heartbeat, and that is the whole of its work. The window is sized by the
+// first WindowSizeMsg the program sends, the input's focus STATE is set at construction (newModel —
+// Init holds a copy, so it could not set it here), and the caret needs no start-up Cmd either: the
+// virtual cursor is retired, so there is no blink to schedule and nothing to animate (steadyCursor,
+// View). The spinner likewise ticks only while running. The beat goes out immediately rather than
+// after one Interval, because startup discovery IS the first beat (the binary no longer probes
+// before painting): the sooner it lands, the sooner the footer stops saying "connecting…". With the
+// monitor unwired beatCmd is nil, so an unwired TUI starts no chain at all — exactly as before.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.input.Focus(), m.beatCmd())
+	return m.beatCmd()
 }
 
 // ----------------------------------------------------------------------------
@@ -500,8 +517,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
-		// Other Bubble Tea Msgs (e.g. the cursor blink) belong to the widgets; route them
-		// to the focused input so the cursor keeps blinking.
+		// Other Bubble Tea Msgs belong to the widgets; route them to the focused input so it
+		// sees its own (a focus/blur report, say). The cursor is no longer among them: with the
+		// virtual cursor retired no blink Msg is ever scheduled, and the real cursor is placed
+		// by View rather than driven by a Msg chain.
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -1739,7 +1758,8 @@ func (m *Model) refreshViewport() {
 // the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
 // approval or ask prompt, when one is pending, sits between the transcript and the blank line; the
 // viewport is shrunk on this local copy to make room (View has a value receiver, so the
-// stored layout is untouched).
+// stored layout is untouched). It also places the frame's cursor: the real terminal one, at the
+// prompt caret, wherever the box is editable (promptCursor).
 func (m Model) View() tea.View {
 	if !m.ready {
 		return tea.NewView("apogee — starting…")
@@ -1820,7 +1840,34 @@ func (m Model) View() tea.View {
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // enable wheel scrolling (Update routes MouseWheelMsg)
+	v.Cursor = m.promptCursor()
 	return v
+}
+
+// promptCursor is the real terminal cursor this frame shows — the caret in the input box — or nil
+// to hide it. Visibility follows EDITABILITY (inputEditable: idle, the borrowed ask answer, and
+// while a worker runs): at awaitingApproval and errored the keyboard belongs to a/d/s and the
+// Enter-dismiss, so a caret there would invite typing that goes nowhere. Hiding is by state rather
+// than by Blur() — the textarea stays focused through every state (nothing blurs it), which is
+// exactly what lets the box keep its content and its selection while it is inert.
+//
+// The widget reports the caret in ITS own coordinates (nil when blurred, or while the virtual
+// cursor is in use), so the position is translated by the content rectangle's origin — the same
+// rectangle a mouse click maps back through (inputContentRect), which is what keeps the drawn caret
+// and click-to-position in agreement. The box is bottom-anchored above the footer, so the overlays
+// this View stacks above it never move that origin.
+func (m Model) promptCursor() *tea.Cursor {
+	if !m.inputEditable() {
+		return nil
+	}
+	c := m.input.Cursor()
+	if c == nil {
+		return nil
+	}
+	x0, y0, _, _ := m.inputContentRect()
+	c.X += x0
+	c.Y += y0
+	return c
 }
 
 // applyStickyHeader overlays the user prompt that owns the content at the top of the viewport,

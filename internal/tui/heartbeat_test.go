@@ -136,10 +136,10 @@ func countNotes(m Model, want string) int {
 	return n
 }
 
-// firstBeat runs Init's Cmd and returns the beatMsg it yields. Init batches the first beat with
-// the input's focus Cmd, and that one parks for the cursor's blink interval when executed, so the
-// batch's Cmds run concurrently here and the beat — which lands at once — is taken from whichever
-// finishes first.
+// firstBeat runs Init's Cmd and returns the beatMsg it yields. With the virtual cursor retired
+// there is no blink Cmd to batch the beat with, so Init's Cmd IS the beat and lands directly; the
+// batch arm is kept because a Cmd batched onto it later must not silently stop the chain — its
+// members are run concurrently and the beat taken from whichever finishes first.
 func firstBeat(t *testing.T, cmd tea.Cmd) beatMsg {
 	t.Helper()
 	if cmd == nil {
@@ -227,8 +227,8 @@ func TestBeatChainReArmsAndStaleGenIsInert(t *testing.T) {
 	}
 }
 
-// An unwired monitor is completely inert: no chain is armed, Init returns the focus Cmd alone, a
-// stray beat is not folded, and nothing is ever blocked. This is what keeps every hand-built test
+// An unwired monitor is completely inert: no chain is armed, Init returns nothing to run, a stray
+// beat is not folded, and nothing is ever blocked. This is what keeps every hand-built test
 // Options — and any embedder that wires no monitor — behaving exactly as before the heartbeat.
 func TestHeartbeatUnwiredIsInert(t *testing.T) {
 	t.Parallel()
@@ -254,9 +254,10 @@ func TestHeartbeatUnwiredIsInert(t *testing.T) {
 	}
 }
 
-// assertNoBatch proves cmd is not a tea.Batch. The lone focus Cmd is the cursor blink, which parks
-// for its blink interval rather than returning a Msg, while a batch resolves to its BatchMsg at
-// once — so a short wait tells the two apart without executing the blink.
+// assertNoBatch proves cmd starts no chain: with no monitor wired Init has nothing to return, so
+// the nil Cmd is the whole proof today. The batched arm is kept for the day Init carries a start-up
+// Cmd again — a batch resolves to its BatchMsg at once, while a Cmd that parks (a timer, say) never
+// answers, so a short wait tells the two apart without executing what it holds.
 func assertNoBatch(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
@@ -267,7 +268,7 @@ func assertNoBatch(t *testing.T, cmd tea.Cmd) {
 	select {
 	case msg := <-out:
 		if _, ok := msg.(tea.BatchMsg); ok {
-			t.Error("Init batched a Cmd onto the focus Cmd; an unwired monitor must start no chain")
+			t.Error("Init batched a Cmd onto its start-up Cmd; an unwired monitor must start no chain")
 		}
 	case <-time.After(250 * time.Millisecond):
 	}

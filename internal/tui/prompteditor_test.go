@@ -18,7 +18,7 @@ import (
 
 // submitParse classifies a free-text line as a message and extracts its @file references.
 func TestPromptEditorSubmitParseMessage(t *testing.T) {
-	e := newPromptEditor()
+	e := newPromptEditor(defaultCursorShape)
 	e.input.SetValue("look at @main.go and @pkg/x.go please")
 	parsed, skills := e.submitParse()
 	if parsed.kind != kindMessage {
@@ -37,7 +37,7 @@ func TestPromptEditorSubmitParseMessage(t *testing.T) {
 
 // submitParse recognises a leading /command and reports the bare verb.
 func TestPromptEditorSubmitParseCommand(t *testing.T) {
-	e := newPromptEditor()
+	e := newPromptEditor(defaultCursorShape)
 	e.input.SetValue("/clear")
 	parsed, _ := e.submitParse()
 	if parsed.kind != kindCommand || parsed.command != "clear" {
@@ -47,7 +47,7 @@ func TestPromptEditorSubmitParseCommand(t *testing.T) {
 
 // submitParse carries the staged-skill chips through so a text-free, skills-only send is valid.
 func TestPromptEditorSubmitParseCarriesStagedSkills(t *testing.T) {
-	e := newPromptEditor()
+	e := newPromptEditor(defaultCursorShape)
 	e.pendingSkills = []string{"go-testing", "git"}
 	parsed, skills := e.submitParse()
 	if parsed.text != "" {
@@ -60,7 +60,7 @@ func TestPromptEditorSubmitParseCarriesStagedSkills(t *testing.T) {
 
 // reset empties every editable part of the editor: the textarea, the overlay, and the chips.
 func TestPromptEditorResetClearsEverything(t *testing.T) {
-	e := newPromptEditor()
+	e := newPromptEditor(defaultCursorShape)
 	e.input.SetValue("half-typed /skill go")
 	e.autocomplete = autocompleteState{active: true, kind: acSkill}
 	e.pendingSkills = []string{"git"}
@@ -78,7 +78,7 @@ func TestPromptEditorResetClearsEverything(t *testing.T) {
 
 // rows grows one row per logical line and clamps at maxInputRows.
 func TestPromptEditorRowsGrowsAndClamps(t *testing.T) {
-	e := newPromptEditor()
+	e := newPromptEditor(defaultCursorShape)
 
 	e.input.SetValue("hello")
 	if got := e.rows(40); got != minInputRows {

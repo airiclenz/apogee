@@ -330,8 +330,8 @@ func (m Model) highlightInput(view string) string {
 // shadeCells re-renders the display columns [c0,c1) of an ANSI line under style. The flanking
 // parts keep their original styling (ansi.Cut slices by display cell without breaking escape
 // codes); the selected span is stripped and re-rendered so the selection colours win. The
-// prompt text is single-styled, so the only thing lost under the span is the cursor block — and
-// the caret sits at the selection head anyway.
+// prompt text is single-styled, so a stripped span loses nothing there — the caret is not part of
+// the rendered content at all: the terminal draws the real cursor over the frame (steadyCursor).
 func shadeCells(line string, c0, c1 int, style lipgloss.Style) string {
 	w := lipgloss.Width(line)
 	left := ansi.Cut(line, 0, c0)

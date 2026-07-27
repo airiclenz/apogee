@@ -139,6 +139,13 @@ type settings struct {
 	// its defaults are the renderer's own (defaultUISettings): the default style with the colour
 	// loop on. The composition root hands both values to the TUI as Options.
 	ui uiSettings
+
+	// cursorShape is the configured shape of the prompt's caret, as the user spelled it (block |
+	// underline | bar). File-only like the ui block, and empty ⇒ the renderer's default (block).
+	// It is carried as the raw NAME — applyConfig validates it through tui.ParseCursorShape, and
+	// the composition root parses it once more into the tea.CursorShape the TUI Options take, so
+	// cmd/apogee never restates the vocabulary internal/tui owns.
+	cursorShape string
 }
 
 // presentSettings is the resolved `present:` block (ADR 0019), in the form the composition root
@@ -363,6 +370,11 @@ type layer struct {
 	// present). A nil pointer means the source configures no `ui:` block, so resolution keeps the
 	// defaults (the renderer's default spinner style, colour loop on).
 	ui *uiSettings
+
+	// cursorShape is set only by the FILE layer (the caret's shape is config'd, no flag/env — like
+	// the ui block). A nil pointer means the source names no shape, so resolution leaves it empty
+	// and the renderer's default (a steady block) stands.
+	cursorShape *string
 }
 
 // resolveSettings overlays the layers in increasing priority — the default base, then
@@ -420,6 +432,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	}
 	if file.ui != nil { // file-only; env/flag never carry the UI block
 		s.ui = *file.ui
+	}
+	if file.cursorShape != nil { // file-only, like the UI block above
+		s.cursorShape = *file.cursorShape
 	}
 	for _, l := range []layer{file, env, flag} {
 		if l.endpoint != nil {
@@ -593,6 +608,14 @@ type fileConfig struct {
 	SystemPromptText   string                             `yaml:"system-prompt-text"`
 	SystemPromptFile   string                             `yaml:"system-prompt-file"`
 	SystemPromptModels map[string]systemPromptEntryConfig `yaml:"system-prompt-models"`
+	// CursorShape names the shape the prompt's caret is drawn with — block (the default) |
+	// underline | bar. apogee draws the REAL terminal cursor, always steady, so this is the one
+	// axis there is: nothing blinks, and the shape the terminal itself is configured with cannot be
+	// inherited while a full-screen program runs (tui.ParseCursorShape says why). File-only (no
+	// flag/env), like the blocks above. It stays a raw string here — applyConfig parses it once, so
+	// an unknown name reaches startup as an error rather than being quietly dropped at the yaml
+	// seam (the `ui.spinner` posture).
+	CursorShape string `yaml:"cursor-shape"`
 	// UI configures how the terminal UI presents itself — today the status-line spinner's animation
 	// and its colour loop. File-only (no flag/env), like the blocks above. Absent ⇒ the renderer's
 	// default style with the colour loop on. A pointer so an absent block falls through to those
@@ -833,6 +856,9 @@ func (fc fileConfig) layer() layer {
 		u := fc.UI.toUISettings()
 		l.ui = &u
 	}
+	if fc.CursorShape != "" {
+		l.cursorShape = &fc.CursorShape
+	}
 	return l
 }
 
@@ -975,6 +1001,13 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := s.ui.validate(); err != nil {
 		return err
 	}
+	// A `cursor-shape:` naming a shape no terminal cursor has is the same kind of loud startup
+	// error, for the same reason: drawing a block instead would leave the user staring at a caret
+	// their config did not ask for. internal/tui owns the vocabulary (ParseCursorShape lists the
+	// shapes); this only adds the key the bad value was read from, which that package cannot know.
+	if _, err := tui.ParseCursorShape(s.cursorShape); err != nil {
+		return fmt.Errorf("apogee: invalid cursor-shape: %w", err)
+	}
 	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
 	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of
 	// this machine and of which model this run resolves, so it is refused here for every level.
@@ -1003,6 +1036,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.present = s.present
 	opts.systemPrompt = s.systemPrompt
 	opts.ui = s.ui
+	opts.cursorShape = s.cursorShape
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

@@ -168,6 +168,17 @@ type Options struct {
 	// keeps the terminal's own text colour, which is also the pre-styles look under classic.
 	SpinnerColor bool
 
+	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config
+	// key selected. apogee draws the REAL terminal cursor (the textarea's simulated one is retired
+	// in newPromptEditor) and it never blinks, so the shape is the only axis there is: a Bubble Tea
+	// program NAMES a cursor shape on every frame and never emits the DECSCUSR reset while it runs,
+	// so "inherit the shape this terminal is configured with" is not expressible and this key is
+	// the honest substitute for it. Like Spinner it is a SELECTION, already validated by the binary
+	// (cmd/apogee's applyConfig calls ParseCursorShape), so the renderer never parses a name. The
+	// zero value is tea.CursorBlock — also the configured default — so hand-built test Options and
+	// an unset key agree.
+	CursorShape tea.CursorShape
+
 	// Version is the resolved FULL build version (apogee.Version, read from the embedded VERSION
 	// file plus build provenance), read only by the /version command — it mirrors what --version
 	// prints. The start-up box reads BaseVersion instead, so the TUI never imports the source.

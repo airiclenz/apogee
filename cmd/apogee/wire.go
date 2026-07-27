@@ -339,6 +339,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		}, nil
 	}
 
+	// The prompt caret's shape. applyConfig already refused a name this build does not know, so the
+	// error here cannot fire; ignoring it keeps the parse a single expression, and ParseCursorShape
+	// answers an unknown name with the default anyway — a caret is drawn either way.
+	cursorShape, _ := tui.ParseCursorShape(opts.cursorShape)
+
 	err = launch(ctx, agent, bridge, tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
 		// a cold start, where the footer says "connecting…" until the first beat binds one), and
@@ -360,6 +365,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// renderer selects rather than parses.
 		Spinner:      opts.ui.spinner,
 		SpinnerColor: opts.ui.spinnerColor,
+		// The `cursor-shape:` key: the shape the REAL terminal cursor takes at the prompt caret
+		// (steady always — there is no blink key). Selected here, like the two above, so the
+		// renderer never parses a config name.
+		CursorShape: cursorShape,
 		// The single source of truth (the embedded top-level VERSION file). Version carries the
 		// full string (provenance included) that /version prints and --version mirrors; BaseVersion
 		// is the release version alone (no provenance), the clean value the start-up box displays.

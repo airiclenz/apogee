@@ -282,6 +282,14 @@ system-prompt-text: |
 #   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
 
 # =============================================================================
+# The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:
+# block (the default) | underline | bar. Nothing blinks, and there is no key to make it blink. The
+# shape the terminal itself is configured with cannot be inherited while apogee runs: a full-screen
+# terminal program names a cursor shape on every frame, so this key is how you say which. Your
+# terminal's own cursor comes back when apogee exits. Config-file only (no flag or env).
+# cursor-shape: block
+
+# =============================================================================
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false
