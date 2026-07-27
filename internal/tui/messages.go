@@ -28,6 +28,7 @@ var (
 	_ tea.Msg = errMsg{}
 	_ tea.Msg = compactDoneMsg{}
 	_ tea.Msg = turnSnapshotMsg{}
+	_ tea.Msg = interjectedMsg{}
 	_ tea.Msg = saveDoneMsg{}
 	_ tea.Msg = heartbeatTickMsg{}
 	_ tea.Msg = beatMsg{}
@@ -121,6 +122,21 @@ type compactDoneMsg struct {
 // transcript the Model holds when this folds is consistent with the snapshot it carries.
 type turnSnapshotMsg struct {
 	Sess domain.Session
+}
+
+// interjectedMsg reports which staged interjections the worker actually COMMITTED into the open
+// Exchange at the between-Steps boundary it just passed (ADR 0025). The worker drains its mailbox,
+// calls Engine.Interject for each row in FIFO order, and sends this one Msg — carrying the rows
+// that landed, in delivery order — before it Steps again, so the transcript records each message
+// at the moment the model saw it rather than at the moment it was typed.
+//
+// It is a REPORT, not a request: the Model reconciles its display rows against items by id,
+// moving the delivered ones into the transcript and leaving the rest staged. That is what makes a
+// failed delivery degrade to "held" rather than "lost" — a drain that delivered nothing still
+// sends the Msg (with no items), and the undelivered rows keep their place in the queue until the
+// terminal flush sends them. An empty drain sends no Msg at all.
+type interjectedMsg struct {
+	items []queuedInterjection
 }
 
 // heartbeatTickMsg re-arms the upstream heartbeat. It is scheduled one heartbeat.Interval after a

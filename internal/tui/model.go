@@ -98,6 +98,23 @@ type Model struct {
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
 	quitting   bool               // a quit requested while busy; the exit waits for the worker's terminal Msg (C4)
 
+	// The interjection queue — what the human typed while the model worked (ADR 0025). It is
+	// kept in two reconciled copies, which is what lets one goroutine own each half:
+	//
+	// box is the running Exchange's mailbox, held BY POINTER because it carries a mutex and the
+	// Model is value-copied on every Update (doc.go's no-copy invariant). It is created fresh
+	// per Exchange, handed to that Exchange's worker, and cleared at the terminal fold: non-nil
+	// means "a worker is draining this", nil means there is nothing to deliver into right now
+	// (idle, or the /compact worker, which drives no Exchange).
+	//
+	// pendingInterjections is the display copy and the queue of record — a plain slice, safe in
+	// the copied Model. Rows are appended here and pushed to the box together; the worker's
+	// interjectedMsg then removes by id exactly the rows that were COMMITTED, so a row that did
+	// not land stays queued rather than vanishing. Rows are session-ephemeral: sessions record
+	// what was committed (ADR 0022), never what is still waiting to be sent.
+	box                  *interjectBox
+	pendingInterjections []queuedInterjection
+
 	// act is the live activity the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go). It is derived
 	// from the Event stream (foldActivity) plus the transitions no Event announces, and it is
@@ -664,8 +681,12 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.transcript.addUser(parsed.text, m.skillDisplayNames(attached))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 
+	// A fresh mailbox per Exchange: this worker is the only one that will ever drain it, and it
+	// dies with the Exchange (finishWorker clears it), so a row can never be delivered into an
+	// Exchange other than the one it was typed during.
+	m.box = newInterjectBox()
 	cmd, cancel := startExchange(m.parent, m.eng,
-		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached}, m.notify)
+		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached}, m.box, m.notify)
 	m.cancel = cancel
 	m.state = stateRunning
 	// The request is away and nothing has come back yet: the honest phrase is "thinking" until
@@ -788,7 +809,8 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			// the TUI aborts on every live cancel): /continue resumes the OPEN Exchange rather than
 			// opening a new one. Drive Step-only from the boundary (startResume) — no Submit, no new
 			// user block; the interrupted note already stands, so the transcript is left untouched.
-			cmd, cancel := startResume(m.parent, m.eng, m.notify)
+			m.box = newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
+			cmd, cancel := startResume(m.parent, m.eng, m.box, m.notify)
 			m.cancel = cancel
 			m.state = stateRunning
 			m.setActivity(actThinking, "", 0) // the resumed work is a request in flight (as in submit)
@@ -802,8 +824,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.userScrolled = false
 		m.transcript.addUser("/continue", m.skillDisplayNames(attached))
 		m.layout()
+		m.box = newInterjectBox()
 		cmd, cancel := startExchange(m.parent, m.eng,
-			domain.UserInput{Text: "Please continue", SkillIDs: attached}, m.notify)
+			domain.UserInput{Text: "Please continue", SkillIDs: attached}, m.box, m.notify)
 		m.cancel = cancel
 		m.state = stateRunning
 		m.setActivity(actThinking, "", 0) // a canned turn is still a request in flight (as in submit)
@@ -834,6 +857,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// (the turn is reset).
 		m.pendingSkills = nil
 		m.layout() // reflow the emptied input box back to one row
+		// No mailbox: /compact drives no Exchange, so there is nothing to interject INTO. A row
+		// staged while it runs stays on the display queue and goes out at the terminal fold.
+		m.box = nil
 		cmd, cancel := startCompact(m.parent, m.eng)
 		m.cancel = cancel
 		m.state = stateRunning
@@ -896,9 +922,9 @@ func (m *Model) stopWorker() {
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
-// arrives: it cancels and clears the CancelFunc and any pending Approval or ask_user
-// question. The new state is idle for a completed or cancelled Exchange, errored for a loop
-// fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit); otherwise, when
+// arrives: it cancels and clears the CancelFunc, any pending Approval or ask_user
+// question, and the Exchange's interjection mailbox. The new state is idle for a completed
+// or cancelled Exchange, errored for a loop fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit); otherwise, when
 // the Exchange settled at idle, it is the final per-session save (saveAtIdle) — the Model owns
 // the engine again at this boundary, so it takes its own Snapshot — else nil.
 //
@@ -922,6 +948,10 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.cancel = nil
 	m.pending = nil
 	m.pendingAsk = nil
+	// The Exchange is over, so its mailbox has no reader left: drop it, and with it any row the
+	// worker had not drained by the time it unwound. Nothing is lost — the display queue
+	// (pendingInterjections) is the queue of record and still holds every undelivered row.
+	m.box = nil
 	m.genStart = time.Time{}
 	// The worker has unwound, so the activity is over — including a sticky "stopping", which
 	// only this path clears (activity.go). Idle renders an empty left slot.

@@ -125,12 +125,15 @@ type fakeEngine struct {
 	restoreCalls []domain.Session // records RestoreSession calls (the in-TUI resume primitive), in order
 	inExchange   bool             // the value InExchange reports; a test sets it to model a mid-Exchange restore
 
-	submitFn   func(domain.UserInput) error
-	stepFn     func(ctx context.Context, call int) (domain.StepResult, error)
-	snapshotFn func() (domain.Session, error)
-	clearFn    func() error
-	restoreFn  func(domain.Session) error // scripted RestoreSession error (nil ⇒ success)
-	compactFn  func(context.Context) (skipped bool, err error)
+	interjected []domain.UserInput // records Interject calls (the worker's between-Steps delivery), in order
+
+	submitFn    func(domain.UserInput) error
+	stepFn      func(ctx context.Context, call int) (domain.StepResult, error)
+	snapshotFn  func() (domain.Session, error)
+	clearFn     func() error
+	restoreFn   func(domain.Session) error // scripted RestoreSession error (nil ⇒ success)
+	compactFn   func(context.Context) (skipped bool, err error)
+	interjectFn func(domain.UserInput) error // scripted Interject error (nil ⇒ committed)
 }
 
 // fakeEngine satisfies the narrow Engine seam the worker drives.
@@ -154,6 +157,30 @@ func (f *fakeEngine) Step(ctx context.Context) (domain.StepResult, error) {
 	fn := f.stepFn
 	f.mu.Unlock()
 	return fn(ctx, call)
+}
+
+// Interject records the delivery the worker attempted at a between-Steps boundary and answers
+// with whatever the test scripted (nil ⇒ committed). A scripted refusal models the real Agent's
+// ErrNoOpenExchange / empty-input guards without needing an engine in a particular state. It
+// mirrors Submit: the call is recorded whether or not it is refused, so a test can prove that a
+// refusal STOPPED the drain rather than merely skipping a row.
+func (f *fakeEngine) Interject(in domain.UserInput) error {
+	f.mu.Lock()
+	f.interjected = append(f.interjected, in)
+	fn := f.interjectFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(in)
+	}
+	return nil
+}
+
+// interjections reports the inputs Interject was handed, in delivery order — empty when the
+// worker delivered nothing.
+func (f *fakeEngine) interjections() []domain.UserInput {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.UserInput(nil), f.interjected...)
 }
 
 func (f *fakeEngine) Snapshot() (domain.Session, error) {

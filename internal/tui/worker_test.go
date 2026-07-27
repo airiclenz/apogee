@@ -24,7 +24,7 @@ func TestDriveExchangeRunsToExchangeBoundary(t *testing.T) {
 		),
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil, nil)
 
 	done, ok := msg.(exchangeDoneMsg)
 	if !ok {
@@ -70,7 +70,7 @@ func TestDriveExchangeNotifiesPerTurn(t *testing.T) {
 		}
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, notify)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil, notify)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -103,7 +103,7 @@ func TestDriveResumeStepsWithoutSubmit(t *testing.T) {
 		}
 	}
 
-	msg := driveResume(context.Background(), eng, notify)
+	msg := driveResume(context.Background(), eng, nil, notify)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -131,7 +131,7 @@ func TestStartResumeCancelYieldsCancelledMsg(t *testing.T) {
 		},
 	}
 
-	cmd, cancel := startResume(context.Background(), eng, nil)
+	cmd, cancel := startResume(context.Background(), eng, nil, nil)
 
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()
@@ -164,7 +164,7 @@ func TestDriveExchangeSubmitError(t *testing.T) {
 		},
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil, nil)
 
 	e, ok := msg.(errMsg)
 	if !ok {
@@ -188,7 +188,7 @@ func TestDriveExchangeStepError(t *testing.T) {
 		},
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil, nil)
 
 	e, ok := msg.(errMsg)
 	if !ok {
@@ -213,7 +213,7 @@ func TestStartExchangeCancelYieldsCancelledMsg(t *testing.T) {
 		},
 	}
 
-	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil)
+	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil, nil)
 
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()

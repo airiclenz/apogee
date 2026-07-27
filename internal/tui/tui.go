@@ -65,9 +65,9 @@ type SessionHost interface {
 // *agent.Agent (= *apogee.Agent), but the TUI depends only on this interface so it
 // never imports the root module path (the ADR-0010 invariant) and stays unit-testable
 // with a fake engine. The worker goroutine is the only caller of the Exchange-driving
-// methods (Submit/Step); ClearContext/Compact are driven from the Update goroutine but
-// only at idle, when no worker runs — so the single-driver contract holds (phase-2 detail
-// plan §3 C1).
+// methods (Submit/Step, and Interject at the boundary between them); ClearContext/Compact
+// are driven from the Update goroutine but only at idle, when no worker runs — so the
+// single-driver contract holds (phase-2 detail plan §3 C1).
 type Engine interface {
 	// Submit enqueues user input to begin or continue an Exchange.
 	Submit(domain.UserInput) error
@@ -75,6 +75,15 @@ type Engine interface {
 	Step(context.Context) (domain.StepResult, error)
 	// Snapshot captures the serializable conversation state at a boundary.
 	Snapshot() (domain.Session, error)
+	// Interject commits a user message into the OPEN Exchange, so a remark the human typed
+	// while the model was working reaches it mid-task instead of waiting for the Exchange to
+	// end (ADR 0025). Called ONLY by the worker goroutine, between Steps of the Exchange it
+	// drives — the same class as Snapshot above: the driving goroutine owns the conversation
+	// at that boundary, so the boundary is the synchronization and no mutex is involved.
+	// It refuses with domain.ErrNoOpenExchange when no Exchange is open, and with an
+	// empty-interjection error when the input carries no text, references, or skills; on
+	// either refusal the conversation is untouched and the worker holds the remaining rows.
+	Interject(domain.UserInput) error
 	// ClearContext drops the model's conversation history (the /clear command); the
 	// host's visible transcript is unaffected. Called only at idle (no worker running).
 	ClearContext() error
