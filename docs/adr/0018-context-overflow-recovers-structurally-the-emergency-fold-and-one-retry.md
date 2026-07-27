@@ -170,3 +170,16 @@ quiet fold confusing).
   dropping on the next `UsageEvent`. The behaviour is pinned by hermetic `internal/agent` tests
   (overflow→success, overflow→overflow, opted-out, tool-continuation, cancel-during-fold); a live
   proof against a real ~32k-window profile is the implementing plan's closing gate.
+
+## Note (2026-07-27) — the shipped template is no longer behaviour-neutral; nothing here changes
+
+Decision §1 closes with "The shipped config template stays behaviour-neutral — nothing here is a
+new default to enable." That remains true of **this** decision: overflow recovery is structural, it
+is enabled by nothing in the config file, and `auto-compact: false` is still its only opt-out.
+
+What the sentence appealed to — that the starter `config.yaml` is entirely commented out and so
+changes nothing — ended on 2026-07-27, when
+[ADR 0023](0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) shipped an
+**active** `system-prompt-text:` key in that template (its §8), deliberately and for fresh installs
+only. The Decision text above is left exactly as written; this note is the pointer, so a reader
+does not take the aside for a still-standing invariant of the template as a whole.

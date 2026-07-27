@@ -110,10 +110,12 @@ path, and an `@path` in a message hands that file to the model.
 
 Settings resolve by precedence, highest first: a command-line flag overrides an
 `APOGEE_*` environment variable, which overrides `~/.apogee/config.yaml`, which
-overrides the built-in default. A fully-commented starter `config.yaml` is written
-to `~/.apogee` on first run (your edits are never overwritten). Some settings are
-**file-only** (no flag or env) — the model profile, MCP servers, web-search
-endpoint, and the small-model mechanisms.
+overrides the built-in default. A documented starter `config.yaml` is written to
+`~/.apogee` on first run (your edits are never overwritten): every setting is
+there as a commented example, with one exception — `system-prompt-text:`, the
+default system prompt, ships active. Some settings are **file-only** (no flag or
+env) — the system prompt, the model profile, MCP servers, web-search endpoint,
+and the small-model mechanisms.
 
 Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
 until its A/B bench run proves it a win, so enabling one is a deliberate config
@@ -151,6 +153,44 @@ server at startup — for a pinned `model:` too. Set `context-window:` (a file-o
 key, in tokens) only when your server does not advertise a window, or to start a
 pinned model offline; with no window known, the Budget and automatic compaction stay
 inactive and apogee says so once at startup.
+
+### The system prompt
+
+The system prompt is the standing instruction apogee sends ahead of your first
+message, as the first system message of every request. A fresh install starts with
+a short default one; **delete it or comment it out to send no system prompt at
+all**. An existing `~/.apogee/config.yaml` — which an upgrade never touches —
+carries no such key, so nothing changes for a setup you already run.
+
+```yaml
+# ~/.apogee/config.yaml
+system-prompt-text: |
+  You are apogee, a coding agent working in the workspace at {{workspace}}.
+  Today's date is {{datetime}}. You are operating in {{mode}} mode.
+
+# ...or keep it in a file of its own instead (never both at once):
+# system-prompt-file: ~/prompts/apogee.md
+
+# ...and optionally override it for one model:
+# system-prompt-models:
+#   qwen2.5-coder:
+#     system-prompt-text: "Be terse. Use tools; do not narrate."
+```
+
+Three placeholders are substituted fresh on every request: `{{workspace}}` (the
+workspace path), `{{datetime}}` (today's **date** — not a timestamp, which would
+change the prompt every turn and throw away your server's prefix cache), and
+`{{mode}}` (the autonomy mode, so a Shift+Tab shows up from the next request on).
+The spelling is strict and the set is closed — anything else in double braces,
+`{{ workspace }}` included, is a startup error listing the three.
+
+A `system-prompt-models:` entry keyed by the model name apogee resolves at startup
+**replaces** the global prompt for that model, whole; an entry naming a model you
+are not running is simply inert — never selected, its file never read — so one
+config can carry a prompt per model across every machine it travels to. Sub-agents
+inherit your prompt; apogee's own internal calls (the conversation summariser,
+`apogee probe`'s battery) keep their dedicated prompts and never see it; and the
+prompt never enters your conversation history or a saved session.
 
 ### Showing a finished document
 

@@ -509,7 +509,20 @@ request unchanged, zero bytes added.
 
 ---
 
-## 5. Documentation close-out — ADR 0023, CHANGELOG, README, CONTEXT, TODO
+## 5. Documentation close-out — ADR 0023, CHANGELOG, README, CONTEXT, TODO — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): three documentation-shape deviations, all doc-only. (a) The item lists five
+files; a sixth was touched — `docs/adr/0018-…` gained a dated `## Note (2026-07-27)` (no Decision
+text rewritten) because its §1 aside "the shipped config template stays behaviour-neutral" leans on
+the template-wide invariant item 4 ended. ADR 0023's Consequences carries the reciprocal pointer.
+(b) README: the new prose landed as a `### The system prompt` subsection placed beside the other
+Configuration subsections (before `### Showing a finished document`) rather than inline in the
+section's opening prose — an unheaded block there would have pulled the mechanisms / compaction /
+context-window paragraphs that follow under it. The same edit amends the now-stale
+"A fully-commented starter `config.yaml` is written" sentence (L113) and adds the system prompt to
+the file-only enumeration. (c) TODO's closed entry carries **two** residual notes, not one: the
+host-override knob as specified, plus the `AppendToSystem` marker-suppression interaction, because
+ADR 0023's Consequences records it as "recorded in TODO.md" per the deferred finding.
 
 **What.** The cross-cutting docs this feature owes, under one owning item:
 

@@ -87,6 +87,40 @@ point is a **minor** bump, not a breaking change.
   function of a frame counter, which is what the value-copied Model of
   [ADR 0011](docs/adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md) requires.
 
+- **apogee now sends a system prompt, and it is yours to write.** Until now a conversation started at
+  your first message: apogee had no standing instructions at all, so anything you wanted it to always
+  know had to be retyped every session. Three new **file-only** keys in `~/.apogee/config.yaml` fix
+  that. `system-prompt-text:` holds the prompt inline; `system-prompt-file:` names a file holding it
+  instead (a leading `~` expands, and a relative path resolves against your apogee home, so a prompt
+  file travels with the rest of your config); and `system-prompt-models:` keys per-model prompts by
+  the model name apogee resolves at startup. A matching per-model entry **replaces** the global
+  prompt whole — it does not merge — and an entry naming a model you are not running is inert: never
+  selected, its file never read, so one config carries a prompt per model across every machine.
+  Setting both the text and the file at one level is a startup error naming both keys.
+
+  Three placeholders are substituted **fresh on every request**: `{{workspace}}` (the workspace path),
+  `{{datetime}}` (today's **date** — deliberately not a timestamp, which would change the prompt every
+  turn and throw away your server's prefix cache), and `{{mode}}` (the autonomy mode, so a Shift+Tab
+  is reflected from the next request onward). The spelling is strict and the set is closed: anything
+  else between double braces — including `{{ workspace }}`, with spaces — is a startup error listing
+  the three, rather than raw braces shipped to the model.
+
+  **A fresh install now starts with a default prompt** — a five-line persona and context frame, active
+  (uncommented) in the starter `config.yaml`, the one setting in that file that is not a commented
+  example. Edit it to make it your own, or delete it / comment it out to send no system prompt at all.
+  **An existing `~/.apogee/config.yaml` is untouched by an upgrade** and has no such key, so it keeps
+  today's promptless behaviour byte for byte; there is no compiled-in fallback. The prompt is
+  **request-scoped**: it is the first system message on the wire — mechanism directives and the
+  profile's tool-menu block fold in after it, in one system message — and it never enters your
+  conversation history or a saved session. Sub-agents inherit it; the compaction summariser and the
+  `apogee probe` battery keep their own dedicated prompts and never see it.
+
+  For embedders this is **additive**: `apogee.Config` gains one field, `SystemPrompt`, carrying the
+  **template** (not a rendered string — the mode and the date are live), so this is a **minor** bump
+  and an embedder that sets nothing is byte-identical to before. An unknown placeholder fails
+  `New`/`Resume` loudly, the way a bad model profile does. See
+  [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md).
+
 ### Changed
 
 - **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**

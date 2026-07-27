@@ -216,30 +216,52 @@ spellings stay out of scope.
 
 ---
 
-## General system-prompt / template story
+## General system-prompt / template story — CLOSED (the configurable system prompt shipped)
 
-**Status:** parked 2026-07-02 (prompt-seam grill — `docs/plans/prompt-seam-wiring-plan.md`,
-scope guard). Post-v1, **additive** (a new `Config` field + a template renderer; the
-byte-identical native anchor is preserved).
+**Status:** CLOSED 2026-07-26 (`docs/plans/2026-07-26 - 02 - configurable-system-prompt-plan.md`,
+items 1–5;
+[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)).
+Held out of the prompt-seam plan 2026-07-02 by its grilled scope guard, and reopened by owner
+request 2026-07-26. **Additive**: `apogee.Config` gains one field, `SystemPrompt` — a minor bump,
+no exported name changes.
 
-**The idea:** apogee has **no built-in system prompt** — the conversation starts empty. The
-prompt-seam plan ships only the **narrow** profile-driven block: the text tool menu + format-
-emission instructions rendered for a non-native tool-call format. The apogee-code oracle
-assembles a much larger system-prompt template *around* that block — `{{tools_block}}` plus
-`{{agent_mode_directive}}` / `{{datetime}}` / `{{workspace}}` / a persona preamble
-(`~/Repos/Airic/apogee-code/src/context/context-builder.ts:38-45`). Porting that general
-template (a system-prompt `Config` field / template engine) is the separate, larger
-feature-parity item, **explicitly out of scope** of the prompt-seam plan per its grilled scope
-guard.
+**What shipped:** three **file-only** keys — `system-prompt-text:` (inline), `system-prompt-file:`
+(a path; `~` expands, a relative path resolves against the apogee home), and
+`system-prompt-models:` (per-model entries keyed on the **resolved** model name, reusing the same
+two key spellings). A matching entry **replaces** the global prompt whole; a non-matching one is
+inert, its file never read (the `unconfined-hosts` posture). The template language is a new
+stdlib-only `internal/prompt` package with exactly three strictly-spelled placeholders —
+`{{workspace}}`, `{{datetime}}` (date-only, so the prefix KV cache survives a turn), `{{mode}}` —
+an unknown one being a startup error listing the three. `Config.SystemPrompt` carries the
+**template**, not a rendered string, and the loop renders it fresh per request at `buildRequest`
+position 0, so mechanism directives and the profile's tool block fold in after it in **one**
+system message, and nothing enters history or a Session record. Sub-agents inherit it; the
+Compaction summariser and the probe battery keep their own dedicated prompts. The shipped starter
+`config.yaml` now carries **one active key** — the default `system-prompt-text:` — so fresh
+installs get a prompt while an existing config (never overwritten) keeps promptless behaviour byte
+for byte.
 
-**Extension point noted for when it lands:** a **host-override knob** for the rendered
-instruction block — D1's *rejected hybrid* in the prompt-seam plan (engine-owned won; an
-override is additive later if a real embedder needs to supply or replace the block). Design it
-*together with* the general template so the two compose rather than fight.
+**Native byte-identical anchor (held, and still holds):** with no prompt configured and a
+zero/native profile the wire request adds **zero bytes** — `TestPromptSeam_NativeProfileByteIdentical`
+passed untouched through every item and stays the anchor for anything built on this seam.
 
-**Native byte-identical anchor (must hold when built):** a zero/native profile must still add
-**zero bytes** to the wire request — the template applies only when a profile (or a future
-prompt field) asks for it.
+**Residual 1 — deliberately NOT built:** the **host-override knob** for the rendered instruction
+block (D1's *rejected hybrid* in the prompt-seam plan; engine-owned won). It stays additive-later,
+and the obligation this entry attached to it is discharged: because the prompt, the directives and
+the tool block merge into **one** system message, a host-supplied block would replace the rendered
+one *inside that same message* without reshaping anything ADR 0023 decided. The two compose; they
+do not fight.
+
+**Residual 2 — accepted interaction, not a defect:** `Request.AppendToSystem(marker, text)` is
+idempotent by `strings.Contains(first system message, marker)`, and the markers are
+natural-language phrases (`decompose`'s `"Focus on one action"`, `cot`'s `"have not read any files
+yet"`, `library`'s `"[Apogee context notes"`). The first system message is now the **user's**
+prompt, so a prompt that happens to contain such a phrase reads as "already injected" and silently
+**suppresses** that Mechanism's directive. It is a suppression, not a corruption — the request stays
+well-formed and the user's own sentence on the subject is what the model reads — and it is bounded
+to the catalogued nudge Mechanisms (default-off, per-model). Fixing it means a non-textual
+idempotency channel on the hook API, which is a change to every Mechanism's contract; see ADR 0023's
+Consequences. Revisit if a real prompt trips it.
 
 ---
 
