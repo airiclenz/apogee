@@ -187,7 +187,7 @@ render-provider interface on Config: it would be a public seam with exactly one 
 
 ---
 
-## 1. `internal/prompt` — the three-placeholder template language
+## 1. `internal/prompt` — the three-placeholder template language — ✅ DONE (2026-07-27)
 
 **What.** New package `internal/prompt` (files `prompt.go`, `prompt_test.go`). Stdlib-only
 imports. The whole language: three placeholders, strict validation, per-request substitution.
