@@ -17,6 +17,7 @@
 #   flag: --endpoint   env: APOGEE_ENDPOINT
 # endpoint: http://192.168.64.1:1111
 
+# =============================================================================
 # The bearer token that endpoint wants, if it wants one — llama.cpp started with --api-key,
 # LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is sent as
 # `Authorization: Bearer <key>` on EVERY request to the server above: your conversation, the
