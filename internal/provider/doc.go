@@ -1,9 +1,10 @@
 // Package provider talks to the Upstream: it owns the Responder seam (the interface
 // the engine calls instead of net/http), the provider-local wire types, and the
 // OpenAI-compatible Client that implements the seam — non-streaming Respond plus a
-// streaming Stream, with bounded retries and timeouts, /v1/models discovery, and a
-// local server-process manager. It is the seam behind which streaming, retries, and
-// timeouts live (P1.1).
+// streaming Stream, with bounded retries and timeouts and /v1/models discovery. It is
+// the seam behind which streaming, retries, and timeouts live (P1.1). Watching the
+// Upstream over time is not this package's job: internal/heartbeat observes
+// reachability and the served model on a cadence (ADR 0024).
 //
 // ADR 0010 homes the Responder seam here (moved out of internal/agent) beside the
 // HTTP client that implements it; the wire types (Request / RawResponse / Message)

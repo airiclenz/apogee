@@ -327,7 +327,13 @@ rebind := func(model string, window int) (tui.RebindResult, error) {
 
 ---
 
-## 6. Remove the dead `ServerManager`
+## 6. Remove the dead `ServerManager` — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): one addition beyond the item's literal text. `internal/provider/doc.go`'s
+package doc advertised "a local server-process manager" as part of what the package owns — false
+the moment `server.go` goes. The clause is dropped and replaced by a pointer to
+`internal/heartbeat` as the thing that watches the Upstream over time. (`docs/design/technical-design.md`
+and `TODO.md` also name `ServerManager`; both are item 7's enumerated territory and are left alone.)
 
 **What.** Delete `internal/provider/server.go` + `server_test.go` (zero references outside its own file+test, verified 2026-07-27). Rationale recorded under "Decisions taken". The technical-design "Provider / Upstream" row's `ServerManager` mention is amended in item 7.
 
