@@ -122,7 +122,7 @@ rotation apogee shipped before and still supports. Only `classic` is one column 
 two are two, which shifts the activity phrase one column right of the sketch's older single-cell
 `⣻`. The phrase and the elapsed clock beside it are the same for every style.
 
-**Which colour.** `ui.spinner-color` runs a soft eight-second loop through three palette tones
+**Which colour.** `ui.spinner-color` runs a soft ten-second loop through three palette tones
 (periwinkle → turquoise → blue → back) over whichever style is selected; with it off, the glyph
 keeps the terminal's own text colour on the status bar's black field. The two keys are
 independent — every style renders both coloured and plain — so picking `classic` does not turn

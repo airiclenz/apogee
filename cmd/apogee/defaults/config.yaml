@@ -247,8 +247,8 @@ system-prompt-text: |
 #              apogee has always shown, kept as a permanent choice rather than a fallback.
 #              One column wide.
 #
-# The colour loop is a soft eight-second lap through three colours already on this screen —
-# periwinkle → turquoise → blue → back — blended so no step is visible. The lap takes eight
+# The colour loop is a soft ten-second lap through three colours already on this screen —
+# periwinkle → turquoise → blue → back — blended so no step is visible. The lap takes ten
 # seconds under every style. With `spinner-color: false` the glyph keeps your terminal's own text
 # colour: `classic` with the loop off is exactly the status line apogee rendered before these
 # styles existed, and `classic` with it on is those same glyphs in the new colours.
@@ -259,7 +259,7 @@ system-prompt-text: |
 #
 # ui:
 #   spinner: snake         # snake | glitter | classic
-#   spinner-color: true    # the 8s colour loop; false = your terminal's own text colour
+#   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
 
 # =============================================================================
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).

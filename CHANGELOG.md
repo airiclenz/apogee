@@ -72,9 +72,9 @@ point is a **minor** bump, not a breaking change.
   braille cells twenty times a second while the number of lit dots breathes in and out over six
   seconds, swelling to a solid `⣿⣿` and falling away again; `classic` is the single rotating cell
   `⣾⣽⣻⢿⡿⣟⣯⣷` apogee has always shown, kept as a **permanent** choice rather than a fallback. The
-  colour loop is a soft eight-second lap through three colours already in the palette (periwinkle →
+  colour loop is a soft ten-second lap through three colours already in the palette (periwinkle →
   turquoise → blue), blended in Oklch so there is no visible step or seam at the wrap, and it takes
-  eight seconds under every style.
+  ten seconds under every style.
 
   Because the two keys are independent, all six combinations work: `spinner: classic` with
   `spinner-color: false` is byte-for-byte the status line apogee rendered before this change, and

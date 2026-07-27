@@ -253,7 +253,7 @@ var spinnerSpecs = map[SpinnerStyle]spinnerSpec{
 // them renders. [spinnerAnim.view] is the single place the two compose — nothing below branches on
 // the style to decide a colour, and no style carries one of its own.
 
-// spinnerColorPeriod is one full lap of the colour loop in wall-clock time. It is the same eight
+// spinnerColorPeriod is one full lap of the colour loop in wall-clock time. It is the same ten
 // seconds under every style: the period is the constant and the frame count is derived from the
 // style's own interval (framesPerColorLoop), so a faster style takes more, smaller colour steps
 // rather than a shorter lap.
@@ -338,8 +338,8 @@ func (s spinnerAnim) interval() time.Duration { return s.spec().interval }
 // glyph is this frame's braille cell(s), pure in [spinnerAnim.frame].
 func (s spinnerAnim) glyph() string { return s.spec().glyph(s.frame) }
 
-// framesPerColorLoop is how many of THIS style's frames one colour lap spans: 80 at classic's
-// 10 fps, 96 at snake's 12, 160 at glitter's 20. Deriving the count from the style's interval is
+// framesPerColorLoop is how many of THIS style's frames one colour lap spans: 100 at classic's
+// 10 fps, 120 at snake's 12, 200 at glitter's 20. Deriving the count from the style's interval is
 // what keeps the loop's wall-clock period at spinnerColorPeriod under every style, so selecting a
 // faster animation does not speed the colour up with it.
 func (s spinnerAnim) framesPerColorLoop() int { return int(spinnerColorPeriod / s.interval()) }

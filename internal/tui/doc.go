@@ -127,7 +127,7 @@
 // (six dots walking the outer ring of the 4×4 dot grid two braille cells form side by side, a lap
 // a second), glitter (the braille block sorted by density, re-rolled at 20 fps under a six-second
 // breath), and classic, the eight-cell rotation apogee shipped before, which stays a first-class
-// choice rather than a deprecated fallback — while the eight-second Oklch colour loop is a FLAG
+// choice rather than a deprecated fallback — while the ten-second Oklch colour loop is a FLAG
 // beside the style, never a property of one, so all six style × colour combinations render and
 // [spinnerAnim.view] is the single place the two compose. cmd/apogee's file-only `ui:` block
 // selects both ([Options.Spinner], [Options.SpinnerColor]); theme.go keeps only the field the

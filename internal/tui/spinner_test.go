@@ -411,12 +411,13 @@ func oklabDistance(t *testing.T, first, second color.Color) float64 {
 const (
 	// spinnerStopTolerance is how close the loop has to pass to each palette stop, in Oklab. It is
 	// not zero because a stop lands exactly on a frame only when the lap's frame count divides by
-	// the number of stops (96 does; 80 and 160 do not), and because every frame is quantised to a
-	// hex triple on its way out. The measured worst case is 0.003.
+	// the number of stops (120, 200 and 100 all do at the current period, but a retimed period need
+	// not), and because every frame is quantised to a hex triple on its way out. The measured worst
+	// case is 0.0002.
 	spinnerStopTolerance = 0.01
 
 	// spinnerSoftStep is the largest Oklab step allowed between consecutive frames — the "soft" in
-	// the requirement. The measured worst case is 0.015, on classic's 80-frame lap (the coarsest of
+	// the requirement. The measured worst case is 0.023, on classic's 100-frame lap (the coarsest of
 	// the three rates); the stops themselves sit ~0.23 apart, so a stop list with a discontinuity or
 	// a seam at the wrap overshoots this by an order of magnitude.
 	spinnerSoftStep = 0.03
@@ -567,24 +568,24 @@ func TestSpinnerColorIsOrthogonalToStyle(t *testing.T) {
 // three different frame rates share one wall-clock period. They are written out rather than derived
 // so a change to a style's interval that reshapes the loop fails here instead of quietly retiming it.
 var spinnerLoopFrames = map[SpinnerStyle]int{
-	SpinnerSnake:   96,  // 12 fps
-	SpinnerGlitter: 160, // 20 fps
-	SpinnerClassic: 80,  // 10 fps
+	SpinnerSnake:   120, // 12 fps
+	SpinnerGlitter: 200, // 20 fps
+	SpinnerClassic: 100, // 10 fps
 }
 
-// TestSpinnerColorPeriodIsEightSeconds proves the loop is timed in seconds rather than in frames:
-// each style spends a different number of frames on a lap, and every lap still takes the same eight
+// TestSpinnerColorPeriodIsTenSeconds proves the loop is timed in seconds rather than in frames:
+// each style spends a different number of frames on a lap, and every lap still takes the same ten
 // seconds, so selecting a faster animation does not speed the colour up with it.
-func TestSpinnerColorPeriodIsEightSeconds(t *testing.T) {
+func TestSpinnerColorPeriodIsTenSeconds(t *testing.T) {
 	t.Parallel()
 
-	if spinnerColorPeriod != 8*time.Second {
-		t.Fatalf("spinnerColorPeriod = %v, want the eight seconds the design calls for", spinnerColorPeriod)
+	if spinnerColorPeriod != 10*time.Second {
+		t.Fatalf("spinnerColorPeriod = %v, want the ten seconds the design calls for", spinnerColorPeriod)
 	}
 
 	// The slack absorbs integer-nanosecond truncation in the intervals themselves and nothing more:
-	// snake's time.Second/12 is 83.333333ms, a third of a nanosecond short, so its 96 frames land
-	// 32ns under the period. A loop that actually drifted with the frame rate would miss by seconds.
+	// snake's time.Second/12 is 83.333333ms, a third of a nanosecond short, so its 120 frames land
+	// 40ns under the period. A loop that actually drifted with the frame rate would miss by seconds.
 	const slack = time.Microsecond
 
 	for style, want := range spinnerLoopFrames {
