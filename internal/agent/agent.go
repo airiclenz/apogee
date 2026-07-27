@@ -98,9 +98,10 @@ type Agent struct {
 // Auto-mode/Confinement gate (ADR 0004) and the Mechanism ordering graph (ADR 0003,
 // a constraint cycle is a startup error) — and returns an error rather than
 // silently degrading a misconfigured surface. The root facade forwards apogee.New
-// here, binding the real OpenAI-compatible provider client at cfg.Endpoint (P1.1).
+// here, binding the real OpenAI-compatible provider client at cfg.Endpoint (P1.1)
+// carrying cfg.APIKey — unconditionally, since an empty key sends no auth header.
 func New(cfg domain.Config) (*Agent, error) {
-	return newAgent(cfg, provider.NewClient(cfg.Endpoint, cfg.Model))
+	return newAgent(cfg, provider.NewClient(cfg.Endpoint, cfg.Model, provider.WithAPIKey(cfg.APIKey)))
 }
 
 // Resume reconstructs an Agent from a prior Session snapshot. Config supplies the
@@ -108,7 +109,7 @@ func New(cfg domain.Config) (*Agent, error) {
 // serializable conversation state comes from snap. External connections (MCP,
 // network) reconnect fresh; no server-side state is restored (ADR 0008).
 func Resume(cfg domain.Config, snap domain.Session) (*Agent, error) {
-	return resumeAgent(cfg, snap, provider.NewClient(cfg.Endpoint, cfg.Model))
+	return resumeAgent(cfg, snap, provider.NewClient(cfg.Endpoint, cfg.Model, provider.WithAPIKey(cfg.APIKey)))
 }
 
 // Close releases the Agent's resources. Because tools are stateless across Turns

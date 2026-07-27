@@ -21,6 +21,14 @@ type Config struct {
 	// something is bound, so an empty Model delays requests rather than allowing anonymous ones.
 	Model string
 
+	// APIKey is the bearer token sent as `Authorization: Bearer <key>` on every upstream
+	// request. Empty — the local-server default — sends no auth header, so a keyless server
+	// behaves exactly as it did before this field existed. The provider client redacts it from
+	// server-echoed errors; it must never be logged, persisted, or shown by any consumer. One
+	// key per session, because a session has exactly one Upstream (ADR 0024) — a different
+	// server is a different invocation.
+	APIKey string
+
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006: Mechanisms off, structure on (the hard-constraint floor)

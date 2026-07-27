@@ -66,7 +66,7 @@ NOTES (2026-07-27): the root Long text gained one sentence beyond the bare enume
 
 ---
 
-## 2. Engine — `Config.APIKey`, passed to the session's provider client
+## 2. Engine — `Config.APIKey`, passed to the session's provider client — ✅ DONE (2026-07-27)
 
 **What.** `internal/domain/config.go`: `Config` gains `APIKey string` directly under `Endpoint`/`Model` (`:16-22`), doc comment: *the bearer token sent as `Authorization` on every upstream request; empty — the local-server default — sends no auth header. The provider client redacts it from server-echoed errors; it must never be logged, persisted, or shown by any consumer.* The `apogee.Config` alias (`apogee.go:74`) publishes it for free. `internal/agent/agent.go`: `New` (`:103`) and `Resume` (`:111`) become `provider.NewClient(cfg.Endpoint, cfg.Model, provider.WithAPIKey(cfg.APIKey))` — unconditional (decision 3). Sub-agents inherit via `a.upstream` (`subagent.go:125`), untouched. `cmd/apogee/wire.go`: the `apogee.Config` literal (`:147-184`) gains `APIKey: opts.apiKey` beside `Endpoint`/`Model`.
 
