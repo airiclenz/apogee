@@ -70,7 +70,9 @@ GOOS=windows go build ./... && GOOS=darwin go build ./...
 
 ---
 
-## 2. The autocomplete speaks the quoted form — detection, labels, splice, exact-match
+## 2. The autocomplete speaks the quoted form — detection, labels, splice, exact-match — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): the open-quote partial is `scanRefToken`'s path verbatim — interior spaces kept, but TRAILING spaces/tabs right-trimmed (the scanner's unterminated-quote rule), not the item's literal "everything after it (spaces included)". Decision 4 (one grammar, one home) wins over duplicating a trim-free variant in the detector, and a trailing space in the partial would only ever kill the overlay: `filecache.suggest` is a substring match, so `@"my plan ` would match nothing while `@"my plan` lists `my plan.md`. Covered by the `open quote right-trimmed` row in `TestTrailingFileToken`.
 
 **What.** `internal/tui/autocomplete.go`, all four seams, on top of item 1's scanner:
 - `trailingFileToken` (`:130-137`): recognise a trailing *quoted* token — a word-boundary `@` + quote whose token (per `scanRefToken`) reaches the very end of value. Open quote ⇒ the partial is everything after it (spaces included), and the overlay stays alive across them; closed quote flush at end-of-value ⇒ the partial is the inner path (so the exact-match/Enter-submits flow works for a fully-typed quoted token, mirroring the bare case). Value ending in whitespace after a closed quote ⇒ no token, as today. Bare tokens: byte-for-byte today's behaviour. Keep it a pure function; extend its doc comment with the quoted shapes.

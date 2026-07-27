@@ -601,6 +601,125 @@ func TestComputeAutocompleteFiles(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// Quoted @file refs — the overlay's half of the grammar
+// ----------------------------------------------------------------------------
+
+// The detector reads both shapes of the ref token: bare rows must behave exactly as they always
+// did, quoted rows keep the overlay alive across the spaces the bare rule tokenizes on.
+func TestTrailingFileToken(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		start   int
+		partial string
+		ok      bool
+	}{
+		{"no token", "plain text", 0, "", false},
+		{"at start", "@main", 0, "main", true},
+		{"after text", "look at @main", 8, "main", true},
+		{"bare @ alone", "look at @", 8, "", true},
+		{"trailing space closes it", "look at @main.go ", 0, "", false},
+		{"email is not a token", "mail foo@bar.com", 0, "", false},
+		{"open quote spans the space", `see @"my pl`, 4, "my pl", true},
+		{"open single quote", "see @'my pl", 4, "my pl", true},
+		{"open quote right-trimmed", `@"my pl `, 0, "my pl", true},
+		{"closing quote flush at the end", `@"a b.md"`, 0, "a b.md", true},
+		{"space after the closing quote closes it", `@"a b.md" `, 0, "", false},
+		{"prose after the closing quote", `@"a b.md" and more`, 0, "", false},
+		{"bare token after a closed quote", `@"a b.md" @ma`, 10, "ma", true},
+		{"quoted email is not a token", `mail foo@"bar baz`, 0, "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			start, partial, ok := trailingFileToken(c.value)
+			if ok != c.ok || partial != c.partial || (ok && start != c.start) {
+				t.Errorf("trailingFileToken(%q) = (%d, %q, %v), want (%d, %q, %v)",
+					c.value, start, partial, ok, c.start, c.partial, c.ok)
+			}
+		})
+	}
+}
+
+// Typing an open quote keeps the dropdown listing across spaces, the row shows the quoted token
+// it will insert, and accepting splices exactly that (plus the trailing space that closes it).
+func TestComputeAutocompleteQuotedFiles(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
+	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
+	opts := testOpts
+	opts.Workspace = dir
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+
+	m.input.SetValue(`look at @"my pl`)
+	ac := m.computeAutocomplete()
+	if !ac.active || ac.kind != acFile {
+		t.Fatalf("overlay = {active:%v kind:%v}, want active file", ac.active, ac.kind)
+	}
+	if len(ac.items) != 1 || ac.items[0].value != "my plan.md" || ac.items[0].label != `@"my plan.md"` {
+		t.Fatalf("file suggestions = %+v, want one quoted my plan.md row", ac.items)
+	}
+	m.autocomplete = ac
+	m = step(t, m, keyTab())
+	if got, want := m.input.Value(), `look at @"my plan.md" `; got != want {
+		t.Errorf("accepted %q, want %q", got, want)
+	}
+	if m.autocomplete.active {
+		t.Error("overlay still open after accepting a completed ref")
+	}
+}
+
+// Quoting is decided by the PATH, not by how the user started typing: a bare partial completing
+// to a spaced path still splices the quoted form, because only that form resolves.
+func TestAcceptAutocompleteQuotesSpacedPath(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
+	opts := testOpts
+	opts.Workspace = dir
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+
+	m.input.SetValue("look at @my")
+	m.autocomplete = m.computeAutocomplete()
+	m = step(t, m, keyTab())
+	if got, want := m.input.Value(), `look at @"my plan.md" `; got != want {
+		t.Errorf("accepted %q, want %q", got, want)
+	}
+}
+
+// A fully typed quoted token counts as an exact match in either dialect, so ⏎ submits instead of
+// re-completing — and the ref reaching the engine is the clean, unquoted path.
+func TestAutocompleteQuotedFileEnterExactSubmits(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
+	opts := testOpts
+	opts.Workspace = dir
+	eng := &fakeEngine{stepFn: scriptedSteps()} // immediately ExchangeComplete when driven
+	m := newTestModelEng(t, eng, opts)
+
+	m.input.SetValue("look at @'my plan.md'")
+	m.autocomplete = m.computeAutocomplete()
+	if !m.autocompleteExactMatch() {
+		t.Errorf("single-quoted token not an exact match (items=%+v)", m.autocomplete.items)
+	}
+
+	m.input.SetValue(`look at @"my plan.md"`)
+	m.autocomplete = m.computeAutocomplete()
+	if !m.autocompleteExactMatch() {
+		t.Fatalf("double-quoted token not an exact match (items=%+v)", m.autocomplete.items)
+	}
+	m, cmd := stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("state = %v, want running (exact-match Enter submits, not re-completes)", m.state)
+	}
+	drainCmd(t, m, cmd)
+	if len(eng.submitted) != 1 {
+		t.Fatalf("Submit calls = %d, want 1", len(eng.submitted))
+	}
+	if want := []string{"my plan.md"}; !reflect.DeepEqual(eng.submitted[0].FileRefs, want) {
+		t.Errorf("submitted FileRefs = %v, want %v", eng.submitted[0].FileRefs, want)
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

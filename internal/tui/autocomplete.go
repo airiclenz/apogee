@@ -88,7 +88,7 @@ func (m Model) computeAutocomplete() autocompleteState {
 		return autocompleteState{active: true, kind: acCommand, items: items, tokenStart: 0}
 	}
 
-	// File: the final whitespace-delimited word is an "@" token being typed.
+	// File: the input ends in an "@" token being typed — bare, or quoted across its spaces.
 	if start, partial, ok := trailingFileToken(value); ok {
 		items := m.fileSuggestions(partial)
 		if len(items) == 0 {
@@ -123,17 +123,56 @@ func (m Model) recomputeAutocomplete() Model {
 	return m
 }
 
-// trailingFileToken reports the "@" token at the very end of value (the word being typed):
-// its start offset, the partial path after "@", and whether value ends in such a token. The
-// token must sit at a word boundary (start of value or after whitespace); a value ending in
-// whitespace has no trailing token (the ref is complete).
+// trailingFileToken reports the "@" token at the very end of value (the token being typed):
+// its start offset, the partial path after the "@" (and after any opening quote), and whether
+// value ends in such a token. The token must sit at a word boundary (start of value or after
+// whitespace); a value ending in whitespace has no trailing token (the ref is complete).
+//
+// It reads both shapes of the ref grammar (scanRefToken owns it, command.go):
+//
+//   - bare — the trailing whitespace-delimited word, "@internal/loop.go";
+//   - quoted — a word-boundary "@" followed by a quote whose token reaches the very end of
+//     value. An open quote keeps the overlay alive across the spaces the bare rule would
+//     tokenize on (@"my pl → partial "my pl"), and a closing quote flush at the end yields the
+//     inner path (@"my plan.md" → partial "my plan.md"), so a fully-typed quoted token can
+//     still match its suggestion exactly and let ⏎ submit.
+//
+// The quoted shape is tried first: its own closing quote and interior spaces are precisely what
+// the bare rule would mis-read. Bare tokens keep their previous behaviour byte for byte.
 func trailingFileToken(value string) (int, string, bool) {
+	for i := 0; i < len(value); i++ {
+		if value[i] != '@' {
+			continue
+		}
+		if i > 0 && !isInputSpace(value[i-1]) { // not at a word boundary ⇒ not a ref (e.g. an email)
+			continue
+		}
+		if i+1 >= len(value) || (value[i+1] != '"' && value[i+1] != '\'') {
+			continue
+		}
+		partial, end := scanRefToken(value, i+1)
+		if end == len(value) {
+			return i, partial, true
+		}
+		i = end - 1 // a closed quote mid-line: resume scanning past this token
+	}
 	start := strings.LastIndexAny(value, " \t\n") + 1
 	word := value[start:]
 	if !strings.HasPrefix(word, "@") {
 		return 0, "", false
 	}
 	return start, word[1:], true
+}
+
+// fileRefToken renders path as the "@" reference the overlay shows and splices for it: the
+// canonical double-quoted form when the path contains a space or a tab (a bare token would
+// split there and never resolve), the bare form otherwise. Labels and accept share this one
+// function, so a row always shows exactly what accepting it will insert.
+func fileRefToken(path string) string {
+	if strings.ContainsAny(path, " \t") {
+		return `@"` + path + `"`
+	}
+	return "@" + path
 }
 
 // commandMenuItem is one entry the "/" dropdown offers: the verb and a one-line summary.
@@ -229,14 +268,16 @@ func (m Model) skillSuggestions(partial string) []acItem {
 	return items
 }
 
-// fileSuggestions lists workspace files matching the typed partial as "@path" rows, served
-// through the Model's file cache so a typing burst reuses one workspace walk (filecache.go).
-// newModel always installs the cache, so m.files is never nil here.
+// fileSuggestions lists workspace files matching the typed partial as "@path" rows — quoted
+// rows for paths with spaces (fileRefToken), so the dropdown teaches the syntax before the user
+// ever types a quote — served through the Model's file cache so a typing burst reuses one
+// workspace walk (filecache.go). newModel always installs the cache, so m.files is never nil
+// here. The item's value stays the raw path; only the label carries the sigil and quotes.
 func (m Model) fileSuggestions(partial string) []acItem {
 	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
-		items = append(items, acItem{value: p, label: "@" + p})
+		items = append(items, acItem{value: p, label: fileRefToken(p)})
 	}
 	return items
 }
@@ -280,7 +321,8 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 
 // autocompleteExactMatch reports whether the token under completion already equals the
 // highlighted suggestion verbatim (sigil included) — in which case Enter should submit rather
-// than re-complete.
+// than re-complete. A file token counts as typed out in any dialect the parser accepts: bare,
+// double-quoted or single-quoted (command.go), so ⏎ submits whichever the user typed.
 func (m Model) autocompleteExactMatch() bool {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 || ac.tokenStart > len(m.input.Value()) {
@@ -297,16 +339,22 @@ func (m Model) autocompleteExactMatch() bool {
 	if ac.kind == acCommand && selected == "skill" {
 		return false
 	}
-	sigil := "/"
+	typed := m.input.Value()[ac.tokenStart:]
 	if ac.kind == acFile {
-		sigil = "@"
+		return typed == "@"+selected ||
+			typed == `@"`+selected+`"` ||
+			typed == "@'"+selected+"'"
 	}
-	return m.input.Value()[ac.tokenStart:] == sigil+selected
+	return typed == "/"+selected
 }
 
 // acceptAutocomplete applies the highlighted suggestion. A skill is attached (a chip is popped
-// and its "/skill <partial>" text stripped — attachSkill); a command/file is spliced in as
-// sigil + value + a trailing space. After a splice it RECOMPUTES the overlay rather than
+// and its "/skill <partial>" text stripped — attachSkill); a command is spliced in as
+// "/" + value + a trailing space, and a file as its reference token (fileRefToken — quoted when
+// the path has spaces, whatever form the partial was typed in) plus that same trailing space.
+// The quoting is decided by the PATH, never by how the user started typing: a bare "@my"
+// partial completing to a spaced path still splices the quoted token, because only that one
+// resolves. After a splice it RECOMPUTES the overlay rather than
 // blindly closing it: that closes the overlay for a completed command/file (the trailing space
 // ends the token) but reopens it as the skill picker after "/skill " — the chain the oracle's
 // selectSkill mirrors. It never submits; the cursor lands at the end of the spliced text.
@@ -323,11 +371,11 @@ func (m Model) acceptAutocomplete() Model {
 	if start > len(value) {
 		start = len(value) // defensive: the value cannot have shrunk, but never slice out of range
 	}
-	sigil := "/"
+	token := "/" + ac.items[ac.selected].value
 	if ac.kind == acFile {
-		sigil = "@"
+		token = fileRefToken(ac.items[ac.selected].value)
 	}
-	m.input.SetValue(value[:start] + sigil + ac.items[ac.selected].value + " ")
+	m.input.SetValue(value[:start] + token + " ")
 	m.input.MoveToEnd()
 	m = m.recomputeAutocomplete() // chains "/skill " → picker (reloading the catalog); else closes
 	m.layout()
