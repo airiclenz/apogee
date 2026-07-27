@@ -853,6 +853,120 @@ func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// Selection scope across the state ladder (mouse.go inputEditable; ADR 0025)
+// ----------------------------------------------------------------------------
+//
+// "Select text at any point in time" reaches the two rectangles differently. The transcript is
+// selectable in EVERY state: the mouse cases in Update are the one input path that is not gated by
+// state, and (since the keep-if-unchanged rule) a repaint no longer takes a selection away, so
+// there is always something on screen a drag can copy. The prompt follows EDITABILITY — idle, the
+// borrowed ask answer box, and while a worker runs — because a selection there carries a caret with
+// it. At an approval decision and after an error the box is inert (a/d/s and Enter-dismiss own the
+// keyboard, and the cursor is hidden), so a click in it selects nothing and falls through to the
+// same region arbitration as a click on any other non-field cell. The three tests below pin exactly
+// that scope so it cannot narrow again by accident.
+
+// TestPromptDragSelectsWhileRunning is the prompt half of "at any point in time": text typed into
+// the box while the model works selects and copies there exactly as it does at idle — the drag runs
+// while a worker owns the exchange and the staged interjection is still being written.
+func TestPromptDragSelectsWhileRunning(t *testing.T) {
+	m := modelWithInput(t, "hello world")
+	m.state = stateRunning
+	const y = 24 - footerHeight - 1
+
+	m = step(t, m, leftClick(2+0, y)) // anchor at column 0
+	m = step(t, m, leftDrag(2+5, y))  // head at column 5 → "hello"
+	if !m.sel.active || m.sel.anchorOff != 0 || m.sel.headOff != 5 {
+		t.Fatalf("prompt selection while running = %+v, want an active span over offsets (0,5)", m.sel)
+	}
+	if got := selectionText(m.input.Value(), m.sel.anchorOff, m.sel.headOff); got != "hello" {
+		t.Fatalf("selected text = %q, want %q — the runes actually typed", got, "hello")
+	}
+
+	m, cmd := stepCmd(t, m, leftRelease(2+5, y))
+	if cmd == nil {
+		t.Fatal("releasing a prompt drag while running should return a copy Cmd, got nil")
+	}
+	if !strings.Contains(m.flash, "copied 5 chars") {
+		t.Fatalf("flash = %q, want it to mention 'copied 5 chars'", m.flash)
+	}
+	if m.state != stateRunning {
+		t.Fatalf("state = %v after a prompt drag, want it left at running", m.state)
+	}
+}
+
+// TestTranscriptDragCopiesInEveryState is the transcript half: a drag-release over the settled
+// conversation copies in all five states — including the running one, where the issue this pin
+// answers used to lose the selection to the next streamed token.
+func TestTranscriptDragCopiesInEveryState(t *testing.T) {
+	states := []struct {
+		name  string
+		state uiState
+	}{
+		{"idle", stateIdle},
+		{"running", stateRunning},
+		{"awaiting approval", stateAwaitingApproval},
+		{"awaiting ask", stateAwaitingAsk},
+		{"errored", stateErrored},
+	}
+	for _, s := range states {
+		t.Run(s.name, func(t *testing.T) {
+			m := modelWithTranscript(t, "hello world")
+			m.state = s.state
+			w := m.viewport.Width()
+
+			m = step(t, m, leftClick(0, 0)) // the settled user block, pinned to the top row
+			m = step(t, m, leftDrag(w, 0))
+			if !m.transcriptSel.active {
+				t.Fatal("a transcript drag armed no selection")
+			}
+			got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			if want := glyphUser + " hello world"; got != want {
+				t.Fatalf("selected text = %q, want %q", got, want)
+			}
+
+			m, cmd := stepCmd(t, m, leftRelease(w, 0))
+			if cmd == nil {
+				t.Fatal("release of a non-empty transcript selection should return a copy Cmd, got nil")
+			}
+			if !strings.Contains(m.flash, "copied") {
+				t.Fatalf("flash = %q, want a copy confirmation", m.flash)
+			}
+		})
+	}
+}
+
+// TestPromptClickRefusedAtApprovalAndErrored pins the scope's boundary: where the box is inert the
+// mouse leaves it alone — no caret move, no selection armed, nothing copied. The click is not
+// swallowed either; it goes on to the region arbitration exactly as a click on any other cell does,
+// which is what keeps the transcript copyable in those states (the test above).
+func TestPromptClickRefusedAtApprovalAndErrored(t *testing.T) {
+	for _, state := range []uiState{stateAwaitingApproval, stateErrored} {
+		m := modelWithInput(t, "hello world")
+		m.state = state
+		const y = 24 - footerHeight - 1
+		caret := m.input.Column() // SetValue leaves it after the text
+
+		m = step(t, m, leftClick(2+0, y))
+		if m.sel.active {
+			t.Fatalf("state %v: a click armed a prompt selection in an inert box: %+v", state, m.sel)
+		}
+		if got := m.input.Column(); got != caret {
+			t.Fatalf("state %v: a click moved the caret to column %d, want it left at %d", state, got, caret)
+		}
+
+		m = step(t, m, leftDrag(2+5, y))
+		m, cmd := stepCmd(t, m, leftRelease(2+5, y))
+		if cmd != nil {
+			t.Fatalf("state %v: a drag in an inert box copied something", state)
+		}
+		if m.flash != "" {
+			t.Fatalf("state %v: flash = %q, want empty — nothing was selected", state, m.flash)
+		}
+	}
+}
+
 // TestTranscriptSelectionOnStickyHeaderRow checks the pinned sticky-header row behaves as a plain
 // viewport row for selection: a drag over it copies its rendered text and the highlight reaches
 // the composed View (which layers the highlight over the sticky-header overlay).

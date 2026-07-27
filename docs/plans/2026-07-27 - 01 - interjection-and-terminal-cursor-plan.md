@@ -236,7 +236,18 @@ NOTES (2026-07-27): two small deviations. (a) The predicate's parameters are nam
 
 ---
 
-## 8. Selection at any point in time — scope pins across the state ladder
+## 8. Selection at any point in time — scope pins across the state ladder — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): one deviation, and it is an absence. The item's single piece of prose work — the
+`inputEditable` doc comment naming editability as the rule (idle, ask, running; approval/errored
+inert) — already landed with item 4, which adopted `inputEditable()` as the keyboard's routing class
+too and rewrote the comment for both readers at once (item 4's NOTES (e)). The comment as it stands
+says exactly what this item asks for, so rewriting it again would only churn it; this item therefore
+ships as its three test pins alone. No behavior code was needed either — every pin passed on the
+first run against items 4 and 7 as committed, which is the item's own success condition ("if any is,
+it is a bug in items 4/7"). The pins were placed in one new `mouse_test.go` section rather than
+scattered into the prompt and transcript sections above, so the scope decision reads as one rule
+with its boundary case beside it.
 
 **What.** After items 4 and 7 — behaviorally almost free (item 4 admits running to `inputEditable`, item 7 keeps transcript selections alive under repaints); this item pins the owner-decided scope (decision 9) so it cannot regress silently. `mouse.go`: the `inputEditable` doc comment (`:69-74`) is rewritten to name editability as the rule (idle, ask, running — the states where the human may edit; approval/errored stay inert), matching item 4's admission. No further behavior code should be needed — if any is, it is a bug in items 4/7, fixed there.
 
