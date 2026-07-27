@@ -262,7 +262,40 @@ with its boundary case beside it.
 
 ---
 
-## 9. Docs, decision record, and release bookkeeping
+## 9. Docs, decision record, and release bookkeeping — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): **0025 was actually free** — the heartbeat plan has executed and holds 0024, and
+`docs/adr/` ends there — so the ADR took the number the item names, with no renumbering. Six
+deviations from the item's literal text, all in the docs themselves. (a) **README has no
+"config-key table."** Its `## Configuration` section documents keys in prose and per-key
+subsections (`### The upstream API key`, `### The system prompt`); the only tables in the file are
+the in-chat commands and the `make` targets. `cursor-shape` therefore landed as a short prose
+paragraph closing the Configuration preamble, beside the `context-window:` pin it reads most like,
+rather than as a row in a table that does not exist. The capability bullet went in as written
+("Type — and select — while it works"). (b) **doc.go gains `interject.go` and `cursor_test.go` in
+two NEW paragraphs**, not in the one-line-each file enumeration the item's line numbers point at:
+that paragraph is explicitly "the REST of the package", i.e. the files no prose paragraph narrates,
+so adding a file to it *and* narrating it would double-name it. The interjection cluster (mailbox /
+staging / delivery fold / flush-or-hold, and `inputEditable` as the one routing predicate) and the
+real terminal cursor now have a paragraph each, in the file's existing order, and the enumeration's
+"names every file in it" claim still holds. (c) **The state-aware placeholder** is noted at the end
+of the input-cluster paragraph, as asked. (d) **Verifier finding (b) — the `blockedUpstream`
+under-count — is fixed here as the comment touch-up it is**, which extends the item's file list by
+one code file: `internal/tui/model.go`'s `blockedUpstream` doc (and doc.go's heartbeat paragraph,
+which repeats the same sentence) now say "the three paths a HUMAN opens an Exchange with" and name
+the auto-flush as the fourth, ungated opener with the reason it is safe (`foldBeat` ignores a failed
+beat mid-Exchange, so the offline state cannot have moved since the completed Exchange was allowed
+to start) and the condition under which that stops being true. No behaviour changed; ADR 0025's
+consequences record the invariant. (e) **technical-design.md's TUI row also names the real cursor
+and the keep-if-unchanged selection rule**, not only the interjection staging the item lists: the
+row is that component's status of record and this wave shipped all three, so naming one would date
+the row on arrival. The Agent-surface amendment likewise reached the **Errors** row
+(`ErrNoOpenExchange`) as well as "Drive the loop" (`Interject`) — the same public surface, two rows.
+(f) **Verifier finding (c) — the `stateAwaitingApproval` placeholder still reading `⏎ queue` where
+⏎ is a no-op — is NOT fixed here.** Correcting it means changing rendered chrome and pinning the new
+wording, which is item 4's placeholder-swap territory (its NOTES (c) already enumerates the five
+transitions); item 4 is done, so it is reported as a follow-up rather than absorbed into a docs
+sweep. Nothing in this item's prose asserts otherwise.
 
 **What.** ADR **0025** `docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md` (next free number — 0024 belongs to the heartbeat plan; if that plan has not executed yet, take the next actually-free number and note it): the Interjection concept; the three-way split (TUI stages / worker drains / engine commits); the NAMED third engine-call class — between-Steps calls by the driving goroutine (`Snapshot` precedent, now `Interject`) alongside ADR 0011's idle-only and `SetMode` classes, with a cross-amendment note in ADR 0011's closing rule; the `Interjected` marker and the one-site derivation fix; the wire posture (user-after-tool accepted; strict-template breakage is a model-profile concern, explicitly deferred); hold-on-stop and the idle single-message join; staged rows are session-ephemeral; why the Exchange-scoped deferred pipe (ADR 0017) was NOT reused (request-scoped, exchange-cleared — an interjection must outlive both). The cursor decision gets a paragraph in the CHANGELOG and config docs, not an ADR — and the selection-survival rule follows the same precedent: the `mouse.go` header sentence (item 7) plus a CHANGELOG bullet, no ADR. `CONTEXT.md`: **Interjection** entry near Turn/Exchange (the human's mid-exchange message, marked, boundary-delivered; _Avoid_: "steering" — that is ADR 0014's guided-decomposition sense; cross-reference both ways), plus "staged/held" phrasing under the entry. `internal/tui/doc.go`: narration (`:201-213`) gains `interject.go` and `cursor_test.go`; the input-cluster paragraph notes the state-aware placeholder; the `mouse.go` narration line (`:94-97`) gains the keep-if-unchanged rule and the editability scope. `README.md`: the config-key table gains `cursor-shape`; a short "type — and select — while it works" bullet in the feature list. `CHANGELOG.md` `[Unreleased]`: the Interjections block (type-ahead, mid-run delivery, hold-on-stop, `Agent.Interject`) + the cursor block + the selection block (transcript selection survives streaming and is available in every state; prompt selection while running) — rides v0.9.0. `ISSUES.md`: check off items 1–3 with pointers — items 1–2 to ADR 0025 / this plan, item 3 to this plan's items 7–8 and the CHANGELOG entry. `docs/design/technical-design.md`: amend the Agent surface row (`Interject`) and the TUI row (interjection staging).
 

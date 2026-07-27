@@ -196,6 +196,62 @@ point is a **minor** bump, not a breaking change.
   For embedders this is **additive**: `apogee.Config` gains `APIKey`, passed straight to the
   session's provider client.
 
+- **You can now type while the model works — and what you type reaches it mid-task. Interjections.**
+  The prompt box used to be dead for the whole of a run: keys scrolled the transcript, `⏎` did
+  nothing, a paste was dropped, and the only way to say "also check the tests" was to wait for the
+  task to finish and start a new one — by which point the turns that could have acted on it were
+  spent. Now the box stays live, and a message you enter while a run is in flight is **queued and
+  delivered into that run**:
+  - **Delivered at the next tool boundary, not after the task.** Your message is committed into the
+    running exchange between turns, so the model reads it with the rest of the work still ahead of
+    it. If it is already writing its final answer there is no next boundary, so the message goes out
+    the moment the exchange ends, as the next one. Nothing is clock-timed — "queued" means *sent at
+    the first boundary that exists*.
+  - **You can see what is waiting.** Queued messages appear as dim `⧖` rows directly above the input
+    box (three at a time, under a `… N more queued` marker), the status line reads `N queued`, and
+    the placeholder changes to `⏎ queue · esc stop` so the box says what `⏎` will do. Each message
+    joins the transcript **when it is actually delivered**, so the scrollback stays an honest record
+    of what the model saw and when.
+  - **`esc` stops everything, including the queue.** Nothing auto-sends after a stop or an error:
+    the rows stay put under a one-line note, and the next `⏎` — even on an empty box — sends them.
+    **Backspace on an empty box** takes the newest queued message back into the editor, exactly as
+    you typed it, to edit or discard.
+  - **Whatever is still queued when a task ends naturally goes out by itself**, as one message
+    joining the queued lines oldest-first (a `/compact` that completes flushes the same way). A
+    queue held over a stop survives `/clear` — it is outgoing input, not context — but not a quit:
+    queued messages are never written to a session.
+  - **`/commands` still run at idle only.** Typing one while the model works is refused with a note
+    and your line is left in the box, rather than being queued into a refusal later.
+
+  **One thing deliberately changes:** the single-key transcript scroll while a run is in flight
+  (`j`/`k`/space) is gone, because those keys now type. `PgUp`/`PgDn` and the mouse wheel scroll the
+  transcript in every state, as before. Typing stays blocked where another decision owns the
+  keyboard — at an approval prompt (`a`/`d`/`s`), while the model is asking you a question (the box
+  holds the answer), and after an error (`⏎` dismisses).
+
+  For embedders this is **additive**, a **minor** bump: `apogee.Agent` gains
+  `Interject(UserInput) error`, which commits a marked user message into the open exchange and is
+  documented as callable only from the goroutine driving `Step`, **between** Steps — the same
+  boundary the per-turn `Snapshot` already uses, so it takes no lock. `apogee.Message` gains an
+  `Interjected` flag (the derived exchange boundary skips it, so a mid-task message joins the running
+  exchange instead of starting a new one) and `apogee.ErrNoOpenExchange` is re-exported. Saved
+  sessions round-trip the flag with **no version bump**, in both directions. See
+  [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md).
+
+- **The prompt caret is now the real terminal cursor, and it never blinks — the `cursor-shape`
+  setting.** The box painted its own simulated cursor, which blinked with no way to turn it off. It
+  now draws the **terminal's own** cursor at the caret, steady, in the shape you name:
+  `cursor-shape: block` (the default), `underline`, or `bar`, a file-only key in
+  `~/.apogee/config.yaml` — an unknown value is a startup error listing the three. The cursor shows
+  wherever the box is editable, including while the model works, and is **hidden** where it is not
+  (an approval prompt, or after an error), so the caret is never sitting in a box that ignores it.
+  Your terminal's own cursor is restored when apogee exits.
+
+  Inheriting the shape your terminal is configured with is deliberately **not** offered: a
+  full-screen terminal program names a cursor shape on every frame, so "whatever you had" is not
+  something apogee can express while it runs — the key is the honest substitute. There is no blink
+  option; nothing blinks.
+
 ### Changed
 
 - **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**
@@ -289,6 +345,25 @@ point is a **minor** bump, not a breaking change.
   lines)` marker, so the input box the answer is typed into is never pushed off-screen.
 
 ### Fixed
+
+- **Selecting text no longer dies the moment the model streams — and the transcript is selectable in
+  every state.** apogee captures the mouse (for scrolling and for click-to-position), which turns the
+  terminal's own click-drag selection off, so selection is apogee's to implement — and it dropped
+  **every** transcript selection on **every** repaint. While a reply streamed that is once per token,
+  so a drag died before it began and a copied highlight vanished a moment later. Selections now
+  survive by a **keep-if-unchanged** rule: a selection lives on exactly while every line it spans is
+  identical before and after the repaint. In practice you can drag-select a settled paragraph, keep
+  extending it, and copy it while the model keeps writing underneath — and a selection over the
+  still-moving tail drops honestly the instant that text changes, rather than silently pointing at
+  something else. **What you copy is always exactly what you see**, because the copy slices the very
+  lines the rule protected. Text becomes selectable again the moment the stream has passed it.
+
+  Scope is now the same in every state: **transcript** selection works while idle, running, at an
+  approval prompt, while the model is asking you something, and after an error. **Prompt-box**
+  selection follows the box — wherever you may edit it (idle, answering a question, and now while the
+  model works) a click positions the caret and a drag selects; at an approval prompt and after an
+  error the box stays inert and the transcript covers copying. The terminal's own `shift`+drag
+  selection is untouched and remains available as it always was.
 
 - **An MCP server on `localhost` or your LAN now connects — it used to stop apogee from starting.**
   A `mcp-servers:` entry with an endpoint like `http://127.0.0.1:7331/mcp` or

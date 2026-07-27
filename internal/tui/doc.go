@@ -92,9 +92,21 @@
 // toolpresent.go's posture, with render.go still owning the marker and depth framing. filecache.go
 // backs the "@" overlay with a short-TTL, single-walk workspace listing filtered in memory, so a
 // typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke. mouse.go
-// implements the prompt's click-to-position caret and drag-to-select (with OSC52 copy) on top of
-// the textarea — apogee captures the mouse for transcript scrolling, which turns off the
-// terminal's own click-drag selection, so the prompt re-implements it here.
+// implements click-to-position caret and drag-to-select (with OSC52 copy) in BOTH rectangles —
+// apogee captures the mouse for transcript scrolling, which turns off the terminal's own click-drag
+// selection, so both are re-implemented here, the prompt's in rune offsets into the textarea Value
+// and the transcript's in content coordinates over the cached rendered lines ("copy what you see").
+// The handlers arbitrate by region, so the two never coexist. Scope is the owner's rule, not an
+// accident of routing: the TRANSCRIPT selects in every state, while the PROMPT follows
+// [Model.inputEditable] — idle, ask, running — and stays inert at approval/errored, where a/d/s and
+// Enter-dismiss own the keyboard and the transcript covers copying. A transcript selection survives
+// a repaint by the KEEP-IF-UNCHANGED rule ([transcriptSel.spanUnchanged], applied in
+// [Model.refreshViewport] against the outgoing lines): it lives on exactly while every line it spans
+// is identical before and after, so a drag over settled text keeps extending while the model streams
+// beneath it, and it drops the moment the text under it moves (the streaming tail, a rewrap, a tool
+// call joining its group). Freezing repaints under a held button was rejected — the stream must not
+// visibly stall — and the release slices the very lines the rule protected, which is what makes copy
+// equal sight by construction rather than by care.
 //
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
 // five loose input-side concerns the architecture review called one coherent concept — the
@@ -108,7 +120,37 @@
 // stay on the Model rather than duplicate that state (computeAutocomplete, acceptAutocomplete,
 // attachSkill, highlightInput, inputContentRect, the region-arbitrating mouse handlers). The Model
 // stays the coordinator that owns the lifecycle state machine, the transcript + render cache, the
-// stats/gauge, the theme, and the layout; the editor never touches the engine.
+// stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
+// invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps idlePlaceholder
+// ("⏎ send") for runningPlaceholder ("⏎ queue · esc stop") on the lifecycle transitions that open and
+// close an Exchange, so the chrome names what ⏎ will actually do — which is also why the ask
+// rendezvous swaps BACK to the idle legend while it borrows the box for an answer.
+//
+// Typing while the model works is that swap's substance, and it is a three-party split ADR 0025
+// records: this package STAGES, the worker DELIVERS, the engine COMMITS. interject.go holds the
+// TUI's two thirds — [interjectBox], the per-Exchange mutex-guarded FIFO the Update goroutine pushes
+// into and the worker drains between Steps (held by POINTER, per the no-copy invariant below: a
+// mutex copied by value would give each Model copy its own lock and unsynchronise the two goroutines
+// silently rather than fail loudly), and the staging half around it — ⏎ turns the editor into a
+// queued row, Backspace on an empty box pops the newest back into it (withdrawing it from the
+// mailbox first, and giving up if the worker already took it, so a message cannot be sent twice),
+// the delivery report moves exactly the rows that LANDED into the transcript as ⧖ blocks, and a
+// terminal boundary rules on whatever is left: flushed as ONE joined message on a natural
+// completion, HELD under a note after Esc or a fault, because Esc means stop everything. Keys reach
+// the box wherever [Model.inputEditable] says so — the same predicate the mouse arbitrates by, which
+// is what keeps the keyboard and the mouse from disagreeing about which states are live — and the
+// cost is the deliberate one the plan named: single-key transcript scrolling while running, with
+// PgUp/PgDn and the wheel keeping it in every state.
+//
+// The caret under all that is the REAL terminal cursor. The bubbles textarea's virtual one is
+// retired (SetVirtualCursor(false)) and View attaches textarea.Cursor(), translated by
+// inputContentRect's content origin, onto tea.View.Cursor — but only where inputEditable holds, so
+// at approval and errored the cursor is simply absent rather than blurred out of a still-focused
+// widget. It never blinks, and its shape is the `cursor-shape` config key (block | underline | bar,
+// parsed once here through [ParseCursorShape], the ParseSpinnerStyle posture): Bubble Tea's renderer
+// must name a shape on every frame, so "inherit the terminal's own configured shape" is not
+// expressible while the app runs and the key is the honest substitute. cursor_test.go pins the
+// translation, the hidden states, and the shape.
 //
 // activity.go replaces the status line's turn index — which answered nothing the human was
 // asking — with a live activity phrase and an elapsed clock ("thinking · 12s", "reading ·
@@ -157,11 +199,15 @@
 // on a saturated one), a failure before any beat has ever landed is believed at once (a cold start
 // against a stopped server should say so), and otherwise the offline crossing waits for
 // offlineFailureThreshold consecutive idle failures, each crossing noted exactly once (the
-// saveFailing fail-once posture). The consequence is [Model.blockedUpstream]: the three paths that
-// would open an Exchange — a message, /continue, /compact — are refused with a note while there is
-// nothing to send to, and the typed message STAYS IN THE BOX, while scrollback, /clear, /sessions,
-// /version, /confine and Shift+Tab all stay live. An unwired seam arms no chain, folds nothing and
-// blocks nothing, which is exactly the pre-heartbeat renderer.
+// saveFailing fail-once posture). The consequence is [Model.blockedUpstream]: the three paths a
+// HUMAN opens an Exchange with — a message, /continue, /compact — are refused with a note while
+// there is nothing to send to, and the typed message STAYS IN THE BOX (a held interjection queue
+// stays held for the same reason), while scrollback, /clear, /sessions, /version, /confine and
+// Shift+Tab all stay live. The interjection auto-flush (ADR 0025) is a FOURTH opener and is
+// deliberately ungated: it runs inside a natural completion's own fold, where foldBeat's own rule —
+// a failed beat during an in-flight Exchange is ignored — means the offline state cannot have moved
+// since the Exchange that just completed was allowed to start. An unwired seam arms no chain, folds
+// nothing and blocks nothing, which is exactly the pre-heartbeat renderer.
 //
 // What a beat DOES about a changed upstream is the second seam, [Options.Rebind], and the split
 // between the two is the design: the heartbeat seam observes, the rebind seam applies, and the

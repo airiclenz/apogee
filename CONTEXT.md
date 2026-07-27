@@ -148,6 +148,29 @@ v1** (designed swappable for nested stepping later). See
 _Avoid_: "tick", "cycle" (Turn is the loop iteration; Step is the externally-driven advance
 of one Turn).
 
+**Interjection**:
+A message the human interjects into a **running** Exchange — the remark that reaches the model
+mid-task ("also check the tests") instead of waiting for the Exchange to end. It is committed
+history, not a request-scoped injection: `Agent.Interject` appends it as a real `RoleUser`
+message at a **between-Steps boundary** — the class of engine call the worker's `Snapshot`
+already occupies, where the driving goroutine owns the conversation and the boundary is the
+synchronization, no mutex — so it survives Turns, compaction, and session save/restore. It
+carries `Message.Interjected`, and the derived Exchange **opening skips it**, so the remark
+joins the running Exchange's body rather than starting a new one and every Mechanism reading the
+boundary keeps seeing the whole task as shared context. It reaches the model after the tool
+results already in the tail (legal OpenAI chat; strict Gemma-class templates are a model-profile
+concern, ADR 0025). A message typed while the model works is **staged** (queued for the next
+boundary), and a queue left standing by Esc or a loop error is **held** (nothing auto-sends after
+a stop; the next ⏎ sends it, Backspace on an empty box pops the newest back into the editor).
+Staged and held rows are session-ephemeral — sessions record what was committed (ADR 0022).
+Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the rows into ONE
+**unmarked** message, because exactly one unmarked user message opens an Exchange. See
+[ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md).
+_Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mechanism shaping the
+model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;
+it means deliver-at-the-next-boundary), "queued input" alone (the queue is the staging, the
+Interjection is the message).
+
 ### Safety and autonomy
 
 **Agent mode**:
@@ -546,7 +569,8 @@ _Avoid_: "planner" (Plan is an autonomy mode), "orchestrator" (that is the sub-a
 machinery, ADR 0013), "auto-decomposition" (the model performs the semantic split; the
 Mechanism only decides when to ask and serializes the follow-through). Not to be conflated with
 the **`decompose`** Mechanism (a prompt-shaping nudge; steers wording, not delegation — the two
-are declared incompatible).
+are declared incompatible), nor with an **Interjection** (a *human's* mid-Exchange message —
+"steer" here is the Mechanism sense, a directive shaping the model's own primary call).
 
 ### Deliverables and presentation
 

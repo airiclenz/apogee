@@ -192,6 +192,24 @@ call **only** behind the same mutex-guarded, documented-goroutine-safe surface `
 This mirrors [ADR 0007](0007-step-turn-and-the-quiescent-boundary.md)'s realisation notes: the
 boundary contract is unchanged; these entries record the exact control-flow calls that live at it.
 
+**Amendment (2026-07-27) — there is a THIRD class, and it was already in the tree: between-Steps
+calls by the goroutine DRIVING `Step`.** The rule above enumerates two classes and, read strictly,
+misdescribes a call this package has made since the session work landed: the worker calls
+`eng.Snapshot()` *between* Steps for the per-Turn save
+([ADR 0022](0022-sessions-persist-per-turn-as-dual-representation-records.md)) — not from the
+`Update` goroutine, and not behind a mutex.
+[ADR 0025](0025-interjections-commit-at-the-between-steps-boundary.md) names that class and adds its
+second member, `Agent.Interject`, which commits the human's mid-run remark into the open Exchange at
+the same boundary. Its safety is structural rather than either of the other two arguments: **between
+Steps, the driving goroutine is the engine's single driver, so the boundary IS the synchronization**
+— no state-machine proof is needed (a worker *is* running, it is simply the caller) and no lock is
+taken. The class is deliberately narrow: it is available only to the goroutine that owns the
+Exchange, only at a quiescent boundary, and a call made from anywhere else races the loop's own
+writes. So a consumer copies **three** rules, not two — idle-only under the state machine,
+`SetMode`-class under a documented mutex, and between-Steps under the boundary itself. Nothing above
+changes; the idle-only list is unchanged (ADR 0024 added `Rebind` to it), and the single-worker
+invariant is untouched — a message typed while a worker runs is *staged*, never submitted.
+
 **Note (2026-07-25) — "thin renderer" now holds for tool outcomes too: the view reads a typed
 summary instead of re-deriving one from prose.** Until this date `internal/tui/toolpresent.go`
 reconstructed *what a tool had done* by pattern-matching the free-text result string the tool wrote

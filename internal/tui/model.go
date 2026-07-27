@@ -1629,9 +1629,16 @@ func (m Model) foldBeatFailure(failure string) (Model, bool) {
 
 // blockedUpstream reports whether there is nothing to send to right now: the heartbeat says the
 // server is offline, or no model is bound yet because the first beat has not landed (the async
-// cold start). It gates the three paths that would open an Exchange — a message, /continue, and
+// cold start). It gates the three paths a HUMAN opens an Exchange with — a message, /continue, and
 // /compact — so a send fails loudly at the boundary instead of silently against a dead endpoint.
 // Everything else stays live: scrollback, /clear, /sessions, /version, /confine, Shift+Tab.
+//
+// The interjection auto-flush (flushAfterCompletion, ADR 0025) is a FOURTH path that opens an
+// Exchange and deliberately does NOT consult this: it runs inside a natural completion's own fold,
+// and foldBeat ignores a failed beat while an Exchange is in flight, so the offline state cannot
+// have moved since the Exchange that just completed was itself allowed to start. That is an
+// invariant, not a coincidence — if the offline crossing ever becomes able to land mid-Exchange,
+// the flush needs this guard too.
 //
 // With the monitor unwired it is always false: nothing observes the server, so the TUI has no
 // standing to refuse anything (and every pre-heartbeat test keeps its behaviour).

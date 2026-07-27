@@ -67,6 +67,12 @@ next.
   your machine with a local model.
 - **Agentic tool use** — multi-step loop with file edits, shell, search, git, web,
   and sub-agents.
+- **Type — and select — while it works** — the prompt box stays live during a run: write
+  your next message while the model streams, and press `⏎` to *queue* it. A queued message
+  is delivered **into the running task** at the next tool boundary, so a remark like "also
+  check the tests" lands while there are still turns left to act on it; anything still
+  queued when the task finishes goes out as the next message. `esc` stops everything and
+  holds the queue. Transcript text stays selectable in every state, mid-stream included.
 - **Deliverables you actually see** — `present_document` ends a report-producing task
   by showing the file: opened on your desktop when apogee runs locally, served over a
   one-off link when it runs on a remote box, and always printed as a clickable path
@@ -158,6 +164,15 @@ key, in tokens) only when your server does not advertise a window, or when its n
 wrong for how you run it; that key is a **pin** the heartbeat never overrides. With no
 window known, the Budget and automatic compaction stay inactive and apogee says so in the
 transcript the moment it binds a model without one.
+
+The prompt's caret is the **real terminal cursor**, and it never blinks. Set
+`cursor-shape:` (a file-only key) to `block` (the default), `underline`, or `bar` to say
+which shape it takes; your terminal's own cursor comes back when apogee exits. A
+full-screen terminal program has to name a cursor shape on every frame, so inheriting the
+one your terminal is configured with is not something apogee can express while it runs —
+this key is the honest substitute. The cursor is shown wherever the box is editable
+(including while the model works) and hidden where it is not, such as at an approval
+prompt.
 
 ### The upstream API key
 
