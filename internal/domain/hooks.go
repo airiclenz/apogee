@@ -308,7 +308,7 @@ type Request struct {
 	// bounded — the appendage still reaches the Upstream.
 	//
 	// Once frozen it is MAINTAINED, not static (F2): a below-boundary structural mutation
-	// (InjectContext inserting before the last user message, or appendOrCreateSystem
+	// (InjectContext inserting before the Exchange opening, or appendOrCreateSystem
 	// prepending a system message) shifts committed indices, so committedLen advances to keep
 	// View() pinned to the same logical committed history. This matters for the
 	// empty-superseded retry, where nothing is appended so the correction lands below the

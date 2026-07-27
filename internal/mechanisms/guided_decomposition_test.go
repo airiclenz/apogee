@@ -208,6 +208,67 @@ func TestGuidedDecompositionGate(t *testing.T) {
 	}
 }
 
+// Interjections (ADR 0025) and the gate. Signal A is a TAIL test, not an opening test — it fires
+// wherever the conversation ends in an oversized user message — so a mid-Exchange remark carrying big
+// @file refs arms it, deliberately: that is the same "the task just grew too big while the model
+// works" event signal B answers, arriving through the other door
+// (guidedDecompositionTailUserOversized carries the full rationale). What an Interjection must NEVER
+// do is move the Exchange window the once-per-Exchange F1 guard reads, because the derived opening
+// skips it — so a fan-out already begun in this Exchange keeps the gate quiet with a remark on the
+// tail.
+func TestGuidedDecompositionInterjections(t *testing.T) {
+	t.Parallel()
+
+	// A running Exchange: a small opening ask, the model mid-work on a read call, the result.
+	openExchange := []domain.Message{
+		{Role: domain.RoleUser, Content: "go"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file", Arguments: []byte(`{}`)}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: "ok"},
+	}
+	// The same Exchange, but a fan-out has already begun in it (a committed sub_agent call).
+	fannedOut := []domain.Message{
+		{Role: domain.RoleUser, Content: "go"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{guidedSubAgentCall("c1", "do a")}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: "child report"},
+	}
+	interjection := domain.Message{Role: domain.RoleUser, Content: oversizedUser, Interjected: true}
+
+	tests := []struct {
+		name string
+		msgs []domain.Message
+		fire bool
+	}{
+		{
+			name: "control: the running Exchange alone is under both thresholds",
+			msgs: openExchange,
+			fire: false,
+		},
+		{
+			name: "an oversized interjection arms signal A mid-Exchange",
+			msgs: append(append([]domain.Message{}, openExchange...), interjection),
+			fire: true,
+		},
+		{
+			name: "an interjection does not re-arm the once-per-Exchange F1 guard",
+			msgs: append(append([]domain.Message{}, fannedOut...), interjection),
+			fire: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := guidedRequest(tc.msgs, guidedMenu, guidedBudget, 0)
+			before := req.Revision()
+			if err := (guidedDecompositionMechanism{}).PreRequest(context.Background(), req); err != nil {
+				t.Fatalf("PreRequest: %v", err)
+			}
+			if fired := req.Revision() != before; fired != tc.fire {
+				t.Fatalf("fired = %v, want %v (revision %d → %d)", fired, tc.fire, before, req.Revision())
+			}
+		})
+	}
+}
+
 // An outstanding steer or fan-out directive in the conversation stops the gate from steering again —
 // no double-steer (locked decision 1). Both markers are exercised, over an otherwise-firing signal-A
 // request. The marker rides a user message at a LINE START — the shape the loop's InjectContext writes

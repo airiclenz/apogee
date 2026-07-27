@@ -123,7 +123,7 @@ var guidedDecompositionDescriptor = domain.MechanismDescriptor{
 //   - no steer or fan-out directive may already be outstanding in this REQUEST — the same-request
 //     double-steer guard (guidedDecompositionOutstanding, keyed on the request-scoped markers);
 //   - no fan-out may have begun yet in the current Exchange — the once-per-Exchange guard on COMMITTED
-//     evidence (guidedDecompositionFanOutBegun, F1): once any assistant message after the last user ask
+//     evidence (guidedDecompositionFanOutBegun, F1): once any assistant message after the opening ask
 //     carries a sub_agent call the gate stays quiet for the rest of the Exchange, so it cannot re-steer
 //     on the synthesis Turn after the request-scoped markers have drained;
 //   - the task must be oversized by signal A or B (guidedDecompositionOversized).
@@ -195,9 +195,10 @@ func guidedDecompositionOutstanding(conv domain.ConversationView) bool {
 
 // guidedDecompositionMarkerRole reports whether role is one the loop's InjectContext writes an
 // injection into — RoleUser or RoleSystem (F5's role scope). The steer rides a user message (inserted
-// before the last user ask or appended after an assistant message) and the drained directive rides a
-// user message or, when history ends in a tool result, the system prompt. A marker in a RoleAssistant
-// echo or a RoleTool result is never the Mechanism's own injection, so the marker scanners skip it.
+// before the Exchange's opening ask or appended after an assistant message) and the drained directive
+// rides a user message or, when history ends in a tool result, the system prompt. A marker in a
+// RoleAssistant echo or a RoleTool result is never the Mechanism's own injection, so the marker
+// scanners skip it.
 func guidedDecompositionMarkerRole(role domain.Role) bool {
 	return role == domain.RoleUser || role == domain.RoleSystem
 }
@@ -220,7 +221,7 @@ func guidedDecompositionMarkerAtLineStart(content, marker string) bool {
 
 // guidedDecompositionFanOutBegun reports whether a fan-out has already begun in the current Exchange,
 // judged from COMMITTED history alone (F1 — the once-per-Exchange rule): true when any assistant
-// message after the last RoleUser message carries a sub_agent tool call. That single predicate
+// message after the Exchange's opening ask carries a sub_agent tool call. That single predicate
 // subsumes both of §5's silence conditions — the item-2 enumeration anchor commits as its verbatim
 // list PLUS the synthesized first sub_agent call, and a model that delegated unprompted this Exchange
 // likewise carries one — so once it holds a steer adds nothing (the model is already delegating) and
@@ -231,8 +232,8 @@ func guidedDecompositionMarkerAtLineStart(content, marker string) bool {
 // from the next request the moment nothing is re-deferred (the synthesis Turn). Committed sub_agent
 // calls do not vanish — the child reports grew honest history and mid-Exchange auto-compaction cannot
 // run — so this is what stops the gate re-steering on the synthesis Turn once the markers are gone and
-// signal B still reads oversized. A new Exchange (a new last RoleUser message) moves the window
-// forward and re-arms the gate.
+// signal B still reads oversized. A new Exchange (a new OPENING user message — an Interjection is
+// deliberately not one, ADR 0025) moves the window forward and re-arms the gate.
 func guidedDecompositionFanOutBegun(conv domain.ConversationView) bool {
 	if conv == nil {
 		return false
@@ -253,15 +254,29 @@ func guidedDecompositionOversized(conv domain.ConversationView, budget domain.Bu
 	if budget.CharsPerToken <= 0 {
 		return false
 	}
-	return guidedDecompositionFreshUserOversized(conv, budget) ||
+	return guidedDecompositionTailUserOversized(conv, budget) ||
 		guidedDecompositionMidExchangeOversized(conv, budget)
 }
 
-// guidedDecompositionFreshUserOversized is signal A (the Turn-1 fact): the conversation ends in the
-// fresh user message and its estimated tokens exceed the FileContext allocation. The resolved @file
-// blocks live inside that message (loop.go), so its size embodies the resolved file context — a big
-// opening ask is the primary-call fan-out trigger.
-func guidedDecompositionFreshUserOversized(conv domain.ConversationView, budget domain.Budget) bool {
+// guidedDecompositionTailUserOversized is signal A (ADR 0014 §5(a)): the conversation ENDS in a user
+// message and its estimated tokens exceed the FileContext allocation. The resolved @file blocks live
+// inside that message (loop.go for an opening ask, interject.go for an Interjection), so its size
+// embodies the resolved file context — size as measured fact, not prophecy.
+//
+// The tail user message is not necessarily the Exchange OPENING, and firing on either is deliberate.
+// The ADR wrote the signal as "at Turn 1" because back then the only conversation tail that could be
+// a user message was the fresh opening ask (hence this helper's former FreshUser name); since
+// Interjections ship (ADR 0025) the human can commit a remark INTO a running Exchange, and a remark
+// carrying @file refs big enough to clear the FileContext allocation is the same event signal B
+// answers — the task grew too big while the model works — arriving through the other door. Every
+// guard around it still holds: the once-per-Exchange F1 check, the request-scoped no-double-steer
+// check, and strikes-3 self-regulation. It is bounded too — the tail stops being a user message the
+// moment the model replies, so an Interjection can arm this signal for exactly one Step.
+//
+// The Exchange BOUNDARY is untouched by all of this: domain.CurrentExchange skips interjected
+// messages, so the Mechanism's three Exchange scans (routed through
+// guidedDecompositionCurrentExchangeStart) keep reading the whole shared task context.
+func guidedDecompositionTailUserOversized(conv domain.ConversationView, budget domain.Budget) bool {
 	n := conv.Len()
 	if n == 0 {
 		return false
@@ -467,7 +482,7 @@ func guidedDecompositionRemainder(conv domain.ConversationView, respCalls []doma
 }
 
 // guidedDecompositionEnumeration returns the enumeration list from honest history: the FIRST
-// assistant message WITHIN THE CURRENT EXCHANGE (the messages after the last RoleUser message — the
+// assistant message WITHIN THE CURRENT EXCHANGE (the messages after the opening user message — the
 // original ask) that BOTH parses as an in-bounds (2..12) subtask list AND carries at least one
 // sub_agent tool call. That pair uniquely identifies the real enumeration (F3): the case-1 intercept
 // commits it as the verbatim list text PLUS the synthesized first delegation, so no other message
@@ -492,7 +507,7 @@ func guidedDecompositionEnumeration(conv domain.ConversationView) []string {
 }
 
 // guidedDecompositionDispatchedTasks collects the task text of every sub_agent call recorded on the
-// assistant messages of the CURRENT EXCHANGE (after the last RoleUser message) — the dispatched half
+// assistant messages of the CURRENT EXCHANGE (after the opening user message) — the dispatched half
 // of the honest-history cursor, scoped to this Exchange so a previous Exchange's fan-out cannot
 // consume this one's items. It reads the CALLS, never the child results.
 func guidedDecompositionDispatchedTasks(conv domain.ConversationView) []string {
@@ -514,9 +529,11 @@ func guidedDecompositionDispatchedTasks(conv domain.ConversationView) []string {
 // three Exchange scans (the F1 fan-out-begun check, the enumeration anchor, the dispatched-task
 // window) through that seam. Injected steers and the drained directive land before the opening user
 // message or in the system message, never after it (loop.go / Request.InjectContext), so the boundary
-// is stable across injections — the shared-context invariant behind F1/F3. With no user message
-// present UserIndex is -1 and the whole conversation is scanned — the Mechanism's long-standing
-// no-user reading, unchanged.
+// is stable across injections — the shared-context invariant behind F1/F3. An Interjection (ADR 0025)
+// lands AFTER the opening and does not move it either: the derivation skips interjected messages, so
+// a human's mid-Exchange remark joins the window these scans read rather than truncating it. With no
+// opening user message present UserIndex is -1 and the whole conversation is scanned — the
+// Mechanism's long-standing no-user reading, unchanged.
 func guidedDecompositionCurrentExchangeStart(conv domain.ConversationView) int {
 	return domain.CurrentExchange(conv).UserIndex() + 1
 }

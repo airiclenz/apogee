@@ -223,6 +223,14 @@ func (decomposeMechanism) PreRequest(_ context.Context, req *domain.Request) err
 	collapse := decomposeCollapseTargets(conv, decomposeThreshold)
 	priorTextOnly := decomposeHasPriorTextOnlyResponse(conv)
 
+	// The step hint reads LastUser — the human's most recent instruction, an Interjection included
+	// (ADR 0025: two questions, two locators). That is deliberate and the opposite locator from the
+	// collapse above, which anchors on the derived Exchange OPENING: the collapse asks "which older
+	// prompt may the model still re-read a full plan from" and must never touch the live ask, while
+	// the hint asks "what did the human just tell me to do" and should follow a mid-Exchange remark.
+	// A short remark scores below the complexity threshold and a long one is normally out-stepped by
+	// the conversation-wide completed-step count, so an Interjection costs at most the one Turn's
+	// hint — it can never redirect the hint away from a task the human did not change.
 	var stepHint string
 	if lastMsg, _, ok := conv.LastUser(); ok && strings.TrimSpace(lastMsg.Content) != "" &&
 		hasActionIntent(lastMsg.Content) {
@@ -265,24 +273,27 @@ type decomposeCollapseTarget struct {
 	content string
 }
 
-// decomposeCollapseTargets finds the complex multi-step user messages in history (every user message
-// before the last) and pairs each with its collapsed summary (apogee-sim collapseComplexHistory
-// @pin). Returning the plan rather than mutating in place keeps PreRequest's reads strictly before
-// its writes.
+// decomposeCollapseTargets finds the complex multi-step user messages in history — every user message
+// before the CURRENT EXCHANGE'S OPENING — and pairs each with its collapsed summary (apogee-sim
+// collapseComplexHistory @pin). Returning the plan rather than mutating in place keeps PreRequest's
+// reads strictly before its writes.
+//
+// The boundary is domain.CurrentExchange's derived opening, NOT this scan's own "last user message".
+// The sim's rule was "every user message before the last" because back then the last user message WAS
+// the live ask; since Interjections ship (ADR 0025) it need not be — the human can commit a remark
+// INTO the running Exchange, and anchoring on it would lossy-summarize the opening ask mid-Exchange,
+// the one message the collapse exists to keep whole. Routing through the derivation (which skips
+// interjected messages) keeps the live ask and every interjection joining it intact, while older
+// Exchanges' complex prompts collapse exactly as before: with no interjection present the two anchors
+// are the same index, so the sim's measured behaviour is unchanged.
 func decomposeCollapseTargets(conv domain.ConversationView, threshold string) []decomposeCollapseTarget {
-	lastUserIdx := -1
-	for i := conv.Len() - 1; i >= 0; i-- {
-		if conv.At(i).Role == domain.RoleUser {
-			lastUserIdx = i
-			break
-		}
-	}
-	if lastUserIdx < 0 {
+	opening := domain.CurrentExchange(conv).UserIndex()
+	if opening < 0 {
 		return nil
 	}
 
 	var targets []decomposeCollapseTarget
-	for i := 0; i < lastUserIdx; i++ {
+	for i := 0; i < opening; i++ {
 		m := conv.At(i)
 		if m.Role != domain.RoleUser {
 			continue

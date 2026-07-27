@@ -190,6 +190,46 @@ func TestDecomposeMutedWhenReadLoopFired(t *testing.T) {
 	}
 }
 
+// An Interjection — the human's remark committed INTO the running Exchange (ADR 0025) — is NOT an
+// Exchange opening, so the history collapse must anchor on the derived opening rather than on "the
+// last user message": the LIVE ask stays whole even though a later user message follows it, and only
+// what precedes the opening collapses. The two complex prompts carry IDENTICAL text, so their
+// opposite fates are decided purely by the boundary, and the interjection itself is left alone as
+// part of the running Exchange's body.
+func TestDecomposeCollapseSparesTheLiveAskAcrossAnInterjection(t *testing.T) {
+	t.Parallel()
+	req := shaperRequest([]domain.Message{
+		{Role: domain.RoleSystem, Content: "SYS"},
+		{Role: domain.RoleUser, Content: complexMultiStep}, // 1: the previous Exchange's ask → collapsed
+		{Role: domain.RoleAssistant, Content: "Done."},
+		{Role: domain.RoleUser, Content: complexMultiStep}, // 3: the LIVE opening ask → kept whole
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"lexer.go"}`)}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: "package lexer"},
+		{Role: domain.RoleUser, Content: "also check the tests", Interjected: true}, // 6: mid-Exchange remark
+	}, oneTool)
+
+	before := len(req.State().Messages)
+	if err := (decomposeMechanism{}).PreRequest(context.Background(), req); err != nil {
+		t.Fatalf("PreRequest: %v", err)
+	}
+	msgs := req.State().Messages
+	if len(msgs) != before {
+		t.Fatalf("message count changed %d → %d; collapse must edit in place", before, len(msgs))
+	}
+	if msgs[3].Content != complexMultiStep {
+		t.Errorf("the live opening ask was collapsed mid-Exchange: %q", msgs[3].Content)
+	}
+	if msgs[1].Content == complexMultiStep {
+		t.Error("the previous Exchange's complex ask was not collapsed")
+	}
+	if !strings.Contains(msgs[1].Content, "Detailed steps omitted") {
+		t.Errorf("collapsed message missing the omission note: %q", msgs[1].Content)
+	}
+	if msgs[6].Content != "also check the tests" {
+		t.Errorf("the interjection was rewritten: %q", msgs[6].Content)
+	}
+}
+
 // Once the model has written a file, decompose stops steering — no continuation, no step hint
 // (apogee-sim: return once HasWrittenFiles).
 func TestDecomposeSkipsAfterWrite(t *testing.T) {
