@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 )
 
 // ----------------------------------------------------------------------------
@@ -28,6 +29,8 @@ var (
 	_ tea.Msg = compactDoneMsg{}
 	_ tea.Msg = turnSnapshotMsg{}
 	_ tea.Msg = saveDoneMsg{}
+	_ tea.Msg = heartbeatTickMsg{}
+	_ tea.Msg = beatMsg{}
 )
 
 // eventMsg carries one engine Event into the Update loop. The teaSink wraps every Event
@@ -118,6 +121,24 @@ type compactDoneMsg struct {
 // transcript the Model holds when this folds is consistent with the snapshot it carries.
 type turnSnapshotMsg struct {
 	Sess domain.Session
+}
+
+// heartbeatTickMsg re-arms the upstream heartbeat. It is scheduled one heartbeat.Interval after a
+// beat LANDED — never on a fixed wall clock — so the observation and the wait can never overlap,
+// and its fold issues the next beat Cmd. gen names the chain that scheduled it (the spinner's
+// generation guard, spinner.go): the Update loop drops a tick carrying a retired generation, so two
+// chains can never beat at once.
+type heartbeatTickMsg struct{ gen int }
+
+// beatMsg carries one landed observation of the Upstream into the Update loop — reachability, the
+// served model and its window, and the advertised model list (internal/heartbeat). It arrives off
+// a Cmd goroutine rather than from the worker, so it can land in ANY state: a beat that fails while
+// an Exchange is in flight is deliberately ignored (a live stream is stronger evidence of a
+// reachable server than a timed-out probe on a saturated one). gen carries the same generation
+// guard heartbeatTickMsg does.
+type beatMsg struct {
+	gen  int
+	beat heartbeat.Beat
 }
 
 // saveDoneMsg reports the outcome of one asynchronous SessionHost.Save (the per-Turn and idle

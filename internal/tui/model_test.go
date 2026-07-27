@@ -2163,7 +2163,9 @@ func TestReseatPreservesStickyColumn(t *testing.T) {
 
 // TestDisplayModel proves the footer strips a discovered model path to just its name and drops a
 // known weight-file extension, while leaving version dots ("qwen2.5") and bare ids untouched. The
-// strip is display-only; opts.Model (sent to the server) is unaffected.
+// strip is display-only; opts.Model (sent to the server) is unaffected. The no-model case — once a
+// "never reached in practice" row here, now a real state at every cold start — has its own test,
+// TestDisplayModelEmpty (heartbeat_test.go).
 func TestDisplayModel(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/Users/me/models/qwen2.5-coder-7b-instruct.gguf", "qwen2.5-coder-7b-instruct"},
@@ -2171,7 +2173,6 @@ func TestDisplayModel(t *testing.T) {
 		{"model.safetensors", "model"},
 		{"qwen2.5-coder", "qwen2.5-coder"}, // no weight extension: the version dot survives
 		{"test-model", "test-model"},
-		{"", "."}, // filepath.Base("") is "."; never reached in practice (nonEmpty-guarded)
 	}
 	for _, tc := range cases {
 		if got := displayModel(tc.in); got != tc.want {

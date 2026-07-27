@@ -144,6 +144,25 @@
 // tick carrying an older one — which is what keeps the frame rate from doubling after an approval
 // prompt or an ask_user question re-arms the chain.
 //
+// The upstream heartbeat is the package's SECOND tick chain, and it deliberately reuses the
+// first one's shape. [Options.Heartbeat] is a narrow func seam the binary backs with an
+// internal/heartbeat monitor — this package imports that one for the Beat value and the Interval
+// cadence, never internal/provider (ADR 0010) — and the Model owns only WHEN: [Model.Init] fires
+// the first beat immediately, because startup discovery IS that beat now (the binary paints before
+// the server has answered), and the beatMsg fold re-arms from the LANDED beat rather than off a
+// fixed clock, so an observation and its wait are strictly sequential and two beats can never
+// overlap. The spinner's generation counter guards it identically: a Msg from a retired chain is
+// inert. What a beat MEANS is [Model.foldBeat] — a failure while an Exchange is in flight is
+// IGNORED (a streaming reply is stronger evidence that the server is there than a timed-out probe
+// on a saturated one), a failure before any beat has ever landed is believed at once (a cold start
+// against a stopped server should say so), and otherwise the offline crossing waits for
+// offlineFailureThreshold consecutive idle failures, each crossing noted exactly once (the
+// saveFailing fail-once posture). The consequence is [Model.blockedUpstream]: the three paths that
+// would open an Exchange — a message, /continue, /compact — are refused with a note while there is
+// nothing to send to, and the typed message STAYS IN THE BOX, while scrollback, /clear, /sessions,
+// /version, /confine and Shift+Tab all stay live. An unwired seam arms no chain, folds nothing and
+// blocks nothing, which is exactly the pre-heartbeat renderer.
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the three

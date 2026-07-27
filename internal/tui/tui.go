@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -205,6 +206,20 @@ type Options struct {
 	// owns the path, id minting, and on-disk format, keeping the file I/O out of the renderer
 	// while the "is it safe to snapshot" decision stays with the Model that owns the Engine.
 	Sessions SessionHost
+
+	// Heartbeat is one observation of the Upstream: is the server reachable, which model is it
+	// serving, in which context window, and what else does it advertise (internal/heartbeat). The
+	// binary backs it with a live heartbeat.Monitor; the TUI owns only the CADENCE and the
+	// consequences — it fires one beat from Init, re-arms heartbeat.Interval after each LANDED beat
+	// (so beats can never overlap), renders the offline state, and refuses a send while the server
+	// is not there to answer it. A beat is never an error: an unreachable server is a finding the
+	// Beat itself carries, which is why the seam returns no error.
+	//
+	// nil ⇒ unwired: no tick chain starts, no beat is ever folded, nothing is ever blocked, and the
+	// footer keeps the launch-time display — exactly the pre-heartbeat behaviour, which is what
+	// every hand-built test Options relies on. It is a func rather than an interface for the same
+	// reason SaveHostAcknowledgement is: the TUI needs one call, not a type.
+	Heartbeat func(context.Context) heartbeat.Beat
 
 	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
 	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints

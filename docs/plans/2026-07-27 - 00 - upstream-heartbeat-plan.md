@@ -180,7 +180,22 @@ Implementation notes — validate-then-commit, nothing mutated on any error path
 
 ---
 
-## 3. TUI heartbeat loop — tick chain, offline state, submit block, display fixes
+## 3. TUI heartbeat loop — tick chain, offline state, submit block, display fixes — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): three deviations/additions from the item's literal text.
+1. The acceptance line "all pre-existing `internal/tui` tests pass **unmodified**" could not hold
+   literally: `TestDisplayModel` (`model_test.go`) PINNED the `displayModel("") == "."` bug the item
+   fixes, with the comment "never reached in practice". That one table row is deleted (the case is
+   now covered by the item's own `TestDisplayModelEmpty`) and the test's doc comment points at it.
+   Every other pre-existing test in the package passes untouched.
+2. The `runCommand` gate is one check above the switch, keyed on the two Exchange-opening verbs
+   (`continue`, `compact`), rather than a copy inside each case — same behaviour, one wording of the
+   refusal. `submit`'s check sits after the blank-message guard, so an empty ⏎ while offline stays
+   the silent no-op it already was.
+3. Two additions the item implied but did not list: the `beatMsg` fold repaints only when the fold
+   actually noted a transition (a repaint on every beat would drop a live drag-selection every ten
+   seconds — `refreshViewport` clears `transcriptSel`), and `internal/tui/doc.go` gains the
+   heartbeat paragraph the package's file-by-file narration convention requires.
 
 **What.** The TUI half, deliberately rebind-free (bindings don't move yet, so the footer never shows an observed-but-unbound model — the tree stays honest). `tui.Options` gains `Heartbeat func(context.Context) heartbeat.Beat` (nil ⇒ unwired: no chain starts, every existing test unaffected) — the `SkillCatalog`-style narrow seam; `internal/tui` imports `internal/heartbeat`, never `internal/provider`. `Model` gains a plain-value `hb heartbeatState{gen, failures int; offline, everOnline bool; lastFailure string; models []heartbeat.ModelSummary; observedModel string; observedWindow int}` (value-copy-safe). `messages.go` gains `heartbeatTickMsg{gen int}` + `beatMsg{gen int; beat heartbeat.Beat}` and the compile-assert entries. Tick topology: `newModel` arms `hb.gen = 1` when wired; `Init` (`model.go:210`) becomes `tea.Batch(m.input.Focus(), m.beatCmd())`; the `beatMsg` fold schedules `tea.Tick(heartbeat.Interval, …)`; the tick re-issues `beatCmd`; both drop stale generations (spinner chain shape, `spinner.go:369-382`). The beat Cmd captures `m.parent` so shutdown cancels an in-flight beat. Offline policy per the debounce decision above; transitions note once each way: `server offline — <failure>` / `server back online`. Submit block: `blockedUpstream()` = `opts.Heartbeat != nil && (m.hb.offline || m.opts.Model == "")`, checked at the top of `submit()`'s message path and `runCommand`'s `continue`/`compact` cases — transcript note (`cannot send — server offline (<endpoint>): <failure>`, or `…still connecting to <endpoint>` pre-bind), **typed input preserved** (no editor reset); `/clear`, `/sessions`, `/version`, `/confine`, Shift+Tab stay live. Display: `footerContent` (`model.go:1373`) appends a styled `offline` segment when offline and shows `connecting…` in place of model ✦ ctx while `Model == ""`; successful beats stash `AvailableModels` into `hb.models` (decision 4's data layer — no UI). Two cheap fixes ride along: `displayModel("")` returns `""` (today `filepath.Base("")` = `"."`, live on every cold start), and **B5**: `contextUsage.view` (`model.go:1590`) clamps the `%` text to 100 to match the already-clamped bar.
 

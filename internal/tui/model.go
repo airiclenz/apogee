@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 )
 
 // ----------------------------------------------------------------------------
@@ -80,6 +81,12 @@ type Model struct {
 	// safe inside the value-copied Model, and every frame is a pure function of the counter rather
 	// than of an RNG handle a copy would share (ADR 0011).
 	spin spinnerAnim
+
+	// hb is the upstream heartbeat's state — the tick chain's generation, the offline debounce,
+	// and what the last landed beat observed (see heartbeatState). Plain values and one slice, so
+	// it is safe inside the value-copied Model (ADR 0011). It stays zero when Options.Heartbeat is
+	// unwired, and every reader treats that zero value as "no monitor, nothing to say".
+	hb heartbeatState
 
 	// Lifecycle.
 	state      uiState
@@ -152,6 +159,13 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		state:        stateIdle,
 	}
 
+	// Arm the heartbeat's tick chain when the monitor is wired: generation 1 is the chain Init's
+	// first beat belongs to. An unwired seam leaves it at 0 — the generation no beat ever carries,
+	// so a stray Msg cannot be folded into a Model that monitors nothing.
+	if opts.Heartbeat != nil {
+		m.hb.gen = 1
+	}
+
 	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
 	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
 	// every repaint, so it reflows on resize with no "already shown" guard, and /clear re-seeds it
@@ -205,10 +219,14 @@ func blackenInput(ta *textarea.Model) {
 	ta.SetStyles(s)
 }
 
-// Init starts the cursor blink. The window is sized by the first WindowSizeMsg the program
-// sends; nothing else needs an initial Cmd (the spinner ticks only while running).
+// Init starts the cursor blink and fires the first heartbeat. The window is sized by the first
+// WindowSizeMsg the program sends; nothing else needs an initial Cmd (the spinner ticks only while
+// running). The beat goes out immediately rather than after one Interval, because startup
+// discovery IS the first beat (the binary no longer probes before painting): the sooner it lands,
+// the sooner the footer stops saying "connecting…". With the monitor unwired beatCmd is nil and
+// tea.Batch collapses to the focus Cmd alone, so an unwired TUI behaves exactly as before.
 func (m Model) Init() tea.Cmd {
-	return m.input.Focus()
+	return tea.Batch(m.input.Focus(), m.beatCmd())
 }
 
 // ----------------------------------------------------------------------------
@@ -372,6 +390,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.spin.frame++
 		return m, m.spin.tick()
+
+	case beatMsg:
+		// One observation of the Upstream landed (beatCmd). Fold what it says, then re-arm the
+		// chain from HERE — Interval after the beat landed, never on a fixed clock — so the next
+		// beat cannot overlap this one. A beat from a retired chain is inert, like a spinner tick.
+		if !m.heartbeatLive(msg.gen) {
+			return m, nil
+		}
+		next, noted := m.foldBeat(msg.beat)
+		if noted {
+			// Only a transition writes to the transcript; repainting on every beat would also drop
+			// a live drag-selection (refreshViewport) every ten seconds.
+			next.refreshViewport()
+		}
+		return next, next.beatTick()
+
+	case heartbeatTickMsg:
+		// The interval since the last landed beat has elapsed: issue the next one. Same generation
+		// guard as the spinner chain — a tick from a retired chain schedules nothing.
+		if !m.heartbeatLive(msg.gen) {
+			return m, nil
+		}
+		return m, m.beatCmd()
 
 	case tea.MouseWheelMsg:
 		// The wheel scrolls the transcript in every state — unlike the keyboard path, which is
@@ -599,6 +640,16 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	if parsed.text == "" && len(attached) == 0 {
 		return m, nil
 	}
+	if m.blockedUpstream() {
+		// There is nothing to send to. Refuse at the boundary and say why — and leave the typed
+		// message exactly where it is: the human wrote it, the server's absence is not their
+		// mistake, and re-typing it once the server comes back would be the actual insult. Nothing
+		// else about the state moves (no worker, no reset, no chip drop), so ⏎ once the heartbeat
+		// recovers sends the very same message.
+		m.transcript.addNote(m.upstreamBlockNote())
+		m.refreshViewport()
+		return m, nil
+	}
 	if m.eng.InExchange() {
 		// The session was restored mid-task and the human typed a fresh message instead of
 		// /continue: their new intent supersedes the stale half-Exchange (Esc-parity). Scrap the
@@ -716,6 +767,15 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 
 	if parsed.err != nil {
 		m.transcript.addNote(parsed.err.Error())
+		m.layout()
+		return m, nil
+	}
+
+	// /continue and /compact are the two commands that open an Exchange, so they answer to the
+	// heartbeat exactly as a typed message does (blockedUpstream). The purely local verbs below —
+	// /clear, /sessions, /version, /confine — stay live while the server is away.
+	if m.blockedUpstream() && (parsed.command == "continue" || parsed.command == "compact") {
+		m.transcript.addNote(m.upstreamBlockNote())
 		m.layout()
 		return m, nil
 	}
@@ -1072,6 +1132,165 @@ func (m Model) busy() bool {
 }
 
 // ----------------------------------------------------------------------------
+// The upstream heartbeat (ADR 0024)
+// ----------------------------------------------------------------------------
+
+// heartbeatState is the Model's live view of the Upstream monitor: which tick chain is current,
+// how many consecutive idle beats have failed, whether the footer currently says offline, whether
+// any beat has ever landed, why the last one did not, what the server advertises, and what the
+// last beat observed as served. It holds plain values and one slice of plain values, so it copies
+// safely with the Model (ADR 0011).
+//
+// It is display and policy state only — no binding moves here. The engine's per-model bindings are
+// re-resolved by the composition root through a separate seam, at a quiescent boundary.
+type heartbeatState struct {
+	// gen is the live tick chain's generation; a Msg carrying any other one is inert. 0 means no
+	// chain (the monitor is unwired).
+	gen int
+	// failures counts consecutive failed IDLE beats since the last success — the offline debounce's
+	// evidence. A landed beat resets it; a failure while an Exchange runs leaves it where it was.
+	failures int
+	// offline is what the footer says and what a submit is refused against.
+	offline bool
+	// everOnline records that at least one beat has landed. Before that there is nothing to weigh a
+	// failure against, so the first one is believed immediately.
+	everOnline bool
+	// lastFailure is the most recent failure's words, quoted in the offline note and in the
+	// refusal of a send. "" once a beat lands.
+	lastFailure string
+	// models is what the server last advertised — the data layer a future model picker reads.
+	// Nothing renders it today; it is kept current so the picker needs no new plumbing.
+	models []heartbeat.ModelSummary
+	// observedModel and observedWindow are what the last beat that mattered reported. They are the
+	// baseline a model/window change is measured against; the rebind orchestration owns them.
+	observedModel  string
+	observedWindow int
+}
+
+// offlineFailureThreshold is how many consecutive idle beat failures flip the footer offline once
+// a beat has ever landed. One failure is not evidence of an absent server: discovery's own timeout
+// can elapse on a server that is merely saturated, and a footer that flickers offline mid-session
+// would be worse than useless. Two (~15–25 s after the server actually went away) is the owner's
+// debounce. Before any beat has landed there is nothing to weigh against, so a cold start says so
+// on the first failure — see foldBeatFailure.
+const offlineFailureThreshold = 2
+
+// onlineNote and offlineNote word the two transitions, each recorded exactly once per crossing
+// (the saveFailing fail-once posture): a heartbeat that noted every failed beat would fill the
+// transcript with one line every ten seconds while a server is down.
+const onlineNote = "server back online"
+
+// offlineNote words the offline crossing, naming why the server could not be read when the monitor
+// has words for it.
+func offlineNote(failure string) string {
+	if failure == "" {
+		return "server offline"
+	}
+	return "server offline — " + failure
+}
+
+// heartbeatLive reports whether gen belongs to the current tick chain of a WIRED monitor — the
+// guard both heartbeat Msgs pass through. An unwired Model (gen 0) folds nothing, so a stray beat
+// can never flip a TUI that monitors nothing into an offline state it can never leave.
+func (m Model) heartbeatLive(gen int) bool {
+	return m.opts.Heartbeat != nil && gen == m.hb.gen
+}
+
+// beatCmd runs one observation off the Update loop and reports it as a beatMsg stamped with the
+// current generation. It captures the program context, so a shutdown cancels a beat still in
+// flight, and the seam func by value — no pointer into the value-copied Model (the saveCmd
+// posture). It returns nil when the monitor is unwired, which is what makes Init's tea.Batch
+// collapse to the focus Cmd alone.
+func (m Model) beatCmd() tea.Cmd {
+	observe := m.opts.Heartbeat
+	if observe == nil {
+		return nil
+	}
+	ctx, gen := m.parent, m.hb.gen
+	return func() tea.Msg {
+		return beatMsg{gen: gen, beat: observe(ctx)}
+	}
+}
+
+// beatTick schedules the next beat one heartbeat.Interval after the beat that just landed. Timing
+// the wait from the landing (rather than from a fixed clock) is what makes overlap impossible: the
+// observation and its wait are strictly sequential, whatever the server's latency.
+func (m Model) beatTick() tea.Cmd {
+	gen := m.hb.gen
+	return tea.Tick(heartbeat.Interval, func(time.Time) tea.Msg { return heartbeatTickMsg{gen: gen} })
+}
+
+// foldBeat folds one landed observation into the heartbeat state and reports whether it wrote a
+// transcript note (so the caller repaints only on a transition). It moves no binding: what the
+// server serves is recorded, and applying it is the rebind orchestration's job.
+func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
+	if !beat.Reachable {
+		return m.foldBeatFailure(beat.Failure)
+	}
+	m.hb.failures = 0
+	m.hb.everOnline = true
+	m.hb.lastFailure = ""
+	m.hb.models = beat.AvailableModels // the future picker's data layer (decision 4); nothing renders it
+	if !m.hb.offline {
+		return m, false // the ordinary case: a healthy beat says nothing
+	}
+	m.hb.offline = false
+	m.transcript.addNote(onlineNote)
+	return m, true
+}
+
+// foldBeatFailure folds a beat that could not read the server. Three rules, in order:
+//
+//   - While an Exchange is in flight the failure is IGNORED — counter, state and words untouched.
+//     A streaming reply is stronger evidence that the server is there than a timed-out /v1/models
+//     on a single-slot server busy serving that very stream.
+//   - Before any beat has ever landed, one failure is enough: a cold start against a server that
+//     is not running should say so at once rather than after a debounce it has no evidence for.
+//   - Otherwise the crossing waits for offlineFailureThreshold consecutive idle failures.
+//
+// The crossing is noted exactly once; every further failed beat is silent until a success crosses
+// back (foldBeat).
+func (m Model) foldBeatFailure(failure string) (Model, bool) {
+	if m.busy() {
+		return m, false
+	}
+	m.hb.failures++
+	m.hb.lastFailure = failure
+	if m.hb.offline || (m.hb.everOnline && m.hb.failures < offlineFailureThreshold) {
+		return m, false
+	}
+	m.hb.offline = true
+	m.transcript.addNote(offlineNote(failure))
+	return m, true
+}
+
+// blockedUpstream reports whether there is nothing to send to right now: the heartbeat says the
+// server is offline, or no model is bound yet because the first beat has not landed (the async
+// cold start). It gates the three paths that would open an Exchange — a message, /continue, and
+// /compact — so a send fails loudly at the boundary instead of silently against a dead endpoint.
+// Everything else stays live: scrollback, /clear, /sessions, /version, /confine, Shift+Tab.
+//
+// With the monitor unwired it is always false: nothing observes the server, so the TUI has no
+// standing to refuse anything (and every pre-heartbeat test keeps its behaviour).
+func (m Model) blockedUpstream() bool {
+	return m.opts.Heartbeat != nil && (m.hb.offline || m.opts.Model == "")
+}
+
+// upstreamBlockNote words the refusal blockedUpstream produced: offline names the endpoint and,
+// when the monitor has them, the failure's own words; the pre-bind case says the truth instead —
+// the server has not answered YET, which on a cold start is a matter of seconds.
+func (m Model) upstreamBlockNote() string {
+	if !m.hb.offline {
+		return "cannot send — still connecting to " + m.opts.Endpoint
+	}
+	note := "cannot send — server offline (" + m.opts.Endpoint + ")"
+	if m.hb.lastFailure != "" {
+		note += ": " + m.hb.lastFailure
+	}
+	return note
+}
+
+// ----------------------------------------------------------------------------
 // Layout
 // ----------------------------------------------------------------------------
 
@@ -1371,24 +1590,54 @@ func (m Model) footerView() string {
 // colour reset bleed the black field. The host falls back to the endpoint when no alias is
 // configured, and the context window is omitted when unknown (0).
 func (m Model) footerContent(w int) string {
-	info := strings.Join(nonEmpty(hostDisplay(m.opts), displayModel(m.opts.Model), formatTokens(m.opts.ContextWindow)), " "+glyphAssistant+" ")
+	info := strings.Join(nonEmpty(append([]string{hostDisplay(m.opts)}, m.upstreamSegments()...)...), " "+glyphAssistant+" ")
+	offline := ""
+	if m.hb.offline {
+		offline = " " + glyphAssistant + " " + offlineLabel
+	}
 	mode := modeLabel(m.opts.Mode)
 	bar := m.th.chromeRule.Render("│")
 	field := w - 2 // content columns between the two │ borders (footerView guards w >= 3)
 
 	// One-column margins inside the borders; a black-bg gap justifies the mode marker right.
-	gap := field - 2 - lipgloss.Width(info) - lipgloss.Width(mode)
+	gap := field - 2 - lipgloss.Width(info) - lipgloss.Width(offline) - lipgloss.Width(mode)
 	if gap < 1 {
 		// Too narrow for both segments: keep the left info, truncate to the field, pad black.
-		body := ansi.Truncate(" "+info, field, "…")
+		body := ansi.Truncate(" "+info+offline, field, "…")
 		body += strings.Repeat(" ", max(0, field-lipgloss.Width(body)))
 		return bar + m.th.footerText.Render(body) + bar
 	}
 	left := m.th.footerText.Render(" " + info)
+	if offline != "" {
+		// Styled independently, like the mode marker: the segment carries the error tone on the
+		// footer's own black field, so the state reads at a glance without recolouring the line.
+		left += m.th.footerText.Foreground(colError).Render(offline)
+	}
 	fill := m.th.footerText.Render(strings.Repeat(" ", gap))
 	// footerText keeps the black background; only the foreground swaps to the mode's colour.
 	right := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(mode) + m.th.footerText.Render(" ")
 	return bar + left + fill + right + bar
+}
+
+// The two words the footer says about the Upstream that are not facts about a model.
+const (
+	// connectingLabel stands where the model and its window go while a wired heartbeat has not
+	// bound a model yet — the honest word for the seconds between the first paint and the first
+	// landed beat (startup discovery is now that beat).
+	connectingLabel = "connecting…"
+	// offlineLabel is the footer's own word for the state a send is refused in.
+	offlineLabel = "offline"
+)
+
+// upstreamSegments are the footer's upstream facts: the display model and its context window, or
+// the single word "connecting…" while a wired heartbeat has not bound a model yet. The two are
+// replaced TOGETHER — a context-window pin is not a fact about a model nobody has named yet — and
+// with the monitor unwired the pair is rendered exactly as it always was.
+func (m Model) upstreamSegments() []string {
+	if m.opts.Model == "" && m.opts.Heartbeat != nil {
+		return []string{connectingLabel}
+	}
+	return []string{displayModel(m.opts.Model), formatTokens(m.opts.ContextWindow)}
 }
 
 // newStartupView builds the one-time start-up box's facts from the resolved display Options — the
@@ -1431,7 +1680,15 @@ var modelWeightExt = map[string]bool{
 // the name, so this strips the directory and a known weight-file extension. It is display-only:
 // opts.Model stays the canonical id sent to the server on every request (wire.go), so the strip
 // never reaches the wire — mirroring modeLabel.
+//
+// No model at all renders as nothing, so the footer and the start-up box simply omit the segment
+// (nonEmpty). The guard is not cosmetic: filepath.Base("") is ".", and with the model bound late
+// by the first heartbeat there is now a real window at every cold start in which a lone "." would
+// be shown as the model.
 func displayModel(s string) string {
+	if s == "" {
+		return ""
+	}
 	base := filepath.Base(s)
 	if modelWeightExt[strings.ToLower(filepath.Ext(base))] {
 		base = base[:len(base)-len(filepath.Ext(base))]
@@ -1583,11 +1840,17 @@ var gaugeEighths = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 // prefix is faint-on-black status text; the bar is a solid two-tone strip (renderGaugeBar)
 // carrying its own per-cell backgrounds, so the whole string is pre-styled and must be
 // concatenated raw by the caller (never re-wrapped in a background style).
+//
+// The percentage is clamped to 100 because the bar already is (renderGaugeBar): a conversation
+// carried across a switch to a smaller window overfills its new limit, and a full bar labelled
+// "137%" is a rendering bug, not a reading. The unclamped Used still shows beside it, so an
+// over-window fill is visible as the token count rather than as an impossible percentage.
 func (c contextUsage) view(th theme) string {
 	if c.Used <= 0 || c.Limit <= 0 {
 		return ""
 	}
-	prefix := th.statusBar.Render(fmt.Sprintf("%s %d%% ", formatTokens(c.Used), c.Used*100/c.Limit))
+	pct := min(c.Used*100/c.Limit, 100)
+	prefix := th.statusBar.Render(fmt.Sprintf("%s %d%% ", formatTokens(c.Used), pct))
 	return prefix + renderGaugeBar(th, c.Used, c.Limit)
 }
 
