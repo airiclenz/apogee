@@ -5,10 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,82 +19,6 @@ import (
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
-
-// discoverUpstreamModel probes a real OpenAI-compatible /v1/models endpoint and returns its
-// active model — the production discoverer the root wires into resolveModel. The httptest
-// server exercises the full provider path (HTTP + decode), not just the injected fake.
-func TestDiscoverUpstreamModel(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":[{"id":"loaded-model","context_length":32768}]}`))
-		case "/props":
-			// Best-effort runtime-window probe; a non-llama.cpp server has no /props.
-			w.WriteHeader(http.StatusNotFound)
-		default:
-			t.Errorf("discovery hit unexpected path %q", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
-
-	got, err := discoverUpstreamModel(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatalf("discoverUpstreamModel: %v", err)
-	}
-	if got.model != "loaded-model" {
-		t.Errorf("model = %q; want the server's advertised model", got.model)
-	}
-	if got.contextWindow != 32768 {
-		t.Errorf("contextWindow = %d; want the server's advertised window 32768", got.contextWindow)
-	}
-}
-
-// An unreachable server is a discovery error the caller surfaces, not a silent empty model.
-func TestDiscoverUpstreamModelUnreachable(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	if _, err := discoverUpstreamModel(context.Background(), srv.URL); err == nil {
-		t.Fatal("discovery against a failing server: want an error, got nil")
-	}
-}
-
-// The loud-zero notice fires exactly when the context window is unknown (0) while automatic
-// Compaction is on — the Budget and the fold then have nothing to bind against (item 3 / S3). It
-// is suppressed once a window is known (a context-window: key or successful discovery) or when
-// Compaction is off.
-func TestContextWindowNotice(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name       string
-		maxTokens  int
-		compaction bool
-		wantNotice bool
-	}{
-		{name: "unknown window + compaction on → notice", maxTokens: 0, compaction: true, wantNotice: true},
-		{name: "unknown window + compaction off → silent", maxTokens: 0, compaction: false, wantNotice: false},
-		{name: "known window + compaction on → silent", maxTokens: 32768, compaction: true, wantNotice: false},
-		{name: "known window + compaction off → silent", maxTokens: 32768, compaction: false, wantNotice: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := contextWindowNotice(tt.maxTokens, tt.compaction)
-			if (got != "") != tt.wantNotice {
-				t.Errorf("contextWindowNotice(%d, %v) = %q; wantNotice = %v", tt.maxTokens, tt.compaction, got, tt.wantNotice)
-			}
-			if tt.wantNotice && !strings.Contains(got, "context-window") {
-				t.Errorf("notice %q does not name the context-window key", got)
-			}
-		})
-	}
-}
 
 // The label-walk pre-warm trigger is the mirror of the degradation gate: it fires exactly when
 // Auto asks for confinement a host CAN enforce (Auto ∧ confine-asked ∧ FSWrite), so the Windows
@@ -155,26 +78,26 @@ func captureStderr(t *testing.T, f func()) string {
 	return <-captured
 }
 
-// runRoot threads opts.contextWindow into apogee.Config.Context.MaxContextTokens (wire.go), which
-// the Budget and automatic Compaction bind against. The constructed Agent exposes no accessor for
-// that field, so the threading is observed through its sole runtime consumer in the composition
-// root: the loud-zero startup notice, which fires only when MaxContextTokens == 0 while Compaction
-// is on. A positive window therefore reaches MaxContextTokens (no notice) and a zero window reaches
-// it too (notice fires) — proving opts.contextWindow lands in ContextConfig, not just in opts (the
-// gap TestApplyConfigContextWindow leaves open). The same value also lands in the TUI footer's
-// ContextWindow, asserted here for the exact-value pin (item 5).
+// runRoot threads opts.contextWindow — which is now the `context-window:` PIN and nothing else,
+// since startup no longer probes — into both places that read it: the TUI's own ContextWindow (the
+// footer's window and the gauge denominator) and, as the pin, the rebind closure, where it must
+// outrank whatever the heartbeat observes (ADR 0024, decision 9). The unknown-window honesty line
+// this test used to observe the threading through has moved into the TUI's rebind fold, where the
+// window is actually known or not; internal/tui's TestUnknownWindowNotedOnBind owns it now.
 func TestRunRootThreadsContextWindow(t *testing.T) {
-	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
+	t.Parallel()
 	tests := []struct {
 		name          string
 		contextWindow int
-		wantNotice    bool
+		observed      int
+		wantBound     int
 	}{
-		{name: "positive window reaches MaxContextTokens (no loud-zero notice)", contextWindow: 16384, wantNotice: false},
-		{name: "zero window reaches MaxContextTokens (loud-zero notice fires)", contextWindow: 0, wantNotice: true},
+		{name: "pinned window outranks the observation", contextWindow: 16384, observed: 131072, wantBound: 16384},
+		{name: "unpinned adopts whatever the beat observed", contextWindow: 0, observed: 131072, wantBound: 131072},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rec := &recordingLauncher{}
 			opts := options{
 				endpoint:      "http://127.0.0.1:1111",
@@ -182,29 +105,154 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 				mode:          "ask-before",
 				workspace:     t.TempDir(),
 				contextWindow: tt.contextWindow,
-				autoCompact:   true, // the loud-zero notice fires only while Compaction is on
+				autoCompact:   true,
 			}
 
-			var runErr error
-			stderr := captureStderr(t, func() {
-				runErr = runRoot(context.Background(), opts, rec.launch)
-			})
-
-			if runErr != nil {
-				t.Fatalf("runRoot: %v", runErr)
-			}
-			gotNotice := strings.Contains(stderr, "context window unknown")
-			if gotNotice != tt.wantNotice {
-				t.Errorf("loud-zero notice present = %v (stderr = %q); want %v — Config.Context.MaxContextTokens must carry opts.contextWindow = %d",
-					gotNotice, stderr, tt.wantNotice, tt.contextWindow)
+			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+				t.Fatalf("runRoot: %v", err)
 			}
 			if rec.opts.ContextWindow != tt.contextWindow {
 				t.Errorf("tui.Options.ContextWindow = %d; want the threaded %d", rec.opts.ContextWindow, tt.contextWindow)
+			}
+			if rec.opts.Rebind == nil {
+				t.Fatal("tui.Options.Rebind is nil; the composition root did not wire the rebind closure")
+			}
+			result, err := rec.opts.Rebind("fake", tt.observed)
+			if err != nil {
+				t.Fatalf("Rebind: %v", err)
+			}
+			if result.ContextWindow != tt.wantBound {
+				t.Errorf("bound window = %d; want %d (pin = %d, observed = %d)",
+					result.ContextWindow, tt.wantBound, tt.contextWindow, tt.observed)
 			}
 			// The build version is threaded into Options from the single source (the embedded
 			// VERSION file, via apogee.Version), which never resolves empty (blank ⇒ "dev").
 			if rec.opts.Version == "" {
 				t.Error("tui.Options.Version is empty; the build version was not threaded from apogee.Version")
+			}
+		})
+	}
+}
+
+// rebindSpecFor is the composition root's half of a rebind: everything that is per-model gets
+// resolved again for the model the heartbeat observed, and everything else is left alone. The table
+// walks the four decisions it makes — which system-prompt template (ADR 0023), which validated
+// Mechanism set (ADR 0016), whether an explicit `mechanisms:` block suppresses that set, and which
+// window is bound when the observation and a `context-window:` pin disagree (decision 9).
+func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
+	t.Parallel()
+
+	prompts := systemPromptSettings{
+		global: promptSource{text: "the global prompt"},
+		models: map[string]promptSource{"model-b": {text: "the model-b prompt"}},
+	}
+	manual := []apogee.MechanismID{"validate"}
+
+	tests := []struct {
+		name         string
+		opts         options
+		manualIDs    []apogee.MechanismID
+		model        string
+		window       int
+		pinnedWindow int
+		wantPrompt   string
+		wantWindow   int
+		wantEnable   func(t *testing.T, got []apogee.MechanismID)
+	}{
+		{
+			name:       "the per-model prompt entry is selected for the model being bound",
+			opts:       options{systemPrompt: prompts},
+			model:      "model-b",
+			window:     32768,
+			wantPrompt: "the model-b prompt",
+			wantWindow: 32768,
+		},
+		{
+			name:       "a model with no entry of its own falls back to the global prompt",
+			opts:       options{systemPrompt: prompts},
+			model:      "model-a",
+			window:     32768,
+			wantPrompt: "the global prompt",
+			wantWindow: 32768,
+		},
+		{
+			name: "a validated set matching the new model applies when no manual list was configured",
+			opts: options{
+				validatedSetsEnable: true,
+				validatedSetsAlias:  map[string]string{gemmaKey: gemmaKey}, // the §3 human decision
+			},
+			model:      gemmaKey,
+			window:     8192,
+			wantWindow: 8192,
+			wantEnable: func(t *testing.T, got []apogee.MechanismID) {
+				t.Helper()
+				if len(got) < 2 {
+					t.Errorf("EnableMechanisms = %v; want the matched validated set, not the empty floor", got)
+				}
+			},
+		},
+		{
+			name: "an explicit mechanisms: block is manual control and suppresses the matched set",
+			opts: options{
+				validatedSetsEnable: true,
+				validatedSetsAlias:  map[string]string{gemmaKey: gemmaKey},
+				mechanisms:          map[string]bool{"validate": true},
+			},
+			manualIDs:  manual,
+			model:      gemmaKey,
+			window:     8192,
+			wantWindow: 8192,
+			wantEnable: func(t *testing.T, got []apogee.MechanismID) {
+				t.Helper()
+				if !slices.Equal(got, manual) {
+					t.Errorf("EnableMechanisms = %v; want the manual list %v carried through untouched", got, manual)
+				}
+			},
+		},
+		{
+			name:         "a context-window: pin outranks the observed window",
+			opts:         options{},
+			model:        "model-a",
+			window:       131072,
+			pinnedWindow: 16384,
+			wantWindow:   16384,
+		},
+		{
+			name:       "an unpinned session adopts the observed window",
+			opts:       options{},
+			model:      "model-a",
+			window:     131072,
+			wantWindow: 131072,
+		},
+		{
+			name:       "an observation with no window binds an unknown one rather than inventing it",
+			opts:       options{},
+			model:      "model-a",
+			wantWindow: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
+
+			spec, _, err := rebindSpecFor(tt.opts, roots, tt.manualIDs, tt.model, tt.window, tt.pinnedWindow)
+			if err != nil {
+				t.Fatalf("rebindSpecFor: %v", err)
+			}
+			if spec.Model != tt.model {
+				t.Errorf("spec.Model = %q; want the observed %q", spec.Model, tt.model)
+			}
+			if spec.SystemPrompt != tt.wantPrompt {
+				t.Errorf("spec.SystemPrompt = %q; want %q", spec.SystemPrompt, tt.wantPrompt)
+			}
+			if spec.MaxContextTokens != tt.wantWindow {
+				t.Errorf("spec.MaxContextTokens = %d; want %d (observed %d, pin %d)",
+					spec.MaxContextTokens, tt.wantWindow, tt.window, tt.pinnedWindow)
+			}
+			if tt.wantEnable != nil {
+				tt.wantEnable(t, spec.EnableMechanisms)
 			}
 		})
 	}
@@ -747,6 +795,37 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 	}
 	if m.UserMsgs != 2 || m.CtxUsed != 200 {
 		t.Errorf("Meta counts = msgs %d, ctx %d; want the latest Save's 2 / 200", m.UserMsgs, m.CtxUsed)
+	}
+}
+
+// A heartbeat rebind moves the session's model mid-conversation, and the stored metadata has to
+// follow it: a session that started model-less (the async cold start) or switched models upstream
+// must be listed under what its Turns actually ran against, not under a launch-time value that was
+// never true. SetModel restamps subsequent Saves in place — it does not rewrite history, because
+// the record IS the session and its current model is the session's current truth.
+func TestSessionHostSetModelStampsSaves(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "", nil) // a cold start: nothing bound yet
+
+	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0); err != nil {
+		t.Fatalf("Save before the bind: %v", err)
+	}
+	host.SetModel("bound-model")
+	if err := host.Save(apogee.Session{}, nil, "cold", 2, 0); err != nil {
+		t.Fatalf("Save after the bind: %v", err)
+	}
+
+	metas, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("two Saves produced %d files; want 1 (update-in-place)", len(metas))
+	}
+	if metas[0].Model != "bound-model" {
+		t.Errorf("Meta.Model = %q; want %q — the save after SetModel must carry the rebound model",
+			metas[0].Model, "bound-model")
 	}
 }
 

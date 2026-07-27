@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -149,6 +152,86 @@ func TestRootCommandExecuteCleanQuit(t *testing.T) {
 	}
 	if !rec.called {
 		t.Fatal("launcher was not invoked through the command tree")
+	}
+}
+
+// TestRootStartsWithNoModelAndNoServer is decision 8's headline, and it is the exact inverse of
+// the behaviour it replaces: with no model configured by any layer and nothing listening at the
+// endpoint, startup used to fail hard ("no model configured and discovery from … failed"), which
+// meant the tool was unusable precisely when the server needed attention. It now reaches the
+// launcher with no model bound at all — the first beat binds one, or the footer says the server is
+// offline and the submit block explains itself — and both upstream seams are wired for it to do so.
+func TestRootStartsWithNoModelAndNoServer(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	cmd := newRootCommand(rec.launch)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"--endpoint", "http://127.0.0.1:1", // nothing listens here — and nothing asks
+		"--workspace", t.TempDir(),
+		"--config", t.TempDir(), // hermetic: no real ~/.apogee/config.yaml, so no model: key
+	})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("Execute with no model and no server: %v\n%s", err, out.String())
+	}
+	if !rec.called {
+		t.Fatal("the launcher was not invoked; startup still refuses to open without a reachable server")
+	}
+	if rec.opts.Model != "" {
+		t.Errorf("tui.Options.Model = %q; want \"\" — nothing may be invented before the first beat", rec.opts.Model)
+	}
+	if rec.opts.Heartbeat == nil {
+		t.Error("tui.Options.Heartbeat is nil; the upstream monitor was not wired")
+	}
+	if rec.opts.Rebind == nil {
+		t.Error("tui.Options.Rebind is nil; the rebind closure was not wired")
+	}
+}
+
+// TestRootMakesNoStartupProbe is the other half of decision 8: not merely that startup survives an
+// unreachable server, but that it never asks. A reachable server is the harder case — a surviving
+// probe would succeed and hide itself — so this one counts requests against a live endpoint and
+// requires the count to still be zero at the moment the launcher is handed the wiring. Everything
+// upstream now happens inside the running TUI, on the heartbeat's cadence.
+func TestRootMakesNoStartupProbe(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"loaded-model","context_length":32768}]}`))
+	}))
+	defer srv.Close()
+
+	launched := false
+	atLaunch := int64(-1)
+	launch := func(context.Context, tui.Engine, *tui.Bridge, tui.Options) error {
+		launched = true
+		atLaunch = requests.Load()
+		return nil
+	}
+
+	cmd := newRootCommand(launch)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"--endpoint", srv.URL,
+		"--workspace", t.TempDir(),
+		"--config", t.TempDir(),
+	})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("Execute: %v\n%s", err, out.String())
+	}
+	if !launched {
+		t.Fatal("the launcher was not invoked")
+	}
+	if atLaunch != 0 {
+		t.Errorf("the server saw %d request(s) before the UI launched; want 0 — startup must not probe", atLaunch)
 	}
 }
 

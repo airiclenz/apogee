@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/present"
 	"github.com/airiclenz/apogee/internal/probe"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -42,33 +42,6 @@ const (
 	modeAuto       = apogee.ModeAuto
 )
 
-// discoverUpstreamModel probes the OpenAI-compatible server at endpoint for its active
-// model id — the first advertised model when none is configured (provider.Discover). It is
-// the production modelDiscoverer the root wires into resolveModel so a single-model server
-// runs with no --model set; tests inject a fake. ctx bounds the probe (Discover also
-// self-imposes a short timeout), and a model-less client is fine — Discover treats the
-// configured model only as a hint.
-func discoverUpstreamModel(ctx context.Context, endpoint string) (discoveredUpstream, error) {
-	info, err := provider.NewClient(endpoint, "").Discover(ctx)
-	if err != nil {
-		return discoveredUpstream{}, err
-	}
-	return discoveredUpstream{model: info.ActiveModel, contextWindow: info.ContextWindow}, nil
-}
-
-// contextWindowNotice returns the one-line startup notice to print when the context window is
-// unknown (0) while automatic Compaction is enabled — the Budget and the automatic fold both
-// bind against the window, so with none known they are inactive (item 3 / S3). It returns "" (no
-// notice) when the window is known or Compaction is off. Pure so the startup message is
-// table-testable without capturing os.Stderr.
-func contextWindowNotice(maxContextTokens int, compactionEnabled bool) string {
-	if maxContextTokens != 0 || !compactionEnabled {
-		return ""
-	}
-	return "apogee: context window unknown — automatic compaction and the Budget are inactive; " +
-		"set context-window: in config.yaml or let discovery run"
-}
-
 // The confinement backend label and the Auto-degradation notice used below live in
 // internal/probe: `apogee probe` reports the same verdict off-session and the TUI's
 // /confine status renders it in-session, so the wording is extracted rather than copied —
@@ -82,8 +55,7 @@ func contextWindowNotice(maxContextTokens int, compactionEnabled bool) string {
 // worth pre-warming behind a progress notice. It returns true on the Linux and macOS backends too
 // (they also report FSWrite under Auto+confine), where PrewarmLabelWalk is a genuine no-op — only
 // the Windows-tagged labelBox pays a walk — so the Windows-vs-not distinction lives in that seam,
-// not here. Pure so the decision is table-testable off Windows (the contextWindowNotice /
-// DegradedNotice seam pattern).
+// not here. Pure so the decision is table-testable off Windows (the DegradedNotice seam pattern).
 func shouldPrewarmLabelWalk(mode apogee.Mode, confineToWorkspace, fsWrite bool) bool {
 	return mode == modeAuto && confineToWorkspace && fsWrite
 }
@@ -161,11 +133,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		}()
 	}
 
-	// The system prompt this session runs with (ADR 0023), selected for the RESOLVED model: the
-	// root filled opts.model from discovery before calling runRoot, so a system-prompt-models
-	// entry keyed on the discovered name is matchable here and nowhere earlier. A selected file
-	// that cannot be read, or a template carrying an unknown placeholder, fails startup naming the
-	// config key — the prompt is structural configuration, not something to degrade quietly around.
+	// The system prompt this session STARTS with (ADR 0023), selected for the model as configured
+	// — which on a cold start is no model at all, so this selects the global template and the
+	// per-model entry lands seconds later, on the first beat's rebind (rebindSpecFor re-runs
+	// exactly this call with the observed model). A selected file that cannot be read, or a
+	// template carrying an unknown placeholder, fails startup naming the config key — the prompt is
+	// structural configuration, not something to degrade quietly around.
 	sysPrompt, err := resolveSystemPrompt(opts.systemPrompt, opts.model, roots.config, os.ReadFile)
 	if err != nil {
 		return err
@@ -200,10 +173,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// the user's own message, exactly as it did before this key existed.
 		SystemPrompt: sysPrompt,
 		Skills:       skillProvider,
-		// The discovered runtime context window (0 when the server did not report one). It is the
-		// budget /compact and the automatic Compaction trigger bound their summary request against
-		// so compaction survives high fill (the summary call would otherwise overflow near n_ctx);
-		// the same value drives the TUI's footer/gauge below. CompactionEnabled carries the
+		// The `context-window:` PIN (0 when unpinned — nothing probes at startup any more). It is
+		// the budget /compact and the automatic Compaction trigger bound their summary request
+		// against so compaction survives high fill (the summary call would otherwise overflow near
+		// n_ctx); the same value drives the TUI's footer/gauge below. Unpinned it stays 0 until the
+		// first heartbeat rebind binds the observed window. CompactionEnabled carries the
 		// `auto-compact` key (default on) — the budget-driven automatic trigger (item 9); the
 		// on-demand /compact runs regardless of it.
 		Context: apogee.ContextConfig{MaxContextTokens: opts.contextWindow, CompactionEnabled: opts.autoCompact},
@@ -225,12 +199,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		fmt.Fprintln(os.Stderr, notice)
 	}
 
-	// When the context window is still unknown (discovery found none and no context-window: key
-	// was set) but automatic Compaction is on, the Budget and the fold have nothing to bind
-	// against — both silently do nothing. Say so once, and name the fix (item 3 / S3).
-	if notice := contextWindowNotice(cfg.Context.MaxContextTokens, cfg.Context.CompactionEnabled); notice != "" {
-		fmt.Fprintln(os.Stderr, notice)
-	}
+	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
+	// the TUI's rebind fold (ADR 0024): at this point in startup NOTHING has asked the server yet,
+	// so a launch-time notice would fire on every cold start and be wrong ten seconds later. The
+	// first beat that binds a window without one is where the sentence is actually true.
 
 	// Eager pre-warm of the confinement label walk (ADR 0020 §2, the plan's approach A). On the
 	// Windows token backend the box is a mandatory Low label on the workspace tree, and labelling a
@@ -271,10 +243,16 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// key — never constructed — must still fail loudly at this startup boundary. With nothing enabled
 	// the list is empty and the engine arms nothing, so a config without a mechanisms block behaves
 	// exactly as before.
-	cfg.EnableMechanisms, err = mechanismIDs(opts.mechanisms, mechanisms.KnownIDs())
+	//
+	// The list is hoisted into a local because it outlives this assignment: it is the MANUAL
+	// choice, model-independent by construction, and the rebind closure below re-runs the
+	// "an explicit mechanisms: block suppresses a validated set" rule against it for every new
+	// model — so it must survive the validated-set overwrite two blocks down.
+	manualIDs, err := mechanismIDs(opts.mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return err
 	}
+	cfg.EnableMechanisms = manualIDs
 
 	// The Validated-set runtime surface (ADR 0016): match the resolved model fingerprint
 	// against the shipped + user-local entries and fold an applying set into
@@ -317,7 +295,49 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// session's file rather than starting a new one.
 	host := newSessionHost(store, roots.workspace, opts.model, resumed)
 
+	// The upstream monitor: one beat every heartbeat.Interval, from inside the running TUI. The
+	// configured model id travels with it as the discovery HINT (decision 10) — while the server
+	// still serves that id, discovery resolves ITS window rather than the first advertised model's,
+	// which is the whole of the pinned-multi-model-server bug; once the pin vanishes from
+	// /v1/models the beat reports what is actually loaded and the rebind below follows it.
+	monitor := heartbeat.NewMonitor(opts.endpoint, opts.model)
+
+	// The `context-window:` pin, captured before anything can move it. Startup no longer probes, so
+	// a non-zero value here is the user's pin and nothing else — which is what lets rebindSpecFor
+	// implement decision 9 ("a pin is never overridden by the heartbeat") with one comparison.
+	pinnedWindow := opts.contextWindow
+
+	// The rebind closure: the composition root's half of an observed model change. The TUI decides
+	// WHEN (at idle, or at the exchange-terminal boundary), this decides WHAT — because every input
+	// to the decision is config the binary owns (the per-model system prompt, ADR 0023; the
+	// validated set, ADR 0016; the manual mechanisms list; the window pin) and the engine mutators
+	// are the binary's to drive. It runs on the Update goroutine, at a quiescent boundary Agent.
+	// Rebind demands, so nothing here needs a lock of its own. A resolution error returns WITHOUT
+	// touching the engine, and Agent.Rebind is itself validate-then-commit, so a refused rebind
+	// leaves the session bound exactly where it was.
+	rebind := func(model string, window int) (tui.RebindResult, error) {
+		spec, notices, err := rebindSpecFor(opts, roots, manualIDs, model, window, pinnedWindow)
+		if err != nil {
+			return tui.RebindResult{}, err
+		}
+		if err := agent.Rebind(spec); err != nil {
+			return tui.RebindResult{}, err
+		}
+		// Session metadata follows the wire: a session that switched models mid-conversation is
+		// listed under the model it ends on, which is the one its last Turns actually ran against.
+		host.SetModel(spec.Model)
+		return tui.RebindResult{
+			Model:         spec.Model,
+			ContextWindow: spec.MaxContextTokens,
+			Notices:       notices,
+		}, nil
+	}
+
 	err = launch(ctx, agent, bridge, tui.Options{
+		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
+		// a cold start, where the footer says "connecting…" until the first beat binds one), and
+		// ContextWindow is the `context-window:` pin (0 when unpinned). Neither is a discovery
+		// result any more — the heartbeat and the rebind closure below own everything after launch.
 		Model:         opts.model,
 		Endpoint:      opts.endpoint,
 		Mode:          mode,
@@ -325,6 +345,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Workspace:     roots.workspace,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
+		// The two upstream seams (ADR 0024): the monitor observes on the TUI's cadence, and the
+		// closure applies what the observation implies. Wiring both is what makes the display live.
+		Heartbeat: monitor.Beat,
+		Rebind:    rebind,
 		// The resolved `ui:` block: which animation paints the status-line spinner and whether its
 		// colour loop runs. Two independent values, resolved and validated by applyConfig, so the
 		// renderer selects rather than parses.
@@ -372,6 +396,71 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		fmt.Fprintln(os.Stdout, "Session saved · resume with: apogee --continue   (or /sessions inside apogee)")
 	}
 	return err
+}
+
+// ----------------------------------------------------------------------------
+// Per-model re-resolution (the composition root's half of a rebind — ADR 0024)
+// ----------------------------------------------------------------------------
+
+// rebindSpecFor re-resolves every per-model binding for a model the heartbeat observed, and returns
+// the whole answer as one [apogee.RebindSpec] plus the per-session notices worth telling the human.
+// It is the same resolution runRoot does at startup, run again with a different model — deliberately
+// so: a session that switches models mid-conversation must land in exactly the state a session
+// started on that model would have been in, or "rebind" would be a second, subtly different way of
+// configuring the engine.
+//
+// What it re-resolves:
+//   - the system-prompt template, because `system-prompt-models:` keys on the model name (ADR 0023);
+//   - the validated Mechanism set, because a set is matched against the model's identity fingerprint
+//     (ADR 0016) — the opts copy carries the new id so the fingerprint re-keys on it;
+//   - the enable list, applying the same precedence startup applies: an explicit `mechanisms:` block
+//     is manual control and suppresses any matched set (whole-set-or-nothing, never a merge), which
+//     is why manualIDs is passed in rather than re-derived from the map here;
+//   - the context window, applying the pin: pinnedWindow > 0 is the user's `context-window:` key and
+//     outranks whatever the server reports (decision 9), else the observed window is bound as-is.
+//
+// What it deliberately does NOT touch: `model-profile:`, which is a GLOBAL key (one profile per
+// installation, not per model) and therefore not a per-model binding at all; the endpoint, the mode,
+// the tools, and the conversation, none of which a model change has any claim on.
+//
+// A resolution failure is returned rather than swallowed — an unreadable per-model prompt file or a
+// dangling validated-sets alias is the user's own config being wrong about the new model — and the
+// caller then leaves the engine bound to what it had, which is the honest outcome.
+func rebindSpecFor(
+	opts options,
+	roots stateRoots,
+	manualIDs []apogee.MechanismID,
+	model string,
+	window, pinnedWindow int,
+) (apogee.RebindSpec, []string, error) {
+	next := opts
+	next.model = model
+
+	sysPrompt, err := resolveSystemPrompt(next.systemPrompt, model, roots.config, os.ReadFile)
+	if err != nil {
+		return apogee.RebindSpec{}, nil, err
+	}
+
+	vset, notices, err := resolveValidatedSet(next, roots.validated, roots.probe)
+	if err != nil {
+		return apogee.RebindSpec{}, nil, err
+	}
+	enable := manualIDs
+	if len(vset) > 0 {
+		enable = vset
+	}
+
+	bound := window
+	if pinnedWindow > 0 {
+		bound = pinnedWindow
+	}
+
+	return apogee.RebindSpec{
+		Model:            model,
+		SystemPrompt:     sysPrompt,
+		MaxContextTokens: bound,
+		EnableMechanisms: enable,
+	}, notices, nil
 }
 
 // presentationRungs builds the host-side presentation ladder (ADR 0019) from the resolved
@@ -484,15 +573,19 @@ func knownMechanismList(known []apogee.MechanismID) string {
 // deletion, and renaming to the store. It is the composition root's single owner of id minting and
 // metadata, keeping both out of the renderer (phase-2 detail plan §3 C5).
 //
-// The active-session fields are mutex-guarded: Save runs on a Bubble Tea Cmd goroutine while
-// ActiveID and the browser verbs are driven from the Update loop, so the two can race.
+// The mutable fields are mutex-guarded: Save runs on a Bubble Tea Cmd goroutine while ActiveID, the
+// browser verbs, and SetModel are driven from the Update loop, so the two can race.
 type sessionHost struct {
 	store     *session.Store
 	workspace string
-	model     string
 	now       func() time.Time
 
-	mu     sync.Mutex
+	mu sync.Mutex
+	// model is the model id stamped on saved metadata. It MOVES: a heartbeat rebind switches the
+	// session's model mid-conversation (ADR 0024), and SetModel is how the composition root's
+	// rebind closure keeps the record's metadata describing what the conversation actually ran
+	// against. Guarded because that closure runs on the Update goroutine while Save runs on a Cmd.
+	model  string
 	active *activeSession // nil ⇒ no active session; the next Save mints one
 }
 
@@ -535,6 +628,7 @@ func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string,
 		h.active = &activeSession{id: session.NewID(now), title: title, createdAt: now}
 	}
 	a := *h.active
+	model := h.model
 	h.mu.Unlock()
 
 	return h.store.Save(session.Record{
@@ -544,13 +638,24 @@ func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string,
 			CreatedAt: a.createdAt,
 			UpdatedAt: now,
 			Workspace: h.workspace,
-			Model:     h.model,
+			Model:     model,
 			UserMsgs:  userMsgs,
 			CtxUsed:   ctxUsed,
 		},
 		Transcript: transcript,
 		Session:    sess,
 	})
+}
+
+// SetModel restamps the model recorded on subsequent Saves. The composition root's rebind closure
+// calls it once the engine has actually been rebound, so the stored metadata names the model the
+// conversation is running against rather than the one it launched with — including on a cold start,
+// where the session began with no model bound at all. It does not rewrite already-saved records:
+// the next Save updates the same file with the new id, which is the session's current truth.
+func (h *sessionHost) SetModel(model string) {
+	h.mu.Lock()
+	h.model = model
+	h.mu.Unlock()
 }
 
 // Rotate closes the active session so the next Save mints a fresh id (the /clear|/new boundary).

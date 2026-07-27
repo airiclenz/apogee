@@ -277,7 +277,25 @@ Trigger (successful `beatMsg` folds only): `changed := beat.ActiveModel != m.hb.
 
 ---
 
-## 5. Startup surgery + composition-root wiring — the feature goes live
+## 5. Startup surgery + composition-root wiring — the feature goes live — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): four deviations/additions from the item's literal text.
+1. Deleting `contextWindowNotice` broke a test the item did not name: `TestRunRootThreadsContextWindow`
+   (`wire_test.go`) observed `opts.contextWindow → Config.Context.MaxContextTokens` THROUGH that
+   stderr notice, and the Agent exposes no accessor for the field. It is retimed rather than deleted:
+   it now pins the two surfaces that still read the value — `tui.Options.ContextWindow` and the wired
+   rebind closure, where the pin must outrank the observation — and its doc comment points at
+   `TestUnknownWindowNotedOnBind` (item 4) for the notice half.
+2. Two doc comments named `contextWindowNotice` as the "pure so it is table-testable" precedent
+   (`shouldPrewarmLabelWalk`, `appliedNotice`); both now name `probe.DegradedNotice` instead, so the
+   deletion leaves no dangling reference.
+3. `README.md`'s context-window paragraph claimed the window is "discovered from the server at
+   startup" and that apogee "says so once at startup" — both false after this item, and README is
+   enumerated by neither this item nor item 7. The three sentences are corrected here (live
+   discovery, `context-window:` as a pin, the notice now in the transcript).
+4. `TestRebindSpecForSelectsPerModelBindings` asserts the enable list through a per-case check func
+   rather than a literal slice: the applying case is the shipped gemma entry, whose exact membership
+   is pinned by `validated`'s own tests and would be a brittle copy here.
 
 **What.** Remove the synchronous startup discovery and wire both seams. `cmd/apogee/root.go:171-191`: delete the `resolveModel`/`resolveContextWindow` calls and the "discovered model" stderr line — `RunE` goes `seedDefaultConfig → applyConfig → runRoot`; the TUI paints instantly. `cmd/apogee/config.go:1013-1077`: delete `discoveredUpstream`, `modelDiscoverer`, `resolveModel`, `resolveContextWindow` (+ their tests); the `context-window:` pin layering (`config.go:519`) is untouched, and since discovery no longer pre-fills `opts.contextWindow`, **`opts.contextWindow > 0` now ⇔ pinned** — the fact the rebind closure relies on. `cmd/apogee/wire.go`: delete `discoverUpstreamModel` (`:51`) and `contextWindowNotice` (`:64` + call at `:231` — the honesty line moved into the TUI, item 4, where it fires at the right moment instead of wrongly on every cold start); `resolveSystemPrompt` (`:169`) now runs with a possibly-empty model (selects the global template; the per-model entry lands via the first beat's rebind, seconds later); keep `resolveValidatedSet` as-is (empty model ⇒ no identity ⇒ no set — correct until bound) but **hoist the manual `mechanismIDs` list into a local** before the validated-set overwrite (`:293-295`) so the rebind closure can re-run the "manual list suppresses the set" rule per new model. Wire:
 

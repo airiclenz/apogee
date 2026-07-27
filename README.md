@@ -149,10 +149,12 @@ it stays on even under `--bypass` — so it is on by default; set `auto-compact:
 out of the recovery too.
 
 The context **window** these budgets are measured against is discovered from the
-server at startup — for a pinned `model:` too. Set `context-window:` (a file-only
-key, in tokens) only when your server does not advertise a window, or to start a
-pinned model offline; with no window known, the Budget and automatic compaction stay
-inactive and apogee says so once at startup.
+server — live, not once: apogee asks every ten seconds, so switching the loaded model
+under a running session re-binds the window with it. Set `context-window:` (a file-only
+key, in tokens) only when your server does not advertise a window, or when its number is
+wrong for how you run it; that key is a **pin** the heartbeat never overrides. With no
+window known, the Budget and automatic compaction stay inactive and apogee says so in the
+transcript the moment it binds a model without one.
 
 ### The system prompt
 

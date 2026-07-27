@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -43,6 +45,14 @@ const (
 	followUpMessageText = "Glad to help. Anything else?"
 	greetingFileName    = "greeting.txt"
 	greetingFileBody    = "Hello, Apogee!\n"
+)
+
+// The cold-start run's own strings: the model nobody configured (the server turns out to be serving
+// it) and the message typed while the server was still down.
+const (
+	coldStartModel   = "loaded-model"
+	coldStartWindow  = 32768
+	coldStartMessage = "are you there?"
 )
 
 // ----------------------------------------------------------------------------
@@ -89,6 +99,17 @@ func requestRoles(r *http.Request) []string {
 		roles[i] = m.Role
 	}
 	return roles
+}
+
+// requestModel decodes the model id the request asked for — what the provider client actually put
+// on the wire, which is the only place a rebind can be proven to have reached.
+func requestModel(r *http.Request) string {
+	body, _ := io.ReadAll(r.Body)
+	var req struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &req)
+	return req.Model
 }
 
 // lastRoleIs reports whether the final message in the request carries role want.
@@ -333,6 +354,126 @@ func TestE2EConversationThroughTUI(t *testing.T) {
 		if !strings.Contains(transcript, want) {
 			t.Errorf("transcript missing %q:\n%s", want, transcript)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The heartbeat's end-to-end proof (ADR 0024 — decisions 2, 6 and 8)
+// ----------------------------------------------------------------------------
+
+// TestE2EColdStartHeartbeat is the cross-layer deliverable: a REAL Agent built with no model at all,
+// a REAL heartbeat.Monitor over the real provider client, and a server that starts out serving
+// nothing. It proves the three decisions that only meet each other here — startup neither blocks nor
+// fails on an absent server (8), a send while offline is refused with the typed message preserved
+// (2), and the first successful beat completes startup discovery LATE through the same rebind path a
+// mid-session model switch uses (6) — and then holds a real conversation with the model nobody
+// configured, checking that its id is what went out on the wire.
+//
+// The rebind closure is written here in the shape cmd/apogee wires it (resolve, rebind the engine,
+// report what was bound); the resolution half is config work with its own tests in cmd/apogee, so
+// this one binds directly and keeps the run about the layers meeting.
+func TestE2EColdStartHeartbeat(t *testing.T) {
+	t.Parallel()
+
+	var up atomic.Bool // the server starts out answering nothing
+	var wireModel atomic.Value
+	wireModel.Store("")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"data":[{"id":%q,"context_length":%d}]}`, coldStartModel, coldStartWindow)
+		case "/props":
+			w.WriteHeader(http.StatusNotFound) // best-effort; a non-llama.cpp server has none
+		default:
+			wireModel.Store(requestModel(r))
+			w.Header().Set("Content-Type", "text/event-stream")
+			writeFinal(w, finalMessageText)
+		}
+	}))
+	defer srv.Close()
+
+	workspace := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bridge := NewBridge()
+	h := newUIHarness()
+	bridge.Bind(h)
+	eng := newE2EEngine(t, srv.URL, "", workspace, bridge.Sink(), bridge.Approver())
+
+	opts := e2eOptions(srv.URL, workspace)
+	opts.Model, opts.ContextWindow = "", 0 // the cold start: nothing configured, nothing discovered
+	opts.Heartbeat = heartbeat.NewMonitor(srv.URL, "").Beat
+	opts.Rebind = func(model string, window int) (RebindResult, error) {
+		if err := eng.Rebind(agent.RebindSpec{Model: model, MaxContextTokens: window}); err != nil {
+			return RebindResult{}, err
+		}
+		return RebindResult{Model: model, ContextWindow: window}, nil
+	}
+
+	m := step(t, newModel(ctx, eng, opts, nil), tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	// --- The server is not there: the first beat says so, and a send is refused ---
+	m = step(t, m, firstBeat(t, m.Init()))
+	if !m.hb.offline {
+		t.Fatal("the first beat against a server answering nothing left the session online")
+	}
+	if m.opts.Model != "" {
+		t.Errorf("Options.Model = %q after a failed beat; want \"\" — nothing may be invented", m.opts.Model)
+	}
+
+	m.input.SetValue(coldStartMessage)
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd != nil {
+		t.Error("an offline submit launched a worker")
+	}
+	if got := m.input.Value(); got != coldStartMessage {
+		t.Errorf("input = %q after the refusal; want the typed message preserved (%q)", got, coldStartMessage)
+	}
+	if got := plainTranscript(m); !strings.Contains(got, "cannot send") {
+		t.Errorf("the refusal was silent:\n%s", got)
+	}
+
+	// --- The server comes up: the next beat completes startup discovery, late ---
+	up.Store(true)
+	m = step(t, m, m.beatCmd()())
+
+	if m.hb.offline {
+		t.Fatal("a successful beat left the session offline")
+	}
+	if m.opts.Model != coldStartModel || m.opts.ContextWindow != coldStartWindow {
+		t.Fatalf("bound %q / %d after the late seed; want %q / %d",
+			m.opts.Model, m.opts.ContextWindow, coldStartModel, coldStartWindow)
+	}
+	if got := ansiPattern.ReplaceAllString(m.footerContent(100), ""); !strings.Contains(got, coldStartModel) {
+		t.Errorf("footer = %q; want the late-seeded model named", got)
+	}
+	if got := plainTranscript(m); !strings.Contains(got, "connected: "+coldStartModel) {
+		t.Errorf("the late seed was silent:\n%s", got)
+	}
+	if m.blockedUpstream() {
+		t.Fatal("the submit gate stayed shut after a model was bound")
+	}
+
+	// --- And the conversation runs, against the model nobody configured ---
+	m, term := h.runExchange(t, ctx, m, eng, coldStartMessage)
+	if done, ok := term.(exchangeDoneMsg); !ok {
+		t.Fatalf("terminal Msg = %T, want exchangeDoneMsg", term)
+	} else if done.Result.Status != domain.StatusExchangeComplete {
+		t.Errorf("terminal status = %q, want %q", done.Result.Status, domain.StatusExchangeComplete)
+	}
+	if got := wireModel.Load().(string); got != coldStartModel {
+		t.Errorf("the request went out for model %q; want the rebound %q — the rebind never reached the wire",
+			got, coldStartModel)
+	}
+	if got := plainTranscript(m); !strings.Contains(got, finalMessageText) {
+		t.Errorf("transcript missing the reply %q:\n%s", finalMessageText, got)
 	}
 }
 

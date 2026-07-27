@@ -28,8 +28,10 @@ type options struct {
 
 	// Resolved display values handed to the TUI (not bound to flags). hostAlias is the
 	// footer's friendly host name (config key, else the endpoint host); contextWindow is the
-	// active model's window in tokens — the context-window config key when set, else discovered
-	// from the server (for a pinned model too, item 3); 0 when still unknown.
+	// `context-window:` PIN in tokens, and nothing else — startup no longer probes, so a
+	// non-zero value means the user pinned the window and the heartbeat must never override it
+	// (ADR 0024, decision 9), while 0 means "discover it, live" and the first landed beat binds
+	// whatever the server reports.
 	hostAlias     string
 	contextWindow int
 
@@ -164,30 +166,16 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 			// default) before construction; the flag set tells us which flags were
 			// explicitly set so an unset flag's default never shadows a lower layer.
 			// A soft notice from resolution (a malformed unconfined-hosts entry) prints here,
-			// on stderr before the alt-screen, like the seeding and discovery lines above.
+			// on stderr before the alt-screen, like the seeding line above.
 			if err := applyConfig(&opts, changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 				return err
 			}
-			// With no model configured by any layer, ask the server for its active model
-			// (the lowest-priority layer) so a single-model server runs with no --model set.
-			// The notice prints before the alt-screen, on stderr. `probed` reports whether that
-			// discovery probe ran, so the context-window probe below can be skipped when it did.
-			model, probed, err := resolveModel(cmd.Context(), &opts, discoverUpstreamModel)
-			if err != nil {
-				return err
-			}
-			if model != "" {
-				cmd.PrintErrln("apogee: discovered model", model, "at", opts.endpoint)
-			}
-			// Discover the context window for a PINNED model (item 3): a configured model makes
-			// resolveModel early-return without probing, but the Budget and automatic Compaction
-			// still need the window. Skip it when model discovery already ran this startup (item 4):
-			// that one probe resolved the window in the same call, so re-probing here would be
-			// redundant even when the server advertised no window. A failure here is non-fatal, so
-			// an offline pinned-model start still works.
-			if !probed {
-				resolveContextWindow(cmd.Context(), &opts, discoverUpstreamModel, func(msg string) { cmd.PrintErrln(msg) })
-			}
+			// Nothing asks the server anything here. Startup used to stall for up to five seconds
+			// on a discovery probe — and hard-fail when no model was configured and the server was
+			// down — which made a coding tool unusable exactly when the server needed attention.
+			// The TUI now paints immediately and the heartbeat fires its first beat from Init, so
+			// discovery is late and continuous rather than early and once (ADR 0024, decision 8):
+			// the same beat that late-seeds a cold start refreshes a running one.
 			return runRoot(cmd.Context(), opts, launch)
 		},
 	}

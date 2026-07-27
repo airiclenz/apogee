@@ -180,7 +180,7 @@ func resolveValidatedSet(opts options, userDir, probeDir string) (set []apogee.M
 // appliedNotice is the per-session line for an applying set (ADR 0016 §5's "visible
 // per-session notice"): it names the entry, the mechanism count, the licensing
 // campaign, the source (shipped / user-local), and the off-switch. Pure so the wording
-// is table-testable (the contextWindowNotice pattern).
+// is table-testable (the probe.DegradedNotice seam pattern).
 func appliedNotice(d validated.Decision) string {
 	via := ""
 	if d.ViaAlias {
