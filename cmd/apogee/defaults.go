@@ -15,9 +15,11 @@ import (
 
 // defaultConfigYAML is the starter config compiled into the binary from
 // defaults/config.yaml. //go:embed re-reads that file on every build, so the seeded
-// template can never drift from the binary that ships it. It is a fully-commented
-// template: parsed, it sets nothing (an empty layer), so seeding it on first run never
-// changes how a run resolves — it only drops a documented file the user can edit.
+// template can never drift from the binary that ships it. It is a commented template with
+// exactly ONE active key — system-prompt-text:, the default system prompt (ADR 0023) —
+// so parsed, it sets that and nothing else: seeding it on first run changes nothing else
+// about how a run resolves, and deleting or commenting out that one key sends no system
+// prompt at all. Everything else it drops is documentation the user can edit.
 //
 //go:embed defaults/config.yaml
 var defaultConfigYAML []byte

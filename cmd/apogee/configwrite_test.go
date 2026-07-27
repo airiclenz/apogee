@@ -75,8 +75,9 @@ func TestSaveHostAcknowledgement_SeedsAbsentConfigThenAppends(t *testing.T) {
 
 	got := readTestConfig(t, path)
 	// The absent config is seeded from the embedded template, never left as a bare fragment —
-	// and the template is ENTIRELY comments, so this is also the sharpest test that the writer
-	// does not round-trip through unmarshal→marshal (which would have deleted all of it).
+	// and the template is comments apart from its one active key, so this is also the sharpest
+	// test that the writer does not round-trip through unmarshal→marshal (which would have
+	// deleted every documentation line below).
 	for _, doc := range []string{
 		"# apogee configuration — ~/.apogee/config.yaml",
 		"# confine-to-workspace: true",

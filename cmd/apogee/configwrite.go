@@ -23,9 +23,9 @@ import (
 // 0012, amendment 2026-07-21) — into a file the user owns, hand-edits, and reads back months
 // later. TODO constraint 4 requires that write to be visible and reversible, which rules out the
 // obvious implementation: unmarshal into fileConfig, append an entry, re-marshal. yaml.v3 hangs
-// comments off nodes, and the seeded template (cmd/apogee/defaults/config.yaml) is ENTIRELY
-// comments — it parses to no nodes at all — so a re-marshal would hand the user back a file with
-// one setting in it, having silently deleted every word of documentation they started with.
+// comments off nodes, and the seeded template (cmd/apogee/defaults/config.yaml) is comments apart
+// from its one active key — so a re-marshal would hand the user back a file with a setting or two
+// in it, having silently deleted every word of documentation they started with.
 //
 // So the edit is textual, guided by the parsed node positions: the entry is rendered by the YAML
 // marshaller (which owns quoting and escaping) and spliced into the existing bytes, leaving every
@@ -196,7 +196,8 @@ func spliceHostAcknowledgement(data []byte, entry unconfinedHost) ([]byte, error
 }
 
 // configDocument decodes the config's single YAML document node, or nil when the file holds no
-// document at all — empty, or nothing but comments, which is exactly the seeded template's shape.
+// document at all — empty, or nothing but comments, the shape of a config whose every setting the
+// user has commented out (the seeded template keeps one key active, so it decodes to a document).
 // A second document is refused: yaml.Unmarshal reads only the first, so an entry appended to the
 // last one would be written and never read.
 func configDocument(data []byte) (*yaml.Node, error) {

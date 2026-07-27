@@ -4,7 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/prompt"
 )
 
 // An absent config is seeded: seedConfig creates the parent directory and writes the
@@ -52,9 +55,12 @@ func TestSeedConfigDoesNotOverwrite(t *testing.T) {
 	}
 }
 
-// The embedded starter config is valid YAML and behaviour-neutral: parsed, it sets nothing
-// (a fully-commented template), so seeding it on first run never changes how a run resolves.
-func TestEmbeddedDefaultConfigIsNeutral(t *testing.T) {
+// The embedded starter config is valid YAML and sets EXACTLY one thing: the default system
+// prompt (ADR 0023), the template's one deliberately-active key. Every other key stays a
+// commented example, so seeding the template on first run changes nothing else about how a
+// run resolves. This is the precise form of the old "the template is behaviour-neutral"
+// invariant, amended when the shipped prompt went active.
+func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	t.Parallel()
 	if len(defaultConfigYAML) == 0 {
 		t.Fatal("defaultConfigYAML is empty; the embed did not pick up defaults/config.yaml")
@@ -67,8 +73,43 @@ func TestEmbeddedDefaultConfigIsNeutral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded default config does not parse: %v", err)
 	}
+
+	// The one active key: an inline global prompt, no file, no per-model entries.
+	if l.systemPrompt == nil {
+		t.Fatal("embedded default config carries no system prompt; the shipped default must be active")
+	}
+	text := l.systemPrompt.global.text
+	for _, want := range []string{
+		"You are apogee",
+		prompt.PlaceholderWorkspace,
+		prompt.PlaceholderDatetime,
+		prompt.PlaceholderMode,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("shipped system prompt does not contain %q:\n%s", want, text)
+		}
+	}
+	if l.systemPrompt.global.file != "" {
+		t.Errorf("shipped system-prompt-file = %q; want empty — the file key stays a commented example",
+			l.systemPrompt.global.file)
+	}
+	if l.systemPrompt.models != nil {
+		t.Errorf("shipped system-prompt-models = %+v; want none — the per-model block stays a commented example",
+			l.systemPrompt.models)
+	}
+
+	// The shipped prompt must survive both gates a user's own prompt faces.
+	if err := prompt.Validate(text); err != nil {
+		t.Errorf("shipped system prompt fails prompt.Validate: %v", err)
+	}
+	if err := l.systemPrompt.validate(); err != nil {
+		t.Errorf("shipped system-prompt block fails validate: %v", err)
+	}
+
+	// Everything else still parses to nothing — the surviving half of the old invariant.
+	l.systemPrompt = nil
 	if !reflect.DeepEqual(l, layer{}) {
-		t.Errorf("embedded default config sets values (not behaviour-neutral): %+v", l)
+		t.Errorf("embedded default config sets values beyond the system prompt: %+v", l)
 	}
 }
 

@@ -7,8 +7,10 @@
 #
 #   command-line flag  >  APOGEE_* environment variable  >  this file  >  built-in default
 #
-# Every line below is commented out, so out of the box this file changes nothing — it is
-# a documented starting point. Uncomment a line and edit it to make it your default.
+# Every line below is commented out with ONE exception — system-prompt-text:, the default
+# system prompt — so out of the box this file changes nothing else; it is a documented
+# starting point. Uncomment a line and edit it to make it your default; delete or comment
+# out the system prompt to send none.
 
 # =============================================================================
 # The local OpenAI-compatible LLM server URL.
@@ -42,8 +44,11 @@
 
 # =============================================================================
 # The system prompt: the standing instructions apogee sends ahead of your own first message,
-# as the first system message of every request. Config-file only (no flag or env). With all
-# three keys below commented out, apogee sends no system prompt at all.
+# as the first system message of every request. Config-file only (no flag or env).
+#
+# system-prompt-text: below is the ONE active setting in this file — the default prompt a fresh
+# install starts with. Edit it to make it your own; delete it, or comment it out, and apogee
+# sends no system prompt at all (how apogee behaved before this key existed).
 #
 # Write it inline with system-prompt-text, or keep it in a file of its own and name that file
 # with system-prompt-file — one or the other, never both at the same level (setting both is a
@@ -62,16 +67,17 @@
 #
 # The spelling is strict and the set is closed: anything else between double braces — including
 # `{{ workspace }}`, with spaces — is a startup error listing these three.
-#
-# system-prompt-text: |
-#   You are apogee, a coding agent working in the workspace at {{workspace}}.
-#   Today's date is {{datetime}}. You are operating in {{mode}} mode.
-#
-#   Work step by step: read before you change, keep edits small and focused,
-#   and verify your work. Be direct and concise; when a task is done,
-#   summarise what changed.
 
-# The same prompt, kept in a file instead of inline (use one or the other):
+system-prompt-text: |
+  You are apogee, a coding agent working in the workspace at {{workspace}}.
+  Today's date is {{datetime}}. You are operating in {{mode}} mode.
+
+  Work step by step: read before you change, keep edits small and focused,
+  and verify your work. Be direct and concise; when a task is done,
+  summarise what changed.
+
+# The same prompt, kept in a file instead of inline. Use one or the other: uncommenting this
+# while the text above is still active is the both-set startup error.
 # system-prompt-file: ~/prompts/apogee.md
 
 # Per-model prompts. Key an entry by the model name apogee resolves at startup (the name in the

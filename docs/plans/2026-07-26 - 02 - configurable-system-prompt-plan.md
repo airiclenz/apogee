@@ -444,7 +444,23 @@ server log); removing the key restores the promptless request.
 
 ---
 
-## 4. Ship the default prompt — the template's one active setting
+## 4. Ship the default prompt — the template's one active setting — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): two prose-only deviations in `defaults/config.yaml`. (a) The "turn it off"
+sentence says "(how apogee behaved before this key existed)" rather than the plan's "(the pre-0.9
+behaviour)": this plan rides whatever minor cut ships next (VERSION is 0.8.6 today), so naming a
+version in the shipped template would be a claim the release could falsify. (b) The
+`system-prompt-file:` example's caption now warns that uncommenting it while the text above is
+active is the both-set startup error — the file key sits beside an ACTIVE text key for the first
+time, so the contradiction is newly reachable by a one-line uncomment.
+
+NOTES (2026-07-27): "amend the invariant that forbade it" reached three files beyond the item's
+literal two, because the old invariant was also stated in code prose that is now false:
+`defaults.go`'s `defaultConfigYAML` doc comment ("a fully-commented template … parsed, it sets
+nothing"), `configwrite.go`'s writer rationale and its `configDocument` doc ("ENTIRELY comments
+… parses to no nodes at all"), and the same rationale repeated in `configwrite_test.go`. All are
+comment-only edits — no behaviour changed, and the writer is textual either way. README's
+"fully-commented starter `config.yaml`" (L113) is item 5's territory and was left alone.
 
 **What.** Activate the owner-approved default in the embedded starter template and amend the
 invariant that forbade it. Files: `cmd/apogee/defaults/config.yaml`,
