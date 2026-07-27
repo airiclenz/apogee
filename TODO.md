@@ -1,98 +1,38 @@
-# TODO — parked ideas (not in Phase 3 / not in `v1.0.0`)
+# TODO — parked ideas
 
-Ideas worth doing later, deliberately deferred so they don't bloat the v1 freeze.
-Each entry records *enough* design that we don't re-derive it when we pick it up.
+Live, deliberately deferred work only. Each entry records *enough* design that we don't
+re-derive it when we pick it up. When an entry closes, its body leaves this file for the
+authoritative record (plan / ADR / CHANGELOG) and a one-line trail entry lands under
+**Closed entries** at the bottom — so a deferral trail never becomes a silent drop, and the
+file never becomes an archive.
 
 ---
 
 ## apogee-code feature parity — user-facing affordances not yet ported
 
-**Status:** parked 2026-06-25. Post-v1, **additive** (all TUI/UX layers on top of the agent
-core, which is already at parity). These are features the original **apogee-code** VS Code
-extension (`airic-lenz.apogee-code` v0.2.58) ships that the Go TUI does not. Scope here is
-*user-facing* parity only — the by-design Phase-4 items (Mechanisms catalogue, cross-session
-Library, context-budget gauge) are tracked separately and excluded.
+**Status:** parked 2026-06-25; most of the surface has since shipped (ledger at the end of this
+entry). Additive TUI/UX layers on top of the agent core, which is already at parity. Scope is
+*user-facing* parity with the apogee-code VS Code extension (`airic-lenz.apogee-code` v0.2.58)
+only — the by-design Phase-4 items were tracked separately.
 
 **Verification note (the source-of-truth correction):** apogee-code's `Apogee-Code-TDD.md`
-claims it has *no slash commands, only `@file`*. **That doc is stale.** The shipped webview
-(`~/.vscode/extensions/airic-lenz.apogee-code-0.2.58/media/chat.js`, array `Ws`) actually
-implements a full chat mini-language. When porting, treat `media/chat.js` as the behavioral
-oracle, not the TDD. On send the webview posts `{text, skillIds, fileRefs}`; the backend
-resolves skill bodies + file contents into context.
+claims it has *no slash commands, only `@file`*. **That doc is stale.** When porting, treat the
+shipped webview (`~/.vscode/extensions/airic-lenz.apogee-code-0.2.58/media/chat.js`, array `Ws`)
+as the behavioral oracle, not the TDD. On send the webview posts `{text, skillIds, fileRefs}`.
 
-**The missing surface, prioritized:**
+**Remaining:**
 
-- **[P0] Chat input mini-language** — a parse layer between the input box and the agent.
-  **CORE SHIPPED 2026-06-26** (handoff `docs/handoffs/2026-06-26 - 00 - chat-mini-language-core.md`):
-  the pure parser/router (`internal/tui/command.go`), the autocomplete overlay for `/`-commands
-  **and** `@`-files (`internal/tui/autocomplete.go`, bounded `os.Root` workspace walk), `/clear`
-  (→ `Agent.ClearContext()`), `/continue` (→ "Please continue"), a **stubbed** `/compact`
-  (→ `Agent.Compact()` returning `ErrCompactionNotImplemented`), and the real agent-side
-  `@file` resolver (`loop.go resolveFileRefs`, reusing `security.SafeReadFile`; replaced
-  `noteUnresolvedFileRefs`). `domain.UserInput.SkillIDs` is pre-wired (reserved, unresolved).
-  **Remaining:**
-  - `/compact` real reducer — **SHIPPED 2026-07-01.** The generative Compaction summarizer lives
-    in `internal/context` (`Compact`): it summarizes the conversation through one silent upstream
-    call and writes the summary back via `Conversation.Replace`, keeping the protected prefix
-    (`PrefixEnd`) verbatim. `Agent.Compact` drives it (quiescent-boundary guarded like
-    `ClearContext`), and the TUI runs it on a worker goroutine (spinner + `Esc`-cancel + gauge
-    reset). Wired as the built-in **default reducer** invoked directly — NOT through
-    `runHistoryRewriteHooks` (that stays the experimental-hook / `truncate_history` path, per
-    `internal/context/doc.go`). The *automatic* budget-driven trigger — **SHIPPED 2026-07-04
-    (Phase-4 item 9):** the loop folds the conversation (the same `Compact`) at a quiescent
-    boundary when `internal/context.HistoryExceedsAllocation` reports the history has outgrown its
-    Budget allocation (`Agent.autoCompact`, called before the Turn consumes new input). It is
-    structural — on by default, on even under Bypass (D5/D6) — with a file-only `auto-compact:
-    false` opt-out (`ContextConfig.CompactionEnabled`); the on-demand `/compact` is unaffected by
-    the gate. Built on Phase-4 item 8's Budget allocator + usage-calibrated token accounting.
-  - `/skill <name>` — **SHIPPED 2026-06-26** with the Skills system below: the "/" menu offers
-    `/skill`, which chains into a skill picker (`acSkill` dropdown); a pick pops a chip onto
-    `Model.pendingSkills`, and submit copies it into `UserInput.SkillIDs`. The loop
-    (`loop.go resolveSkillRefs`, replacing `noteUnresolvedSkillIDs`) prepends each resolved
-    body to the turn. `/skill` is intentionally NOT a parser command (attachment is the only
-    way it acts), so an unknown `/skill foo` stays an ordinary message.
-  - `/server` (switch server) — needs a swappable provider seam (today `upstream` is immutable
-    after construction). See **[P1] Server / model switching**.
-  - Polish: `@`-file-listing cache **SHIPPED 2026-06-26** (`internal/tui/filecache.go`: a
-    `*fileCache` on the Model memoises the workspace listing with a short TTL and filters it in
-    memory, so a typing burst reuses one fenced walk instead of re-scanning the disk per
-    keystroke). **Still deferred:** mid-string (non-trailing) token completion (the overlay
-    completes the word at the cursor/end only) — kept deferred on purpose: it trades the
-    "cursor-position-free, robust" design for cursor-tracking edge cases.
-
-- **[P0] Skills system** (prerequisite for `/skill`) — **SHIPPED 2026-06-26**
-  (`docs/plans/archived/skills-system-plan.md`). New `internal/skills` package discovers **directory +
-  `SKILL.md`** skills (not flat `.md` — matches the apogee-code oracle and the Anthropic
-  agent-skills convention) from the layered dirs `~/.apogee/skills/`, workspace `.apogee/skills/`,
-  and workspace `skills/` (the last gated by the new file-only `use-project-skills` config key,
-  default true), later source winning on id collision. YAML frontmatter (`id`|`name`,
-  `displayName`, `summary`|`description`) + body, with a no-frontmatter fallback; layered through
-  `os.OpenRoot` so a workspace symlink can't escape; a missing dir is skipped and a malformed skill
-  is skipped with a soft error. `Catalog` satisfies `domain.SkillResolver` (loop) and the TUI's
-  `SkillCatalog` (picker); `wire.go` loads it once and injects both. No builtin/embedded skills and
-  no auto-created `~/.apogee/skills` in v1 (additive future hooks).
-  - **Authoring guidance (2026-07-21):** a report-producing skill should end by calling
-    `present_document` on the file it wrote — that is what surfaces the deliverable instead of
-    leaving it behind a one-line `write_file` card ([ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md)).
-    Guidance only: skills stay **user-authored** (ADR 0002), apogee ships none, and nothing in the
-    `present_document` work edits a builtin skill.
-
-- **[P1] Session management UI** — **SHIPPED 2026-07-24**
-  (`docs/plans/2026-07-24 - 02 - session-system-plan.md`,
-  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)). Sessions
-  now persist **continuously** (per-Turn autosave, not quit-only) as id-addressed dual-representation
-  records (engine envelope + TUI scrollback blob) under `~/.apogee/sessions/`. `/clear` and `/new`
-  close the current session into history and rotate to a fresh one; the **`/sessions`** browser
-  overlay lists · resumes · deletes · renames (workspace-scoped, with an `a` toggle to all
-  workspaces); `--continue` resumes this workspace's most recent, `--resume` now takes an **id or a
-  path** (legacy bare-envelope files still load); resume **replays the scrollback**; and an
-  interrupted mid-task session resumes with a step-only `/continue` drive. Follow-ons (retention,
-  cross-instance lock) recorded below.
-
-- **[P1] Server / model switching** — `/server` live endpoint switch (re-probe `/v1/models`,
-  rebind the `provider` seam; today fixed at startup); a switchable **model-profile** abstraction
-  (sampling params, context-budget %, thinking/tool-call format — reuse `internal/processing`);
-  and start/stop control for a local llama.cpp server.
+- **[P1] Server / model switching** — **IN FLIGHT 2026-07-27**
+  (`docs/plans/2026-07-27 - 00 - upstream-heartbeat-plan.md`). The heartbeat work landed the
+  engine seam this entry was blocked on — the old "today `upstream` is immutable after
+  construction" note is obsolete: `Agent.Rebind(RebindSpec)`, `provider.Client.SetModel`, and
+  the per-beat `/v1/models` data layer shipped as plan items 1–3; items 4–7 are pending, and
+  plan item 7 owns this entry's close-out wording. Still future *after* that plan (its explicit
+  non-goals): the `/model`/`/server` picker UI (its prepared seams: `hb.models`, `RebindSpec`,
+  `Agent.Rebind`), the endpoint switch (`Rebind` deliberately never touches `Endpoint`), and
+  local llama.cpp start/stop (rebuild over `heartbeat.Beat`; the dead `provider.ServerManager`
+  is deleted by plan item 6). The switchable **model-profile** abstraction (sampling params,
+  context-budget %, thinking/tool-call format — reuse `internal/processing`) remains unstarted.
 
 - **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
   shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
@@ -101,32 +41,39 @@ resolves skill bodies + file contents into context.
 - **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
   terminal side-effects are not undone, as the extension does).
 
-- **[P2] Throughput display** — **SHIPPED 2026-06-26.** The server's `stream_options.include_usage`
-  accounting (already on every request) now rides a new `domain.UsageEvent` emitted from the loop's
-  stream consumer (`agent/loop.go` on the terminal `DeltaDone`); the TUI folds the latest top-level
-  (Depth 0) usage to (a) light the live context-fill gauge (`contextGauge` now reads `m.ctxUsed`
-  instead of a hard-coded 0) and (b) show a rolling `· N tok/s` readout in the status line, the
-  completion timed against the Update clock from the Turn's first token (`model.go foldStats` /
-  `throughputSuffix`). Distinct from the excluded context-budget gauge. **Update 2026-06-28:** the
-  companion ISSUES bug — the context *window* read wrong from the server (`provider/discovery.go`) —
-  is now **FIXED**: `Discover` probes llama.cpp `GET /props` and prefers its runtime
-  `default_generation_settings.n_ctx` over the model's training window (`n_ctx_train`), so the gauge
-  measures against the correct denominator. The deferred `llamacpp-props` discovery strategy is now
-  live; the `ollama-show`/`ollama-tags` strategies remain unported (additive, not needed yet).
+- **[P2] Mid-string (non-trailing) token completion** — the autocomplete overlay completes the
+  word at the cursor/end only. Kept deferred on purpose: it trades the "cursor-position-free,
+  robust" design for cursor-tracking edge cases.
 
-**Related (already parked below):** per-tool approval overrides (`toolApprovalOverrides`:
+**Related (parked below):** per-tool approval overrides (`toolApprovalOverrides`:
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
 disposition table but no user-facing override. See *Configurable tool × mode security matrix*.
+
+**Shipped since parking (full records in the named docs):**
+
+- Chat-input mini-language core (`/clear`, `/continue`, autocomplete for `/` and `@`, the
+  agent-side `@file` resolver) — 2026-06-26,
+  `docs/handoffs/archived/2026-06-26 - 00 - chat-mini-language-core.md`.
+- Skills system + `/skill` picker — 2026-06-26, `docs/plans/archived/skills-system-plan.md`;
+  authoring guidance (a report-producing skill ends with `present_document`) in
+  [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md).
+- `@`-file-listing cache — 2026-06-26, `internal/tui/filecache.go`.
+- Throughput display + live context-fill gauge — 2026-06-26; the context-window discovery fix
+  (llama.cpp `/props` runtime `n_ctx`) — 2026-06-28, `internal/provider/discovery.go`.
+- `/compact` generative reducer — 2026-07-01 (`internal/context.Compact`); the automatic
+  budget-driven trigger — 2026-07-04, Phase-4 item 9 (`Agent.autoCompact`).
+- Session management UI (per-Turn autosave, `/sessions` browser, `--continue`, id-or-path
+  `--resume`, scrollback replay) — 2026-07-24,
+  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md) +
+  `docs/plans/archived/2026-07-24 - 02 - session-system-plan.md`.
 
 ---
 
 ## Session system follow-ons — deliberately deferred from the 2026-07-24 session-system plan
 
 **Status:** recorded 2026-07-24 at the session-system close-out
-([ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)). The
-session system shipped with per-Turn autosave, the `/sessions` browser, `--continue`, id-or-path
-`--resume`, scrollback replay, and interrupted-task `/continue` (see the parity item above). These
-were named out of scope in the plan and left for later — none is a live gap.
+([ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)). Named
+out of scope in the plan and left for later — neither is a live gap.
 
 - **[P2] Retention / pruning policy** — today the store never prunes: `~/.apogee/sessions/`
   grows unbounded and the only discard is the browser's `d` (manual delete). A retention policy
@@ -137,131 +84,36 @@ were named out of scope in the plan and left for later — none is a live gap.
   instances at once; documented and accepted, not locked. A cross-instance lock (or a
   resumed-elsewhere detection) is the follow-on if that narrow case ever bites.
 
-Explicitly **not** deferred TODOs (deliberate non-goals, recorded so they are not re-opened as
-gaps): LLM-generated titles, session search, session export, sub-agent session persistence, and
-serializing mode/approvals/confinement/MCP into the record — all named out of scope in the plan,
-the last per ADR 0008. The bench stays unchanged and keeps composing `Snapshot`/`Encode` directly
-(ADR 0001), so there is no bench-side session-store TODO.
+Explicitly **not** deferred (deliberate non-goals, so they are not re-opened as gaps):
+LLM-generated titles, session search, session export, sub-agent session persistence, and
+serializing mode/approvals/confinement/MCP into the record (the last per ADR 0008). The bench
+keeps composing `Snapshot`/`Encode` directly (ADR 0001) — no bench-side session-store TODO.
 
 ---
 
 ## Phase-4 mechanism catalogue — deliberately dropped / folded / deferred
 
-**Status:** recorded 2026-07-04 at the Phase-4 close-out (`v1.2.0`). The ratified catalogue
-(`docs/design/mechanism-catalogue.md`, Table C + ledger) ported most apogee-sim Mechanisms but
-deliberately did **not** port these. Logged here so the deferral trail stays deliberate, not a
-silent drop — **none is a live gap**; each is an evidence-backed verdict that can be revisited if
-the bench finds a specific win.
+**Status:** recorded 2026-07-04 at the Phase-4 close-out (`v1.2.0`). Every verdict below is
+recorded in full — evidence, rationale, ledger row — in
+`docs/design/mechanism-catalogue.md` (Table C, the port ledger, Table B); this entry is the
+deferral trail's pointer, not the record. **None is a live gap**; revisit a verdict only if the
+bench finds a specific win.
 
-- **`codeinfo` — DROPPED (catalogue C7).** Broad plan §2 deprioritized it (modest effect,
-  superseded by shell-out diagnostics); the sim's own A/B shows its specific missed-call-site
-  signal is **not significant** (OR 0.69, p=0.32 on gpt-oss-20b, N=75/arm). Not ported to any wave.
-- **`correct_tool_result` — DEFERRED, not dropped (owner-ratified 2026-07-04).** The pinned sim
-  defines **no production trigger** — it is a lab-only intervention with an operator-supplied
-  correction — so inventing gating would ship behaviour with no evidence (D7). The loop already
-  exposes the lab surface (an experimental post-tool-result hook can replace a result via the
-  mutation API), so the bench plays the operator without a catalogued Mechanism. A **bench-discovered
-  trigger motivates a NEW plan item** + a fresh Table B verdict — that is the only path to porting it.
-- **`compress` external-client-compaction sniffing — DROPPED (C3).** apogee owns the loop; there is
-  no external client to sniff pre-compressed content from (broad plan §4). The *surviving* halves of
-  `compress` shipped: `tool_result_cap` (Mechanism, item 9), generative Compaction (structural, item
-  9), and `truncate_history` (Mechanism, item 7).
-- **`intent` / `cot` / `feed_forward_correction` — FOLDED, not standalone Mechanisms (C4/C5/C6).**
-  `intent` is a shared inline classifier (no hook/descriptor); `cot` split into the three completion
-  nudges (`stall_nudge` / `list_nudge` / `tool_use_directive`, item 12); `feed_forward_correction`
-  folded into `validate`'s retry-in-place `ActionRetry{Inject}` delivery (item 5, R1). No catalogue
-  rows of their own.
-- **Un-ported sim refinements — recorded bench-pending (R2).** The off-ramps' retry-ladder
-  refinements (attempt-2 nudge ladder, system directive, temperature escalation, per-Session throttle
-  counters) and `tool_loop_interceptor`'s per-Session count threshold + 30s wall-clock cooldown are
-  not ported — the loop's strikes-3 self-regulation + the `maxPostResponseRetries` cap substitute, and
-  wall-clock time is meaningless in the deterministic bench. Revisit only if the bench shows a specific
-  refinement carries a win.
-
----
-
-## Read/list tool-name detection — CLOSED (spelling families + shared-scan re-shaping both landed)
-
-**Status:** CLOSED 2026-07-19 (architecture-deepening close-out,
-`docs/plans/architecture-deepening-plan.md` items 6–7 / D4–D5; previously narrowed 2026-07-06 by
-the post-v1.3.0 review-fixes close-out, `docs/plans/archived/post-v1.3.0-review-fixes-plan.md`
-item 11 / F8). Both halves are done:
-
-- **The drift half (F8, 2026-07-06):** the read trio (`read_file`/`readFile`/`open_file`) and the
-  five list spellings are single-sourced as two spelling families hoisted beside
-  `wave4WriteTools`; every read/list set composes from them, and the four diverged sets were
-  corrected in that pass.
-- **The structural re-shaping (D5, 2026-07-19):** one copy of each shared `conv.Range(...)` scan
-  shape now lives in `internal/mechanisms/historyscan.go` beside the families (read-attempt path
-  counting with successes/failures separate, successful-read paths over the latest read episode,
-  written paths since an index); readloop, readrepeat, and filehint migrated onto them.
-  Per-Mechanism membership and thresholds stay at the call sites (the F8 spirit); readloop's
-  `isGreenfieldContext` deliberately stays local — a composite write/read/list early-exit scan no
-  shared shape expresses (commented at the symbol). Token arithmetic concentrated alongside (D4):
-  `Budget.EstimateTokens` / `Budget.HistoryExceedsAllocation` are the one chars→token
-  implementation. (One deliberate outlier: the Library's context-fill backoff,
-  `libraryContextTooFull`, keeps its own *continuous* usage fraction rather than calling
-  `Budget.EstimateTokens` — it needs a fraction of the window, not an int estimate.)
-
-**Deliberately NOT built (so the drop stays a verdict, not a silent one):** the broader
-shared-detection-module idea — unifying the Mechanism marker machinery into a framework — was
-declined as speculative by the deepening plan ("Explicitly NOT in this plan"): F1 moved fan-out
-idempotency onto committed evidence, so the residual marker use is one Mechanism's same-request
-guard; a shared marker store concentrates nothing real until a second Mechanism needs one.
-Re-surface it at the next architecture pass if that happens.
-
-**Divergences that must NOT be folded in (still hold):** the content-repair Mechanisms
-(`syntax`, `autofix`) key on the narrower sim-only `isWriteTool` set, and search/exec tool
-spellings stay out of scope.
-
----
-
-## General system-prompt / template story — CLOSED (the configurable system prompt shipped)
-
-**Status:** CLOSED 2026-07-26 (`docs/plans/2026-07-26 - 02 - configurable-system-prompt-plan.md`,
-items 1–5;
-[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)).
-Held out of the prompt-seam plan 2026-07-02 by its grilled scope guard, and reopened by owner
-request 2026-07-26. **Additive**: `apogee.Config` gains one field, `SystemPrompt` — a minor bump,
-no exported name changes.
-
-**What shipped:** three **file-only** keys — `system-prompt-text:` (inline), `system-prompt-file:`
-(a path; `~` expands, a relative path resolves against the apogee home), and
-`system-prompt-models:` (per-model entries keyed on the **resolved** model name, reusing the same
-two key spellings). A matching entry **replaces** the global prompt whole; a non-matching one is
-inert, its file never read (the `unconfined-hosts` posture). The template language is a new
-stdlib-only `internal/prompt` package with exactly three strictly-spelled placeholders —
-`{{workspace}}`, `{{datetime}}` (date-only, so the prefix KV cache survives a turn), `{{mode}}` —
-an unknown one being a startup error listing the three. `Config.SystemPrompt` carries the
-**template**, not a rendered string, and the loop renders it fresh per request at `buildRequest`
-position 0, so mechanism directives and the profile's tool block fold in after it in **one**
-system message, and nothing enters history or a Session record. Sub-agents inherit it; the
-Compaction summariser and the probe battery keep their own dedicated prompts. The shipped starter
-`config.yaml` now carries **one active key** — the default `system-prompt-text:` — so fresh
-installs get a prompt while an existing config (never overwritten) keeps promptless behaviour byte
-for byte.
-
-**Native byte-identical anchor (held, and still holds):** with no prompt configured and a
-zero/native profile the wire request adds **zero bytes** — `TestPromptSeam_NativeProfileByteIdentical`
-passed untouched through every item and stays the anchor for anything built on this seam.
-
-**Residual 1 — deliberately NOT built:** the **host-override knob** for the rendered instruction
-block (D1's *rejected hybrid* in the prompt-seam plan; engine-owned won). It stays additive-later,
-and the obligation this entry attached to it is discharged: because the prompt, the directives and
-the tool block merge into **one** system message, a host-supplied block would replace the rendered
-one *inside that same message* without reshaping anything ADR 0023 decided. The two compose; they
-do not fight.
-
-**Residual 2 — accepted interaction, not a defect:** `Request.AppendToSystem(marker, text)` is
-idempotent by `strings.Contains(first system message, marker)`, and the markers are
-natural-language phrases (`decompose`'s `"Focus on one action"`, `cot`'s `"have not read any files
-yet"`, `library`'s `"[Apogee context notes"`). The first system message is now the **user's**
-prompt, so a prompt that happens to contain such a phrase reads as "already injected" and silently
-**suppresses** that Mechanism's directive. It is a suppression, not a corruption — the request stays
-well-formed and the user's own sentence on the subject is what the model reads — and it is bounded
-to the catalogued nudge Mechanisms (default-off, per-model). Fixing it means a non-textual
-idempotency channel on the hook API, which is a change to every Mechanism's contract; see ADR 0023's
-Consequences. Revisit if a real prompt trips it.
+- **`codeinfo` — DROPPED (C7):** its specific missed-call-site signal is not significant
+  (OR 0.69, p=0.32, gpt-oss-20b, N=75/arm).
+- **`correct_tool_result` — DEFERRED, not dropped (owner-ratified 2026-07-04):** the sim defines
+  no production trigger (lab-only, operator-supplied correction); the experimental
+  post-tool-result hook is the lab surface. A bench-discovered trigger motivates a **new** plan
+  item — the only path to porting.
+- **`compress` external-client-compaction sniffing — DROPPED (C3):** apogee owns the loop, no
+  external client to sniff. The surviving halves shipped: `tool_result_cap`, generative
+  Compaction, `truncate_history`.
+- **`intent` / `cot` / `feed_forward_correction` — FOLDED (C4/C5/C6):** absorbed into the inline
+  classifier, the three completion nudges, and `validate`'s retry-in-place — no catalogue rows
+  of their own.
+- **Un-ported sim refinements — bench-pending (R2):** the off-ramps' retry-ladder refinements and
+  `tool_loop_interceptor`'s count threshold + wall-clock cooldown; the loop's strikes-3
+  self-regulation + `maxPostResponseRetries` substitute.
 
 ---
 
@@ -373,7 +225,7 @@ an extra prompt rather than a broken tool, and the export is purely additive whe
 
 ## Two doors left open by the Mechanism-registration collapse
 
-**Status:** parked 2026-07-25 (`docs/plans/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`,
+**Status:** parked 2026-07-25 (`docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`,
 "Explicit non-goals" + D4; [ADR 0003](docs/adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md)
 amendment 2026-07-25). Both were named out of scope by that plan and recorded here so the door is
 documented rather than silently shut. **Neither is a live gap.**
@@ -536,76 +388,27 @@ needs its own grill and bench evidence — deliberately not a rider on the decom
 
 ---
 
-## Auto-mode confinement degradation is silent — CLOSED (notice + `/confine` + host acknowledgement shipped)
+## Startup notices are stderr-only — the in-transcript banner
 
-**Status:** CLOSED 2026-07-21 (filed, designed, and implemented the same day —
-`docs/plans/auto-confinement-degradation-plan.md`, items 1–10; ADR 0012 amendment 2026-07-21).
-Post-`v1.4.0`, **additive**: a startup notice, an in-place accept path, and a config write. The
-resolution ladder is unchanged.
+**Status:** extracted 2026-07-27 from the closed *Auto-mode confinement degradation* entry (its
+one still-open residue) so the closed body could leave this file. The underlying parked idea is
+the validated-set in-transcript banner — deferred follow-up 04 of the validated-set work
+(`docs/plans/archived/validated-set-runtime-surface.md`: "no TUI in-transcript banner in v1,
+revisit if the stderr line proves easy to miss").
 
-**What was wrong:** `resolveLadderAuto` sends a subprocess tool to `Confine` when the backend can
-fence it and to `Gate` when it cannot — ADR 0012's *"confine if you can, gate if you can't"*. On a
-host reporting `Capabilities().FSWrite == false` that is an Approval prompt on **every** terminal
-command, and nothing said so, so Auto read as broken. It is the *common* case, not an edge one:
-`landlock_create_ruleset` returns **`ENOSYS`** in most containers regardless of kernel version
-(verified on 6.18.15, well past the 5.13 floor).
-
-**What shipped:**
-
-1. **The capability-aware startup notice** (`cmd/apogee/wire.go`) — fires only on the one cell that
-   warrants it (Auto **and** confinement asked for **and** `FSWrite == false`), names the backend
-   and the consequence, and is worded as the ladder working, never as a malfunction.
-2. **`/confine`** — `status` reports the backend, its capabilities, the host id, and the effective
-   setting; `off` / `on` swap Auto's blast radius for the running session through
-   `Agent.SetConfineToWorkspace`; `off --save` also persists. A slash command was chosen over a
-   startup y/N prompt or an extra Approval choice precisely to keep the accept away from the moment
-   of peak frustration (the click-through-consent trap).
-3. **`unconfined-hosts:`** — the host-scoped acknowledgement, resolving the open scope question in
-   favour of *host*: `confine-to-workspace` keeps its global meaning, while "this machine is
-   disposable" is recorded per machine against `platform.HostID()`, so a throwaway container's
-   acknowledgement never follows `~/.apogee/config.yaml` onto a laptop.
-4. **A comment-preserving config writer** — `--save` splices the entry as text guided by the parsed
-   node positions (never unmarshal→marshal, which would delete the template's documentation),
-   idempotent, atomic, mode-preserving, and re-parse-verified before the write.
-
-**The constraint that must keep holding:** do **not** loosen the ladder. `resolveLadderAuto` must
-never auto-run unconfined subprocesses on its own initiative when the backend is incapable — that
-reintroduces the "unsupervised *and* unbounded" hole ADR 0004/0012 forbid, *without the user ever
-choosing it*. What shipped is the tool making the user's own decision reachable, never the tool
-deciding.
-
-**Deliberately deferred residue:**
-
-- **Surfacing the startup notice in the transcript, not just stderr.** *(Still open.)*
-  `/confine status` renders in the transcript, but the startup notice is stderr-only (it is
-  printed pre-alt-screen, like every other startup notice). Folding it into the UI belongs to the
-  parked validated-set in-transcript banner work (deferred follow-up 04) — this plan explicitly
-  did **not** build a banner framework.
-- ~~**`apogee probe`** — reporting the confinement backend and its capability matrix as a
-  subcommand, diagnosable without running an agent.~~ **CLOSED 2026-07-22 (Phase 5, items 1/3 —
-  `docs/plans/2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`;
-  [ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)).**
-  `apogee probe` (and `apogee probe host`, its scriptable twin) prints the host report — backend,
-  capability matrix, `AutoEligible()` verdict, the effective `confine-to-workspace` after the host
-  acknowledgement, the roots, endpoint reachability — free, offline and read-only, with no agent
-  and no model call. It does not duplicate `/confine status`: both render one extracted verdict
-  (`internal/probe`'s `BackendName` / `DegradedNotice` / `CapabilityLine`), so the CLI and the TUI
-  cannot word the same matrix two different ways, and the report closes with the startup
-  degradation notice verbatim.
-
-Also closed by Phase 5, though it was never the residue's own bullet: **the degradation notice no
-longer fires on a capable Windows host.** The notice's trigger cell (Auto + confinement asked for
-+ `FSWrite == false`) is unchanged — what changed is that Windows now has a backend that reports
-`FSWrite: true` (ADR 0020's low-integrity token, floor build 17763), so the notice narrows to the
-hosts where it was always the honest answer: an older Windows, and the containers where landlock
-returns `ENOSYS`.
+Every startup notice (the validated-set notice, the Auto-confinement degradation notice) prints
+pre-alt-screen on **stderr only**; `/confine status` renders the same facts in the transcript on
+demand, but the startup moment does not. Folding startup notices into the transcript means
+building the banner rendering the degradation plan deliberately did **not** build (its item 7
+used the existing notice path and named follow-up 04 the owner of any framework). No wrong
+behaviour — pick it up when a stderr notice proves easy to miss.
 
 ---
 
 ## A presented document carries no sub-agent depth (the ⤷ label re-opens around it)
 
 **Status:** parked 2026-07-21 (noticed while verifying the `present_document` plan,
-`docs/plans/2026-07-21 - 01 - present-document-tool-plan.md`). Cosmetic, no wrong output.
+`docs/plans/archived/2026-07-21 - 01 - present-document-tool-plan.md`). Cosmetic, no wrong output.
 
 `domain.PresentRequest` carries no sub-agent depth, so `internal/tui`'s presentation entry is
 always rendered at depth 0 — unrailed even when a sub-agent presented the document. Because
@@ -649,101 +452,56 @@ strictly easier to reason about.
 
 ---
 
-## Validated-set twin ladders — probe and startup ask the same question twice
+## Host-override knob for the rendered instruction block
 
-**Status: DONE 2026-07-22** — consolidated by the Phase 5 second review fixes
-(`docs/plans/2026-07-22 - 03 - phase5-second-review-fixes-plan.md` item 6), pulled forward from
-the `/improve-codebase-architecture` backlog after the SAME twin-ladder shape produced a second
-divergence in one day (the post-fixes review's High: `probe model`'s claim ignored the unpinned-
-model and weights-file rungs of startup's identity ladder).
+**Status:** extracted 2026-07-27 from the closed *system-prompt / template story* entry (its
+Residual 1); originally the prompt-seam plan's D1 *rejected hybrid* (engine-owned won —
+[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)).
+Additive-later, demand-driven.
 
-What shipped: one shared ladder, `startupSetDecision` (`cmd/apogee/validatedsets.go`) — the
-off-switches, `library.ResolveFingerprintFrom`, `validated.Match`, the explicit `mechanisms:`
-precedence, and `validated.Validate` in startup's order — returning a decision value both call
-sites render in their own voice: `resolveValidatedSet` enacts it (notices + the applied set),
-and `probe model`'s `autoApplyKeys` (`cmd/apogee/probemodel.go`) reports it, running the ladder
-once against the home as the probe just left it and once with the record rung removed to compute
-the promotion. The recorded genuine differences survived: startup stays loud on the dangling
-alias where the probe stays silent, and the probe still asks the question at two confidences.
-Sources: ADR 0016 §5 + its 2026-07-19 realisation, ADR 0021 §4.
+The idea: a host (embedder) knob to override the engine-rendered instruction block. The
+obligation the old entry attached to it is discharged: because the user's prompt, the mechanism
+directives and the profile's tool block merge into **one** system message, a host-supplied block
+would replace the rendered block *inside that same message* without reshaping anything ADR 0023
+decided — the two compose; they do not fight. Build only if an embedder asks.
 
 ---
 
 ## Phase-5 verification leftovers — the owner-run passes this machine cannot perform
 
-**Status:** carried forward 2026-07-22 at the Phase-5 close-out, out of the "Owner-run checklist"
-of the now-archived
+**Status:** carried forward 2026-07-22 from the "Owner-run checklist" of the archived
 [`docs/plans/archived/2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`](docs/plans/archived/2026-07-22%20-%2000%20-%20phase5-cross-platform-hardening-plan.md)
-— read it for the full context (the ground truth, the settled design, and every work item's
-NOTES). Phase 5 is **implemented**: all ten items shipped, the whole-plan gate is green (build,
-vet on all three GOOSes, six cross targets, tests, `--help`). What is parked here is the
-**verification** the Windows execution machine physically cannot do, plus one measurement that
-wants an owner decision. Logged here rather than left in the archive so it isn't buried.
+(read it for full context). Phase 5 is **implemented**, and everything runnable here has since
+run green (2026-07-23, recorded in the CHANGELOG + the archived plans): `make check` under
+`-race` on the Linux devbox including the live landlock enforcement battery, `make live-eval`,
+`TestSmokeLiveProfileSeam`, and the **Linux** arm of the live Auto-confined deliverable run.
+What remains needs hardware this environment does not have:
 
-- **✅ DONE (2026-07-23) — Closeout Linux pass — `make check` on the Linux devbox.** Ran green,
-  exit 0, on an Ubuntu devbox (kernel **7.0.0-28-generic** aarch64) with the race detector on
-  (cgo enabled, gcc 15.2): gofmt, `go vet`, `go build`, `go test -race ./...` across all 24
-  packages, the ADR-0010 import invariant, all six cross-compile targets, and `apogee --help`.
-  This is the first run of the build-tagged Linux code paths (previously only cross-compiled from
-  the Windows host), so it closes the Linux execution gap for Phase 5, the Phase-5 *review fixes*
-  plan (`docs/plans/archived/2026-07-22 - 02 - phase5-review-fixes-plan.md`, item 13), and the
-  Phase-5 *second* review-fixes plan (`.../2026-07-22 - 03 - ...`, whose untagged platform tables
-  in `winconfine_test.go`/`host_test.go` now also run natively on Linux). Bonus: this box has
-  `landlock` live, so the landlock-tagged enforcement battery ran live rather than self-skipping —
-  see the CHANGELOG "Known post-release verification" note, "Linux landlock live enforcement",
-  now also closed.
-- **✅ DONE (2026-07-23) — Both automated live checks against the real endpoint.**
-  (a) `make live-eval` (`TestE2ELiveModel`) passed under `-race` against
-  `http://192.168.64.1:1111` (gemma-4-E4B-it-QAT): streamed, requested `write_file`, cleared
-  Approval, file landed in the temp workspace — closes the open Phase-1 live eval (also flipped
-  in `docs/design/technical-design.md` §"Suggested next-session entry point").
-  (b) `TestSmokeLiveProfileSeam` passed under `-race` against the same endpoint: all three
-  subtests (thinking-delimiter strip, native control, fenced tool-call parse+dispatch) green.
-  Remaining from that trio: the **manual, owner-run live Auto-confined deliverable run** —
-  tracked in the CHANGELOG "Known post-release verification" note. **Linux (landlock) arm
-  ✅ done (2026-07-23)** on the Ubuntu devbox (kernel 7.0.0-28-generic aarch64): out-of-workspace
-  write OS-denied with no prompt, in-workspace write succeeded, `demo__ping` MCP tool still
-  raised Approval, delegated sub-agent's `NOTES.md` write rendered, escape file confirmed
-  absent afterwards. Only the macOS (seatbelt) and Windows arms remain.
-- **Live Auto-confined deliverable run on Windows**, if an LLM endpoint is reachable from that
-  machine. The ADR 0020 backend itself is proven natively (escape battery + the real `Terminal`
-  tool under `platform.NewConfiner()`, item 8's live evidence); an end-to-end deliverable
-  session under Auto is what remains.
-- **Degradation notice on a below-minimum-version Windows host** (below build 17763). The
-  **deny-vs-token decision itself is proven**: the untagged `belowWindowsFloor` predicate
-  (`winguard.go:43`, was `winconfine.go:35` before the 2026-07-25 split) has table coverage
-  (`TestBelowWindowsFloor` — 17762⇒deny, 17763⇒token,
-  26200⇒token), verified green on the Linux devbox 2026-07-23. What stays **UNTESTED** (recorded so
-  in [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)'s
-  consequences) is only the on-host UX observation of the notice — no such host exists here, and it
-  is verifiable only if one turns up.
-- **macOS cross-binary smoke:** `--help` plus a trivial session. The darwin binary **cross-builds
-  clean** (`GOOS=darwin` amd64+arm64, re-verified 2026-07-23); Linux and Windows are each covered by
-  an execution machine, so only the runtime `--help`+session observation on a Mac remains.
-- **✅ DECIDED (2026-07-23) — the Windows disk-label walk is NOT pruned; a progress notice is added
-  instead.** Item 8 measured what ADR 0020 accepted but never quantified: the label pass costs
-  **~1 ms per object**, so a synthetic 5,051-object tree took **5.2 s to label and 2.2 s to revert**
-  — paid once per box per session (first confined command, then shutdown), and a large `.git`/
-  `node_modules` makes that first `Confine` visibly block. Owner call: **keep the ratified full-tree
-  labelling** (pruning would dissolve the fence for excluded trees — a confined child could no
-  longer `git commit`/`npm ci` — and belongs with the parked box-local-`%TEMP%`/toolchain-caches
-  session), and **add a user-visible progress notice** so the one-time walk stops being a silent
-  hang. Implementation plan: `docs/plans/2026-07-23 - 00 - windows-label-walk-progress-notice-plan.md`
-  (2 items; Item 2 carries a startup-pre-warm-vs-transcript-delegate design call for the owner).
+- **Live Auto-confined deliverable run on Windows** — the ADR 0020 backend is proven natively
+  (escape battery + the real `Terminal` tool under `platform.NewConfiner()`); an end-to-end
+  deliverable session under Auto is what remains, if an LLM endpoint is reachable from that
+  machine.
+- **Live Auto-confined deliverable run on macOS (seatbelt) + runtime smoke** — same shape; the
+  darwin binary cross-builds clean (amd64+arm64, re-verified 2026-07-23), so what remains on a
+  Mac is `--help`, a trivial session, and the confined Auto run.
+- **Degradation notice on a below-floor Windows host (< build 17763)** — the deny-vs-token
+  decision itself is table-proven (`TestBelowWindowsFloor` in the untagged `winguard.go`
+  predicate); only the on-host UX observation of the notice stays untested (recorded so in
+  [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)'s
+  consequences), verifiable only if such a host turns up.
 
-**Not repeated here:** the same checklist carried a "pre-existing, NOT Phase 5 scope" group
-(Linux landlock live enforcement on a landlock-enabled kernel; the Linux/macOS live Auto-confined
-runs). Those live in the CHANGELOG's **"Known post-release verification (owner-run / CI)"** note
-and stay there — that note, not this file, is their tracking home.
+**Not repeated here:** the "pre-existing, NOT Phase 5 scope" group (Linux/macOS live-run
+variants already tracked elsewhere) lives in the CHANGELOG's **"Known post-release verification
+(owner-run / CI)"** note — that note, not this file, is its tracking home.
 
 ---
 
 ## Windows Auto: box-local `%TEMP%` / toolchain caches
 
 **Status:** recorded 2026-07-22 (Phase 5 review fixes,
-`docs/plans/2026-07-22 - 02 - phase5-review-fixes-plan.md` item 12). Not built by that plan by
-decision — it needs its own design session. Sources: ADR 0020 §2 (the "Consequence for the box
-builder" paragraph) and `docs/design/confinement-execution-contract.md` §7.
+`docs/plans/archived/2026-07-22 - 02 - phase5-review-fixes-plan.md` item 12). Not built by that
+plan by decision — it needs its own design session. Sources: ADR 0020 §2 (the "Consequence for the
+box builder" paragraph) and `docs/design/confinement-execution-contract.md` §7.
 
 **The gap.** ADR 0020 §2 names the toolchain's cache/temp dirs a **hard prerequisite** on Windows,
 not the ergonomic nicety contract §7 treats them as on Linux/macOS: the confined child runs under a
@@ -776,51 +534,38 @@ moment to give `ConfineWritablePaths` its first writer.
 
 ---
 
-## `internal/platform`'s two Windows confinement files exceed the file-size guideline — CLOSED (the label mechanism is a module)
+## Closed entries — the one-line trail
 
-**Status:** CLOSED 2026-07-25. Recorded 2026-07-22 (Phase 5 review-fixes follow-up) as a shape
-observation flagged for **`/improve-codebase-architecture`**; picked up as candidate **05** of
-`docs/reviews/archived/2026-07-24 - 00 - architecture-deepening-review.md` and landed by
-`docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md` (7 items).
+Full records live in the named docs; a line here keeps the deferral trail deliberate and carries
+any standing constraint that must not be re-filed.
 
-The figures this entry quoted were **stale**: 581/572 at the time of writing, but
-`winconfine.go` was **804** lines and `confiner_windows.go` **777** by the time the card was
-picked up — both had grown ~40 % on the Phase-5 follow-ups. The three seams this entry named
-(journal, label walk, notice wording) became **one** package, not three: the walk and the
-journal have to be co-located for the journal-before-label invariant (ADR 0020 §2) to live
-inside the module instead of in three cooperating call sites. What landed:
-
-- **`internal/platform/winlabel`** — the mandatory label mechanism: the SDDL vocabulary, the
-  journal (record, atomic write, retention, revert-split), the tree walk and the notice
-  wording, behind a compiler-enforced boundary. It is a leaf package — standard library plus
-  `golang.org/x/sys/windows`, nothing from apogee — so the wraps stay one-way and the decision
-  half is still table-testable on Linux and macOS, the property Phase 5 bought. Eight non-test
-  files, the largest `walk_windows.go` (345) and `journal.go` (339).
-- **`internal/platform/confiner_windows.go`** — **328 lines**, the backend that *composes* it:
-  the selectors, `Confine`, `Close`, `labelBox` and root resolution.
-- **`internal/platform/winguard.go`** — **208 lines**, was `winconfine.go`, renamed because
-  nothing in it confines: the version floor, the labelling guardrails and the three notice
-  delegations. The guardrails deliberately did **not** follow the mechanism into `winlabel` —
-  they are the host's path rules (`hostRules.split`/`Contains`) applied to a box.
-- **`internal/platform/wintoken_windows.go`** — **101 lines**, the restricted low-integrity
-  token mint, the one concern in the old file that is about the token rather than the box.
-
-**Three files under `internal/platform` are still over the ~400-line guideline. None of them is a
-finding — do not re-file them:**
-
-- `confiner_windows_test.go` — **1377 lines**, over **by decision** (plan decision D7). It is
-  the Windows-tagged lifecycle suite that asserts against real SACLs, real junctions and real
-  journal files, and it is the only proof this backend has on a machine that cannot execute it.
-  Rewriting ~900 lines of it to drive `winlabel.Journal` directly would have traded a proven
-  safety net for an unproven one. Only its call sites were renamed.
-- `host.go` — **434 lines**, pre-existing and **out of that plan's scope**: it is the untagged
-  host rule table (`hostRules`, `split`, `Contains`, the POSIX/Windows tables), last changed in
-  `019d93c`, before any of the split work. If it is ever picked up it wants its own entry.
-- `winlabel/journal_test.go` — **433 lines**, over **by decision** (owner call on the plan's
-  follow-up). It is the journal's untagged decision suite: nine functions covering the round trip
-  and the accessors, the atomic publish and its temp debris, the sibling scan, both halves of the
-  residue report, and the two fold-injected entry helpers (`recordEntry`, `unwindEntry`). They
-  share one vocabulary and one set of Windows path spellings, so splitting them for 33 lines
-  would scatter the journal-before-label invariant (ADR 0020 §2) across several suites. It is
-  also the only proof of that invariant's decision half on a machine that cannot write a real
-  SACL, which is exactly the property the module split was for.
+- **Read/list tool-name detection** — CLOSED 2026-07-19 (spelling families: post-v1.3.0
+  review-fixes item 11/F8; shared `internal/mechanisms/historyscan.go` scan shapes + token
+  arithmetic: architecture-deepening items 6–7/D4–D5). The broader shared-detection framework
+  stays declined as speculative. **Standing:** `syntax`/`autofix` keep the narrower sim-only
+  `isWriteTool` set, and search/exec tool spellings stay out of scope — do not fold in.
+- **General system-prompt / template story** — CLOSED 2026-07-26
+  ([ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md);
+  `docs/plans/archived/2026-07-26 - 02 - configurable-system-prompt-plan.md`). The accepted
+  marker-phrase-suppression interaction is recorded in ADR 0023's Consequences; the native
+  byte-identical anchor (`TestPromptSeam_NativeProfileByteIdentical`) still holds. The
+  host-override residual is now its own entry above.
+- **Auto-mode confinement degradation is silent** — CLOSED 2026-07-21 (ADR 0012 amendment;
+  `docs/plans/archived/auto-confinement-degradation-plan.md`): capability-aware startup notice,
+  `/confine`, the host-scoped `unconfined-hosts:` acknowledgement, the comment-preserving config
+  writer. `apogee probe` closed it further 2026-07-22 (ADR 0021). **Standing:** never loosen
+  `resolveLadderAuto` — the user's decision must stay reachable, the tool never decides. The one
+  live residue is the *startup notices are stderr-only* entry above.
+- **Validated-set twin ladders** — DONE 2026-07-22 (one shared `startupSetDecision`,
+  `cmd/apogee/validatedsets.go`; phase5-second-review-fixes item 6; ADR 0016 §5, ADR 0021 §4).
+- **Windows disk-label walk kept full-tree + progress notice** — DECIDED and SHIPPED 2026-07-23
+  (`docs/plans/archived/2026-07-23 - 00 - windows-label-walk-progress-notice-plan.md`; the ~1 ms
+  per-object measurement lives there). Pruning the walk stays rejected — it would dissolve the
+  fence for excluded trees; the related cache/temp question is the live *box-local `%TEMP%`*
+  entry above.
+- **`internal/platform` Windows confinement file split** — CLOSED 2026-07-25
+  (`docs/plans/archived/2026-07-25 - 02 - windows-label-module-plan.md`): the label mechanism is
+  the leaf module `internal/platform/winlabel`; `winguard.go` (was `winconfine.go`) keeps the
+  host's path rules. **Standing (do not re-file):** `confiner_windows_test.go` (1377 lines),
+  `host.go` (434) and `winlabel/journal_test.go` (433) are over the ~400-line guideline **by
+  decision** (plan D7 + owner calls); if `host.go` is ever picked up it wants its own entry.

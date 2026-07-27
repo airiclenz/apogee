@@ -221,6 +221,27 @@ NOTES (2026-07-27): three deviations/additions from the item's literal text.
 
 ## 4. TUI rebind orchestration — late seed, deferred apply, transcript notice
 
+NOTES (2026-07-27): five deviations/additions from the item's literal text, all in the WORDING half.
+1. A beat that crosses back online AND rebinds writes only the bind note — the item-3 `server back
+   online` line is suppressed for that one fold. This item's acceptance demands it ("offline note,
+   connected note, (nothing), changed note" for the script `offline → model A → model A → model B`),
+   and "connected: A" already implies the server answered. Item 3's recovery note is untouched in
+   every other case (`TestRecoveryNotesOnce` passes unmodified — it wires no Rebind).
+2. The window-only change needed a third wording the item did not give (it named only the late-seed
+   and model-change lines while asking for a "window-only notice"): `context window changed: 32k →
+   16k`. A rebind whose BOUND values did not move — the pinned-window case, where the server resized
+   and the pin outranked it — writes no note at all, since none of it is visible to the human.
+3. The failure note has a second form for the late seed: `still bound to X` cannot be said when
+   nothing is bound, so the pre-bind refusal reads `could not bind Y: <err> — no model is bound yet`.
+   The bound case is the item's literal sentence.
+4. Model ids in all four notes are rendered through `displayModel` (the footer's and start-up box's
+   own rendering), so a note and the chrome beside it can never name one model two ways.
+5. Four tests beyond the item's list: `TestBeatScriptNarratesEachChangeOnce` (the acceptance script,
+   asserted as the exact note sequence), `TestUnknownWindowNotedOnBind` and
+   `TestRebindNoticesSurfaceAsNotes` (the two note paths the item mandates but did not list a test
+   for), and `internal/tui/doc.go` gains the rebind paragraph the package's narration convention
+   requires.
+
 **What.** The apply half. `tui.Options` gains the second seam:
 
 ```go
@@ -301,6 +322,14 @@ rebind := func(model string, window int) (tui.RebindResult, error) {
 ---
 
 ## 7. Docs, decision record, and release bookkeeping
+
+**NOTES (2026-07-27):** the `TODO.md` half of this item is already done — an owner-requested
+TODO cleanup rewrote the file the same day: the stale "upstream is immutable" note is gone and
+**[P1] Server / model switching** is already marked IN FLIGHT with the item 1–3 / 4–7 split and
+the non-goals. The quoted `:53-55` / `:92-95` line numbers no longer apply. When this item runs,
+only *finalize* that entry's wording against what actually shipped (drop "IN FLIGHT", record what
+remains); every other target of this item (ADR 0024, CONTEXT.md, ISSUES.md, CHANGELOG.md,
+technical-design.md) is untouched and still to do.
 
 **What.** ADR **0024** `docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md`: the 10 s monitor as a concept distinct from probe (ADR 0021); the beat-result-re-arms tick topology; the idle-only/deferred-apply concurrency argument (why no locks on `cfg` — the boundary IS the synchronization, extending ADR 0011's idle-only class); pin-wins (decision 9); model-as-hint (decision 10); the busy-failure/2-idle-failures debounce; the display-only-vs-rebind split of the two Options seams; deliberate non-goals (B6; B2 per-slot `n_ctx` documented, not re-derived). `CONTEXT.md`: a **Heartbeat** noun entry near Probe (`CONTEXT.md:608-644`) — probe diagnoses once, the heartbeat monitors continuously, rebind is its apply; _Avoid_: "health check", "poller", "probe" for this — plus a cross-reference from the Probe entry. `TODO.md`: rewrite the stale "upstream is immutable" note (`:53-55`); mark **[P1] Server / model switching** (`:92-95`) partially landed (heartbeat + `Agent.Rebind` + model-list data layer shipped; `/server` + `/model` picker UI and local-server start/stop remain, now unblocked). `ISSUES.md`: check off the 10-second-timer item with a pointer to ADR 0024; note the gauge half is B5-fixed and B6 stays open by design. `CHANGELOG.md` `[Unreleased]`: the Heartbeat block (async startup, offline UX, live rebind + notice, `/v1/models` data layer, B5 fix, ServerManager removal) — rides **v0.9.0**. `docs/design/technical-design.md` §5: new **Heartbeat / upstream monitor** row (pointing at ADR 0024); amend the Provider row.
 
