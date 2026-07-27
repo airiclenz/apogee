@@ -72,11 +72,13 @@ type settings struct {
 	// is unaffected by it (that always folds on request).
 	autoCompact bool
 
-	// contextWindow overrides the discovered model context window in tokens (item 3 / S3). File-only
-	// (no flag/env, like autoCompact) and default 0 ⇒ no override, so the CLI discovers the window
-	// from the server; a positive value wins and skips the probe (the escape hatch for a server that
-	// does not advertise its window, or an offline pinned-model start). It feeds
-	// ContextConfig.MaxContextTokens, which the Budget and automatic Compaction bind against.
+	// contextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env,
+	// like autoCompact) and default 0 ⇒ unpinned, so the window is whatever the ten-second
+	// heartbeat observes, live, and follows a model switch with it; a positive value is never
+	// overridden by a beat (ADR 0024 — the escape hatch for a server that does not advertise a
+	// window, or advertises one that is wrong for how it is run). Nothing pre-fills it any more, so
+	// > 0 means "the user pinned it" and nothing else. It feeds ContextConfig.MaxContextTokens,
+	// which the Budget and automatic Compaction bind against.
 	contextWindow int
 
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), file-only
@@ -306,9 +308,10 @@ type layer struct {
 	// distinguishable from an absent key (which keeps the default true).
 	autoCompact *bool
 
-	// contextWindow is set only by the FILE layer (the window override is config'd, no flag/env —
-	// like autoCompact). A nil pointer means the source does not set a window, so resolution falls
-	// through to discovery; only a positive `context-window:` projects to a non-nil pointer.
+	// contextWindow is set only by the FILE layer (the window pin is config'd, no flag/env — like
+	// autoCompact). A nil pointer means the source pins no window, so resolution leaves it 0 and
+	// the heartbeat's live observation stands; only a positive `context-window:` projects to a
+	// non-nil pointer.
 	contextWindow *int
 
 	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
@@ -510,11 +513,12 @@ type fileConfig struct {
 	// so an explicit `auto-compact: false` is distinguishable from an absent key (default true).
 	// Compaction is structural (it stays on under Bypass), so this is the only way to turn it off.
 	AutoCompact *bool `yaml:"auto-compact"`
-	// ContextWindow overrides the discovered model context window in tokens (item 3 / S3). File-only
-	// (no flag/env), like auto-compact. Absent or ≤ 0 ⇒ the CLI discovers the window from the server
-	// (for a pinned model too); a positive value wins and skips the probe — the escape hatch for a
-	// server that does not advertise its window, or an offline pinned-model start. It feeds
-	// ContextConfig.MaxContextTokens, which the Budget and automatic Compaction bind against.
+	// ContextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env),
+	// like auto-compact. Absent or ≤ 0 ⇒ unpinned, so the window follows what the ten-second
+	// heartbeat observes, live, across a model switch; a positive value is never overridden by a
+	// beat (ADR 0024) — the escape hatch for a server that does not advertise a window, or
+	// advertises one that is wrong for how it is run. It feeds ContextConfig.MaxContextTokens,
+	// which the Budget and automatic Compaction bind against.
 	ContextWindow int `yaml:"context-window"`
 	// MCPServers configures external MCP servers to connect on startup (P3.15). Absent/empty ⇒
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
@@ -1018,9 +1022,11 @@ func configFilePath(configDir string) string {
 // ----------------------------------------------------------------------------
 
 // resolveSystemPrompt collapses the resolved system-prompt block into the ONE template
-// apogee.Config.SystemPrompt carries for this session's model. The composition root calls it
-// AFTER model resolution, because the per-model override keys on the RESOLVED model name — the
-// label discovery fills in when no model is configured — which is not known any earlier.
+// apogee.Config.SystemPrompt carries for the model this session is BOUND to. The composition root
+// calls it AFTER model resolution, with the model as configured — which on a cold start is no
+// model at all, so the global template is selected — and rebindSpecFor re-runs exactly this call
+// with the model the first beat observes, so the per-model entry lands the moment a model is
+// bound and again on every switch (ADR 0024).
 //
 // Selection is whole-entry replacement: an entry keyed on model replaces the global prompt
 // entirely (a per-model file does not inherit a global text), and every other entry is inert —
