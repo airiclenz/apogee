@@ -1,10 +1,10 @@
-# Plan — Interjections: type-ahead + mid-run delivery, and the real terminal cursor
+# Plan — Interjections: type-ahead + mid-run delivery, the real terminal cursor, and selection that survives the stream
 
 **Date:** 2026-07-27
-**Status:** READY (grilled with the owner 2026-07-27 — six decisions recorded below; ground verified against the working tree same day)
-**Source:** ISSUES.md items 1–2 — "I cannot start writing the next prompt when the model is working … scheduled messages … sent when possible even when the model is still working" and "The cursor in the prompt box is blinking … I just want a full static symbol … preferably the terminal's defined cursor (line vs block)".
+**Status:** READY (grilled with the owner 2026-07-27 — six decisions recorded below; ground verified against the working tree same day. **Second grill, same day:** the text-selection issue merged in — decisions 7–9; selection ground verified against the working tree the same way.)
+**Source:** ISSUES.md items 1–3 — "I cannot start writing the next prompt when the model is working … scheduled messages … sent when possible even when the model is still working", "The cursor in the prompt box is blinking … I just want a full static symbol … preferably the terminal's defined cursor (line vs block)", and "I cannot select text in apogee when the model is working. I'd like to be able to select text at any point in time."
 **Track:** rides **v0.9.0** `[Unreleased]` (current `VERSION` v0.8.7; additive public surface, one deliberate behavioral change: keys type into the input while the model works instead of scrolling the transcript).
-**Public API:** additive (ADR 0010): `Agent.Interject` (public automatically via the `apogee.Agent` alias, `apogee.go:52`), exported field `domain.Message.Interjected`, sentinel `domain.ErrNoOpenExchange` (re-exported at root + `example_test.go` guard), config key `cursor-shape`, `tui.Options.CursorShape`. The internal `tui.Engine` seam gains `Interject` (every fake engine in `internal/tui/*_test.go` follows).
+**Public API:** additive (ADR 0010): `Agent.Interject` (public automatically via the `apogee.Agent` alias, `apogee.go:52`), exported field `domain.Message.Interjected`, sentinel `domain.ErrNoOpenExchange` (re-exported at root + `example_test.go` guard), config key `cursor-shape`, `tui.Options.CursorShape`. The internal `tui.Engine` seam gains `Interject` (every fake engine in `internal/tui/*_test.go` follows). The selection merge (items 7–8) adds NO public surface — it is all internal TUI rendering.
 **Standing requirement:** `/coding-standards` is forwarded to the implementer and verifier sub-agents.
 
 Per-item green gate:
@@ -15,14 +15,14 @@ make check                                              # vet + lint + go test -
 GOOS=windows go build ./... && GOOS=darwin go build ./...
 ```
 
-**Dependencies.** Items 1 → 2 → 3 → 4 → 5 run in order; the tree is coherent and green after every item and you may stop after any completed one. Item 6 (cursor) is fully independent — it may run at any point, even first. Item 7 runs last.
+**Dependencies.** Items 1 → 2 → 3 → 4 → 5 run in order; the tree is coherent and green after every item and you may stop after any completed one. Items 6 (cursor) and 7 (transcript-selection survival) are fully independent — each may run at any point, even first. Item 8 (selection scope pins) follows items 4 and 7. Item 9 runs last.
 
 **Deviations leave a trail.** Any authorized deviation gets a dated `NOTES (YYYY-MM-DD):` paragraph directly under the item heading.
 
 **Authoritative sources**, in precedence order:
 1. This plan (encodes the owner decisions).
 2. ADR 0011 (thin renderer; the legal engine-call classes — this plan names a third), ADR 0010 (package layout), ADR 0017 (the Exchange-scoped deferred queue this feature deliberately does NOT reuse), ADR 0014 ("steer" is taken by guided decomposition), ADR 0022 (per-Turn session records).
-3. CONTEXT.md domain language (Turn / Exchange / Step / quiescent boundary; the new noun **Interjection** lands in item 7).
+3. CONTEXT.md domain language (Turn / Exchange / Step / quiescent boundary; the new noun **Interjection** lands in item 9).
 4. The code as it stands.
 
 ---
@@ -36,6 +36,12 @@ GOOS=windows go build ./... && GOOS=darwin go build ./...
 5. **History: a committed, marked user message.** An interjection becomes a real, durable `RoleUser` message in engine history, carrying a marker the derived-Exchange computation skips. It survives turns, compaction, and session save/restore. The wire consequence (a user message after tool results — OpenAI-legal, but documented in-repo as breaking strict Gemma-class templates) is accepted and recorded; if it ever bites a live template it is a model-profile concern, not a history redesign.
 6. **Noun: "Interjection."** A message the human interjects into a running exchange. `Agent.Interject`, interjected messages, pending interjections. Avoids ADR 0014's "steer"; CONTEXT.md gets the entry plus the disambiguation.
 
+**Second grill (2026-07-27, selection merge):**
+
+7. **Selection rides this plan.** ISSUES item 3 — text selection while the model works — merges in as items 7–8 rather than a companion plan, so the three issues land together. The first grill's carve-out ("deliberately its own issue") is superseded by this decision.
+8. **A selection over changing text drops honestly.** The rule is keep-if-unchanged: a selection (mid-drag or lingering post-copy highlight) survives a repaint exactly when every rendered line it spans is identical before and after; the moment the text under it changes — the streaming tail, a rewrap, a fold-toggle — it drops. Repaint-freezing while the mouse button is held was rejected (the stream would visibly stall under every drag). What you copy is always exactly what you see.
+9. **Scope: the transcript everywhere, the prompt where it is editable.** Transcript selection works in every state (idle, running, approval, ask, errored). Prompt-box selection follows prompt editability — idle, ask, and (via item 4) running; at approval/errored the prompt stays inert (a/d/s and Enter-dismiss own the keyboard, the cursor is hidden per item 6, and the transcript covers copying). Read-only prompt selection in inert states was rejected (a caret-less selection in a box you cannot edit).
+
 ---
 
 ## The ground (verified 2026-07-27 against the working tree)
@@ -44,7 +50,7 @@ GOOS=windows go build ./... && GOOS=darwin go build ./...
 
 **Submit → worker → terminal fold.** `submit()` (`model.go:586-624`) parses (`submitParse`, `prompteditor.go:85-87`), launches `startExchange` (`worker.go:27-31`), sets `stateRunning`. The worker (`stepToBoundary`, `worker.go:110-130`) loops `eng.Step`; on `StatusTurnComplete` it already calls a SECOND engine method between Steps on the worker goroutine — `eng.Snapshot()` at `worker.go:119` — the in-tree precedent this plan's delivery mechanism extends. Terminal Msgs (`messages.go:19-29` compile-assert block) fold into `finishWorker` (`model.go:853-877`), whose `m.quitting` branch (`:865-869`) is the house pattern for "defer an action to the exchange-terminal fold". `/compact` runs as `stateRunning` via `startCompact` (`worker.go:45-55`) → `compactDoneMsg`.
 
-**Engine input path.** `Submit` refuses mid-exchange (`agent.go:127-133`, `ErrInputPending`); the single-slot `pendingInput` (`agent.go:89`) is consumed at the top of `step()` — `loop.go:63-75`: `openExchange()` (caches `exchangeStart`, `turn.go:150-153`), then `resolveSkillRefs` / `resolveFileRefs` (`loop.go:71-72` — @file refs resolve at delivery time, fresh), then one `conv.Append(RoleUser…)`. The Agent's contract (`agent.go:26-27`): drive from ONE goroutine; the only anytime-goroutine-safe mutators are `SetMode`/`SetConfineToWorkspace` behind sibling mutexes (`agent.go:43-58`). ADR 0011's closing rule: idle-only calls guarded by the state machine, or a new mid-`Step` call only behind a `SetMode`-class mutex. Between-Steps calls by the driving goroutine (the `Snapshot` precedent) are a third, so-far-unnamed class — item 7's ADR names it.
+**Engine input path.** `Submit` refuses mid-exchange (`agent.go:127-133`, `ErrInputPending`); the single-slot `pendingInput` (`agent.go:89`) is consumed at the top of `step()` — `loop.go:63-75`: `openExchange()` (caches `exchangeStart`, `turn.go:150-153`), then `resolveSkillRefs` / `resolveFileRefs` (`loop.go:71-72` — @file refs resolve at delivery time, fresh), then one `conv.Append(RoleUser…)`. The Agent's contract (`agent.go:26-27`): drive from ONE goroutine; the only anytime-goroutine-safe mutators are `SetMode`/`SetConfineToWorkspace` behind sibling mutexes (`agent.go:43-58`). ADR 0011's closing rule: idle-only calls guarded by the state machine, or a new mid-`Step` call only behind a `SetMode`-class mutex. Between-Steps calls by the driving goroutine (the `Snapshot` precedent) are a third, so-far-unnamed class — item 9's ADR names it.
 
 **Why a mid-run user message is non-trivial.** At a tool-round boundary the conversation tail is `assistant(tool_calls), tool…` (`dispatch.go:418-422`). (a) `Request.InjectContext` (`hooks.go:391-402`) documents user-after-tool as breaking strict chat templates and routes around it — but it is request-scoped: never committed, gone after one request. (b) The deferred-injection pipe (`hooks.go:741-766` → drained at `loop.go:574-579`) is Exchange-scoped by contract (F6: `closeExchange` clears it, `turn.go:129-132`) and also request-scoped on delivery. (c) The derived Exchange opening is `lastRoleIndex(c, RoleUser)` (`exchange.go:56-61`), stable today precisely because nothing commits a user message mid-exchange (`exchange.go:3-8`); ~9 mechanism call sites read it (guided_decomposition, decompose, library, cot, empty_response, tool_use_enforcer, filehint, toolfilter). Decision 5 commits anyway and fixes the derivation in one place with a marker.
 
@@ -53,6 +59,8 @@ GOOS=windows go build ./... && GOOS=darwin go build ./...
 **Rollback fates.** A cancelled Turn drops `[t.rollback, len)` (`turn.go:104-106`) — `t.rollback` is set by `armRequest` AFTER the between-Steps window, so an interjection delivered at the boundary survives a same-Turn cancel. `AbortExchange` (`agent.go:178-188`) drops the whole exchange including delivered interjections — accepted, documented fate (the transcript keeps the visual record).
 
 **Cursor.** `Init` returns `m.input.Focus()` (the virtual cursor's blink, `model.go:210-212`); `View()` (`model.go:1184-1255`) never sets `tea.View.Cursor`, so the real terminal cursor stays hidden and the bubbles textarea paints a simulated blinking one. bubbles v2 has first-class support for the switch: `SetVirtualCursor(false)` + `textarea.Cursor()` → a `*tea.Cursor` positioned relative to the widget (`textarea.go:1614-1641`), nil when blurred or virtual. `inputContentRect()` (`mouse.go:80-87`) already computes the textarea content's on-screen origin (the box is bottom-anchored above the three-row footer, so overlays above never move it) — the exact translation the cursor needs. Shape/blink flow from `styles.Cursor` (`textarea.go:1637-1639`). Config precedent for a flat scalar key: the `yaml:"…"` struct at `cmd/apogee/config.go:487-523`; template at `cmd/apogee/defaults/config.yaml`.
+
+**Selection (second grill; verified 2026-07-27 against the working tree).** Both drag-selections already exist (`mouse.go`): the prompt's rune-offset model and the transcript's screen-space content-coordinate model (`:35-61`), with region-arbitrated handlers Update routes in EVERY state (`model.go:418-436`); the copied text is sliced from the cached rendered lines (`transcriptSelectionText`, `mouse.go:347-372`). Two distinct blocks produce the issue. **Prompt side:** `inputEditable` (`mouse.go:72-74`) admits only idle/ask — item 4 already admits `stateRunning`, so prompt selection while running arrives with the routing item; today's refusals are pinned by `TestClickIgnoredWhileRunning` (`mouse_test.go:180`) and `TestPasteIgnoredWhileRunning` (`:452`) — rewrites the first grill's item 4 did not name (amended now). **Transcript side:** `refreshViewport` (`model.go:1562-1586`) unconditionally clears `transcriptSel` (`:1566`) because regenerated lines invalidate content anchors — and while the model streams, every `eventMsg` fold repaints (`:278-281`; so do the presented/cancelled/err/compact folds `:303-359`, and `layout()` on resize `:1515-1531`), so a drag dies within a token. Pinned by `TestTranscriptSelectionClearsOnStreamToken` (`mouse_test.go:589`) and `TestTranscriptSelectionClearsOnResize` (`:604`). **Why keep-if-unchanged is sound:** `renderView` (`render.go:47-96`) is deterministic at fixed width and entry-append-only; the volatile region is the tail — the streaming buffer block (`:89-95`) and a tool-call run joining its group on arrival (`:81-84`) — so settled lines keep both index and content, and line equality over the span is precisely "the selection's ground did not move". The spinner is status-line chrome (its tick fold, `model.go:383-392`, never repaints the transcript); the heartbeat fold already repaints only on a noted change and cites the drag-selection as the reason (`:401-407`) — the rule demotes that guard from correctness to economy. Approval/ask hold the worker at a rendezvous (no events flow), so transcript selection already works there today; the complaint is the streaming state. A wheel-scroll mid-drag already survives (content anchors; `TestTranscriptSelectionSurvivesWheelScroll`, `mouse_test.go:558`).
 
 ---
 
@@ -68,6 +76,9 @@ GOOS=windows go build ./... && GOOS=darwin go build ./...
 - **Interjected transcript blocks are not sticky headers.** They render as user-styled blocks at their delivery position but do not join `userBlocks` (`applyStickyHeader`, `model.go:1262+`) — the exchange's OPENING prompt stays the sticky context.
 - **No engine Event for interjections.** The TUI notifies itself (`interjectedMsg`); an `events.go` variant is additive later if embedders want observability (`apogee.go:141`).
 - **Cursor visibility follows editability.** `View` attaches the real cursor only when `inputEditable()` says so (idle/ask today, + running after item 4); at `stateAwaitingApproval`/`stateErrored` the cursor is hidden (`v.Cursor` stays nil) — no `Blur()` juggling needed.
+- **Keep-if-unchanged lives in `refreshViewport`; the predicate lives on `transcriptSel`.** `spanUnchanged(old, new []string) bool` — false when inactive or the span exceeds either slice, else line equality over the normalised span — evaluated against the outgoing `m.lines` BEFORE `rendered.lines` replaces them. Cols need no re-check: identical lines have identical widths. The lingering post-release highlight obeys the same rule, so a copied span stays visibly marked while the stream continues below it.
+- **Copy equals sight, by construction.** The release path slices the same `m.lines` the rule protected, so a kept selection can never copy text that differs from what is on screen.
+- **Item 4's named rewrites extend to the mouse pins.** `TestClickIgnoredWhileRunning` → `TestClickPositionsCaretWhileRunning`, and `TestPasteIgnoredWhileRunning` is superseded by item 4's `TestPasteWhileRunningTypes` — a first-grill gap in item 4's rewrite list, closed by this merge.
 
 ---
 
@@ -144,7 +155,8 @@ Refuses: `!a.turns.inExchange` → `domain.ErrNoOpenExchange`; all-empty input (
 - `TestBackspaceEmptyPopsNewestIntoEditor` — two rows staged; backspace restores the newest raw text; the older row remains.
 - `TestInterjectedMsgMovesRowToTranscript` — fold removes the row, transcript gains the marked block at the tail, sticky header unchanged.
 - `TestStatusLineShowsQueuedCount` — `plain(view)` contains `2 queued`; disappears at zero.
-- `TestPasteWhileRunningTypes`; `TestScrollWhileRunningViaPgKeysAndWheel`; `TestFileAutocompleteOpensWhileRunning`; `TestApprovalAndAskKeysUnchanged` — a/d/s and the ask-answer path behave exactly as before.
+- `TestPasteWhileRunningTypes` — replaces `TestPasteIgnoredWhileRunning` (`mouse_test.go:452`); `TestScrollWhileRunningViaPgKeysAndWheel`; `TestFileAutocompleteOpensWhileRunning`; `TestApprovalAndAskKeysUnchanged` — a/d/s and the ask-answer path behave exactly as before.
+- `TestClickPositionsCaretWhileRunning` — replaces `TestClickIgnoredWhileRunning` (`mouse_test.go:180`): with `inputEditable` admitting `stateRunning`, a click in the box positions the caret mid-run (second grill, decision 9).
 
 **Acceptance.** Green gate; every pre-existing test that changed is one of the deliberately named rewrites above, nothing else.
 
@@ -189,13 +201,47 @@ Refuses: `!a.turns.inExchange` → `domain.ErrNoOpenExchange`; all-empty input (
 
 ---
 
-## 7. Docs, decision record, and release bookkeeping
+## 7. Transcript selection survives the stream — the keep-if-unchanged rule
 
-**What.** ADR **0025** `docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md` (next free number — 0024 belongs to the heartbeat plan; if that plan has not executed yet, take the next actually-free number and note it): the Interjection concept; the three-way split (TUI stages / worker drains / engine commits); the NAMED third engine-call class — between-Steps calls by the driving goroutine (`Snapshot` precedent, now `Interject`) alongside ADR 0011's idle-only and `SetMode` classes, with a cross-amendment note in ADR 0011's closing rule; the `Interjected` marker and the one-site derivation fix; the wire posture (user-after-tool accepted; strict-template breakage is a model-profile concern, explicitly deferred); hold-on-stop and the idle single-message join; staged rows are session-ephemeral; why the Exchange-scoped deferred pipe (ADR 0017) was NOT reused (request-scoped, exchange-cleared — an interjection must outlive both). The cursor decision gets a paragraph in the CHANGELOG and config docs, not an ADR. `CONTEXT.md`: **Interjection** entry near Turn/Exchange (the human's mid-exchange message, marked, boundary-delivered; _Avoid_: "steering" — that is ADR 0014's guided-decomposition sense; cross-reference both ways), plus "staged/held" phrasing under the entry. `internal/tui/doc.go`: narration (`:201-213`) gains `interject.go` and `cursor_test.go`; the input-cluster paragraph notes the state-aware placeholder. `README.md`: the config-key table gains `cursor-shape`; a short "type while it works" bullet in the feature list. `CHANGELOG.md` `[Unreleased]`: the Interjections block (type-ahead, mid-run delivery, hold-on-stop, `Agent.Interject`) + the cursor block — rides v0.9.0. `ISSUES.md`: check off items 1 and 2 with pointers to ADR 0025 / this plan; the text-selection item (line 5) stays open and untouched. `docs/design/technical-design.md`: amend the Agent surface row (`Interject`) and the TUI row (interjection staging).
+**What.** Independent of items 1–6 (may run at any point, even first). `internal/tui/mouse.go`: `transcriptSel` gains `spanUnchanged(old, new []string) bool` — false when `!active` or the normalised span exceeds either slice, else string equality of every spanned line (`old[i] == new[i]` for `i` in `[top.line, bot.line]`); cols stay valid by construction (identical lines, identical widths). The package header's selection narration (`:14-31`) gains the survival sentence. `internal/tui/model.go` `refreshViewport` (`:1562-1586`): evaluate the predicate against the outgoing `m.lines` before `rendered.lines` replaces them; clear `transcriptSel` only when it fails — the mid-drag case and the lingering post-release highlight both ride the same rule. The `transcriptSel` field doc (`:116-120`) and the heartbeat fold's repaint-guard comment (`:401-407`) are rewritten: the beat guard stays (repaint economy) but is no longer what keeps a drag alive. Everything else — anchoring, highlight overlay, copy slicing, wheel-scroll survival — is untouched: the rule only decides WHEN the existing machinery lets go.
+
+**Tests** (`internal/tui/mouse_test.go`; deliberate rewrites named):
+- `TestTranscriptSelectionSurvivesStreamAppend` — replaces `TestTranscriptSelectionClearsOnStreamToken` (`:589`): selection over the settled prompt block; stream tokens append tail lines; the selection (and its highlight) survive; release copies exactly the settled text.
+- `TestTranscriptSelectionDropsWhenSpanChanges` — selection spanning the streaming tail; the next token rewrites those lines ⇒ dropped, no highlight, a release copies nothing.
+- `TestTranscriptMidDragSurvivesRepaint` — click, drag, an `eventMsg` fold between motions, drag on, release ⇒ the copy equals the settled span; the drag never died.
+- `TestTranscriptSelectionResize` — replaces `TestTranscriptSelectionClearsOnResize` (`:604`): a width change (rewrap) drops the selection; a height-only resize (identical lines through `layout()`) keeps it.
+- `TestTranscriptHighlightPersistsWhileStreaming` — a released (copied) highlight stays shaded in `View()` while tokens stream below it.
+- `TestNotedBeatRepaintKeepsSelection` — a heartbeat fold that repaints (an offline note landing) leaves a selection over settled lines intact.
+- `TestSpanUnchangedTable` — unit table: inactive ⇒ false; span past either slice ⇒ false; identical span ⇒ true; one differing line ⇒ false; reversed anchor/head normalises.
+
+**Acceptance.** Green gate; the only pre-existing tests that changed are the two named rewrites.
+
+**commit.** `feat(tui): transcript selection survives streaming — kept while the lines it spans are unchanged`
+
+---
+
+## 8. Selection at any point in time — scope pins across the state ladder
+
+**What.** After items 4 and 7 — behaviorally almost free (item 4 admits running to `inputEditable`, item 7 keeps transcript selections alive under repaints); this item pins the owner-decided scope (decision 9) so it cannot regress silently. `mouse.go`: the `inputEditable` doc comment (`:69-74`) is rewritten to name editability as the rule (idle, ask, running — the states where the human may edit; approval/errored stay inert), matching item 4's admission. No further behavior code should be needed — if any is, it is a bug in items 4/7, fixed there.
+
+**Tests** (`internal/tui/mouse_test.go`):
+- `TestPromptDragSelectsWhileRunning` — at `stateRunning`: click positions the caret, drag selects, release copies the typed runes — the prompt half of "select at any time".
+- `TestTranscriptDragCopiesInEveryState` — table over idle / running / awaitingApproval / awaitingAsk / errored: a transcript drag-release copies in each (running drags over settled lines).
+- `TestPromptClickRefusedAtApprovalAndErrored` — pins decision 9's boundary: a click in the box at those states starts no prompt selection (it falls through to the transcript arbitration exactly as today).
+
+**Acceptance.** Green gate; `go test -race -run 'Selection|Drag|Click' ./internal/tui` green.
+
+**commit.** `test(tui): selection pinned across the state ladder — transcript everywhere, prompt where editable`
+
+---
+
+## 9. Docs, decision record, and release bookkeeping
+
+**What.** ADR **0025** `docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md` (next free number — 0024 belongs to the heartbeat plan; if that plan has not executed yet, take the next actually-free number and note it): the Interjection concept; the three-way split (TUI stages / worker drains / engine commits); the NAMED third engine-call class — between-Steps calls by the driving goroutine (`Snapshot` precedent, now `Interject`) alongside ADR 0011's idle-only and `SetMode` classes, with a cross-amendment note in ADR 0011's closing rule; the `Interjected` marker and the one-site derivation fix; the wire posture (user-after-tool accepted; strict-template breakage is a model-profile concern, explicitly deferred); hold-on-stop and the idle single-message join; staged rows are session-ephemeral; why the Exchange-scoped deferred pipe (ADR 0017) was NOT reused (request-scoped, exchange-cleared — an interjection must outlive both). The cursor decision gets a paragraph in the CHANGELOG and config docs, not an ADR — and the selection-survival rule follows the same precedent: the `mouse.go` header sentence (item 7) plus a CHANGELOG bullet, no ADR. `CONTEXT.md`: **Interjection** entry near Turn/Exchange (the human's mid-exchange message, marked, boundary-delivered; _Avoid_: "steering" — that is ADR 0014's guided-decomposition sense; cross-reference both ways), plus "staged/held" phrasing under the entry. `internal/tui/doc.go`: narration (`:201-213`) gains `interject.go` and `cursor_test.go`; the input-cluster paragraph notes the state-aware placeholder; the `mouse.go` narration line (`:94-97`) gains the keep-if-unchanged rule and the editability scope. `README.md`: the config-key table gains `cursor-shape`; a short "type — and select — while it works" bullet in the feature list. `CHANGELOG.md` `[Unreleased]`: the Interjections block (type-ahead, mid-run delivery, hold-on-stop, `Agent.Interject`) + the cursor block + the selection block (transcript selection survives streaming and is available in every state; prompt selection while running) — rides v0.9.0. `ISSUES.md`: check off items 1–3 with pointers — items 1–2 to ADR 0025 / this plan, item 3 to this plan's items 7–8 and the CHANGELOG entry. `docs/design/technical-design.md`: amend the Agent surface row (`Interject`) and the TUI row (interjection staging).
 
 **Tests.** None (docs); `make check` still runs.
 
-**Acceptance.** `grep -n "Interjection" CONTEXT.md CHANGELOG.md docs/adr/0025-*.md` all hit; `grep -n "cursor-shape" README.md cmd/apogee/defaults/config.yaml` hit; ISSUES items 1–2 checked.
+**Acceptance.** `grep -n "Interjection" CONTEXT.md CHANGELOG.md docs/adr/0025-*.md` all hit; `grep -n "cursor-shape" README.md cmd/apogee/defaults/config.yaml` hit; `grep -in "selection" CHANGELOG.md` hits in `[Unreleased]`; ISSUES items 1–3 checked.
 
 **commit.** `docs: ADR 0025 — interjections commit at the between-Steps boundary; CONTEXT noun + close-out`
 
@@ -203,8 +249,11 @@ Refuses: `!a.turns.inExchange` → `domain.ErrNoOpenExchange`; all-empty input (
 
 ## Explicitly NOT in this plan
 
-- **Text selection while the model works** (ISSUES item 3) — same busy-gate territory (`mouse.go:69-74`), deliberately its own issue.
 - **Typing during approval / ask / errored states** — a/d/s, the borrowed answer box, and Enter-dismiss keep the keyboard; owner decision 1.
+- **Selecting the actively-streaming tail** — a selection whose lines change under it drops honestly (decision 8); streamed text becomes selectable the moment it settles.
+- **Freezing transcript repaints while the mouse button is held** — rejected in the second grill: the stream must not visibly stall under a drag.
+- **Read-only prompt selection at approval/errored** — the prompt stays inert where it is not editable (decision 9); the transcript covers copying there.
+- **The terminal's native shift+drag selection** — untouched; it bypasses the app's mouse capture at the terminal layer and remains available as-is.
 - **Queueing slash commands or `/skill` attachment mid-run** — commands are idle-only and are refused with a note; skills stage at idle as today.
 - **Clock-timed scheduling** ("send at 15:00") — "scheduled" in the issue means deliver-when-possible; nothing timer-based ships.
 - **Strict-template mitigation for user-after-tool** (Gemma-class) — accepted risk, absorbed by the model-profile layer if it ever bites; recorded in ADR 0025.
@@ -218,7 +267,7 @@ Refuses: `!a.turns.inExchange` → `domain.ErrNoOpenExchange`; all-empty input (
 
 - `internal/domain/hooks.go`, `internal/domain/exchange.go` — the marker + derivation skip; `internal/domain` sentinels.
 - `internal/agent/interject.go` (new), `internal/agent/agent.go` — `Interject`, contract docs.
-- `internal/tui/interject.go` (new) — mailbox + staged rows; `internal/tui/worker.go` — the drain; `internal/tui/messages.go` — `interjectedMsg`; `internal/tui/model.go` — routing, staging, folds, flush, status/placeholder, View cursor; `internal/tui/prompteditor.go` — virtual-cursor retirement, state-aware placeholder; `internal/tui/mouse.go` — `inputEditable`; `internal/tui/tui.go` — the `Engine` seam + `Options.CursorShape`; `internal/tui/doc.go` — narration.
+- `internal/tui/interject.go` (new) — mailbox + staged rows; `internal/tui/worker.go` — the drain; `internal/tui/messages.go` — `interjectedMsg`; `internal/tui/model.go` — routing, staging, folds, flush, status/placeholder, View cursor, `refreshViewport` keep-if-unchanged; `internal/tui/prompteditor.go` — virtual-cursor retirement, state-aware placeholder; `internal/tui/mouse.go` — `inputEditable`, `spanUnchanged`, header narration; `internal/tui/mouse_test.go` — the selection pins and the named rewrites; `internal/tui/tui.go` — the `Engine` seam + `Options.CursorShape`; `internal/tui/doc.go` — narration.
 - `cmd/apogee/config.go`, `cmd/apogee/wire.go`, `cmd/apogee/defaults/config.yaml` — `cursor-shape` plumbing.
 - `apogee.go`, `example_test.go` — sentinel re-export + guard, method enumeration.
 - `docs/adr/0025-…`, `docs/adr/0011-…` (amendment note), `CONTEXT.md`, `README.md`, `CHANGELOG.md`, `ISSUES.md`, `docs/design/technical-design.md`.
@@ -234,5 +283,7 @@ Manual live run against the llama-launcher host (`http://192.168.64.1:1111`; ser
 5. Type `/clear` while running: refused with the note, input preserved; `/clear` at idle with a held row keeps the row.
 6. `cursor-shape: bar` in config.yaml → restart: the caret is a steady bar; an invalid value errors at startup naming the options; on quit the terminal's own cursor returns.
 7. Approval flow (`Ask-Before` mode): while the approval prompt is up, a/d/s still decide, typing does nothing, and the cursor is hidden; after approval, typing resumes.
+8. While the model streams a long reply, drag-select a settled paragraph higher up: the highlight holds and the drag extends normally while tokens keep streaming below; release — the flash confirms and a paste matches the screen exactly. Then drag over the still-moving tail: the selection drops the moment the text changes, and the same text selects fine once the stream has passed it. Also drag-select the text you have typed into the prompt box mid-run.
+9. During an approval prompt and after an error, drag-copy from the transcript still works; a click inside the prompt box in those states selects nothing there.
 
-Automated: the per-item green gate after every item; `TestEndToEndInterjectionScript` (item 5) is the end-to-end proof in CI.
+Automated: the per-item green gate after every item; `TestEndToEndInterjectionScript` (item 5) is the end-to-end proof for interjections, the item 7–8 selection pins for ISSUES item 3.
