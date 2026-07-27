@@ -47,8 +47,10 @@ import (
 // ----------------------------------------------------------------------------
 
 // Agent is a single embeddable Apogee agent instance — the engine handle. Its
-// methods (Submit / Step / Run / Mode / Snapshot / Close) are the public stepping
-// surface; construct one with New or Resume. See internal/agent for the contract.
+// methods (Submit / Step / Run / Interject / Mode / Snapshot / Close) are the public
+// stepping surface; construct one with New or Resume. Interject commits a user message
+// into the OPEN Exchange and is valid only between Steps of the goroutine driving it
+// (ADR 0025). See internal/agent for the contract.
 type Agent = agent.Agent
 
 // New constructs an Agent from cfg, validating the Auto/Confinement gate (ADR 0004)

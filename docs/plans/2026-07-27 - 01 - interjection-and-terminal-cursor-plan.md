@@ -101,7 +101,7 @@ NOTES (2026-07-27): third deviation, extending the item's literal call-site list
 
 ---
 
-## 2. Engine — `Agent.Interject` at the between-Steps boundary
+## 2. Engine — `Agent.Interject` at the between-Steps boundary — ✅ DONE (2026-07-27)
 
 **What.** New `internal/agent/interject.go`:
 
