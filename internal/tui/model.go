@@ -29,7 +29,7 @@ type uiState int
 
 const (
 	stateIdle             uiState = iota // awaiting input; the worker is not running
-	stateRunning                         // a worker drives an Exchange; input is refused
+	stateRunning                         // a worker drives an Exchange; typing stages an interjection
 	stateAwaitingApproval                // a tool call is blocked on the human's decision
 	stateAwaitingAsk                     // an ask_user question is blocked on the human's typed answer
 	stateErrored                         // the worker returned a loop-level error
@@ -112,8 +112,13 @@ type Model struct {
 	// interjectedMsg then removes by id exactly the rows that were COMMITTED, so a row that did
 	// not land stays queued rather than vanishing. Rows are session-ephemeral: sessions record
 	// what was committed (ADR 0022), never what is still waiting to be sent.
+	//
+	// interjectSeq mints those ids — a plain counter, incremented on the Update goroutine and
+	// never reset, so an id names one row for the life of the session and a delivery report can
+	// never be reconciled against a row that merely reused a number.
 	box                  *interjectBox
 	pendingInterjections []queuedInterjection
+	interjectSeq         int
 
 	// act is the live activity the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go). It is derived
@@ -272,15 +277,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// post-edit refresh a keypress does — without it a multi-line paste renders unwrapped
 		// until the next key, the autocomplete overlay is computed from stale input, and a live
 		// drag-selection's cached cell offsets no longer match the value (a later copy would take
-		// the wrong runes). Only the editable states accept it; a paste while a worker runs is
-		// dropped, exactly as keys are refused there. Mirrors handleKey's idle/ask edit path.
-		if m.state != stateIdle && m.state != stateAwaitingAsk {
+		// the wrong runes). It lands wherever the box is editable — including while a worker runs,
+		// where the pasted text is staged as an interjection (ADR 0025) — and is dropped at the
+		// inert states, exactly as keys are. Mirrors handleKey's edit path.
+		if !m.inputEditable() {
 			return m, nil
 		}
 		m.sel = promptSel{} // the value is about to change; drop the selection before its coords go stale
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
-		if m.state == stateIdle {
+		if m.state == stateIdle || m.state == stateRunning {
 			m = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input (reloads on /skill open)
 		}
 		m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
@@ -313,6 +319,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingAsk = &msg
 		m.askSel = 0 // first choice pre-selected while the input is empty (D5); no-op when there are no choices
 		m.input.Reset()
+		// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend must say so
+		// for as long as the question stands (submitAnswer swaps it back when the answer is away).
+		m.setPlaceholder(idlePlaceholder)
 		m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
 		m.layout()
 		return m, m.input.Focus()
@@ -375,6 +384,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, cmd
 
+	case interjectedMsg:
+		// The worker committed staged rows into the open Exchange at the boundary it just passed
+		// (ADR 0025). Move exactly those rows out of the queue and into the transcript, where they
+		// now belong: the model has read them, so this is the point in the scrollback at which they
+		// happened. Rows the report does not name stay queued.
+		m.foldInterjected(msg.items)
+		return m, nil
+
 	case turnSnapshotMsg:
 		// The worker snapshotted the engine after a completed Turn (driveExchange). Persist it
 		// asynchronously through the SessionHost; the worker keeps stepping, so this never stalls
@@ -433,8 +450,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.beatCmd()
 
 	case tea.MouseWheelMsg:
-		// The wheel scrolls the transcript in every state — unlike the keyboard path, which is
-		// state-gated (idle/ask feed the input). Mouse reporting is enabled in View
+		// The wheel scrolls the transcript in every state — unlike the ordinary keyboard path,
+		// which is state-gated (idle/ask/running feed the input; only PgUp/PgDn scroll from the
+		// keyboard everywhere). Mouse reporting is enabled in View
 		// (MouseModeCellMotion); the viewport's own Update turns the wheel into a scroll.
 		return m.scrollViewport(msg)
 
@@ -475,9 +493,12 @@ const ctrlCQuitWindow = time.Second
 type ctrlCResetMsg struct{}
 
 // handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
-// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits. Enter submits at idle and
-// is a no-op while a worker runs (the single-worker invariant the seam relies on). Other keys
-// feed the input while idle, or scroll the transcript while busy.
+// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits. Enter submits at idle,
+// answers a pending ask, dismisses an error, and while a worker runs STAGES what was typed as an
+// interjection — launching nothing, so the single-worker invariant the seam relies on still
+// holds. Other keys feed the input wherever the box is editable (idle, ask, running —
+// inputEditable), and scroll the transcript at the inert states; PgUp/PgDn scroll in every state,
+// which is what a running Exchange leaves the keyboard for reading with (ADR 0025).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Any keypress drops a mouse drag-selection: typing past it, navigating, or submitting all
 	// move on from what was selected, and clearing here (before the value can change) keeps the
@@ -491,10 +512,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionBrowserKey(msg)
 	}
 
-	// While the autocomplete overlay is open (idle only), it claims the navigation, accept,
-	// and dismiss keys — including enter and tab — before the normal routing below. Any other
-	// key returns handled=false and falls through to edit the input (which re-derives it).
-	if m.state == stateIdle && m.autocomplete.active {
+	// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
+	// including enter and tab — before the normal routing below. Any other key returns
+	// handled=false and falls through to edit the input (which re-derives it). It opens at idle,
+	// and while running for the "@file" region alone (computeAutocomplete), so an interjection can
+	// reference a file as easily as a submitted message can.
+	if (m.state == stateIdle || m.state == stateRunning) && m.autocomplete.active {
 		if handled, nm, cmd := m.autocompleteKey(msg); handled {
 			return nm, cmd
 		}
@@ -523,6 +546,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case stateIdle:
 			return m.submit()
+		case stateRunning:
+			// The single-worker invariant stands — this launches nothing. What the human typed is
+			// STAGED as an interjection and delivered into the running Exchange at the next
+			// between-Steps boundary (ADR 0025).
+			return m.stageInterjection()
 		case stateAwaitingAsk:
 			// Submit the typed answer back to the blocked ask_user tool (P3.11).
 			return m.submitAnswer()
@@ -532,7 +560,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.state = stateIdle
 			return m, nil
 		default:
-			return m, nil // no-op while running / awaiting approval
+			return m, nil // no-op while awaiting approval (a/d/s own the keyboard)
 		}
 	case "shift+tab":
 		// Cycle the autonomy mode one rung up the privilege ladder (wraps Auto → Plan). Live in
@@ -580,26 +608,37 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// While awaiting an ask_user answer the input box is live so the human types the reply —
-	// the same editing path as idle (enter, handled above, submits it).
-	if m.state == stateIdle || m.state == stateAwaitingAsk {
-		// Backspace on an empty input pops the last attached skill chip (idle only) — so a chip
-		// is removed the same way a typed character is, once the message field is empty.
-		if m.state == stateIdle && len(m.pendingSkills) > 0 && m.input.Value() == "" && msg.String() == "backspace" {
-			m.pendingSkills = m.pendingSkills[:len(m.pendingSkills)-1]
-			m.layout()
-			return m, nil
+	// Wherever the box is editable the keys type into it: idle (a message to send), awaiting an
+	// ask_user answer (the borrowed answer box), and — the deliberate behavioural change this
+	// feature ships — while a worker runs, where ⏎ stages the message as an interjection
+	// (inputEditable; ADR 0025). Enter is handled above; everything else is an edit.
+	if m.inputEditable() {
+		if m.input.Value() == "" && msg.String() == "backspace" {
+			// Backspace on an empty input un-does the last thing staged, newest first. The
+			// interjection queue is checked BEFORE the skill chips: a queued row is the more recent
+			// act (chips are staged at idle, before the send that opened the Exchange), and the two
+			// rarely coexist at all.
+			if popped, ok := m.popInterjection(); ok {
+				return popped, nil
+			}
+			if m.state == stateIdle && len(m.pendingSkills) > 0 {
+				m.pendingSkills = m.pendingSkills[:len(m.pendingSkills)-1]
+				m.layout()
+				return m, nil
+			}
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
-		if m.state == stateIdle {
+		if m.state == stateIdle || m.state == stateRunning {
 			m = m.recomputeAutocomplete() // re-derive the overlay from the edited input (reloads on /skill open)
 		}
 		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd
 	}
-	// While running, let the keys scroll the transcript rather than edit the (refused) input;
-	// a scroll that actually moves the viewport suspends sticky-to-top until the next submit.
+	// At the inert states — errored (⏎ dismisses) and a live approval that fell past its decision
+	// keys — the keys scroll the transcript instead; a scroll that actually moves the viewport
+	// suspends sticky-to-top until the next submit. While running the transcript scrolls by
+	// PgUp/PgDn (intercepted above) and the mouse wheel, the keyboard being the input's now.
 	return m.scrollViewport(msg)
 }
 
@@ -689,6 +728,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: attached}, m.box, m.notify)
 	m.cancel = cancel
 	m.state = stateRunning
+	m.setPlaceholder(runningPlaceholder) // the empty box now invites a queued message, not a send
 	// The request is away and nothing has come back yet: the honest phrase is "thinking" until
 	// the first Event re-derives it (activity.go).
 	m.setActivity(actThinking, "", 0)
@@ -813,6 +853,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			cmd, cancel := startResume(m.parent, m.eng, m.box, m.notify)
 			m.cancel = cancel
 			m.state = stateRunning
+			m.setPlaceholder(runningPlaceholder)
 			m.setActivity(actThinking, "", 0) // the resumed work is a request in flight (as in submit)
 			tick := m.spin.arm()
 			return m, tea.Batch(cmd, tick)
@@ -829,6 +870,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			domain.UserInput{Text: "Please continue", SkillIDs: attached}, m.box, m.notify)
 		m.cancel = cancel
 		m.state = stateRunning
+		m.setPlaceholder(runningPlaceholder)
 		m.setActivity(actThinking, "", 0) // a canned turn is still a request in flight (as in submit)
 		tick := m.spin.arm()
 		return m, tea.Batch(cmd, tick)
@@ -863,6 +905,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		cmd, cancel := startCompact(m.parent, m.eng)
 		m.cancel = cancel
 		m.state = stateRunning
+		// Typing is live through a compaction too — the row simply waits for the terminal fold
+		// (there is no Exchange to interject into), so the legend says "queue" here as well.
+		m.setPlaceholder(runningPlaceholder)
 		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
 		m.setActivity(actCompacting, "", 0)
 		tick := m.spin.arm()
@@ -901,6 +946,7 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	m.pendingAsk = nil
 	m.input.Reset()
 	m.state = stateRunning
+	m.setPlaceholder(runningPlaceholder) // the box is the human's own again — ⏎ queues from here
 	m.layout()
 	tick := m.spin.arm()
 	return m, tick
@@ -952,6 +998,7 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// worker had not drained by the time it unwound. Nothing is lost — the display queue
 	// (pendingInterjections) is the queue of record and still holds every undelivered row.
 	m.box = nil
+	m.setPlaceholder(idlePlaceholder) // nothing is running: ⏎ sends again
 	m.genStart = time.Time{}
 	// The worker has unwound, so the activity is over — including a sticky "stopping", which
 	// only this path clears (activity.go). Idle renders an empty left slot.
@@ -1637,12 +1684,14 @@ func (m Model) View() tea.View {
 	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
 		prompt = m.askPrompt(m.pendingAsk.Request)
 	}
-	// The autocomplete overlay and the attached-skill chips (idle only) sit just above the input
-	// box. They, and the approval/ask prompt, each steal rows from the transcript viewport, so
-	// shrink it by their combined height before rendering. The chips can co-occur with the
-	// dropdown (attaching one skill while picking another); the prompt cannot (different states).
+	// The autocomplete overlay (idle, and the "@file" region while running), the attached-skill
+	// chips (idle only), and the staged interjection rows sit just above the input box. They, and
+	// the approval/ask prompt, each steal rows from the transcript viewport, so shrink it by their
+	// combined height before rendering. The chips can co-occur with the dropdown (attaching one
+	// skill while picking another); the prompt cannot (different states).
 	dropdown := m.renderAutocomplete()
 	chips := m.renderSkillChips()
+	queued := m.renderPendingInterjections()
 	browser := m.renderSessionBrowser()
 	shrink := 0
 	if prompt != "" {
@@ -1656,6 +1705,9 @@ func (m Model) View() tea.View {
 	}
 	if chips != "" {
 		shrink += lipgloss.Height(chips)
+	}
+	if queued != "" {
+		shrink += lipgloss.Height(queued)
 	}
 	if shrink > 0 {
 		h := m.viewport.Height() - shrink
@@ -1689,6 +1741,11 @@ func (m Model) View() tea.View {
 	}
 	if chips != "" {
 		rows = append(rows, chips)
+	}
+	// The staged interjection rows sit closest to the box: they are what ⏎ just put there, and
+	// what Backspace on an empty box takes back (ADR 0025).
+	if queued != "" {
+		rows = append(rows, queued)
 	}
 	rows = append(rows, m.inputView(), m.footerView())
 
@@ -1970,8 +2027,9 @@ func (m Model) throughputSuffix() string {
 // on the right, justified across the window. While a worker runs the left slot is the live
 // activity phrase plus an elapsed clock ("⣻ reading · main.go · 3s") — what the human is
 // actually asking, in place of the turn index, which answered none of it. Idle renders nothing
-// there (the input box below already invites a message); the blocked and errored states keep
-// their own words, with no spinner and no clock (nothing is ticking). The left slot hangs off
+// there (the input box below already invites a message) beyond what is queued; the blocked and
+// errored states keep their own words, with no spinner and no clock (nothing is ticking). Any
+// staged interjections add their count to whatever the slot holds. The left slot hangs off
 // the transcript's own text column: it leads with bodyIndent, so the spinner lines up with the
 // body text above it rather than with the ✦/❯ marker column (layout.md). It reads only display
 // values off Options and the model's own state — never off the Engine mid-step.
@@ -1987,6 +2045,9 @@ func (m Model) statusLine() string {
 	case stateErrored:
 		left += m.th.statusError.Render("error")
 	}
+	// What is waiting to go out rides the same slot, in every state: a queue that survives a stop
+	// or an error (it does) must keep saying so at idle too, where the slot is otherwise empty.
+	left += m.queuedSegment(m.state != stateIdle)
 	// Fill the whole width with black-bg cells — segments and the justify gap alike — so
 	// the info line reads as one solid black bar joined to the prompt box below it. A plain
 	// justify gap would show the terminal's default background through the seam. statusRight

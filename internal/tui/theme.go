@@ -63,6 +63,7 @@ const (
 	glyphBullet     = "•" // a markdown bullet-list item (- / * / +)
 	glyphSkill      = "✦" // leads an attached-skill chip (matches the assistant marker)
 	glyphPresented  = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
+	glyphInterject  = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
 )
 
 // subAgentLabel is the one-line header that opens each contiguous run of sub-agent

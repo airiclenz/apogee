@@ -99,13 +99,14 @@ type wirePresented struct {
 // serialized (encodeTranscript skips any kind with no name here), and a "startup" string on
 // decode is unknown and skipped — symmetric.
 var entryKindNames = map[entryKind]string{
-	entryUser:       "user",
-	entryAssistant:  "assistant",
-	entryToolCall:   "toolCall",
-	entryToolResult: "toolResult",
-	entryError:      "error",
-	entryNote:       "note",
-	entryPresented:  "presented",
+	entryUser:        "user",
+	entryAssistant:   "assistant",
+	entryToolCall:    "toolCall",
+	entryToolResult:  "toolResult",
+	entryError:       "error",
+	entryNote:        "note",
+	entryPresented:   "presented",
+	entryInterjected: "interjected",
 }
 
 // entryKindByName is the decode-side inverse of entryKindNames, built once at init so decode is

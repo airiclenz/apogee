@@ -486,29 +486,13 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The single-worker invariant: submit while running is a no-op
+// The single-worker invariant
 // ----------------------------------------------------------------------------
-
-func TestModelSubmitWhileRunningIsNoOp(t *testing.T) {
-	m := newTestModel(t)
-	m.input.SetValue("first")
-	m, _ = stepCmd(t, m, keyEnter())
-	if m.state != stateRunning {
-		t.Fatalf("state = %v, want running", m.state)
-	}
-
-	m.input.SetValue("second")
-	next, cmd := stepCmd(t, m, keyEnter())
-	if next.state != stateRunning {
-		t.Errorf("state = %v, want still running (submit refused)", next.state)
-	}
-	if cmd != nil {
-		t.Error("a second worker Cmd was launched while one was running")
-	}
-	if v := next.input.Value(); v != "second" {
-		t.Errorf("input was consumed by a refused submit: %q", v)
-	}
-}
+//
+// ⏎ while a worker runs no longer does nothing: it STAGES the typed message as an interjection
+// (ADR 0025), which launches no second worker and so keeps the invariant this section pins.
+// TestEnterWhileRunningStagesRow (interject_test.go) replaced TestModelSubmitWhileRunningIsNoOp
+// and asserts both halves — the row is staged, and no worker Cmd comes back.
 
 // blank submit is also refused (no worker, stays idle).
 func TestModelBlankSubmitIsIgnored(t *testing.T) {

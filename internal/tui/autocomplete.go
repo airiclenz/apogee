@@ -12,8 +12,10 @@ import (
 // Chat input mini-language — the autocomplete overlay
 // ----------------------------------------------------------------------------
 //
-// A suggestion popup that opens while the human types at idle: "/" lists the known
-// commands, and an "@" token lists workspace files. It is painted by the shared selector-popup
+// A suggestion popup that opens while the human types: "/" lists the known commands (at idle,
+// where a command can actually run), and an "@" token lists workspace files (wherever the box is
+// editable, so an interjection references a file as easily as a submitted message does — see
+// computeAutocomplete). It is painted by the shared selector-popup
 // module (popup.go) — a titled, bordered pane rendered above the input box, in a slot that
 // shrinks the transcript viewport to make room. The overlay completes the WORD AT THE END of the
 // input (the common forward-typing case), which keeps it cursor-position-free and robust.
@@ -53,15 +55,23 @@ type autocompleteState struct {
 
 // computeAutocomplete derives the overlay from the current input value, treating the cursor
 // as at the end (the common case while typing). It returns an inactive state when nothing
-// should be suggested. Only ever called in stateIdle.
+// should be suggested. Called at stateIdle and — for the file region only — at stateRunning.
+//
+// The three regions do NOT share a lifetime. An "@file" reference is exactly as useful in a
+// message interjected mid-run as in one submitted at idle (the ref resolves at delivery, fresh),
+// so the file region is offered wherever the box is editable. The "/command" and "/skill"
+// regions are idle-only, because both offer something that would be REFUSED mid-run: a command
+// is not queued (it earns a note instead) and a skill attaches to a send that is not happening.
+// Offering either while running would be the overlay lying about what ⏎ does.
 func (m Model) computeAutocomplete() autocompleteState {
 	value := m.input.Value()
+	idle := m.state == stateIdle
 
 	// Skill argument: a "/skill <partial>" region (the trailing word after a "/skill" token).
 	// Checked FIRST so it wins over the bare-command branch — which would otherwise see "/skill"
 	// the moment a space is typed. tokenStart marks the "/skill" itself, so accepting strips the
 	// whole "/skill <partial>" run when the chip is popped.
-	if start, partial, ok := skillArgToken(value); ok {
+	if start, partial, ok := skillArgToken(value); ok && idle {
 		items := m.skillSuggestions(partial)
 		if len(items) == 0 {
 			return autocompleteState{}
@@ -70,7 +80,7 @@ func (m Model) computeAutocomplete() autocompleteState {
 	}
 
 	// Command: the whole line is "/<partial>" with no whitespace yet.
-	if strings.HasPrefix(value, "/") && !strings.ContainsAny(value, " \t\n") {
+	if idle && strings.HasPrefix(value, "/") && !strings.ContainsAny(value, " \t\n") {
 		items := commandSuggestions(strings.TrimPrefix(value, "/"))
 		if len(items) == 0 {
 			return autocompleteState{}
@@ -101,6 +111,10 @@ func (m Model) computeAutocomplete() autocompleteState {
 // the input, so unit tests that call it keep working.
 func (m Model) recomputeAutocomplete() Model {
 	_, _, inSkill := skillArgToken(m.input.Value())
+	// The picker itself is idle-only (computeAutocomplete), so a "/skill " region typed into an
+	// interjection is not one: it must neither re-scan disk nor arm the edge trigger, or the first
+	// keystroke back at idle would find skillRegion already true and skip the reload.
+	inSkill = inSkill && m.state == stateIdle
 	if inSkill && !m.skillRegion && m.opts.ReloadSkills != nil {
 		m.opts.ReloadSkills() // picker opening: re-scan before computeAutocomplete lists suggestions
 	}
@@ -227,7 +241,8 @@ func (m Model) fileSuggestions(partial string) []acItem {
 	return items
 }
 
-// autocompleteKey handles a keypress while the overlay is open (idle only). It reports
+// autocompleteKey handles a keypress while the overlay is open (idle, or the file region while a
+// worker runs — handleKey gates which states consult it). It reports
 // whether it consumed the key: up/down (and ctrl+p/ctrl+n) move the selection; tab/enter
 // accept the highlighted item (splicing it in, NOT submitting); esc dismisses the overlay.
 // Any other key returns handled=false so the input-editing path takes it and re-derives the

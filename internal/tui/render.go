@@ -109,7 +109,12 @@ func renderEntryLines(th theme, e entry, width int) []string {
 	inner := railedWidth(width, e.depth)
 	switch e.kind {
 	case entryUser:
-		return railLines(th, renderUserBlock(th, e.text, e.skills, inner), e.depth)
+		return railLines(th, renderUserBlock(th, glyphUser+" ", e.text, e.skills, inner), e.depth)
+	case entryInterjected:
+		// The human's mid-Exchange remark: the same block the prompt gets — it is the same voice —
+		// under the ⧖ marker that says it arrived while the model was already working (ADR 0025).
+		// It carries no skills (attachment is idle-only), so it is always the plain text block.
+		return railLines(th, renderUserBlock(th, glyphInterject+" ", e.text, nil, inner), e.depth)
 	case entryAssistant:
 		marker := glyphAssistant + " "
 		body := renderMarkdownBody(th, e.text, inner-lipgloss.Width(marker))
@@ -140,24 +145,28 @@ func renderSubAgentLabel(th theme, depth, width int) []string {
 	return railLines(th, body, depth)
 }
 
-// renderUserBlock renders the user prompt as a full-width white-on-dark-gray block: the ❯
+// renderUserBlock renders something the human said as a full-width white-on-dark-gray block: the
 // marker on the first line, a hanging two-column indent on wrapped continuation lines, and
 // the dark-gray background padded across the whole width on every line. Any skills attached to
 // the send render as chips on a trailing row of the same block, so the attachment stays visible
 // after the message is sent (an empty-text send is just the chip row, marker and all).
-func renderUserBlock(th theme, text string, skills []string, width int) []string {
+//
+// marker is the block's lead ("❯ " for a submitted prompt, "⧖ " for a delivered interjection):
+// the two are the same voice and so share one shape, and the glyph is the whole of the
+// difference the reader needs.
+func renderUserBlock(th theme, marker, text string, skills []string, width int) []string {
 	var out []string
 	if text != "" {
-		for _, ln := range hangingPrefixes(glyphUser+" ", text, width) {
+		for _, ln := range hangingPrefixes(marker, text, width) {
 			out = append(out, th.userBlock.Width(width).Render(ln))
 		}
 	}
 	if len(skills) > 0 {
-		marker := glyphUser + " " // a text-less send: the chip row leads with the ❯ marker
+		chipMarker := marker // a text-less send: the chip row leads with the block's own marker
 		if len(out) > 0 {
-			marker = "  " // a continuation row: align the chips under the prompt text
+			chipMarker = "  " // a continuation row: align the chips under the prompt text
 		}
-		out = append(out, renderUserChipRow(th, marker, skills, width))
+		out = append(out, renderUserChipRow(th, chipMarker, skills, width))
 	}
 	return out
 }

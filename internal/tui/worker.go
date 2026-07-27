@@ -17,8 +17,9 @@ import (
 // the tea.Cmd the model schedules (Bubble Tea runs it on its own goroutine) and the
 // CancelFunc the model stores, so a stop key cancels the in-flight Step at the next
 // quiescent boundary (phase-2 detail plan §3 C4). Only one worker runs at a time — the model
-// refuses input while running — so eng is only ever driven from the current worker, and the
-// Agent's single-goroutine contract holds by construction (C1).
+// launches none while one runs, and what the human types meanwhile is STAGED rather than
+// submitted (ADR 0025) — so eng is only ever driven from the current worker, and the Agent's
+// single-goroutine contract holds by construction (C1).
 //
 // parent is the program's context; deriving the worker ctx from it means a program-wide
 // shutdown also cancels an in-flight Exchange. box is this Exchange's interjection mailbox — the
@@ -85,7 +86,9 @@ func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, box 
 	if err := eng.Submit(input); err != nil {
 		return errMsg{Err: err}
 	}
-	return stepToBoundary(ctx, eng, box, notify)
+	// Submit only QUEUES the input: the Exchange opens inside the first Step, so this drive enters
+	// the loop with no Exchange to interject into (see stepToBoundary's exchangeOpen).
+	return stepToBoundary(ctx, eng, box, false, notify)
 }
 
 // driveResume Steps an already-open Exchange to its quiescent boundary and returns the single
@@ -96,11 +99,14 @@ func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, box 
 // Turn rather than opening a new one; per-Turn notify, cancel, and terminal handling are identical
 // to driveExchange because both run stepToBoundary.
 func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func(tea.Msg)) tea.Msg {
-	return stepToBoundary(ctx, eng, box, notify)
+	// The restored Exchange is already open (the model launches this only when eng.InExchange()),
+	// so unlike driveExchange this drive may deliver before its very first Step — a row staged
+	// between the /continue keypress and that Step has a live Exchange to land in.
+	return stepToBoundary(ctx, eng, box, true, notify)
 }
 
-// stepToBoundary is the shared Step loop both drive paths run once the Exchange is open —
-// driveExchange after its Submit, driveResume straight away. It Steps to the quiescent Exchange
+// stepToBoundary is the shared Step loop both drive paths run — driveExchange after its Submit,
+// driveResume straight away into an Exchange that is already open. It Steps to the quiescent Exchange
 // boundary, treating StatusTurnComplete as "keep stepping," and returns the single terminal Msg the
 // model folds: cancelledMsg on a user stop, exchangeDoneMsg on the final boundary (and on any
 // future terminal status). The StepStatus set is open; only StatusTurnComplete continues.
@@ -116,9 +122,21 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 // Before each Step it also empties the interjection mailbox into the open Exchange
 // (deliverInterjections): the same between-Steps window Snapshot occupies, now carrying the human's
 // mid-task remarks into the conversation the next Step's request is built from (ADR 0025).
-func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, notify func(tea.Msg)) tea.Msg {
+//
+// exchangeOpen says whether there is an Exchange to deliver into YET, and it exists because the two
+// drive paths differ exactly there: driveResume enters with the Exchange already open (false would
+// silently defer a staged row by one Step), while driveExchange enters having only Submitted —
+// Submit queues the input and the Exchange opens inside the first Step. Draining against that
+// closed Exchange would be worse than useless: Interject refuses with ErrNoOpenExchange, the drain
+// stops, and the row — already out of the mailbox — never gets another chance at delivery, so a
+// row staged later would reach the model FIRST. Skipping the drain before the Submit path's first
+// Step keeps the mailbox FIFO and the delivery order the order the human typed in.
+func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchangeOpen bool, notify func(tea.Msg)) tea.Msg {
 	for {
-		deliverInterjections(eng, box, notify)
+		if exchangeOpen {
+			deliverInterjections(eng, box, notify)
+		}
+		exchangeOpen = true // whatever the entry state, the Exchange is open from the first Step on
 		res, err := eng.Step(ctx)
 		if err != nil {
 			return errMsg{Err: err}
@@ -154,7 +172,8 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, notify f
 // pressing on would only produce more of the same — and delivering row 3 after row 2 was refused
 // would reorder the human's remarks. The refused rows are not lost: they never appear in the report,
 // so the Model keeps them staged and the terminal flush sends them (ADR 0025). In the shipped wiring
-// the error cannot fire mid-Exchange at all; this is the honest degradation, not a live path.
+// the error cannot fire at all — stepToBoundary drains only once the Exchange is open — so this is
+// the honest degradation, not a live path.
 func deliverInterjections(eng Engine, box *interjectBox, notify func(tea.Msg)) {
 	staged := box.drainAll()
 	if len(staged) == 0 {

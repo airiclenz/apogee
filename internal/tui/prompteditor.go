@@ -29,8 +29,9 @@ type promptEditor struct {
 	// input is the message textarea (Bubbles widget), the black-interior auto-growing field.
 	input textarea.Model
 
-	// autocomplete is the chat mini-language suggestion overlay shown while typing at idle
-	// (commands on "/", workspace files on "@", skills on "/skill"). The zero value is hidden.
+	// autocomplete is the chat mini-language suggestion overlay shown while typing (commands on
+	// "/", workspace files on "@", skills on "/skill" — the first and last at idle only, the file
+	// region wherever the box is editable, interjections included). The zero value is hidden.
 	autocomplete autocompleteState
 
 	// skillRegion tracks whether the input currently sits in a "/skill <partial>" region, so
@@ -58,13 +59,27 @@ type promptEditor struct {
 	sel promptSel
 }
 
+// The prompt's two placeholders — what the empty box invites, which is not the same thing while a
+// worker runs. At idle (and while answering an ask_user question) a message is SENT; while the
+// model works it is queued as an interjection and delivered at the next boundary (ADR 0025), so
+// the legend says what ⏎ will actually do and keeps esc's meaning visible.
+//
+// They are swapped on the lifecycle transitions that open and close an Exchange (setPlaceholder,
+// called from the launch paths and finishWorker), never derived per frame: View renders the
+// widget as it stands, so the placeholder is state the Model sets once rather than a render-time
+// branch.
+const (
+	idlePlaceholder    = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ⌃c quit"
+	runningPlaceholder = "queue a message…  ⏎ queue · esc stop"
+)
+
 // newPromptEditor builds the idle input cluster: a focused, black-interior, auto-growing textarea
 // (its newline binding repurposed because plain Enter submits) and an empty workspace file cache.
 // The Focus Cmd is discarded here — the focus STATE is what matters at construction; the cursor's
 // blink Cmd is returned later by Model.Init.
 func newPromptEditor() promptEditor {
 	ta := textarea.New()
-	ta.Placeholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ⌃c quit"
+	ta.Placeholder = idlePlaceholder
 	ta.Prompt = "" // the rounded border is the frame; no inline prompt gutter (layout.md)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit; the model, not the widget, bounds a turn
@@ -84,6 +99,13 @@ func newPromptEditor() promptEditor {
 // I hold into send-ingredients" seam — unit-testable without a Model or a fake engine.
 func (e promptEditor) submitParse() (parsedInput, []string) {
 	return parseInput(e.input.Value()), e.pendingSkills
+}
+
+// setPlaceholder swaps what the empty box invites (idlePlaceholder / runningPlaceholder). It is
+// called on the lifecycle transitions that open and close an Exchange, not per frame, so the
+// legend is one assignment rather than a branch in the renderer.
+func (e *promptEditor) setPlaceholder(text string) {
+	e.input.Placeholder = text
 }
 
 // reset clears the editor back to empty after a message is sent: it empties the textarea, closes

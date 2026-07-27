@@ -66,11 +66,14 @@ type flashClearMsg struct{}
 // flashDuration is how long a mouse-copy confirmation lingers in the status line.
 const flashDuration = 2 * time.Second
 
-// inputEditable reports whether the prompt is live for the human to edit — the only states in
-// which a mouse click positions the caret. While a worker runs (or an approval is pending) the
-// input is refused, so clicks there are ignored.
+// inputEditable reports whether the prompt is live for the human to edit — the states in which a
+// keypress reaches the textarea and a mouse click positions the caret. Editability IS the rule:
+// idle (a message to send), awaitingAsk (the borrowed answer box), and running (a message staged
+// as an interjection, ADR 0025). At awaitingApproval and errored the box is inert — a/d/s and
+// Enter-dismiss own the keyboard there — so clicks fall through to the transcript arbitration.
 func (m Model) inputEditable() bool {
-	return (m.state == stateIdle || m.state == stateAwaitingAsk) && m.input.Focused()
+	return (m.state == stateIdle || m.state == stateAwaitingAsk || m.state == stateRunning) &&
+		m.input.Focused()
 }
 
 // inputContentRect returns the textarea text area's on-screen rectangle: the top-left cell

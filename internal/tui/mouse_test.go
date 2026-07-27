@@ -175,20 +175,21 @@ func TestClickOffFieldDeselects(t *testing.T) {
 	}
 }
 
-// TestClickIgnoredWhileRunning checks that mouse clicks do not edit the refused input while a
-// worker is in flight.
-func TestClickIgnoredWhileRunning(t *testing.T) {
+// TestClickPositionsCaretWhileRunning replaces TestClickIgnoredWhileRunning: the prompt is
+// editable while a worker runs (the human is typing an interjection into it), so a click there
+// positions the caret and arms a prompt selection exactly as it does at idle — the prompt half of
+// "select at any point in time" (ADR 0025; the plan's decision 9).
+func TestClickPositionsCaretWhileRunning(t *testing.T) {
 	m := modelWithInput(t, "hello world")
 	m.state = stateRunning
 	m.input.MoveToEnd()
-	wantCol := m.input.Column()
 
-	m = step(t, m, leftClick(2+0, 24-footerHeight-1)) // would move caret to column 0 if honoured
-	if m.input.Column() != wantCol {
-		t.Fatalf("click moved the caret while running (col %d, want %d)", m.input.Column(), wantCol)
+	m = step(t, m, leftClick(2+0, 24-footerHeight-1)) // column 0 of the single content row
+	if got := m.input.Column(); got != 0 {
+		t.Fatalf("click did not position the caret while running (col %d, want 0)", got)
 	}
-	if m.sel.active {
-		t.Fatal("click should not arm a selection while running")
+	if !m.sel.active || m.sel.anchorOff != 0 || m.sel.headOff != 0 {
+		t.Fatalf("a click while running should arm a collapsed selection at offset 0, got %+v", m.sel)
 	}
 }
 
@@ -447,14 +448,18 @@ func TestPasteRecomputesAutocomplete(t *testing.T) {
 	}
 }
 
-// TestPasteIgnoredWhileRunning checks a paste is dropped while a worker holds the input, the same
-// way keypress edits are refused in that state.
-func TestPasteIgnoredWhileRunning(t *testing.T) {
-	m := modelWithInput(t, "keep")
-	m.state = stateRunning
-	m = step(t, m, tea.PasteMsg{Content: "junk"})
-	if got := m.input.Value(); got != "keep" {
-		t.Fatalf("paste while running must not edit the input, got %q", got)
+// TestPasteIgnoredWhereInputIsInert checks a paste is dropped in the states that refuse keypress
+// edits too — an approval decision and the errored dismiss own the keyboard there. The running
+// state is deliberately NOT among them any more: TestPasteWhileRunningTypes (interject_test.go)
+// replaced TestPasteIgnoredWhileRunning when typing while the model works landed (ADR 0025).
+func TestPasteIgnoredWhereInputIsInert(t *testing.T) {
+	for _, state := range []uiState{stateAwaitingApproval, stateErrored} {
+		m := modelWithInput(t, "keep")
+		m.state = state
+		m = step(t, m, tea.PasteMsg{Content: "junk"})
+		if got := m.input.Value(); got != "keep" {
+			t.Fatalf("paste at state %v must not edit the input, got %q", state, got)
+		}
 	}
 }
 

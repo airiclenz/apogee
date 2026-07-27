@@ -42,6 +42,7 @@ const (
 	entryNote
 	entryPresented
 	entryStartup
+	entryInterjected
 )
 
 // entry is one committed line-block in the transcript. text is the body (for the text
@@ -104,6 +105,17 @@ type startupView struct {
 // attacker cannot smuggle a terminal control sequence into the transcript through a chip.
 func (t *transcript) addUser(text string, skills []string) {
 	t.entries = append(t.entries, entry{kind: entryUser, text: text, skills: stripEscapesAll(skills)})
+}
+
+// addInterjected appends a message the human interjected into the running Exchange, at the point
+// in the scrollback where the model actually RECEIVED it (ADR 0025) — the delivery fold calls it,
+// never the staging keypress, so the transcript stays an honest record of what the model saw and
+// when. It reads as the human speaking (the user block's styling) but leads with the ⧖ marker
+// rather than ❯, and it is deliberately NOT an entryUser: a mid-Exchange remark must not become
+// the sticky header (renderView records only entryUser blocks as such), because the prompt the
+// on-screen work belongs to is still the one that opened the Exchange.
+func (t *transcript) addInterjected(text string) {
+	t.entries = append(t.entries, entry{kind: entryInterjected, text: text})
 }
 
 // addNote appends a neutral note (e.g. "cancelled") — a transcript record of a UI-level
