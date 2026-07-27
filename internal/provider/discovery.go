@@ -88,7 +88,7 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 		return ModelInfo{}, fmt.Errorf("apogee: decode models: %w", err)
 	}
 
-	info := decoded.toModelInfo(c.model)
+	info := decoded.toModelInfo(c.activeModel())
 	if len(info.AvailableModels) == 0 {
 		return ModelInfo{}, errors.New("apogee: model discovery: server returned no models")
 	}

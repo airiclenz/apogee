@@ -124,7 +124,15 @@ func (a *Agent) Close() error { return nil }
 
 // Submit enqueues user input to begin (or continue) an Exchange. It does not run
 // the loop; the next Step/Run consumes it. Submitting mid-Exchange is an error.
+//
+// Submitting with no model bound is also an error (errNoModelBound): construction no longer
+// requires Config.Model, so a host may run ahead of its Upstream discovery and bind the model
+// later through Rebind (ADR 0024) — this is the gate that keeps a model-less request off the
+// wire until it does.
 func (a *Agent) Submit(in domain.UserInput) error {
+	if a.cfg.Model == "" {
+		return errNoModelBound
+	}
 	if a.pendingInput != nil || a.turns.inExchange {
 		return domain.ErrInputPending
 	}

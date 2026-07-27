@@ -227,3 +227,43 @@ func TestFormatMessage_OracleVectors(t *testing.T) {
 		}
 	})
 }
+
+// TestClientSetModelSwapsWireModel pins the reason SetModel exists: the CONFIGURED model wins
+// over the Request's in buildBody, so an engine that rebinds its own model without telling the
+// Client would keep sending the model the Upstream stopped serving.
+func TestClientSetModelSwapsWireModel(t *testing.T) {
+	t.Parallel()
+
+	var captured [][]byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = append(captured, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "old-model")
+	req := Request{Model: "ignored-by-the-client", Messages: []Message{{Role: "user", Content: "hi"}}}
+
+	if _, err := client.Respond(context.Background(), req); err != nil {
+		t.Fatalf("Respond before SetModel: %v", err)
+	}
+	client.SetModel("new-model")
+	if _, err := client.Respond(context.Background(), req); err != nil {
+		t.Fatalf("Respond after SetModel: %v", err)
+	}
+
+	if len(captured) != 2 {
+		t.Fatalf("server saw %d requests, want 2", len(captured))
+	}
+	for i, want := range []string{"old-model", "new-model"} {
+		var body map[string]any
+		if err := json.Unmarshal(captured[i], &body); err != nil {
+			t.Fatalf("unmarshal request %d: %v", i, err)
+		}
+		if body["model"] != want {
+			t.Errorf("request %d model = %v, want %q", i, body["model"], want)
+		}
+	}
+}

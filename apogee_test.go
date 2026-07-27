@@ -118,7 +118,6 @@ func TestNew_RequiresMinimumConfig(t *testing.T) {
 	}{
 		{name: "missing Events", mutate: func(c *apogee.Config) { c.Events = nil }},
 		{name: "missing Endpoint", mutate: func(c *apogee.Config) { c.Endpoint = "" }},
-		{name: "missing Model", mutate: func(c *apogee.Config) { c.Model = "" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -129,6 +128,31 @@ func TestNew_RequiresMinimumConfig(t *testing.T) {
 				t.Error("New = nil error, want a validation error")
 			}
 		})
+	}
+}
+
+// TestNew_ModelMayBeBoundLater pins the construction relaxation async startup needs (ADR 0024):
+// Config.Model is no longer part of the minimum surface, so a host that starts before its
+// Upstream answers constructs anyway and binds the observed model later through Rebind. The
+// engine's own guard moved to Submit, which refuses while nothing is bound.
+func TestNew_ModelMayBeBoundLater(t *testing.T) {
+	cfg := validConfig()
+	cfg.Model = ""
+
+	agent, err := apogee.New(cfg)
+	if err != nil {
+		t.Fatalf("New with an empty Model = %v, want nil", err)
+	}
+	defer agent.Close()
+
+	if err := agent.Submit(apogee.UserInput{Text: "too early"}); err == nil {
+		t.Error("Submit with no model bound = nil error, want a refusal")
+	}
+	if err := agent.Rebind(apogee.RebindSpec{Model: "late-bound"}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+	if err := agent.Submit(apogee.UserInput{Text: "now it flows"}); err != nil {
+		t.Errorf("Submit after Rebind = %v, want nil", err)
 	}
 }
 

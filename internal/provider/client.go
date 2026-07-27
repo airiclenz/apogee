@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,11 +40,20 @@ var ErrContextOverflow = errors.New("apogee: context window exceeded")
 // bounded retries (transient transport faults, 429, and 5xx) and an optional per-attempt
 // timeout on top of the bare TS oracle, which the embeddable core needs and the VS Code
 // extension got from the editor. One Client is safe for concurrent Respond/Stream calls
-// (it holds no per-request state); cancellation is via the caller's context.
+// (it holds no per-request state) and for a concurrent SetModel; cancellation is via the
+// caller's context.
 type Client struct {
-	baseURL        string
-	chatPath       string
-	model          string
+	baseURL  string
+	chatPath string
+
+	// modelMu guards model — the ONE field that changes after construction. The host rebinds
+	// the wire model when the Upstream starts serving a different one (SetModel, driven by
+	// Agent.Rebind — ADR 0024) while another goroutine may be mid-Stream or mid-Discover, so
+	// both readers go through activeModel under this lock and the "safe for concurrent use"
+	// contract above stays literally true. Every other field is written once by NewClient.
+	modelMu sync.RWMutex
+	model   string
+
 	apiKey         string
 	httpClient     *http.Client
 	maxRetries     int
@@ -98,6 +108,30 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 }
 
 var _ Responder = (*Client)(nil)
+
+// SetModel rebinds the model id this Client sends on the wire — and hints Discover with —
+// for every subsequent request. It exists because the Upstream's loaded model can change
+// under a running session (the heartbeat observes the switch; Agent.Rebind applies it, ADR
+// 0024), and the configured model wins over the Request's in buildBody, so rebinding the
+// engine's Config alone would leave the old id on the wire.
+//
+// It is safe to call from another goroutine while requests are in flight: the change lands on
+// the next body the Client builds, in the shape of Agent.SetMode. It never touches the
+// endpoint — switching servers means a new Client, not a mutated one.
+func (c *Client) SetModel(model string) {
+	c.modelMu.Lock()
+	c.model = model
+	c.modelMu.Unlock()
+}
+
+// activeModel reads the configured model under the lock. It is the single read seam for the
+// two places the field is consumed — the request body and model discovery — so a concurrent
+// SetModel is observed race-free by both.
+func (c *Client) activeModel() string {
+	c.modelMu.RLock()
+	defer c.modelMu.RUnlock()
+	return c.model
+}
 
 // Respond performs one non-streaming round-trip and assembles the reply. A non-2xx
 // status becomes an error (ErrContextOverflow for a 400 overflow, otherwise an
@@ -231,7 +265,7 @@ func (c *Client) buildBody(req Request) chatRequest {
 		body.StreamOptions = &streamOptions{IncludeUsage: true}
 	}
 
-	model := c.model
+	model := c.activeModel()
 	if model == "" {
 		model = req.Model
 	}

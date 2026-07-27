@@ -8,13 +8,18 @@ import "time"
 
 // Config is the full construction surface. It carries the Upstream target, the
 // autonomy posture, the host-supplied delegates, the extension registries, and the
-// injected state roots. A zero Config is not valid; Endpoint, Model, and Events are
-// the minimum. A struct (not functional options) because every field is a
+// injected state roots. A zero Config is not valid; Endpoint and Events are the
+// minimum. A struct (not functional options) because every field is a
 // deliberate, reviewable seam and ADR 0001 speaks of state "injected via Config".
 type Config struct {
 	// Upstream — the local OpenAI-compatible LLM server (CONTEXT: Upstream).
 	Endpoint string
-	Model    string
+
+	// Model is the model id sent on the wire. It MAY be empty at construction when the host
+	// late-binds it — a host that starts before its Upstream is reachable constructs model-less
+	// and binds the model it observes through Agent.Rebind (ADR 0024). Submit refuses until
+	// something is bound, so an empty Model delays requests rather than allowing anonymous ones.
+	Model string
 
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)

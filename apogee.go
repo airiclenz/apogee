@@ -59,6 +59,12 @@ func New(cfg Config) (*Agent, error) { return agent.New(cfg) }
 // live delegates and state roots, snap supplies the serializable conversation state.
 func Resume(cfg Config, snap Session) (*Agent, error) { return agent.Resume(cfg, snap) }
 
+// RebindSpec carries the per-model bindings Agent.Rebind swaps in when the Upstream starts
+// serving a different model — the wire model id, its system-prompt template, its context
+// window, and the Mechanism set resolved for it. The host computes it whole and applies it at
+// a quiescent boundary. See internal/agent for the contract.
+type RebindSpec = agent.RebindSpec
+
 // ----------------------------------------------------------------------------
 // Construction & autonomy (internal/domain)
 // ----------------------------------------------------------------------------

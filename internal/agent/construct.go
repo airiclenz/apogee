@@ -21,7 +21,6 @@ import (
 var (
 	errMissingEvents   = errors.New("apogee: Config.Events is required")
 	errMissingEndpoint = errors.New("apogee: Config.Endpoint is required")
-	errMissingModel    = errors.New("apogee: Config.Model is required")
 )
 
 // newAgent validates cfg and constructs a ready-to-Step Agent bound to up. The public
@@ -221,19 +220,21 @@ func resumeAgent(cfg domain.Config, snap domain.Session, up provider.Responder) 
 	return a, nil
 }
 
-// validateConfig enforces the minimum construction surface (Config: Endpoint, Model, and
-// Events are the minimum). Events is load-bearing — the loop emits through it; Endpoint and
-// Model are validated here for an honest contract even when a test injects a fake responder
-// that ignores them (the real provider dials them).
+// validateConfig enforces the minimum construction surface (Config: Endpoint and Events).
+// Events is load-bearing — the loop emits through it; Endpoint is validated here for an honest
+// contract even when a test injects a fake responder that ignores it (the real provider dials it).
+//
+// Model is deliberately NOT required: a host may construct before it knows which model the
+// Upstream serves and bind it later through Rebind (ADR 0024) — that is what lets the TUI paint
+// instantly against a server that is still starting. The requirement did not vanish, it moved to
+// where it is actually load-bearing: Submit refuses with errNoModelBound while nothing is bound,
+// so a model-less request can never reach the wire.
 func validateConfig(cfg domain.Config) error {
 	if cfg.Events == nil {
 		return errMissingEvents
 	}
 	if cfg.Endpoint == "" {
 		return errMissingEndpoint
-	}
-	if cfg.Model == "" {
-		return errMissingModel
 	}
 	return nil
 }

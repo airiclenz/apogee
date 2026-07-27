@@ -129,7 +129,19 @@ func (m *Monitor) Beat(ctx context.Context) Beat
 
 ---
 
-## 2. Engine full rebind — `Agent.Rebind`, `Client.SetModel`, deferred model binding
+## 2. Engine full rebind — `Agent.Rebind`, `Client.SetModel`, deferred model binding — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): three deviations from the item's literal text.
+1. `errMissingModel` **was** pinned by a test, contrary to the item's "no test pins it":
+   `apogee_test.go`'s `TestNew_RequiresMinimumConfig/missing_Model`. That table row is deleted and
+   replaced by `TestNew_ModelMayBeBoundLater` (empty `Model` constructs → `Submit` refuses → `Rebind`
+   → `Submit` flows), which pins the new contract through the public facade.
+2. The mid-Exchange refusal returns `domain.ErrInputPending` (the item named no error): `Rebind`
+   joins the `ClearContext`/`RestoreSession` idle-only class, and that is the error that class uses.
+3. Two additions the item implied but did not list: `_ apogee.RebindSpec` in `example_test.go`'s
+   completeness guard (that file's own contract — every alias must be named there), and
+   `TestRebindRefusesUnbuildableSpecs` covering the two refusals the implementation notes mandate
+   (`spec.Model == ""`, pre-built `Config.Mechanisms`), which the test list did not name.
 
 **What.** The engine half plus the construction relaxation async startup needs. In `internal/provider/client.go`: add `modelMu sync.RWMutex` + `SetModel(string)`; route the two `c.model` reads (`buildBody` `:234`, `discoverModels` `:91`) through a locked accessor so the Client's documented concurrent-use contract stays literally true. In `internal/agent` (new `rebind.go` + touches to `agent.go`, `construct.go`):
 

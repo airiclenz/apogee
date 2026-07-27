@@ -25,6 +25,7 @@ import (
 var (
 	_ apogee.Agent
 	_ apogee.Config
+	_ apogee.RebindSpec
 	_ apogee.ContextConfig
 	_ apogee.ModelProfile
 	_ apogee.ToolCallFormat
