@@ -144,6 +144,29 @@ func (t *transcript) addStartup(v startupView) {
 	t.entries = append(t.entries, entry{kind: entryStartup, startup: v})
 }
 
+// refreshStartup re-states the one-time start-up box's facts in place, leaving it exactly where it
+// sits in the scrollback. The box is seeded once (addStartup) from the display Options as they stood
+// at construction, and its startupView is a frozen copy: without this a session whose model is bound
+// LATE — the async cold start, where the first heartbeat is startup discovery — would keep a box
+// saying "connecting" at the top of the scrollback until the next /clear re-seeded it. Only the
+// first box is restated; there is never a second (the /clear path resets the transcript before
+// re-seeding, and a resumed scrollback carries no start-up entry — the codec never persists one).
+// A transcript with no box yet is left untouched.
+//
+// Host and Model are escape-stripped exactly as addStartup strips them: the facts come from the same
+// Options, and a fact that arrived from the server (the observed model id) is even less this
+// program's own than the configured one.
+func (t *transcript) refreshStartup(v startupView) {
+	v.Host = stripEscapes(v.Host)
+	v.Model = stripEscapes(v.Model)
+	for i := range t.entries {
+		if t.entries[i].kind == entryStartup {
+			t.entries[i].startup = v
+			return
+		}
+	}
+}
+
 // reset returns the transcript to its empty state — no committed entries and no in-progress
 // assistant buffer — while preserving the debug flag (a hidden view toggle, not conversation).
 // It is the /clear + /new "start a new session" primitive: the caller re-seeds the one-time

@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +74,55 @@ func downBeat(failure string) heartbeat.Beat { return heartbeat.Beat{Failure: fa
 func foldBeatMsg(t *testing.T, m Model, beat heartbeat.Beat) Model {
 	t.Helper()
 	return step(t, m, beatMsg{gen: m.hb.gen, beat: beat})
+}
+
+// fakeRebind stands in for the composition root's rebind closure: it records every (model, window)
+// it was asked to bind and answers with what the binary would have bound — by default exactly what
+// was observed, which is the unpinned case. It is called synchronously from the beat fold, on the
+// test's own goroutine, so it needs no guard.
+type fakeRebind struct {
+	calls  []rebindCall
+	answer func(model string, window int) (RebindResult, error)
+}
+
+// rebindCall is one binding the TUI asked the composition root to resolve and apply.
+type rebindCall struct {
+	model  string
+	window int
+}
+
+func (f *fakeRebind) rebind(model string, window int) (RebindResult, error) {
+	f.calls = append(f.calls, rebindCall{model: model, window: window})
+	if f.answer != nil {
+		return f.answer(model, window)
+	}
+	return RebindResult{Model: model, ContextWindow: window}, nil
+}
+
+// wireRebind builds a ready, idle model with BOTH upstream seams wired: hb observes, rb applies.
+func wireRebind(t *testing.T, opts Options, hb *fakeHeartbeat, rb *fakeRebind) Model {
+	t.Helper()
+	opts.Rebind = rb.rebind
+	return wireHeartbeat(t, opts, hb)
+}
+
+// unbound is opts with no model or window bound at launch — the async cold start the binary hands
+// the TUI once startup discovery is the first beat.
+func unbound(opts Options) Options {
+	opts.Model, opts.ContextWindow = "", 0
+	return opts
+}
+
+// noteTexts returns every transcript note in display order, so a whole beat script's narration can
+// be asserted as one sequence rather than as a bag of substrings.
+func noteTexts(m Model) []string {
+	var out []string
+	for _, e := range m.transcript.entries {
+		if e.kind == entryNote {
+			out = append(out, e.text)
+		}
+	}
+	return out
 }
 
 // countNotes counts the transcript notes containing want.
@@ -509,5 +560,326 @@ func TestDisplayModelEmpty(t *testing.T) {
 
 	if got := displayModel(""); got != "" {
 		t.Errorf("displayModel(%q) = %q, want the empty string", "", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Rebind orchestration
+// ----------------------------------------------------------------------------
+
+// The cold start binds LATE: the binary launches with no model at all and the first landed beat is
+// startup discovery. It runs the ordinary rebind path from empty — the seam is asked for the
+// observed model, the display adopts what came back, and both places that name a model (the footer
+// and the start-up box seeded before any of this was known) say it.
+func TestLateSeedBindsThroughRebind(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("served-model", 16384))
+
+	if want := []rebindCall{{model: "served-model", window: 16384}}; !reflect.DeepEqual(rb.calls, want) {
+		t.Fatalf("rebind calls = %+v, want %+v — the observation is what the binary is asked to bind", rb.calls, want)
+	}
+	if m.opts.Model != "served-model" || m.opts.ContextWindow != 16384 {
+		t.Errorf("bound display = %q/%d, want the rebind's own result adopted", m.opts.Model, m.opts.ContextWindow)
+	}
+	if n := countNotes(m, "connected: served-model, context 16k"); n != 1 {
+		t.Errorf("connected notes = %d, want exactly 1; entries = %+v", n, m.transcript.entries)
+	}
+	footer := ansiPattern.ReplaceAllString(m.footerContent(80), "")
+	if !strings.Contains(footer, "served-model") || strings.Contains(footer, connectingLabel) {
+		t.Errorf("footer = %q, want the bound model in place of %q", footer, connectingLabel)
+	}
+	box := m.transcript.entries[0]
+	if box.kind != entryStartup || box.startup.Model != "served-model" || box.startup.Context != "16k" {
+		t.Errorf("start-up box = %+v, want it restated in place with the bound model and window", box.startup)
+	}
+	if m.blockedUpstream() {
+		t.Error("the upstream is still blocked after a model was bound")
+	}
+}
+
+// The reported bug: a model switched behind apogee's back left the display — and the bindings —
+// frozen at launch. An observed change now rebinds and says so in one line carrying both models and
+// both windows.
+func TestModelChangeRebindsWithNotice(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the first beat observes what is already bound
+
+	m = foldBeatMsg(t, m, upBeat("new-model", 16384))
+
+	if len(rb.calls) != 2 || rb.calls[1] != (rebindCall{model: "new-model", window: 16384}) {
+		t.Fatalf("rebind calls = %+v, want the second one carrying the newly served model", rb.calls)
+	}
+	if m.opts.Model != "new-model" || m.opts.ContextWindow != 16384 {
+		t.Errorf("bound display = %q/%d, want the newly served model", m.opts.Model, m.opts.ContextWindow)
+	}
+	if n := countNotes(m, "model changed: test-model → new-model, context 32k → 16k"); n != 1 {
+		t.Errorf("change notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+	if n := countNotes(m, "connected:"); n != 0 {
+		t.Error("a model change was narrated as a first connection")
+	}
+	if footer := ansiPattern.ReplaceAllString(m.footerContent(80), ""); !strings.Contains(footer, "new-model") {
+		t.Errorf("footer = %q, want the newly bound model", footer)
+	}
+}
+
+// The same model reloaded with a different -c is a real change too: the gauge's denominator and the
+// engine's Budget both move, so it rebinds — and the note says only what moved.
+func TestWindowOnlyChangeRebinds(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+
+	m = foldBeatMsg(t, m, upBeat("test-model", 16384))
+
+	if len(rb.calls) != 2 || rb.calls[1] != (rebindCall{model: "test-model", window: 16384}) {
+		t.Fatalf("rebind calls = %+v, want a second call for the resized window", rb.calls)
+	}
+	if m.opts.ContextWindow != 16384 {
+		t.Errorf("bound window = %d, want the resized 16384", m.opts.ContextWindow)
+	}
+	if n := countNotes(m, "context window changed: 32k → 16k"); n != 1 {
+		t.Errorf("window notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+	if n := countNotes(m, "model changed"); n != 0 {
+		t.Errorf("a window-only change claimed the model moved; notes = %q", noteTexts(m))
+	}
+}
+
+// A beat that cannot name a window reports 0, which is the ABSENCE of an observation rather than an
+// observation of absence: it must never be mistaken for the window having changed, or a server with
+// no /props would rebind every ten seconds forever.
+func TestZeroWindowBeatIsNotAChange(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+
+	m = foldBeatMsg(t, m, heartbeat.Beat{Reachable: true, ActiveModel: "test-model"})
+
+	if len(rb.calls) != 1 {
+		t.Errorf("rebind calls = %+v, want the window-less beat to have asked for nothing", rb.calls)
+	}
+	if m.opts.ContextWindow != 32768 {
+		t.Errorf("bound window = %d, want the known 32768 kept", m.opts.ContextWindow)
+	}
+	if notes := noteTexts(m); len(notes) != 0 {
+		t.Errorf("notes = %q, want silence", notes)
+	}
+}
+
+// A switch observed mid-answer waits: Agent.Rebind is idle-only, so the intent is stashed and
+// applied in the exchange-terminal fold — the same boundary the idle save uses. Two switches during
+// one Exchange collapse to the latest; binding an intermediate model nobody is serving any more
+// would be worse than binding nothing.
+func TestRebindDeferredWhileBusy(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the baseline binding, at idle
+	m.state = stateRunning
+
+	m = foldBeatMsg(t, m, upBeat("model-a", 32768))
+	m = foldBeatMsg(t, m, upBeat("model-b", 16384))
+
+	if len(rb.calls) != 1 {
+		t.Fatalf("rebind calls = %+v, want nothing bound while a worker owns the engine", rb.calls)
+	}
+	if m.opts.Model != "test-model" {
+		t.Errorf("bound model = %q, want the mid-Exchange binding untouched", m.opts.Model)
+	}
+	if want := (rebindIntent{model: "model-b", window: 16384}); m.hb.pendingRebind == nil || *m.hb.pendingRebind != want {
+		t.Fatalf("pendingRebind = %+v, want the LATEST observation stashed (%+v)", m.hb.pendingRebind, want)
+	}
+
+	m = step(t, m, exchangeDoneMsg{})
+
+	if len(rb.calls) != 2 || rb.calls[1] != (rebindCall{model: "model-b", window: 16384}) {
+		t.Fatalf("rebind calls = %+v, want exactly the latest applied at the boundary", rb.calls)
+	}
+	if m.opts.Model != "model-b" || m.opts.ContextWindow != 16384 {
+		t.Errorf("bound display = %q/%d, want the deferred change applied", m.opts.Model, m.opts.ContextWindow)
+	}
+	if m.hb.pendingRebind != nil {
+		t.Error("the applied intent is still stashed; it would be re-applied at the next boundary")
+	}
+	if n := countNotes(m, "model changed: test-model → model-b, context 32k → 16k"); n != 1 {
+		t.Errorf("change notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+}
+
+// A `context-window:` pin outranks whatever the server reports, and the binary — not the renderer —
+// is what knows that. The TUI adopts the BOUND window, and because it measures change against the
+// OBSERVATION, the server's own differing window never re-triggers a rebind on every beat.
+func TestPinnedWindowResultSticks(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{answer: func(model string, _ int) (RebindResult, error) {
+		return RebindResult{Model: model, ContextWindow: 8192}, nil // the pin wins in the composition root
+	}}
+	opts := unbound(testOpts)
+	opts.ContextWindow = 8192 // the pin the binary already applied at launch
+	m := wireRebind(t, opts, &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
+
+	if len(rb.calls) != 1 {
+		t.Fatalf("rebind calls = %+v, want exactly one — identical beats are not changes", rb.calls)
+	}
+	if m.opts.ContextWindow != 8192 {
+		t.Errorf("bound window = %d, want the pinned 8192 the rebind reported", m.opts.ContextWindow)
+	}
+	if n := countNotes(m, "connected: served-model, context 8k"); n != 1 {
+		t.Errorf("connected notes = %d, want exactly 1 naming the PINNED window; notes = %q", n, noteTexts(m))
+	}
+	if n := countNotes(m, "context window changed"); n != 0 {
+		t.Errorf("the pinned window narrated a change it suppressed; notes = %q", noteTexts(m))
+	}
+}
+
+// A rebind that cannot be resolved leaves every binding where it was and says so — once per target.
+// The monitor beats every ten seconds; repeating one refusal at that rate would bury the
+// conversation it annotates.
+func TestRebindFailureNotedOnce(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{answer: func(model string, _ int) (RebindResult, error) {
+		return RebindResult{}, errors.New("no validated set for " + model)
+	}}
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("model-a", 32768))
+	if m.opts.Model != "test-model" || m.opts.ContextWindow != 32768 {
+		t.Fatalf("bound display = %q/%d, want it untouched by a failed rebind", m.opts.Model, m.opts.ContextWindow)
+	}
+	if n := countNotes(m, "model change detected (test-model → model-a) but rebind failed"); n != 1 {
+		t.Fatalf("failure notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+	if n := countNotes(m, "still bound to test-model"); n != 1 {
+		t.Errorf("the refusal does not say what apogee is still talking to; notes = %q", noteTexts(m))
+	}
+
+	// An identical beat is not a change at all: nothing is asked, nothing is said.
+	m = foldBeatMsg(t, m, upBeat("model-a", 32768))
+	if len(rb.calls) != 1 || len(noteTexts(m)) != 1 {
+		t.Errorf("an identical beat re-ran the failed rebind (calls %+v, notes %q)", rb.calls, noteTexts(m))
+	}
+
+	// The same target seen in a new window IS asked again — and stays quiet, having already spoken.
+	m = foldBeatMsg(t, m, upBeat("model-a", 16384))
+	if len(rb.calls) != 2 {
+		t.Errorf("rebind calls = %+v, want the retry a genuinely new observation triggers", rb.calls)
+	}
+	if n := len(noteTexts(m)); n != 1 {
+		t.Errorf("notes = %q, want the refusal still stated exactly once for this target", noteTexts(m))
+	}
+
+	// A different target is a different fact, and is worth saying.
+	m = foldBeatMsg(t, m, upBeat("model-b", 16384))
+	if n := countNotes(m, "→ model-b) but rebind failed"); n != 1 {
+		t.Errorf("a new target's refusal was swallowed; notes = %q", noteTexts(m))
+	}
+}
+
+// With no rebind seam the heartbeat is display-frozen by design (an embedder that wires only the
+// monitor): beats still light the offline state, but no binding moves and nothing claims one did.
+func TestRebindNilIsDisplayFrozen(t *testing.T) {
+	t.Parallel()
+
+	m := wireHeartbeat(t, testOpts, &fakeHeartbeat{}) // no Rebind wired
+	before := m.opts
+
+	m = foldBeatMsg(t, m, upBeat("other-model", 16384))
+
+	if m.opts.Model != before.Model || m.opts.ContextWindow != before.ContextWindow {
+		t.Errorf("bound display = %q/%d, want the launch values (%q/%d) with no seam to move them",
+			m.opts.Model, m.opts.ContextWindow, before.Model, before.ContextWindow)
+	}
+	if m.hb.pendingRebind != nil {
+		t.Error("a change was stashed with nothing to apply it through")
+	}
+	if notes := noteTexts(m); len(notes) != 0 {
+		t.Errorf("notes = %q, want silence — no binding moved", notes)
+	}
+	if footer := ansiPattern.ReplaceAllString(m.footerContent(80), ""); !strings.Contains(footer, "test-model") {
+		t.Errorf("footer = %q, want the launch-time model still shown", footer)
+	}
+}
+
+// The whole narration, read end to end: a cold start against a stopped server, the server coming up
+// with model A, an identical beat, then a switch to B. Four beats, three lines — the transcript is
+// the feature's user-visible contract, and its enemy is duplication at one line every ten seconds.
+func TestBeatScriptNarratesEachChangeOnce(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, downBeat("connection refused"))
+	m = foldBeatMsg(t, m, upBeat("model-a", 32768))
+	m = foldBeatMsg(t, m, upBeat("model-a", 32768))
+	m = foldBeatMsg(t, m, upBeat("model-b", 16384))
+
+	want := []string{
+		"server offline — connection refused",
+		"connected: model-a, context 32k",
+		"model changed: model-a → model-b, context 32k → 16k",
+	}
+	if got := noteTexts(m); !reflect.DeepEqual(got, want) {
+		t.Errorf("transcript notes =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A bound model whose window nobody can name is honest about the consequence: the Budget and
+// automatic compaction both bind against the window, so with none known they simply do nothing.
+// The line rides the rebind because that is when the fact is established — at launch it would fire
+// on every cold start and be wrong a second later.
+func TestUnknownWindowNotedOnBind(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, heartbeat.Beat{Reachable: true, ActiveModel: "served-model"})
+
+	if n := countNotes(m, unknownWindowNote); n != 1 {
+		t.Errorf("unknown-window notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+	if n := countNotes(m, "connected: served-model"); n != 1 {
+		t.Errorf("connected notes = %d, want exactly 1 with no window clause; notes = %q", n, noteTexts(m))
+	}
+	if n := countNotes(m, "context "); n != 1 {
+		t.Errorf("a window was named for a binding that has none; notes = %q", noteTexts(m))
+	}
+}
+
+// The notices the composition root produced (a validated set that matched the new model, say) ride
+// the same rebind into the transcript, after the line that says what moved.
+func TestRebindNoticesSurfaceAsNotes(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{answer: func(model string, window int) (RebindResult, error) {
+		return RebindResult{Model: model, ContextWindow: window, Notices: []string{"validated set: strict-json"}}, nil
+	}}
+	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
+
+	want := []string{"connected: served-model, context 32k", "validated set: strict-json"}
+	if got := noteTexts(m); !reflect.DeepEqual(got, want) {
+		t.Errorf("transcript notes =\n%q\nwant\n%q", got, want)
 	}
 }

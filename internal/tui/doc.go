@@ -163,6 +163,23 @@
 // /version, /confine and Shift+Tab all stay live. An unwired seam arms no chain, folds nothing and
 // blocks nothing, which is exactly the pre-heartbeat renderer.
 //
+// What a beat DOES about a changed upstream is the second seam, [Options.Rebind], and the split
+// between the two is the design: the heartbeat seam observes, the rebind seam applies, and the
+// binary owns everything in between — re-resolving the per-model system prompt (ADR 0023), the
+// validated set (ADR 0016), the mechanisms registry and the compaction budget, then driving
+// Agent.Rebind. This package decides only WHEN. [Model.observeBinding] measures each landed beat
+// against the last OBSERVATION rather than against the binding — which is what lets a
+// `context-window:` pin outrank the server's window forever without the renderer knowing a pin
+// exists — and a change is applied at once when the engine is idle, or stashed as a latest-wins
+// pendingRebind and applied in finishWorker when a worker owns it, the same quiescent boundary
+// AbortExchange and the idle save use. [Model.applyRebind] then adopts what was actually BOUND
+// (never merely what was observed), restates the start-up box in place (transcript.refreshStartup —
+// its facts were frozen when it was seeded, and a late-bound session would otherwise keep a
+// "connecting" box at the top of its scrollback), and words the change once: connected / model
+// changed / context window changed, a refusal noted once per distinct target, and nothing at all
+// when a pin means nothing visible moved. A nil seam is a display-frozen heartbeat — the offline
+// state and the model list still live, no binding ever does.
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the three

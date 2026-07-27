@@ -221,6 +221,20 @@ type Options struct {
 	// reason SaveHostAcknowledgement is: the TUI needs one call, not a type.
 	Heartbeat func(context.Context) heartbeat.Beat
 
+	// Rebind re-resolves and applies the per-model bindings after the heartbeat observed the
+	// upstream serving a different model — or the same model in a different window. The binary owns
+	// the resolution (the per-model system prompt, ADR 0023; the validated set, ADR 0016; the
+	// mechanisms registry and the compaction budget) and the engine mutators; the TUI owns only
+	// WHEN, which is the whole of its half: at idle the moment the beat lands, or deferred to the
+	// exchange-terminal fold when a worker owns the engine — the quiescent boundary Agent.Rebind
+	// demands (ADR 0024). It returns what was actually BOUND, which is not always what was observed
+	// (a `context-window:` pin outranks the server's window), plus any notices to surface.
+	//
+	// nil ⇒ a display-frozen heartbeat: beats still light the offline state and refresh the
+	// advertised model list, but no binding ever moves and no note claims one did. It is a func
+	// rather than an interface for the same reason Heartbeat is: the TUI needs one call, not a type.
+	Rebind func(model string, contextWindow int) (RebindResult, error)
+
 	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
 	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints
 	// the resumed scrollback beneath it and relights the context gauge from the stored fill — or,
@@ -228,6 +242,18 @@ type Options struct {
 	// an honest note with the view otherwise fresh. The binary resolves the store record and
 	// projects it onto this small value, so the renderer never decodes the record itself.
 	Resumed *ResumedSession
+}
+
+// RebindResult is what the composition root actually bound in answer to an observed change: the
+// model id now going out on the wire, the context window the engine budgets and the gauge measures
+// against — the observed one, or the `context-window:` pin that outranks it — and any per-rebind
+// lines worth telling the human (a validated set that matched the new model, say), surfaced in
+// order as transcript notes. The TUI renders it and never derives it: which window won, and why, is
+// the binary's decision, so the renderer needs no knowledge of the pin at all.
+type RebindResult struct {
+	Model         string   // the model id now bound; what the footer and the start-up box show
+	ContextWindow int      // the BOUND window in tokens (a pin wins over the observation); 0 ⇒ unknown
+	Notices       []string // per-rebind lines to surface as transcript notes, in order
 }
 
 // ResumedSession is the startup-replay payload the composition root hands the TUI when a run

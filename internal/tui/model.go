@@ -400,8 +400,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		next, noted := m.foldBeat(msg.beat)
 		if noted {
-			// Only a transition writes to the transcript; repainting on every beat would also drop
-			// a live drag-selection (refreshViewport) every ten seconds.
+			// Only a beat that MOVED something — the offline state, or a binding — repaints;
+			// repainting on every beat would drop a live drag-selection (refreshViewport) every ten
+			// seconds.
 			next.refreshViewport()
 		}
 		return next, next.beatTick()
@@ -901,6 +902,10 @@ func (m *Model) stopWorker() {
 // the Exchange settled at idle, it is the final per-session save (saveAtIdle) — the Model owns
 // the engine again at this boundary, so it takes its own Snapshot — else nil.
 //
+// It is also where a binding change the heartbeat observed mid-Exchange is applied
+// (applyPendingRebind): the Model owning the engine again is exactly the precondition
+// Agent.Rebind states, so the deferred apply and the idle Snapshot share one boundary.
+//
 // It CALLS the CancelFunc before clearing it: a completed Exchange leaves its worker's
 // cancellable child context un-cancelled otherwise, leaking one context (and its goroutine's
 // timer resources) per completed exchange for the life of the session. Cancelling a context
@@ -925,8 +930,14 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	if m.quitting {
 		// A quit was requested while busy (quit deferred the exit to here); the worker has now
 		// returned its terminal Msg, so its goroutine has unwound and the teardown cannot race it.
+		// A binding change captured during that Exchange is deliberately dropped: the session is
+		// ending, and rebinding an engine nobody will send to would only delay the exit.
 		return tea.Quit
 	}
+	// The engine is the Update loop's again, which is the boundary a binding change captured
+	// mid-Exchange has been waiting for (ADR 0024). It runs BEFORE the idle save so the session
+	// record is stamped with the model that is now bound, notes and all.
+	m.applyPendingRebind()
 	if next == stateIdle {
 		// A completed or cancelled Exchange settled at idle: persist the final conversation state
 		// (the per-Turn saves captured each Turn; this catches the closing boundary, including a
@@ -1165,6 +1176,25 @@ type heartbeatState struct {
 	// baseline a model/window change is measured against; the rebind orchestration owns them.
 	observedModel  string
 	observedWindow int
+	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
+	// lands while a worker owns the engine, applied in finishWorker. Latest-wins: a second change
+	// during the same Exchange replaces the first, so only the newest reality is ever bound. nil ⇒
+	// nothing is deferred. A pointer into a value-copied Model is safe because it is only ever
+	// replaced, never written through (the pendingSave posture, ADR 0011).
+	pendingRebind *rebindIntent
+	// lastRebindFailed is the model id whose rebind last failed, so a refusal is noted once per
+	// distinct target instead of once every Interval. "" once a rebind succeeds.
+	lastRebindFailed string
+}
+
+// rebindIntent is one captured binding change: the model the last beat observed the server to be
+// serving and the window it reported for it. It is what the deferred apply stashes and what the
+// [Options.Rebind] seam is called with — plain values, so the value-copied Model carries it safely.
+// It is the OBSERVATION, not the binding: what the binary makes of it (a pinned window outranking
+// the observed one) comes back in the [RebindResult].
+type rebindIntent struct {
+	model  string
+	window int
 }
 
 // offlineFailureThreshold is how many consecutive idle beat failures flip the footer offline once
@@ -1220,9 +1250,14 @@ func (m Model) beatTick() tea.Cmd {
 	return tea.Tick(heartbeat.Interval, func(time.Time) tea.Msg { return heartbeatTickMsg{gen: gen} })
 }
 
-// foldBeat folds one landed observation into the heartbeat state and reports whether it wrote a
-// transcript note (so the caller repaints only on a transition). It moves no binding: what the
-// server serves is recorded, and applying it is the rebind orchestration's job.
+// foldBeat folds one landed observation into the heartbeat state and reports whether it changed
+// what the view shows (so the caller repaints only when there is something new to see). Two things
+// can move: the offline state, and — through [Model.observeBinding] — the bindings themselves.
+//
+// A beat that crosses back online AND rebinds says so once, not twice: "connected: <model>" is the
+// stronger statement, and it already implies the server answered. The recovery note is for the
+// ordinary case, where the server came back serving exactly what it served before and there is
+// nothing else to report.
 func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	if !beat.Reachable {
 		return m.foldBeatFailure(beat.Failure)
@@ -1231,12 +1266,172 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	m.hb.everOnline = true
 	m.hb.lastFailure = ""
 	m.hb.models = beat.AvailableModels // the future picker's data layer (decision 4); nothing renders it
-	if !m.hb.offline {
-		return m, false // the ordinary case: a healthy beat says nothing
-	}
+	crossed := m.hb.offline
 	m.hb.offline = false
-	m.transcript.addNote(onlineNote)
+
+	m, rebound := m.observeBinding(beat)
+	if crossed && !rebound {
+		m.transcript.addNote(onlineNote)
+	}
+	return m, crossed || rebound
+}
+
+// observeBinding measures a landed beat against the last observation that mattered and, when the
+// upstream has moved, binds the new reality — now if the engine is quiescent, or stashed for the
+// exchange-terminal boundary when a worker owns it. It reports whether the view changed.
+//
+// The comparison is against what was last OBSERVED, not against what is bound, and the observation
+// is recorded the moment the intent is captured (before the seam even answers). That one choice is
+// what keeps a `context-window:` pin quiet: the server keeps reporting its own window every ten
+// seconds, the pin keeps outranking it, and the difference between the two is never mistaken for a
+// fresh change — so the TUI needs no knowledge of the pin at all. A beat that reports no window
+// (0) is not evidence the window changed, only that this beat could not name it.
+func (m Model) observeBinding(beat heartbeat.Beat) (Model, bool) {
+	if m.opts.Rebind == nil {
+		return m, false // a display-frozen heartbeat: nothing to apply a change through
+	}
+	changed := beat.ActiveModel != m.hb.observedModel ||
+		(beat.ContextWindow > 0 && beat.ContextWindow != m.hb.observedWindow)
+	if !changed {
+		return m, false
+	}
+	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, beat.ContextWindow
+	intent := rebindIntent{model: beat.ActiveModel, window: beat.ContextWindow}
+	if m.busy() {
+		// A worker owns the engine, and Agent.Rebind is idle-only by construction. Stash the intent
+		// for finishWorker rather than refuse it: the human is mid-answer, and the switch they made
+		// upstream should land the moment the Exchange closes (latest-wins, so a second switch during
+		// the same Exchange simply supersedes this one).
+		m.hb.pendingRebind = &intent
+		return m, false
+	}
+	return m.applyRebind(intent)
+}
+
+// applyRebind re-resolves the bindings for one captured change through the [Options.Rebind] seam and
+// folds the answer into the display: the model and window the binary actually BOUND, the start-up
+// box restated in place, the note that says what moved, and any notices the resolution produced. It
+// reports whether it wrote to the view.
+//
+// It is called only where the engine is quiescent — a beat landing at idle, or the exchange-terminal
+// fold for a change captured mid-Exchange — because the seam drives Agent.Rebind, which refuses
+// anything else (ADR 0024). The conversation is deliberately left alone: history survives a switch,
+// and ctxUsed keeps its last measured fill (an over-window conversation renders clamped at 100%
+// until the next usage event or a compaction re-measures it).
+//
+// A failure leaves every binding exactly where it was and says so ONCE per distinct target: the
+// monitor beats every ten seconds, and a transcript repeating the same refusal at that rate would
+// bury the conversation it is meant to annotate (the saveFailing fail-once posture).
+func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
+	rebind := m.opts.Rebind
+	if rebind == nil {
+		return m, false
+	}
+	oldModel, oldWindow := m.opts.Model, m.opts.ContextWindow
+
+	result, err := rebind(intent.model, intent.window)
+	if err != nil {
+		if m.hb.lastRebindFailed == intent.model {
+			return m, false
+		}
+		m.hb.lastRebindFailed = intent.model
+		m.transcript.addNote(rebindFailNote(oldModel, intent.model, err))
+		return m, true
+	}
+
+	m.hb.lastRebindFailed = ""
+	m.opts.Model, m.opts.ContextWindow = result.Model, result.ContextWindow
+	// The box's facts were frozen when it was seeded, so a late seed would otherwise leave a
+	// "connecting" box at the top of the scrollback until the next /clear.
+	m.transcript.refreshStartup(newStartupView(m.opts))
+	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow); note != "" {
+		m.transcript.addNote(note)
+	}
+	for _, notice := range result.Notices {
+		m.transcript.addNote(notice)
+	}
+	if m.opts.ContextWindow == 0 {
+		m.transcript.addNote(unknownWindowNote)
+	}
 	return m, true
+}
+
+// applyPendingRebind binds a change that was captured while a worker owned the engine. The terminal
+// fold IS the boundary Agent.Rebind demands — the same one AbortExchange and the idle save already
+// use — and the worker's terminal Msg travelling through the Bubble Tea channel is what establishes
+// the happens-before in both directions, which is why the engine's per-model bindings need no lock
+// (ADR 0024). A no-op when nothing was deferred.
+func (m *Model) applyPendingRebind() {
+	intent := m.hb.pendingRebind
+	if intent == nil {
+		return
+	}
+	m.hb.pendingRebind = nil
+	next, noted := m.applyRebind(*intent)
+	*m = next
+	if noted {
+		m.refreshViewport()
+	}
+}
+
+// unknownWindowNote is the honesty line for a binding whose context window nobody could name: the
+// Budget and automatic Compaction both bind against the window, so with none known they silently do
+// nothing. It rides the rebind rather than the start-up sequence because the window is known — or
+// not — only once a beat has landed: printed at launch it would fire on every cold start and be
+// wrong a second later.
+const unknownWindowNote = "context window unknown — automatic compaction and the Budget are inactive; " +
+	"set context-window: in config.yaml"
+
+// rebindNote words what a successful rebind actually moved, in the three shapes it can take: the
+// late seed that binds the session's first model (the async cold start — same code path, different
+// words), a model change, and a window-only change. It returns "" when nothing VISIBLE moved, which
+// is the pinned-window case: the server switched to a differently-sized window, the pin outranked
+// it, and the binding the human can see is unchanged — a note there would describe a change that
+// did not happen. The window clause is carried only when the BOUND window moved, so a pin never
+// narrates the change it suppressed.
+//
+// Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
+// note and the chrome beside it can never name the same model two different ways.
+func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int) string {
+	switch {
+	case oldModel == "":
+		note := "connected: " + displayModel(newModel)
+		if newWindow > 0 {
+			note += ", context " + formatTokens(newWindow)
+		}
+		return note
+	case oldModel != newModel:
+		note := "model changed: " + displayModel(oldModel) + " → " + displayModel(newModel)
+		if newWindow != oldWindow {
+			note += ", context " + windowWord(oldWindow) + " → " + windowWord(newWindow)
+		}
+		return note
+	case newWindow != oldWindow:
+		return "context window changed: " + windowWord(oldWindow) + " → " + windowWord(newWindow)
+	}
+	return ""
+}
+
+// rebindFailNote words a refused rebind. The bindings did not move, so the note's job is to say
+// what the server is serving, that apogee is NOT following it, and why — a session silently talking
+// to a model the server no longer loads is the failure this whole feature exists to prevent. The
+// late seed says it differently because there is no old binding to still be on.
+func rebindFailNote(oldModel, target string, err error) string {
+	if oldModel == "" {
+		return "could not bind " + displayModel(target) + ": " + err.Error() + " — no model is bound yet"
+	}
+	return "model change detected (" + displayModel(oldModel) + " → " + displayModel(target) +
+		") but rebind failed: " + err.Error() + " — still bound to " + displayModel(oldModel)
+}
+
+// windowWord renders a context window inside a change clause, naming an unknown one in words rather
+// than as the empty string formatTokens yields — "context  → 16k" reads as a rendering bug, which is
+// the very thing the gauge's clamp was fixed for.
+func windowWord(n int) string {
+	if n <= 0 {
+		return "unknown"
+	}
+	return formatTokens(n)
 }
 
 // foldBeatFailure folds a beat that could not read the server. Three rules, in order:

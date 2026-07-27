@@ -219,7 +219,7 @@ NOTES (2026-07-27): three deviations/additions from the item's literal text.
 
 ---
 
-## 4. TUI rebind orchestration — late seed, deferred apply, transcript notice
+## 4. TUI rebind orchestration — late seed, deferred apply, transcript notice — ✅ DONE (2026-07-27)
 
 NOTES (2026-07-27): five deviations/additions from the item's literal text, all in the WORDING half.
 1. A beat that crosses back online AND rebinds writes only the bind note — the item-3 `server back
