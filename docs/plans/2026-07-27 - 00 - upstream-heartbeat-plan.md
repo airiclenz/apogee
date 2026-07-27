@@ -345,7 +345,7 @@ and `TODO.md` also name `ServerManager`; both are item 7's enumerated territory 
 
 ---
 
-## 7. Docs, decision record, and release bookkeeping
+## 7. Docs, decision record, and release bookkeeping — ✅ DONE (2026-07-27)
 
 **NOTES (2026-07-27):** the `TODO.md` half of this item is already done — an owner-requested
 TODO cleanup rewrote the file the same day: the stale "upstream is immutable" note is gone and
@@ -354,6 +354,26 @@ the non-goals. The quoted `:53-55` / `:92-95` line numbers no longer apply. When
 only *finalize* that entry's wording against what actually shipped (drop "IN FLIGHT", record what
 remains); every other target of this item (ADR 0024, CONTEXT.md, ISSUES.md, CHANGELOG.md,
 technical-design.md) is untouched and still to do.
+
+**NOTES (2026-07-27, implementation):** four deviations from the item's literal text.
+1. `ISSUES.md` was rewritten by the owner mid-plan into an `A`/`P`/`X` status legend (Activated /
+   Planned / Executed), so "check off the 10-second-timer item" is realized as `[P]` → `[X]` plus the
+   shipped paragraph the item asks for (ADR 0024 pointer, B5/B1 fixed, B6 open by design). The
+   owner's wording of the entry itself is preserved verbatim.
+2. The `TODO.md` half is as the note above predicted: the "upstream is immutable" line was already
+   gone, so only the `[P1] Server / model switching` entry's wording was finalized (IN FLIGHT
+   dropped, shipped/remaining split recorded), plus a shipped-ledger line in the same entry's
+   "Shipped since parking" list.
+3. `docs/design/technical-design.md`: besides the §5 Provider row and the new Heartbeat row the item
+   names, the §8 backlog's completed "Provider/Upstream client" line (`:314`) — the doc's only other
+   `ServerManager` mention — gains a one-clause dated pointer, so item 6's deletion leaves no claim
+   in this file that the type still exists. The Provider row's *Undesigned* cell was corrected in the
+   same edit (llama.cpp `/props` discovery shipped 2026-06-28; PID-file orphan adoption re-tagged to
+   the parked local-server work).
+4. `VERSION` is deliberately **not** bumped: it is not one of this item's enumerated targets, the
+   owner moved it concurrently (v0.8.6 → v0.8.7), and the `[Unreleased]` block names the additive
+   surface as a **minor** bump rather than hard-coding `v0.9.0` — the release header carries the
+   number when the release is cut.
 
 **What.** ADR **0024** `docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md`: the 10 s monitor as a concept distinct from probe (ADR 0021); the beat-result-re-arms tick topology; the idle-only/deferred-apply concurrency argument (why no locks on `cfg` — the boundary IS the synchronization, extending ADR 0011's idle-only class); pin-wins (decision 9); model-as-hint (decision 10); the busy-failure/2-idle-failures debounce; the display-only-vs-rebind split of the two Options seams; deliberate non-goals (B6; B2 per-slot `n_ctx` documented, not re-derived). `CONTEXT.md`: a **Heartbeat** noun entry near Probe (`CONTEXT.md:608-644`) — probe diagnoses once, the heartbeat monitors continuously, rebind is its apply; _Avoid_: "health check", "poller", "probe" for this — plus a cross-reference from the Probe entry. `TODO.md`: rewrite the stale "upstream is immutable" note (`:53-55`); mark **[P1] Server / model switching** (`:92-95`) partially landed (heartbeat + `Agent.Rebind` + model-list data layer shipped; `/server` + `/model` picker UI and local-server start/stop remain, now unblocked). `ISSUES.md`: check off the 10-second-timer item with a pointer to ADR 0024; note the gauge half is B5-fixed and B6 stays open by design. `CHANGELOG.md` `[Unreleased]`: the Heartbeat block (async startup, offline UX, live rebind + notice, `/v1/models` data layer, B5 fix, ServerManager removal) — rides **v0.9.0**. `docs/design/technical-design.md` §5: new **Heartbeat / upstream monitor** row (pointing at ADR 0024); amend the Provider row.
 

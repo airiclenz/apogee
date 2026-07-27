@@ -22,17 +22,23 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 
 **Remaining:**
 
-- **[P1] Server / model switching** — **IN FLIGHT 2026-07-27**
-  (`docs/plans/2026-07-27 - 00 - upstream-heartbeat-plan.md`). The heartbeat work landed the
-  engine seam this entry was blocked on — the old "today `upstream` is immutable after
-  construction" note is obsolete: `Agent.Rebind(RebindSpec)`, `provider.Client.SetModel`, and
-  the per-beat `/v1/models` data layer shipped as plan items 1–3; items 4–7 are pending, and
-  plan item 7 owns this entry's close-out wording. Still future *after* that plan (its explicit
-  non-goals): the `/model`/`/server` picker UI (its prepared seams: `hb.models`, `RebindSpec`,
-  `Agent.Rebind`), the endpoint switch (`Rebind` deliberately never touches `Endpoint`), and
-  local llama.cpp start/stop (rebuild over `heartbeat.Beat`; the dead `provider.ServerManager`
-  is deleted by plan item 6). The switchable **model-profile** abstraction (sampling params,
-  context-budget %, thinking/tool-call format — reuse `internal/processing`) remains unstarted.
+- **[P1] Server / model switching** — **unblocked 2026-07-27; the UI half remains.** The
+  upstream-heartbeat work shipped everything this entry was blocked on
+  ([ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md),
+  `docs/plans/2026-07-27 - 00 - upstream-heartbeat-plan.md`): the old "today `upstream` is
+  immutable after construction" note is obsolete — `Agent.Rebind(RebindSpec)` swaps every
+  per-model binding at a quiescent boundary, `provider.Client.SetModel` moves the wire model,
+  startup is fully async (a model-less start is legal and the first beat binds late), and every
+  beat carries the server's whole `/v1/models` offering into `hb.models` as the picker's data
+  layer. **Remaining** (the plan's explicit non-goals): the `/model` / `/server` **picker UI**
+  over those prepared seams (`hb.models`, `RebindSpec`, `Agent.Rebind`); the **endpoint switch**
+  — `Rebind` deliberately never touches `Endpoint`, so a server switch swaps the `heartbeat`
+  monitor and the provider client behind the same two `tui.Options` seams; and **local
+  llama.cpp start/stop**, to be rebuilt over `heartbeat.Beat` (the dead `provider.ServerManager`,
+  whose liveness half the heartbeat supersedes, was deleted rather than revived). The switchable
+  **model-profile** abstraction (sampling params, context-budget %, thinking/tool-call format —
+  reuse `internal/processing`) remains unstarted, and stays deliberately global: `model-profile`
+  is not per-model, and a rebind does not touch it.
 
 - **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
   shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
@@ -66,6 +72,11 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   `--resume`, scrollback replay) — 2026-07-24,
   [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md) +
   `docs/plans/archived/2026-07-24 - 02 - session-system-plan.md`.
+- The upstream **Heartbeat** (a ten-second monitor, async startup, offline state, live rebind on
+  an observed model/window change, the `/v1/models` data layer) — 2026-07-27,
+  [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md) +
+  `docs/plans/2026-07-27 - 00 - upstream-heartbeat-plan.md`. It is the engine half of the `/server`
+  item above, not that item's close-out.
 
 ---
 

@@ -121,6 +121,57 @@ point is a **minor** bump, not a breaking change.
   `New`/`Resume` loudly, the way a bad model profile does. See
   [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md).
 
+- **apogee now watches the server it is talking to — the upstream Heartbeat.** Model, context window
+  and reachability were read **once**, at startup, and never again: restart your llama.cpp server
+  with a different model (or a different `-c`) beside a running apogee and the footer kept showing
+  the old name over the old window, the context gauge kept dividing by a window that no longer
+  existed, and the Budget kept measuring against it. Every **ten seconds** apogee now asks the server
+  what it is actually serving and follows the answer:
+  - **The display follows reality.** Footer, start-up box and the gauge's denominator move with the
+    server, and the transcript says what changed, once: `model changed: gemma-4 → gpt-oss-20b,
+    context 32k → 16k` (the window clause only when the window moved).
+  - **So do the bindings — this is not a cosmetic refresh.** A model change re-resolves the outgoing
+    request's model id, the per-model **system prompt**
+    ([ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)),
+    the matching **validated Mechanism set**
+    ([ADR 0016](docs/adr/0016-curation-is-per-model-validated-sets-keyed-by-fingerprint.md)), the
+    Mechanism registry, and the compaction budget — together, or not at all. Your **conversation,
+    mode, approvals, confinement and tools stand**, and a change observed while a reply is streaming
+    is applied the moment that exchange finishes, never in the middle of it.
+  - **apogee starts without a server.** Startup no longer probes: the TUI paints **instantly** —
+    where it used to stall up to five seconds, and refuse to start at all when `model:` was unset and
+    the server was down — shows `connecting…`, and binds the moment a server answers (`connected:
+    gemma-4, context 32k`). Start apogee first and your server second, in either order.
+  - **Offline is a state, not a failure.** When the server stops answering the footer says `offline`
+    and a send is refused with a note naming the endpoint and the reason — **and your typed message
+    stays in the box**. Scrollback, `/clear`, `/sessions`, `/version`, `/confine` and Shift+Tab all
+    keep working. A failed beat while a reply is streaming is ignored outright (a live stream is
+    better evidence than a timed-out status call on a busy single-slot server), and an established
+    session needs two consecutive quiet failures before it says offline, so a moment of load cannot
+    flicker the footer. Recovery is noted once too.
+  - **`context-window:` is now a pin, and `model:` is a hint.** A configured window is **never**
+    overridden by the heartbeat — it stays the escape hatch for a server that misreports its own —
+    while a configured model is followed while the server serves it and yields, with a notice, when
+    the server loads something else. Leaving `context-window:` unset now means "discover it, and keep
+    discovering it".
+  - Two long-standing display bugs go with it: a **pinned model was probed with an empty hint**, so on
+    a multi-model server apogee adopted the *first* model's context window rather than the pinned
+    one's; and the **gauge clamped its bar but not its percentage**, printing readings like `41k
+    137%`. Both fixed.
+
+  Every beat also carries the server's whole `/v1/models` offering into the TUI's state. Nothing
+  renders it yet — it is the data layer a future `/model` picker and server switch read, and building
+  those seams was half the point. For embedders this is **additive**, a **minor** bump: `apogee.Agent`
+  gains `Rebind(RebindSpec)` and the root facade re-exports `apogee.RebindSpec`, and `Config.Model`
+  may now be **empty** at construction — a model-less agent is a legitimate object (clear context,
+  restore a session, switch mode) and only `Submit` refuses until a model is bound, so a host can
+  start before its server exists exactly as the TUI does. `Rebind` is **idle-only** (it refuses
+  mid-exchange, the way `ClearContext` does) and validate-then-commit, so a spec the new model cannot
+  satisfy leaves every binding intact. Internally the dead `provider.ServerManager` is deleted: its
+  liveness half is superseded by the heartbeat, which observes strictly more, and its local-server
+  launch half will be rebuilt over the beat when that work lands. See
+  [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md).
+
 ### Changed
 
 - **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**

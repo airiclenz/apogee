@@ -621,8 +621,32 @@ record, so it never fires as a side effect of the bare noun. It prints suggested
 profile** knobs as paste-ready YAML and never edits the user's config; `--no-save` runs the
 battery and writes nothing.
 _Avoid_: "benchmark" (the battery measures capability, not quality — scoring is [the
-bench](#validation-and-the-bench)'s job), "health check" (it diagnoses, it does not monitor),
-"auto-configure" (nothing is written into config).
+bench](#validation-and-the-bench)'s job), "health check" (it diagnoses, it does not monitor —
+monitoring is the [Heartbeat](#probing-and-model-identity)'s job), "auto-configure" (nothing is
+written into config).
+
+**Heartbeat** (and its **Beat**):
+The continuous **monitor** of the [Upstream](#identity-and-shape): every **ten seconds** apogee asks
+the server which model it is serving, in which context window, and what else it advertises, and
+reports the answer as one **Beat**. Deliberately the opposite pole of [Probe](#probing-and-model-identity)
+on every axis — a probe diagnoses **once, on demand**, and prints a report a *human* reads; the
+heartbeat runs **unasked for the life of a session** and its output is *consumed* (the footer's
+model and window, the gauge's denominator, the offline state, and the rebind that follows an
+observed change). A Beat is **never an error**: an unreachable server sets `Reachable: false` and
+says why, because that is a finding about the server, not a failure of the observation. It is also
+what **starts** a session — the first beat fires immediately and completes discovery late, so
+apogee paints before the server has answered and can be started **before** its server exists.
+**Rebind** is the heartbeat's apply half: `Agent.Rebind` swaps *all* the per-model bindings
+together — wire model id, [System prompt](#context-and-history) template, context window, and the
+[Mechanism](#mechanism-and-hook-points) set — at a **quiescent boundary** (idle, or deferred to the
+end of the running [Exchange](#turns-and-stepping)), never mid-Exchange. A configured
+`context-window:` is a **pin** the heartbeat never overrides; a configured `model:` is a **hint**
+that yields to what the server actually serves. See
+[ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md).
+_Avoid_: "health check" (it observes what is served, not merely that something answers), "poller"
+(says nothing about what is observed, and the chain re-arms from the landed beat, not off a clock),
+"probe" for this (the other noun, the other job), "reconnect" for a Rebind (the connection never
+moved — the bindings did).
 
 **Behavioral fingerprint**:
 The model identity a completed **model battery** earns — the model's own advertised label, at
