@@ -77,6 +77,22 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
+			name: "api-key comes from the file when the environment sets none",
+			file: fileConfig{APIKey: "file-secret"}.layer(),
+			want: settings{mode: "ask-before", apiKey: "file-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+		},
+		{
+			// The key is settable by the file and by the environment, and by nothing else: even
+			// with an "api-key" flag reported as explicitly set, flagLayer projects no key —
+			// there is no --api-key to bind, because a secret on the command line lands in shell
+			// history and in `ps` output. So the env value stands over the file's.
+			name: "api-key: env beats file, and the flag layer cannot carry one at all",
+			file: fileConfig{APIKey: "file-secret"}.layer(),
+			env:  layer{apiKey: strptr("env-secret")},
+			flag: flagLayer(options{apiKey: "flag-secret"}, func(name string) bool { return name == "api-key" }),
+			want: settings{mode: "ask-before", apiKey: "env-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+		},
+		{
 			name: "confine-to-workspace is file-only and defaults true",
 			file: layer{confineToWorkspace: boolptr(false)},
 			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
@@ -455,6 +471,58 @@ func TestApplyConfigDefaults(t *testing.T) {
 	}
 	if !opts.autoCompact {
 		t.Error("autoCompact = false; want the structural default true (auto-compaction on)")
+	}
+	if opts.apiKey != "" {
+		t.Errorf("apiKey = %q; want empty — an unconfigured key sends no Authorization header", opts.apiKey)
+	}
+}
+
+// The api-key surface end-to-end through applyConfig: the config file sets it, APOGEE_API_KEY
+// beats the file, and a key configured nowhere resolves empty — which is what makes a keyless
+// local server behave exactly as it did before the key existed (no Authorization header). No flag
+// appears in the table because there is no --api-key flag: a secret passed on the command line
+// would land in shell history and in `ps` output.
+func TestApplyConfigAPIKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileYAML string
+		env      string
+		want     string
+	}{
+		{name: "the file alone", fileYAML: "api-key: file-secret\n", want: "file-secret"},
+		{name: "the environment alone", env: "env-secret", want: "env-secret"},
+		{
+			name:     "the environment beats the file",
+			fileYAML: "api-key: file-secret\n",
+			env:      "env-secret",
+			want:     "env-secret",
+		},
+		{name: "configured nowhere → empty (no auth header)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if tt.fileYAML != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.fileYAML), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+			getenv := func(k string) string {
+				if k == envAPIKey {
+					return tt.env
+				}
+				return ""
+			}
+			opts := options{configDir: home}
+			if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if opts.apiKey != tt.want {
+				t.Errorf("opts.apiKey = %q; want %q", opts.apiKey, tt.want)
+			}
+		})
 	}
 }
 

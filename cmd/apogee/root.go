@@ -35,6 +35,14 @@ type options struct {
 	hostAlias     string
 	contextWindow int
 
+	// apiKey is the upstream bearer token (`api-key:` in config.yaml, `APOGEE_API_KEY` in the
+	// environment), resolved-not-flag-bound like hostAlias above — but for a different reason:
+	// there is deliberately no --api-key, because a secret on the command line lands in shell
+	// history and in `ps` output. applyConfig sets it from the resolved settings (env > file);
+	// empty ⇒ no Authorization header, which is the keyless local-server default. Its VALUE is
+	// never logged, persisted, or displayed — only its presence is ever reported.
+	apiKey string
+
 	// confineToWorkspace tunes Auto's blast radius (ADR 0012); default true. It is NOT a
 	// flag — it is loaded from the GLOBAL config file only (a project config cannot loosen
 	// it), so applyConfig sets it from the resolved settings. It is the EFFECTIVE value:
@@ -139,8 +147,11 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 			"opens an interactive session against a local OpenAI-compatible model:\n" +
 			"hold a coding conversation, watch tools run, and approve writes.\n\n" +
 			"Settings resolve by precedence: a flag overrides an APOGEE_* environment\n" +
-			"variable (APOGEE_ENDPOINT, APOGEE_MODEL, APOGEE_MODE, APOGEE_BYPASS), which\n" +
-			"overrides ~/.apogee/config.yaml, which overrides the built-in default. With no\n" +
+			"variable (APOGEE_ENDPOINT, APOGEE_MODEL, APOGEE_MODE, APOGEE_BYPASS,\n" +
+			"APOGEE_API_KEY), which overrides ~/.apogee/config.yaml, which overrides the\n" +
+			"built-in default. APOGEE_API_KEY carries the upstream bearer token for a keyed\n" +
+			"server (api-key: in the config file) and has no flag on purpose: a secret on\n" +
+			"the command line lands in shell history and in process lists. With no\n" +
 			"model set anywhere, apogee asks the server for its active model, so a single-\n" +
 			"model server (e.g. llama.cpp's llama-server) needs only --endpoint. The\n" +
 			"session is saved continuously under ~/.apogee/sessions; resume the most\n" +

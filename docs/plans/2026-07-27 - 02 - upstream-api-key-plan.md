@@ -49,7 +49,9 @@ GOOS=windows go build ./... && GOOS=darwin go build ./...
 
 ---
 
-## 1. Config — the `api-key` key, `APOGEE_API_KEY`, and precedence
+## 1. Config — the `api-key` key, `APOGEE_API_KEY`, and precedence — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): the root Long text gained one sentence beyond the bare enumeration — that `APOGEE_API_KEY` carries the bearer token (`api-key:` in the file) and has no flag on purpose, shell history / process lists — so the help text states decision 1's *why* where a user meets the variable. The precedence-table case pins "the flag layer cannot carry it" through `flagLayer(options{apiKey: …}, changed=="api-key")` returning a nil-key layer, rather than hand-setting `layer.apiKey` in the flag position (which would only prove the generic loop honours it).
 
 **What.** `cmd/apogee/config.go`: `settings` gains `apiKey string` (doc comment: the upstream bearer token; env > file, NO flag — a secret must not land in shell history or `ps` output; empty ⇒ no Authorization header). `layer` gains `apiKey *string`. `fileConfig` gains `APIKey string \`yaml:"api-key"\`` with the same doc; `fileConfig.layer()` projects it when non-empty. `envLayer` reads `envAPIKey = "APOGEE_API_KEY"` (constant beside the others, `:830-837`). `flagLayer` is untouched. `resolveSettings`'s generic loop (`:402-418`) gains the `apiKey` case — file then env overlay, flag never set, so env wins over file by the loop's own order. `applyConfig` writes `opts.apiKey = s.apiKey`. `cmd/apogee/root.go`: `options` gains `apiKey string` (documented as resolved-not-flag-bound, like `hostAlias`); the Long text's env enumeration (`:141-143`) gains `APOGEE_API_KEY`.
 

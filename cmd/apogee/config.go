@@ -41,6 +41,14 @@ type settings struct {
 	hostAlias string
 	bypass    bool
 
+	// apiKey is the upstream bearer token: the value sent as `Authorization: Bearer <key>` on
+	// every request to the LLM server (a keyed llama.cpp, LM Studio, a remote vLLM, any keyed
+	// OpenAI-compatible proxy). It resolves env > file — `APOGEE_API_KEY` beats `api-key:` in
+	// config.yaml — and has NO flag on purpose: a secret passed on the command line lands in
+	// shell history and in `ps` output on every OS. Empty (the keyless local-server default)
+	// ⇒ no Authorization header at all.
+	apiKey string
+
 	// confineToWorkspace is GLOBAL-CONFIG-ONLY (ADR 0012): it is resolved from the config
 	// file alone, never from a flag or env, so a hostile repo invoking apogee cannot loosen
 	// Auto's blast radius. Default true. (There is no project-level config file today; the
@@ -285,6 +293,13 @@ type layer struct {
 	hostAlias *string
 	bypass    *bool
 
+	// apiKey is set by the FILE and ENV layers only; the flag layer never carries it, because
+	// there is deliberately no --api-key (a secret must not reach shell history or a process
+	// list). It still rides the generic resolution loop, so the loop's own order — file, then
+	// env — is what makes `APOGEE_API_KEY` beat `api-key:`. A nil pointer means the source
+	// configures no key, so resolution falls through to the empty default: no auth header.
+	apiKey *string
+
 	// confineToWorkspace is set only by the FILE layer (global-config-only, ADR 0012). The
 	// env and flag layers leave it nil so the invocation environment cannot loosen it.
 	confineToWorkspace *bool
@@ -355,6 +370,10 @@ type layer struct {
 // variable beats the file beats the default. Only ask-before (the default mode) is a
 // non-zero base; endpoint/model default empty and bypass defaults false.
 //
+// api-key is the mirror-image case: it rides the same loop, but no flag layer ever sets it
+// (there is no --api-key — a secret on the command line lands in shell history and in `ps`
+// output), so the loop's order alone resolves it env > file.
+//
 // confine-to-workspace is the exception: it defaults true and is resolved from the FILE
 // layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
 // repo's invocation environment must not be able to loosen Auto's blast radius. hostID is
@@ -417,6 +436,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 		}
 		if l.bypass != nil {
 			s.bypass = *l.bypass
+		}
+		if l.apiKey != nil {
+			s.apiKey = *l.apiKey
 		}
 	}
 	return s, notices
@@ -491,6 +513,13 @@ type fileConfig struct {
 	Mode      string `yaml:"mode"`
 	HostAlias string `yaml:"host-alias"`
 	Bypass    *bool  `yaml:"bypass"`
+	// APIKey is the bearer token sent as `Authorization` on every upstream request — what a
+	// keyed server wants (llama.cpp's `--api-key`, LM Studio, a remote vLLM, any keyed
+	// OpenAI-compatible proxy). `APOGEE_API_KEY` overrides it; there is no flag on purpose (a
+	// secret on the command line lands in shell history and in `ps` output). Absent/empty ⇒ no
+	// Authorization header, which is the keyless local-server default. This file is plain
+	// text: on a shared machine prefer the environment variable, or restrict its permissions.
+	APIKey string `yaml:"api-key"`
 	// ConfineToWorkspace is global-config-only (ADR 0012): a pointer so an explicit
 	// `confine-to-workspace: false` is distinguishable from an absent key (which keeps the
 	// secure default true). It has no flag or env — editing the global config IS the
@@ -749,6 +778,9 @@ func (fc fileConfig) layer() layer {
 	if fc.Bypass != nil {
 		l.bypass = fc.Bypass
 	}
+	if fc.APIKey != "" {
+		l.apiKey = &fc.APIKey
+	}
 	if fc.ConfineToWorkspace != nil {
 		l.confineToWorkspace = fc.ConfineToWorkspace
 	}
@@ -836,6 +868,7 @@ const (
 	envModel     = "APOGEE_MODEL"
 	envMode      = "APOGEE_MODE"
 	envBypass    = "APOGEE_BYPASS"
+	envAPIKey    = "APOGEE_API_KEY"
 	envConfig    = "APOGEE_CONFIG"
 	envWorkspace = "APOGEE_WORKSPACE"
 )
@@ -861,6 +894,11 @@ func envLayer(getenv func(string) string) (layer, error) {
 			return layer{}, fmt.Errorf("apogee: invalid %s %q: want a boolean", envBypass, v)
 		}
 		l.bypass = &b
+	}
+	// The upstream bearer token: the env layer is the RECOMMENDED source (it beats `api-key:`
+	// and never touches the config file), and the only one above the file — no flag carries it.
+	if v := getenv(envAPIKey); v != "" {
+		l.apiKey = &v
 	}
 	return l, nil
 }
@@ -950,6 +988,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.hostAlias = s.hostAlias
+	opts.apiKey = s.apiKey
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.unconfinedHosts = s.unconfinedHosts
 	opts.webSearchEndpoint = s.webSearchEndpoint
