@@ -12,9 +12,11 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
+	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -273,4 +275,228 @@ func wireToDomain(msgs []provider.Message) []domain.Message {
 		out[i] = domain.Message{Role: domain.Role(m.Role), Content: m.Content}
 	}
 	return out
+}
+
+// ----------------------------------------------------------------------------
+// The configured system prompt (ADR 0023) — Config.SystemPrompt seeds position 0
+// ----------------------------------------------------------------------------
+//
+// The template is seeded into the REQUEST projection by buildRequest, so the tests below drive
+// the same recording fake as the emit-seam tests above and assert on the captured
+// provider.Request: exactly ONE system message, rendered from live inputs, merged with the
+// mechanism directives and the profile tool block, and absent from history and the snapshot.
+
+// promptTemplate exercises all three placeholders with {{workspace}} REPEATED, so a render
+// assertion covers every substitution and the every-occurrence rule in one template.
+const promptTemplate = "You are apogee working in {{workspace}} on {{datetime}} in {{mode}} mode. Stay inside {{workspace}}."
+
+// promptWorkspace is the workspace path the template renders; menuConfig injects the tool
+// registry explicitly, so setting it changes nothing but the rendered prompt.
+const promptWorkspace = "/tmp/apogee-prompt-ws"
+
+// promptNow is the fixed render clock the date assertions read (late in the day, so a
+// date-only render is visibly not a timestamp).
+var promptNow = time.Date(2026, 7, 26, 23, 59, 30, 0, time.UTC)
+
+// countSystemMessages counts the wire request's system messages — the "exactly one merged
+// system message" property every seeding assertion below rests on.
+func countSystemMessages(msgs []provider.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Role == string(domain.RoleSystem) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestPromptSeam_ConfiguredPromptNativeSingleSystemMessage: with a configured template and a
+// native (zero) profile the wire request opens with EXACTLY one system message carrying the
+// rendered prompt, and the native tools array is untouched — the prompt does not trip the
+// non-native suppression.
+func TestPromptSeam_ConfiguredPromptNativeSingleSystemMessage(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := menuConfig(t, sink) // zero Profile: native tool calls
+	cfg.Mode = domain.ModeAskBefore
+	cfg.WorkspaceDir = promptWorkspace
+	cfg.SystemPrompt = promptTemplate
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := responder.last
+	if n := countSystemMessages(got.Messages); n != 1 {
+		t.Fatalf("wire request has %d system messages, want exactly 1 (the seeded prompt)", n)
+	}
+	want := prompt.Render(promptTemplate, prompt.Inputs{
+		Workspace: promptWorkspace,
+		Mode:      string(domain.ModeAskBefore),
+		Now:       promptNow,
+	})
+	if got.Messages[0].Role != string(domain.RoleSystem) || got.Messages[0].Content != want {
+		t.Errorf("first wire message = %+v\nwant a system message %q", got.Messages[0], want)
+	}
+	if len(got.Tools) != 1 || got.Tools[0].Name != "read_file" {
+		t.Errorf("Tools = %+v, want the native read_file spec (a prompt must not suppress the native array)", got.Tools)
+	}
+}
+
+// TestPromptSeam_ConfiguredPromptMergesDirectivesAndToolBlock: prompt + a mechanism directive
+// (AppendToSystem) + a non-native profile's tool block all land in ONE system message, in the
+// required order prompt → directives → tool block.
+func TestPromptSeam_ConfiguredPromptMergesDirectivesAndToolBlock(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := menuConfig(t, sink)
+	cfg.Mode = domain.ModeAskBefore
+	cfg.WorkspaceDir = promptWorkspace
+	cfg.SystemPrompt = promptTemplate
+	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	// seedingHook stands in for a Mechanism's directive: it appends through the same
+	// Request.AppendToSystem seam the catalogued nudges use.
+	const directive = "Always cite the files you read. [seed]"
+	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, seedingHook{text: directive}); err != nil {
+		t.Fatalf("AddExperimental: %v", err)
+	}
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := responder.last
+	if n := countSystemMessages(got.Messages); n != 1 {
+		t.Fatalf("wire request has %d system messages, want exactly 1 (prompt, directive and tool block merged)", n)
+	}
+	block, err := processing.InstructionsFor(cfg.Profile, a.toolMenu())
+	if err != nil {
+		t.Fatalf("InstructionsFor: %v", err)
+	}
+	rendered := prompt.Render(promptTemplate, prompt.Inputs{
+		Workspace: promptWorkspace,
+		Mode:      string(domain.ModeAskBefore),
+		Now:       promptNow,
+	})
+	want := rendered + "\n\n" + directive + "\n\n" + block
+	if got.Messages[0].Role != string(domain.RoleSystem) || got.Messages[0].Content != want {
+		t.Errorf("merged system message = %q\nwant %q", got.Messages[0].Content, want)
+	}
+}
+
+// TestPromptSeam_ConfiguredPromptRendersFreshPerRequest: both live inputs — the date and the
+// autonomy mode — are re-read per request, so a mode switch and a new day land on the next Turn
+// rather than being frozen at construction.
+func TestPromptSeam_ConfiguredPromptRendersFreshPerRequest(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := menuConfig(t, sink)
+	cfg.Mode = domain.ModeAskBefore
+	cfg.WorkspaceDir = promptWorkspace
+	cfg.SystemPrompt = promptTemplate
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+	if err := a.Submit(domain.UserInput{Text: "one"}); err != nil {
+		t.Fatalf("Submit 1: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step 1: %v", err)
+	}
+	turn1 := responder.last.Messages[0].Content
+	if !strings.Contains(turn1, "2026-07-26") || !strings.Contains(turn1, string(domain.ModeAskBefore)) {
+		t.Fatalf("Turn 1 prompt = %q, want the fixed date and the ask-before mode", turn1)
+	}
+
+	// Roll the clock to the next day and drop to Plan: the next request must render both.
+	nextDay := promptNow.AddDate(0, 0, 1)
+	a.now = func() time.Time { return nextDay }
+	a.SetMode(domain.ModePlan)
+	if err := a.Submit(domain.UserInput{Text: "two"}); err != nil {
+		t.Fatalf("Submit 2: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step 2: %v", err)
+	}
+	turn2 := responder.last.Messages[0].Content
+	if !strings.Contains(turn2, "2026-07-27") {
+		t.Errorf("Turn 2 prompt = %q, want the rolled-over date 2026-07-27", turn2)
+	}
+	if !strings.Contains(turn2, string(domain.ModePlan)) || strings.Contains(turn2, string(domain.ModeAskBefore)) {
+		t.Errorf("Turn 2 prompt = %q, want the live plan mode and no trace of ask-before", turn2)
+	}
+}
+
+// TestPromptSeam_ConfiguredPromptNeverEntersHistoryOrSnapshot: the rendered prompt is a
+// request projection — no committed message carries it, and it is absent from the snapshot.
+func TestPromptSeam_ConfiguredPromptNeverEntersHistoryOrSnapshot(t *testing.T) {
+	const marker = "MARKER-SYSTEM-PROMPT-7f3"
+
+	sink := &recordingSink{}
+	cfg := menuConfig(t, sink)
+	cfg.Mode = domain.ModeAskBefore
+	cfg.WorkspaceDir = promptWorkspace
+	cfg.SystemPrompt = "Remember " + marker + " while working in {{workspace}}."
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if !strings.Contains(responder.last.Messages[0].Content, marker) {
+		t.Fatalf("the wire request never carried the prompt: %+v", responder.last.Messages)
+	}
+
+	for i, m := range a.conv.Messages() {
+		if m.Role == domain.RoleSystem {
+			t.Errorf("committed message %d is a system message; the seeded prompt must stay off history", i)
+		}
+		if strings.Contains(m.Content, marker) {
+			t.Errorf("committed message %d carries the seeded prompt: %q", i, m.Content)
+		}
+	}
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	raw, err := snap.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if bytes.Contains(raw, []byte(marker)) {
+		t.Error("the encoded snapshot carries the seeded prompt; it must be request-scoped only")
+	}
+}
+
+// TestNewAgentRejectsUnknownPromptPlaceholder: a template with an unknown placeholder fails
+// construction (the engine's own gate, mirroring the bad-profile one) with an error naming the
+// offender and listing the known three.
+func TestNewAgentRejectsUnknownPromptPlaceholder(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.SystemPrompt = "hi {{foo}}"
+
+	_, err := newAgent(cfg, &recordingResponder{reply: "unused"})
+	if err == nil {
+		t.Fatal("newAgent accepted an unknown placeholder; a bad template must fail construction")
+	}
+	for _, want := range []string{"{{foo}}", prompt.PlaceholderWorkspace, prompt.PlaceholderDatetime, prompt.PlaceholderMode} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
 }

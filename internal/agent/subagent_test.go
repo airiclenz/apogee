@@ -427,3 +427,23 @@ func hasErrorContaining(events []domain.Event, depth int, sub string) bool {
 	}
 	return false
 }
+
+// TestSubAgentInheritsSystemPrompt: the configured system prompt (ADR 0023) reaches a
+// sub-agent through newChildAgent's wholesale cfg copy — no carve-out, so a delegated task
+// runs under the same persona and context as the parent.
+func TestSubAgentInheritsSystemPrompt(t *testing.T) {
+	cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore)
+	cfg.SystemPrompt = "You are apogee in {{workspace}} on {{datetime}} in {{mode}} mode."
+
+	a, err := newAgent(cfg, &recordingResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := a.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	if child.cfg.SystemPrompt != a.cfg.SystemPrompt {
+		t.Errorf("child SystemPrompt = %q, want the parent's %q", child.cfg.SystemPrompt, a.cfg.SystemPrompt)
+	}
+}

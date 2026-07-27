@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/processing"
+	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -70,6 +72,14 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, err
 	}
 
+	// A bad system-prompt template fails construction loudly (like a bad profile above),
+	// so an embedder typo never silently ships an un-rendered placeholder to the model.
+	// For config users the cmd-side check fires first, naming the offending config key;
+	// this is the engine's own gate, mirroring the ParserFor one (ADR 0023).
+	if err := prompt.Validate(cfg.SystemPrompt); err != nil {
+		return nil, err
+	}
+
 	a := &Agent{
 		cfg:                cfg,
 		upstream:           up,
@@ -82,6 +92,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),
 		tokens:             apogeectx.NewTokenEstimator(),
+		now:                time.Now, // the request-render clock for the system prompt's {{datetime}}
 	}
 	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.

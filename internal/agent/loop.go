@@ -12,6 +12,7 @@ import (
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
+	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -552,7 +553,23 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 // re-queue them. The request carries the tool menu (Plan-filtered) and a trivial Budget so
 // a hook can read them through req.View().
 func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
-	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
+	msgs := a.conv.Messages()
+	// The configured system prompt (ADR 0023) is seeded at position 0 of the REQUEST
+	// projection — never the conversation — so it is re-rendered per request (armRequest,
+	// and refold after an overflow fold), stays out of history and the snapshot, and both
+	// AppendToSystem (mechanism directives) and the wire seam's tool-instruction block
+	// fold into THIS one message (prompt → directives → tool block). "" seeds nothing:
+	// the no-prompt native anchor stays byte-identical.
+	//
+	// Two consequences are deliberate, not defects: the Budget's predictive guard and its
+	// calibration now measure the prompt too (req.State() carries it) — honest accounting of
+	// what the request actually costs; and a post-response scanner reading req.View() sees a
+	// leading system message whenever a prompt is configured — the same shape a seeding
+	// pre-request hook already produced.
+	if sys := a.systemPrompt(); sys != "" {
+		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
+	}
+	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
 	req.SetDepth(a.depth) // surface this Agent's nesting level through req.View().Depth() (ADR 0013/0014)
 	deferred, ok := a.conv.TakeDeferred()
 	if ok {
@@ -561,6 +578,26 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 		}
 	}
 	return req, deferred
+}
+
+// systemPrompt renders this request's system prompt from the configured template, or ""
+// when none is configured. The inputs are live where the placeholders demand it: the mode
+// through the lock-guarded Mode() (a Shift+Tab lands on the next request, and a sub-agent
+// renders its own inherited mode), the date from a.now (date-only — stable within a day,
+// so the KV cache holds), the workspace from Config.
+//
+// The template was validated at construction (newAgent's prompt.Validate gate), so Render
+// cannot meet an unknown placeholder here; if one somehow survived it passes through
+// verbatim rather than failing the request.
+func (a *Agent) systemPrompt() string {
+	if a.cfg.SystemPrompt == "" {
+		return ""
+	}
+	return prompt.Render(a.cfg.SystemPrompt, prompt.Inputs{
+		Workspace: a.cfg.WorkspaceDir,
+		Mode:      string(a.Mode()),
+		Now:       a.now(),
+	})
 }
 
 // uncalibratedRoomMargin is how many times the working room an estimate must exceed before the
@@ -777,6 +814,10 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // (including this Turn's committed assistant + tool messages), the tool menu, the budget,
 // and the Turn index. It is rebuilt per call from current state so a hook counting prior
 // failures across Turns sees up-to-date history.
+//
+// It is deliberately NOT seeded with the configured system prompt (ADR 0023): the prompt is a
+// REQUEST-projection concern owned by buildRequest, while this view is "the conversation so
+// far" — which is why the profile's tool-instruction block is likewise absent from it.
 func (a *Agent) loopView(turn int) domain.LoopView {
 	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
 	req.SetDepth(a.depth) // the tool-stage view reports the same nesting level as the request view

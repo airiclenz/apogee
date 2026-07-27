@@ -338,3 +338,42 @@ func TestCompactFoldsToolCallTurnsWithoutDanglingResults(t *testing.T) {
 		t.Errorf("resumed Step status = %q, want %q", res.Status, domain.StatusExchangeComplete)
 	}
 }
+
+// TestCompactSummaryRequestOmitsSystemPrompt: the summariser is a separate request path — it
+// builds its own message list around the summariser's dedicated system prompt rather than
+// going through buildRequest — so the user's configured system prompt (ADR 0023) must never
+// reach it. Pinned here because the two prompts would otherwise compete for the summary.
+func TestCompactSummaryRequestOmitsSystemPrompt(t *testing.T) {
+	const marker = "MARKER-SYSTEM-PROMPT-COMPACT"
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.SystemPrompt = "Remember " + marker + " while working in {{workspace}}."
+
+	up := &recordingResponder{reply: "FOLDED-SUMMARY"}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedFoldable(a)
+
+	skipped, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if skipped {
+		t.Fatal("Compact skipped a foldable conversation; want a fold so a summary request was made")
+	}
+
+	got := up.last
+	if len(got.Messages) == 0 || got.Messages[0].Role != string(domain.RoleSystem) {
+		t.Fatalf("summary request messages = %+v, want the summariser's own system message first", got.Messages)
+	}
+	if !strings.HasPrefix(got.Messages[0].Content, "You are compacting a conversation") {
+		t.Errorf("summary request system message = %q, want the summariser's own instruction", got.Messages[0].Content)
+	}
+	for i, m := range got.Messages {
+		if strings.Contains(m.Content, marker) {
+			t.Errorf("summary request message %d carries the configured system prompt: %q", i, m.Content)
+		}
+	}
+}

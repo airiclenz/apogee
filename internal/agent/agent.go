@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"sync"
+	"time"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -77,6 +78,12 @@ type Agent struct {
 	// UsageEvent, reporting the default ratio and a zero Used until then. It is structural, not a
 	// Mechanism, so it stays live under Bypass (D5/D6).
 	tokens *apogeectx.TokenEstimator
+
+	// now is the request-render clock the configured system prompt's {{datetime}} placeholder
+	// reads (ADR 0023). It is a field rather than a direct time.Now call so a test can pin the
+	// rendered date — the injectable-clock shape cmd/apogee's sessionHost.now already uses.
+	// newAgent seeds it with time.Now; it is never nil on a constructed Agent.
+	now func() time.Time
 
 	conv         domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step

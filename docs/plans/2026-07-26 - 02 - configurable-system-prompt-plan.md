@@ -252,7 +252,15 @@ config key name.
 
 ---
 
-## 2. Engine — `Config.SystemPrompt` seeds the first system message of every request
+## 2. Engine — `Config.SystemPrompt` seeds the first system message of every request — ✅ DONE (2026-07-27)
+
+NOTES (2026-07-27): two test-only deviations, both cosmetic. (a) The merge test reuses the
+EXISTING `seedingHook` helper (marker `[seed]`) rather than adding a near-duplicate hook type
+calling `AppendToSystem("[directive]", …)` — same seam, same append semantics, one helper.
+(b) `TestCompactSummaryRequestOmitsSystemPrompt` asserts the summary request's first message
+starts with the literal `"You are compacting a conversation"` instead of the named
+`summaryInstruction` constant, which is unexported in `internal/context` and so unreachable
+from `internal/agent`.
 
 **What.** The additive Config field, the `buildRequest` seeding, construction-time validation,
 and the `now` seam. Files: `internal/domain/config.go`, `internal/agent/agent.go`,
