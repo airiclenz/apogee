@@ -30,20 +30,48 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   Needs grilling.
 
 - **[P1] Server / model switching** — **the switching itself SHIPPED 2026-07-28; the local-server
-  and profile halves remain.** Both user-facing switches now exist and are recorded in
+  and profile halves remain (the local-server half has a settled integration decision below,
+  awaiting its grill + plans).** Both user-facing switches now exist and are recorded in
   [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
   (see the ledger below): `/model` picks among what the beat reported and drives the existing
   Rebind, `/server` moves the whole Upstream (a new provider client, the per-server Monitor swapped
   behind the unchanged seam, the model unbound until the new server's first beat binds it), and the
   file-only `servers:` key names where a session may go. **Remaining:**
-  - **Local llama.cpp start/stop** — launching and stopping a server apogee owns, to be rebuilt
-    over `heartbeat.Beat` (the dead `provider.ServerManager`, whose liveness half the heartbeat
-    supersedes, was deleted rather than revived). `/server` moves between servers that are already
-    running; nothing yet starts one.
+  - **Local server start/stop — DECIDED 2026-07-28: llama-launcher becomes an importable
+    library; apogee is its client, not its port.** `/server` moves between servers that are
+    already running; nothing yet starts one — and the machinery that starts one already exists
+    as the owner's `llama-launcher` (`github.com/airiclenz/llama-launcher`, sibling checkout):
+    the three backend protocols (llama.cpp, Ollama, LM Studio) behind its `LLMServer` interface,
+    plus the profile store llama.cpp itself lacks. One code home: porting that into apogee is
+    rejected, and MCP is not the primary integration. Division of labour: the launcher
+    **actuates** (start/stop/load/unload), the heartbeat **observes** — a profile load is
+    completed by the next beat binding what it finds, the ADR 0028 shape; the dead
+    `provider.ServerManager` stays dead (apogee grows no process manager of its own).
+    - **Prerequisite, in the launcher repo:** all launcher code is `internal/launcher/` today,
+      so the launcher must first export a public facade (config load, profile listing, the
+      lifecycle verbs) — an ADR + minor release there before apogee can import anything.
+    - **Module mechanics:** dependency direction strictly apogee → llama-launcher (the launcher
+      stays agent-free); apogee's committed `go.mod` requires a **tagged** launcher release,
+      never a `replace` to the sibling checkout (build-from-source must work from a bare clone);
+      local cross-repo dev via an untracked `go.work`.
+    - **Scope limit, accepted:** the library only manages servers on apogee's own machine.
+      Remote lifecycle control (apogee in a container, server on the host) stays with the
+      launcher's own `llama-launcher-mcp` adapter, configured as an ordinary `mcp-servers:`
+      entry — the two compose, they do not compete. Consequence for tests: CI covers the seam
+      with a fake launcher; the end-to-end pass is owner-run on a same-machine host.
+    - **Grill before planning (the open forks):** the exported surface (minimal verbs vs the
+      full capability set); the config source (reuse `~/.config/llama-launcher/config.yaml` as
+      the single profile store — argued for — vs an apogee-passed config); where profiles
+      surface (`/server`, `/model`, or a new command) and how a launcher-backed `servers:`
+      entry is marked; the load-latency UX (what apogee shows between a slow profile load
+      returning and the first successful beat). Then two plans: the export plan in
+      llama-launcher, the integration plan here.
   - The switchable **model-profile** abstraction (sampling params, context-budget %,
     thinking/tool-call format — reuse `internal/processing`), still unstarted and still
     deliberately **global**: `model-profile` is not per-model, and neither a rebind nor a server
-    switch touches it.
+    switch touches it. Distinct from the launcher's profiles above, which are **launch-side**
+    (model file, server flags); `model-profile` is **request-side** — the grill above should
+    keep the two "profile" namespaces from colliding in the UX.
   - Deliberate non-goals of the 2026-07-28 work, additive later if wanted: a `--save` form for
     `/server`, a `server:` startup key selecting a named entry, and persisting a switched endpoint
     in the session record (`--resume` returns to the configured one).
