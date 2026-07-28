@@ -35,6 +35,10 @@ not in a separate proxy. And nothing is carried forward on faith: every mechanis
 is measured and A/B-tested against real local models with an eval/simulation
 harness before it earns a place in the loop.
 
+Working on this repo *with* a coding agent? [`AGENTS.md`](AGENTS.md) is the
+agent-facing map — where the docs live, and the conventions that aren't derivable
+from the code.
+
 ## Why Go
 
 Portability is the primary goal. Go cross-compiles to a single static binary with
@@ -44,20 +48,27 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v1.7.0` shipped (2026-07-21); cross-platform hardening landed on `main`
-(2026-07-22).** The embeddable agent core is stable — the public Go API follows
-semver from `v1.0.0` — with the full tool suite, MCP client, sub-agents, and
-OS-confined Auto mode on **all three** platforms: Linux landlock, macOS seatbelt,
-and — new — Windows, where the fence is a restricted low-integrity token (Windows 10
-1809 / build 17763 / Server 2019 and newer). Auto still falls back to asking before
-each shell/subprocess call wherever the facility is genuinely missing rather than
-unimplemented: an older Windows build, or most containers, where landlock reports
-`ENOSYS` whatever the kernel version. Apogee says so at startup, `apogee probe`
-answers "what would Auto do on this box?" without running an agent, and `/confine`
-is the way out (see [Auto mode's blast radius](#auto-modes-blast-radius) and
-[Diagnosing a host](#diagnosing-a-host--apogee-probe)). Current work is per-model
-bench validation of the mechanism catalogue: the full catalogue is ported, and
-the first Validated set (gemma-4-E4B) ships with the binary.
+**`v0.9.x` on `main` — pre-production.** The release line was deliberately reset
+from `1.x` to `0.x` (2026-07-23): the old numbering overstated maturity, and under
+SemVer a `0.x` version makes no API-stability promise — the Go API is still allowed
+to move while the tool hardens. One consequence: install from source or from
+GitHub Releases, **not** `go install …@latest` — proxy.golang.org retains the
+retired `v1.x` module versions immutably, so that still resolves to old `v1.7.0`.
+
+Functionally the loop is complete: full tool suite, MCP client, sub-agents, skills,
+and OS-confined Auto mode on **all three** platforms — Linux landlock, macOS
+seatbelt, and a Windows restricted low-integrity token (Windows 10 1809 / build
+17763 / Server 2019 and newer). Where the facility is genuinely missing (an older
+Windows build, or most containers, where landlock reports `ENOSYS` whatever the
+kernel version), Auto asks before each shell/subprocess call instead of running it
+unbounded; apogee says so at startup, `apogee probe` answers "what would Auto do on
+this box?" without running an agent, and `/confine` is the way out (see
+[Auto mode's blast radius](#auto-modes-blast-radius)).
+
+Newest on `main`: the **session system** — every session autosaves per turn and is
+browsable, resumable, and crash-safe (see [Sessions](#sessions)). Current work is
+per-model bench validation of the mechanism catalogue: the full catalogue is
+ported, and the first Validated set (gemma-4-E4B) ships with the binary.
 See [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
 next.
 
@@ -77,6 +88,11 @@ next.
   by showing the file: opened on your desktop when apogee runs locally, served over a
   one-off link when it runs on a remote box, and always printed as a clickable path
   in the transcript. See [Showing a finished document](#showing-a-finished-document).
+- **Sessions that survive anything** — every completed turn autosaves to
+  `~/.apogee/sessions/`, so a crash loses at most the turn in flight. `apogee
+  --continue` reopens this workspace's latest session, `/sessions` browses them all,
+  and a resumed session repaints its full scrollback; an interrupted task picks up
+  where it stopped with `/continue`. See [Sessions](#sessions).
 - **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
   Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
   at the OS level via Linux landlock / macOS seatbelt / a Windows low-integrity
@@ -110,11 +126,36 @@ you.
 
 | Command | Does |
 |---|---|
-| `/clear` (or `/new`) | Reset the model's memory of this session |
+| `/clear` (or `/new`) | Close this session into history and start a fresh one |
 | `/compact` | Summarise the conversation to reclaim context |
 | `/continue` | Ask the model to keep going |
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) |
+| `/sessions` | Browse saved sessions — resume, rename, or delete |
 | `/skill` | Attach a skill to your next message |
+
+## Sessions
+
+Every conversation is a session, saved continuously: after each completed turn the
+session is written to `~/.apogee/sessions/` (asynchronously, best-effort), so a
+crash or `kill -9` costs at most the turn in flight. A saved session stores the
+engine's conversation **and** the TUI scrollback, so resuming repaints the
+transcript you actually saw — tool cards included — and relights the context
+gauge, instead of opening an empty view over a model that still remembers.
+
+- `apogee --continue` resumes this workspace's most recent session; `--resume`
+  takes a session id (from `/sessions`) or a file path.
+- `/sessions` opens the in-TUI browser (newest first): `⏎` resumes, `r` renames
+  inline, `d` deletes after a confirm, `a` toggles between this workspace and all
+  workspaces. Titles default to the first user message.
+- `/clear` (or `/new`) closes the current session into history and starts a fresh
+  one — neither deletes; discarding is an explicit `d` in the browser.
+- A session killed mid-task resumes to the last completed turn and says so;
+  `/continue` then picks the unfinished work back up, while sending a new message
+  instead discards it and continues fresh.
+
+Autonomy mode, tool approvals, confinement, and MCP connections are deliberately
+**not** part of a saved session — they are re-established or re-confirmed on
+resume, so yesterday's approvals never silently apply to today's run.
 
 ## Configuration
 
@@ -404,12 +445,9 @@ build tag rather than a separate artifact.
 
 > **Note:** launch the TUI with `apogee --endpoint <openai-compatible-url> --model <name>`
 > to hold a real coding conversation with a local model. All four autonomy modes, the
-> full tool suite, MCP, sub-agents, and skills are live; Auto mode runs fully unattended
-> where OS confinement is actually available — Linux landlock, macOS seatbelt, and a
-> Windows low-integrity token on build 17763 or newer — and where it is not (an older
-> Windows, or a container with neither), Auto gates each shell/subprocess call through
-> approval and tells you why. `apogee probe` says which case this machine is in. See
-> [Auto mode's blast radius](#auto-modes-blast-radius).
+> full tool suite, MCP, sub-agents, sessions, and skills are live; `apogee probe`
+> reports which confinement case this machine is in (see
+> [Auto mode's blast radius](#auto-modes-blast-radius)).
 
 ## License
 
