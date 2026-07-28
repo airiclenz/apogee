@@ -7,3 +7,6 @@
 /apogee.exe
 *.test
 *.out
+
+# Local per-tool loader shim — AGENTS.md is the canonical, checked-in agent guide
+/CLAUDE.md
