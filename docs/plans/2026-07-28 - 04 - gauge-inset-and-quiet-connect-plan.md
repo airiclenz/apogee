@@ -269,7 +269,17 @@ still appear when applicable.
 
 **Commit.** `fix(tui): no "connected:" note when the first heartbeat lands clean`
 
-## 3. Documentation close-out
+## 3. Documentation close-out — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): the `ISSUES.md` touch was adapted on the owner's call. The owner had already
+DELETED both issue lines outright in `2c01c0c` ("updated ISSUES and bumped the version"), leaving an
+orphan `- [ ]` stub — that deletion is the owner's own record that both asks are executed, so the
+lines were NOT restored and NOT marked `[X]` (they no longer exist); the leftover stub was tidied
+away instead, and the legend at `:1-3` stands. `VERSION` was likewise bumped to `v0.9.8` by the owner
+in that same commit — untouched here, as the item requires. The `layout.md` clause landed as its own
+short `## The status line's right slot` section after the spinner section rather than inside it: the
+existing section is spinner-specific by its heading, and the right slot is a separate part of the
+sketch, so a sibling section keeps both headings honest and the clause findable.
 
 **What.**
 

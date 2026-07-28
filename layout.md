@@ -139,6 +139,22 @@ turning it off is for.
 
 ---
 
+## The status line's right slot
+
+**Where it ends.** The right end of the status line is one slot that its occupants take in turn —
+the context-usage gauge (`16k 50% ██████` in the sketch above), the key hint that stands in for it
+(`esc stop` while a turn runs, `enter dismiss` after an error, the primed-`ctrl+c` line), and the
+mouse-copy flash. Whichever one is showing, it ends **two columns short of the window edge**
+(`bodyIndent`) — the mirror of the two columns the left slot leads with, and the same column the
+footer's mode marker below it ends in, so the gauge's last track cell sits directly above the last
+character of `ask-before`. The margin belongs to the slot, not to any one occupant: the gauge and
+every hint end in that column, and nothing in the slot ever touches the edge. The black field runs
+past it to the edge regardless — the row is one unbroken band, as it is on the left. In a window
+too narrow to hold both slots the right one is dropped whole rather than squeezed, two columns
+sooner than it used to be.
+
+---
+
 ## The staged-interjection band
 
 **What it shows, and when.** A message typed while the agent is working is *staged*, not sent: it

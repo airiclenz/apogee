@@ -326,6 +326,28 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The status line's right slot now ends two columns short of the window edge.** Whatever occupies
+  that slot — the context-usage gauge, `esc stop` while a turn runs, `enter dismiss` after an error,
+  the primed-`ctrl+c` hint, the mouse-copy flash — used to be justified hard against the last
+  column. A text hint only *read* as inset, because a glyph does not paint its whole cell; the
+  gauge's track paints solid, so it ran visibly into the terminal edge while the hints beside it did
+  not. The margin now belongs to the **whole slot**, so every occupant ends in the same column —
+  mirroring the two columns the left slot leads with, and landing directly above the last character
+  of the footer's mode marker. The row is still one unbroken black band to the edge. A window too
+  narrow for both slots still drops the right one whole; that threshold simply arrives two columns
+  earlier.
+
+- **The `connected: …` note is no longer printed when the first heartbeat lands clean.** Starting
+  apogee against a server that was already up and serving a model printed
+  `connected: <model>, context <n>` into the transcript directly beneath the start-up box that had
+  *just been restated with the same host, model and context* — the same news twice, in the one case
+  where there was no news at all. **First contact** — the first beat ever to land, with no failed
+  beat before it — now refreshes the box and the footer silently. The note still prints wherever it
+  carries something: a cold start against a **down** server (offline first, then one `connected: …`
+  when the server appears, which doubles as the recovery statement), and a server that was up but
+  **modelless** at launch, when a model finally loads. `context window unknown` and the validated-set
+  notices are not gated on this and still print on a quiet first contact.
+
 - **The attached-skill chip strip above the prompt box is gone.** A skill is text in your message
   now (`/skill-id`), not state parked beside it, so the strip has nothing left to show: no chips,
   no Backspace-to-pop-a-chip, no attachment silently carried into `/continue` or dropped by
