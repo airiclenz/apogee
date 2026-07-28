@@ -268,9 +268,10 @@ point is a **minor** bump, not a breaking change.
     one's; and the **gauge clamped its bar but not its percentage**, printing readings like `41k
     137%`. Both fixed.
 
-  Every beat also carries the server's whole `/v1/models` offering into the TUI's state. Nothing
-  renders it yet — it is the data layer a future `/model` picker and server switch read, and building
-  those seams was half the point. For embedders this is **additive**, a **minor** bump: `apogee.Agent`
+  Every beat also carries the server's whole `/v1/models` offering into the TUI's state — the
+  offering `/model` now lists and picks from — and the rebind path a beat takes is the one both
+  `/model` and `/server` complete their switch through. Building those seams was half the point.
+  For embedders this is **additive**, a **minor** bump: `apogee.Agent`
   gains `Rebind(RebindSpec)` and the root facade re-exports `apogee.RebindSpec`, and `Config.Model`
   may now be **empty** at construction — a model-less agent is a legitimate object (clear context,
   restore a session, switch mode) and only `Submit` refuses until a model is bound, so a host can

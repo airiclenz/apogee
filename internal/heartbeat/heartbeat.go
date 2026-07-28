@@ -29,8 +29,8 @@ import (
 const Interval = 10 * time.Second
 
 // ModelSummary is one model the Upstream advertises through GET /v1/models. The list travels
-// on every Beat so a caller can hold the current offering in state — the data layer a future
-// model picker reads; nothing renders it today.
+// on every Beat so a caller can hold the current offering in state — the data layer the TUI's
+// /model picker derives its rows from, so a beat landing under an open picker refreshes them.
 type ModelSummary struct {
 	// ID is the model id to send on the wire.
 	ID string
