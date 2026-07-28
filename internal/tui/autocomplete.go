@@ -12,9 +12,12 @@ import (
 // ----------------------------------------------------------------------------
 //
 // A suggestion popup that opens while the human types: a "/" token lists the commands AND the
-// skills in ONE merged menu (at idle, where a command can actually run), and an "@" token lists
-// workspace files (wherever the box is editable, so an interjection references a file as easily as
-// a submitted message does — see computeAutocomplete). It is painted by the shared selector-popup
+// skills in ONE merged menu, and an "@" token lists workspace files. Every region opens wherever
+// the box is editable — the namespace is most wanted exactly where it used to vanish, on the
+// message being composed while the model works, so an interjection reaches a file, a skill and a
+// reporting command as easily as a submitted message does (see computeAutocomplete; a command that
+// needs a quiescent engine is offered TAGGED rather than hidden, and refused with a note if it is
+// accepted anyway). It is painted by the shared selector-popup
 // module (popup.go) — a titled, bordered pane rendered above the input box, in a slot that
 // shrinks the transcript viewport to make room. The overlay completes the TOKEN AT THE CARET
 // (caretToken): forward typing at the end of the draft is only its commonest case, and going back
@@ -630,8 +633,8 @@ func autocompleteTitle(kind acKind) string {
 
 // renderAutocomplete draws the suggestion dropdown shown above the input box, through the shared
 // popup module (renderPopup): a titled, bordered pane spanning the full window width (m.width,
-// flush with the input box below) holding the suggestion rows and a key legend,
-// the selected row highlighted. The kind picks the title ("commands"/"files"/"skills"); row
+// flush with the input box below) holding the suggestion rows and a key legend, the selected row
+// highlighted. The kind picks the title ("commands and skills"/"files"/"skills"); row
 // composition (the acItem labels, verbatim) stays caller-side while the module owns the marker,
 // highlight, truncation, and scroll windowing. It returns "" when the overlay is inactive, so
 // View treats it like the approval-prompt slot.

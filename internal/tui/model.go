@@ -615,9 +615,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
 	// including enter and tab — before the normal routing below. Any other key returns
-	// handled=false and falls through to edit the input (which re-derives it). It opens at idle,
-	// and while running for the "@file" region alone (computeAutocomplete), so an interjection can
-	// reference a file as easily as a submitted message can.
+	// handled=false and falls through to edit the input (which re-derives it). Every region opens
+	// in BOTH states (computeAutocomplete), so an interjection reaches a file, a skill and a
+	// reporting command as easily as a submitted message does; the per-command while-running policy
+	// is applied at accept (commandRunnable), not by hiding the menu.
 	if (m.state == stateIdle || m.state == stateRunning) && m.autocomplete.active {
 		if handled, nm, cmd := m.autocompleteKey(msg); handled {
 			return nm, cmd
@@ -1055,8 +1056,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmd, tick)
 		}
 		// The canned turn carries no skills: a skill is invoked by naming its /token in a real
-		// message, and "/continue" is the whole input here by construction (the whole-input command
-		// rule), so there is no token to carry.
+		// message, and this turn's text is apogee's own "Please continue", not the human's line.
+		// A draft the accept path left standing in the box is still a DRAFT — it carries its own
+		// tokens when it is eventually sent, and nothing is silently borrowed from it here.
 		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
 		m.transcript.addUser("/continue", nil)
 		m.layout()

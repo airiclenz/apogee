@@ -23,7 +23,8 @@ import (
 // the editor's own fields live here. Methods that also read Model state the editor does not own —
 // the theme, the window width/height, the display Options, the lifecycle state — stay on the Model
 // rather than duplicate that state here (computeAutocomplete, acceptAutocomplete,
-// insertSkillToken, highlightInput, inputContentRect, the region-arbitrating mouse handlers). No
+// insertSkillToken, highlightInput, accentTokens, inputContentRect, the region-arbitrating mouse
+// handlers). No
 // Model state is copied onto the editor, and the editor never touches the engine — it only turns
 // what the human typed into send-ingredients the Model then routes.
 
@@ -33,9 +34,10 @@ type promptEditor struct {
 	// input is the message textarea (Bubbles widget), the black-interior auto-growing field.
 	input textarea.Model
 
-	// autocomplete is the chat mini-language suggestion overlay shown while typing (commands on
-	// "/", workspace files on "@", skills on "/skill" — the first and last at idle only, the file
-	// region wherever the box is editable, interjections included). The zero value is hidden.
+	// autocomplete is the chat mini-language suggestion overlay shown while typing: one merged menu
+	// of commands and skills on a "/" token, workspace files on "@", and the two-step picker's
+	// catalog on "/skill <partial>". Every region follows the TOKEN AT THE CARET and opens wherever
+	// the box is editable, interjections included. The zero value is hidden.
 	autocomplete autocompleteState
 
 	// skillRegion tracks whether the input currently sits in a "/skill <partial>" region, so

@@ -9,6 +9,6 @@ X: Executed
 
 - [ ] The context usage gauge should be move 2 spaced to the left (same as all other information printes there - eg: "esc stop")
 
-- [ ] slash command like /skills do not work when typing a message to be scheduled and they also don't work if I want to use a slah command after I already typed something in the promt editor. I also would like to see skills and files in-line in the prompt text. Skills should also directly be call-able with / (without the need to call the list with /skills ). Please write an implementation plan for this. Ask me / grill me if you have any open questions! 
+- [X] slash command like /skills do not work when typing a message to be scheduled and they also don't work if I want to use a slah command after I already typed something in the promt editor. I also would like to see skills and files in-line in the prompt text. Skills should also directly be call-able with / (without the need to call the list with /skills ). Please write an implementation plan for this. Ask me / grill me if you have any open questions! 
 
 - [ ] I do not want the "connected: ..." message printed when apogee is stared and a server was up and running and apogee connected immediatelly.

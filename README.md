@@ -117,24 +117,41 @@ next.
   via an eval/simulation bench (which imports Apogee as a Go library and drives
   the real loop in-process) before it earns a place in the loop.
 
-## In-chat commands
+## In-chat commands, skills, and file references
 
-Typing `/` in the prompt opens the command menu; `@` completes a workspace file
-path, and an `@path` in a message hands that file to the model. A path containing
-spaces is written quoted — `@"docs/my plan.md"` (single quotes are accepted too) —
-and the autocomplete keeps completing across the spaces and inserts the quotes for
-you.
+Typing `/` in the prompt opens **one menu of commands and skills**; `@` completes a
+workspace file path, and an `@path` in a message hands that file to the model. A path
+containing spaces is written quoted — `@"docs/my plan.md"` (single quotes are accepted
+too) — and the autocomplete keeps completing across the spaces and inserts the quotes
+for you.
 
-| Command | Does |
-|---|---|
-| `/clear` (or `/new`) | Close this session into history and start a fresh one |
-| `/compact` | Summarise the conversation to reclaim context |
-| `/continue` | Ask the model to keep going |
-| `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) |
-| `/sessions` | Browse saved sessions — resume, rename, or delete |
-| `/skill` | Attach a skill to your next message |
-| `/skills` | List the discovered skills — id, name and summary |
-| `/version` | Show the apogee version |
+Both work **anywhere in the line and at any time**: the menu completes the token your
+cursor is on, so you can start typing a message and reach for a command halfway
+through, or go back and fix a misspelled name. Accepting a command from the menu
+**runs it and keeps the rest of your draft**. The menu stays open while the model is
+working, too — commands that need a quiet engine are shown tagged `— idle only` and
+say so if you pick one, while `/version`, `/skills` and `/confine`'s status report
+answer immediately. A token lights up in the box exactly when it resolves — violet for
+a skill your catalog has, blue for a file your workspace has — so a typo is visible
+before you send.
+
+| What you type | Does | While the model works |
+|---|---|---|
+| `/<skill-id>` | Invoke a skill — type its id anywhere in your message | ✅ rides the queued message |
+| `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
+| `/skill` | Pick a skill by name — writes its `/token` for you | ✅ |
+| `/skills` | List the discovered skills — id, name and summary | ✅ |
+| `/version` | Show the apogee version | ✅ |
+| `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) | ✅ report only |
+| `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
+| `/compact` | Summarise the conversation to reclaim context | — |
+| `/continue` | Ask the model to keep going | — |
+| `/sessions` | Browse saved sessions — resume, rename, or delete | — |
+
+A lone `/word` that names neither a command nor a skill is **not** sent to the model:
+apogee says `unknown command or skill: /…` and leaves your line in the box to fix.
+Anywhere else in a message a slash is just text, so paths like `/usr/bin` travel
+untouched.
 
 ## Sessions
 

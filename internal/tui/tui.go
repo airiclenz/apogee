@@ -149,6 +149,14 @@ type Options struct {
 	Bypass    bool
 	Workspace string
 
+	// ConfigHome is the resolved apogee home directory — `~/.apogee` by default, or whatever
+	// `--config` / `APOGEE_CONFIG` selected. The renderer never derives it (the binary owns path
+	// resolution) and reads it only to NAME a path in a report: /skills tells an empty catalog
+	// where discovery looked, and looking under a home the run is not using would be a wrong
+	// answer to the one question that note exists to answer. Empty ⇒ unwired: the reports fall
+	// back to the "~/.apogee" spelling rather than inventing a path.
+	ConfigHome string
+
 	// ContextWindow is the active model's context-window size in tokens (0 when unknown), as
 	// reported by upstream discovery. The footer renders it statically (e.g. "32k") and it is the
 	// denominator of the live status-line context-fill gauge, which lights as each top-level

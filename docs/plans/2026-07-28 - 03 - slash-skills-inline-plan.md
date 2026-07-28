@@ -604,7 +604,34 @@ overlap; a token wrapped across rows shades on both; scrolled textarea (content 
 
 **Commit.** `feat(tui): inline accents for resolving /skill and @file tokens`
 
-## 9. Close-out — ADR 0027 and the documentation sweep
+## 9. Close-out — ADR 0027 and the documentation sweep — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): five deviations, one of them a code change the item's "Tests: none new" line does not
+anticipate. (a) the carried finding "the `/skills` empty-catalog note hardcodes `~/.apogee/skills`" cannot be
+fixed in prose — it needed a seam: `Options.ConfigHome` (the apogee home THIS run resolved, wired from
+`roots.config` in wire.go, mirroring the existing `Workspace` injection) and `skillCatalogNote(list, home,
+workspace)`, empty home falling back to the `~/.apogee` spelling as empty workspace already fell back to
+`<workspace>`. No test was added, but two existing ones were revised to pin the fix
+(`TestSkillsCommandWithNoCatalog` now sets a non-default ConfigHome and asserts `~/.apogee` is ABSENT;
+`TestSkillCatalogNote` covers both fallbacks). (b) four stale comments beyond the carried list, all of the
+same two families the sweep owns and all verified false against the tree first: `autocomplete.go`'s header
+("(at idle, where a command can actually run)") and `renderAutocomplete`'s title roll-call ("commands"),
+both falsified by items 5/7; `render.go:117`'s entryInterjected rationale ("it carries no skills —
+attachment is idle-only"), falsified by item 3 — the block still shows no chip row, but for the opposite
+reason, which is now what it says; and `prompteditor.go`'s Model-side method roll-call, which item 8's
+`accentTokens` had not been added to. (c) `commandSpecs`' `/skill` summary — user-facing dropdown text —
+still read "attach a skill to your next message"; it is now "pick a skill by name (writes its /token)",
+since nothing is attached to anything any more. No test asserted the old string. (d) ADR 0025 itself gained
+an inline amendment block under decision 10, not merely a mention inside ADR 0027: its second clause ("the
+`/` and `/skill` pickers stay idle-only, because offering a command that would be refused misleads") is now
+false, and leaving a false decision standing in an accepted ADR is what the sweep exists to prevent. ADR
+0027 carries `Amends: ADR 0025 (decision 10)` in its front matter (a new key; `Supersedes:` was the only
+precedent). (e) TODO.md gains ONE new parked entry beside the un-deferral: the mouse-path residue item 6's
+third-pass NOTES reported as a follow-up (a click below a phantom-wrapped line lands a row short) had no
+home in any tracked file, and ADR 0027's Consequences names it — so it is parked rather than asserted to be
+recorded somewhere it was not. doc.go's narrative needed no rewrite (items 3–8 amended it as they went):
+the dangling reflow fragment was closed, `/version` + `/skills` joined the verb roll-call, and a pointer to
+ADR 0027 closes the paragraph.
 
 **What.**
 

@@ -10,6 +10,45 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Skills are invoked by typing `/<skill-id>` straight into your message — one `/` namespace for
+  everything.** A skill used to be a two-step ritual: `/skill`, pick from a list, watch a violet
+  chip appear *above* the box, then write the message. Now you write
+  `/code-audit please check the parser` and that is the invocation — the token sits in the text,
+  the model sees it *and* the skill's instructions, and the transcript keeps an honest record of
+  what you asked for. The `/skill <name>` picker is still there for browsing (it now types the
+  token for you), and only a token your catalog actually knows counts: any other `/word` inside a
+  message is ordinary text, so `/usr/bin` and dates travel untouched.
+  - **One menu.** Typing `/` opens a single dropdown listing **commands and skills** together —
+    commands first with their summaries, then skills marked with `✦`. A skill whose id collides
+    with a command verb is reached through the `/skill` picker (the command wins the bare name).
+  - **`/skills`** lists your discovered skills — id, display name and summary, re-scanned first, so
+    a skill you added since launch shows up. With none installed it tells you the three folders
+    discovery looked in, so "no skills" is a next step rather than a dead end.
+  - **The menu works anywhere in the line.** Completion follows the token your **cursor** is on,
+    for `/`, `@` and the picker alike — so you can start a message, reach for a command halfway
+    through, or go back and fix a misspelled skill id, and get the same menu the end of the buffer
+    gives you. Accepting splices over that token alone; everything on either side is untouched.
+  - **Accepting a command runs it and keeps your draft.** Pick `compact` from the menu with half a
+    message written and the `/compact` is cut out, the command fires, and the rest of what you
+    typed is still there with the cursor where it belongs. Arguments still belong to the
+    whole-line form (`/confine off --save`), which is unchanged.
+  - **Skills and files light up as you type.** A `/token` turns violet exactly when it names a
+    skill you have, an `@path` turns blue exactly when the file is in your workspace listing.
+    Everything else stays plain — so a typo simply never lights, and you see it before you send
+    instead of after. Nothing is read off disk to paint it.
+
+  See [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md).
+
+- **The `/` menu and the safe commands now work while the model is running.** Previously the
+  command and skill menus vanished the moment a turn started — exactly when you are composing the
+  next message — and every `/command` was refused with "commands run at idle". Now the menu opens
+  in both states, and each verb carries its own policy: `/version`, `/skills` and `/confine`'s
+  status report **run immediately** mid-run; `/clear`, `/new`, `/sessions`, `/compact`,
+  `/continue` and `/confine off|on` still wait for a quiet engine, but their rows are shown
+  **tagged `— idle only`** rather than hidden, and picking one prints the note and leaves your
+  draft alone. Skill and file tokens are just message content, so they ride the queued message to
+  the model like the rest of it.
+
 - **apogee now reads your project's `AGENTS.md` — workspace context files.** The system prompt says
   what *you* always want said; this is what *this project* wants said. At the start of every session
   apogee looks for `AGENTS.md` in the workspace root and folds its content into the same first system
@@ -287,6 +326,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The attached-skill chip strip above the prompt box is gone.** A skill is text in your message
+  now (`/skill-id`), not state parked beside it, so the strip has nothing left to show: no chips,
+  no Backspace-to-pop-a-chip, no attachment silently carried into `/continue` or dropped by
+  `/compact`. The **sent** message still shows its violet `✦ name` chips in the transcript — that
+  is the record of what you asked for, and it is now built from the tokens your message actually
+  contained. Removing a skill is deleting its token.
+
+- **Autocomplete completes the token at your cursor, not the last word of the box.** This was a
+  deliberate deferral (`TODO.md`, "cursor-position-free, robust"); it turned out to be the reason a
+  message already in the box had no `/` namespace at all. All three regions — `/`, `@` and
+  `/skill <partial>` — now complete mid-string and splice in place. Fixing the caret's own walk for
+  it also fixed a **pre-existing hang**: an ordinary keystroke that grew the box while the cursor
+  sat below a soft-wrapped line ending in a space could spin the re-seat loop forever.
+
+- **A lone `/word` that names nothing is refused instead of sent.** Typing `/skills` before it
+  existed — or `/code-adit` at any time — used to reach the model as prose, which is exactly the
+  confusion this release exists to remove. Now apogee answers
+  `unknown command or skill: /code-adit — nothing sent` and leaves your line in the box for a
+  one-character fix. Only a line that is **nothing but** that one token is guarded, so a slash
+  anywhere in a real message is still just text. A bare `/skill` gets the picker's usage line.
+
 - **Breaking (Go API): a Mechanism no longer describes itself — the registry holds catalogue rows.**
   `apogee.Mechanism` is **removed**; `apogee.RegisteredMechanism` takes its place, a row of
   `{Descriptor, Ordering, Hook}` in which the descriptor and the ordering constraints are catalogue
@@ -378,6 +438,13 @@ point is a **minor** bump, not a breaking change.
   lines)` marker, so the input box the answer is typed into is never pushed off-screen.
 
 ### Fixed
+
+- **A skill invoked in a message typed while the model works now actually reaches the model.** The
+  staging path parsed your line, then built the queued message **without** the skills it had just
+  found — so a skill you named mid-run was silently dropped and the model never saw its
+  instructions. The queued message now carries its skill ids (and merges them, first-seen, when
+  several held rows go out together), and the loop resolves them at delivery exactly as it does for
+  a message sent at idle.
 
 - **The transcript now follows the model's output — and stays put where you scrolled to.** Every
   repaint used to re-pin the view to the last user prompt, so the moment an answer outgrew the

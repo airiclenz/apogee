@@ -114,7 +114,8 @@ func renderEntryLines(th theme, e entry, width int) []string {
 	case entryInterjected:
 		// The human's mid-Exchange remark: the same block the prompt gets — it is the same voice —
 		// under the ⧖ marker that says it arrived while the model was already working (ADR 0025).
-		// It carries no skills (attachment is idle-only), so it is always the plain text block.
+		// It shows no chip row: a remark may well invoke a skill, but the invocation is a "/token"
+		// standing in the text itself, so the block already says so without a badge repeating it.
 		return railLines(th, renderUserBlock(th, glyphInterject+" ", e.text, nil, inner), e.depth)
 	case entryAssistant:
 		marker := glyphAssistant + " "

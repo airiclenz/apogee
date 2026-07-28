@@ -164,7 +164,12 @@ boundary), and a queue left standing by Esc or a loop error is **held** (nothing
 a stop; the next ⏎ sends it, Backspace on an empty box pops the newest back into the editor).
 Staged and held rows are session-ephemeral — sessions record what was committed (ADR 0022).
 Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the rows into ONE
-**unmarked** message, because exactly one unmarked user message opens an Exchange. See
+**unmarked** message, because exactly one unmarked user message opens an Exchange. A **Skill** or
+a **File reference** named in a staged message is message content and rides the Interjection with
+it; a `/command` never queues, and which ones may run mid-run is a **per-command** policy rather
+than a blanket "at idle" rule — the reporting verbs (`/version`, `/skills`, `/confine` status) run
+immediately, every other verb is offered *tagged* in the menu and refused with a note that leaves
+the line in the box (ADR 0027, amending ADR 0025's decision 10). See
 [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md).
 _Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mechanism shaping the
 model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;
@@ -482,7 +487,7 @@ reaches by construction: the Compaction summariser's instruction and the probe b
 _Avoid_: "persona", "preamble" (either may be its *content*; the term names the channel),
 "prompt" alone (in TUI speech that is the user's own input line), "instructions block" (that is
 the profile's engine-owned tool menu, which follows it). Distinct from a **Skill**, which is
-turn-local and attached to one message.
+turn-local and invoked from one message.
 
 **Context files**:
 The **project's** standing text: files apogee **discovers** in the workspace root — configured by
@@ -504,8 +509,8 @@ host names each loaded file and warns when the standing content exceeds the
 _Avoid_: "project prompt", "workspace prompt" (the System prompt is the user's, these are the
 project's — the terms must stay separable), "AGENTS.md support" (that is the default name, not the
 concept), "loaded into context" (they are request-scoped standing content, not history). Distinct
-from a **File reference** (`@file`, turn-local and user-named) and from a **Skill** (attached to
-one message).
+from a **File reference** (`@file`, turn-local and user-named) and from a **Skill** (invoked by
+`/token` in one message).
 
 **File reference (`@file`)**:
 A workspace file the user names with an `@path` token in their message. The loop resolves
@@ -515,19 +520,31 @@ as that request's *file context* — and reports-and-skips a missing or escaping
 is **bare** (`@path`, a run of non-whitespace) or **quoted** (`@"path with spaces"` — `'` is
 accepted too, only `"` is ever produced), where the closing quote ends the token and an
 unterminated one runs to the end of that line; there are no escape sequences. Parsing
-the token is the TUI's job; resolution is the agent's.
+the token is the TUI's job; resolution is the agent's. It is the same inline grammar a **Skill**
+`/token` uses, and the prompt box accents both on the same rule: a token lights up exactly when it
+resolves — the path is in the workspace listing, the id is in the catalog — so a typo visibly
+fails to light instead of failing at submit (ADR 0027).
 _Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
 
 **Skill**:
-A reusable block of instructions the user *attaches* to a message with `/skill` — a folder
-holding a `SKILL.md` (YAML frontmatter — id, display name, summary — plus a Markdown body).
-Skills are discovered from layered dirs (the global `~/.apogee/skills`, the project's
+A reusable block of instructions the user *invokes* from a message — a folder holding a `SKILL.md`
+(YAML frontmatter — id, display name, summary — plus a Markdown body).
+Skills are discovered from layered dirs (the global `<apogee home>/skills`, the project's
 `.apogee/skills`, and — when `use-project-skills` is on — the project's `skills/`), the later
-source winning a name clash. Like an `@file`, a skill is **turn-local**: the loop resolves the
-attached IDs through `Config.Skills` and prepends each body to *that one* user message, so a
-skill never persists as a system-prompt edit. The TUI picks and attaches; the agent resolves.
+source winning a name clash. A skill is invoked by naming its id as a **`/token`** in the message
+text — `/code-audit please check the parser` — at a word boundary and whitespace-delimited,
+exactly parallel to an `@path`. The token **stays in the text** the model reads, and only a token
+the catalog confirms is a reference: any other `/word` inside a message is prose (a path survives
+untouched), and a **command verb shadows** a skill of the same id. Like an `@file`, a skill is
+**turn-local**: the loop resolves the extracted IDs (`UserInput.SkillIDs`) through `Config.Skills`
+and prepends each body to *that one* user message, so a skill never persists as a system-prompt
+edit. The TUI parses and offers (one merged `/` menu, plus the `/skill <name>` picker that writes
+the token for you, and `/skills` to browse the catalog); the agent resolves. See
+[ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md).
 _Avoid_: "plugin", "tool" (a skill is prompt text, not executable; it adds no capability — it
-steers the model). Distinct from a **Mechanism** (a catalogued, self-regulating loop behaviour).
+steers the model), "attachment"/"chip" (a skill is text *in* the message, not state beside it —
+the chip strip was retired with ADR 0027). Distinct from a **Mechanism** (a catalogued,
+self-regulating loop behaviour).
 
 **Tool-result capping**:
 Per-tool-result truncation of any single result that exceeds its fraction of the Budget,

@@ -47,9 +47,14 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 - **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
   terminal side-effects are not undone, as the extension does).
 
-- **[P2] Mid-string (non-trailing) token completion** — the autocomplete overlay completes the
-  word at the cursor/end only. Kept deferred on purpose: it trades the "cursor-position-free,
-  robust" design for cursor-tracking edge cases.
+- **[P2] A prompt click below a phantom-wrapped line lands imprecisely** — uncovered while fixing
+  the caret walk for mid-string completion (2026-07-28). bubbles' `wrap` appends a trailing
+  sub-line that `CursorDown` can never enter, so the MOUSE path's `reseatCaret` (which seats a
+  click's *visual* row) can land a row short below such a line. Pre-existing, bounded (its loop
+  cannot spin), and keyboard-only editing is unaffected — the logical-row walk both
+  `caretToOffset` and `reseatInput` express was fixed (`promptEditor.seatCaret`,
+  [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md)). The fix wants the
+  same Height-aware step expressed for a visual target.
 
 **Related (parked below):** per-tool approval overrides (`toolApprovalOverrides`:
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
@@ -77,6 +82,13 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md) +
   `docs/plans/2026-07-27 - 00 - upstream-heartbeat-plan.md`. It is the engine half of the `/server`
   item above, not that item's close-out.
+- **One `/` namespace** — direct `/skill-id` invocation as inline text tokens (the chip strip
+  retired), one merged command+skill menu that runs a command at accept without destroying the
+  draft, `/skills`, the sole-token typo guard, resolve-gated inline accents, and the per-command
+  while-running policy — 2026-07-28,
+  [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) +
+  `docs/plans/2026-07-28 - 03 - slash-skills-inline-plan.md`. It closes the payload half of the
+  oracle note above (`{text, skillIds, fileRefs}`) — parity of payload, not of UI.
 
 ---
 
@@ -577,6 +589,15 @@ moment to give `ConfineWritablePaths` its first writer.
 Full records live in the named docs; a line here keeps the deferral trail deliberate and carries
 any standing constraint that must not be re-filed.
 
+- **Mid-string (non-trailing) token completion** — CLOSED 2026-07-28, **shipped rather than
+  deferred** ([ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) decision 5;
+  `docs/plans/2026-07-28 - 03 - slash-skills-inline-plan.md` item 6). The deferral's own rationale
+  — that the trailing-token rule bought a "cursor-position-free, robust" design — was the defect:
+  it is why a draft already in the box had no `/` namespace at all. All three regions (`/`, `@`,
+  `/skill <partial>`) now complete the token at the caret. **Standing:** the caret walk is
+  `promptEditor.seatCaret` (a `CursorEnd`-then-`CursorDown` step over LOGICAL rows) — bubbles'
+  phantom trailing sub-line makes a naive `CursorDown` loop stall or spin, so do not "simplify" it
+  back; the remaining mouse-path residue is its own entry above.
 - **Read/list tool-name detection** — CLOSED 2026-07-19 (spelling families: post-v1.3.0
   review-fixes item 11/F8; shared `internal/mechanisms/historyscan.go` scan shapes + token
   arithmetic: architecture-deepening items 6–7/D4–D5). The broader shared-detection framework

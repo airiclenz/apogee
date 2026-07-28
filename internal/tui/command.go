@@ -87,7 +87,7 @@ var commandSpecs = []commandSpec{
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
-	{name: "skill", summary: "attach a skill to your next message", menuOnly: true},
+	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
 }
 

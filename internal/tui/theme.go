@@ -62,7 +62,7 @@ const (
 	glyphSubRail    = "│"
 	glyphSubLabel   = "⤷"
 	glyphBullet     = "•" // a markdown bullet-list item (- / * / +)
-	glyphSkill      = "✦" // leads an attached-skill chip (matches the assistant marker)
+	glyphSkill      = "✦" // marks a skill: the sent block's chips and the "/" menu's skill rows
 	glyphPresented  = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
 	glyphInterject  = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
 )

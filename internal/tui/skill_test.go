@@ -738,9 +738,12 @@ func TestSkillsCommandReloadsBeforeListing(t *testing.T) {
 }
 
 // With no catalog wired (and no ReloadSkills) the verb still answers — no panic — and the note
-// says where discovery looks, so "no skills" is actionable rather than a dead end.
+// says where discovery looks, so "no skills" is actionable rather than a dead end. The global
+// library it names is the home THIS run resolved (Options.ConfigHome — what --config /
+// APOGEE_CONFIG selected), never the ~/.apogee default the run may not be using.
 func TestSkillsCommandWithNoCatalog(t *testing.T) {
 	o := testOpts // no Skills, no ReloadSkills
+	o.ConfigHome = filepath.Join("elsewhere", "apogee-home")
 	o.Workspace = filepath.Join("home", "code", "proj")
 	m := newTestModelEng(t, &fakeEngine{}, o)
 	note := runSkillsNote(t, m)
@@ -748,8 +751,11 @@ func TestSkillsCommandWithNoCatalog(t *testing.T) {
 	if !strings.Contains(note, "no skills found") {
 		t.Errorf("note does not report an empty catalog:\n%s", note)
 	}
+	if strings.Contains(note, filepath.Join("~", ".apogee")) {
+		t.Errorf("note names the default home instead of the configured one:\n%s", note)
+	}
 	for _, want := range []string{
-		filepath.Join("~", ".apogee", "skills"),
+		filepath.Join("elsewhere", "apogee-home", "skills"),
 		filepath.Join("home", "code", "proj", ".apogee", "skills"),
 		filepath.Join("home", "code", "proj", "skills"),
 	} {
@@ -760,17 +766,20 @@ func TestSkillsCommandWithNoCatalog(t *testing.T) {
 }
 
 // skillCatalogNote is pure, so its wording is pinned without a Model: the singular header, a
-// skill with no summary, and the placeholder that stands in for an unwired workspace.
+// skill with no summary, and the fallbacks that stand in for the two unwired roots.
 func TestSkillCatalogNote(t *testing.T) {
-	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, "/ws")
+	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, "/home/.apogee", "/ws")
 	if !strings.HasPrefix(one, "1 skill available:") {
 		t.Errorf("singular header wrong:\n%s", one)
 	}
 	if !strings.Contains(one, "/review  Review") || strings.Contains(one, "—") {
 		t.Errorf("a summary-less skill must render without the dash:\n%s", one)
 	}
-	empty := skillCatalogNote(nil, "")
+	empty := skillCatalogNote(nil, "", "")
 	if !strings.Contains(empty, "<workspace>") {
 		t.Errorf("an unwired workspace must render the placeholder:\n%s", empty)
+	}
+	if !strings.Contains(empty, filepath.Join("~", ".apogee", "skills")) {
+		t.Errorf("an unwired home must render the ~/.apogee spelling:\n%s", empty)
 	}
 }

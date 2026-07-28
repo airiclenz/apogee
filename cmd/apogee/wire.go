@@ -354,11 +354,15 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// a cold start, where the footer says "connecting…" until the first beat binds one), and
 		// ContextWindow is the `context-window:` pin (0 when unpinned). Neither is a discovery
 		// result any more — the heartbeat and the rebind closure below own everything after launch.
-		Model:         opts.model,
-		Endpoint:      opts.endpoint,
-		Mode:          mode,
-		Bypass:        opts.bypass,
-		Workspace:     roots.workspace,
+		Model:     opts.model,
+		Endpoint:  opts.endpoint,
+		Mode:      mode,
+		Bypass:    opts.bypass,
+		Workspace: roots.workspace,
+		// The apogee home THIS run resolved (--config / APOGEE_CONFIG included), so a report that
+		// names a path — /skills telling an empty catalog where discovery looked — names the folder
+		// the run actually walks rather than the ~/.apogee default it may not be using.
+		ConfigHome:    roots.config,
 		ContextWindow: opts.contextWindow,
 		HostAlias:     opts.hostAlias,
 		// The two upstream seams (ADR 0024): the monitor observes on the TUI's cadence, and the

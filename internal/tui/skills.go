@@ -46,7 +46,7 @@ func (m Model) runSkills() (tea.Model, tea.Cmd) {
 	if m.opts.Skills != nil { // nil ⇒ no catalog is wired; the empty note answers that too
 		list = m.opts.Skills.List()
 	}
-	m.transcript.addNote(skillCatalogNote(list, m.opts.Workspace))
+	m.transcript.addNote(skillCatalogNote(list, m.opts.ConfigHome, m.opts.Workspace))
 	m.layout()
 	return m, nil
 }
@@ -58,17 +58,24 @@ func (m Model) runSkills() (tea.Model, tea.Cmd) {
 // An empty catalog is not a failure — most users start with none — so instead of an apologetic
 // blank the note says where discovery looked, in the layered order sourceDirs walks
 // (skills/load.go): the answer to the question a user staring at "no skills" is about to ask.
-// workspace is the project root the two project-local dirs hang off; empty (unwired options)
-// renders a placeholder rather than a bogus relative path.
-func skillCatalogNote(list []skills.Skill, workspace string) string {
+// Both roots are INJECTED rather than assumed, for the same reason the loader's Sources are
+// (ADR 0001): home is the apogee home this run resolved — `--config` / APOGEE_CONFIG move it, and
+// naming `~/.apogee` at a run that is not using it would send the human to the wrong folder — and
+// workspace is the project root the two project-local dirs hang off. An empty root renders its
+// spelling/placeholder rather than a bogus relative path.
+func skillCatalogNote(list []skills.Skill, home, workspace string) string {
 	if len(list) == 0 {
+		lib := home
+		if lib == "" {
+			lib = filepath.Join("~", ".apogee")
+		}
 		ws := workspace
 		if ws == "" {
 			ws = "<workspace>"
 		}
 		return strings.Join([]string{
 			"no skills found — a skill is a folder holding a SKILL.md, discovered under:",
-			"  " + filepath.Join("~", ".apogee", "skills") + "  (your global library)",
+			"  " + filepath.Join(lib, "skills") + "  (your global library)",
 			"  " + filepath.Join(ws, ".apogee", "skills"),
 			"  " + filepath.Join(ws, "skills") + "  (only when use-project-skills is on)",
 		}, "\n")

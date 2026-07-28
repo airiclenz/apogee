@@ -176,3 +176,45 @@ the cap, the marker, and the two framing rows.
 **What the band is not.** Once a staged message is delivered it leaves the band and appears in the
 transcript as its own ⧖ block, which keeps the transcript's own look. The status line's `N queued`
 readout is separate too, and reads the same count from the same queue.
+
+---
+
+## The prompt box's mini-language
+
+**One dropdown for `/`.** Typing a `/` token opens ONE suggestion pane above the box — the same
+bordered, titled pane the `/sessions` browser and the approval prompt use, in the slot that
+shrinks the transcript to make room. It is titled `commands and skills` and it lists both:
+commands first, prefix-matched, each with its one-line summary; then skills, matched on id and
+display name, each row led by the `✦` skill glyph so the two kinds never read alike. `@` opens the
+same pane over workspace files. At most eight rows show; the hint line under them reads
+`↑/↓ select · ⏎/tab accept · esc dismiss`.
+
+**It follows the caret, not the end of the line.** The token being completed is the word the caret
+stands in or immediately after — so a draft already in the box does not shut the menu out, and
+going back to fix a misspelled skill id mid-message offers exactly the same menu the end of the
+buffer does. Accepting splices over that token alone and puts the caret just after the splice;
+everything on either side is untouched.
+
+**Accepting a command RUNS it.** The `/verb` is cut out of the draft and the command fires; the
+rest of what was typed stays in the box with the caret where it belongs. The two verbs that need
+what follows them are the exception and complete instead: `/confine` (which takes arguments — and
+arguments are only ever read from a whole-line invocation) and `/skill`, which chains into the
+picker over the catalog. Accepting a skill row writes that skill's own `/id ` token into the text.
+
+**The box never goes dead while the model works.** Every region stays open. A command that needs a
+quiescent engine is not hidden — its row renders with a trailing `— idle only` tag in the pane's
+faint unselected style, and accepting it anyway prints the note and leaves the draft exactly as it
+was. The verbs that only report (`/version`, `/skills`, `/confine` with no arguments) run there
+and then.
+
+**Tokens light up when they resolve.** Inside the box a `/token` is painted in the skill violet
+only when it names a skill in the catalog, and an `@path` in the reference blue only when the path
+is in the workspace listing. Everything else stays plain prompt text, so the colour is a live
+verdict rather than decoration: a typo simply never lights. Both accents are drawn on the box's
+own black, so the field still reads as one band, and a token wrapped across rows is painted on
+every row it spans. A drag-selection drawn over a token wins — selection is painted last.
+
+**What is not here any more.** There is no strip of attached-skill chips above the box. A skill is
+its `/token` in the text now, so the message says what it invokes without a second surface
+repeating it. The transcript's sent user block still carries its violet `✦ name` chips — that is
+the record of a send, not the state of the editor.

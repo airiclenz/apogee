@@ -58,14 +58,16 @@
 // (commandSpec.whileRunning, read off the parsed line by [parsedInput.safeWhileRunning] so
 // "/confine" and "/confine off" can differ): the reporting verbs run mid-run, every other row is
 // TAGGED "— idle only" in the menu and earns commandsAtIdleNote instead of running, and skill and
-// file tokens are simply message content that rides the interjection.
-// /clear (aliased by /new) and /compact drive the engine's context seams
-// ([Engine.ClearContext]/[Engine.Compact]); /confine reports and toggles Auto's blast radius
-// through [Engine.SetConfineToWorkspace], the one verb that takes arguments ([parseConfine] owns
-// its "status | off [--save] | on" grammar, and an argument it does not understand is a parse
-// error carrying the usage line — never a silent no-op on the command that widens what Auto may
-// touch); @file *resolution* stays in the agent loop (reusing
-// the workspace fence), so the TUI only parses references — it never reads files itself.
+// file tokens are simply message content that rides the interjection. /clear (aliased by /new) and
+// /compact drive the engine's context seams ([Engine.ClearContext]/[Engine.Compact]); /version and
+// /skills are pure reports written straight into the scrollback; /confine reports and toggles
+// Auto's blast radius through [Engine.SetConfineToWorkspace], the one verb that takes arguments
+// ([parseConfine] owns its "status | off [--save] | on" grammar, and an argument it does not
+// understand is a parse error carrying the usage line — never a silent no-op on the command that
+// widens what Auto may touch); @file *resolution* stays in the agent loop (reusing the workspace
+// fence), so the TUI only parses references — it never reads files itself. The settled questions
+// behind all of it — one namespace, tokens not chips, accept-executes, caret-aware regions, the
+// while-running policy, resolve-gated accents, the sole-token guard — are recorded in ADR 0027.
 //
 // confine.go is the routing half of that verb (ADR 0012, amendment 2026-07-21): [Model.runConfine]
 // asserts the requested blast radius on the [Engine] and records a transcript note whose pure
@@ -146,18 +148,17 @@
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
 // loose input-side concerns the architecture review called one coherent concept — the textarea, the
 // autocomplete overlay (+ its skillRegion edge-trigger), the workspace file cache, and the prompt
-// drag-selection — into a [promptEditor] type the [Model] embeds
-// anonymously. Field and self-contained-method promotion keeps the value-copied Model idiom
-// and every call site unchanged (m.input, m.autocomplete, m.caretTo(...) resolve through it). The
-// lift is deliberately partial: only methods touching nothing but the editor's own fields move
-// there (newPromptEditor, submitParse, reset, rows, and the caret re-seat family caretTo/reseatCaret
-// for a VISUAL row and seatCaret — which caretToOffset and reseatInput both express — for a LOGICAL
-// one, plus the offset pair caretByteOffset/caretToOffset a mid-draft completion splices by);
-// methods that also read Model-owned state — theme, width/height, opts, lifecycle —
-// stay on the Model rather than duplicate that state (computeAutocomplete, acceptAutocomplete,
-// insertSkillToken, highlightInput, accentTokens, inputContentRect, the region-arbitrating mouse
-// handlers). The Model stays the coordinator that owns the lifecycle state machine, the transcript
-// + render cache, the
+// drag-selection — into a [promptEditor] type the [Model] embeds anonymously. Field and
+// self-contained-method promotion keeps the value-copied Model idiom and every call site unchanged
+// (m.input, m.autocomplete, m.caretTo(...) resolve through it). The lift is deliberately partial:
+// only methods touching nothing but the editor's own fields move there (newPromptEditor,
+// submitParse, reset, rows, and the caret re-seat family caretTo/reseatCaret for a VISUAL row and
+// seatCaret — which caretToOffset and reseatInput both express — for a LOGICAL one, plus the offset
+// pair caretByteOffset/caretToOffset a mid-draft completion splices by); methods that also read
+// Model-owned state — theme, width/height, opts, lifecycle — stay on the Model rather than
+// duplicate that state (computeAutocomplete, acceptAutocomplete, insertSkillToken, highlightInput,
+// accentTokens, inputContentRect, the region-arbitrating mouse handlers). The Model stays the
+// coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
 // invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps idlePlaceholder
 // ("⏎ send") for runningPlaceholder ("⏎ queue · esc stop") on the lifecycle transitions that open and

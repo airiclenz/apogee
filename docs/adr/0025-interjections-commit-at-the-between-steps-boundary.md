@@ -159,6 +159,15 @@ keyboard there. Commands never queue — a `/command` typed while running earns 
 autocomplete works while running (refs are useful in a remark); the `/` and `/skill` pickers stay
 idle-only, because offering a command that would be refused misleads.
 
+> **Amended 2026-07-28 by [ADR 0027](0027-one-slash-namespace-with-inline-skill-tokens.md)
+> (decision 6).** The second clause no longer holds: **every** completion region opens while the
+> model works, including `/`. What would have misled is answered by *tagging* the row `— idle only`
+> rather than hiding the namespace, and the per-command `whileRunning` policy lets the reporting
+> verbs (`/version`, `/skills`, `/confine` status) actually run mid-run. The rest of this decision
+> stands unchanged — commands still never queue, and an idle-only verb still earns
+> `commands run at idle — not queued` with the human's line left in the box. ADR 0027 also repairs
+> a defect on this path: a staged interjection carries its `SkillIDs` instead of dropping them.
+
 **11. The one deliberate behavioural loss: the single-key transcript scroll while running.** Keys
 that used to scroll the transcript mid-run (j/k/space) now type. PgUp/PgDn and the mouse wheel keep
 scrolling in every state. This is the plan's one accepted regression and it is the direct cost of
