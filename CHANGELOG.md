@@ -446,6 +446,12 @@ point is a **minor** bump, not a breaking change.
   several held rows go out together), and the loop resolves them at delivery exactly as it does for
   a message sent at idle.
 
+- **A delivered mid-run message now shows the skills it invoked, exactly as a sent one does.** The
+  `⧖` block written when the model picks up a queued message carried its text alone, so the violet
+  `✦ name` chips that record what you invoked appeared only when the message happened to be flushed
+  into a new turn instead — the same message, two different records, depending on timing. The
+  delivered block now carries the same chip row.
+
 - **The transcript now follows the model's output — and stays put where you scrolled to.** Every
   repaint used to re-pin the view to the last user prompt, so the moment an answer outgrew the
   screen it streamed out of sight and you had to scroll down by hand, again and again, to watch it

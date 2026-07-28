@@ -231,7 +231,7 @@ func (m *Model) foldInterjected(items []queuedInterjection) {
 	delivered := make(map[int]bool, len(items))
 	for _, it := range items {
 		delivered[it.id] = true
-		m.transcript.addInterjected(it.input.Text)
+		m.transcript.addInterjected(it.input.Text, m.skillDisplayNames(it.input.SkillIDs))
 	}
 	kept := make([]queuedInterjection, 0, len(m.pendingInterjections))
 	for _, row := range m.pendingInterjections {

@@ -526,6 +526,30 @@ func TestStagedInterjectionCarriesSkillIDs(t *testing.T) {
 	}
 }
 
+// The DELIVERED interjection records its skills exactly as a flushed send does: the ⧖ block
+// carries the same chip row the ❯ block gets, because the two differ only in when the message
+// landed. The delivery fold used to drop the ids on the floor (addInterjected took text alone).
+func TestDeliveredInterjectionShowsSkillChips(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.state = stateRunning
+	m.box = newInterjectBox()
+	m.input.SetValue("/review this diff too")
+	m = step(t, m, keyEnter())
+
+	m = step(t, m, interjectedMsg{items: m.pendingInterjections})
+
+	last := m.transcript.entries[len(m.transcript.entries)-1]
+	if last.kind != entryInterjected {
+		t.Fatalf("tail entry = %+v; want the delivered remark as an interjected block", last)
+	}
+	if !reflect.DeepEqual(last.skills, []string{"Review"}) {
+		t.Errorf("delivered block skills = %v, want [Review] — the invoked skill must be recorded", last.skills)
+	}
+	if got := plain(m.View()); !strings.Contains(got, glyphSkill+" Review") {
+		t.Errorf("the delivered remark shows no skill chip:\n%s", got)
+	}
+}
+
 // A flush of two rows naming the same skill unions to one id, exactly as the file refs do.
 func TestFlushUnionsSkillIDs(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}

@@ -58,7 +58,7 @@ type entry struct {
 	callID    string
 	tool      toolView
 	done      bool
-	skills    []string // entryUser only: display names of the skills attached to this send
+	skills    []string // entryUser / entryInterjected: display names of the skills this message invoked
 	presented presentedView
 	startup   startupView // entryStartup only: the one-time start-up box's logo + session facts
 }
@@ -114,8 +114,13 @@ func (t *transcript) addUser(text string, skills []string) {
 // rather than ❯, and it is deliberately NOT an entryUser: a mid-Exchange remark must not become
 // the sticky header (renderView records only entryUser blocks as such), because the prompt the
 // on-screen work belongs to is still the one that opened the Exchange.
-func (t *transcript) addInterjected(text string) {
-	t.entries = append(t.entries, entry{kind: entryInterjected, text: text})
+//
+// It carries the skills the remark invoked exactly as addUser does, and for the same reason: a
+// skill rides an interjection (ADR 0027), so the delivered block must record what the model was
+// given, and a delivered remark differs from a flushed one only in when it landed. The display
+// names are escape-stripped on the same untrusted-input grounds.
+func (t *transcript) addInterjected(text string, skills []string) {
+	t.entries = append(t.entries, entry{kind: entryInterjected, text: text, skills: stripEscapesAll(skills)})
 }
 
 // addNote appends a neutral note (e.g. "cancelled") — a transcript record of a UI-level

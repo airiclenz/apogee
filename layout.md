@@ -216,5 +216,6 @@ every row it spans. A drag-selection drawn over a token wins — selection is pa
 
 **What is not here any more.** There is no strip of attached-skill chips above the box. A skill is
 its `/token` in the text now, so the message says what it invokes without a second surface
-repeating it. The transcript's sent user block still carries its violet `✦ name` chips — that is
-the record of a send, not the state of the editor.
+repeating it. The transcript's sent user block still carries its violet `✦ name` chips — and so
+does a delivered `⧖` interjection block, which is the same record — because that is the record of
+a send, not the state of the editor.
