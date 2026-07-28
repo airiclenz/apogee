@@ -1711,6 +1711,85 @@ func TestStatusLineIndentFitsNarrowWindow(t *testing.T) {
 	}
 }
 
+// statusCells renders the model's status line with styling stripped and NOTHING trimmed — the
+// row's cells exactly as they land, so an assertion can read the columns at its right edge.
+func statusCells(t *testing.T, m Model) string {
+	t.Helper()
+	return ansiPattern.ReplaceAllString(m.statusLine(), "")
+}
+
+// TestStatusLineGaugeEndsShortOfEdge proves the context gauge stops bodyIndent columns short of
+// the window edge: the pre-styled bar is followed by the status bar's own black margin (asserted
+// as the rendered suffix, not as SGR bytes), so the track's last cell sits above the footer mode
+// marker's last character instead of against the terminal edge — and the margin comes out of the
+// row's width budget, which is still exactly one window.
+func TestStatusLineGaugeEndsShortOfEdge(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter()) // running, so the gauge displaces a hint that would otherwise show
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}})
+	if m.contextGauge() == "" {
+		t.Fatal("context gauge unlit after usage: nothing in the right slot to inset")
+	}
+
+	line := m.statusLine()
+	if margin := m.th.statusBar.Render(bodyIndent); !strings.HasSuffix(line, margin) {
+		t.Errorf("status line does not end with the styled margin %q: %q", margin, line)
+	}
+	if got := ansi.StringWidth(line); got != m.width {
+		t.Errorf("status line renders %d columns, want exactly %d (the margin rides inside the width)", got, m.width)
+	}
+}
+
+// assertStatusRightTail pins the right slot's last columns, styling stripped and untrimmed, and
+// re-checks that the margin is paid for out of the window rather than overhanging it.
+func assertStatusRightTail(t *testing.T, m Model, want string) {
+	t.Helper()
+	if got := statusCells(t, m); !strings.HasSuffix(got, want) {
+		t.Errorf("status line %q does not end with %q", got, want)
+	}
+	if got := ansi.StringWidth(m.statusLine()); got != m.width {
+		t.Errorf("status line renders %d columns, want exactly %d", got, m.width)
+	}
+}
+
+// TestStatusLineRightSlotOccupantsShareTheMargin proves the WHOLE right slot moved, not the gauge
+// alone: every occupant that time-shares the slot — key hint, copy flash, primed Ctrl+C — ends in
+// the same column, bodyIndent short of the edge, which is what "aligned with everything else
+// printed there" asks for. An empty slot keeps no phantom margin: the justify gap already paints
+// the black band to the last column.
+func TestStatusLineRightSlotOccupantsShareTheMargin(t *testing.T) {
+	t.Run("running hint", func(t *testing.T) {
+		m := newTestModel(t)
+		m.input.SetValue("hello")
+		m = step(t, m, keyEnter()) // no usage yet, so the hint holds the slot
+		assertStatusRightTail(t, m, "esc stop"+bodyIndent)
+	})
+
+	t.Run("errored hint", func(t *testing.T) {
+		m := newTestModel(t)
+		m.state = stateErrored
+		m.lastErr = errors.New("boom")
+		assertStatusRightTail(t, m, "enter dismiss"+bodyIndent)
+	})
+
+	t.Run("copy flash", func(t *testing.T) {
+		m := newTestModel(t)
+		m.flash = "copied 5 chars"
+		assertStatusRightTail(t, m, m.flash+bodyIndent)
+	})
+
+	t.Run("empty slot", func(t *testing.T) {
+		m := newTestModel(t) // idle, no usage: the slot has no occupant to inset
+		if got := statusCells(t, m); strings.TrimSpace(got) != "" {
+			t.Errorf("idle status line = %q, want nothing but the black band's fill", got)
+		}
+		if got := ansi.StringWidth(m.statusLine()); got != m.width {
+			t.Errorf("idle status line renders %d columns, want exactly %d", got, m.width)
+		}
+	})
+}
+
 // transcriptRows returns the composed View's transcript rows with styling stripped — the
 // viewport's own rows, scroll-bar column included, before the gap row and the bottom chrome.
 func transcriptRows(t *testing.T, m Model) []string {

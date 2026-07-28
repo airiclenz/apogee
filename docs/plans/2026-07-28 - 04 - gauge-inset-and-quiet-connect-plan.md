@@ -163,7 +163,7 @@ regions.
 
 ---
 
-## 1. The right slot ends two cells short of the window edge
+## 1. The right slot ends two cells short of the window edge — ✅ DONE (2026-07-28)
 
 **What.** Every right-slot occupant — gauge, hints, flash, Ctrl+C prime — ends at column
 `width-2`, aligned with the footer's mode marker below and mirroring the left slot's

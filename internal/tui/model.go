@@ -2312,8 +2312,11 @@ func (m Model) throughputSuffix() string {
 // errored states keep their own words, with no spinner and no clock (nothing is ticking). Any
 // staged interjections add their count to whatever the slot holds. The left slot hangs off
 // the transcript's own text column: it leads with bodyIndent, so the spinner lines up with the
-// body text above it rather than with the ✦/❯ marker column (layout.md). It reads only display
-// values off Options and the model's own state — never off the Engine mid-step.
+// body text above it rather than with the ✦/❯ marker column (layout.md). The right slot mirrors
+// that lead: whatever occupies it — gauge, key hint, copy flash, primed Ctrl+C — ends bodyIndent
+// short of the window edge, the column the footer's mode marker below it ends in, so nothing in
+// the slot ever touches the terminal's last column. It reads only display values off Options and
+// the model's own state — never off the Engine mid-step.
 func (m Model) statusLine() string {
 	left := m.th.statusBar.Render(bodyIndent)
 	switch m.state {
@@ -2329,12 +2332,19 @@ func (m Model) statusLine() string {
 	// What is waiting to go out rides the same slot, in every state: a queue that survives a stop
 	// or an error (it does) must keep saying so at idle too, where the slot is otherwise empty.
 	left += m.queuedSegment(m.state != stateIdle)
-	// Fill the whole width with black-bg cells — segments and the justify gap alike — so
-	// the info line reads as one solid black bar joined to the prompt box below it. A plain
-	// justify gap would show the terminal's default background through the seam. statusRight
-	// returns a fully pre-styled string (the gauge carries its own per-cell backgrounds), so
-	// it is concatenated raw rather than re-wrapped, which would clobber those backgrounds.
+	// Fill the whole width with black-bg cells — segments, the justify gap and the right slot's
+	// trailing margin alike — so the info line reads as one solid black bar joined to the prompt
+	// box below it. A plain justify gap (or a bare-space margin) would show the terminal's default
+	// background through the seam. statusRight returns a fully pre-styled string (the gauge carries
+	// its own per-cell backgrounds), so it is concatenated raw rather than re-wrapped, which would
+	// clobber those backgrounds; the margin is styled separately and appended for the same reason.
+	// An empty slot gets no margin: the justify gap already paints black to the last column, so two
+	// orphan cells would move nothing. The gap arithmetic below reads the widened right slot, so
+	// the too-narrow drop simply happens two columns earlier — the margin's honest price.
 	right := m.statusRight()
+	if right != "" {
+		right += m.th.statusBar.Render(bodyIndent)
+	}
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return ansi.Truncate(left, max(0, m.width), "")
@@ -2357,7 +2367,9 @@ func (m Model) runningPhrase(now time.Time) string {
 // statusRight is the status line's right slot: the live context gauge when token usage is
 // known, else a state-appropriate key hint. The gauge is empty only until the first UsageEvent
 // folds a turn's total into ctxUsed (or after /clear and /compact zero it) — so the hint shows
-// before any usage is measured and the gauge takes the slot the moment it is.
+// before any usage is measured and the gauge takes the slot the moment it is. Every branch
+// returns its occupant flush — statusLine appends the trailing margin at one seam, so the whole
+// slot moves together and no branch has to remember an inset of its own.
 func (m Model) statusRight() string {
 	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
 	if !m.lastCtrlC.IsZero() {
