@@ -329,7 +329,7 @@ config).
 
 **Commit.** `feat(tui): session notice and Budget warn for context files`
 
-## 5. Shipped template and documentation close-out
+## 5. Shipped template and documentation close-out — ✅ DONE (2026-07-28)
 
 **What.**
 

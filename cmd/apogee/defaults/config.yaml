@@ -112,6 +112,45 @@ system-prompt-text: |
 #     system-prompt-file: ~/prompts/gpt-oss.md
 
 # =============================================================================
+# Workspace context files: files apogee looks for in the WORKSPACE ROOT and folds into the
+# system prompt when a session starts — the AGENTS.md / CLAUDE.md behaviour. The system prompt
+# above is what YOU always want said; these are what THIS PROJECT wants said, and a repo that
+# already keeps an AGENTS.md for other agents is picked up with nothing configured here.
+# Config-file only (no flag or env), like the system prompt it stands beside. Defaults below.
+#
+# EVERY listed name that exists is included, in list order — the list is an inclusion set, not a
+# priority chain — each under a `## Workspace context: <name>` header, appended after the system
+# prompt inside that same one first system message. Names are looked up in the workspace root
+# ONLY: no parent-directory walk-up and no global context file (standing text that follows you
+# from project to project is exactly what system-prompt-text/-file above are). A name must be a
+# plain workspace-relative one: an absolute path, a name climbing out with "..", an empty entry,
+# or the same name twice is a startup error naming the entry.
+#
+# A name that does not exist is skipped SILENTLY — the default will not exist in every repo, so
+# absence is the normal case — and so is an empty file. A file that is present but cannot be
+# read is skipped LOUDLY (a note in the transcript), never a startup failure: unlike
+# system-prompt-file, which you named, these are discovered.
+#
+# The content is DATA and travels VERBATIM: the three placeholders above do NOT apply to it, so
+# {{braces}} in some repo's AGENTS.md reach the model as written and can never fail apogee's
+# startup.
+#
+# The files are read when a session STARTS and re-read by /clear, /new and a /sessions restore —
+# never mid-conversation, so what the model was told stays fixed for the whole session and your
+# server's prefix cache survives it. Edit AGENTS.md while apogee runs and the new text lands on
+# your next /new.
+#
+# apogee names each file it loaded, with its size, in the transcript at every one of those
+# boundaries, and warns when the standing system content (system prompt + context files) has
+# outgrown its share of the context window. The warning is advisory only: nothing is ever capped
+# or truncated, and with no window known yet there is no share to compare against and no warning.
+#
+# context-files:
+#   enable: true             # the off-switch; default true
+#   names: [AGENTS.md]       # the default; looked up in the workspace root, in this order
+#                            # (an explicitly empty list, names: [], is the other way to say off)
+
+# =============================================================================
 # Auto's blast radius (only meaningful in --mode auto). GLOBAL-CONFIG-ONLY: there is no flag
 # or env, and a project config cannot loosen it — editing THIS file is the deliberate
 # acknowledgement. Default: true.

@@ -215,3 +215,19 @@ the **only** key it sets and that every other key still parses to nothing.
 - **`{{datetime}}` is a per-day cache boundary.** A session running across midnight re-renders the
   first system message and the server's prefix cache misses once. That is the accepted cost of a
   correct date, and the reason the placeholder is not a timestamp.
+
+## Note (2026-07-28) — the zero-byte anchor now reads "no prompt AND no context files"
+
+Decision §6 says `""` seeds nothing, "so the native no-prompt anchor stays byte-identical". That
+still holds for the prompt: an empty template seeds no system message, and
+`TestPromptSeam_NativeProfileByteIdentical` is untouched.
+
+What changed is the *condition* the anchor tests.
+[ADR 0026](0026-workspace-context-files-are-session-scoped-prompt-data.md) added a **second,
+independent** source of standing system content — the workspace context files
+(`Config.ContextFiles`, default `AGENTS.md`) — which seeds the same position-0 message on its own,
+so the request is byte-identical only with **no prompt and no context files**. The seed is composed
+by `standingSystem()` (prompt → context files) and everything else in §6 is unchanged: one merged
+system message, per-request projection, never in history or the snapshot. The Decision text above is
+left exactly as written; this note is the pointer, so the anchor's condition is not read as narrower
+than it is.

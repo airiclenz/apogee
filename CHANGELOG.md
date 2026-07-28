@@ -10,6 +10,39 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **apogee now reads your project's `AGENTS.md` — workspace context files.** The system prompt says
+  what *you* always want said; this is what *this project* wants said. At the start of every session
+  apogee looks for `AGENTS.md` in the workspace root and folds its content into the same first system
+  message, after your prompt, under a `## Workspace context: AGENTS.md` header — so a repo that
+  already keeps one for other agents is picked up with **nothing to configure**. A new file-only
+  `context-files:` block is the control: `names:` lists the names to look for (**all** of the ones
+  that exist are included, in your order — it is an inclusion list, not a fallback chain) and
+  `enable: false` turns it off, as does an explicitly empty `names: []`. Names are looked up in the
+  workspace root only — no walk-up, no global context file; standing text that follows *you* is what
+  `system-prompt-text` / `system-prompt-file` already are.
+  - **Discovery, so absence is normal.** A name that does not exist is skipped silently (one config
+    travels across repos that carry different files, or none), and so is an empty file; a file that
+    is **present but unreadable** is reported in the transcript and skipped, never a startup failure.
+    A malformed *name* — absolute, `..`, empty, or listed twice — **is** a startup error naming
+    `context-files.names` and the value, on every OS, so a travelling config fails where it was
+    written.
+  - **The content is data, verbatim.** The system prompt's placeholders do not apply to it: `{{…}}`
+    in some repo's `AGENTS.md` reaches the model exactly as written and can never fail apogee's
+    startup.
+  - **Read at session start, not per request.** The files are re-read by `/clear`, `/new` and a
+    `/sessions` resume, and **never** mid-conversation — so what the model was told is fixed for the
+    whole session (your server's prefix cache survives it) and an edit to `AGENTS.md` lands on your
+    next `/new`. Sub-agents inherit the parent's bytes. Nothing enters your history or a saved
+    session.
+  - **You are told what it costs.** Each loaded file is named with its size at every session
+    boundary, and when the standing system content (prompt + context files) outgrows its share of the
+    context window apogee says so — advisory only: nothing is ever capped or truncated.
+
+  For embedders this is **additive**: `apogee.Config` gains one field, `ContextFiles` (the names to
+  look for; nil = off), alongside a read-only `ContextFilesReport()` on the engine, so this is a
+  **minor** bump and an embedder that sets nothing is byte-identical to before. See
+  [ADR 0026](docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md).
+
 - **Sessions now persist continuously, are browsable, and resume with their scrollback intact — the
   session system.** Previously a conversation was saved **only on a clean quit** and `--resume
   <path>` reopened it into an empty-looking view (the engine remembered, but nothing replayed). Now:

@@ -285,6 +285,22 @@ inherit your prompt; apogee's own internal calls (the conversation summariser,
 `apogee probe`'s battery) keep their dedicated prompts and never see it; and the
 prompt never enters your conversation history or a saved session.
 
+Beside your prompt, apogee folds in the **project's own** standing text: it looks
+for `AGENTS.md` in the workspace root at the start of every session and appends it
+to that same first system message, under a header naming the file — so a repo that
+already keeps one for other agents is picked up with nothing to configure. The
+file-only `context-files:` block is where you change that: `names:` is the list of
+names to look for (all of the ones that exist are included, in your order) and
+`enable: false` turns the whole thing off. A name that is not there is skipped
+silently — one config travels across repos that carry different files, or none —
+and a file that is present but unreadable is reported in the transcript rather than
+stopping apogee. The content goes out **verbatim**: the placeholders above do not
+apply to it, so a repo's own `{{braces}}` can never fail your startup. The files
+are read when a session starts and re-read on `/clear`, `/new`, or a resume, never
+mid-conversation, so editing `AGENTS.md` while apogee runs takes effect on your
+next `/new`; apogee names each file it loaded, with its size, and warns you (never
+truncates) when the standing content outgrows its share of the context window.
+
 ### Showing a finished document
 
 When the model finishes a deliverable — a report, a review, an HTML summary — it calls

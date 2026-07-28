@@ -484,6 +484,29 @@ _Avoid_: "persona", "preamble" (either may be its *content*; the term names the 
 the profile's engine-owned tool menu, which follows it). Distinct from a **Skill**, which is
 turn-local and attached to one message.
 
+**Context files**:
+The **project's** standing text: files apogee **discovers** in the workspace root — configured by
+NAME (`context-files:`, default `AGENTS.md`; file-only, root-only, no walk-up) — whose content is
+folded into the standing system content beside the [System prompt](#context-and-history). Every
+listed name that exists is included, in list order, each under a `## Workspace context: <name>`
+header, and the merged first system message reads **prompt → context files → Mechanism directives
+→ tool menu**; either source alone seeds the message. Content is **data, never a template**: it
+bypasses the placeholder language entirely, so a repo's own `{{braces}}` travel verbatim and can
+never fail startup. The read is **session-scoped** — at construction and at each session boundary
+(`/clear`, `/new`, a restore), never per request and never mid-conversation — so the bytes are
+fixed for a session (the server's prefix cache survives) and an edit lands on the next `/new`; a
+**Sub-agent inherits the parent's bytes**, copied rather than re-read. A missing or empty file is
+skipped silently, a present-but-unreadable one **loudly** (a note, never a startup failure — it was
+discovered, not named); a malformed *name* is a startup error. Oversize is **advisory only**: the
+host names each loaded file and warns when the standing content exceeds the
+[Budget](#context-and-history)'s system-prompt share — nothing is ever capped or truncated. See
+[ADR 0026](docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md).
+_Avoid_: "project prompt", "workspace prompt" (the System prompt is the user's, these are the
+project's — the terms must stay separable), "AGENTS.md support" (that is the default name, not the
+concept), "loaded into context" (they are request-scoped standing content, not history). Distinct
+from a **File reference** (`@file`, turn-local and user-named) and from a **Skill** (attached to
+one message).
+
 **File reference (`@file`)**:
 A workspace file the user names with an `@path` token in their message. The loop resolves
 each reference at the start of the Turn — reading it within the workspace fence
