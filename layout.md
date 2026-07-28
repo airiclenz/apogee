@@ -130,3 +130,43 @@ the loop off, and `classic` with the loop off is exactly the status line apogee 
 the styles existed. The loop is quantised downstream by the terminal, so on a 256-colour
 terminal it steps visibly and on a 16-colour one it collapses to a couple of tones; that is what
 turning it off is for.
+
+---
+
+## The staged-interjection band
+
+**What it shows, and when.** A message typed while the agent is working is *staged*, not sent: it
+waits its turn and goes out at the next safe seam. Every staged message waiting to go out shows as
+one row in a band sitting directly above the input box — the slot closest to the box, below the
+status line. The band exists only while something is queued, in whichever state holds it: a live
+queue draining as the agent runs, or a queue held over at idle after a stop. An empty queue paints
+nothing at all — no rows, and no frame either.
+
+**One group, framed.** The rows are one contiguous block, never interleaved with other chrome, and
+the group is framed by one blank band row above and one below so it reads as its own object between
+the status line and the box. The frame belongs to the band: it appears and disappears with it.
+
+**Painted edge to edge.** Every row of the band — the content rows and the two blank framing rows
+alike — is faint text on a black field spanning the **full window width**. A row is clipped
+ANSI-aware to the window with a `…` tail and then padded back out to that same width, so the black
+runs to both edges and the terminal's own background never shows through past the text. The input
+box directly beneath has the same black interior, so band and box read as one joined block of
+chrome — the status line's posture, one row up.
+
+**A row.** `  ⧖ message`: two spaces of indent (`bodyIndent` — the same body column the status
+line's text and the transcript's own body sit in, so the ⧖ lines up with the spinner column above),
+the ⧖ staged-interjection marker, one space, then the message flattened to a single line (runs of
+whitespace collapse to one space) as a preview. The message itself is untouched; this is only how a
+waiting row is shown.
+
+**Order and cap.** Rows are in delivery order, oldest first — so the row nearest the input box is
+the newest, the one Backspace takes back. At most three content rows show at once (`maxQueuedRows`);
+the strip steals its height from the transcript viewport, so an unbounded queue would squeeze the
+conversation off the screen. Past the cap the **newest** rows are the ones kept and a
+`  … N more queued` marker rides at the top of the group, inside the frame and indented and painted
+like every other row, so the count says nothing was dropped. The worst case on screen is six rows:
+the cap, the marker, and the two framing rows.
+
+**What the band is not.** Once a staged message is delivered it leaves the band and appears in the
+transcript as its own ⧖ block, which keeps the transcript's own look. The status line's `N queued`
+readout is separate too, and reads the same count from the same queue.

@@ -682,6 +682,22 @@ point is a **minor** bump, not a breaking change.
   leaked; the gap is closed ahead of any error shape that would make it real. Failure messages
   still name the host exactly as the caller spelled it, and no message wording changes.
 
+## [0.9.4] — 2026-07-28
+
+### Changed
+
+- **Queued messages now read as one band above the input box.** The staged interjections waiting to
+  go out — the rows shown above the box while the agent works, or held there at idle after a stop —
+  used to sit flush against the left edge as bare faint lines. They now render as a group: each row
+  is indented two columns into the same body column the status line's text uses, the whole band is
+  painted faint on black **out to the full window width** so no strip of terminal background shows
+  through past the text, and one blank black row frames the group above and below. The band joins
+  the input box's own black interior directly beneath it, so the bottom chrome reads as one block.
+  Order, the three-row cap, the `… N more queued` overflow marker (now inside the frame, indented
+  and painted like every other row) and the status line's `N queued` readout are unchanged, and a
+  **delivered** ⧖ block in the transcript looks exactly as before. With nothing queued there is no
+  band and no frame. See `layout.md`'s *staged-interjection band* section.
+
 ## [0.8.0] — 2026-07-23
 
 *Release version **reset from the `1.x` line to `0.8.0`.** The `1.x` numbering overstated

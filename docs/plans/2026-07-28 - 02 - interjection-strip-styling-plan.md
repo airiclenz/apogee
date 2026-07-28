@@ -180,7 +180,15 @@ transcript blocks and the status line's "N queued" segment look exactly as befor
 
 **Commit.** `feat(tui): staged-interjection strip renders as an indented full-width black band`
 
-## 2. Documentation close-out
+## 2. Documentation close-out — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): one authorized deviation from the item text. The item (and the plan's *Track*
+line) says `VERSION` untouched; a first pass at this item nonetheless bumped `VERSION` from `v0.9.3`
+to `v0.9.4`, and the owner ratified keeping the bump rather than reverting it. `VERSION` therefore
+stays at `v0.9.4`, and — because `AGENTS.md` requires `CHANGELOG.md` and `VERSION` to stay in step —
+this item's `### Changed` entry ships under a new `## [0.9.4] — 2026-07-28` release section instead
+of under `## [Unreleased]`; the other `[Unreleased]` entries, which belong to other work, are left
+where they are. No behaviour, code or test changes ride along.
 
 **What.**
 
