@@ -312,6 +312,64 @@ func TestRunRootSystemPromptResolutionFails(t *testing.T) {
 	}
 }
 
+// runRoot folds the resolved context-file name list into apogee.Config.ContextFiles, which is what
+// makes the `context-files:` block reach the engine at all. The engine keeps no accessor for the
+// list yet, so the threading is proven at its one observable seam: the construction gate that
+// refuses a name reaching outside the workspace (internal/agent's own defense-in-depth check).
+// A list that never arrived would construct happily — which is exactly the regression this pins.
+func TestRunRootThreadsContextFiles(t *testing.T) {
+	t.Parallel()
+	t.Run("a workspace-relative list constructs and launches", func(t *testing.T) {
+		t.Parallel()
+		workspace := t.TempDir()
+		// Only the first name exists: discovery, not a requirement, so startup must not care.
+		if err := os.WriteFile(filepath.Join(workspace, "AGENTS.md"), []byte("house rules\n"), 0o600); err != nil {
+			t.Fatalf("write AGENTS.md: %v", err)
+		}
+		rec := &recordingLauncher{}
+		opts := options{
+			endpoint:     "http://127.0.0.1:1111",
+			model:        "fake",
+			mode:         "ask-before",
+			workspace:    workspace,
+			configDir:    t.TempDir(),
+			contextFiles: []string{"AGENTS.md", "docs/absent.md"},
+		}
+		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+			t.Fatalf("runRoot: %v", err)
+		}
+		if !rec.called {
+			t.Error("the launcher did not run; a resolved context-file list must not block startup")
+		}
+	})
+
+	t.Run("a name reaching outside the workspace fails startup before launch", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingLauncher{}
+		opts := options{
+			endpoint:     "http://127.0.0.1:1111",
+			model:        "fake",
+			mode:         "ask-before",
+			workspace:    t.TempDir(),
+			configDir:    t.TempDir(),
+			contextFiles: []string{filepath.Join("..", "outside.md")},
+		}
+		err := runRoot(context.Background(), opts, rec.launch)
+		if err == nil {
+			t.Fatal("runRoot: want the engine's context-file gate to refuse the name, got nil " +
+				"(the list never reached apogee.Config.ContextFiles)")
+		}
+		for _, want := range []string{"ContextFiles", "escapes"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q; want it to contain %q", err, want)
+			}
+		}
+		if rec.called {
+			t.Error("the launcher ran; a refused context-file name must fail startup before launch")
+		}
+	})
+}
+
 // The resolved `ui:` block reaches the renderer: runRoot hands opts.ui's two values to
 // tui.Options as Spinner and SpinnerColor. They are threaded INDEPENDENTLY — the colour flag is
 // not derived from the style and the style not from the flag — so the table walks the combination

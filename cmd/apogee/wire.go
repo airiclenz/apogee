@@ -175,6 +175,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// request and seeds as the first system message. Empty ⇒ no prompt: the request opens with
 		// the user's own message, exactly as it did before this key existed.
 		SystemPrompt: sysPrompt,
+		// The workspace context files (`context-files:`, file-only): the names the engine looks for
+		// in the workspace root at every session boundary, whose content rides the same first system
+		// message as the prompt above — verbatim, never as a template. Nil ⇒ the feature is off, and
+		// the request is exactly what it was before the key existed.
+		ContextFiles: opts.contextFiles,
 		Skills:       skillProvider,
 		// The `context-window:` PIN (0 when unpinned — nothing probes at startup any more). It is
 		// the budget /compact and the automatic Compaction trigger bound their summary request

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -134,6 +135,13 @@ type settings struct {
 	// resolveSystemPrompt, AFTER model resolution: which entry applies is not known until then.
 	systemPrompt systemPromptSettings
 
+	// contextFiles is the resolved `context-files:` block: the workspace-root files whose content
+	// joins the standing system content (the AGENTS.md / CLAUDE.md behaviour). File-only (no
+	// flag/env, like the system-prompt keys it sits beside) and its default is ON with the one
+	// name AGENTS.md, so a repo carrying that file works with no configuration at all. The
+	// composition root collapses it into the name list apogee.Config.ContextFiles carries.
+	contextFiles contextFilesSettings
+
 	// ui is the resolved `ui:` block: how the terminal UI presents itself — today the status-line
 	// spinner's animation and its colour loop. File-only (no flag/env, like the blocks above), and
 	// its defaults are the renderer's own (defaultUISettings): the default style with the colour
@@ -245,6 +253,111 @@ func (sp systemPromptSettings) validate() error {
 		}
 	}
 	return nil
+}
+
+// defaultContextFileName is the ONE name the `context-files:` block looks for when the config
+// names none: the cross-tool agent guide a repo already keeps for other agents. It is the whole
+// reason the feature needs no configuration in the common case.
+const defaultContextFileName = "AGENTS.md"
+
+// contextFilesSettings is the resolved `context-files:` block: whether workspace context files are
+// folded into the standing system content at all, and which names are looked for in the workspace
+// root, in inclusion order. It is one struct rather than two fields on settings for the same
+// reason presentSettings is: the keys describe ONE subsystem and travel together, from the on-disk
+// block through resolution to the composition root, where resolved() collapses them into the
+// single name list apogee.Config carries.
+//
+// The list is an INCLUSION set, not a priority chain — every listed name that EXISTS is included —
+// and whether any of them exists is deliberately not a config-time question: discovery is the
+// feature, and the default name will not exist in every repo.
+type contextFilesSettings struct {
+	// enable is the block's off-switch, default TRUE (the validated-sets `enable` posture): a repo
+	// carrying an AGENTS.md is picked up with nothing configured, and `enable: false` opts out.
+	enable bool
+	// names are the workspace-relative names to look for, in inclusion order. Default the one
+	// AGENTS.md; an explicitly EMPTY list means "no names", which is the other way to switch the
+	// feature off.
+	names []string
+}
+
+// defaultContextFilesSettings is the resolved block with nothing configured: on, looking for the
+// one default name.
+func defaultContextFilesSettings() contextFilesSettings {
+	return contextFilesSettings{enable: true, names: []string{defaultContextFileName}}
+}
+
+// validate rejects a name the workspace lookup must never be handed, at config time where the
+// message can name the key that is wrong: an empty entry, a name that is not workspace-relative,
+// one that climbs out of the workspace with "..", and one listed twice (which would fold the same
+// file into the prompt twice — always a mistake, never an intent).
+//
+// It runs whatever `enable` says: a bad name is a defect in the FILE, and a block that is off
+// today gets switched on months later — by which time the typo has lost its context. This is the
+// systemPromptSettings.validate posture (every level is checked, including entries this run will
+// never select).
+//
+// What is deliberately NOT checked: whether any named file EXISTS. Discovery is the feature — a
+// missing name is skipped silently by the engine's loader, because one global config is expected
+// to travel across repos that carry different files (or none).
+//
+// Every check is MACHINE-INDEPENDENT (ADR 0023 §3's posture): the same config file is refused on
+// every OS, so a Windows-shaped escape (`..\x`, a `C:` drive prefix, a leading `\`) is named on
+// Linux too rather than lying dormant until the file travels. The cost is a false positive for a
+// unix filename that genuinely contains a backslash, which is not a filename anyone writes here.
+func (cf contextFilesSettings) validate() error {
+	seen := make(map[string]struct{}, len(cf.names))
+	for _, name := range cf.names {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("apogee: context-files.names: an entry is empty — name a file to look " +
+				"for in the workspace root, or remove the entry")
+		}
+		if !workspaceRelative(name) {
+			return fmt.Errorf("apogee: context-files.names: %q is not workspace-relative: the names are "+
+				"looked up in the workspace root, so give a plain name like %q", name, defaultContextFileName)
+		}
+		// Slash-normalise before cleaning so the walk-up is recognised in either spelling on either
+		// OS; path (not path/filepath) then cleans with slash semantics everywhere.
+		cleaned := path.Clean(strings.ReplaceAll(name, `\`, "/"))
+		if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+			return fmt.Errorf("apogee: context-files.names: %q climbs out of the workspace: context files "+
+				"are read from the workspace only (a standing prompt from elsewhere is system-prompt-file)", name)
+		}
+		if _, dup := seen[cleaned]; dup {
+			return fmt.Errorf("apogee: context-files.names: %q is listed twice: each name is included "+
+				"once, in list order", name)
+		}
+		seen[cleaned] = struct{}{}
+	}
+	return nil
+}
+
+// workspaceRelative reports whether a configured name resolves inside the workspace root on EVERY
+// OS — the question filepath.IsAbs alone cannot answer for a config file that travels:
+//
+//   - a rooted name ("/x", "\x") is absolute on unix and root-of-the-current-drive on Windows;
+//   - a DRIVE-scoped name ("C:AGENTS.md") is drive-relative — filepath.IsAbs reports false for it
+//     even on Windows, yet it resolves against that drive's own working directory, so it can name
+//     a file anywhere on the machine.
+//
+// The "..' walk-up is validate's own check, so it can name that case separately.
+func workspaceRelative(name string) bool {
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
+		return false
+	}
+	drive := len(name) >= 2 && name[1] == ':' &&
+		(('a' <= name[0] && name[0] <= 'z') || ('A' <= name[0] && name[0] <= 'Z'))
+	return !drive
+}
+
+// resolved collapses the block into the list apogee.Config.ContextFiles carries: nil — the feature
+// off — when the switch is off or the list resolved empty, and otherwise the names in list order.
+// The two spellings of "off" are deliberately one value downstream: the engine's contract is that
+// an empty list IS the feature being off, so nothing below has to know which spelling was used.
+func (cf contextFilesSettings) resolved() []string {
+	if !cf.enable || len(cf.names) == 0 {
+		return nil
+	}
+	return cf.names
 }
 
 // uiSettings is the resolved `ui:` block, in the form the composition root hands the renderer
@@ -366,6 +479,11 @@ type layer struct {
 	// keys, so resolution keeps the zero value: no prompt, today's promptless request.
 	systemPrompt *systemPromptSettings
 
+	// contextFiles is set only by the FILE layer (the `context-files:` block is config'd, no
+	// flag/env — like systemPrompt above). A nil pointer means the source carries no block, so
+	// resolution keeps the defaults: on, looking for AGENTS.md in the workspace root.
+	contextFiles *contextFilesSettings
+
 	// ui is set only by the FILE layer (the UI's own presentation is config'd, no flag/env — like
 	// present). A nil pointer means the source configures no `ui:` block, so resolution keeps the
 	// defaults (the renderer's default spinner style, colour loop on).
@@ -397,7 +515,8 @@ type layer struct {
 // surface established: a data defect degrades, it never blocks startup).
 func resolveSettings(file, env, flag layer, hostID string) (settings, []string) {
 	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true,
-		validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: defaultUISettings()}
+		validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: defaultUISettings(),
+		contextFiles: defaultContextFilesSettings()}
 	// file-only (ADR 0012 + its 2026-07-21 amendment); env/flag never carry either, so the
 	// invocation environment can neither flip the flag nor name a host.
 	s.unconfinedHosts = file.unconfinedHosts
@@ -429,6 +548,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	}
 	if file.systemPrompt != nil { // file-only (ADR 0023); env/flag never carry a system prompt
 		s.systemPrompt = *file.systemPrompt
+	}
+	if file.contextFiles != nil { // file-only, like the system prompt it stands beside
+		s.contextFiles = *file.contextFiles
 	}
 	if file.ui != nil { // file-only; env/flag never carry the UI block
 		s.ui = *file.ui
@@ -608,6 +730,13 @@ type fileConfig struct {
 	SystemPromptText   string                             `yaml:"system-prompt-text"`
 	SystemPromptFile   string                             `yaml:"system-prompt-file"`
 	SystemPromptModels map[string]systemPromptEntryConfig `yaml:"system-prompt-models"`
+	// ContextFiles configures the workspace context files folded into the standing system content
+	// at every session start — the AGENTS.md / CLAUDE.md behaviour. File-only (no flag/env), like
+	// the system-prompt keys above, and it is a BLOCK rather than loose keys because the two keys
+	// (the switch and the list) are meaningless apart. Absent ⇒ on, looking for AGENTS.md in the
+	// workspace root. A pointer so an absent block falls through to that default rather than being
+	// an explicit zero setting, which would read as `enable: false` and silently disable it.
+	ContextFiles *contextFilesConfig `yaml:"context-files"`
 	// CursorShape names the shape the prompt's caret is drawn with — block (the default) |
 	// underline | bar. apogee draws the REAL terminal cursor, always steady, so this is the one
 	// axis there is: nothing blinks, and the shape the terminal itself is configured with cannot be
@@ -692,6 +821,34 @@ func (fc fileConfig) toSystemPromptSettings() systemPromptSettings {
 		for model, e := range fc.SystemPromptModels {
 			s.models[model] = promptSource{text: e.Text, file: e.File}
 		}
+	}
+	return s
+}
+
+// contextFilesConfig is the on-disk schema for the `context-files:` block: `enable` is the
+// off-switch (a pointer so an explicit `enable: false` is distinguishable from an absent key,
+// default true — the validated-sets posture), and `names` the workspace-relative names to look for
+// in inclusion order.
+//
+// `names` is a slice rather than a pointer because YAML already tells absent from empty here: an
+// absent (or null) key decodes to a nil slice and keeps the default [AGENTS.md], while an explicit
+// `names: []` decodes to an empty non-nil slice and means "no names" — the second spelling of off.
+type contextFilesConfig struct {
+	Enable *bool    `yaml:"enable"`
+	Names  []string `yaml:"names"`
+}
+
+// toContextFilesSettings maps the on-disk context-files block onto the resolved value, applying the
+// defaults for the keys the block leaves out — so `enable: false` alone, or `names:` alone, is a
+// usable one-line block (the toPresentSettings shape). It applies no validation: the names are
+// contextFilesSettings.validate's to refuse.
+func (c contextFilesConfig) toContextFilesSettings() contextFilesSettings {
+	s := defaultContextFilesSettings()
+	if c.Enable != nil {
+		s.enable = *c.Enable
+	}
+	if c.Names != nil { // present-but-empty is "no names", not "the default"
+		s.names = c.Names
 	}
 	return s
 }
@@ -851,6 +1008,10 @@ func (fc fileConfig) layer() layer {
 	if fc.SystemPromptText != "" || fc.SystemPromptFile != "" || len(fc.SystemPromptModels) > 0 {
 		sp := fc.toSystemPromptSettings()
 		l.systemPrompt = &sp
+	}
+	if fc.ContextFiles != nil {
+		c := fc.ContextFiles.toContextFilesSettings()
+		l.contextFiles = &c
 	}
 	if fc.UI != nil {
 		u := fc.UI.toUISettings()
@@ -1016,6 +1177,13 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := s.systemPrompt.validate(); err != nil {
 		return err
 	}
+	// A context-file NAME that cannot be a workspace file — empty, rooted, drive-scoped, climbing
+	// out with "..", or listed twice — is the same kind of machine-independent defect in the file,
+	// refused here where the message can name `context-files.names` and the value. Whether the
+	// named files exist is deliberately not asked: discovery is the feature (contextFilesSettings).
+	if err := s.contextFiles.validate(); err != nil {
+		return err
+	}
 	opts.endpoint = s.endpoint
 	opts.model = s.model
 	opts.mode = s.mode
@@ -1035,6 +1203,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.validatedSetsAlias = s.validatedSetsAlias
 	opts.present = s.present
 	opts.systemPrompt = s.systemPrompt
+	opts.contextFiles = s.contextFiles.resolved()
 	opts.ui = s.ui
 	opts.cursorShape = s.cursorShape
 	if opts.hostAlias == "" {

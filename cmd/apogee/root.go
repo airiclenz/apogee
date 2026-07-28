@@ -111,6 +111,14 @@ type options struct {
 	// (resolveSystemPrompt, after model resolution) and folds that into apogee.Config.SystemPrompt.
 	systemPrompt systemPromptSettings
 
+	// contextFiles is the RESOLVED workspace context-file name list (the `context-files:` block,
+	// file-only like the system prompt above): the names looked for in the workspace root, in
+	// inclusion order, or nil when the feature is off (`enable: false`, or an empty `names:`).
+	// applyConfig sets it from the resolved settings, having already refused a name that cannot be
+	// a workspace file; runRoot folds it straight into apogee.Config.ContextFiles, which the engine
+	// reads at every session boundary.
+	contextFiles []string
+
 	// ui is the resolved `ui:` block — the status-line spinner's animation and its colour loop.
 	// Loaded from the config file only, like present above. applyConfig sets it from the resolved
 	// settings (already validated against the styles this build knows); runRoot hands both values

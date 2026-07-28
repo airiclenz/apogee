@@ -234,7 +234,23 @@ next request carries the new bytes; a child agent's request carries the parent's
 
 **Commit.** `feat(agent): seed context-file content into the first system message`
 
-## 3. The config surface — the `context-files:` block
+## 3. The config surface — the `context-files:` block — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): four points on the validation, which is wider than the item's four literal
+cases. (a) Item 1's verifier carried a finding to this item — a Windows drive-relative name
+(`C:AGENTS.md`) passes `filepath.IsAbs` — so "an absolute path" is implemented as
+`workspaceRelative()`: rooted (`/x`, `\x`), drive-scoped (`C:x`), or `IsAbs` all fail as "not
+workspace-relative". (b) The `..` check slash-normalises first (`path.Clean` over the
+backslash-replaced name), so `..\secrets.md` is refused on Linux too — the checks are
+machine-independent, as the item requires, at the cost of a false positive for a unix filename that
+genuinely contains a backslash. (c) The duplicate check keys on that same cleaned form, so
+`AGENTS.md` and `./AGENTS.md` collide. (d) Names are validated whatever `enable` says (the
+`systemPromptSettings.validate` posture: a defect in the file outlives the day the block is
+switched back on). Two test-shape notes: the file-only precedence case went into the existing
+`TestResolveSettingsPrecedence` table beside the `ui`/`present` ones (whose 30 `want` literals
+gained the new default field), and `wire_test.go` proves the threading through the ENGINE's
+construction gate — a `..` name must fail startup — since no accessor for the list exists until
+item 4.
 
 **What.** Config-file-only plumbing, copying the `validated-sets:` block precedent end to
 end (`fileConfig` → layer → `settings` → `applyConfig` → `validate`).
