@@ -112,10 +112,11 @@ startup error (ADR 0023 §3).
 A bad **name**, however, is the user's own defect and is fatal, checked twice: in the host's config
 `validate` pass, where the message can name `context-files.names` and the offending value (an empty
 entry, a name that is not workspace-relative, a `..` walk-up, a duplicate), and again in `newAgent`,
-the defense-in-depth construction gate that catches a Go embedder's typo. The host checks are
+the defense-in-depth construction gate that catches a Go embedder's typo. Both gates apply ONE
+shared name rule (`internal/domain`), so neither can drift away from the other, and that rule is
 **machine-independent** (ADR 0023 §3's posture): a Windows-shaped escape — `..\x`, a leading `\`, a
-drive-scoped `C:AGENTS.md` — is refused on Linux too, so a travelling config fails on the machine
-that wrote it rather than on the one that inherits it. Validation runs whatever `enable` says: a
+drive-scoped `C:AGENTS.md` — is refused on Linux too, so a travelling config (or an embedder's list)
+fails on the machine that wrote it rather than on the one that inherits it. Validation runs whatever `enable` says: a
 defect in the file outlives the day the block is switched back off.
 
 **8. Oversize is a NOTICE and a WARNING against the Budget's own share — never a cap.** At every

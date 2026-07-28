@@ -478,6 +478,33 @@ decided — the two compose; they do not fight. Build only if an embedder asks.
 
 ---
 
+## A marker phrase in the standing system content suppresses that Mechanism's directive
+
+**Status:** filed 2026-07-28, the entry
+[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md)'s
+Consequences asked for (that ADR carries the full record and the rejected alternatives);
+[ADR 0026](docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md) widened it to a
+second source. **Accepted, not a defect to fix on sight** — revisit if a real prompt trips it.
+
+`Request.AppendToSystem(marker, text)` is idempotent by `strings.Contains` over the FIRST system
+message, and the markers are natural-language phrases — `decompose`'s `"Focus on one action"`,
+`cot`'s `"have not read any files yet"`, `library`'s `"[Apogee context notes"`. That message is now
+content the user supplies: the configured system prompt (ADR 0023) and, since ADR 0026, the
+workspace context files folded in beside it. A prompt — or a repo's own `AGENTS.md` — that happens
+to contain one of those phrases therefore reads as "already injected", and the Mechanism stays
+quiet.
+
+It is a **suppression, not a corruption**: the request stays well-formed, and the user's own
+sentence on that subject is what the model reads instead. The blast radius is bounded to the
+catalogued nudge Mechanisms, which are default-off and enabled per model on bench evidence
+([ADR 0015](docs/adr/0015-catalogued-mechanisms-are-enabled-by-id-through-config.md)).
+
+**Standing (do not re-file as new ideas):** both obvious fixes were weighed and declined in ADR
+0023 — a non-textual idempotency channel changes the hook API's contract for every Mechanism, and
+opaque sentinel strings would put text in front of the model whose only reader is apogee.
+
+---
+
 ## Phase-5 verification leftovers — the owner-run passes this machine cannot perform
 
 **Status:** carried forward 2026-07-22 from the "Owner-run checklist" of the archived
@@ -558,9 +585,9 @@ any standing constraint that must not be re-filed.
 - **General system-prompt / template story** — CLOSED 2026-07-26
   ([ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md);
   `docs/plans/archived/2026-07-26 - 02 - configurable-system-prompt-plan.md`). The accepted
-  marker-phrase-suppression interaction is recorded in ADR 0023's Consequences; the native
-  byte-identical anchor (`TestPromptSeam_NativeProfileByteIdentical`) still holds. The
-  host-override residual is now its own entry above.
+  marker-phrase-suppression interaction is recorded in ADR 0023's Consequences and is now its own
+  entry above; the native byte-identical anchor (`TestPromptSeam_NativeProfileByteIdentical`) still
+  holds. The host-override residual is now its own entry above.
 - **Auto-mode confinement degradation is silent** — CLOSED 2026-07-21 (ADR 0012 amendment;
   `docs/plans/archived/auto-confinement-degradation-plan.md`): capability-aware startup notice,
   `/confine`, the host-scoped `unconfined-hosts:` acknowledgement, the comment-preserving config

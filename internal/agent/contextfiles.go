@@ -74,32 +74,31 @@ func loadContextFiles(workspaceDir string, names []string) []contextFile {
 	return files
 }
 
-// validateContextFileNames rejects a name the loader must never be handed: an empty one, an
-// absolute path, or one whose cleaned form climbs out of the workspace. It is the engine's
-// defense-in-depth gate (ADR 0023 §3's posture, mirroring the prompt.Validate one beside it):
-// for config users the host's own check fires first and names the config key, so this one
-// exists to make a Go embedder's typo fail construction loudly rather than reach for a file
-// outside the workspace. Every error names the offending entry.
+// validateContextFileNames rejects a name the loader must never be handed: an empty one, one that
+// is not workspace-relative (rooted, or Windows drive-scoped), or one whose cleaned form climbs
+// out of the workspace. It is the engine's defense-in-depth gate (ADR 0023 §3's posture, mirroring
+// the prompt.Validate one beside it): for config users the host's own check fires first and names
+// the config key, so this one exists to make a Go embedder's typo fail construction loudly rather
+// than reach for a file outside the workspace. Every error names the offending entry.
+//
+// The name rule itself is domain's (workspacename.go) — the SAME rule the host's config check
+// applies, so an embedder is refused exactly what a config user is, and the two gates cannot
+// drift. It is machine-independent by construction: `C:AGENTS.md` and `..\x` are refused on Linux
+// and macOS too, rather than passing here and reaching outside the workspace on Windows.
 func validateContextFileNames(names []string) error {
 	for _, name := range names {
-		if name == "" {
+		if strings.TrimSpace(name) == "" {
 			return errors.New("apogee: Config.ContextFiles: empty name")
 		}
-		if filepath.IsAbs(name) {
-			return fmt.Errorf("apogee: Config.ContextFiles: %q is absolute; names are workspace-relative", name)
+		if !domain.IsWorkspaceRelative(name) {
+			return fmt.Errorf("apogee: Config.ContextFiles: %q is not workspace-relative; names are "+
+				"looked up in the workspace root", name)
 		}
-		if escapesWorkspace(name) {
+		if domain.EscapesWorkspace(name) {
 			return fmt.Errorf("apogee: Config.ContextFiles: %q escapes the workspace", name)
 		}
 	}
 	return nil
-}
-
-// escapesWorkspace reports whether a workspace-relative name climbs above the workspace root
-// once cleaned — "..", "../x" and "a/../../x" all do, while "a/../x" does not.
-func escapesWorkspace(name string) bool {
-	cleaned := filepath.Clean(name)
-	return cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator))
 }
 
 // reloadContextFiles refills the session cache from the workspace. It is called at every

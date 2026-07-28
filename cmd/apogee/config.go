@@ -7,13 +7,13 @@ import (
 	"maps"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/prompt"
@@ -302,8 +302,9 @@ func defaultContextFilesSettings() contextFilesSettings {
 //
 // Every check is MACHINE-INDEPENDENT (ADR 0023 §3's posture): the same config file is refused on
 // every OS, so a Windows-shaped escape (`..\x`, a `C:` drive prefix, a leading `\`) is named on
-// Linux too rather than lying dormant until the file travels. The cost is a false positive for a
-// unix filename that genuinely contains a backslash, which is not a filename anyone writes here.
+// Linux too rather than lying dormant until the file travels. The rule itself is domain's
+// (workspacename.go) — the same one the engine's construction-time gate applies, so a name refused
+// here is refused there and the two cannot drift apart.
 func (cf contextFilesSettings) validate() error {
 	seen := make(map[string]struct{}, len(cf.names))
 	for _, name := range cf.names {
@@ -311,17 +312,16 @@ func (cf contextFilesSettings) validate() error {
 			return errors.New("apogee: context-files.names: an entry is empty — name a file to look " +
 				"for in the workspace root, or remove the entry")
 		}
-		if !workspaceRelative(name) {
+		if !domain.IsWorkspaceRelative(name) {
 			return fmt.Errorf("apogee: context-files.names: %q is not workspace-relative: the names are "+
 				"looked up in the workspace root, so give a plain name like %q", name, defaultContextFileName)
 		}
-		// Slash-normalise before cleaning so the walk-up is recognised in either spelling on either
-		// OS; path (not path/filepath) then cleans with slash semantics everywhere.
-		cleaned := path.Clean(strings.ReplaceAll(name, `\`, "/"))
-		if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		if domain.EscapesWorkspace(name) {
 			return fmt.Errorf("apogee: context-files.names: %q climbs out of the workspace: context files "+
 				"are read from the workspace only (a standing prompt from elsewhere is system-prompt-file)", name)
 		}
+		// The duplicate check compares NORMAL FORMS, so "AGENTS.md" and "./AGENTS.md" are one name.
+		cleaned := domain.CleanWorkspaceName(name)
 		if _, dup := seen[cleaned]; dup {
 			return fmt.Errorf("apogee: context-files.names: %q is listed twice: each name is included "+
 				"once, in list order", name)
@@ -329,24 +329,6 @@ func (cf contextFilesSettings) validate() error {
 		seen[cleaned] = struct{}{}
 	}
 	return nil
-}
-
-// workspaceRelative reports whether a configured name resolves inside the workspace root on EVERY
-// OS — the question filepath.IsAbs alone cannot answer for a config file that travels:
-//
-//   - a rooted name ("/x", "\x") is absolute on unix and root-of-the-current-drive on Windows;
-//   - a DRIVE-scoped name ("C:AGENTS.md") is drive-relative — filepath.IsAbs reports false for it
-//     even on Windows, yet it resolves against that drive's own working directory, so it can name
-//     a file anywhere on the machine.
-//
-// The "..' walk-up is validate's own check, so it can name that case separately.
-func workspaceRelative(name string) bool {
-	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
-		return false
-	}
-	drive := len(name) >= 2 && name[1] == ':' &&
-		(('a' <= name[0] && name[0] <= 'z') || ('A' <= name[0] && name[0] <= 'Z'))
-	return !drive
 }
 
 // resolved collapses the block into the list apogee.Config.ContextFiles carries: nil — the feature

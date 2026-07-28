@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -150,6 +151,10 @@ func TestLoadContextFilesInertWithoutWorkspace(t *testing.T) {
 // TestNewAgentRejectsBadContextFileName: the engine's defense-in-depth gate — an empty,
 // absolute, or workspace-escaping name fails construction with an error naming the offender,
 // exactly as an unknown prompt placeholder does.
+//
+// Every Windows-shaped case is MACHINE-INDEPENDENT (the host's config check's posture, now the
+// same domain rule): a drive-scoped or backslash-spelled name is refused on Linux and macOS too,
+// so an embedder's list that travels is refused where it was written rather than where it lands.
 func TestNewAgentRejectsBadContextFileName(t *testing.T) {
 	t.Parallel()
 
@@ -159,9 +164,16 @@ func TestNewAgentRejectsBadContextFileName(t *testing.T) {
 		name  string
 	}{
 		{"an empty name", ""},
+		{"a whitespace-only name", "   "},
 		{"an absolute path", filepath.Join(workspace, "AGENTS.md")},
+		{"a slash-rooted path", "/etc/passwd"},
+		{"a name rooted at the current drive", `\AGENTS.md`},
+		{"a Windows drive-relative name", "C:AGENTS.md"},
+		{"a Windows drive-absolute name", `C:\secrets.md`},
 		{"a parent escape", filepath.Join("..", "secrets.md")},
 		{"an escape hidden mid-path", filepath.Join("docs", "..", "..", "secrets.md")},
+		{"a backslash-spelled parent escape", `..\secrets.md`},
+		{"a backslash-spelled escape hidden mid-path", `docs\..\..\secrets.md`},
 	}
 
 	for _, tc := range tests {
@@ -177,7 +189,9 @@ func TestNewAgentRejectsBadContextFileName(t *testing.T) {
 			if !strings.Contains(err.Error(), "ContextFiles") {
 				t.Errorf("error %q does not name the offending config surface", err)
 			}
-			if tc.name != "" && !strings.Contains(err.Error(), tc.name) {
+			// The message quotes the name (%q), so a backslash-spelled entry appears escaped:
+			// compare against the quoted form rather than the raw one.
+			if strings.TrimSpace(tc.name) != "" && !strings.Contains(err.Error(), strconv.Quote(tc.name)) {
 				t.Errorf("error %q does not name the offending entry %q", err, tc.name)
 			}
 		})
