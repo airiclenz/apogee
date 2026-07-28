@@ -92,6 +92,32 @@ func TestBeatHintVanishedFallsBack(t *testing.T) {
 	}
 }
 
+// The hint follows the BINDING: once a rebind commits, the host re-states it, and the very next
+// beat must resolve the newly bound model — otherwise a server that still serves the old id would
+// keep reporting it as active and the orchestration would bind straight back, flapping the session
+// off whatever the user just picked.
+func TestSetModelMovesTheDiscoveryHint(t *testing.T) {
+	t.Parallel()
+
+	// No /props payload, so nothing overrides the advertised windows: the window the beat reports
+	// is the hinted model's own, which is exactly what has to move with the hint.
+	srv := discoveryServer(t, `{"data":[{"id":"model-a","context_length":32768},{"id":"model-b","context_length":8192}]}`, "")
+
+	monitor := NewMonitor(srv.URL, "model-a", "")
+
+	if beat := monitor.Beat(context.Background()); beat.ActiveModel != "model-a" || beat.ContextWindow != 32768 {
+		t.Fatalf("first beat: active = %q ctx = %d, want model-a / 32768", beat.ActiveModel, beat.ContextWindow)
+	}
+
+	monitor.SetModel("model-b")
+
+	// model-a is still served and still listed first, so only the moved hint can explain this
+	// answer — the hint wins over the advertisement order.
+	if beat := monitor.Beat(context.Background()); beat.ActiveModel != "model-b" || beat.ContextWindow != 8192 {
+		t.Errorf("beat after SetModel: active = %q ctx = %d, want model-b / 8192", beat.ActiveModel, beat.ContextWindow)
+	}
+}
+
 // A keyed server answers /v1/models with 401 just as readily as it answers a chat call, so the
 // monitor's own client must carry the bearer token: without it the footer would report the
 // Upstream permanently unreachable under a session that is talking to it perfectly well.

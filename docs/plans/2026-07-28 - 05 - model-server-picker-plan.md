@@ -269,7 +269,7 @@ duplicate name fails startup with a message naming the entry.
 
 **Commit.** `feat(config): servers: — named upstream endpoints for the /server picker`
 
-## 2. The discovery hint follows the bound model
+## 2. The discovery hint follows the bound model — ✅ DONE (2026-07-28)
 
 **What.** A successful rebind moves the Monitor's discovery hint to the model it bound, so
 the next beat measures the binding as "nothing new" — the load-bearing half of the `/model`

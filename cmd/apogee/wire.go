@@ -337,6 +337,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// Session metadata follows the wire: a session that switched models mid-conversation is
 		// listed under the model it ends on, which is the one its last Turns actually ran against.
 		host.SetModel(spec.Model)
+		// And so does discovery: the hint is "which of the served models do I mean", a property of
+		// the binding rather than of the launch. Re-stating it on every commit keeps the next beat
+		// measuring the model the session now runs as "nothing new" — without it a server serving
+		// both the old and the new id would resolve the stale config hint and this very closure
+		// would bind straight back to it on the next beat.
+		monitor.SetModel(spec.Model)
 		return tui.RebindResult{
 			Model:         spec.Model,
 			ContextWindow: spec.MaxContextTokens,

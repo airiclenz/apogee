@@ -81,6 +81,21 @@ func NewMonitor(endpoint, modelHint, apiKey string) *Monitor {
 	return &Monitor{client: provider.NewClient(endpoint, modelHint, provider.WithAPIKey(apiKey))}
 }
 
+// SetModel moves the discovery hint to model. The hint is a property of the BINDING, not of
+// the launch: the host re-states it whenever a rebind commits — a user-driven pick and a
+// heartbeat-observed change alike, the latter a no-op restatement of what the beat just said —
+// so discovery keeps resolving the model the session actually runs rather than the one config
+// named at launch. Without that, a multi-model server still serving the configured id would
+// resolve it on the next beat and the rebind orchestration would dutifully bind back to it,
+// undoing the switch seconds after it landed.
+//
+// It never touches the endpoint, honouring provider.Client's own contract that switching
+// servers means a new Client rather than a mutated one. It is safe to call while a beat is in
+// flight: the client guards that field for exactly this concurrent use.
+func (m *Monitor) SetModel(model string) {
+	m.client.SetModel(model)
+}
+
 // Beat performs one observation and reports what answered. It never returns an error (see
 // Beat) and is bounded by the provider package's discovery timeout as well as by ctx, so a
 // hung server cannot outlive the interval.
