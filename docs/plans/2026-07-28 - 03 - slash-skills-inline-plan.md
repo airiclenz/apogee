@@ -490,7 +490,32 @@ completion the end does, for `/`, `@`, and the picker region alike.
 
 **Commit.** `feat(tui): caret-aware completion for the /, @ and /skill regions`
 
-## 7. The running state opens — dropdown live, per-command policy
+## 7. The running state opens — dropdown live, per-command policy — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): the item's open question resolved to the PRIMARY branch — `/confine`'s status form is
+runnable mid-run and was NOT demoted. Evidence: `internal/agent/agent.go:256-260`, `ConfineToWorkspace()`
+reads the live flag under `a.confineMu.RLock()` (the RWMutex declared at `agent.go:64` as an explicit
+SIBLING of `modeMu`), its setter locks the same mutex at `agent.go:277-281`, and the type doc at
+`agent.go:34` names exactly `SetMode` and `SetConfineToWorkspace` as "anytime-goroutine-safe, each behind
+its own mutex" — the interface doc (`tui.go:131`) already claimed the same. Four further deviations, all
+mechanical. (a) `whileRunning` alone cannot express the policy the *Design decisions* state, because
+`/confine` is safe under one FORM and idle-only under the other; the gate is therefore the new pure
+`parsedInput.safeWhileRunning()` (command.go), which reads the spec flag AND `confine.action ==
+confineStatus` — true for every non-confine verb by `confineArgs`' zero value, so no verb is named — with
+`Model.commandRunnable` (`!m.busy() || …`) the one gate both ⏎ and the dropdown accept consult. A
+`/confine <typo>` stays runnable mid-run: `parseConfine` reports its error as the zero value, and a usage
+line is a report. (b) `commandSuggestions` gained a `busy bool` parameter (the tag is a property of the
+moment, not a table column); the predicate is `m.busy()`, not `state == stateRunning`, since an idle-only
+verb needs a quiescent engine in every busy state. The tag needs no style of its own — `renderPopup`
+already paints unselected rows faint. (c) the accept-path refusal (`Model.refuseIdleOnlyCommand`) also
+CLOSES the overlay: the draft, caret and verb token are untouched as the item requires, but every other
+branch of `acceptAutocomplete` closes or re-derives the overlay, and a menu still highlighting the row it
+just refused would only invite the same refusal. (d) `recomputeAutocomplete`'s edge-triggered
+`ReloadSkills` is now state-blind — verified race-free: `skills.Provider` swaps its catalog through an
+`atomic.Pointer` (`internal/skills/provider.go:26,43-47`), which is also what makes `/skills` safe mid-run.
+`TestFileAutocompleteOpensWhileRunning` asserted the inverse of this item and was rewritten as
+`TestAutocompleteOpensWhileRunning`; `internal/tui/doc.go`'s mini-language paragraph gained the policy
+clause as items 3–6 did; the CHANGELOG and the README/layout.md/CONTEXT.md sweep stay item 9's.
 
 **What.** The first `ISSUES.md:12` symptom. Honor `whileRunning` end to end:
 

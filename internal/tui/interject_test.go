@@ -373,9 +373,9 @@ func TestStagedRowCarriesFileRefs(t *testing.T) {
 	}
 }
 
-// TestCommandWhileRunningRefusedWithNote pins the one thing that does NOT queue: a /command is
-// idle-only, so it earns a note and keeps the human's line in the box for the moment the Exchange
-// ends.
+// TestCommandWhileRunningRefusedWithNote pins the thing that does NOT queue: a MUTATING /command
+// needs a quiescent engine, so it earns a note and keeps the human's line in the box for the moment
+// the Exchange ends. (The reporting verbs run right there — TestReportingCommandsRunWhileRunning.)
 func TestCommandWhileRunningRefusedWithNote(t *testing.T) {
 	m := runningModel(t)
 	m.input.SetValue("/clear")
@@ -659,10 +659,12 @@ func TestScrollWhileRunningViaPgKeysAndWheel(t *testing.T) {
 	}
 }
 
-// TestFileAutocompleteOpensWhileRunning: the "@file" overlay is offered in an interjection (the
-// ref is useful there), while the command and skill regions stay idle-only — offering a completion
-// that would be refused would be the overlay lying about what ⏎ does.
-func TestFileAutocompleteOpensWhileRunning(t *testing.T) {
+// TestAutocompleteOpensWhileRunning: all three regions are offered in an interjection — the first
+// ISSUES #12 symptom was the "/" namespace vanishing exactly when the human was composing the
+// message to send next. A @ref and a skill token are message content that rides the interjection; a
+// command row is offered too, and the ones that need a boundary carry the "— idle only" tag rather
+// than being hidden, so the menu says what accepting them will do.
+func TestAutocompleteOpensWhileRunning(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatalf("writing the fixture file: %v", err)
@@ -683,14 +685,166 @@ func TestFileAutocompleteOpensWhileRunning(t *testing.T) {
 
 	m.input.SetValue("/clea")
 	m = step(t, m, keyRune('r'))
-	if m.autocomplete.active {
-		t.Errorf("autocomplete = %+v; want no command region while running", m.autocomplete)
+	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+		t.Fatalf("autocomplete = %+v; want the merged command menu open while running", m.autocomplete)
+	}
+	if len(m.autocomplete.items) != 1 || m.autocomplete.items[0].value != "clear" {
+		t.Fatalf("rows = %+v, want [clear]", m.autocomplete.items)
+	}
+	if label := m.autocomplete.items[0].label; !strings.Contains(label, idleOnlyTag) {
+		t.Errorf("row label = %q, want the %q tag — /clear cannot run mid-Step", label, idleOnlyTag)
+	}
+	if got := plain(m.View()); !strings.Contains(got, idleOnlyTag) {
+		t.Errorf("the rendered dropdown is missing the idle-only tag:\n%s", got)
 	}
 
 	m.input.SetValue("/skill re")
 	m = step(t, m, keyRune('v'))
-	if m.autocomplete.active {
-		t.Errorf("autocomplete = %+v; want no skill picker while running", m.autocomplete)
+	if !m.autocomplete.active || m.autocomplete.kind != acSkill {
+		t.Fatalf("autocomplete = %+v; want the skill picker open while running", m.autocomplete)
+	}
+}
+
+// A reporting verb answers on the spot while the model works: /version and /skills touch no engine
+// boundary at all, so ⏎ on one prints its note, empties the box (the whole-input form IS the command
+// line), and leaves the worker and the queue exactly where they were — nothing staged, nothing sent.
+func TestReportingCommandsRunWhileRunning(t *testing.T) {
+	opts := testOpts
+	opts.Version = "9.9.9-test"
+	cases := []struct {
+		verb string
+		want string
+	}{
+		{"/version", "apogee 9.9.9-test"},
+		{"/skills", "no skills found"}, // no catalog is wired: the empty-catalog note is the report
+	}
+	for _, c := range cases {
+		t.Run(c.verb, func(t *testing.T) {
+			m := newTestModelEng(t, &fakeEngine{}, opts)
+			m.input.SetValue("open the exchange")
+			m, _ = stepCmd(t, m, keyEnter())
+			if m.state != stateRunning {
+				t.Fatalf("precondition: state = %v, want running", m.state)
+			}
+			m = stageRow(t, m, "hold that thought") // a staged row the command must not disturb
+			m.input.SetValue(c.verb)
+			next, cmd := stepCmd(t, m, keyEnter())
+
+			if cmd != nil {
+				t.Error("a reporting command returned a Cmd; it must not drive a worker")
+			}
+			if next.state != stateRunning {
+				t.Errorf("state = %v; want the running Exchange untouched", next.state)
+			}
+			if got := next.input.Value(); got != "" {
+				t.Errorf("input = %q; want the box emptied — the line was nothing but the verb", got)
+			}
+			if n := len(next.pendingInterjections); n != 1 {
+				t.Errorf("staged rows = %d; want the queue untouched (1)", n)
+			}
+			if got := plain(next.View()); !strings.Contains(got, c.want) {
+				t.Errorf("transcript missing the %s report %q:\n%s", c.verb, c.want, got)
+			}
+		})
+	}
+}
+
+// /confine is per-FORM while running: the status report reads Engine.ConfineToWorkspace (goroutine-
+// safe, like SetMode) and answers immediately, while "off" would swap Auto's blast radius under a
+// Step that is already dispatching tool calls — so it is refused, the engine untouched.
+func TestConfineStatusRunsWhileRunningButOffIsRefused(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+
+	m.input.SetValue("/confine")
+	m = step(t, m, keyEnter())
+	if got := plain(m.View()); !strings.Contains(got, "/confine — auto mode's blast radius") {
+		t.Errorf("the status report is missing while running:\n%s", got)
+	}
+	if got := eng.confinesSet(); len(got) != 0 {
+		t.Errorf("SetConfineToWorkspace calls = %v, want none (status reports only)", got)
+	}
+
+	m.input.SetValue("/confine off")
+	m = step(t, m, keyEnter())
+	if got := m.input.Value(); got != "/confine off" {
+		t.Errorf("input = %q; want the refused line preserved", got)
+	}
+	if got := eng.confinesSet(); len(got) != 0 {
+		t.Errorf("SetConfineToWorkspace calls = %v, want none — the mutating form is idle-only", got)
+	}
+	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
+		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	}
+}
+
+// Accepting a tagged row from the dropdown while running answers with the note and touches NOTHING
+// else: the draft (the verb token included — it was never consumed) is exactly as it was, so ⏎ on
+// the very same line works the moment the Exchange ends.
+func TestAcceptIdleOnlyCommandWhileRunningNotesAndKeepsTheDraft(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+
+	m.input.SetValue("fix the parser /clear")
+	m.input.MoveToEnd()
+	m = m.recomputeAutocomplete()
+	if !m.autocomplete.active {
+		t.Fatalf("precondition: the menu did not open on the trailing token")
+	}
+	next, cmd := stepCmd(t, m, keyTab())
+
+	if cmd != nil {
+		t.Error("a refused accept returned a Cmd; nothing may be driven while a worker runs")
+	}
+	if eng.clearCalls != 0 {
+		t.Errorf("ClearContext calls = %d, want 0 — /clear cannot run mid-Step", eng.clearCalls)
+	}
+	if got, want := next.input.Value(), "fix the parser /clear"; got != want {
+		t.Errorf("editor = %q, want the draft untouched (%q)", got, want)
+	}
+	if next.autocomplete.active {
+		t.Error("the overlay stayed open after the accept was answered")
+	}
+	if got := plain(next.View()); !strings.Contains(got, commandsAtIdleNote) {
+		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	}
+}
+
+// A skill accepted from the merged menu while running splices its inline token like any other text,
+// and the staged row carries the id out to the engine — a skill is message content, so it rides the
+// interjection rather than answering to the command policy.
+func TestAcceptSkillWhileRunningStagesTheID(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+
+	m.input.SetValue("also /revi")
+	m.input.MoveToEnd()
+	m = m.recomputeAutocomplete()
+	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+		t.Fatalf("autocomplete = %+v; want the merged menu open on the skill token", m.autocomplete)
+	}
+	m = step(t, m, keyTab())
+	if got, want := m.input.Value(), "also /review "; got != want {
+		t.Errorf("editor = %q, want the spliced token (%q)", got, want)
+	}
+
+	m = step(t, m, keyEnter())
+	if n := len(m.pendingInterjections); n != 1 {
+		t.Fatalf("staged rows = %d, want 1", n)
+	}
+	if got := m.pendingInterjections[0].input.SkillIDs; !reflect.DeepEqual(got, []string{"review"}) {
+		t.Errorf("staged SkillIDs = %v, want [review]", got)
 	}
 }
 

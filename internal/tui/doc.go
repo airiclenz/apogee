@@ -52,7 +52,13 @@
 // — [Model.acceptAutocomplete] cuts the verb out and leaves the rest of the draft standing, which
 // is why [Model.runCommand] never touches the editor and its callers prepare it instead. The
 // whole-input form keeps ownership of arguments ("/confine off --save"), so ⏎ on a finished token
-// falls through to submit exactly there and executes at accept everywhere else.
+// falls through to submit exactly there and executes at accept everywhere else. All three regions
+// stay open while the model WORKS — the namespace is most wanted exactly where it used to vanish,
+// on the message being composed for next — under the per-command policy the table carries
+// (commandSpec.whileRunning, read off the parsed line by [parsedInput.safeWhileRunning] so
+// "/confine" and "/confine off" can differ): the reporting verbs run mid-run, every other row is
+// TAGGED "— idle only" in the menu and earns commandsAtIdleNote instead of running, and skill and
+// file tokens are simply message content that rides the interjection.
 // /clear (aliased by /new) and /compact drive the engine's context seams
 // ([Engine.ClearContext]/[Engine.Compact]); /confine reports and toggles Auto's blast radius
 // through [Engine.SetConfineToWorkspace], the one verb that takes arguments ([parseConfine] owns

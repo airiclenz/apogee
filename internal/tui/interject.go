@@ -125,30 +125,39 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // Staging — the Update-goroutine half: type, queue, take back, and record on arrival
 // ----------------------------------------------------------------------------
 
-// commandsAtIdleNote is what a /command typed while the model works earns instead of a queue
-// slot. Commands are idle-only by construction (runCommand drives the engine at a boundary the
-// Update loop owns), so queueing one would only defer a refusal — and the human's line is left in
-// the box, because they may well want to send it the moment the Exchange ends.
+// commandsAtIdleNote is what an IDLE-ONLY /command typed while the model works earns instead of a
+// queue slot: the verbs that drive the engine at a boundary the Update loop owns (/clear, /new,
+// /sessions, /compact, /continue, /confine off|on) cannot run mid-Step, and queueing one would only
+// defer a refusal. The human's line is left in the box, because they may well want to send it the
+// moment the Exchange ends. The reporting verbs are not refused at all — they run right there
+// (parsedInput.safeWhileRunning), which is why this note is no longer about "commands" as a class.
 const commandsAtIdleNote = "commands run at idle — not queued"
 
 // stageInterjection is what ⏎ does while a worker runs: it turns the editor's contents into a
 // staged row and empties the box, launching nothing (the single-worker invariant is untouched —
 // the running worker delivers the row at its next between-Steps boundary, ADR 0025).
 //
-// Four outcomes, and the input's fate is the difference between them: a /command is REFUSED with
-// a note and the line is left exactly where it was (commandsAtIdleNote); a lone /word that names
-// nothing is refused the same way, with the typo guard's note (refuseUnknownSlash — a mistyped
-// invocation must no more be queued for the model than sent to it); a blank box stages nothing at
-// all; anything else is queued and the editor is cleared, the same way a submit clears it. The row
-// carries both halves — the verbatim editor text for the Backspace restore, and the parsed input
-// the engine consumes, whose @file references deliberately stay unresolved until delivery, so the
-// model reads the file as it stands then.
+// Five outcomes, and the input's fate is the difference between them: a REPORTING /command runs on
+// the spot — /version, /skills, /confine status answer while the model works, because they touch no
+// boundary (commandRunnable), and the box empties exactly as it does at idle since a whole-input
+// invocation IS the command line; any other /command is REFUSED with a note and the line is left
+// exactly where it was (refuseIdleOnlyCommand); a lone /word that names nothing is refused the same
+// way, with the typo guard's note (refuseUnknownSlash — a mistyped invocation must no more be queued
+// for the model than sent to it); a blank box stages nothing at all; anything else is queued and the
+// editor is cleared, the same way a submit clears it. The row carries both halves — the verbatim
+// editor text for the Backspace restore, and the parsed input the engine consumes, whose @file
+// references deliberately stay unresolved until delivery, so the model reads the file as it stands
+// then.
 func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
-		m.transcript.addNote(commandsAtIdleNote)
-		m.refreshViewport()
-		return m, nil
+		if !m.commandRunnable(parsed) {
+			return m.refuseIdleOnlyCommand()
+		}
+		// Nothing else was typed (the whole-input command rule), so emptying the box is exactly
+		// stripping the verb — submit's reading at idle, and runCommand touches the editor in neither.
+		m.promptEditor.reset()
+		return m.runCommand(parsed)
 	}
 	if parsed.kind == kindUnknownSlash {
 		return m.refuseUnknownSlash(parsed)

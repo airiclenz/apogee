@@ -50,9 +50,10 @@ type parsedInput struct {
 //
 //   - takesArgs — the verb reads what follows it. Only /confine does (parseConfine owns its
 //     grammar); every other verb ignores surplus tokens, as it always has.
-//   - whileRunning — the verb is safe to run while a worker is working, because it only reports.
-//     Recorded here for the dispatch side to honour; nothing reads it yet, so today every
-//     command still runs at idle only.
+//   - whileRunning — the verb is safe to run while a worker is working, because it only REPORTS:
+//     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is
+//     idle-only and earns commandsAtIdleNote mid-run instead of running (parsedInput.safeWhileRunning
+//     is where the flag is read, and /confine's reporting FORM is the one nuance it adds).
 //   - menuOnly — the dropdown offers the verb but the parser must never recognise it. /skill is
 //     the one: accepting it chains into the skill picker, and keeping it unparsed is exactly
 //     what keeps an unknown "/skill foo" line an ordinary message.
@@ -175,6 +176,24 @@ func commandByName(name string) (commandSpec, bool) {
 		}
 	}
 	return commandSpec{}, false
+}
+
+// safeWhileRunning reports whether this parsed command LINE may be driven while a worker works.
+// It is the whole of the per-command policy, in one pure place both ⏎ (stageInterjection) and the
+// dropdown's accept (acceptAutocomplete) read, so the menu's "— idle only" tag and what the key
+// actually does can never disagree.
+//
+// Two tests, because the policy is about the line and not only about the verb. The verb's own
+// commandSpec.whileRunning says it merely reports — /version, /skills, /confine. /confine then adds
+// the one nuance: its STATUS form reports (Engine.ConfineToWorkspace is goroutine-safe, read under
+// the engine's own confineMu), while "/confine off|on" swaps Auto's blast radius under a Step that
+// is already dispatching tool calls and is idle-only for the same reason /clear is. confineArgs'
+// zero value IS confineStatus, so that second test reads true for every other verb without naming
+// one — and an argument error, which parseConfine reports as the zero value, stays runnable so a
+// mistyped /confine earns its usage line mid-run exactly as it does at idle.
+func (p parsedInput) safeWhileRunning() bool {
+	spec, ok := commandByName(p.command)
+	return ok && spec.whileRunning && p.confine.action == confineStatus
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is

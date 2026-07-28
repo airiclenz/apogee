@@ -66,20 +66,22 @@ type autocompleteState struct {
 }
 
 // computeAutocomplete derives the overlay from the current input value and the caret's byte offset
-// into it. It returns an inactive state when nothing should be suggested. Called at stateIdle and —
-// for the file region only — at stateRunning.
+// into it. It returns an inactive state when nothing should be suggested. Called wherever the box
+// is editable and the overlay claims keys — stateIdle and stateRunning (handleKey).
 //
 // The caret arrives as an ARGUMENT rather than being read off the widget, which keeps this a pure
 // function of (value, caret): recomputeAutocomplete is the one place that asks the textarea where
 // its cursor is, and every test constructs the pair directly.
 //
-// The three regions do NOT share a lifetime. An "@file" reference is exactly as useful in a
-// message interjected mid-run as in one submitted at idle (the ref resolves at delivery, fresh),
-// so the file region is offered wherever the box is editable. The "/" region is idle-only
-// because a command typed mid-run is REFUSED rather than queued (it earns a note instead), and
-// offering it while running would be the overlay lying about what ⏎ does. The "/skill" picker
-// stays idle-only alongside it for now — a hold on the menu, not a limit of what it splices: the
-// inline token it writes is message content, and rides an interjection exactly as an @ref does.
+// All three regions now share ONE lifetime: each is offered wherever the box is editable, a
+// running worker included — the first ISSUES #12 symptom was that the "/" namespace vanished
+// exactly when the human was composing the message to send next. An "@file" ref is as useful in an
+// interjection as in a submitted message (it resolves at delivery, fresh) and a skill "/token" is
+// message content that rides the interjection the same way. A COMMAND is the one that cannot
+// simply ride, so the menu tells the truth about it instead of hiding it: the verbs that only
+// report run mid-run, the ones that need a quiescent engine are TAGGED "— idle only"
+// (commandSuggestions) and earn commandsAtIdleNote if accepted. An offered row that says what it
+// will do is worth more than a namespace that disappears.
 //
 // Each region is scoped to the TOKEN AT THE CARET, never to the whole line and no longer to the end
 // of the buffer: the "/" menu opens on the "/word" being edited in a draft that already holds text
@@ -87,13 +89,12 @@ type autocompleteState struct {
 // mistyped id repaired without first emptying the box or walking the caret back to the end.
 func (m Model) computeAutocomplete(caret int) autocompleteState {
 	value := m.input.Value()
-	idle := m.state == stateIdle
 
 	// Skill argument: a "/skill <partial>" region (the caret's word, introduced by a "/skill" token).
 	// Checked FIRST so it wins over the merged "/" branch — which would otherwise see the partial as
 	// a "/" token of its own. The region starts at the "/skill" itself, so accepting replaces the
 	// whole "/skill <partial>" run with the skill's own "/id " token.
-	if start, end, partial, ok := skillArgToken(value, caret); ok && idle {
+	if start, end, partial, ok := skillArgToken(value, caret); ok {
 		items := m.skillSuggestions(partial, outsideRegion(value, start, end))
 		if len(items) == 0 {
 			return autocompleteState{}
@@ -102,7 +103,7 @@ func (m Model) computeAutocomplete(caret int) autocompleteState {
 	}
 
 	// Command + skill: the caret's word is a "/" token — one namespace, one menu.
-	if start, end, partial, ok := caretSlashToken(value, caret); ok && idle {
+	if start, end, partial, ok := caretSlashToken(value, caret); ok {
 		items := m.slashSuggestions(partial, outsideRegion(value, start, end))
 		if len(items) == 0 {
 			return autocompleteState{}
@@ -142,15 +143,16 @@ func outsideRegion(value string, start, end int) string {
 // the other — a single visit to the catalog, not two. This is also the ONE place the textarea is
 // asked where its cursor is: callers use it instead of assigning m.computeAutocomplete(…) directly,
 // and computeAutocomplete stays a pure function of the (value, caret) pair a test can construct.
+//
+// The reload is state-blind, because both regions are: a skill invoked from an interjection is
+// resolved by the same shared provider a submitted one is, so a "/" token typed while the model
+// works must see the catalog as it stands now, exactly as one typed at idle does.
 func (m Model) recomputeAutocomplete() Model {
 	value := m.input.Value()
 	caret := m.caretByteOffset() // the one place the widget is asked where its cursor is
 	_, _, _, inPicker := skillArgToken(value, caret)
 	_, _, _, inMenu := caretSlashToken(value, caret)
-	// Both regions are idle-only (computeAutocomplete), so a "/" token typed into an interjection is
-	// not one: it must neither re-scan disk nor arm the edge trigger, or the first keystroke back at
-	// idle would find skillRegion already true and skip the reload.
-	inSkill := (inPicker || inMenu) && m.state == stateIdle
+	inSkill := inPicker || inMenu
 	if inSkill && !m.skillRegion && m.opts.ReloadSkills != nil {
 		m.opts.ReloadSkills() // region opening: re-scan before computeAutocomplete lists suggestions
 	}
@@ -249,22 +251,38 @@ func fileRefToken(path string) string {
 	return "@" + path
 }
 
+// idleOnlyTag closes the label of a command row that cannot run in the state the menu is open in.
+// The dropdown offers every verb while a worker works — hiding half the namespace is what made the
+// "/" menu useless mid-run — so the row that would be refused says so instead of pretending. It
+// needs no style of its own: renderPopup paints every unselected row faint already, and the
+// selected one on its highlight bar, so the tag inherits whichever the row is wearing.
+const idleOnlyTag = "— idle only"
+
 // commandSuggestions returns the verbs of commandSpecs (command.go — the one registry the parser
 // reads too) whose name has partial as a prefix, in table order, labeling each "/verb  summary"
 // (the value stays the bare verb). It is the command half of the merged "/" menu
 // (slashSuggestions). Every row is offered, menuOnly ones included: accepting /skill completes to
 // "/skill " and chains into the skill picker (acceptAutocomplete recomputes the overlay), never
 // sending "/skill" as a literal message — like the apogee-code oracle's selectSkill.
-func commandSuggestions(partial string) []acItem {
+//
+// busy says a worker owns the engine, which is what the idleOnlyTag is appended from: the verbs
+// commandSpec.whileRunning marks as reporting-only stay untagged (they run right here), every other
+// row carries the tag and earns commandsAtIdleNote if accepted. The tag is a property of the
+// MOMENT, not of the verb, so it is a parameter rather than a second table column.
+func commandSuggestions(partial string, busy bool) []acItem {
 	var items []acItem
 	for _, c := range commandSpecs {
-		if strings.HasPrefix(c.name, partial) {
-			label := "/" + c.name
-			if c.summary != "" {
-				label += "  " + c.summary
-			}
-			items = append(items, acItem{value: c.name, label: label})
+		if !strings.HasPrefix(c.name, partial) {
+			continue
 		}
+		label := "/" + c.name
+		if c.summary != "" {
+			label += "  " + c.summary
+		}
+		if busy && !c.whileRunning {
+			label += "  " + idleOnlyTag
+		}
+		items = append(items, acItem{value: c.name, label: label})
 	}
 	return items
 }
@@ -307,8 +325,12 @@ func skillArgToken(value string, caret int) (start, end int, partial string, ok 
 //
 // outside is the draft text OUTSIDE the region being completed, so the half-typed token can never
 // suppress its own row while the already-invoked ones stay out (skillSuggestions).
+//
+// The skill rows are never tagged, whatever the model is doing: a skill token is message content
+// that rides an interjection to the running Exchange, so it is as invocable mid-run as at idle. Only
+// the command half answers to the while-running policy (commandSuggestions takes m.busy()).
 func (m Model) slashSuggestions(partial, outside string) []acItem {
-	items := commandSuggestions(partial)
+	items := commandSuggestions(partial, m.busy())
 	for _, sk := range m.skillSuggestions(partial, outside) {
 		if _, shadowed := commandByName(sk.value); shadowed {
 			continue
@@ -477,9 +499,11 @@ func (m Model) autocompleteExactMatch() bool {
 //     token, because only that one resolves;
 //   - /confine and the menu-only /skill complete to "/verb " and wait — one reads arguments, the
 //     other chains into the picker, and firing a verb that is not finished would be wrong for both;
-//   - every other command RUNS: its token is cut out of the draft (removeCompletionToken) and
-//     runCommand drives it, so invoking a command from the middle of a half-written message costs
-//     the message nothing.
+//   - every other command RUNS — if it may run NOW. Its token is cut out of the draft
+//     (removeCompletionToken) and runCommand drives it, so invoking a command from the middle of a
+//     half-written message costs the message nothing. An idle-only verb accepted while a worker
+//     works is refused instead (refuseIdleOnlyCommand): the row was tagged "— idle only", and the
+//     note repeats that answer without touching a character the human typed.
 //
 // The cursor lands at the end of the spliced text, or where the cut token stood.
 func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
@@ -497,7 +521,11 @@ func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
 	if spec, ok := commandByName(it.value); ok && (spec.takesArgs || spec.menuOnly) {
 		return m.spliceCompletion("/" + it.value), nil
 	}
-	return m.removeCompletionToken().runCommand(parsedInput{kind: kindCommand, command: it.value})
+	parsed := parsedInput{kind: kindCommand, command: it.value}
+	if !m.commandRunnable(parsed) {
+		return m.refuseIdleOnlyCommand()
+	}
+	return m.removeCompletionToken().runCommand(parsed)
 }
 
 // completionRegion is the byte range the overlay is completing, clamped to the value as it stands

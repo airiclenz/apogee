@@ -860,6 +860,36 @@ func (m Model) refuseUnknownSlash(parsed parsedInput) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// commandRunnable reports whether parsed's verb may be driven in the state the Model is in RIGHT
+// NOW. It is the one gate the two invocation routes share — ⏎ on a whole-input line
+// (stageInterjection) and a dropdown accept (acceptAutocomplete) — so the menu's "— idle only" tag,
+// the refusal note and what actually happens are three views of a single rule.
+//
+// At a quiescent boundary every verb is runnable. While a worker owns the engine (m.busy() — the
+// same predicate that decides whether Esc stops something) only the reporting lines are:
+// parsedInput.safeWhileRunning owns which those are, and it is deliberately asked about the parsed
+// LINE rather than the bare verb, because "/confine" and "/confine off" are the same verb and only
+// one of them is a report.
+func (m Model) commandRunnable(parsed parsedInput) bool {
+	return !m.busy() || parsed.safeWhileRunning()
+}
+
+// refuseIdleOnlyCommand answers an idle-only command invoked while a worker works: the note that
+// says commands run at idle, and NOTHING else moved. The draft stays exactly as it was — the verb
+// token included, because it was never consumed — so the human can press ⏎ on the very same line the
+// moment the Exchange ends; it is refuseUnknownSlash's posture, applied to a word that resolves fine
+// and merely came too early.
+//
+// The overlay closes, because the accept key was answered: every other branch of acceptAutocomplete
+// either closes it or deliberately re-derives it, and an open menu still highlighting the row that
+// was just refused would only invite the same refusal again. Typing on re-opens it, tag and all.
+func (m Model) refuseIdleOnlyCommand() (tea.Model, tea.Cmd) {
+	m.transcript.addNote(commandsAtIdleNote)
+	m.autocomplete = autocompleteState{}
+	m.layout()
+	return m, nil
+}
+
 // launchExchange starts the worker over one Exchange and moves the Model into stateRunning: a
 // fresh mailbox for what the human types while it runs, the worker Cmd and the CancelFunc the stop
 // key calls (C4), the queue legend on the emptied box, the opening "thinking" phrase, and the
@@ -967,14 +997,21 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// runCommand handles a recognised local /command from the idle state. /continue and /compact
-// open a worker: /continue a canned "Please continue" turn, /compact a generative summary
-// call; /clear (and its alias /new) resets the session view and reprints the start-up box
-// synchronously and stays idle (startNewSession), /version records the build version as a note the same
-// synchronous way, /skills records the discovered skill catalog the same synchronous way
-// (skills.go), and /confine reports or swaps Auto's blast radius the same
-// synchronous way (confine.go). Reached at stateIdle, so the engine is quiescent — no worker owns
-// it — and ClearContext/Compact are safe to launch here.
+// runCommand handles a recognised local /command. /continue and /compact open a worker: /continue
+// a canned "Please continue" turn, /compact a generative summary call; /clear (and its alias /new)
+// resets the session view and reprints the start-up box synchronously and stays idle
+// (startNewSession), /version records the build version as a note the same synchronous way,
+// /skills records the discovered skill catalog the same synchronous way (skills.go), and /confine
+// reports or swaps Auto's blast radius the same synchronous way (confine.go).
+//
+// It is reached at stateIdle — where the engine is quiescent and ClearContext/Compact are safe to
+// launch — OR, for a reporting line alone, while a worker runs. Its callers own that gate
+// ([Model.commandRunnable]); by the time a verb arrives here it is either at a boundary or
+// boundary-FREE. The three that can arrive mid-run are boundary-free by inspection: /version and
+// /skills are synchronous notes touching no engine at all, and /confine's status form reads
+// [Engine.ConfineToWorkspace], which the Agent serves under its own RWMutex precisely so the UI may
+// ask while a Step dispatches (agent.go — the SetMode class). Everything else is idle-only and is
+// refused before it gets here.
 //
 // It never touches the editor: the CALLER has already put the box where it belongs, and the two
 // callers disagree on purpose. A whole-input invocation arrives from submit, which empties the box

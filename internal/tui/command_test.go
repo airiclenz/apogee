@@ -74,16 +74,68 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		want = append(want, spec.name)
 	}
 	var got []string
-	for _, it := range commandSuggestions("") {
+	for _, it := range commandSuggestions("", false) {
 		got = append(got, it.value)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commandSuggestions(\"\") = %v, want every row in table order %v", got, want)
 	}
-	for i, it := range commandSuggestions("") {
+	for i, it := range commandSuggestions("", false) {
 		if wantLabel := "/" + commandSpecs[i].name + "  " + commandSpecs[i].summary; it.label != wantLabel {
 			t.Errorf("row %d label = %q, want %q", i, it.label, wantLabel)
 		}
+	}
+}
+
+// While a worker works the menu still offers every verb — hiding half the namespace mid-run is the
+// ISSUES #12 symptom — but the rows that cannot run there say so. The tag follows commandSpecs'
+// whileRunning column exactly, so a future verb flipping that flag needs no second edit here.
+func TestCommandSuggestionsTagIdleOnlyRowsWhileBusy(t *testing.T) {
+	rows := commandSuggestions("", true)
+	if len(rows) != len(commandSpecs) {
+		t.Fatalf("rows = %d, want every one of the %d verbs offered while busy", len(rows), len(commandSpecs))
+	}
+	for i, it := range rows {
+		spec := commandSpecs[i]
+		tagged := strings.Contains(it.label, idleOnlyTag)
+		if tagged == spec.whileRunning {
+			t.Errorf("row %q label = %q; tagged = %v, want %v (whileRunning = %v)",
+				spec.name, it.label, tagged, !spec.whileRunning, spec.whileRunning)
+		}
+	}
+}
+
+// safeWhileRunning is asked about the parsed LINE, not the verb: /confine reports under one form
+// and mutates Auto's blast radius under the other, and only the report is boundary-free.
+func TestSafeWhileRunningReadsTheLine(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"/version", true},
+		{"/skills", true},
+		{"/confine", true},
+		{"/confine status", true},
+		{"/confine bogus", true}, // a usage-line report, not a mutation (parseConfine's error path)
+		{"/confine off", false},
+		{"/confine off --save", false},
+		{"/confine on", false},
+		{"/clear", false},
+		{"/new", false},
+		{"/sessions", false},
+		{"/compact", false},
+		{"/continue", false},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			parsed := parseInput(c.in, nil)
+			if parsed.kind != kindCommand {
+				t.Fatalf("parseInput(%q).kind = %v, want a command", c.in, parsed.kind)
+			}
+			if got := parsed.safeWhileRunning(); got != c.want {
+				t.Errorf("safeWhileRunning(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
 	}
 }
 
