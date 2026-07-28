@@ -29,23 +29,24 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   sessions for the session history (I think they should be marked / grouped for that schedule run).
   Needs grilling.
 
-- **[P1] Server / model switching** — **unblocked 2026-07-27; the UI half remains.** The
-  upstream-heartbeat work shipped everything this entry was blocked on
-  ([ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md),
-  `docs/plans/2026-07-27 - 00 - upstream-heartbeat-plan.md`): the old "today `upstream` is
-  immutable after construction" note is obsolete — `Agent.Rebind(RebindSpec)` swaps every
-  per-model binding at a quiescent boundary, `provider.Client.SetModel` moves the wire model,
-  startup is fully async (a model-less start is legal and the first beat binds late), and every
-  beat carries the server's whole `/v1/models` offering into `hb.models` as the picker's data
-  layer. **Remaining** (the plan's explicit non-goals): the `/model` / `/server` **picker UI**
-  over those prepared seams (`hb.models`, `RebindSpec`, `Agent.Rebind`); the **endpoint switch**
-  — `Rebind` deliberately never touches `Endpoint`, so a server switch swaps the `heartbeat`
-  monitor and the provider client behind the same two `tui.Options` seams; and **local
-  llama.cpp start/stop**, to be rebuilt over `heartbeat.Beat` (the dead `provider.ServerManager`,
-  whose liveness half the heartbeat supersedes, was deleted rather than revived). The switchable
-  **model-profile** abstraction (sampling params, context-budget %, thinking/tool-call format —
-  reuse `internal/processing`) remains unstarted, and stays deliberately global: `model-profile`
-  is not per-model, and a rebind does not touch it.
+- **[P1] Server / model switching** — **the switching itself SHIPPED 2026-07-28; the local-server
+  and profile halves remain.** Both user-facing switches now exist and are recorded in
+  [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
+  (see the ledger below): `/model` picks among what the beat reported and drives the existing
+  Rebind, `/server` moves the whole Upstream (a new provider client, the per-server Monitor swapped
+  behind the unchanged seam, the model unbound until the new server's first beat binds it), and the
+  file-only `servers:` key names where a session may go. **Remaining:**
+  - **Local llama.cpp start/stop** — launching and stopping a server apogee owns, to be rebuilt
+    over `heartbeat.Beat` (the dead `provider.ServerManager`, whose liveness half the heartbeat
+    supersedes, was deleted rather than revived). `/server` moves between servers that are already
+    running; nothing yet starts one.
+  - The switchable **model-profile** abstraction (sampling params, context-budget %,
+    thinking/tool-call format — reuse `internal/processing`), still unstarted and still
+    deliberately **global**: `model-profile` is not per-model, and neither a rebind nor a server
+    switch touches it.
+  - Deliberate non-goals of the 2026-07-28 work, additive later if wanted: a `--save` form for
+    `/server`, a `server:` startup key selecting a named entry, and persisting a switched endpoint
+    in the session record (`--resume` returns to the configured one).
 
 - **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
   shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
@@ -96,6 +97,14 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) +
   `docs/plans/2026-07-28 - 03 - slash-skills-inline-plan.md`. It closes the payload half of the
   oracle note above (`{text, skillIds, fileRefs}`) — parity of payload, not of UI.
+- **`/model` and `/server`** — the picker UI over the heartbeat's prepared seams and the endpoint
+  switch, both halves of the *Server / model switching* item above: the `/model` picker over
+  `hb.models` driving the existing `Agent.Rebind`; the discovery hint following the bound model (the
+  flap-back fix); `Agent.SwitchUpstream` + `apogee.UpstreamSpec`; the swappable per-server Monitor
+  behind the unchanged `tui.Options` seams plus the new `SwitchServer` one; and the file-only
+  `servers:` config key — 2026-07-28,
+  [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md) +
+  `docs/plans/2026-07-28 - 05 - model-server-picker-plan.md`.
 
 ---
 

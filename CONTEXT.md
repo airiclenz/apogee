@@ -85,7 +85,9 @@ _Avoid_: "the pipeline" (that was the proxy-era Transform chain — a narrower t
 **Upstream**:
 The local LLM server that runs the model — Ollama, llama.cpp, LM Studio, vLLM, or any
 endpoint honouring the OpenAI HTTP surface. Apogee reaches the Upstream directly through
-its `provider/` package; there is no intervening proxy.
+its `provider/` package; there is no intervening proxy. A session is not married to one: the
+[Heartbeat](#probing-and-model-identity)'s Rebind half moves it to another configured server
+mid-session (`/server`), unbound until that server's first Beat says what it serves.
 _Avoid_: "the model server", "the backend" (a `backend` detector package may exist, but
 it detects Upstreams — it is not the Upstream).
 
@@ -708,12 +710,27 @@ together — wire model id, [System prompt](#context-and-history) template, cont
 [Mechanism](#mechanism-and-hook-points) set — at a **quiescent boundary** (idle, or deferred to the
 end of the running [Exchange](#turns-and-stepping)), never mid-Exchange. A configured
 `context-window:` is a **pin** the heartbeat never overrides; a configured `model:` is a **hint**
-that yields to what the server actually serves. See
-[ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md).
+that yields to what the server actually serves — and the hint **follows the binding**, restated on
+every commit, so discovery keeps resolving the model the session actually runs rather than the one
+config named at launch.
+The same two halves are what the human's own switches are made of, never a third path to bind.
+**`/model`** picks among the models the beat reported and drives *Rebind by hand* — same seam, same
+words, and the pick is recorded as the last observation so the next beat measures it as nothing
+new. **`/server`** moves the whole [Upstream](#identity-and-shape): `Agent.SwitchUpstream` binds a
+fresh provider client at the new endpoint and leaves the session with **no model bound**, the
+per-server heartbeat Monitor is swapped whole behind the unchanged seam, and the new server's
+**first Beat completes the move** through that same Rebind — one code path with the cold start. A
+switch guesses nothing about the new server and destroys nothing about the session: the
+conversation, Turn counters, mode, approvals and confinement all stand. It is **session-scoped**
+(config.yaml is not rewritten; the next launch starts at `endpoint:` again), and the servers it can
+reach are the file-only `servers:` list plus the one the session started on. See
+[ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md) and
+[ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md).
 _Avoid_: "health check" (it observes what is served, not merely that something answers), "poller"
 (says nothing about what is observed, and the chain re-arms from the landed beat, not off a clock),
 "probe" for this (the other noun, the other job), "reconnect" for a Rebind (the connection never
-moved — the bindings did).
+moved — the bindings did), "rehome" as a noun for a server switch (the operation is
+`SwitchUpstream`; these nouns carry the rest).
 
 **Behavioral fingerprint**:
 The model identity a completed **model battery** earns — the model's own advertised label, at

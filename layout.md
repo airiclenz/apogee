@@ -214,10 +214,22 @@ buffer does. Accepting splices over that token alone and puts the caret just aft
 everything on either side is untouched.
 
 **Accepting a command RUNS it.** The `/verb` is cut out of the draft and the command fires; the
-rest of what was typed stays in the box with the caret where it belongs. The two verbs that need
-what follows them are the exception and complete instead: `/confine` (which takes arguments — and
-arguments are only ever read from a whole-line invocation) and `/skill`, which chains into the
-picker over the catalog. Accepting a skill row writes that skill's own `/id ` token into the text.
+rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
+follows them are the exception and complete instead: the three that take arguments — `/confine`,
+`/model` and `/server` (and arguments are only ever read from a whole-line invocation) — plus
+`/skill`, which chains into the picker over the catalog. Accepting a skill row writes that skill's
+own `/id ` token into the text.
+
+**One overlay for "which one?".** `/model` and `/server` with nothing after them open a picker: the
+same bordered pane as the `/sessions` browser, one row per choice, one highlight, `↑/↓ select · ⏎
+switch · esc close` under it, at most eight rows with a window scrolling around the selection. It is
+modal — while it is open every key belongs to it. `/model` lists what the server currently
+advertises (`model — 32k`), refreshed in place if a heartbeat lands underneath it; `/server` lists
+the servers `config.yaml` names plus the one this session started on (`name — endpoint`). The row
+the session is already on carries a faint `· current`, and picking it says so instead of switching.
+Given an argument (`/model <id>`, `/server <name>`) the verb switches straight away and no pane
+opens at all. When there is nothing to pick — no monitor, an unreachable server, nothing advertised
+yet, no `servers:` block — the answer is one honest line in the transcript and no empty pane.
 
 **The box never goes dead while the model works.** Every region stays open. A command that needs a
 quiescent engine is not hidden — its row renders with a trailing `— idle only` tag in the pane's

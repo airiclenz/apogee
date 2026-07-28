@@ -538,7 +538,15 @@ conversation survives the whole round trip.
 
 **Commit.** `feat(tui): /server — switch to another configured server mid-session`
 
-## 7. Documentation close-out
+## 7. Documentation close-out — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): one addition beyond the item's literal text. The TODO entry's restated remainder
+carries a THIRD bullet naming this plan's deliberate non-goals (a `--save` form for `/server`, a
+`server:` startup key, persisting a switched endpoint in the session record) — the item names only
+the llama.cpp and model-profile halves, but those non-goals are decided-and-parked work stated in
+this plan's own *Design decisions* and in ADR 0028's Considered options, and TODO.md is where a
+reader looks for them. Also: `internal/tui/doc.go` needed nothing here — items 5 and 6 already grew
+the narration's picker and switch sections, so the item's docs list is complete without it.
 
 **What.**
 

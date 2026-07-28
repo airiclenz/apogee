@@ -10,6 +10,43 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`/model` — switch models without restarting anything.** Type `/model` and apogee lists what
+  your server is actually serving right now, each with its context window, the one you are on
+  marked `· current`; pick another with ⏎ and the session is on it before the keypress is over —
+  the footer, the start-up box and the context budget all move together, and the transcript says
+  `model changed: A → B`. `/model <id>` switches straight away without opening the list. It is the
+  same machinery the heartbeat already used to follow a model *you* changed from the server side,
+  so there is no second way for a binding to move and nothing new to keep in step. When there is
+  nothing to pick from, apogee says which reason it is — no monitor wired, the server not
+  answering, nothing advertised yet — instead of opening an empty pane.
+
+- **`/server` — move a running session to another server, conversation and all.** Name your other
+  machines in a new `servers:` block and `/server` offers them (plus the one you launched against,
+  always, so switching away is never one-way). Picking one re-points the session at that endpoint
+  with its own API key: the footer flips to the new host and `connecting…`, and the new server's
+  first heartbeat — fired immediately, not ten seconds later — binds whatever it is serving and
+  announces `connected: <model>`. Your conversation, autonomy mode, approvals and confinement all
+  survive the move untouched; only the things that actually describe a server change. Between the
+  switch and that first bind a send is refused with the new endpoint named, rather than quietly
+  going somewhere stale.
+  - Each entry takes a `name` (the label in the list, the `/server <name>` argument, **and** the
+    host name the footer shows once you are on it), an `endpoint`, and optionally that server's own
+    `api-key` and `model` hint. `APOGEE_API_KEY` still belongs to the server you start on, so a
+    keyed remote carries its own key in the file.
+  - The switch lasts for the **session**: nothing is written back to `config.yaml` and the next
+    launch starts at `endpoint:` again — the same posture `/confine off` without `--save` takes.
+  - Unreachable current server? `/server` still works. Switching away is exactly what you want to
+    do when the machine you were on stopped answering.
+
+  See [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md).
+
+- **Embedders: `Agent.SwitchUpstream(UpstreamSpec)` and the `apogee.UpstreamSpec` alias.** The
+  engine half of `/server` — bind a fresh provider client at another endpoint and key at a
+  quiescent boundary, leaving the session with no model bound for the heartbeat's ordinary rebind
+  to complete. Idle-only, like `Rebind`: it refuses mid-Exchange with `ErrInputPending`, so no
+  request is ever re-pointed at a different server underneath itself. Additive surface — an
+  embedder who never calls it is unaffected.
+
 - **Skills are invoked by typing `/<skill-id>` straight into your message — one `/` namespace for
   everything.** A skill used to be a two-step ritual: `/skill`, pick from a list, watch a violet
   chip appear *above* the box, then write the message. Now you write
@@ -460,6 +497,15 @@ point is a **minor** bump, not a breaking change.
   lines)` marker, so the input box the answer is typed into is never pushed off-screen.
 
 ### Fixed
+
+- **A model the session moved to is no longer yanked back to the one `config.yaml` named.** The
+  discovery hint — which of the models a multi-model server serves apogee means — was fixed at
+  launch and never moved again, so on a server serving both, a session that had bound a *different*
+  model would have the next heartbeat resolve the configured one, read it as a change, and rebind
+  back to it within ten seconds. The hint now follows the binding: whenever a rebind commits, that
+  is the model discovery asks about from then on. Pre-existing (it was reachable any time the
+  heartbeat moved a binding off the configured model), and load-bearing for `/model` — without it a
+  pick would have flapped back before you finished reading the note.
 
 - **A skill invoked in a message typed while the model works now actually reaches the model.** The
   staging path parsed your line, then built the queued message **without** the skills it had just
