@@ -33,6 +33,60 @@ func TestParseInputCommands(t *testing.T) {
 	}
 }
 
+// TestCommandTableDrivesParserAndMenu pins the one-registry guarantee: commandSpecs is the only
+// list of "/" verbs, so a verb can never be offered by the dropdown while the parser has never
+// heard of it (or vice versa). Exactly the non-menuOnly rows parse; every row is offered.
+func TestCommandTableDrivesParserAndMenu(t *testing.T) {
+	for _, spec := range commandSpecs {
+		t.Run(spec.name, func(t *testing.T) {
+			verb, _, ok := matchCommand("/" + spec.name)
+			if ok == spec.menuOnly {
+				t.Fatalf("matchCommand(%q) recognised = %v, want %v (menuOnly = %v)",
+					"/"+spec.name, ok, !spec.menuOnly, spec.menuOnly)
+			}
+			if ok && verb != spec.name {
+				t.Errorf("matchCommand(%q) verb = %q, want %q", "/"+spec.name, verb, spec.name)
+			}
+		})
+	}
+
+	// The parser's verb set survived the merge intact: the seven real commands, and /skill
+	// offered by the menu alone.
+	var parsed, menuOnly []string
+	for _, spec := range commandSpecs {
+		if spec.menuOnly {
+			menuOnly = append(menuOnly, spec.name)
+			continue
+		}
+		parsed = append(parsed, spec.name)
+	}
+	wantParsed := []string{"clear", "new", "sessions", "compact", "continue", "confine", "version"}
+	if !reflect.DeepEqual(parsed, wantParsed) {
+		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
+	}
+	if !reflect.DeepEqual(menuOnly, []string{"skill"}) {
+		t.Errorf("menu-only verbs = %v, want [skill]", menuOnly)
+	}
+
+	// The empty partial lists every row, in table order, labelled from the same table.
+	var want []string
+	for _, spec := range commandSpecs {
+		want = append(want, spec.name)
+	}
+	var got []string
+	for _, it := range commandSuggestions("") {
+		got = append(got, it.value)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("commandSuggestions(\"\") = %v, want every row in table order %v", got, want)
+	}
+	for i, it := range commandSuggestions("") {
+		if wantLabel := "/" + commandSpecs[i].name + "  " + commandSpecs[i].summary; it.label != wantLabel {
+			t.Errorf("row %d label = %q, want %q", i, it.label, wantLabel)
+		}
+	}
+}
+
 func TestParseInputUnknownSlashIsMessage(t *testing.T) {
 	// An unrecognised /verb is NOT a command — it is sent to the agent verbatim, so a real
 	// message that happens to start with "/" (a path, a typo) is never silently swallowed.

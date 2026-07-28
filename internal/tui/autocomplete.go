@@ -175,34 +175,15 @@ func fileRefToken(path string) string {
 	return "@" + path
 }
 
-// commandMenuItem is one entry the "/" dropdown offers: the verb and a one-line summary.
-type commandMenuItem struct {
-	name    string
-	summary string
-}
-
-// commandMenu is the set the "/" dropdown offers, with summaries. It is a SUPERSET of the
-// parser's knownCommands: it also offers /skill, which the parser deliberately does NOT treat
-// as a command (matchCommand leaves it alone). Accepting /skill completes to "/skill " and
-// chains into the skill picker (acceptAutocomplete recomputes the overlay); it is never sent as
-// a literal message — attachment happens via the picker, like the apogee-code oracle's
-// selectSkill. Keeping it out of knownCommands is what keeps an unknown "/skill foo" a message.
-var commandMenu = []commandMenuItem{
-	{name: "clear", summary: "reset the model's memory of this session"},
-	{name: "new", summary: "start a fresh conversation (same as /clear)"},
-	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
-	{name: "compact", summary: "summarise the conversation to reclaim context"},
-	{name: "continue", summary: "ask the model to keep going"},
-	{name: "confine", summary: "report or change auto mode's blast radius"},
-	{name: "version", summary: "show the apogee version"},
-	{name: "skill", summary: "attach a skill to your next message"},
-}
-
-// commandSuggestions returns the menu commands whose verb has partial as a prefix, labeling
-// each "/verb  summary" (the value stays the bare verb, so accept splices "/verb ").
+// commandSuggestions returns the verbs of commandSpecs (command.go — the one registry the parser
+// reads too) whose name has partial as a prefix, in table order, labeling each "/verb  summary"
+// (the value stays the bare verb, so accept splices "/verb "). The dropdown offers every row,
+// menuOnly ones included: accepting /skill completes to "/skill " and chains into the skill
+// picker (acceptAutocomplete recomputes the overlay), never sending "/skill" as a literal message
+// — attachment happens via the picker, like the apogee-code oracle's selectSkill.
 func commandSuggestions(partial string) []acItem {
 	var items []acItem
-	for _, c := range commandMenu {
+	for _, c := range commandSpecs {
 		if strings.HasPrefix(c.name, partial) {
 			label := "/" + c.name
 			if c.summary != "" {

@@ -40,17 +40,46 @@ type parsedInput struct {
 	fileRefs []string
 }
 
-// knownCommands is the recognised /command set for this slice, in display order. The parser
-// intercepts a line only when its first whitespace token is exactly "/<verb>" for a verb in
-// this set; any other slash-prefixed line is treated as an ordinary message (never silently
-// swallowed). /new is an alias of /clear — both verbs are recognised here and route to the same
-// context-reset logic in runCommand. /sessions opens the history-browser overlay (idle-only,
-// handled synchronously in runCommand like /clear). /confine is the only verb that takes
-// arguments (parseConfine owns its grammar). The autocomplete overlay offers a superset: it also
-// offers /skill, which attaches via the picker and is deliberately not parsed as a command (see
-// commandMenu in autocomplete.go). /server is deferred (it needs a swappable provider seam) and
-// so is absent here.
-var knownCommands = []string{"clear", "new", "sessions", "compact", "continue", "confine", "version"}
+// commandSpec is one verb of the "/" namespace: what the parser does with it and what the
+// dropdown shows for it. name is the verb without its leading slash; summary is the one-line
+// description the dropdown displays beside it. The three flags say how the verb behaves:
+//
+//   - takesArgs — the verb reads what follows it. Only /confine does (parseConfine owns its
+//     grammar); every other verb ignores surplus tokens, as it always has.
+//   - whileRunning — the verb is safe to run while a worker is working, because it only reports.
+//     Recorded here for the dispatch side to honour; nothing reads it yet, so today every
+//     command still runs at idle only.
+//   - menuOnly — the dropdown offers the verb but the parser must never recognise it. /skill is
+//     the one: accepting it chains into the skill picker, and keeping it unparsed is exactly
+//     what keeps an unknown "/skill foo" line an ordinary message.
+type commandSpec struct {
+	name         string
+	summary      string
+	takesArgs    bool
+	whileRunning bool
+	menuOnly     bool
+}
+
+// commandSpecs is THE registry of "/" verbs, in display order: one table feeding both the parser
+// (matchCommand recognises every non-menuOnly name) and the dropdown (commandSuggestions renders
+// every row, summaries included), so the two can no longer drift apart. The parser intercepts a
+// line only when its first whitespace token is exactly "/<verb>" for a verb in this table; any
+// other slash-prefixed line is treated as an ordinary message (never silently swallowed).
+//
+// /new is an alias of /clear — both verbs are recognised here and route to the same context-reset
+// logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
+// synchronously in runCommand like /clear). /server is deferred (it needs a swappable provider
+// seam) and so is absent.
+var commandSpecs = []commandSpec{
+	{name: "clear", summary: "reset the model's memory of this session"},
+	{name: "new", summary: "start a fresh conversation (same as /clear)"},
+	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
+	{name: "compact", summary: "summarise the conversation to reclaim context"},
+	{name: "continue", summary: "ask the model to keep going"},
+	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
+	{name: "version", summary: "show the apogee version", whileRunning: true},
+	{name: "skill", summary: "attach a skill to your next message", menuOnly: true},
+}
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text
 // (the caller ignores it).
@@ -68,11 +97,11 @@ func parseInput(raw string) parsedInput {
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is
-// "/<verb>" for a known verb, together with the remaining whitespace-separated argument tokens.
-// Only /confine reads the arguments; for every other verb they are surplus and ignored (as they
-// always were). The verb itself is delimited by a space or a tab, never a newline — so a
-// multi-line message whose first line is "/clear" stays a message, as it did before arguments
-// existed.
+// "/<verb>" for a non-menuOnly verb of commandSpecs, together with the remaining
+// whitespace-separated argument tokens. Only /confine reads the arguments; for every other verb
+// they are surplus and ignored (as they always were). The verb itself is delimited by a space or
+// a tab, never a newline — so a multi-line message whose first line is "/clear" stays a message,
+// as it did before arguments existed.
 func matchCommand(trimmed string) (string, []string, bool) {
 	if !strings.HasPrefix(trimmed, "/") {
 		return "", nil, false
@@ -82,9 +111,12 @@ func matchCommand(trimmed string) (string, []string, bool) {
 		first, rest = trimmed[:i], trimmed[i+1:]
 	}
 	verb := strings.TrimPrefix(first, "/")
-	for _, c := range knownCommands {
-		if verb == c {
-			return c, strings.Fields(rest), true
+	for _, c := range commandSpecs {
+		if c.menuOnly {
+			continue // offered by the dropdown, never parsed (see commandSpec)
+		}
+		if verb == c.name {
+			return c.name, strings.Fields(rest), true
 		}
 	}
 	return "", nil, false

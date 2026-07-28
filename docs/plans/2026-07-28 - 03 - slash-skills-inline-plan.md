@@ -191,7 +191,7 @@ no dropdown/token section exists yet), `CONTEXT.md:508-530` (Skill/File-referenc
 
 ---
 
-## 1. One command table
+## 1. One command table — ✅ DONE (2026-07-28)
 
 **What.** Merge the two registries — `knownCommands` (`command.go:53`) and `commandMenu`
 (`autocomplete.go:190-199`) — into a single `commandSpec` table in `command.go`:
