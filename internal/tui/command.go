@@ -164,6 +164,19 @@ func unknownSlashNote(token string) string {
 	return "unknown command or skill: " + token + " — nothing sent"
 }
 
+// commandByName looks a verb up in commandSpecs by its bare name (no leading slash). It is the one
+// membership test over the table: the parser asks it what a line opens with, the dropdown's accept
+// path asks it what an accepted row DOES (a takesArgs or menuOnly verb completes, every other verb
+// runs on the spot), and the merged menu asks it which skill ids a command verb shadows.
+func commandByName(name string) (commandSpec, bool) {
+	for _, c := range commandSpecs {
+		if c.name == name {
+			return c, true
+		}
+	}
+	return commandSpec{}, false
+}
+
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is
 // "/<verb>" for a non-menuOnly verb of commandSpecs, together with the remaining
 // whitespace-separated argument tokens. Only /confine reads the arguments; for every other verb
@@ -178,16 +191,11 @@ func matchCommand(trimmed string) (string, []string, bool) {
 	if i := strings.IndexAny(trimmed, " \t"); i >= 0 {
 		first, rest = trimmed[:i], trimmed[i+1:]
 	}
-	verb := strings.TrimPrefix(first, "/")
-	for _, c := range commandSpecs {
-		if c.menuOnly {
-			continue // offered by the dropdown, never parsed (see commandSpec)
-		}
-		if verb == c.name {
-			return c.name, strings.Fields(rest), true
-		}
+	c, ok := commandByName(strings.TrimPrefix(first, "/"))
+	if !ok || c.menuOnly { // menuOnly verbs are offered by the dropdown, never parsed (see commandSpec)
+		return "", nil, false
 	}
-	return "", nil, false
+	return c.name, strings.Fields(rest), true
 }
 
 // ----------------------------------------------------------------------------

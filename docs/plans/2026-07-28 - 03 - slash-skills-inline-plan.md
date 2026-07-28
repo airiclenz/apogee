@@ -334,7 +334,24 @@ item 2, any typo after) can no longer silently reach the model.
 
 **Commit.** `feat(tui): unknown sole /verb is refused with a note`
 
-## 5. Merged menu; commands execute at accept; the draft survives
+## 5. Merged menu; commands execute at accept; the draft survives — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): five recorded deviations, one behavioural. (a) BEHAVIOURAL: the exact-match rule keeps
+the pre-existing `menuOnly` exception — a whole-input `/skill` does NOT fall through to submit — because the
+item's literal "whole trimmed input ⇒ submit" would route it into item 4's `kindUnknownSlash` usage note
+instead of the picker it is an entry point to (regressing `TestEnterOnSkillCommandDoesNotSubmit`); everything
+else follows the literal rule, with a finished SKILL token reporting exact-match wherever it stands, per the
+item's own second sentence. (b) `removeCompletionToken` cuts `[tokenStart, len(value))` and leaves the
+separator the human typed before the token: with tokenEnd = end of value (this item's own scoping) no doubled
+separator can arise, so "collapse any doubled separator" is item 6's to implement when the region gains a
+tail. (c) `skillSuggestions` takes a second argument — the draft text OUTSIDE the completion region — so the
+already-invoked exclusion reads only there; without it a fully typed `/clean-code` suppressed its own row and
+⏎ could never confirm it. Both call sites pass `value[:tokenStart]`. (d) the merged region's dropdown title
+becomes `commands and skills` (it was `commands`), so the pane does not call the skill rows commands. (e) a
+`commandByName` lookup was added to `command.go` for the accept path's `takesArgs`/`menuOnly` question and
+the menu's shadowing test, and `matchCommand` now reads through it (one membership test over the table).
+`internal/tui/doc.go`'s two stale clauses (the "/" region, the picker as the only skill route) were amended
+here as items 3 and 4 did; the CHANGELOG and the README/layout.md sweep stay item 9's.
 
 **What.** The `/` region becomes token-scoped and merged; commands become actions at accept.
 Still end-of-buffer-triggered (caret-awareness is item 6); still idle-gated (item 7 lifts it).

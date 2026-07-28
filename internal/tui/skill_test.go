@@ -210,6 +210,100 @@ func TestEnterOnSkillCommandDoesNotSubmit(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The merged "/" menu: one namespace, commands first, skills marked
+// ----------------------------------------------------------------------------
+
+// One "/" menu, two kinds of row: the matching commands first (a verb ACTS on the session), then
+// the matching skills, marked with the transcript's own skill glyph and shown as the token they
+// write.
+func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.input.SetValue("/c") // four c-commands, and "clean-code" matches as a substring
+	ac := m.computeAutocomplete()
+
+	var got []string
+	for _, it := range ac.items {
+		got = append(got, it.value)
+	}
+	want := []string{"clear", "compact", "continue", "confine", "clean-code"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged rows = %v, want the commands before the skills %v", got, want)
+	}
+	row := ac.items[len(ac.items)-1]
+	if !row.skill {
+		t.Error("the skill row is not marked as a skill; accept would treat it as a command")
+	}
+	if !strings.Contains(row.label, glyphSkill) || !strings.Contains(row.label, "/clean-code") {
+		t.Errorf("skill row label = %q, want the %q marker and the /id token it writes", row.label, glyphSkill)
+	}
+}
+
+// Accepting a skill row writes its inline token at the point the human was typing — the same
+// "/id " the picker splices, and the same thing the submit parse reads back out.
+func TestAcceptSkillRowFromTheMergedMenu(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.input.SetValue("please /rev")
+	m.autocomplete = m.computeAutocomplete()
+	if len(m.autocomplete.items) != 1 || !m.autocomplete.items[0].skill {
+		t.Fatalf("rows = %+v, want the single review skill row", m.autocomplete.items)
+	}
+	m = step(t, m, keyTab())
+
+	if got, want := m.input.Value(), "please /review "; got != want {
+		t.Errorf("accepted %q, want %q", got, want)
+	}
+	if got := m.promptEditor.submitParse(m.knownSkillID).skillIDs; !reflect.DeepEqual(got, []string{"review"}) {
+		t.Errorf("the spliced token parses to %v, want [review]", got)
+	}
+}
+
+// A skill whose id collides with a command verb is omitted from the merged rows — the verb owns the
+// name in one namespace — and stays reachable through the /skill picker, whose splice writes the
+// token in a position the whole-input command rule never claims.
+func TestSlashMenuShadowsCollidingSkillID(t *testing.T) {
+	o := testOpts
+	o.Skills = fakeSkillCatalog{skills: []skills.Skill{{ID: "clear", DisplayName: "Clear Code"}}}
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	m.input.SetValue("/clea")
+	for _, it := range m.computeAutocomplete().items {
+		if it.skill {
+			t.Fatalf("the merged menu offered a skill a command verb shadows: %+v", it)
+		}
+	}
+
+	m.input.SetValue("/skill clea")
+	ac := m.computeAutocomplete()
+	if ac.kind != acSkill || len(ac.items) != 1 || ac.items[0].value != "clear" {
+		t.Fatalf("the /skill picker lost the shadowed skill: %+v", ac)
+	}
+}
+
+// A fully typed skill token keeps its own row — the token being completed is not yet "already
+// invoked" — and ⏎ then SENDS the message it stands in rather than re-completing it.
+func TestTypedSkillTokenStaysOfferedAndSubmits(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, skillOpts())
+	m.input.SetValue("please /review")
+	m.autocomplete = m.computeAutocomplete()
+
+	if len(m.autocomplete.items) != 1 || !m.autocomplete.items[0].skill {
+		t.Fatalf("a finished skill token lost its own row: %+v", m.autocomplete.items)
+	}
+	if !m.autocompleteExactMatch() {
+		t.Fatal("a finished skill token is not an exact match; ⏎ would re-complete instead of sending")
+	}
+	m, cmd := stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("state = %v, want running (⏎ sends the message the token stands in)", m.state)
+	}
+	drainCmd(t, m, cmd)
+	if len(eng.submitted) != 1 || !reflect.DeepEqual(eng.submitted[0].SkillIDs, []string{"review"}) {
+		t.Fatalf("the send did not carry the skill: %+v", eng.submitted)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Submit: inline tokens carry SkillIDs and stay in the text
 // ----------------------------------------------------------------------------
 

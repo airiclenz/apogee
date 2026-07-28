@@ -11,13 +11,19 @@ import (
 // Chat input mini-language — the autocomplete overlay
 // ----------------------------------------------------------------------------
 //
-// A suggestion popup that opens while the human types: "/" lists the known commands (at idle,
-// where a command can actually run), and an "@" token lists workspace files (wherever the box is
-// editable, so an interjection references a file as easily as a submitted message does — see
-// computeAutocomplete). It is painted by the shared selector-popup
+// A suggestion popup that opens while the human types: a "/" token lists the commands AND the
+// skills in ONE merged menu (at idle, where a command can actually run), and an "@" token lists
+// workspace files (wherever the box is editable, so an interjection references a file as easily as
+// a submitted message does — see computeAutocomplete). It is painted by the shared selector-popup
 // module (popup.go) — a titled, bordered pane rendered above the input box, in a slot that
 // shrinks the transcript viewport to make room. The overlay completes the WORD AT THE END of the
 // input (the common forward-typing case), which keeps it cursor-position-free and robust.
+//
+// Accepting a row is not always a completion. A skill or a file row splices its token and leaves
+// the human typing; a COMMAND row runs the command there and then (acceptAutocomplete), cutting its
+// "/verb" out of the draft and leaving everything else in the box — which is what lets a command be
+// invoked from the middle of a half-written message without destroying it. The two verbs that need
+// what follows them — /confine (arguments) and the menu-only /skill (a picker) — complete instead.
 
 // maxAutocompleteItems caps how many suggestions the overlay shows (and how far the file
 // walk runs) — enough to be useful, small enough that the popup never crowds the transcript
@@ -33,11 +39,15 @@ const (
 	acSkill                 // a "/skill <id>" argument (splices the skill's own inline "/id" token)
 )
 
-// acItem is one suggestion: value is the text spliced in (the command name or file path,
-// without the "/"/"@" sigil), label is what the row displays.
+// acItem is one suggestion: value is the text spliced in (the command name, the skill id or the
+// file path, without the "/"/"@" sigil), label is what the row displays, and skill marks a row of
+// the merged "/" menu that names a SKILL rather than a command. The mark is not decoration: the two
+// kinds of row do different things at accept (a skill writes its token, a command RUNS), so the row
+// has to carry which it is.
 type acItem struct {
 	value string
 	label string
+	skill bool
 }
 
 // autocompleteState is the overlay's data. active gates rendering and key capture (it is a
@@ -58,34 +68,38 @@ type autocompleteState struct {
 //
 // The three regions do NOT share a lifetime. An "@file" reference is exactly as useful in a
 // message interjected mid-run as in one submitted at idle (the ref resolves at delivery, fresh),
-// so the file region is offered wherever the box is editable. The "/command" region is idle-only
+// so the file region is offered wherever the box is editable. The "/" region is idle-only
 // because a command typed mid-run is REFUSED rather than queued (it earns a note instead), and
 // offering it while running would be the overlay lying about what ⏎ does. The "/skill" picker
 // stays idle-only alongside it for now — a hold on the menu, not a limit of what it splices: the
 // inline token it writes is message content, and rides an interjection exactly as an @ref does.
+//
+// Each region is scoped to a TOKEN, never to the whole line: the "/" menu opens on the trailing
+// "/word" of a draft that already holds text, which is what lets a command be summoned — or a skill
+// invoked — without first emptying the box.
 func (m Model) computeAutocomplete() autocompleteState {
 	value := m.input.Value()
 	idle := m.state == stateIdle
 
 	// Skill argument: a "/skill <partial>" region (the trailing word after a "/skill" token).
-	// Checked FIRST so it wins over the bare-command branch — which would otherwise see "/skill"
-	// the moment a space is typed. tokenStart marks the "/skill" itself, so accepting replaces the
+	// Checked FIRST so it wins over the merged "/" branch — which would otherwise see the partial as
+	// a "/" token of its own. tokenStart marks the "/skill" itself, so accepting replaces the
 	// whole "/skill <partial>" run with the skill's own "/id " token.
 	if start, partial, ok := skillArgToken(value); ok && idle {
-		items := m.skillSuggestions(partial)
+		items := m.skillSuggestions(partial, value[:start])
 		if len(items) == 0 {
 			return autocompleteState{}
 		}
 		return autocompleteState{active: true, kind: acSkill, items: items, tokenStart: start}
 	}
 
-	// Command: the whole line is "/<partial>" with no whitespace yet.
-	if idle && strings.HasPrefix(value, "/") && !strings.ContainsAny(value, " \t\n") {
-		items := commandSuggestions(strings.TrimPrefix(value, "/"))
+	// Command + skill: the trailing word is a "/" token — one namespace, one menu.
+	if start, partial, ok := trailingSlashToken(value); ok && idle {
+		items := m.slashSuggestions(partial, value[:start])
 		if len(items) == 0 {
 			return autocompleteState{}
 		}
-		return autocompleteState{active: true, kind: acCommand, items: items, tokenStart: 0}
+		return autocompleteState{active: true, kind: acCommand, items: items, tokenStart: start}
 	}
 
 	// File: the input ends in an "@" token being typed — bare, or quoted across its spaces.
@@ -101,26 +115,48 @@ func (m Model) computeAutocomplete() autocompleteState {
 }
 
 // recomputeAutocomplete re-derives the overlay from the current input and stores it, reloading
-// the skill catalog the moment the /skill picker OPENS (the input entering a "/skill <partial>"
-// region it was not in before). The reload swaps the shared skills.Provider that both this picker
-// and the agent loop read, so a skill added since launch — or since the picker last closed —
-// both shows in the dropdown and resolves when attached. It is edge-triggered on skillRegion so a
-// burst of keystrokes inside one open picker re-scans disk once, not per byte (mirroring the
-// filecache TTL's "reuse one walk" intent, but keyed to opens). Callers use this instead of
-// assigning m.computeAutocomplete() directly; computeAutocomplete itself stays a pure function of
-// the input, so unit tests that call it keep working.
+// the skill catalog the moment a catalog-listing region OPENS — the input entering a "/skill
+// <partial>" picker, or the merged "/" menu, that it was not in before. The reload swaps the shared
+// skills.Provider that both those rows and the agent loop read, so a skill added since launch — or
+// since the menu last closed — both shows in the dropdown and resolves when invoked. It is
+// edge-triggered on skillRegion so a burst of keystrokes inside one open region re-scans disk once,
+// not per byte (mirroring the filecache TTL's "reuse one walk" intent, but keyed to opens), and the
+// two regions share the flag because typing "/skill" and then a space walks straight from one into
+// the other — a single visit to the catalog, not two. Callers use this instead of assigning
+// m.computeAutocomplete() directly; computeAutocomplete itself stays a pure function of the input,
+// so unit tests that call it keep working.
 func (m Model) recomputeAutocomplete() Model {
-	_, _, inSkill := skillArgToken(m.input.Value())
-	// The picker itself is idle-only (computeAutocomplete), so a "/skill " region typed into an
-	// interjection is not one: it must neither re-scan disk nor arm the edge trigger, or the first
-	// keystroke back at idle would find skillRegion already true and skip the reload.
-	inSkill = inSkill && m.state == stateIdle
+	value := m.input.Value()
+	_, _, inPicker := skillArgToken(value)
+	_, _, inMenu := trailingSlashToken(value)
+	// Both regions are idle-only (computeAutocomplete), so a "/" token typed into an interjection is
+	// not one: it must neither re-scan disk nor arm the edge trigger, or the first keystroke back at
+	// idle would find skillRegion already true and skip the reload.
+	inSkill := (inPicker || inMenu) && m.state == stateIdle
 	if inSkill && !m.skillRegion && m.opts.ReloadSkills != nil {
-		m.opts.ReloadSkills() // picker opening: re-scan before computeAutocomplete lists suggestions
+		m.opts.ReloadSkills() // region opening: re-scan before computeAutocomplete lists suggestions
 	}
 	m.skillRegion = inSkill
 	m.autocomplete = m.computeAutocomplete()
 	return m
+}
+
+// trailingSlashToken reports the "/" token at the very end of value (the token being typed): its
+// start offset, the partial verb-or-id after the slash, and whether value ends in such a token. It
+// is trailingFileToken's bare rule under a different sigil, and it is what turns the "/" menu from
+// a whole-LINE rule into a TOKEN rule: the menu now opens at the end of a draft that already holds
+// text, instead of only on an otherwise-empty box. A value ending in whitespace has no trailing
+// token (the word is finished).
+//
+// There is no quoted shape to read: command verbs and skill ids are whitespace-free by construction
+// (skill ids are directory names — extractSkillRefs), so the bare word is the whole grammar.
+func trailingSlashToken(value string) (int, string, bool) {
+	start := strings.LastIndexAny(value, " \t\n") + 1
+	word := value[start:]
+	if !strings.HasPrefix(word, "/") {
+		return 0, "", false
+	}
+	return start, word[1:], true
 }
 
 // trailingFileToken reports the "@" token at the very end of value (the token being typed):
@@ -177,10 +213,10 @@ func fileRefToken(path string) string {
 
 // commandSuggestions returns the verbs of commandSpecs (command.go — the one registry the parser
 // reads too) whose name has partial as a prefix, in table order, labeling each "/verb  summary"
-// (the value stays the bare verb, so accept splices "/verb "). The dropdown offers every row,
-// menuOnly ones included: accepting /skill completes to "/skill " and chains into the skill
-// picker (acceptAutocomplete recomputes the overlay), never sending "/skill" as a literal message
-// — attachment happens via the picker, like the apogee-code oracle's selectSkill.
+// (the value stays the bare verb). It is the command half of the merged "/" menu
+// (slashSuggestions). Every row is offered, menuOnly ones included: accepting /skill completes to
+// "/skill " and chains into the skill picker (acceptAutocomplete recomputes the overlay), never
+// sending "/skill" as a literal message — like the apogee-code oracle's selectSkill.
 func commandSuggestions(partial string) []acItem {
 	var items []acItem
 	for _, c := range commandSpecs {
@@ -215,6 +251,35 @@ func skillArgToken(value string) (int, string, bool) {
 	return prevSpace + 1, partial, true
 }
 
+// slashSuggestions builds the merged "/" menu: first the commands whose name partial prefixes, in
+// table order and labelled with their summaries (commandSuggestions), then the catalog skills
+// partial matches, each marked with glyphSkill — the transcript's own skill glyph — and shown as
+// the "/id" token accepting it writes. One namespace, two kinds of row, commands first because a
+// verb ACTS on the session while a skill is content the human is composing.
+//
+// Commands SHADOW skills: a skill whose id equals any verb in commandSpecs is dropped from the
+// merged rows, because the whole-input parse would read "/id" as that command anyway. The collision
+// is settled here, menu-side, so the parse layer never has to know skills exist — and the shadowed
+// skill stays reachable through the /skill picker, which splices its token where no command rule
+// claims it.
+//
+// outside is the draft text OUTSIDE the region being completed, so the half-typed token can never
+// suppress its own row while the already-invoked ones stay out (skillSuggestions).
+func (m Model) slashSuggestions(partial, outside string) []acItem {
+	items := commandSuggestions(partial)
+	for _, sk := range m.skillSuggestions(partial, outside) {
+		if _, shadowed := commandByName(sk.value); shadowed {
+			continue
+		}
+		label := glyphSkill + " /" + sk.value
+		if sk.label != "" {
+			label += "  " + sk.label
+		}
+		items = append(items, acItem{value: sk.value, label: label, skill: true})
+	}
+	return items
+}
+
 // skillSuggestions lists skills matching partial (a case-insensitive substring of id or
 // displayName), excluding those the message already invokes, as rows showing "displayName
 // summary". The value is the skill ID (what the accepted row splices in as a "/id" token). A nil
@@ -223,13 +288,15 @@ func skillArgToken(value string) (int, string, bool) {
 // "Already invoked" is read off the BUFFER — the /tokens standing in the text right now — because
 // the text is where an invocation lives; there is no attachment state beside it to consult. Delete
 // the token and the skill is offered again, which is the same self-healing rule the inline accents
-// and the submit parse read.
-func (m Model) skillSuggestions(partial string) []acItem {
+// and the submit parse read. outside is the part of the buffer the completion region does NOT
+// cover: the region itself is about to be replaced, so a skill named inside it is not yet invoked
+// (a fully typed "/clean-code" must keep offering its own row, or ⏎ could never confirm it).
+func (m Model) skillSuggestions(partial, outside string) []acItem {
 	if m.opts.Skills == nil {
 		return nil
 	}
 	attached := map[string]bool{}
-	for _, id := range extractSkillRefs(m.input.Value(), m.knownSkillID) {
+	for _, id := range extractSkillRefs(outside, m.knownSkillID) {
 		attached[id] = true
 	}
 	needle := strings.ToLower(partial)
@@ -291,14 +358,17 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		m.autocomplete = ac
 		return true, m, nil
 	case "tab":
-		return true, m.acceptAutocomplete(), nil
+		nm, cmd := m.acceptAutocomplete()
+		return true, nm, cmd
 	case "enter":
-		// Enter submits when the token is already fully typed (an exact match); otherwise it
-		// completes the highlighted suggestion (a second Enter then submits).
+		// Enter falls through to submit when the token is already fully typed AND submitting is the
+		// more useful answer (autocompleteExactMatch); otherwise it accepts the highlighted row —
+		// which completes a skill or a file, and RUNS a command.
 		if m.autocompleteExactMatch() {
 			return false, m, nil
 		}
-		return true, m.acceptAutocomplete(), nil
+		nm, cmd := m.acceptAutocomplete()
+		return true, nm, cmd
 	case "esc":
 		m.autocomplete = autocompleteState{}
 		return true, m, nil
@@ -306,10 +376,20 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	return false, m, nil
 }
 
-// autocompleteExactMatch reports whether the token under completion already equals the
-// highlighted suggestion verbatim (sigil included) — in which case Enter should submit rather
-// than re-complete. A file token counts as typed out in any dialect the parser accepts: bare,
-// double-quoted or single-quoted (command.go), so ⏎ submits whichever the user typed.
+// autocompleteExactMatch reports whether ⏎ should fall THROUGH to submit instead of accepting the
+// highlighted row. Two things decide it: the token under completion must already equal that row
+// verbatim (sigil included), and accepting must not be the more useful answer.
+//
+// A file token counts as typed out in any dialect the parser accepts — bare, double-quoted or
+// single-quoted (command.go) — and a directly typed skill token is ordinary message text, so both
+// let ⏎ send the moment they are complete, wherever in the draft they stand.
+//
+// A COMMAND is the asymmetric one, because accepting it now RUNS it (acceptAutocomplete). ⏎ falls
+// through only when the token is the WHOLE trimmed input — the form the whole-input parse owns, and
+// the only form that can carry arguments ("/confine off --save"). Mid-draft, an exactly typed
+// "/clear" executes through the accept path instead, which is what keeps the rest of the draft
+// alive rather than sending it. /skill is excluded outright: it is no parser verb, so submitting it
+// would earn the typo guard's usage note instead of the picker it is an entry point to.
 func (m Model) autocompleteExactMatch() bool {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 || ac.tokenStart > len(m.input.Value()) {
@@ -322,42 +402,77 @@ func (m Model) autocompleteExactMatch() bool {
 	if ac.kind == acSkill {
 		return false
 	}
-	selected := ac.items[ac.selected].value
-	// /skill is not a real command: accepting it chains into the skill picker, so Enter must
-	// complete (open the picker), never submit "/skill" as a message.
-	if ac.kind == acCommand && selected == "skill" {
-		return false
-	}
+	it := ac.items[ac.selected]
 	typed := m.input.Value()[ac.tokenStart:]
 	if ac.kind == acFile {
-		return typed == "@"+selected ||
-			typed == `@"`+selected+`"` ||
-			typed == "@'"+selected+"'"
+		return typed == "@"+it.value ||
+			typed == `@"`+it.value+`"` ||
+			typed == "@'"+it.value+"'"
 	}
-	return typed == "/"+selected
+	if typed != "/"+it.value {
+		return false
+	}
+	if it.skill {
+		return true // a finished skill token is text: ⏎ sends the message it stands in
+	}
+	if spec, ok := commandByName(it.value); ok && spec.menuOnly {
+		return false // /skill chains into the picker; the parser would only refuse it
+	}
+	return strings.TrimSpace(m.input.Value()) == typed
 }
 
-// acceptAutocomplete applies the highlighted suggestion, splicing it over the region that opened
-// the overlay: a skill as its own inline "/id" token (insertSkillToken — the picked skill REPLACES
-// the "/skill <partial>" run that summoned the picker), a command as "/" + value, and a file as its
-// reference token (fileRefToken — quoted when the path has spaces, whatever form the partial was
-// typed in). The quoting is decided by the PATH, never by how the user started typing: a bare "@my"
-// partial completing to a spaced path still splices the quoted token, because only that one
-// resolves. It never submits; the cursor lands at the end of the spliced text.
-func (m Model) acceptAutocomplete() Model {
+// acceptAutocomplete applies the highlighted row over the region that opened the overlay — and for
+// most command rows that means ACTING, not completing:
+//
+//   - a skill (picked from the /skill picker, or chosen directly in the merged menu) becomes its own
+//     inline "/id " token — insertSkillToken, which for the picker REPLACES the whole "/skill
+//     <partial>" run that summoned it;
+//   - a file becomes its reference token (fileRefToken — quoted when the path has spaces, whatever
+//     form the partial was typed in). The quoting is decided by the PATH, never by how the user
+//     started typing: a bare "@my" partial completing to a spaced path still splices the quoted
+//     token, because only that one resolves;
+//   - /confine and the menu-only /skill complete to "/verb " and wait — one reads arguments, the
+//     other chains into the picker, and firing a verb that is not finished would be wrong for both;
+//   - every other command RUNS: its token is cut out of the draft (removeCompletionToken) and
+//     runCommand drives it, so invoking a command from the middle of a half-written message costs
+//     the message nothing.
+//
+// The cursor lands at the end of the spliced text, or where the cut token stood.
+func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 {
-		return m
+		return m, nil
 	}
-	selected := ac.items[ac.selected].value
-	switch ac.kind {
-	case acSkill:
-		return m.insertSkillToken(selected)
-	case acFile:
-		return m.spliceCompletion(fileRefToken(selected))
-	default:
-		return m.spliceCompletion("/" + selected)
+	it := ac.items[ac.selected]
+	switch {
+	case ac.kind == acSkill || it.skill:
+		return m.insertSkillToken(it.value), nil
+	case ac.kind == acFile:
+		return m.spliceCompletion(fileRefToken(it.value)), nil
 	}
+	if spec, ok := commandByName(it.value); ok && (spec.takesArgs || spec.menuOnly) {
+		return m.spliceCompletion("/" + it.value), nil
+	}
+	return m.removeCompletionToken().runCommand(parsedInput{kind: kindCommand, command: it.value})
+}
+
+// removeCompletionToken cuts the token the overlay was completing out of the draft and closes the
+// overlay. It is the editor half of "a command row is an action": the verb is consumed by RUNNING
+// it, so what stays in the box is the message the human was writing, minus the word that invoked
+// the command — never an emptied box (which would lose the draft) and never a dead "/clear" left
+// standing in the text (which would be sent along with it).
+//
+// The region runs from tokenStart to the end of the value — the trailing-token rule the menu opens
+// under — so the cut leaves a prefix and the caret lands at its end. The separator the human typed
+// before the token stays: it is where they were writing, and it is what the next word needs anyway.
+func (m Model) removeCompletionToken() Model {
+	value := m.input.Value()
+	start := min(m.autocomplete.tokenStart, len(value)) // defensive: the value cannot have shrunk
+	m.input.SetValue(value[:start])
+	m.input.MoveToEnd()
+	m.autocomplete = autocompleteState{}
+	m.layout()
+	return m
 }
 
 // insertSkillToken writes the skill's inline invocation — "/id " — over the completion region,
@@ -401,11 +516,13 @@ func containsString(xs []string, s string) bool {
 // undocumented in the legend, as the session hint also elides its modes.
 const autocompleteHint = "↑/↓ select · ⏎/tab accept · esc dismiss"
 
-// autocompleteTitle names the dropdown by what it completes: the popup module's title row.
+// autocompleteTitle names the dropdown by what it completes: the popup module's title row. The "/"
+// region names both halves of its merged list, so the title never implies the skills below the
+// command rows are commands too.
 func autocompleteTitle(kind acKind) string {
 	switch kind {
 	case acCommand:
-		return "commands"
+		return "commands and skills"
 	case acFile:
 		return "files"
 	case acSkill:

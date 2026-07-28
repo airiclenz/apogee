@@ -572,13 +572,19 @@ func TestConfineArgumentErrorNeverTouchesTheEngine(t *testing.T) {
 	}
 }
 
+// Accepting a command row is an ACTION, not a completion: the verb runs on the spot and its token
+// is consumed. Here the box held nothing else, so it comes back empty.
 func TestAutocompleteAcceptWithTab(t *testing.T) {
-	m := newTestModel(t)
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/cl")
 	m.autocomplete = m.computeAutocomplete() // simulate the post-edit recompute
 	m = step(t, m, keyTab())
-	if got := m.input.Value(); got != "/clear " {
-		t.Errorf("after tab-accept input = %q, want %q", got, "/clear ")
+	if eng.clearCalls != 1 {
+		t.Errorf("ClearContext calls = %d, want 1 (accepting a command row runs it)", eng.clearCalls)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Errorf("after tab-accept input = %q, want the accepted token consumed", got)
 	}
 	if m.autocomplete.active {
 		t.Error("overlay still open after accept")
@@ -586,18 +592,23 @@ func TestAutocompleteAcceptWithTab(t *testing.T) {
 }
 
 func TestAutocompleteNavigateThenAccept(t *testing.T) {
-	m := newTestModel(t)
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/c")
-	m.autocomplete = m.computeAutocomplete() // [clear, compact, continue], selected 0
+	m.autocomplete = m.computeAutocomplete() // [clear, compact, continue, confine], selected 0
 	m = step(t, m, keyDown())                // → compact
 	if m.autocomplete.selected != 1 {
 		t.Fatalf("after down selected = %d, want 1", m.autocomplete.selected)
 	}
 	m = step(t, m, keyUp())   // → clear
 	m = step(t, m, keyDown()) // → compact
-	m = step(t, m, keyTab())
-	if got := m.input.Value(); got != "/compact " {
-		t.Errorf("accepted %q, want /compact ", got)
+	m, cmd := stepCmd(t, m, keyTab())
+	if m.state != stateRunning || cmd == nil {
+		t.Fatalf("accepting compact did not run it: state = %v, cmd != nil = %v", m.state, cmd != nil)
+	}
+	drainCmd(t, m, cmd)
+	if eng.compactCalls != 1 {
+		t.Errorf("Compact calls = %d, want 1", eng.compactCalls)
 	}
 }
 
@@ -639,6 +650,105 @@ func TestAutocompleteOpensWhenTypingSlash(t *testing.T) {
 	}
 	if got := plain(m.View()); !strings.Contains(got, "/compact") {
 		t.Errorf("overlay not rendered in the view:\n%s", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The merged "/" menu: token-scoped, and commands run at accept
+// ----------------------------------------------------------------------------
+
+// The "/" region is scoped to a TOKEN, not to the whole line: a draft that already holds text still
+// opens the menu on its trailing "/word" — the second ISSUES #12 symptom ("slash commands don't
+// work if I already typed something in the prompt editor").
+func TestSlashMenuOpensAfterADraft(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("fix the parser /comp")
+	ac := m.computeAutocomplete()
+
+	if !ac.active || ac.kind != acCommand {
+		t.Fatalf("overlay = {active:%v kind:%v}, want the command menu open mid-draft", ac.active, ac.kind)
+	}
+	if len(ac.items) != 1 || ac.items[0].value != "compact" {
+		t.Fatalf("suggestions = %+v, want [compact]", ac.items)
+	}
+	if want := len("fix the parser "); ac.tokenStart != want {
+		t.Errorf("tokenStart = %d, want %d (the token's start, not the line's)", ac.tokenStart, want)
+	}
+}
+
+// Accepting a command row from a draft RUNS the command and hands the draft back minus the verb:
+// invoking a command never destroys what was being written, and never sends it either.
+func TestAcceptCommandRunsItAndKeepsTheDraft(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("fix the parser /comp")
+	m.autocomplete = m.computeAutocomplete()
+	m, cmd := stepCmd(t, m, keyTab())
+
+	if m.state != stateRunning || cmd == nil {
+		t.Fatalf("accepting /compact did not run it: state = %v, cmd != nil = %v", m.state, cmd != nil)
+	}
+	want := "fix the parser "
+	if got := m.input.Value(); got != want {
+		t.Errorf("editor = %q, want the draft minus the accepted token (%q)", got, want)
+	}
+	if off := caretOffset(m.input.Value(), m.input.Line(), m.input.Column()); off != len(want) {
+		t.Errorf("caret offset = %d, want %d (the end of what remains)", off, len(want))
+	}
+	if m.autocomplete.active {
+		t.Error("overlay still open after the command ran")
+	}
+	drainCmd(t, m, cmd)
+	if len(eng.submitted) != 0 {
+		t.Errorf("the draft was sent to the model: %+v", eng.submitted)
+	}
+}
+
+// ⏎ on an exactly typed command token MID-DRAFT executes through the accept path — the command
+// runs, the draft stays, nothing is sent. (The whole-input form keeps falling through to submit:
+// TestAutocompleteEnterExactSubmits.)
+func TestEnterOnMidDraftCommandRunsAndKeepsTheDraft(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("hold on /clear")
+	m.autocomplete = m.computeAutocomplete()
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if eng.clearCalls != 1 {
+		t.Fatalf("ClearContext calls = %d, want 1 (⏎ on an exact mid-draft verb runs it)", eng.clearCalls)
+	}
+	if cmd != nil {
+		t.Error("/clear returned a Cmd; it should not launch a worker")
+	}
+	if got, want := m.input.Value(), "hold on "; got != want {
+		t.Errorf("editor = %q, want the draft preserved (%q)", got, want)
+	}
+	if got := eng.submits(); got != 0 {
+		t.Errorf("Submit calls = %d, want 0 — the draft must not be sent by a command", got)
+	}
+}
+
+// The one arg-taking verb never fires from the menu: accepting /confine completes to "/confine "
+// and waits, because arguments are the whole-input form's business ("/confine off --save").
+func TestAcceptConfineSplicesWithoutFiring(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("/conf")
+	m.autocomplete = m.computeAutocomplete()
+	before := len(m.transcript.entries)
+	m, cmd := stepCmd(t, m, keyTab())
+
+	if got := m.input.Value(); got != "/confine " {
+		t.Errorf("accepted %q, want %q", got, "/confine ")
+	}
+	if cmd != nil {
+		t.Error("accepting /confine launched something")
+	}
+	if got := len(m.transcript.entries); got != before {
+		t.Errorf("transcript grew by %d entries; accepting /confine must not report anything yet", got-before)
+	}
+	if got := eng.confinesSet(); len(got) != 0 {
+		t.Errorf("SetConfineToWorkspace calls = %v, want none from a completion", got)
 	}
 }
 

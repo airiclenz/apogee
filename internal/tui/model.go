@@ -796,6 +796,10 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) submit() (tea.Model, tea.Cmd) {
 	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
+		// A whole-input invocation IS the command line — nothing else was typed — so emptying the
+		// box is exactly stripping the verb. runCommand does not touch the editor: its other caller,
+		// the dropdown's accept path, cuts the token out and deliberately keeps the rest of the draft.
+		m.promptEditor.reset()
 		return m.runCommand(parsed)
 	}
 	if parsed.kind == kindUnknownSlash {
@@ -969,17 +973,19 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 // synchronously and stays idle (startNewSession), /version records the build version as a note the same
 // synchronous way, /skills records the discovered skill catalog the same synchronous way
 // (skills.go), and /confine reports or swaps Auto's blast radius the same
-// synchronous way (confine.go). The input box and the autocomplete overlay are cleared either way. Reached
-// only from submit (stateIdle), so the engine is quiescent — no worker owns it — and
-// ClearContext/Compact are safe to launch here.
+// synchronous way (confine.go). Reached at stateIdle, so the engine is quiescent — no worker owns
+// it — and ClearContext/Compact are safe to launch here.
+//
+// It never touches the editor: the CALLER has already put the box where it belongs, and the two
+// callers disagree on purpose. A whole-input invocation arrives from submit, which empties the box
+// (the line was nothing but the command). A dropdown accept arrives from acceptAutocomplete, which
+// cuts only the accepted "/verb" out and KEEPS the rest of the draft — the whole point of running a
+// command at accept.
 //
 // It takes the whole parsedInput, not just the verb, because a verb with arguments can fail to
 // parse: parsed.err is reported as a note (it carries its own usage line) and nothing is driven,
 // so a mistyped /confine can never be mistaken for one that took effect.
 func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
-	m.input.Reset()
-	m.autocomplete = autocompleteState{}
-
 	if parsed.err != nil {
 		m.transcript.addNote(parsed.err.Error())
 		m.layout()
@@ -1053,7 +1059,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Compaction is a real upstream call (summary generation), so it rides a worker goroutine
 		// like /continue rather than blocking the Update loop (ADR 0011). Esc cancels it via
 		// stopWorker; the terminal compactDoneMsg records the outcome.
-		m.layout() // reflow the emptied input box back to one row
+		m.layout() // reflow the input box after the caller emptied it (or cut the accepted verb out)
 		// No mailbox: /compact drives no Exchange, so there is nothing to interject INTO. A row
 		// staged while it runs stays on the display queue and goes out at the terminal fold.
 		m.box = nil

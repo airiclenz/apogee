@@ -42,9 +42,15 @@
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):
 // command.go is a pure [parseInput] that classifies a line as a local /command or an agent
-// message and extracts @file references; autocomplete.go is the suggestion overlay (commands on
-// "/", a bounded os.Root workspace-file listing on "@") rendered above the input like the
-// approval-prompt slot. /clear (aliased by /new) and /compact drive the engine's context seams
+// message and extracts @file references; autocomplete.go is the suggestion overlay (ONE merged menu
+// of commands and skills on a "/" token, a bounded os.Root workspace-file listing on "@") rendered
+// above the input like the approval-prompt slot. Every region is scoped to the trailing TOKEN, so a
+// draft already in the box does not shut the menu out, and accepting a command row RUNS the command
+// — [Model.acceptAutocomplete] cuts the verb out and leaves the rest of the draft standing, which
+// is why [Model.runCommand] never touches the editor and its callers prepare it instead. The
+// whole-input form keeps ownership of arguments ("/confine off --save"), so ⏎ on a finished token
+// falls through to submit exactly there and executes at accept everywhere else.
+// /clear (aliased by /new) and /compact drive the engine's context seams
 // ([Engine.ClearContext]/[Engine.Compact]); /confine reports and toggles Auto's blast radius
 // through [Engine.SetConfineToWorkspace], the one verb that takes arguments ([parseConfine] owns
 // its "status | off [--save] | on" grammar, and an argument it does not understand is a parse
@@ -71,9 +77,12 @@
 // message is prose, so a path or a typo travels untouched), the token STAYS in the text the model
 // reads, and the ids ride out as [domain.UserInput.SkillIDs] on a submitted message and on a staged
 // interjection alike. Like @file, *resolution* (turning an ID into the prepended skill body) stays
-// in the agent loop, through Config.Skills. The two-step picker survives as an alternate entry
-// point: the "/" menu offers /skill, accepting it chains into an acSkill dropdown over the
-// catalog, and a pick splices the skill's own "/id " token at the strip point. /skill is
+// in the agent loop, through Config.Skills. The merged "/" menu offers the catalog beside the
+// commands (marked with glyphSkill, and accepting one writes its token), with commands SHADOWING a
+// skill of the same id — the collision is settled menu-side, so the parse layer never has to know
+// skills exist. The two-step picker survives as the alternate entry point that reaches a shadowed
+// one: the "/" menu offers /skill, accepting it chains into an acSkill dropdown over the catalog,
+// and a pick splices the skill's own "/id " token at the strip point. /skill is
 // deliberately NOT a parser command, which keeps an unknown "/skill foo" an ordinary message.
 // The one input that is neither command nor message is the SOLE-TOKEN guard (kindUnknownSlash): an
 // input that is nothing but one /word naming no verb and no skill is refused with a note and left
