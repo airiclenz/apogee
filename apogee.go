@@ -78,6 +78,15 @@ type Config = domain.Config
 // ContextConfig governs the structural context reducers (Budget, Compaction).
 type ContextConfig = domain.ContextConfig
 
+// ContextFilesReport is what a session's workspace context files (Config.ContextFiles)
+// contributed and what the standing system content costs against its Budget share — the
+// read-only view Agent.ContextFilesReport returns for the host's session notice.
+type ContextFilesReport = domain.ContextFilesReport
+
+// ContextFileNote is one file's line of that report: the configured name plus either the
+// size loaded or the reason a present file could not be read.
+type ContextFileNote = domain.ContextFileNote
+
 // ModelProfile describes how the configured model speaks the wire — its tool-call format and
 // inline thinking-channel style; the host sets it via Config.Profile (a zero profile is native
 // tool calls with no inline thinking).

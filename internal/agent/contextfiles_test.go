@@ -7,11 +7,13 @@ package agent
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -311,5 +313,107 @@ func TestSubAgentInheritsParentContextFiles(t *testing.T) {
 
 	if got := cachedContent(child.contextFiles, "AGENTS.md"); got != "first" {
 		t.Errorf("sub-agent cached content = %q, want the parent session's %q (copied, never re-read)", got, "first")
+	}
+}
+
+// TestContextFilesReportMirrorsTheCache: the report the host renders is exactly what the session
+// is holding — a note per cache entry in list order, sizes for what loaded and the reason for
+// what could not be read, and nothing at all for a name that was simply absent.
+func TestContextFilesReportMirrorsTheCache(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "agents")
+	if err := os.MkdirAll(filepath.Join(dir, "BROKEN.md"), 0o755); err != nil { // present, unreadable
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cfg := contextConfig(&recordingSink{}, dir, "BROKEN.md", "MISSING.md", "AGENTS.md")
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	report := a.ContextFilesReport()
+
+	if len(report.Files) != 2 {
+		t.Fatalf("report holds %d notes, want 2 (the missing name leaves no trace): %+v", len(report.Files), report.Files)
+	}
+	if got := report.Files[0]; got.Name != "BROKEN.md" || got.Err == "" || got.Bytes != 0 {
+		t.Errorf("first note = %+v, want an unreadable BROKEN.md carrying its error and no size", got)
+	}
+	if got := report.Files[1]; got.Name != "AGENTS.md" || got.Err != "" || got.Bytes != len("agents") {
+		t.Errorf("second note = %+v, want AGENTS.md loaded at %d bytes", got, len("agents"))
+	}
+}
+
+// TestContextFilesReportMeasuresStandingContent: the report costs the WHOLE standing system
+// content — the rendered prompt and the context-file blocks, exactly as seeded — against the
+// Budget's own system-prompt share, so a repo whose conventions have outgrown their allocation
+// says so.
+func TestContextFilesReportMeasuresStandingContent(t *testing.T) {
+	t.Parallel()
+
+	const systemPrompt = "You are a test agent."
+	content := strings.Repeat("workspace conventions. ", 250) // ~5.7 KB: comfortably over an 8k window's share
+
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", content)
+	cfg := contextConfig(&recordingSink{}, dir, "AGENTS.md")
+	cfg.SystemPrompt = systemPrompt
+	cfg.Context.MaxContextTokens = 8192
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	report := a.ContextFilesReport()
+
+	// The seed is prompt + blank line + header + blank line + content (item 2's composition).
+	seedChars := len(systemPrompt) + len("\n\n") + len(contextFileHeader+"AGENTS.md") + len("\n\n") + len(content)
+	want := int(math.Ceil(float64(seedChars) / apogeectx.DefaultCharsPerToken))
+	if report.StandingTokens != want {
+		t.Errorf("StandingTokens = %d, want %d (the estimate over the whole seeded system content)",
+			report.StandingTokens, want)
+	}
+	if share := apogeectx.Allocate(8192, 0).SystemPrompt; report.SystemShare != share {
+		t.Errorf("SystemShare = %d, want the Budget's allocation %d", report.SystemShare, share)
+	}
+	if !report.Oversize() {
+		t.Errorf("report %+v does not report over-share; a 5.7 KB context file overruns an 8k window's share", report)
+	}
+}
+
+// TestContextFilesReportWithoutWindowOrFiles pins the two quiet cases: an unknown context window
+// allocates nothing, so the report never claims an overrun it has no basis to measure; and a
+// session that loaded no files reports no notes at all — the silence the host renders as nothing.
+func TestContextFilesReportWithoutWindowOrFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", strings.Repeat("conventions. ", 500))
+	cfg := contextConfig(&recordingSink{}, dir, "AGENTS.md")
+	cfg.SystemPrompt = "You are a test agent." // no MaxContextTokens: the window is unknown
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	report := a.ContextFilesReport()
+	if report.SystemShare != 0 {
+		t.Errorf("SystemShare = %d with an unknown window, want 0 (nothing was allocated)", report.SystemShare)
+	}
+	if report.StandingTokens == 0 {
+		t.Error("StandingTokens = 0; the content is measurable even before the window binds")
+	}
+	if report.Oversize() {
+		t.Error("an unknown window reported an overrun; there is no share to overrun")
+	}
+
+	bare, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if got := bare.ContextFilesReport(); len(got.Files) != 0 {
+		t.Errorf("a session with no context files reported %+v, want no notes", got.Files)
 	}
 }

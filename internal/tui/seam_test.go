@@ -125,6 +125,9 @@ type fakeEngine struct {
 	restoreCalls []domain.Session // records RestoreSession calls (the in-TUI resume primitive), in order
 	inExchange   bool             // the value InExchange reports; a test sets it to model a mid-Exchange restore
 
+	contextReport  domain.ContextFilesReport // the value ContextFilesReport returns (the zero value: no context files)
+	contextReports int                       // how many times ContextFilesReport was read (once per session boundary)
+
 	interjected []domain.UserInput // records Interject calls (the worker's between-Steps delivery), in order
 
 	submitFn    func(domain.UserInput) error
@@ -222,6 +225,23 @@ func (f *fakeEngine) InExchange() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inExchange
+}
+
+// ContextFilesReport answers with whatever the test scripted (the zero value — no files — for
+// every test that does not care) and counts the reads, so a test can prove the UI takes the
+// report once per session boundary rather than on every repaint.
+func (f *fakeEngine) ContextFilesReport() domain.ContextFilesReport {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.contextReports++
+	return f.contextReport
+}
+
+// contextReads reports how many times the UI read the context-files report.
+func (f *fakeEngine) contextReads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.contextReports
 }
 
 // restores reports the snapshots RestoreSession was handed, in order — empty when the UI never

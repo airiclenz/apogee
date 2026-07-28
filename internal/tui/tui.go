@@ -102,6 +102,11 @@ type Engine interface {
 	// host makes after a restore (or at startup) to detect a session interrupted mid-task. Called
 	// only at idle.
 	InExchange() bool
+	// ContextFilesReport reports what the session's workspace context files contributed and what
+	// the standing system content costs against its Budget share — the data behind the session
+	// notice. Like InExchange it is a boundary-only read: called at idle, right after the boundary
+	// that started the session (startup, /clear|/new, a restore), never while a worker drives a Step.
+	ContextFilesReport() domain.ContextFilesReport
 	// Compact triggers generative Compaction on demand (the /compact command): it summarizes
 	// the conversation and replaces the folded history with the summary. A real upstream call,
 	// so the TUI drives it on a worker goroutine. Called only at idle. skipped is true when the

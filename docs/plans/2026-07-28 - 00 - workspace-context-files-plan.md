@@ -278,7 +278,20 @@ repo carrying an AGENTS.md, and `enable: false` turns it off.
 
 **Commit.** `feat(config): context-files block — enable switch and name list`
 
-## 4. The session notice and the Budget warn
+## 4. The session notice and the Budget warn — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): three additions beyond the item's literal file list, each recorded rather than
+assumed. (a) `apogee.go` gained the two aliases `ContextFilesReport` / `ContextFileNote`: the new
+`Agent.ContextFilesReport()` is public API and an embedder cannot name an `internal/domain` return
+type, so without them the method is unusable outside the module — the same aliasing every other
+publicly reachable domain type gets. (b) The warn's condition landed as a
+`ContextFilesReport.Oversize()` method in domain instead of inline in the TUI: it is pure arithmetic
+on a domain value (ADR 0010, the posture `budget.go` states verbatim) and the zero-share ⇒ never-warn
+rule is Budget knowledge, not formatting knowledge — the item's own test line ("when the report says
+over-share") reads that way too. (c) The warn renders its two counts through a new one-decimal
+`formatTokensFine` rather than the existing whole-thousands `formatTokens`, which is what the item's
+literal wording (`~4.2k` / `~3.9k`) asks for and avoids a narrow overrun printing the same number on
+both sides of "exceeds". Note ordering within a boundary is loaded line → unreadable notes → warn.
 
 **What.** The user sees what was loaded and what it costs, at every session boundary.
 

@@ -200,6 +200,10 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// A resumed run then repaints the stored scrollback beneath that box and relights the gauge
 	// (a no-op on a fresh start, when opts.Resumed is nil).
 	m.replayResumed(opts.Resumed)
+	// Construction is the session's first boundary, so the workspace context files the engine
+	// loaded are reported here — last, so the notice closes the opening frame rather than
+	// separating the box from the scrollback it belongs to.
+	m.noteContextFiles()
 	return m
 }
 
@@ -227,6 +231,50 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	}
 	if r.InExchange {
 		m.transcript.addNote(interruptedNote)
+	}
+}
+
+// noteContextFiles records what the session that just started loaded from the workspace: one
+// note naming every context file and its size, a note of its own for each file that is present
+// but unreadable (the loud skip), and — when the standing system content has outgrown the window
+// share allocated to it — the warning that says so. It is called at each of the three boundaries
+// the host owns, immediately after the boundary reseeded the view: construction, /clear|/new
+// (startNewSession), and a /sessions restore. Each of those re-read the files, so the notice
+// always describes the bytes the NEXT request will actually carry.
+//
+// A repo with none of the configured names is the common case, and it stays completely silent —
+// no note at all, not an empty one. The warning is advisory: nothing is capped or truncated, and
+// a window nobody could name yet reports a zero share, which never warns (Oversize).
+//
+// The name traces to config and the error text to the filesystem, so both are escape-stripped on
+// the way to the terminal exactly as the start-up box strips its host and model.
+func (m *Model) noteContextFiles() {
+	report := m.eng.ContextFilesReport()
+	if len(report.Files) == 0 {
+		return
+	}
+
+	loaded := make([]string, 0, len(report.Files))
+	unreadable := make([]string, 0, len(report.Files))
+	for _, f := range report.Files {
+		name := stripEscapes(f.Name)
+		if f.Err != "" {
+			unreadable = append(unreadable, "context: "+name+" unreadable — "+stripEscapes(f.Err))
+			continue
+		}
+		loaded = append(loaded, name+" ("+formatBytes(f.Bytes)+")")
+	}
+
+	if len(loaded) > 0 {
+		m.transcript.addNote("context: " + strings.Join(loaded, ", "))
+	}
+	for _, note := range unreadable {
+		m.transcript.addNote(note)
+	}
+	if report.Oversize() {
+		m.transcript.addNote("standing system content ~" + formatTokensFine(report.StandingTokens) +
+			" tokens exceeds its Budget share (~" + formatTokensFine(report.SystemShare) +
+			") — trim context files or the system prompt")
 	}
 }
 
@@ -879,6 +927,10 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
+	// The clear above was a session boundary, so the engine re-read the workspace context files:
+	// the fresh view says what the NEW session is carrying (which is why the notice is reprinted
+	// rather than assumed unchanged — the repo's AGENTS.md may have moved since launch).
+	m.noteContextFiles()
 	// A held interjection queue deliberately SURVIVES the reset (ADR 0025): staged rows are
 	// outgoing input, not context — the human wrote them and has not unwritten them — so /clear
 	// drops what the model remembers and leaves what is still waiting to be sent. The staged skill
@@ -2319,6 +2371,32 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%d", n)
 	}
 	return fmt.Sprintf("%dk", n/1000)
+}
+
+// formatTokensFine renders a token count the way a COMPARISON needs it — one decimal above a
+// thousand (4212 → "4.2k"), where formatTokens' whole-thousands rounding would print both sides
+// of a narrow overrun identically and read like a bug. The status line keeps the coarse form: a
+// window size is a round number, a measured count is not.
+func formatTokensFine(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
+}
+
+// formatBytes renders a file size for the session notice: bytes below a kibibyte, else KiB or
+// MiB to one decimal (3174 → "3.1 KiB"). Binary units, because the number it describes is a
+// file's size on disk.
+func formatBytes(n int) string {
+	const kib = 1024
+	switch {
+	case n < kib:
+		return fmt.Sprintf("%d B", n)
+	case n < kib*kib:
+		return fmt.Sprintf("%.1f KiB", float64(n)/kib)
+	default:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(kib*kib))
+	}
 }
 
 // nonEmpty returns the non-empty arguments in order — the footer's left segment skips an

@@ -334,6 +334,10 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if m.eng.InExchange() {
 		m.transcript.addNote(interruptedNote)
 	}
+	// A successful restore starts a new session, so the engine re-read the workspace context files
+	// (the resolved-live posture: a resumed session speaks from the CURRENT files, not the ones its
+	// snapshot was taken under) — the notice says what it is now carrying.
+	m.noteContextFiles()
 	m.ctxUsed = msg.rec.Meta.CtxUsed // relight the gauge near the resumed session's last fill
 	m.tokPerSec = 0
 	m.genStart = time.Time{}

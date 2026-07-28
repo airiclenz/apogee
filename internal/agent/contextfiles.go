@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // contextFile is one resolved workspace context file held in the session cache. Exactly one of
@@ -138,4 +140,38 @@ func (a *Agent) contextBlocks() string {
 		blocks = append(blocks, contextFileHeader+f.name+"\n\n"+strings.TrimRight(f.content, "\r\n"))
 	}
 	return strings.Join(blocks, "\n\n")
+}
+
+// ContextFilesReport reports what this session's workspace context files contributed and what
+// the standing system content they ride in costs — one note per cache entry (loaded or
+// unreadable, in list order), the estimated token size of the WHOLE seeded system content, and
+// the Budget share that content is allocated. It is the data behind the host's session notice;
+// nothing on this path reaches the model.
+//
+// The measure is taken at CALL time, not at the boundary that filled the cache, and that is the
+// point: the context window may bind seconds after a cold start (the first heartbeat), so a
+// report taken then has no allocation to compare against and simply reports a zero share, while
+// the same session's next /new — after the window bound — can say the content is over its share.
+//
+// StandingTokens measures standingSystem(), the very string buildRequest seeds, so what the user
+// is told is what the model is sent rather than a second, drifting estimate of it. Like the
+// session boundaries beside it this is an idle-only read: it renders the prompt (Mode, date) and
+// reads the token accounting, so the host calls it with no worker driving the Agent.
+func (a *Agent) ContextFilesReport() domain.ContextFilesReport {
+	report := domain.ContextFilesReport{}
+	if len(a.contextFiles) > 0 {
+		report.Files = make([]domain.ContextFileNote, 0, len(a.contextFiles))
+		for _, f := range a.contextFiles {
+			note := domain.ContextFileNote{Name: f.name, Bytes: f.size}
+			if f.err != nil {
+				note.Err = f.err.Error()
+			}
+			report.Files = append(report.Files, note)
+		}
+	}
+
+	budget := a.budget()
+	report.StandingTokens = budget.EstimateTokens(len(a.standingSystem()))
+	report.SystemShare = budget.SystemPrompt
+	return report
 }
