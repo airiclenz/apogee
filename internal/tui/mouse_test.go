@@ -968,30 +968,53 @@ func TestPromptClickRefusedAtApprovalAndErrored(t *testing.T) {
 	}
 }
 
-// TestTranscriptSelectionOnStickyHeaderRow checks the pinned sticky-header row behaves as a plain
-// viewport row for selection: a drag over it copies its rendered text and the highlight reaches
-// the composed View (which layers the highlight over the sticky-header overlay).
+// TestTranscriptSelectionOnStickyHeaderRow checks the sticky-header row copies WHAT IS DRAWN ON
+// IT: a drag over row 0 takes the overlaid prompt, not the reply line the scroll offset hides
+// beneath the overlay, and the highlight reaches the composed View (which layers the highlight
+// over the sticky-header overlay). Both scroll regimes are covered — parked on the prompt row,
+// where the overlay is a visual no-op, and following the tail of a reply taller than the screen,
+// where the overlay genuinely covers a different content line (the default for a long reply).
 func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
-	m := newTestModel(t)
-	m.transcript.addUser("HEADERPROMPT", nil)
-	for i := 0; i < 40; i++ {
-		m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
+	base := func(t *testing.T) Model {
+		t.Helper()
+		m := newTestModel(t)
+		m.transcript.addUser("HEADERPROMPT", nil)
+		for i := 0; i < 40; i++ {
+			m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
+		}
+		m.refreshViewport()
+		return m
 	}
-	m.refreshViewport()
-	// Park the view on the prompt row, where the sticky header overlays the same line the mouse
-	// maps to: the transcript follows the tail now, and mouse coordinates address the CONTENT
-	// (m.lines), not the overlay drawn over row 0.
-	m.detached = true
-	m.viewport.SetYOffset(m.userBlocks[len(m.userBlocks)-1].start)
+	cases := []struct {
+		name string
+		park func(m *Model)
+	}{
+		{"parked on the prompt row", func(m *Model) {
+			m.detached = true
+			m.viewport.SetYOffset(m.userBlocks[len(m.userBlocks)-1].start)
+		}},
+		{"following the tail", func(m *Model) {
+			if m.viewport.YOffset() <= m.userBlocks[len(m.userBlocks)-1].start {
+				t.Fatalf("setup: the tail offset %d must sit below the prompt row %d for the overlay to cover anything",
+					m.viewport.YOffset(), m.userBlocks[len(m.userBlocks)-1].start)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := base(t)
+			c.park(&m)
 
-	w := m.viewport.Width()
-	m = step(t, m, leftClick(0, 0))
-	m = step(t, m, leftDrag(w, 0))
-	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
-	if !strings.Contains(got, "HEADERPROMPT") {
-		t.Fatalf("selecting the sticky-header row copied %q, want it to contain the prompt text", got)
-	}
-	if !strings.Contains(m.View().Content, selectionBg) {
-		t.Fatal("a selection over the sticky-header row did not reach the rendered View")
+			w := m.viewport.Width()
+			m = step(t, m, leftClick(0, 0))
+			m = step(t, m, leftDrag(w, 0))
+			got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			if !strings.Contains(got, "HEADERPROMPT") {
+				t.Fatalf("selecting the sticky-header row copied %q, want it to contain the prompt text", got)
+			}
+			if !strings.Contains(m.View().Content, selectionBg) {
+				t.Fatal("a selection over the sticky-header row did not reach the rendered View")
+			}
+		})
 	}
 }

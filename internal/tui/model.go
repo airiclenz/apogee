@@ -1957,14 +1957,16 @@ func (m Model) promptCursor() *tea.Cursor {
 	return c
 }
 
-// applyStickyHeader overlays the user prompt that owns the content at the top of the viewport,
-// frozen at row 0, so the prompt the on-screen replies belong to is always visible. As the next
-// section's prompt scrolls up into the header zone it pushes the current header off the top — a
-// position: sticky hand-off — until the next prompt is itself the natural top line. With the base
-// pin in place (not scrolled) this redraws the latest prompt where it already is, a visual no-op.
-func (m Model) applyStickyHeader(view string) string {
+// stickyHeaderSpan reports which content lines the sticky-header overlay paints over the top of
+// the viewport: the m.lines range [start, start+count), drawn at rows 0..count-1. count is 0 when
+// nothing is overlaid — no user block owns the top row, or the incoming prompt has already pushed
+// this one fully out — in which case every row shows its natural (scroll-offset) content line.
+//
+// It is the single source of truth for the overlay's geometry: applyStickyHeader draws from it and
+// contentLineAt inverts it, so what the mouse addresses can never drift from what is drawn.
+func (m Model) stickyHeaderSpan() (start, count int) {
 	if len(m.userBlocks) == 0 {
-		return view
+		return 0, 0
 	}
 	o := m.viewport.YOffset()
 	cur := -1
@@ -1976,7 +1978,7 @@ func (m Model) applyStickyHeader(view string) string {
 		}
 	}
 	if cur < 0 {
-		return view // the top content sits above the first prompt — nothing to stick
+		return 0, 0 // the top content sits above the first prompt — nothing to stick
 	}
 	b := m.userBlocks[cur]
 	push := 0
@@ -1987,11 +1989,36 @@ func (m Model) applyStickyHeader(view string) string {
 		}
 	}
 	if push >= b.count {
-		return view // this header is fully pushed out; the next one is already the natural top
+		return 0, 0 // this header is fully pushed out; the next one is already the natural top
 	}
-	header := m.lines[b.start+push : b.start+b.count] // the still-visible (bottom) header rows
+	return b.start + push, b.count - push // the still-visible (bottom) header rows
+}
+
+// contentLineAt maps a viewport row to the index into m.lines of the content ACTUALLY DRAWN there.
+// Off the header zone that is just the scroll offset plus the row; within it, it is the overlaid
+// header line — the sticky header covers the content the offset would otherwise put there, so
+// addressing that content by row would name text the human cannot see. Selection (the mouse maps a
+// click through here) and the selection highlight both go through this one mapping, which is what
+// keeps copy equal to sight on the header rows (mouse.go).
+func (m Model) contentLineAt(row int) int {
+	if start, count := m.stickyHeaderSpan(); row >= 0 && row < count {
+		return start + row
+	}
+	return m.viewport.YOffset() + row
+}
+
+// applyStickyHeader overlays the user prompt that owns the content at the top of the viewport,
+// frozen at row 0, so the prompt the on-screen replies belong to is always visible. As the next
+// section's prompt scrolls up into the header zone it pushes the current header off the top — a
+// position: sticky hand-off — until the next prompt is itself the natural top line. With the view
+// parked on the prompt row this redraws it where it already is, a visual no-op.
+func (m Model) applyStickyHeader(view string) string {
+	start, count := m.stickyHeaderSpan()
+	if count == 0 {
+		return view
+	}
 	viewLines := strings.Split(view, "\n")
-	for i, hl := range header {
+	for i, hl := range m.lines[start : start+count] {
 		if i < len(viewLines) {
 			viewLines[i] = hl
 		}

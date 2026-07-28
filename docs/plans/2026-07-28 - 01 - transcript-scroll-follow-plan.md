@@ -156,6 +156,13 @@ coordinates address the CONTENT lines, not the sticky-header overlay drawn over 
 pre-existing (it already held whenever the human had scrolled) and is now simply the default state
 for a reply taller than the screen.
 
+FOLLOW-UP 1 (2026-07-28, owner-authorized after item 3): that defect is FIXED. Screen row → content
+line now goes through one overlay-aware mapping, `Model.contentLineAt` (`model.go`, inverting the new
+`stickyHeaderSpan` that `applyStickyHeader` also draws from), read by both `pointTranscriptRow` and
+`highlightTranscript` (`mouse.go`) — so the header row copies and highlights the prompt drawn on it.
+`TestTranscriptSelectionOnStickyHeaderRow` gained a "following the tail" subtest for the real
+overlay case; the original parked-on-the-prompt-row case is kept as its no-op sibling.
+
 **What.** The repaint policy inverts from pin-to-prompt to follow-the-tail, preserving the
 short-reply prompt pin through the existing padding.
 

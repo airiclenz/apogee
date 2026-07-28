@@ -394,6 +394,12 @@ point is a **minor** bump, not a breaking change.
     for something means you are done reading history.
   - A transcript shorter than the viewport can no longer get stuck detached — at that size the view
     is always at the bottom, so it always follows.
+  - **Selecting the sticky-header row now copies the header.** A drag over the top row took the
+    reply line the header was drawn *over* — the line the scroll offset put there, which you could
+    not see — so copying the prompt off the header was impossible. Mouse selection and its highlight
+    now read the same overlay-aware row→line mapping the header is drawn from, so the top row copies
+    what is printed on it. Pre-existing (it held whenever you had scrolled up); following the tail
+    made it the norm for any answer taller than the screen. Every other row is untouched.
 
 - **An `@`-reference to a file whose name contains spaces now resolves — write it quoted,
   `@"docs/my plan.md"`.** The reference was cut at its first whitespace and the opening quote rode

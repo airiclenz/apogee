@@ -37,6 +37,13 @@ import (
 // the text under the span does move (the streaming tail growing, a rewrap on resize, a tool call
 // joining its group) the selection drops rather than pointing at something else. That is what
 // makes copy equal sight: the release slices the very lines the rule protected.
+//
+// Screen rows become content lines through ONE mapping, Model.contentLineAt (model.go), which the
+// mouse and the highlight both read. It is overlay-aware: the sticky header draws the owning
+// prompt over the viewport's top rows, so those rows name the header's own lines, not the reply
+// lines the scroll offset hides beneath them. A drag that starts on the header and runs down into
+// the reply therefore spans the content between the two — the lines the header covers included,
+// since a screen-space span stays a contiguous run of content lines.
 
 // cell is an absolute visual position inside the textarea content: row counts wrapped (visual)
 // lines from the top of the value; col is the display column within that row.
@@ -145,13 +152,15 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 // screen origin (View stacks it first) and its content spans the width left of the scroll-bar
 // gutter. ok is false when the point falls outside the viewport rows or past the last rendered
 // line (the blank pad refreshViewport leaves below short content), so a click there selects
-// nothing. viewport.YOffset folds in the scroll, so the mapping holds at any scroll position.
+// nothing. contentLineAt (model.go) resolves the row, folding in both the scroll offset and the
+// sticky-header overlay — so a click on a header row names the prompt line drawn there rather
+// than the reply line hidden beneath it, and the mapping holds at any scroll position.
 func (m Model) pointTranscriptRow(x, y int) (line, col int, ok bool) {
 	w, h := m.viewport.Width(), m.viewport.Height()
 	if h < 1 || y < 0 || y >= h {
 		return 0, 0, false
 	}
-	line = m.viewport.YOffset() + y
+	line = m.contentLineAt(y)
 	if line < 0 || line >= len(m.lines) {
 		return 0, 0, false
 	}
@@ -414,10 +423,11 @@ func transcriptSelectionText(lines []string, a, b contentCell) string {
 
 // highlightTranscript overlays the transcript drag-selection's background on the viewport's
 // visible block, mirroring highlightInput: it shades the display cells between the selection's
-// two content-anchored ends on each visible line. viewport.YOffset maps the stored absolute
-// content rows onto the visible rows, so the highlight tracks the selection through a mid-drag
-// wheel-scroll. It is applied after the sticky header so a header row highlights as a plain
-// viewport row. With no active (non-empty) selection the view is returned unchanged.
+// two content-anchored ends on each visible line. contentLineAt (model.go) maps each visible row
+// back to the content line drawn on it, so the highlight tracks the selection through a mid-drag
+// wheel-scroll. It is applied after the sticky header and reads the same overlay mapping the mouse
+// does, so a header row highlights exactly when the header line under the span is the one drawn
+// there. With no active (non-empty) selection the view is returned unchanged.
 func (m Model) highlightTranscript(view string) string {
 	if !m.transcriptSel.active || m.transcriptSel.anchor == m.transcriptSel.head {
 		return view
@@ -426,10 +436,9 @@ func (m Model) highlightTranscript(view string) string {
 	if bot.line < top.line || (bot.line == top.line && bot.col < top.col) {
 		top, bot = bot, top // normalise to reading order
 	}
-	off := m.viewport.YOffset()
 	lines := strings.Split(view, "\n")
 	for r := range lines {
-		absRow := off + r
+		absRow := m.contentLineAt(r)
 		if absRow < top.line || absRow > bot.line {
 			continue
 		}
