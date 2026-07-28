@@ -28,9 +28,9 @@ const (
 // a /confine line (zero value — a status report — for every other verb) and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
-// silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens left in
-// place so the model sees what was referenced) and fileRefs holds the extracted
-// workspace-relative paths.
+// silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and /skill
+// tokens left in place so the model sees what was referenced), fileRefs holds the extracted
+// workspace-relative paths and skillIDs the extracted skill references.
 type parsedInput struct {
 	kind     inputKind
 	command  string
@@ -38,6 +38,7 @@ type parsedInput struct {
 	err      error
 	text     string
 	fileRefs []string
+	skillIDs []string
 }
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
@@ -88,7 +89,14 @@ var commandSpecs = []commandSpec{
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text
 // (the caller ignores it).
-func parseInput(raw string) parsedInput {
+//
+// known reports whether a bare token names a skill in the catalog — the seam that keeps this
+// layer pure, since the catalog is Model state. It is consulted for a kindMessage only, and only
+// after the whole-input command rule has had its say: a command verb SHADOWS a skill of the same
+// id, so "/clear" alone stays the command even in a workspace that ships a skill called clear. A
+// nil predicate means no catalog is wired (or the caller does not care), and no skill reference
+// is extracted.
+func parseInput(raw string, known func(string) bool) parsedInput {
 	trimmed := strings.TrimSpace(raw)
 	if cmd, args, ok := matchCommand(trimmed); ok {
 		parsed := parsedInput{kind: kindCommand, command: cmd}
@@ -98,7 +106,7 @@ func parseInput(raw string) parsedInput {
 		return parsed
 	}
 	text, refs := extractFileRefs(trimmed)
-	return parsedInput{kind: kindMessage, text: text, fileRefs: refs}
+	return parsedInput{kind: kindMessage, text: text, fileRefs: refs, skillIDs: extractSkillRefs(trimmed, known)}
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is
@@ -231,6 +239,47 @@ func extractFileRefs(s string) (string, []string) {
 		i = end - 1 // resume scanning past this token (the loop's own i++ lands on end)
 	}
 	return s, refs
+}
+
+// extractSkillRefs scans s for inline skill references and returns the referenced skill IDs,
+// de-duplicated in first-seen order. A skill reference is the exact mirror of an @file one — the
+// same word-boundary, whitespace-delimited grammar, and the same "the token stays in the text"
+// rule — so the two halves of the prompt mini-language read alike:
+//
+//	/code-audit please check @internal/tui/command.go
+//
+// The token must start at the beginning of s or immediately after whitespace, and it runs to the
+// next whitespace byte. Only a token whose bare name `known` confirms as a catalog ID counts:
+// every other slash-prefixed word is ordinary prose, which is what lets a path (/usr/bin), a
+// fraction (and/or) or a typo (/code-adit) travel to the model untouched. Skill IDs are directory
+// names and so never contain whitespace, which is why this grammar needs no quoted form.
+//
+// The literal token is left in the text — the owner's explicit choice over stripping it: the model
+// sees the invocation the human typed AND the skill body the agent prepends for it.
+func extractSkillRefs(s string, known func(string) bool) []string {
+	if known == nil {
+		return nil
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '/' {
+			continue
+		}
+		if i > 0 && !isInputSpace(s[i-1]) { // not at a word boundary ⇒ prose (a path, a fraction)
+			continue
+		}
+		end := i + 1
+		for end < len(s) && !isInputSpace(s[end]) {
+			end++
+		}
+		if id := s[i+1 : end]; id != "" && !seen[id] && known(id) {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+		i = end - 1 // resume past this token (the loop's own i++ lands on end)
+	}
+	return ids
 }
 
 // scanRefToken scans the token of an @file reference and reports the referenced path together

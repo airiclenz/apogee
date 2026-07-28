@@ -26,7 +26,7 @@ func TestParseInputCommands(t *testing.T) {
 		{"/clear extra args", "clear"}, // trailing args ignored (these commands take none)
 	}
 	for _, c := range cases {
-		got := parseInput(c.in)
+		got := parseInput(c.in, nil)
 		if got.kind != kindCommand || got.command != c.verb {
 			t.Errorf("parseInput(%q) = {kind:%v cmd:%q}, want command %q", c.in, got.kind, got.command, c.verb)
 		}
@@ -91,7 +91,7 @@ func TestParseInputUnknownSlashIsMessage(t *testing.T) {
 	// An unrecognised /verb is NOT a command — it is sent to the agent verbatim, so a real
 	// message that happens to start with "/" (a path, a typo) is never silently swallowed.
 	for _, in := range []string{"/skill foo", "/unknown", "/usr/local/bin matters", "/"} {
-		got := parseInput(in)
+		got := parseInput(in, nil)
 		if got.kind != kindMessage {
 			t.Errorf("parseInput(%q).kind = %v, want message", in, got.kind)
 		}
@@ -99,7 +99,7 @@ func TestParseInputUnknownSlashIsMessage(t *testing.T) {
 }
 
 func TestParseInputMessageExtractsFileRefs(t *testing.T) {
-	got := parseInput("look at @main.go and @internal/agent/loop.go please")
+	got := parseInput("look at @main.go and @internal/agent/loop.go please", nil)
 	if got.kind != kindMessage {
 		t.Fatalf("kind = %v, want message", got.kind)
 	}
@@ -155,6 +155,91 @@ func TestExtractFileRefs(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Inline /skill tokens — the second half of the mini-language
+// ----------------------------------------------------------------------------
+
+// knownSkills builds the catalog predicate parseInput/extractSkillRefs resolve against, from a
+// literal set of ids — the pure-layer stand-in for Model.knownSkillID.
+func knownSkills(ids ...string) func(string) bool {
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return func(id string) bool { return set[id] }
+}
+
+func TestExtractSkillRefs(t *testing.T) {
+	known := knownSkills("grill-me", "code-audit", "clear")
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"none", "just a plain message", nil},
+		{"at start", "/grill-me please", []string{"grill-me"}},
+		{"after space", "now /code-audit this", []string{"code-audit"}},
+		{"whole input", "/grill-me", []string{"grill-me"}},
+		{"multiple", "/grill-me and /code-audit", []string{"grill-me", "code-audit"}},
+		{"dedup first-seen", "/code-audit twice /code-audit", []string{"code-audit"}},
+		{"unknown token ignored", "/code-adit please", nil},
+		{"absolute path survives", "look in /usr/bin for it", nil},
+		{"mid-word slash is not a token", "and/or /grill-me", []string{"grill-me"}},
+		{"trailing punctuation is part of the token", "/grill-me, thanks", nil},
+		{"newline is a boundary", "first line\n/code-audit", []string{"code-audit"}},
+		{"tab is a boundary", "go\t/grill-me", []string{"grill-me"}},
+		{"bare slash ignored", "/ alone", nil},
+		{"nested path token not split", "/usr/grill-me", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := extractSkillRefs(c.in, known); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("extractSkillRefs(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+
+	// A nil predicate means no catalog is wired: every token is prose.
+	if got := extractSkillRefs("/grill-me now", nil); got != nil {
+		t.Errorf("extractSkillRefs with a nil predicate = %v, want nil", got)
+	}
+}
+
+// A message keeps its skill tokens IN the text (the @ref posture) and reports them as references,
+// while the whole-input command rule still wins outright — a command verb SHADOWS a skill of the
+// same id.
+func TestParseInputSkillTokens(t *testing.T) {
+	known := knownSkills("grill-me", "clear")
+
+	got := parseInput("/grill-me check @main.go", known)
+	if got.kind != kindMessage {
+		t.Fatalf("kind = %v, want message", got.kind)
+	}
+	if want := "/grill-me check @main.go"; got.text != want {
+		t.Errorf("text = %q, want %q (the /token stays in place)", got.text, want)
+	}
+	if want := []string{"grill-me"}; !reflect.DeepEqual(got.skillIDs, want) {
+		t.Errorf("skillIDs = %v, want %v", got.skillIDs, want)
+	}
+	if want := []string{"main.go"}; !reflect.DeepEqual(got.fileRefs, want) {
+		t.Errorf("fileRefs = %v, want %v", got.fileRefs, want)
+	}
+
+	// "clear" is both a command verb and (here) a skill id: the command wins, and no skill
+	// reference is extracted from a line the parser never treats as a message.
+	cmd := parseInput("/clear", known)
+	if cmd.kind != kindCommand || cmd.command != "clear" {
+		t.Fatalf("parseInput(/clear) = {kind:%v cmd:%q}, want the clear command", cmd.kind, cmd.command)
+	}
+	if len(cmd.skillIDs) != 0 {
+		t.Errorf("a command carried skill refs: %v", cmd.skillIDs)
+	}
+	// The same id mid-message is an ordinary skill reference again.
+	if got := parseInput("please /clear the mess", known); !reflect.DeepEqual(got.skillIDs, []string{"clear"}) {
+		t.Errorf("mid-message /clear skillIDs = %v, want [clear]", got.skillIDs)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // /confine — the one verb with arguments
 // ----------------------------------------------------------------------------
 
@@ -174,7 +259,7 @@ func TestParseInputConfineGrammar(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := parseInput(c.in)
+			got := parseInput(c.in, nil)
 			if got.kind != kindCommand || got.command != "confine" {
 				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the confine command", c.in, got.kind, got.command)
 			}
@@ -204,7 +289,7 @@ func TestParseInputConfineArgumentErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := parseInput(c.in)
+			got := parseInput(c.in, nil)
 			if got.kind != kindCommand || got.command != "confine" {
 				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the confine command", c.in, got.kind, got.command)
 			}
@@ -222,7 +307,7 @@ func TestParseInputConfineArgumentErrors(t *testing.T) {
 }
 
 func TestParseInputBlankIsEmptyMessage(t *testing.T) {
-	got := parseInput("   ")
+	got := parseInput("   ", nil)
 	if got.kind != kindMessage || got.text != "" {
 		t.Errorf("parseInput(blank) = {kind:%v text:%q}, want empty message", got.kind, got.text)
 	}

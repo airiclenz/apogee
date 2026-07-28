@@ -142,7 +142,7 @@ const commandsAtIdleNote = "commands run at idle — not queued"
 // parsed input the engine consumes, whose @file references deliberately stay unresolved until
 // delivery, so the model reads the file as it stands then.
 func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
-	parsed, _ := m.promptEditor.submitParse()
+	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
 		m.transcript.addNote(commandsAtIdleNote)
 		m.refreshViewport()
@@ -153,9 +153,12 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	}
 	m.interjectSeq++
 	row := queuedInterjection{
-		id:    m.interjectSeq,
-		raw:   m.input.Value(),
-		input: domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs},
+		id:  m.interjectSeq,
+		raw: m.input.Value(),
+		// The row carries the full parse — the skill /tokens included. A skill is message content
+		// like an @ref, so it rides the interjection and is resolved at delivery (agent/interject.go
+		// prepends the bodies exactly as the loop does at open).
+		input: domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs},
 	}
 	// The display copy and the mailbox are written together, which is what makes the two halves
 	// reconcilable: the row exists for the human the moment it exists for the worker.
@@ -261,18 +264,19 @@ func (m Model) flushAfterCompletion(done tea.Cmd) (tea.Model, tea.Cmd) {
 // half-typed line is not something they asked to send — it stays in the box, and the staged rows
 // (which they did press ⏎ on) are what goes.
 func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
-	text, refs := m.joinedInterjections(parsedInput{})
+	in := m.joinedInterjections(parsedInput{})
 	m.pendingInterjections = nil
 	m.detached = false // the flushed prompt re-arms follow-the-tail, exactly as a typed one does
-	m.transcript.addUser(text, nil)
+	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs))
 	m.layout() // the strip above the box loses its rows; the new prompt opens at the top
-	return m.launchExchange(domain.UserInput{Text: text, FileRefs: refs})
+	return m.launchExchange(in)
 }
 
 // joinedInterjections composes the ONE unmarked user message a flush sends: the staged rows'
 // texts oldest first — the order the human wrote them — with tail's text last when a ⏎ on a
-// non-empty box is what triggered the flush, separated by blank lines. Their @file references are
-// unioned in the same order and de-duplicated, so a path named in two rows is resolved once.
+// non-empty box is what triggered the flush, separated by blank lines. Their @file references and
+// their /skill references are unioned in the same order and de-duplicated, so a path — or a skill —
+// named in two rows is resolved once.
 //
 // One message rather than several is the point: exactly one unmarked user message opens an
 // Exchange, so the derived opening (internal/domain) stays trivially correct and every mechanism
@@ -283,26 +287,32 @@ func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 // It joins each row's PARSED text, not the verbatim editor line kept for the Backspace pop: a row
 // delivered mid-run sends exactly that text, and a row that merely happened to be flushed instead
 // must not reach the model differently for it.
-func (m Model) joinedInterjections(tail parsedInput) (string, []string) {
+func (m Model) joinedInterjections(tail parsedInput) domain.UserInput {
 	texts := make([]string, 0, len(m.pendingInterjections)+1)
-	var refs []string
-	seen := make(map[string]bool)
-	add := func(text string, fileRefs []string) {
+	var refs, ids []string
+	seenRef, seenID := make(map[string]bool), make(map[string]bool)
+	add := func(text string, fileRefs, skillIDs []string) {
 		if text != "" {
 			texts = append(texts, text)
 		}
 		for _, ref := range fileRefs {
-			if !seen[ref] {
-				seen[ref] = true
+			if !seenRef[ref] {
+				seenRef[ref] = true
 				refs = append(refs, ref)
+			}
+		}
+		for _, id := range skillIDs {
+			if !seenID[id] {
+				seenID[id] = true
+				ids = append(ids, id)
 			}
 		}
 	}
 	for _, row := range m.pendingInterjections {
-		add(row.input.Text, row.input.FileRefs)
+		add(row.input.Text, row.input.FileRefs, row.input.SkillIDs)
 	}
-	add(tail.text, tail.fileRefs)
-	return strings.Join(texts, "\n\n"), refs
+	add(tail.text, tail.fileRefs, tail.skillIDs)
+	return domain.UserInput{Text: strings.Join(texts, "\n\n"), FileRefs: refs, SkillIDs: ids}
 }
 
 // noteHeldQueue records that a stop or a loop error left the queue standing. It is called from the
@@ -337,9 +347,8 @@ const maxQueuedRows = 3
 // renderPendingInterjections draws the staged rows shown directly above the input box, as one band:
 // faint ⧖ lines in delivery order (oldest first, newest nearest the box), each indented into the
 // body column and painted edge to edge on black, framed by one blank band row above and one below
-// so the group separates from the chrome it sits between. It occupies the same slot the
-// attached-skill chips use, and returns "" when nothing is queued — no queue, no band, no frame —
-// so View treats it exactly like the chips and dropdown slots.
+// so the group separates from the chrome it sits between. It returns "" when nothing is queued —
+// no queue, no band, no frame — so View treats it exactly like the dropdown slot.
 func (m Model) renderPendingInterjections() string {
 	n := len(m.pendingInterjections)
 	if n == 0 {
@@ -360,7 +369,7 @@ func (m Model) renderPendingInterjections() string {
 }
 
 // queuedRow renders one line of the staged-row band: clipped ANSI-aware to the window so a long
-// message never breaks the chrome's layout (the renderSkillChips posture), then padded with spaces
+// message never breaks the chrome's layout (the statusLine posture), then padded with spaces
 // back out to that same width and styled as a whole. Text, indent, and pad alike therefore carry
 // the black background, so the row reads as one solid bar instead of leaving the terminal's own
 // background showing past the text — the statusLine posture. A "" text renders a blank band row.

@@ -435,25 +435,24 @@ func TestBackspaceDoesNotPopADrainedRow(t *testing.T) {
 	}
 }
 
-// The queue pop takes precedence over the skill-chip pop, and the chips are still reachable once
-// the queue is empty — the two rarely coexist, and "newest first" decides when they do.
-func TestBackspacePopsQueueBeforeSkillChips(t *testing.T) {
+// Backspace on an empty box pops the queue and nothing else: with the chips retired there is no
+// second staging area behind it, so a second press on an emptied queue is an ordinary no-op.
+func TestBackspaceOnEmptyPopsOnlyTheQueue(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
-	m.pendingSkills = []string{"review"}
 	m.pendingInterjections = []queuedInterjection{staged(1, "held row")}
 
 	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := m.input.Value(); got != "held row" {
-		t.Fatalf("editor = %q; want the queued row popped before the chip", got)
+		t.Fatalf("editor = %q; want the queued row popped back into the box", got)
 	}
-	if len(m.pendingSkills) != 1 {
-		t.Fatalf("skills = %v; want the chip untouched while a row was still queued", m.pendingSkills)
+	if n := len(m.pendingInterjections); n != 0 {
+		t.Fatalf("staged rows = %d; want the popped row off the queue", n)
 	}
 
 	m.input.SetValue("")
 	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if len(m.pendingSkills) != 0 {
-		t.Errorf("skills = %v; want the chip popped once the queue is empty", m.pendingSkills)
+	if got := m.input.Value(); got != "" {
+		t.Errorf("editor = %q; want an empty box — nothing else is staged to pop", got)
 	}
 }
 

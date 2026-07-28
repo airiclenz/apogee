@@ -65,9 +65,9 @@ type Model struct {
 	sessionBrowser sessionBrowser
 
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
-	// skillRegion edge-trigger), the staged-skill chips, the workspace file cache, and the prompt
-	// drag-selection (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its
-	// self-contained methods promote onto the Model (m.input, m.pendingSkills, m.caretTo(...) all
+	// skillRegion edge-trigger), the workspace file cache, and the prompt drag-selection
+	// (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its
+	// self-contained methods promote onto the Model (m.input, m.autocomplete, m.caretTo(...) all
 	// resolve through it): the value-copied Model idiom and every existing call site stay unchanged
 	// while the input state gains its own home. Model state the editor does not own — theme,
 	// width/height, opts, lifecycle — stays on the Model rather than be duplicated onto the editor.
@@ -718,17 +718,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// (inputEditable; ADR 0025). Enter is handled above; everything else is an edit.
 	if m.inputEditable() {
 		if m.input.Value() == "" && msg.String() == "backspace" {
-			// Backspace on an empty input un-does the last thing staged, newest first. The
-			// interjection queue is checked BEFORE the skill chips: a queued row is the more recent
-			// act (chips are staged at idle, before the send that opened the Exchange), and the two
-			// rarely coexist at all.
+			// Backspace on an empty input un-does the last thing staged: it lifts the newest queued
+			// interjection back into the box. Nothing else is staged beside the text any more — a
+			// skill is a /token IN it, deleted like any other word.
 			if popped, ok := m.popInterjection(); ok {
 				return popped, nil
-			}
-			if m.state == stateIdle && len(m.pendingSkills) > 0 {
-				m.pendingSkills = m.pendingSkills[:len(m.pendingSkills)-1]
-				m.layout()
-				return m, nil
 			}
 		}
 		var cmd tea.Cmd
@@ -800,23 +794,23 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // first, the box's own text last, because it is the newest thing the human wrote. That is also why
 // an EMPTY box is not always a no-op: with rows held, ⏎ is what sends them.
 func (m Model) submit() (tea.Model, tea.Cmd) {
-	parsed, attached := m.promptEditor.submitParse()
+	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
 		return m.runCommand(parsed)
 	}
 	held := len(m.pendingInterjections) > 0
-	// Nothing to send only when there is neither text NOR an attached skill NOR a held row: an
-	// empty message with skills attached is a valid send (the skill bodies are the payload), and so
-	// is a bare ⏎ on a queue waiting to go out.
-	if parsed.text == "" && len(attached) == 0 && !held {
+	// Nothing to send only when there is neither text NOR a held row. A message that is only a skill
+	// token ("/grill-me") HAS text — the token itself — so it sends, which is the owner's edge
+	// default: "just run the skill".
+	if parsed.text == "" && !held {
 		return m, nil
 	}
 	if m.blockedUpstream() {
 		// There is nothing to send to. Refuse at the boundary and say why — and leave the typed
 		// message exactly where it is: the human wrote it, the server's absence is not their
 		// mistake, and re-typing it once the server comes back would be the actual insult. Nothing
-		// else about the state moves (no worker, no reset, no chip drop, and a held interjection
-		// queue stays held), so ⏎ once the heartbeat recovers sends the very same message.
+		// else about the state moves (no worker, no reset, and a held interjection queue stays
+		// held), so ⏎ once the heartbeat recovers sends the very same message.
 		m.transcript.addNote(m.upstreamBlockNote())
 		m.refreshViewport()
 		return m, nil
@@ -829,19 +823,19 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		m.eng.AbortExchange()
 		m.transcript.addNote("discarded the interrupted work — continuing fresh from your message")
 	}
-	text, refs := parsed.text, parsed.fileRefs
+	in := domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs}
 	if held {
 		// The held rows and the box become one unmarked user message (joinedInterjections), which
 		// is what keeps the derived Exchange opening trivially correct: exactly one of them opens
 		// the Exchange, whether the human sent one message or five.
-		text, refs = m.joinedInterjections(parsed)
+		in = m.joinedInterjections(parsed)
 		m.pendingInterjections = nil
 	}
-	m.promptEditor.reset() // empties the textarea, closes the overlay, drops the staged chips
+	m.promptEditor.reset() // empties the textarea and closes the overlay
 	m.detached = false     // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
-	m.transcript.addUser(text, m.skillDisplayNames(attached))
+	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
-	return m.launchExchange(domain.UserInput{Text: text, FileRefs: refs, SkillIDs: attached})
+	return m.launchExchange(in)
 }
 
 // launchExchange starts the worker over one Exchange and moves the Model into stateRunning: a
@@ -871,7 +865,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, tick)
 }
 
-// skillDisplayNames resolves the attached skill IDs to their display names (falling back to the
+// skillDisplayNames resolves the invoked skill IDs to their display names (falling back to the
 // raw ID when the catalog can't resolve it), for the chips rendered on the sent user block. A
 // nil/empty input yields nil, so the block carries no chip row.
 func (m Model) skillDisplayNames(ids []string) []string {
@@ -886,9 +880,8 @@ func (m Model) skillDisplayNames(ids []string) []string {
 				name = sk.DisplayName
 			}
 		}
-		// The display name is untrusted (repo-supplied SKILL.md front-matter) and this resolver
-		// feeds both the transcript chips and the pending-chip strip, so escape-strip it here too
-		// (the transcript boundary strips again — cheap defense in depth).
+		// The display name is untrusted (repo-supplied SKILL.md front-matter), so escape-strip it
+		// here too (the transcript boundary strips again — cheap defense in depth).
 		names = append(names, stripEscapes(name))
 	}
 	return names
@@ -942,13 +935,10 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.noteContextFiles()
 	// A held interjection queue deliberately SURVIVES the reset (ADR 0025): staged rows are
 	// outgoing input, not context — the human wrote them and has not unwritten them — so /clear
-	// drops what the model remembers and leaves what is still waiting to be sent. The staged skill
-	// chips are the opposite case: they are attachments to a send that belonged to the session just
-	// abandoned.
-	m.pendingSkills = nil // the staged chips belonged to the abandoned session
-	m.detached = false    // re-arm follow-the-tail: the fresh transcript opens at its tail like a launch
-	m.ctxUsed = 0         // the gauge and throughput fall with the discarded conversation…
-	m.tokPerSec = 0       // …the same reason compactDoneMsg zeroes them on a fold
+	// drops what the model remembers and leaves what is still waiting to be sent.
+	m.detached = false // re-arm follow-the-tail: the fresh transcript opens at its tail like a launch
+	m.ctxUsed = 0      // the gauge and throughput fall with the discarded conversation…
+	m.tokPerSec = 0    // …the same reason compactDoneMsg zeroes them on a fold
 	m.genStart = time.Time{}
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
 	m.layout()
@@ -1003,16 +993,15 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			tick := m.spin.arm()
 			return m, tea.Batch(cmd, tick)
 		}
-		// /continue carries any attached skills into the canned turn (the user lined them up
-		// before asking the model to keep going).
-		attached := m.pendingSkills
-		m.pendingSkills = nil
+		// The canned turn carries no skills: a skill is invoked by naming its /token in a real
+		// message, and "/continue" is the whole input here by construction (the whole-input command
+		// rule), so there is no token to carry.
 		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
-		m.transcript.addUser("/continue", m.skillDisplayNames(attached))
+		m.transcript.addUser("/continue", nil)
 		m.layout()
 		m.box = newInterjectBox()
 		cmd, cancel := startExchange(m.parent, m.eng,
-			domain.UserInput{Text: "Please continue", SkillIDs: attached}, m.box, m.notify)
+			domain.UserInput{Text: "Please continue"}, m.box, m.notify)
 		m.cancel = cancel
 		m.state = stateRunning
 		m.setPlaceholder(runningPlaceholder)
@@ -1045,9 +1034,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	case "compact":
 		// Compaction is a real upstream call (summary generation), so it rides a worker goroutine
 		// like /continue rather than blocking the Update loop (ADR 0011). Esc cancels it via
-		// stopWorker; the terminal compactDoneMsg records the outcome. Staged chips are dropped
-		// (the turn is reset).
-		m.pendingSkills = nil
+		// stopWorker; the terminal compactDoneMsg records the outcome.
 		m.layout() // reflow the emptied input box back to one row
 		// No mailbox: /compact drives no Exchange, so there is nothing to interject INTO. A row
 		// staged while it runs stays on the display queue and goes out at the terminal fold.
@@ -1865,13 +1852,10 @@ func (m Model) View() tea.View {
 	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
 		prompt = m.askPrompt(m.pendingAsk.Request)
 	}
-	// The autocomplete overlay (idle, and the "@file" region while running), the attached-skill
-	// chips (idle only), and the staged interjection rows sit just above the input box. They, and
-	// the approval/ask prompt, each steal rows from the transcript viewport, so shrink it by their
-	// combined height before rendering. The chips can co-occur with the dropdown (attaching one
-	// skill while picking another); the prompt cannot (different states).
+	// The autocomplete overlay (idle, and the "@file" region while running) and the staged
+	// interjection rows sit just above the input box. They, and the approval/ask prompt, each steal
+	// rows from the transcript viewport, so shrink it by their combined height before rendering.
 	dropdown := m.renderAutocomplete()
-	chips := m.renderSkillChips()
 	queued := m.renderPendingInterjections()
 	browser := m.renderSessionBrowser()
 	shrink := 0
@@ -1883,9 +1867,6 @@ func (m Model) View() tea.View {
 	}
 	if dropdown != "" {
 		shrink += lipgloss.Height(dropdown)
-	}
-	if chips != "" {
-		shrink += lipgloss.Height(chips)
 	}
 	if queued != "" {
 		shrink += lipgloss.Height(queued)
@@ -1919,9 +1900,6 @@ func (m Model) View() tea.View {
 	rows = append(rows, "", m.topRule(), m.statusLine())
 	if dropdown != "" {
 		rows = append(rows, dropdown)
-	}
-	if chips != "" {
-		rows = append(rows, chips)
 	}
 	// The staged interjection rows sit closest to the box: they are what ⏎ just put there, and
 	// what Backspace on an empty box takes back (ADR 0025).

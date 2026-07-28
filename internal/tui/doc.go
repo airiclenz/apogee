@@ -64,14 +64,17 @@
 // seam: file paths and formats are the binary's business, and a save that fails or is unwired
 // never invalidates the session toggle that already happened.
 //
-// The /skill flow (post-v1 apogee-code feature-parity) extends the same overlay without
-// thickening the renderer: the "/" menu offers /skill, accepting it chains into a skill picker
-// ("/skill <id>", an acSkill dropdown over the injected [SkillCatalog]), and a pick pops a chip
-// onto Model.pendingSkills — a plain []string rendered as badges above the input. Submit copies
-// the chips into [domain.UserInput.SkillIDs]; like @file, *resolution* (turning an ID into the
-// prepended skill body) stays in the agent loop, through Config.Skills. /skill is deliberately
-// NOT a parser command (it never submits as a message) — attachment is the only way it acts,
-// mirroring the oracle's selectSkill, which keeps an unknown "/skill foo" an ordinary message.
+// The skill flow (post-v1 apogee-code feature-parity) is the mini-language's second half, and it
+// is TEXT rather than state beside it: a skill is invoked by naming its id as a "/token" at a word
+// boundary in the message — "/code-audit please check the parser" — exactly as an @path names a
+// file. extractSkillRefs collects the tokens the [SkillCatalog] confirms (any other /word is
+// prose, so a path or a typo travels untouched), the token STAYS in the text the model reads, and
+// the ids ride out as [domain.UserInput.SkillIDs] on a submitted message and on a staged
+// interjection alike. Like @file, *resolution* (turning an ID into the prepended skill body) stays
+// in the agent loop, through Config.Skills. The two-step picker survives as an alternate entry
+// point: the "/" menu offers /skill, accepting it chains into an acSkill dropdown over the
+// catalog, and a pick splices the skill's own "/id " token at the strip point. /skill is
+// deliberately NOT a parser command, which keeps an unknown "/skill foo" an ordinary message.
 //
 // presenter.go supplies the last host delegate, and it is the one that decides rather than asks:
 // [uiPresenter] is the Presenter present_document routes a finished deliverable to, and it walks
@@ -109,17 +112,17 @@
 // equal sight by construction rather than by care.
 //
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
-// five loose input-side concerns the architecture review called one coherent concept — the
-// textarea, the autocomplete overlay (+ its skillRegion edge-trigger), the staged-skill chips, the
-// workspace file cache, and the prompt drag-selection — into a [promptEditor] type the [Model]
-// embeds anonymously. Field and self-contained-method promotion keeps the value-copied Model idiom
-// and every call site unchanged (m.input, m.pendingSkills, m.caretTo(...) resolve through it). The
+// loose input-side concerns the architecture review called one coherent concept — the textarea, the
+// autocomplete overlay (+ its skillRegion edge-trigger), the workspace file cache, and the prompt
+// drag-selection — into a [promptEditor] type the [Model] embeds
+// anonymously. Field and self-contained-method promotion keeps the value-copied Model idiom
+// and every call site unchanged (m.input, m.autocomplete, m.caretTo(...) resolve through it). The
 // lift is deliberately partial: only methods touching nothing but the editor's own fields move
 // there (newPromptEditor, submitParse, reset, rows, and the caret re-seat trio caretTo/reseatCaret/
 // reseatInput); methods that also read Model-owned state — theme, width/height, opts, lifecycle —
 // stay on the Model rather than duplicate that state (computeAutocomplete, acceptAutocomplete,
-// attachSkill, highlightInput, inputContentRect, the region-arbitrating mouse handlers). The Model
-// stays the coordinator that owns the lifecycle state machine, the transcript + render cache, the
+// insertSkillToken, highlightInput, inputContentRect, the region-arbitrating mouse handlers). The
+// Model stays the coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
 // invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps idlePlaceholder
 // ("⏎ send") for runningPlaceholder ("⏎ queue · esc stop") on the lifecycle transitions that open and

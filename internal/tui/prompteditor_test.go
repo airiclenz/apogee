@@ -20,7 +20,7 @@ import (
 func TestPromptEditorSubmitParseMessage(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape)
 	e.input.SetValue("look at @main.go and @pkg/x.go please")
-	parsed, skills := e.submitParse()
+	parsed := e.submitParse(nil)
 	if parsed.kind != kindMessage {
 		t.Fatalf("kind = %v, want kindMessage", parsed.kind)
 	}
@@ -30,8 +30,8 @@ func TestPromptEditorSubmitParseMessage(t *testing.T) {
 	if want := []string{"main.go", "pkg/x.go"}; !reflect.DeepEqual(parsed.fileRefs, want) {
 		t.Errorf("fileRefs = %v, want %v", parsed.fileRefs, want)
 	}
-	if len(skills) != 0 {
-		t.Errorf("skills = %v, want none", skills)
+	if len(parsed.skillIDs) != 0 {
+		t.Errorf("skillIDs = %v, want none", parsed.skillIDs)
 	}
 }
 
@@ -39,31 +39,32 @@ func TestPromptEditorSubmitParseMessage(t *testing.T) {
 func TestPromptEditorSubmitParseCommand(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape)
 	e.input.SetValue("/clear")
-	parsed, _ := e.submitParse()
+	parsed := e.submitParse(nil)
 	if parsed.kind != kindCommand || parsed.command != "clear" {
 		t.Fatalf("parsed = %+v, want kindCommand verb=clear", parsed)
 	}
 }
 
-// submitParse carries the staged-skill chips through so a text-free, skills-only send is valid.
-func TestPromptEditorSubmitParseCarriesStagedSkills(t *testing.T) {
+// submitParse resolves the inline /tokens through the predicate it is handed, so a message that
+// names a skill arrives with the id extracted and the token still in its text.
+func TestPromptEditorSubmitParseExtractsSkillTokens(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape)
-	e.pendingSkills = []string{"go-testing", "git"}
-	parsed, skills := e.submitParse()
-	if parsed.text != "" {
-		t.Errorf("text = %q, want empty (a skills-only send has no text)", parsed.text)
+	e.input.SetValue("/go-testing tidy this up")
+	parsed := e.submitParse(knownSkills("go-testing", "git"))
+	if want := "/go-testing tidy this up"; parsed.text != want {
+		t.Errorf("text = %q, want %q (the /token stays in the message)", parsed.text, want)
 	}
-	if want := []string{"go-testing", "git"}; !reflect.DeepEqual(skills, want) {
-		t.Errorf("skills = %v, want the staged chips %v", skills, want)
+	if want := []string{"go-testing"}; !reflect.DeepEqual(parsed.skillIDs, want) {
+		t.Errorf("skillIDs = %v, want %v", parsed.skillIDs, want)
 	}
 }
 
-// reset empties every editable part of the editor: the textarea, the overlay, and the chips.
+// reset empties every editable part of the editor: the textarea and the overlay. Emptying the text
+// is what drops the skills too — they live in it as /tokens, not beside it.
 func TestPromptEditorResetClearsEverything(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape)
 	e.input.SetValue("half-typed /skill go")
 	e.autocomplete = autocompleteState{active: true, kind: acSkill}
-	e.pendingSkills = []string{"git"}
 	e.reset()
 	if v := e.input.Value(); v != "" {
 		t.Errorf("input = %q, want empty after reset", v)
@@ -71,8 +72,8 @@ func TestPromptEditorResetClearsEverything(t *testing.T) {
 	if e.autocomplete.active {
 		t.Error("autocomplete still active after reset")
 	}
-	if e.pendingSkills != nil {
-		t.Errorf("pendingSkills = %v, want nil after reset", e.pendingSkills)
+	if got := e.submitParse(knownSkills("go")); len(got.skillIDs) != 0 {
+		t.Errorf("skillIDs = %v, want none once the text is gone", got.skillIDs)
 	}
 }
 

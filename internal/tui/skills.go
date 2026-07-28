@@ -20,6 +20,19 @@ import (
 // nothing staged. The report builder below is pure, so the wording stays table-testable
 // without a Model (the confine.go posture).
 
+// knownSkillID reports whether id names a skill in the wired catalog. It is the predicate the pure
+// parse layer resolves inline "/token" references against (parseInput → extractSkillRefs) and the
+// one place the "is this word a skill?" question is answered, so the parser, the highlighter and
+// the dropdown can never disagree about what resolves. A nil catalog knows nothing — every token is
+// then plain prose, which is exactly right for a build with no skills wired.
+func (m Model) knownSkillID(id string) bool {
+	if m.opts.Skills == nil {
+		return false
+	}
+	_, ok := m.opts.Skills.Get(id)
+	return ok
+}
+
 // runSkills routes /skills: re-scan the skill source dirs, then record the catalog as one
 // transcript note. The re-scan is the same live refresh the picker edge-triggers when it opens
 // — ReloadSkills swaps the shared skills.Provider that both this listing and the agent loop

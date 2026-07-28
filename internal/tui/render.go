@@ -172,7 +172,7 @@ func renderUserBlock(th theme, marker, text string, skills []string, width int) 
 	return out
 }
 
-// renderUserChipRow composes one full-width row of attached-skill chips inside the user block:
+// renderUserChipRow composes one full-width row of invoked-skill chips inside the user block:
 // a dark-gray lead marker, the violet chips (each carrying its own background), and a dark-gray
 // pad filling the block to width — three independently styled segments on one line, so the
 // chips keep their colour while the row stays a solid block (the footerContent idiom). Chips
@@ -191,9 +191,9 @@ func renderUserChipRow(th theme, marker string, skills []string, width int) stri
 	return lead + body + pad
 }
 
-// renderSkillChip renders one attached-skill badge — the violet " ✦ name " pill the chip row
-// (renderUserChipRow) and the pending-chip strip (renderSkillChips) both show. It is the single
-// source of a chip's look, so the two rows never drift.
+// renderSkillChip renders one invoked-skill badge — the violet " ✦ name " pill the sent block's
+// chip row (renderUserChipRow) shows for every skill the message invoked. It is the single source
+// of a chip's look.
 func renderSkillChip(th theme, name string) string {
 	return th.skillChip.Render(" " + glyphSkill + " " + name + " ")
 }

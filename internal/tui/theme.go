@@ -96,7 +96,7 @@ type theme struct {
 	toolLabel    lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
 	toolDetail   lipgloss.Style // the ┝/┕ branch detail lines (dim)
 	subRail      lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
-	skillChip    lipgloss.Style // an attached-skill chip above the input (white on violet)
+	skillChip    lipgloss.Style // an invoked-skill chip on a sent user block (white on violet)
 	selection    lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
 	diffAdded    lipgloss.Style // a "+" diff detail line (reserved)
 	diffRemoved  lipgloss.Style // a "-" diff detail line (reserved)

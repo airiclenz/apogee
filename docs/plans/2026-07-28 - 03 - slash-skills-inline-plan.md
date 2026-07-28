@@ -239,7 +239,20 @@ sending "/skills" to the model.
 
 **Commit.** `feat(tui): /skills lists the skill catalog`
 
-## 3. Skills become inline `/tokens` — the chip flow retires
+## 3. Skills become inline `/tokens` — the chip flow retires — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): three mechanical deviations from the literal text, no behavioural ones.
+(a) `submitParse` TAKES the catalog predicate as an argument (`submitParse(known func(string) bool)
+parsedInput`) rather than building one from `m.opts.Skills` itself — the editor owns no Options
+(prompteditor.go's partial-lift rule), so the Model passes its new `Model.knownSkillID` (skills.go)
+in; the single return is the parse, callers read `parsed.skillIDs`. (b) `joinedInterjections` now
+returns a `domain.UserInput` instead of `(text, refs)` — a third parallel return for the unioned
+skill IDs read worse than the one value the two call sites already build. (c) consequently
+`flushInterjections`' `addUser` is fed `skillDisplayNames(in.SkillIDs)` instead of `nil`, per the
+design decision that the sent-block chip row is fed from the parsed IDs. `internal/tui/doc.go`'s
+three references to the now-deleted `pendingSkills`/`attachSkill` were rewritten here rather than
+left dangling for item 9 (which still owns the fuller narrative sweep — accept-executes,
+caret-aware regions); the CHANGELOG is left to item 9 entirely, as item 2 did.
 
 **What.** The pivot. Parse layer first (`command.go`), pure and Model-free:
 

@@ -341,8 +341,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.ctxUsed = msg.rec.Meta.CtxUsed // relight the gauge near the resumed session's last fill
 	m.tokPerSec = 0
 	m.genStart = time.Time{}
-	m.pendingSkills = nil // the staged chips belonged to the conversation being left behind
-	m.detached = false    // re-arm follow-the-tail: the resumed view opens at its tail like a launch
+	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
 	m.layout()
 	return nil

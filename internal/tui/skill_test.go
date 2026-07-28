@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -41,8 +39,6 @@ func skillOpts() Options {
 	}}
 	return o
 }
-
-func keyBackspace() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyBackspace} }
 
 // ----------------------------------------------------------------------------
 // skillArgToken (pure)
@@ -145,36 +141,44 @@ func TestSkillArgWinsOverBareCommand(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Accept: attach a chip + strip the text; the /skill command chains into the picker
+// Accept: splice the skill's inline /token; the /skill command chains into the picker
 // ----------------------------------------------------------------------------
 
-func TestAcceptSkillAttachesAndStrips(t *testing.T) {
+// The picker no longer pops a chip: accepting a row REPLACES the "/skill <partial>" run with the
+// skill's own inline "/id " token, which is what the submit parse reads back out.
+func TestAcceptSkillSplicesInlineToken(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("fix /skill cl")
 	m.autocomplete = m.computeAutocomplete() // acSkill, [clean-code]
 	m = step(t, m, keyTab())
 
-	if !reflect.DeepEqual(m.pendingSkills, []string{"clean-code"}) {
-		t.Errorf("pendingSkills = %v, want [clean-code]", m.pendingSkills)
-	}
-	if got := m.input.Value(); got != "fix " {
-		t.Errorf("after attach input = %q, want the /skill text stripped to %q", got, "fix ")
+	if got, want := m.input.Value(), "fix /clean-code "; got != want {
+		t.Errorf("after accept input = %q, want the picker run replaced by %q", got, want)
 	}
 	if m.autocomplete.active {
-		t.Error("overlay still open after attach")
+		t.Error("overlay still open after the splice")
 	}
-	if got := plain(m.View()); !strings.Contains(got, "Clean Code") {
-		t.Errorf("attached chip not rendered:\n%s", got)
+	if got := m.promptEditor.submitParse(m.knownSkillID).skillIDs; !reflect.DeepEqual(got, []string{"clean-code"}) {
+		t.Errorf("spliced token parses to skillIDs = %v, want [clean-code]", got)
+	}
+	// No chip strip renders anywhere any more — the token in the box IS the attachment.
+	if got := plain(m.View()); strings.Contains(got, "Clean Code") {
+		t.Errorf("a chip strip is still rendered above the box:\n%s", got)
 	}
 }
 
-func TestAcceptSkillDedupes(t *testing.T) {
+// The picker excludes a skill the message already invokes — read off the tokens standing in the
+// buffer, since there is no attachment state beside it.
+func TestSkillPickerExcludesTokensAlreadyInTheBuffer(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.pendingSkills = []string{"clean-code"}
-	// The picker excludes an already-attached skill, so "cl" now matches nothing.
-	m.input.SetValue("/skill cl")
+	m.input.SetValue("/clean-code /skill cl")
 	if ac := m.computeAutocomplete(); ac.active {
-		t.Errorf("an already-attached skill is still offered: %+v", ac.items)
+		t.Errorf("a skill already invoked in the text is still offered: %+v", ac.items)
+	}
+	// Delete the token and it is offered again — the exclusion self-heals with the text.
+	m.input.SetValue("/skill cl")
+	if ac := m.computeAutocomplete(); !ac.active || ac.items[0].value != "clean-code" {
+		t.Errorf("removing the token did not restore the suggestion: %+v", ac)
 	}
 }
 
@@ -206,62 +210,64 @@ func TestEnterOnSkillCommandDoesNotSubmit(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Submit: carry SkillIDs, allow empty-text-with-skills, clear chips
+// Submit: inline tokens carry SkillIDs and stay in the text
 // ----------------------------------------------------------------------------
 
 func TestSubmitCarriesSkillIDs(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
-	m.pendingSkills = []string{"clean-code", "review"}
-	m.input.SetValue("do the thing")
+	m.input.SetValue("/clean-code do the thing /review")
 	m, cmd := stepCmd(t, m, keyEnter())
 
 	if m.state != stateRunning {
 		t.Fatalf("state = %v, want running", m.state)
 	}
-	if len(m.pendingSkills) != 0 {
-		t.Errorf("pendingSkills not cleared after submit: %v", m.pendingSkills)
+	if v := m.input.Value(); v != "" {
+		t.Errorf("input not cleared after submit: %q", v)
 	}
 	drainCmd(t, m, cmd)
 	if len(eng.submitted) != 1 {
 		t.Fatalf("Submit calls = %d, want 1", len(eng.submitted))
 	}
 	in := eng.submitted[0]
-	if in.Text != "do the thing" {
-		t.Errorf("submitted text = %q", in.Text)
+	// The tokens stay IN the text (owner override of the strip default): the model sees the
+	// invocation the human typed AND the skill bodies the loop prepends for it.
+	if want := "/clean-code do the thing /review"; in.Text != want {
+		t.Errorf("submitted text = %q, want %q", in.Text, want)
 	}
 	if !reflect.DeepEqual(in.SkillIDs, []string{"clean-code", "review"}) {
-		t.Errorf("submitted SkillIDs = %v, want both attached ids", in.SkillIDs)
+		t.Errorf("submitted SkillIDs = %v, want both invoked ids", in.SkillIDs)
 	}
 }
 
-func TestSubmitEmptyTextWithSkillsSends(t *testing.T) {
+// An input that is ONLY a skill token is a valid submit — "just run the skill" (edge default #2).
+func TestSubmitBareSkillTokenSends(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
-	m.pendingSkills = []string{"clean-code"}
-	m.input.SetValue("") // no text, just an attached skill
+	m.input.SetValue("/clean-code")
 	m, cmd := stepCmd(t, m, keyEnter())
 
 	if m.state != stateRunning {
-		t.Fatalf("an empty message with a skill attached did not send: state = %v", m.state)
+		t.Fatalf("a bare skill token did not send: state = %v", m.state)
 	}
 	drainCmd(t, m, cmd)
 	if len(eng.submitted) != 1 || !reflect.DeepEqual(eng.submitted[0].SkillIDs, []string{"clean-code"}) {
-		t.Fatalf("empty-text send did not carry the skill: %+v", eng.submitted)
+		t.Fatalf("bare-token send did not carry the skill: %+v", eng.submitted)
+	}
+	if eng.submitted[0].Text != "/clean-code" {
+		t.Errorf("submitted text = %q, want the token itself", eng.submitted[0].Text)
 	}
 	if got := plain(m.View()); !strings.Contains(got, "Clean Code") {
-		t.Errorf("transcript should note the attached skill on an empty send:\n%s", got)
+		t.Errorf("transcript should chip the invoked skill:\n%s", got)
 	}
 }
 
-// A message sent WITH text and an attached skill keeps the skill visible on its user block
-// after the send (ISSUES #5: the attachment used to vanish once the chips cleared from the
-// input).
+// A message sent with text and a skill token keeps the skill visible on its user block after the
+// send (ISSUES #5: the attachment used to vanish once the input cleared).
 func TestSentUserBlockShowsSkillChipsWithText(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
-	m.pendingSkills = []string{"clean-code"}
-	m.input.SetValue("fix the parser")
+	m.input.SetValue("/clean-code fix the parser")
 	m, cmd := stepCmd(t, m, keyEnter())
 	drainCmd(t, m, cmd)
 
@@ -270,7 +276,23 @@ func TestSentUserBlockShowsSkillChipsWithText(t *testing.T) {
 		t.Errorf("sent text missing from the transcript:\n%s", got)
 	}
 	if !strings.Contains(got, "Clean Code") {
-		t.Errorf("attached skill not shown on the sent user block (ISSUES #5):\n%s", got)
+		t.Errorf("invoked skill not shown on the sent user block (ISSUES #5):\n%s", got)
+	}
+}
+
+// A token that matches no catalog id is ordinary prose: it travels verbatim and resolves nothing.
+func TestSubmitUnknownTokenIsPlainText(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, skillOpts())
+	m.input.SetValue("/clean-cod the typo and /usr/bin the path")
+	m, cmd := stepCmd(t, m, keyEnter())
+	drainCmd(t, m, cmd)
+
+	if len(eng.submitted) != 1 {
+		t.Fatalf("Submit calls = %d, want 1", len(eng.submitted))
+	}
+	if ids := eng.submitted[0].SkillIDs; len(ids) != 0 {
+		t.Errorf("submitted SkillIDs = %v, want none (nothing in that line resolves)", ids)
 	}
 }
 
@@ -284,63 +306,65 @@ func TestSubmitEmptyAndNoSkillsIgnored(t *testing.T) {
 	}
 }
 
-// ----------------------------------------------------------------------------
-// Chips: backspace removal, command interactions
-// ----------------------------------------------------------------------------
-
-func TestBackspaceOnEmptyRemovesLastChip(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.pendingSkills = []string{"clean-code", "review"}
-	m.input.SetValue("")
-	m = step(t, m, keyBackspace())
-	if !reflect.DeepEqual(m.pendingSkills, []string{"clean-code"}) {
-		t.Errorf("after backspace pendingSkills = %v, want [clean-code]", m.pendingSkills)
-	}
-	m = step(t, m, keyBackspace())
-	if len(m.pendingSkills) != 0 {
-		t.Errorf("after second backspace pendingSkills = %v, want empty", m.pendingSkills)
-	}
-}
-
-func TestBackspaceWithTextDoesNotPopChip(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.pendingSkills = []string{"clean-code"}
-	m.input.SetValue("ab")
-	m = step(t, m, keyBackspace()) // edits the text, not the chip
-	if len(m.pendingSkills) != 1 {
-		t.Errorf("backspace popped a chip while the input had text: %v", m.pendingSkills)
-	}
-	if m.input.Value() != "a" {
-		t.Errorf("backspace did not edit the text: %q", m.input.Value())
-	}
-}
-
-func TestClearAndCompactClearChips(t *testing.T) {
-	for _, cmd := range []string{"/clear", "/compact"} {
-		t.Run(cmd, func(t *testing.T) {
-			m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-			m.pendingSkills = []string{"clean-code"}
-			m.input.SetValue(cmd)
-			m = step(t, m, keyEnter())
-			if len(m.pendingSkills) != 0 {
-				t.Errorf("%s did not clear staged chips: %v", cmd, m.pendingSkills)
-			}
-		})
-	}
-}
-
-func TestContinueCarriesChips(t *testing.T) {
+// /continue no longer carries skills: the chips it used to consume are gone, and its canned turn
+// is the whole input by construction — there is no token in it to invoke anything with.
+func TestContinueCarriesNoSkills(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
-	m.pendingSkills = []string{"review"}
 	m.input.SetValue("/continue")
 	m, cmd := stepCmd(t, m, keyEnter())
-	if len(m.pendingSkills) != 0 {
-		t.Errorf("/continue did not consume the chips: %v", m.pendingSkills)
-	}
 	drainCmd(t, m, cmd)
-	if len(eng.submitted) != 1 || !reflect.DeepEqual(eng.submitted[0].SkillIDs, []string{"review"}) {
-		t.Fatalf("/continue did not carry the attached skill: %+v", eng.submitted)
+
+	if len(eng.submitted) != 1 {
+		t.Fatalf("Submit calls = %d, want the canned turn", len(eng.submitted))
+	}
+	if ids := eng.submitted[0].SkillIDs; len(ids) != 0 {
+		t.Errorf("/continue carried SkillIDs = %v, want none", ids)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Interjections: a skill token rides the queue
+// ----------------------------------------------------------------------------
+
+// Staging a message with a skill token while the model works carries the id on the row's
+// UserInput — the silent drop the chip flow left behind (interject.go's discarded parse).
+func TestStagedInterjectionCarriesSkillIDs(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.state = stateRunning
+	m.box = newInterjectBox()
+	m.input.SetValue("/review this diff too")
+	m = step(t, m, keyEnter())
+
+	if n := len(m.pendingInterjections); n != 1 {
+		t.Fatalf("staged rows = %d, want 1", n)
+	}
+	if got := m.pendingInterjections[0].input.SkillIDs; !reflect.DeepEqual(got, []string{"review"}) {
+		t.Errorf("staged SkillIDs = %v, want [review]", got)
+	}
+}
+
+// A flush of two rows naming the same skill unions to one id, exactly as the file refs do.
+func TestFlushUnionsSkillIDs(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, skillOpts())
+	m.state = stateRunning
+	m.box = newInterjectBox()
+	m.input.SetValue("/review the parser")
+	m = step(t, m, keyEnter())
+	m.input.SetValue("/review the tests too /clean-code")
+	m = step(t, m, keyEnter())
+
+	m.state = stateIdle
+	m.input.SetValue("")
+	m, cmd := stepCmd(t, m, keyEnter()) // ⏎ on an empty box sends what is held
+	drainCmd(t, m, cmd)
+
+	if len(eng.submitted) != 1 {
+		t.Fatalf("Submit calls = %d, want the held rows sent as one message", len(eng.submitted))
+	}
+	if got := eng.submitted[0].SkillIDs; !reflect.DeepEqual(got, []string{"review", "clean-code"}) {
+		t.Errorf("joined SkillIDs = %v, want [review clean-code] (first-seen, deduped)", got)
 	}
 }
 
@@ -356,10 +380,14 @@ func TestNilCatalogGuards(t *testing.T) {
 	if ac := m.computeAutocomplete(); ac.active {
 		t.Errorf("skill picker active with a nil catalog: %+v", ac.items)
 	}
-	// A chip with an unresolvable id falls back to the raw id, no panic.
-	m.pendingSkills = []string{"ghost"}
-	if got := plain(m.View()); !strings.Contains(got, "ghost") {
-		t.Errorf("chip with nil catalog did not fall back to the raw id:\n%s", got)
+	// No token resolves without a catalog, so the message is ordinary prose — no panic.
+	m.input.SetValue("/ghost do it")
+	if got := m.promptEditor.submitParse(m.knownSkillID); len(got.skillIDs) != 0 {
+		t.Errorf("skillIDs = %v with a nil catalog, want none", got.skillIDs)
+	}
+	// A chip with an unresolvable id still falls back to the raw id on the sent block.
+	if names := m.skillDisplayNames([]string{"ghost"}); !reflect.DeepEqual(names, []string{"ghost"}) {
+		t.Errorf("skillDisplayNames = %v, want the raw id as the fallback", names)
 	}
 }
 

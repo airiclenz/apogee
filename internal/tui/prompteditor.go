@@ -12,20 +12,20 @@ import (
 // promptEditor — the chat input cluster lifted off the god-Model (review candidate #3)
 // ----------------------------------------------------------------------------
 //
-// promptEditor gathers the five loose input-side concerns the architecture review called one
-// coherent concept: the textarea, the autocomplete overlay (+ its skillRegion edge-trigger), the
-// staged-skill chips, the workspace file cache, and the prompt drag-selection. The Model embeds it
-// ANONYMOUSLY (model.go), so its fields and its self-contained methods promote onto the Model —
-// m.input, m.pendingSkills, m.caretTo(...) all still resolve — which keeps the value-copied Model
-// idiom and every existing call site (and its tests) unchanged while the input state gains a home.
+// promptEditor gathers the loose input-side concerns the architecture review called one coherent
+// concept: the textarea, the autocomplete overlay (+ its skillRegion edge-trigger), the workspace
+// file cache, and the prompt drag-selection. The Model embeds it ANONYMOUSLY (model.go), so its
+// fields and its self-contained methods promote onto the Model — m.input, m.autocomplete,
+// m.caretTo(...) all still resolve — which keeps the value-copied Model idiom and every existing
+// call site (and its tests) unchanged while the input state gains a home.
 //
 // The lift is deliberately PARTIAL (design decision Option C): only methods that touch nothing but
 // the editor's own fields live here. Methods that also read Model state the editor does not own —
 // the theme, the window width/height, the display Options, the lifecycle state — stay on the Model
-// rather than duplicate that state here (computeAutocomplete, acceptAutocomplete, attachSkill,
-// highlightInput, inputContentRect, the region-arbitrating mouse handlers). No Model state is
-// copied onto the editor, and the editor never touches the engine — it only turns what the human
-// typed into send-ingredients the Model then routes.
+// rather than duplicate that state here (computeAutocomplete, acceptAutocomplete,
+// insertSkillToken, highlightInput, inputContentRect, the region-arbitrating mouse handlers). No
+// Model state is copied onto the editor, and the editor never touches the engine — it only turns
+// what the human typed into send-ingredients the Model then routes.
 
 // promptEditor owns the chat input cluster. The zero value is not usable — build one with
 // newPromptEditor, which focuses the textarea and installs the file cache.
@@ -49,12 +49,6 @@ type promptEditor struct {
 	// one filesystem walk (filecache.go). A pointer — shared across the value-copied Model so
 	// the cache survives each Update (ADR 0011); nil-safe (fileSuggestions falls back).
 	files *fileCache
-
-	// pendingSkills are the skill IDs attached via the /skill picker, awaiting the next submit
-	// (which copies them into UserInput.SkillIDs and clears them). A plain []string — a
-	// reference header, safe in the value-copied Model (ADR 0011) — rendered as chips above the
-	// input. Backspace on an empty input pops the last one.
-	pendingSkills []string
 
 	// sel is the prompt's mouse drag-selection (mouse.go); the zero value is "no selection". It
 	// is cleared by any keypress, a submit/reset, or a resize, so its visual coords never go
@@ -139,13 +133,17 @@ func newPromptEditor(shape tea.CursorShape) promptEditor {
 	return promptEditor{input: ta, files: &fileCache{}}
 }
 
-// submitParse parses the editor's current input through the chat mini-language (command.go) and
-// returns the parse together with the skill IDs staged for attachment. It reads the editor
-// without mutating it: the caller resets the editor only once it has decided the parse is a
+// submitParse parses the editor's current input through the chat mini-language (command.go): the
+// verb or the message text, its @file references, and its inline /skill references. It reads the
+// editor without mutating it: the caller resets the editor only once it has decided the parse is a
 // message to send (a recognised /command routes without a reset). This is the editor's "turn what
 // I hold into send-ingredients" seam — unit-testable without a Model or a fake engine.
-func (e promptEditor) submitParse() (parsedInput, []string) {
-	return parseInput(e.input.Value()), e.pendingSkills
+//
+// known is the catalog predicate parseInput resolves skill tokens against. The editor does not own
+// the catalog (it owns nothing but the box — the partial-lift rule above), so the Model passes its
+// own [Model.knownSkillID] in rather than this type growing a copy of Model state.
+func (e promptEditor) submitParse(known func(string) bool) parsedInput {
+	return parseInput(e.input.Value(), known)
 }
 
 // setPlaceholder swaps what the empty box invites (idlePlaceholder / runningPlaceholder). It is
@@ -155,13 +153,13 @@ func (e *promptEditor) setPlaceholder(text string) {
 	e.input.Placeholder = text
 }
 
-// reset clears the editor back to empty after a message is sent: it empties the textarea, closes
-// the autocomplete overlay, and drops the staged-skill chips. The prompt drag-selection is
-// already gone by here — the keypress that reached submit cleared it (handleKey).
+// reset clears the editor back to empty after a message is sent: it empties the textarea and
+// closes the autocomplete overlay. Emptying the textarea is all it takes to drop the skills too —
+// they are /tokens IN the text, not state beside it. The prompt drag-selection is already gone by
+// here — the keypress that reached submit cleared it (handleKey).
 func (e *promptEditor) reset() {
 	e.input.Reset()
 	e.autocomplete = autocompleteState{}
-	e.pendingSkills = nil
 }
 
 // rows reports the textarea's height in visual rows for a given text width: the rows its current

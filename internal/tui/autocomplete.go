@@ -5,7 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -31,7 +30,7 @@ type acKind int
 const (
 	acCommand acKind = iota // a "/command" word
 	acFile                  // an "@file" reference
-	acSkill                 // a "/skill <id>" argument (attaches a skill chip, not spliced as text)
+	acSkill                 // a "/skill <id>" argument (splices the skill's own inline "/id" token)
 )
 
 // acItem is one suggestion: value is the text spliced in (the command name or file path,
@@ -59,18 +58,19 @@ type autocompleteState struct {
 //
 // The three regions do NOT share a lifetime. An "@file" reference is exactly as useful in a
 // message interjected mid-run as in one submitted at idle (the ref resolves at delivery, fresh),
-// so the file region is offered wherever the box is editable. The "/command" and "/skill"
-// regions are idle-only, because both offer something that would be REFUSED mid-run: a command
-// is not queued (it earns a note instead) and a skill attaches to a send that is not happening.
-// Offering either while running would be the overlay lying about what ⏎ does.
+// so the file region is offered wherever the box is editable. The "/command" region is idle-only
+// because a command typed mid-run is REFUSED rather than queued (it earns a note instead), and
+// offering it while running would be the overlay lying about what ⏎ does. The "/skill" picker
+// stays idle-only alongside it for now — a hold on the menu, not a limit of what it splices: the
+// inline token it writes is message content, and rides an interjection exactly as an @ref does.
 func (m Model) computeAutocomplete() autocompleteState {
 	value := m.input.Value()
 	idle := m.state == stateIdle
 
 	// Skill argument: a "/skill <partial>" region (the trailing word after a "/skill" token).
 	// Checked FIRST so it wins over the bare-command branch — which would otherwise see "/skill"
-	// the moment a space is typed. tokenStart marks the "/skill" itself, so accepting strips the
-	// whole "/skill <partial>" run when the chip is popped.
+	// the moment a space is typed. tokenStart marks the "/skill" itself, so accepting replaces the
+	// whole "/skill <partial>" run with the skill's own "/id " token.
 	if start, partial, ok := skillArgToken(value); ok && idle {
 		items := m.skillSuggestions(partial)
 		if len(items) == 0 {
@@ -196,11 +196,11 @@ func commandSuggestions(partial string) []acItem {
 }
 
 // skillArgToken reports the "/skill <partial>" region at the end of value: the byte offset of
-// the "/skill" token (the strip point when a chip is popped), the partial id/name being typed,
-// and whether value ends in such a region. The partial is the trailing whitespace-delimited
-// word, and the word immediately before it must be exactly "/skill". It accepts "/skill ",
-// "/skill cl", and mid-line "fix /skill cl"; it rejects a bare "/skill" (no arg yet) and a
-// completed "/skill foo " (the word before the trailing position is "foo", not "/skill").
+// the "/skill" token (the point the picked skill's own token is spliced over), the partial
+// id/name being typed, and whether value ends in such a region. The partial is the trailing
+// whitespace-delimited word, and the word immediately before it must be exactly "/skill". It
+// accepts "/skill ", "/skill cl", and mid-line "fix /skill cl"; it rejects a bare "/skill" (no arg
+// yet) and a completed "/skill foo " (the word before the trailing position is "foo", not "/skill").
 func skillArgToken(value string) (int, string, bool) {
 	lastSpace := strings.LastIndexAny(value, " \t\n")
 	if lastSpace < 0 {
@@ -216,14 +216,20 @@ func skillArgToken(value string) (int, string, bool) {
 }
 
 // skillSuggestions lists skills matching partial (a case-insensitive substring of id or
-// displayName), excluding those already attached, as rows showing "displayName  summary". The
-// value is the skill ID (what gets attached). A nil catalog yields nothing (the picker is dark).
+// displayName), excluding those the message already invokes, as rows showing "displayName
+// summary". The value is the skill ID (what the accepted row splices in as a "/id" token). A nil
+// catalog yields nothing (the picker is dark).
+//
+// "Already invoked" is read off the BUFFER — the /tokens standing in the text right now — because
+// the text is where an invocation lives; there is no attachment state beside it to consult. Delete
+// the token and the skill is offered again, which is the same self-healing rule the inline accents
+// and the submit parse read.
 func (m Model) skillSuggestions(partial string) []acItem {
 	if m.opts.Skills == nil {
 		return nil
 	}
-	attached := make(map[string]bool, len(m.pendingSkills))
-	for _, id := range m.pendingSkills {
+	attached := map[string]bool{}
+	for _, id := range extractSkillRefs(m.input.Value(), m.knownSkillID) {
 		attached[id] = true
 	}
 	needle := strings.ToLower(partial)
@@ -309,8 +315,10 @@ func (m Model) autocompleteExactMatch() bool {
 	if !ac.active || len(ac.items) == 0 || ac.tokenStart > len(m.input.Value()) {
 		return false
 	}
-	// A skill is attached via accept (it pops a chip), never submitted literally — so Enter
-	// always completes it, regardless of how exactly the typed text matches.
+	// Inside the "/skill <partial>" picker the typed text is the PICKER's syntax, never the message
+	// — a "/skill cl" that happens to equal nothing sendable — so Enter always completes there,
+	// swapping the run for the skill's own token. (A directly typed "/id" token is ordinary text and
+	// takes the exact-match path below.)
 	if ac.kind == acSkill {
 		return false
 	}
@@ -329,56 +337,51 @@ func (m Model) autocompleteExactMatch() bool {
 	return typed == "/"+selected
 }
 
-// acceptAutocomplete applies the highlighted suggestion. A skill is attached (a chip is popped
-// and its "/skill <partial>" text stripped — attachSkill); a command is spliced in as
-// "/" + value + a trailing space, and a file as its reference token (fileRefToken — quoted when
-// the path has spaces, whatever form the partial was typed in) plus that same trailing space.
-// The quoting is decided by the PATH, never by how the user started typing: a bare "@my"
+// acceptAutocomplete applies the highlighted suggestion, splicing it over the region that opened
+// the overlay: a skill as its own inline "/id" token (insertSkillToken — the picked skill REPLACES
+// the "/skill <partial>" run that summoned the picker), a command as "/" + value, and a file as its
+// reference token (fileRefToken — quoted when the path has spaces, whatever form the partial was
+// typed in). The quoting is decided by the PATH, never by how the user started typing: a bare "@my"
 // partial completing to a spaced path still splices the quoted token, because only that one
-// resolves. After a splice it RECOMPUTES the overlay rather than
-// blindly closing it: that closes the overlay for a completed command/file (the trailing space
-// ends the token) but reopens it as the skill picker after "/skill " — the chain the oracle's
-// selectSkill mirrors. It never submits; the cursor lands at the end of the spliced text.
+// resolves. It never submits; the cursor lands at the end of the spliced text.
 func (m Model) acceptAutocomplete() Model {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 {
 		return m
 	}
-	if ac.kind == acSkill {
-		return m.attachSkill(ac.items[ac.selected].value)
+	selected := ac.items[ac.selected].value
+	switch ac.kind {
+	case acSkill:
+		return m.insertSkillToken(selected)
+	case acFile:
+		return m.spliceCompletion(fileRefToken(selected))
+	default:
+		return m.spliceCompletion("/" + selected)
 	}
+}
+
+// insertSkillToken writes the skill's inline invocation — "/id " — over the completion region,
+// which is the whole "/skill <partial>" run the picker opened on (tokenStart marks the "/skill"
+// itself). The token IS the attachment: it stays in the text the human sends, submitParse reads it
+// back out as a skill reference, and deleting it un-invokes the skill. Shared by the picker's
+// accept and (from the merged menu) a directly chosen skill row.
+func (m Model) insertSkillToken(id string) Model {
+	return m.spliceCompletion("/" + id)
+}
+
+// spliceCompletion writes token, plus the trailing space that ends it, over the completion region
+// and re-derives the overlay. It RECOMPUTES rather than blindly closing: that closes the overlay
+// for a completed command/file/skill token (the trailing space ends the token) but reopens it as
+// the skill picker after "/skill " — the chain the oracle's selectSkill mirrors.
+func (m Model) spliceCompletion(token string) Model {
 	value := m.input.Value()
-	start := ac.tokenStart
+	start := m.autocomplete.tokenStart
 	if start > len(value) {
 		start = len(value) // defensive: the value cannot have shrunk, but never slice out of range
-	}
-	token := "/" + ac.items[ac.selected].value
-	if ac.kind == acFile {
-		token = fileRefToken(ac.items[ac.selected].value)
 	}
 	m.input.SetValue(value[:start] + token + " ")
 	m.input.MoveToEnd()
 	m = m.recomputeAutocomplete() // chains "/skill " → picker (reloading the catalog); else closes
-	m.layout()
-	return m
-}
-
-// attachSkill pops the skill onto the pending chip row (deduped) and strips the "/skill
-// <partial>" text that triggered it (from tokenStart to the end), then recomputes the overlay
-// (which closes, the stripped text no longer being a skill region). The chip is what carries
-// the attachment to submit; the input is freed for the message itself.
-func (m Model) attachSkill(id string) Model {
-	if !containsString(m.pendingSkills, id) {
-		m.pendingSkills = append(m.pendingSkills, id)
-	}
-	value := m.input.Value()
-	start := m.autocomplete.tokenStart
-	if start > len(value) {
-		start = len(value)
-	}
-	m.input.SetValue(value[:start])
-	m.input.MoveToEnd()
-	m = m.recomputeAutocomplete() // leaving the /skill region (chip popped): closes, never reloads
 	m.layout()
 	return m
 }
@@ -436,26 +439,6 @@ func (m Model) renderAutocomplete() string {
 		maxRows:  maxAutocompleteItems,
 	}
 	return renderPopup(m.th, spec, m.width)
-}
-
-// renderSkillChips draws the attached-skill badges shown just above the input box, one chip per
-// pending skill (its display name, resolved through the catalog; the raw ID if unresolved). It
-// returns "" when nothing is attached, so View can treat it like the autocomplete slot. A row
-// of chips that would overrun the width is clipped to one line, not wrapped — it is a status
-// strip, not content.
-func (m Model) renderSkillChips() string {
-	if len(m.pendingSkills) == 0 {
-		return ""
-	}
-	// One resolver (skillDisplayNames) and one chip renderer (renderSkillChip), shared with the
-	// sent-block chip row — so the pending strip and the transcript chips never drift.
-	names := m.skillDisplayNames(m.pendingSkills)
-	chips := make([]string, 0, len(names))
-	for _, name := range names {
-		chips = append(chips, renderSkillChip(m.th, name))
-	}
-	// ANSI-aware clip: the chips carry styling, so a rune-count truncation could cut mid-escape.
-	return ansi.Truncate(strings.Join(chips, " "), max(0, m.width), "…")
 }
 
 // truncateLabel clips s to at most width display runes, ending in an ellipsis when it had to
