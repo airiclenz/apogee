@@ -959,7 +959,8 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 // open a worker: /continue a canned "Please continue" turn, /compact a generative summary
 // call; /clear (and its alias /new) resets the session view and reprints the start-up box
 // synchronously and stays idle (startNewSession), /version records the build version as a note the same
-// synchronous way, and /confine reports or swaps Auto's blast radius the same
+// synchronous way, /skills records the discovered skill catalog the same synchronous way
+// (skills.go), and /confine reports or swaps Auto's blast radius the same
 // synchronous way (confine.go). The input box and the autocomplete overlay are cleared either way. Reached
 // only from submit (stateIdle), so the engine is quiescent — no worker owns it — and
 // ClearContext/Compact are safe to launch here.
@@ -1035,6 +1036,11 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.transcript.addNote("apogee " + m.opts.Version)
 		m.layout()
 		return m, nil
+
+	case "skills":
+		// Synchronous like /version: re-scan the source dirs and print the catalog as a note
+		// (skills.go). No upstream call, no worker — it only reports what discovery found.
+		return m.runSkills()
 
 	case "compact":
 		// Compaction is a real upstream call (summary generation), so it rides a worker goroutine

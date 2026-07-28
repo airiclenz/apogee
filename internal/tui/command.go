@@ -70,6 +70,10 @@ type commandSpec struct {
 // logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
 // synchronously in runCommand like /clear). /server is deferred (it needs a swappable provider
 // seam) and so is absent.
+//
+// Order is display order, and one pair depends on it: /skill must precede /skills, because the
+// dropdown prefix-matches in table order and highlights its first row — so a typed "/skill"
+// completes to the picker rather than to the listing that merely shares its prefix.
 var commandSpecs = []commandSpec{
 	{name: "clear", summary: "reset the model's memory of this session"},
 	{name: "new", summary: "start a fresh conversation (same as /clear)"},
@@ -79,6 +83,7 @@ var commandSpecs = []commandSpec{
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
 	{name: "skill", summary: "attach a skill to your next message", menuOnly: true},
+	{name: "skills", summary: "list the available skills", whileRunning: true},
 }
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text

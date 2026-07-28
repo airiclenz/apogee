@@ -211,7 +211,16 @@ shows only the one table (or thin derivations of it).
 
 **Commit.** `refactor(tui): one command table drives both the parser and the menu`
 
-## 2. `/skills` — list the catalog
+## 2. `/skills` — list the catalog — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): the plan does not fix the new row's position; `skills` is placed LAST, after
+the `menuOnly` `skill`, because `commandSuggestions` prefix-matches in table order and the first
+row is the highlighted one — `skill` before `skills` is what keeps a typed `/skill` + ⏎/tab
+chaining into the picker (`TestSkillPickerReloadsViaCommandChain`). Two existing tests were
+revised for the new verb: `TestCommandTableDrivesParserAndMenu`'s parsed-verb list and
+`TestCommandDropdownOffersSkill` (`/sk` now offers `[skill skills]`, order asserted). Catalog rows
+are indented two spaces under the count header, the `confineStatusReport` note shape. CHANGELOG is
+left to item 9, which owns the sweep.
 
 **What.** Add `skills` to the table (`whileRunning: true` — inert until item 7; summary:
 "list the available skills"). `runCommand` gains the case: call `m.opts.ReloadSkills` (nil-safe)

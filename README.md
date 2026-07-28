@@ -133,6 +133,7 @@ you.
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) |
 | `/sessions` | Browse saved sessions — resume, rename, or delete |
 | `/skill` | Attach a skill to your next message |
+| `/skills` | List the discovered skills — id, name and summary |
 | `/version` | Show the apogee version |
 
 ## Sessions

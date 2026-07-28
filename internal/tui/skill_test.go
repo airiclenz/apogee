@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -108,13 +109,19 @@ func TestComputeAutocompleteSkillDropdown(t *testing.T) {
 
 func TestCommandDropdownOffersSkill(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.input.SetValue("/sk") // "sessions" also begins with s, so narrow to "sk" for skill alone
+	m.input.SetValue("/sk") // "sessions" also begins with s, so narrow to "sk" for the skill verbs
 	ac := m.computeAutocomplete()
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
 	}
-	if len(ac.items) != 1 || ac.items[0].value != "skill" {
-		t.Fatalf("'/sk' suggestions = %+v, want [skill]", ac.items)
+	// /skill BEFORE /skills: the first row is the highlighted one, so a typed "/skill" must
+	// complete into the picker rather than into the listing that shares its prefix.
+	var got []string
+	for _, it := range ac.items {
+		got = append(got, it.value)
+	}
+	if !reflect.DeepEqual(got, []string{"skill", "skills"}) {
+		t.Fatalf("'/sk' suggestions = %v, want [skill skills] in that order", got)
 	}
 	// The full "/" menu includes /skill alongside the three real commands.
 	m.input.SetValue("/")
@@ -452,5 +459,108 @@ func TestSkillPickerReloadNilSafe(t *testing.T) {
 	m = step(t, m, keyRune(' ')) // must not panic with a nil ReloadSkills
 	if m.autocomplete.kind != acSkill {
 		t.Fatalf("picker did not open with a nil ReloadSkills: %+v", m.autocomplete)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /skills — listing the catalog
+// ----------------------------------------------------------------------------
+
+// runSkillsNote runs "/skills" from idle and returns the note it recorded, asserting the verb
+// stayed local: no worker, no Cmd, and the input emptied like every other command.
+func runSkillsNote(t *testing.T, m Model) string {
+	t.Helper()
+	m.input.SetValue("/skills")
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd != nil {
+		t.Error("/skills returned a Cmd; it is a local report and must not launch a worker")
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v after /skills, want idle", m.state)
+	}
+	if v := m.input.Value(); v != "" {
+		t.Errorf("input not cleared after /skills: %q", v)
+	}
+	last := lastEntry(t, m)
+	if last.kind != entryNote {
+		t.Fatalf("/skills wrote a %v entry, want a note", last.kind)
+	}
+	return last.text
+}
+
+// /skills prints the catalog instead of sending "/skills" to the model: a header naming the
+// count, then one line per skill carrying its /id, display name and summary.
+func TestSkillsCommandListsCatalog(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	note := runSkillsNote(t, m)
+
+	if !strings.Contains(note, "2 skills available") {
+		t.Errorf("note does not head with the count:\n%s", note)
+	}
+	for _, want := range []string{
+		"/clean-code  Clean Code — tidy the code",
+		"/review  Review — review a diff",
+	} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note is missing the row %q:\n%s", want, note)
+		}
+	}
+	// Catalog order is display order: the listing reads like the picker.
+	if strings.Index(note, "/clean-code") > strings.Index(note, "/review") {
+		t.Errorf("rows are not in catalog order:\n%s", note)
+	}
+}
+
+// The catalog is re-scanned BEFORE it is listed, so a skill added since launch shows up — the
+// same live refresh the picker edge-triggers on open. The reload stub appends "fresh", so the
+// row can only be there if the reload ran first.
+func TestSkillsCommandReloadsBeforeListing(t *testing.T) {
+	o, reloads := reloadOpts()
+	m := newTestModelEng(t, &fakeEngine{}, o)
+	note := runSkillsNote(t, m)
+
+	if *reloads != 1 {
+		t.Errorf("/skills triggered %d reloads, want exactly 1", *reloads)
+	}
+	if !strings.Contains(note, "/fresh") {
+		t.Errorf("the listing predates the reload (no /fresh row):\n%s", note)
+	}
+}
+
+// With no catalog wired (and no ReloadSkills) the verb still answers — no panic — and the note
+// says where discovery looks, so "no skills" is actionable rather than a dead end.
+func TestSkillsCommandWithNoCatalog(t *testing.T) {
+	o := testOpts // no Skills, no ReloadSkills
+	o.Workspace = filepath.Join("home", "code", "proj")
+	m := newTestModelEng(t, &fakeEngine{}, o)
+	note := runSkillsNote(t, m)
+
+	if !strings.Contains(note, "no skills found") {
+		t.Errorf("note does not report an empty catalog:\n%s", note)
+	}
+	for _, want := range []string{
+		filepath.Join("~", ".apogee", "skills"),
+		filepath.Join("home", "code", "proj", ".apogee", "skills"),
+		filepath.Join("home", "code", "proj", "skills"),
+	} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note does not name the source dir %q:\n%s", want, note)
+		}
+	}
+}
+
+// skillCatalogNote is pure, so its wording is pinned without a Model: the singular header, a
+// skill with no summary, and the placeholder that stands in for an unwired workspace.
+func TestSkillCatalogNote(t *testing.T) {
+	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, "/ws")
+	if !strings.HasPrefix(one, "1 skill available:") {
+		t.Errorf("singular header wrong:\n%s", one)
+	}
+	if !strings.Contains(one, "/review  Review") || strings.Contains(one, "—") {
+		t.Errorf("a summary-less skill must render without the dash:\n%s", one)
+	}
+	empty := skillCatalogNote(nil, "")
+	if !strings.Contains(empty, "<workspace>") {
+		t.Errorf("an unwired workspace must render the placeholder:\n%s", empty)
 	}
 }
