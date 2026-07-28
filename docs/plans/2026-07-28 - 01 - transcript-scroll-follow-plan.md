@@ -202,7 +202,7 @@ until item 2).
 
 **Commit.** `fix(tui): transcript follows generated output unless the user scrolled away`
 
-## 2. Positional detach and re-attach — scrollViewport
+## 2. Positional detach and re-attach — scrollViewport — ✅ DONE (2026-07-28)
 
 **What.** Detach stops being a one-way latch: after routing input to the viewport,
 attachment is recomputed from position, exactly the apogee-code listener logic

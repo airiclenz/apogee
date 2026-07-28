@@ -740,24 +740,26 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	// At the inert states — errored (⏎ dismisses) and a live approval that fell past its decision
-	// keys — the keys scroll the transcript instead; a scroll that actually moves the viewport
-	// detaches the transcript from the tail until the next submit. While running the transcript
-	// scrolls by PgUp/PgDn (intercepted above) and the mouse wheel, the keyboard being the input's now.
+	// keys — the keys scroll the transcript instead, and where the scroll leaves the view sets the
+	// follow policy (scrollViewport): off the bottom holds the position, back at the bottom follows
+	// the tail again. While running the transcript scrolls by PgUp/PgDn (intercepted above) and the
+	// mouse wheel, the keyboard being the input's now.
 	return m.scrollViewport(msg)
 }
 
-// scrollViewport routes a key or wheel event to the viewport and records the human moving off
-// the tail: if the offset changed, the transcript detaches (refreshViewport stops following new
-// content) so reading history is not yanked back as the reply streams in. This is the ONLY site
-// that sets detached — the funnel every user scroll goes through — which is what keeps a
-// programmatic reposition inside refreshViewport from ever reading as a human scroll.
+// scrollViewport routes a key or wheel event to the viewport and re-derives attachment from
+// where that scroll left the view: the scroll position IS the policy. At the very bottom means
+// follow — refreshViewport keeps the view on generated output as it streams; anywhere else means
+// hold exactly there, so reading history is not yanked back by the streaming reply. Detach is
+// therefore not a latch: scrolling up detaches, scrolling back down to the bottom resumes
+// following, and on a transcript that fits the window there is nothing to detach from (AtBottom
+// is always true there). This is the ONLY site that sets detached — the funnel every user scroll
+// goes through — which is what keeps a programmatic reposition inside refreshViewport from ever
+// reading as a human scroll.
 func (m Model) scrollViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
-	before := m.viewport.YOffset()
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
-	if m.viewport.YOffset() != before {
-		m.detached = true
-	}
+	m.detached = !m.viewport.AtBottom()
 	return m, cmd
 }
 

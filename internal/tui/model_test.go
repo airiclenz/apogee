@@ -1986,16 +1986,15 @@ func TestSubmitReattachesFollow(t *testing.T) {
 
 // The mouse wheel scrolls the transcript in every state, including idle. The keyboard scroll
 // path is state-gated (idle feeds the input box), so without the MouseWheelMsg route in Update a
-// finished reply could not be scrolled back — the "scrolling only works intermittently" bug.
+// finished reply could not be scrolled back — the "scrolling only works intermittently" bug. A
+// wheel-up that leaves the bottom detaches: new content must not yank the history back.
 func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 	m := newTestModel(t) // 80x24, stateIdle
 	m.transcript.addUser("question", nil)
 	for i := 0; i < 40; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
-	m.refreshViewport()
-	m.viewport.GotoBottom() // scroll to the end so there is room to wheel back up
-	m.detached = false      // GotoBottom is not a human scroll; start from a clean flag
+	m.refreshViewport() // follows the tail: the view opens at the bottom, attached
 
 	if m.state != stateIdle {
 		t.Fatalf("precondition: state = %v, want stateIdle", m.state)
@@ -2010,8 +2009,121 @@ func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 	if m.viewport.YOffset() >= before {
 		t.Errorf("wheel-up while idle did not scroll: offset %d → %d", before, m.viewport.YOffset())
 	}
+	if m.viewport.AtBottom() {
+		t.Fatalf("precondition: the wheel-up left the view at the bottom (offset %d)", m.viewport.YOffset())
+	}
 	if !m.detached {
-		t.Error("a wheel scroll did not detach the transcript; new content would yank history back")
+		t.Error("a wheel scroll off the bottom did not detach the transcript; new content would yank history back")
+	}
+}
+
+// Detach is positional, not a latch: wheeling back down to the very bottom resumes following, and
+// the token streamed next lands in view.
+func TestWheelBackToBottomReattachesFollow(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.input.SetValue("a question")
+	m = step(t, m, keyEnter())
+	for i := 0; i < 40; i++ {
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: strings.Repeat("x", 60) + " "}})
+	}
+
+	m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if !m.detached {
+		t.Fatalf("precondition: a wheel-up did not detach (offset %d)", m.viewport.YOffset())
+	}
+
+	for i := 0; i < 10 && !m.viewport.AtBottom(); i++ {
+		m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	}
+	if !m.viewport.AtBottom() {
+		t.Fatalf("precondition: wheeling down did not reach the bottom (offset %d)", m.viewport.YOffset())
+	}
+	if m.detached {
+		t.Fatal("scrolling back to the bottom did not re-attach follow")
+	}
+
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "THE-TAIL"}})
+
+	if !m.viewport.AtBottom() {
+		t.Errorf("after re-attaching, a streamed token left the view at offset %d, not the bottom",
+			m.viewport.YOffset())
+	}
+	if got := plain(m.View()); !strings.Contains(got, "THE-TAIL") {
+		t.Errorf("the token streamed after re-attaching is off screen:\n%s", got)
+	}
+}
+
+// The keyboard funnel carries the same policy: PgDn back to the bottom re-attaches, PgUp off it
+// detaches. PgUp/PgDn are intercepted in every state, idle included.
+func TestPageDownToBottomReattachesFollow(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser("a question", nil)
+	for i := 0; i < 40; i++ {
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if !m.detached {
+		t.Fatalf("precondition: PgUp did not detach (offset %d)", m.viewport.YOffset())
+	}
+
+	for i := 0; i < 5 && !m.viewport.AtBottom(); i++ {
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	}
+	if !m.viewport.AtBottom() {
+		t.Fatalf("precondition: PgDn did not reach the bottom (offset %d)", m.viewport.YOffset())
+	}
+	if m.detached {
+		t.Error("PgDn back to the bottom did not re-attach follow")
+	}
+}
+
+// A scroll that lands mid-history holds exactly there: content appended below does not move the
+// view, and does not re-attach it either.
+func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser("a question", nil)
+	for i := 0; i < 60; i++ {
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+
+	for i := 0; i < 5; i++ {
+		m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	}
+	if !m.detached || m.viewport.AtBottom() {
+		t.Fatalf("precondition: not parked mid-history (detached=%v, offset %d)",
+			m.detached, m.viewport.YOffset())
+	}
+	off := m.viewport.YOffset()
+
+	m.transcript.commitAssistant("more streamed content", 0)
+	m.refreshViewport()
+
+	if m.viewport.YOffset() != off {
+		t.Errorf("an append moved the held view: offset %d → %d", off, m.viewport.YOffset())
+	}
+	if !m.detached {
+		t.Error("an append below the held offset re-attached follow")
+	}
+}
+
+// A transcript shorter than the window has no bottom to scroll off, so a wheel event over it can
+// never detach — the old offset-delta latch could be tripped by any stray offset jiggle.
+func TestWheelOnShortTranscriptDoesNotDetach(t *testing.T) {
+	m := newTestModel(t) // 80x24; the start-up box alone, far shorter than the window
+	m.refreshViewport()
+	if !m.viewport.AtBottom() {
+		t.Fatalf("precondition: a transcript shorter than the window sits at offset %d, not the bottom",
+			m.viewport.YOffset())
+	}
+
+	m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+
+	if m.detached {
+		t.Errorf("a wheel event on a transcript that fits the window detached follow (offset %d)",
+			m.viewport.YOffset())
 	}
 }
 
