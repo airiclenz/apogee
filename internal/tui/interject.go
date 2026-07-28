@@ -263,9 +263,9 @@ func (m Model) flushAfterCompletion(done tea.Cmd) (tea.Model, tea.Cmd) {
 func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 	text, refs := m.joinedInterjections(parsedInput{})
 	m.pendingInterjections = nil
-	m.userScrolled = false // the flushed prompt re-arms sticky-to-top, exactly as a typed one does
+	m.detached = false // the flushed prompt re-arms follow-the-tail, exactly as a typed one does
 	m.transcript.addUser(text, nil)
-	m.layout() // the strip above the box loses its rows; the new prompt pins to the top
+	m.layout() // the strip above the box loses its rows; the new prompt opens at the top
 	return m.launchExchange(domain.UserInput{Text: text, FileRefs: refs})
 }
 

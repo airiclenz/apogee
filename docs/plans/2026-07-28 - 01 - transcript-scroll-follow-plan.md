@@ -146,7 +146,15 @@ eventMsg{Event: domain.TokenEvent{...}})`; assertion helpers `firstVisibleLine` 
 
 ---
 
-## 1. Follow the tail — refreshViewport policy and the `detached` flag
+## 1. Follow the tail — refreshViewport policy and the `detached` flag — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): a FIFTH existing test needed revising beyond the four listed —
+`mouse_test.go:TestTranscriptSelectionOnStickyHeaderRow` clicked row 0 expecting the removed pin to
+put the prompt line there. It now parks the view on the prompt row explicitly (`detached = true` +
+`SetYOffset(lastUserBlock.start)`), keeping its assertions verbatim; the underlying point — mouse
+coordinates address the CONTENT lines, not the sticky-header overlay drawn over row 0 — is
+pre-existing (it already held whenever the human had scrolled) and is now simply the default state
+for a reply taller than the screen.
 
 **What.** The repaint policy inverts from pin-to-prompt to follow-the-tail, preserving the
 short-reply prompt pin through the existing padding.

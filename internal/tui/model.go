@@ -153,7 +153,12 @@ type Model struct {
 	th            theme // the palette and reusable styles, built once at construction
 	width, height int
 	ready         bool // a WindowSizeMsg has sized the layout at least once
-	userScrolled  bool // the human scrolled the transcript; suspend sticky-to-top until submit
+	// detached says the human scrolled off the tail: refreshViewport holds the scroll position
+	// where they put it instead of following new content, until a re-arm event (submit, /clear,
+	// /continue, a flushed interjection, a resumed session) clears it. The zero value is
+	// attached — a fresh Model follows the tail with no construction help. A plain bool by
+	// ADR 0011: the Model is copied by value on every Update.
+	detached bool
 
 	// Last render output, stashed by refreshViewport for View's sticky-header overlay: the
 	// physical lines the viewport holds and the line range of every user block.
@@ -736,20 +741,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	// At the inert states — errored (⏎ dismisses) and a live approval that fell past its decision
 	// keys — the keys scroll the transcript instead; a scroll that actually moves the viewport
-	// suspends sticky-to-top until the next submit. While running the transcript scrolls by
-	// PgUp/PgDn (intercepted above) and the mouse wheel, the keyboard being the input's now.
+	// detaches the transcript from the tail until the next submit. While running the transcript
+	// scrolls by PgUp/PgDn (intercepted above) and the mouse wheel, the keyboard being the input's now.
 	return m.scrollViewport(msg)
 }
 
-// scrollViewport routes a key to the viewport and records a human scroll: if the offset
-// moved, sticky-to-top is suspended (refreshViewport stops re-pinning the last user prompt)
-// so reading history is not yanked back as new content streams in.
+// scrollViewport routes a key or wheel event to the viewport and records the human moving off
+// the tail: if the offset changed, the transcript detaches (refreshViewport stops following new
+// content) so reading history is not yanked back as the reply streams in. This is the ONLY site
+// that sets detached — the funnel every user scroll goes through — which is what keeps a
+// programmatic reposition inside refreshViewport from ever reading as a human scroll.
 func (m Model) scrollViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.viewport.YOffset()
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	if m.viewport.YOffset() != before {
-		m.userScrolled = true
+		m.detached = true
 	}
 	return m, cmd
 }
@@ -829,7 +836,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		m.pendingInterjections = nil
 	}
 	m.promptEditor.reset() // empties the textarea, closes the overlay, drops the staged chips
-	m.userScrolled = false // a fresh prompt re-arms sticky-to-top
+	m.detached = false     // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
 	m.transcript.addUser(text, m.skillDisplayNames(attached))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 	return m.launchExchange(domain.UserInput{Text: text, FileRefs: refs, SkillIDs: attached})
@@ -936,10 +943,10 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	// drops what the model remembers and leaves what is still waiting to be sent. The staged skill
 	// chips are the opposite case: they are attachments to a send that belonged to the session just
 	// abandoned.
-	m.pendingSkills = nil  // the staged chips belonged to the abandoned session
-	m.userScrolled = false // re-arm sticky-to-top: the fresh box pins to the top like a launch
-	m.ctxUsed = 0          // the gauge and throughput fall with the discarded conversation…
-	m.tokPerSec = 0        // …the same reason compactDoneMsg zeroes them on a fold
+	m.pendingSkills = nil // the staged chips belonged to the abandoned session
+	m.detached = false    // re-arm follow-the-tail: the fresh transcript opens at its tail like a launch
+	m.ctxUsed = 0         // the gauge and throughput fall with the discarded conversation…
+	m.tokPerSec = 0       // …the same reason compactDoneMsg zeroes them on a fold
 	m.genStart = time.Time{}
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
 	m.layout()
@@ -997,7 +1004,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// before asking the model to keep going).
 		attached := m.pendingSkills
 		m.pendingSkills = nil
-		m.userScrolled = false
+		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
 		m.transcript.addUser("/continue", m.skillDisplayNames(attached))
 		m.layout()
 		m.box = newInterjectBox()
@@ -1780,12 +1787,14 @@ func (m *Model) inputRows() int {
 }
 
 // refreshViewport re-renders the transcript into the viewport and, unless the human has
-// scrolled, pins the last user prompt to the top of the visible area (sticky-to-top, as in
-// apogee-code) so the prompt stays put while the reply streams beneath it. With no user
-// prompt yet, it falls back to the bottom. A human scroll (userScrolled) suspends the pin so
-// reading history is not yanked back; submit re-arms it. The body is rendered to
-// transcriptWidth — the viewport's width less the right gutter — while the sticky-to-top offset
-// still measures against the viewport's own width, which is what soft-wraps the stored lines.
+// scrolled away (detached), ends the repaint at the tail so generated output stays in view as
+// it streams. The last user prompt still opens at the top of the visible area: the trailing-blank
+// padding below a reply shorter than a screen puts the bottom ON the prompt row, and once the
+// reply outgrows the screen the same call follows the tail while applyStickyHeader overlays the
+// owning prompt at row 0. While detached the offset is left exactly where the human put it;
+// submit re-arms following. The body is rendered to transcriptWidth — the viewport's width less
+// the right gutter — while the prompt offset still measures against the viewport's own width,
+// which is what soft-wraps the stored lines.
 //
 // It is also where a live transcript drag-selection lives or dies, by the keep-if-unchanged rule
 // (transcriptSel.spanUnchanged, mouse.go): the predicate is evaluated against the OUTGOING lines
@@ -1799,25 +1808,30 @@ func (m *Model) refreshViewport() {
 	}
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.userBlocks = rendered.userBlocks
-	if m.userScrolled {
+	if m.detached {
 		m.viewport.SetContentLines(rendered.lines)
+		// Content that SHRANK under the held offset is clamped back to the bottom by
+		// SetContentLines; the human is looking at the tail again, so following resumes and the
+		// invariant "detached ⇔ off the bottom" stays total. Growth never lands here — the offset
+		// is untouched and the new tail is below it. This is the one place a repaint touches the
+		// flag, and it only ever CLEARS it: no repaint may fake a human scroll.
+		if m.viewport.AtBottom() {
+			m.detached = false
+		}
 		return
 	}
-	if rendered.lastUserStart < 0 {
-		m.viewport.SetContentLines(rendered.lines)
-		m.viewport.GotoBottom()
-		return
-	}
-	off := wrappedOffset(rendered.lines[:rendered.lastUserStart], m.viewport.Width())
 	lines := rendered.lines
-	// Pad with trailing blank rows so the viewport can scroll the prompt all the way to the top
-	// even when the reply beneath it is shorter than a screen; otherwise SetYOffset is clamped
-	// to maxYOffset (totalRows-height) and the prompt sits mid-screen.
-	if need := off + m.viewport.Height(); len(lines) < need {
-		lines = append(lines, make([]string, need-len(lines))...)
+	if rendered.lastUserStart >= 0 {
+		// Pad with trailing blank rows so the viewport can scroll the prompt all the way to the top
+		// even when the reply beneath it is shorter than a screen; otherwise the bottom is clamped
+		// to maxYOffset (totalRows-height) and the prompt sits mid-screen.
+		off := wrappedOffset(rendered.lines[:rendered.lastUserStart], m.viewport.Width())
+		if need := off + m.viewport.Height(); len(lines) < need {
+			lines = append(lines, make([]string, need-len(lines))...)
+		}
 	}
 	m.viewport.SetContentLines(lines)
-	m.viewport.SetYOffset(off)
+	m.viewport.GotoBottom() // on padded short content the bottom IS the prompt row; otherwise the real tail
 }
 
 // ----------------------------------------------------------------------------

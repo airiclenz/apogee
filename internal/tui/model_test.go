@@ -1881,13 +1881,36 @@ func firstVisibleLine(vp viewport.Model) string {
 	return strings.SplitN(ansiPattern.ReplaceAllString(vp.View(), ""), "\n", 2)[0]
 }
 
-// The last user prompt is pinned to the top of the viewport while the reply streams beneath
-// it, and a human scroll suspends the pin so reading history is not yanked back.
-func TestStickyPinsLastUserPrompt(t *testing.T) {
+// A reply longer than the screen keeps its tail in view as it streams — the transcript follows
+// generated output — with the prompt it belongs to overlaid at the top row as the sticky header.
+// This is the reported bug: the reply used to stream out of sight below a prompt pinned to the top.
+func TestFollowsTailOfLongStreamedReply(t *testing.T) {
 	m := newTestModel(t) // 80x24
+	m.input.SetValue("FOLLOW-PROMPT")
+	m = step(t, m, keyEnter()) // the real submit path: records the prompt and re-arms follow
 
-	// A transcript taller than the viewport, with a clear last prompt followed by enough
-	// content below it to fill the screen (so the pin is not clamped to the bottom).
+	// A reply far taller than the window, streamed token by token through Update.
+	for i := 0; i < 40; i++ {
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: strings.Repeat("x", 60) + " "}})
+	}
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "THE-TAIL"}})
+
+	if !m.viewport.AtBottom() {
+		t.Errorf("viewport left at offset %d, not at the bottom; the stream is running out of view",
+			m.viewport.YOffset())
+	}
+	if got := plain(m.View()); !strings.Contains(got, "THE-TAIL") {
+		t.Errorf("the streamed tail is off screen:\n%s", got)
+	}
+	if top := firstViewLine(m); !strings.Contains(top, "FOLLOW-PROMPT") {
+		t.Errorf("top line = %q; want the owning prompt overlaid as the sticky header", top)
+	}
+}
+
+// A human who scrolled away is not yanked back: while detached, a repaint that appends content
+// leaves the scroll offset exactly where they put it.
+func TestDetachedRepaintHoldsPosition(t *testing.T) {
+	m := newTestModel(t) // 80x24
 	m.transcript.addUser("first question", nil)
 	m.transcript.commitAssistant(strings.Repeat("filler above. ", 80), 0)
 	m.transcript.addUser("STICKY-PROMPT", nil)
@@ -1896,20 +1919,68 @@ func TestStickyPinsLastUserPrompt(t *testing.T) {
 	}
 	m.refreshViewport()
 
-	if m.viewport.YOffset() == 0 {
-		t.Fatal("viewport did not scroll; the sticky prompt cannot be pinned to the top")
-	}
-	if top := firstVisibleLine(m.viewport); !strings.Contains(top, "STICKY-PROMPT") {
-		t.Errorf("top visible line = %q; want the last user prompt pinned to the top", top)
-	}
-
-	// A human scroll suspends the pin: a later refresh must not re-pin and move the offset.
-	m.userScrolled = true
+	m.detached = true
+	m.viewport.SetYOffset(5) // up in the history, well off the bottom
 	off := m.viewport.YOffset()
+
 	m.transcript.commitAssistant("more streamed content", 0)
 	m.refreshViewport()
+
 	if m.viewport.YOffset() != off {
-		t.Errorf("a scrolled viewport was re-pinned: offset %d → %d", off, m.viewport.YOffset())
+		t.Errorf("a detached viewport was moved by a repaint: offset %d → %d", off, m.viewport.YOffset())
+	}
+	if !m.detached {
+		t.Error("appending below a held offset re-attached; only a view back at the bottom may")
+	}
+}
+
+// Content shrinking under a held offset is clamped back to the bottom by SetContentLines, so
+// following resumes — the invariant "detached ⇔ off the bottom" stays total.
+func TestShrinkingContentReattachesFollow(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser("a question", nil)
+	for i := 0; i < 30; i++ {
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+	m.detached = true
+	m.viewport.SetYOffset(20)
+	if m.viewport.AtBottom() {
+		t.Fatal("precondition: the held offset is already at the bottom")
+	}
+
+	m.transcript.reset() // the transcript shrinks away under the offset, as /clear does
+	m.transcript.addUser("a fresh question", nil)
+	m.refreshViewport()
+
+	if m.detached {
+		t.Error("the clamp left the view at the bottom; follow must resume there")
+	}
+	if !m.viewport.AtBottom() {
+		t.Errorf("viewport at offset %d is not at the bottom after the clamp", m.viewport.YOffset())
+	}
+}
+
+// Submitting re-arms follow: sending a prompt means the human is done reading history.
+func TestSubmitReattachesFollow(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser("old question", nil)
+	for i := 0; i < 30; i++ {
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+	m.detached = true
+	m.viewport.SetYOffset(3)
+
+	m.input.SetValue("a new question")
+	m = step(t, m, keyEnter())
+
+	if m.detached {
+		t.Error("submit did not re-arm follow; the reply would stream out of view")
+	}
+	if !m.viewport.AtBottom() {
+		t.Errorf("after submit the viewport sits at %d, not at the bottom (its new prompt)",
+			m.viewport.YOffset())
 	}
 }
 
@@ -1924,7 +1995,7 @@ func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 	}
 	m.refreshViewport()
 	m.viewport.GotoBottom() // scroll to the end so there is room to wheel back up
-	m.userScrolled = false  // GotoBottom is not a human scroll; start from a clean flag
+	m.detached = false      // GotoBottom is not a human scroll; start from a clean flag
 
 	if m.state != stateIdle {
 		t.Fatalf("precondition: state = %v, want stateIdle", m.state)
@@ -1939,8 +2010,8 @@ func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 	if m.viewport.YOffset() >= before {
 		t.Errorf("wheel-up while idle did not scroll: offset %d → %d", before, m.viewport.YOffset())
 	}
-	if !m.userScrolled {
-		t.Error("a wheel scroll did not set userScrolled; sticky-to-top would yank history back")
+	if !m.detached {
+		t.Error("a wheel scroll did not detach the transcript; new content would yank history back")
 	}
 }
 
@@ -1984,7 +2055,7 @@ func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 	// Scrolled a few rows past section one's prompt, into its reply: its prompt is above the top,
 	// so it is drawn as the sticky header. The offset is relative to the block (not an absolute
 	// row) because the one-time start-up box seeded at entries[0] sits above section one.
-	m.userScrolled = true
+	m.detached = true
 	m.viewport.SetYOffset(one.start + 3)
 	if top := firstViewLine(m); !strings.Contains(top, "PROMPT-ONE") {
 		t.Errorf("scrolled into section one: top line = %q; want PROMPT-ONE stuck to the top", top)

@@ -144,7 +144,7 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 // line index into m.lines and the display cell within it. The viewport is top-anchored at the
 // screen origin (View stacks it first) and its content spans the width left of the scroll-bar
 // gutter. ok is false when the point falls outside the viewport rows or past the last rendered
-// line (the blank pad the sticky-to-top pin leaves below short content), so a click there selects
+// line (the blank pad refreshViewport leaves below short content), so a click there selects
 // nothing. viewport.YOffset folds in the scroll, so the mapping holds at any scroll position.
 func (m Model) pointTranscriptRow(x, y int) (line, col int, ok bool) {
 	w, h := m.viewport.Width(), m.viewport.Height()

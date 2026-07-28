@@ -976,7 +976,12 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
 	}
-	m.refreshViewport() // the sole user prompt pins to row 0 as the sticky header
+	m.refreshViewport()
+	// Park the view on the prompt row, where the sticky header overlays the same line the mouse
+	// maps to: the transcript follows the tail now, and mouse coordinates address the CONTENT
+	// (m.lines), not the overlay drawn over row 0.
+	m.detached = true
+	m.viewport.SetYOffset(m.userBlocks[len(m.userBlocks)-1].start)
 
 	w := m.viewport.Width()
 	m = step(t, m, leftClick(0, 0))
