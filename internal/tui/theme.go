@@ -37,7 +37,8 @@ var (
 	colModeAllowEdits = lipgloss.Color("#58a6ff") // allow-edits — blue
 	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
 
-	colSkill = lipgloss.Color("#8957e5") // attached-skill chips — violet
+	colSkill   = lipgloss.Color("#8957e5") // skills — violet: the sent block's chips and the prompt's inline /token accent
+	colFileRef = lipgloss.Color("#58a6ff") // the prompt's inline @file token accent — blue, the tone a reference reads as
 
 	colGauge = lipgloss.Color("#7c7cf0") // context-fill gauge bar — periwinkle (llama-launcher look)
 
@@ -97,6 +98,8 @@ type theme struct {
 	toolDetail   lipgloss.Style // the ┝/┕ branch detail lines (dim)
 	subRail      lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
 	skillChip    lipgloss.Style // an invoked-skill chip on a sent user block (white on violet)
+	skillToken   lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
+	fileToken    lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (blue on the box's black)
 	selection    lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
 	diffAdded    lipgloss.Style // a "+" diff detail line (reserved)
 	diffRemoved  lipgloss.Style // a "-" diff detail line (reserved)
@@ -138,12 +141,17 @@ type theme struct {
 // that divider meets the box — those rules are composed by hand in footerView.
 func newTheme() theme {
 	return theme{
-		userBlock:    lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
-		toolHeader:   lipgloss.NewStyle(),
-		toolLabel:    lipgloss.NewStyle().Bold(true).Foreground(colCode),
-		toolDetail:   lipgloss.NewStyle().Foreground(colFaint),
-		subRail:      lipgloss.NewStyle().Foreground(colFaint),
-		skillChip:    lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
+		userBlock:  lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
+		toolHeader: lipgloss.NewStyle(),
+		toolLabel:  lipgloss.NewStyle().Bold(true).Foreground(colCode),
+		toolDetail: lipgloss.NewStyle().Foreground(colFaint),
+		subRail:    lipgloss.NewStyle().Foreground(colFaint),
+		skillChip:  lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
+		// The two inline token accents invert the chip: the colour moves to the FOREGROUND and the
+		// background stays the box's own black, so an accented token reads as one word of the
+		// sentence it stands in rather than as a badge pasted over the field.
+		skillToken:   lipgloss.NewStyle().Foreground(colSkill).Background(colBlack),
+		fileToken:    lipgloss.NewStyle().Foreground(colFileRef).Background(colBlack),
 		selection:    lipgloss.NewStyle().Foreground(colWhite).Background(colSelection),
 		diffAdded:    lipgloss.NewStyle().Foreground(colDiffAdd),
 		diffRemoved:  lipgloss.NewStyle().Foreground(colDiffDel),

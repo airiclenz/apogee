@@ -53,6 +53,28 @@ func (c *fileCache) suggest(root, partial string, limit int, now time.Time) []st
 	return filterFiles(c.files, partial, limit)
 }
 
+// holds reports whether path is in the listing the cache is CURRENTLY holding — a pure lookup that
+// never walks, which is what makes it safe to call from the render path (inputaccent.go paints an
+// "@ref" only when its path resolves, once per frame per token). Everything else about it follows
+// from that one rule:
+//
+//   - a cache that has never been filled, or was filled from another workspace root, knows nothing
+//     and answers false; the accent simply stays off until the "@" overlay's next lookup warms it;
+//   - an EXPIRED listing still answers, deliberately: the TTL exists to keep suggest's walk fresh,
+//     and honouring it here would blink a resolved token's accent off three seconds after the human
+//     stopped typing, with nothing in the draft having changed. A stale listing is the best answer
+//     available without touching the disk, and the next walk heals it.
+//
+// The listing is sorted (walkWorkspaceFiles), so the lookup is a binary search rather than a scan
+// of up to maxCachedFiles paths per token per frame.
+func (c *fileCache) holds(root, path string) bool {
+	if c == nil || root == "" || path == "" || c.root != root {
+		return false
+	}
+	i := sort.SearchStrings(c.files, path)
+	return i < len(c.files) && c.files[i] == path
+}
+
 // walkWorkspaceFiles lists up to limit workspace-relative file paths via a bounded walk rooted
 // at root through os.Root — so the walk cannot escape the workspace or follow a symlink out of
 // it. It skips .git and other hidden directories/files, lists files only, sorts the result, and

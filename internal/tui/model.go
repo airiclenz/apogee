@@ -2106,8 +2106,13 @@ func (m Model) renderScrollbar(h int) string {
 // below it aligns. The ▔ top-edge hairline that caps the bottom chrome is a separate row above
 // the status line (topRule), not part of this box, so the status line reads as sitting directly
 // above the input box.
+//
+// Two overlays compose onto the widget's own block, and the ORDER is the contract: accentTokens
+// paints the resolving /skill and @file tokens first (inputaccent.go), then highlightInput paints
+// the drag-selection over whatever it covers. shadeCells strips the span it re-renders, so the last
+// pass wins on any overlap — and a selection must read as selected even across an accented token.
 func (m Model) inputView() string {
-	return m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.input.View()))
+	return m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.accentTokens(m.input.View())))
 }
 
 // topRule renders the full-width ▔ hairline that marks the top edge of the bottom chrome: a

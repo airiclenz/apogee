@@ -551,7 +551,30 @@ silently swallowed.
 
 **Commit.** `feat(tui): dropdown and safe commands live while the model runs`
 
-## 8. Inline accents — tokens light up when they resolve
+## 8. Inline accents — tokens light up when they resolve — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): five deviations, one behavioural. (a) BEHAVIOURAL: the file half's cache lookup
+(`fileCache.holds`, filecache.go) ignores the TTL — a MISS (cold cache, or one walked from another
+workspace root) renders plain as the item says, but an EXPIRED listing still answers. Honouring expiry
+would blink a resolved token's accent off three seconds after the human stopped typing with nothing in
+the draft having changed, which contradicts this item's own acceptance ("live as you type"); a stale
+listing is the best answer available without touching the disk and the next walk heals it. Nothing is
+ever walked from the render path, which is the rule the item actually turns on. (b) the item's
+"counting-stub cache" guard is not expressible — `fileCache` is a concrete struct, not a seam — so the
+guard is structural instead (`TestAccentRenderNeverWalksTheWorkspace`): after a render against a cold
+cache the cache is still cold (`files == nil`) and the token is plain, and warming it lights the same
+draft. (c) rather than a second `extractSkillRefs`-SHAPED scan, both extractors were re-expressed over
+ONE located-token scanner pair (`refSpan` / `fileRefSpans` / `skillRefSpans`, command.go) that yields
+byte ranges as well as names — a pure refactor, behaviour byte-identical, so the accents and the submit
+parse can never disagree about what a token is. (d) "the widget's wrap geometry" is not exposed off the
+caret's own line, and `inputContentRows`' ansi.Wordwrap approximation demonstrably disagrees with the
+widget ("hello world" at width 5: 3 rows vs the widget's 4), so `wrapRowStarts` MIRRORS bubbles' own
+`wrap` rune for rune and `TestWrapRowStartsMirrorsTheWidget` pins it against a real textarea's LineInfo
+at every column of every geometry. (e) `fileToken` needed a colour of its own: new palette entry
+`colFileRef` (#58a6ff blue — a reference reads as a link), `skillToken` derived from the chip violet as
+the item says. The pass lives in a new `internal/tui/inputaccent.go`, so `doc.go`'s file roll-call and
+mini-language narrative were amended here as items 3–7 did; the CHANGELOG and the layout.md/README
+sweep stay item 9's.
 
 **What.** The "see skills and files in-line" half. A second post-render pass over the
 textarea block, composed inside `inputView` (`model.go:2021-2023`) BEFORE the selection

@@ -290,22 +290,31 @@ func parseConfine(args []string) (confineArgs, error) {
 	return parsed, nil
 }
 
-// extractFileRefs scans s for @file references and returns s unchanged plus the referenced
-// workspace-relative paths. An @-ref is an "@" at the start of s or immediately after
-// whitespace — so an email like foo@bar.com (where "@" follows a non-space) is not a
-// reference — followed by a token in one of two forms (scanRefToken owns the grammar):
+// refSpan is one resolving token of the mini-language, LOCATED in the text: the byte range
+// [start,end) it occupies and the name it resolves to (a workspace-relative path for an @ref, a
+// skill id for a "/" one). Two readers want different halves of that pair — the extractors below
+// take the names to send with the message, the inline accents take the ranges to paint
+// (inputaccent.go) — so both grammars are scanned in exactly ONE place and the two readers can
+// never disagree about what is a token.
+type refSpan struct {
+	start, end int
+	name       string
+}
+
+// fileRefSpans locates the @file references in s. An @-ref is an "@" at the start of s or
+// immediately after whitespace — so an email like foo@bar.com (where "@" follows a non-space) is
+// not a reference — followed by a token in one of two forms (scanRefToken owns the grammar):
 //
 //   - bare: a run of non-whitespace characters, @internal/agent/loop.go;
 //   - quoted: @"path with spaces" or @'path with spaces' — both quote characters are
 //     accepted, the closing quote ends the token so ordinary text may follow it, and an
 //     unterminated quote runs to the end of that line. There are no escape sequences.
 //
-// The literal @token — quotes included — is left in the text so the model sees what the human
-// pointed at; the path (without the "@" and without any quotes) is collected, de-duplicated in
-// first-seen order, so @x and @"x" collapse to one reference.
-func extractFileRefs(s string) (string, []string) {
-	var refs []string
-	seen := map[string]bool{}
+// The span covers the literal token, quotes included; the name is the path without the "@" and
+// without any quotes. A token naming nothing (a bare "@", an empty quoted pair) is skipped, but
+// the scan still resumes past it.
+func fileRefSpans(s string) []refSpan {
+	var spans []refSpan
 	for i := 0; i < len(s); i++ {
 		if s[i] != '@' {
 			continue
@@ -314,19 +323,17 @@ func extractFileRefs(s string) (string, []string) {
 			continue
 		}
 		path, end := scanRefToken(s, i+1)
-		if path != "" && !seen[path] {
-			seen[path] = true
-			refs = append(refs, path)
+		if path != "" {
+			spans = append(spans, refSpan{start: i, end: end, name: path})
 		}
 		i = end - 1 // resume scanning past this token (the loop's own i++ lands on end)
 	}
-	return s, refs
+	return spans
 }
 
-// extractSkillRefs scans s for inline skill references and returns the referenced skill IDs,
-// de-duplicated in first-seen order. A skill reference is the exact mirror of an @file one — the
-// same word-boundary, whitespace-delimited grammar, and the same "the token stays in the text"
-// rule — so the two halves of the prompt mini-language read alike:
+// skillRefSpans locates the inline skill references in s. A skill reference is the exact mirror of
+// an @file one — the same word-boundary, whitespace-delimited grammar, and the same "the token
+// stays in the text" rule — so the two halves of the prompt mini-language read alike:
 //
 //	/code-audit please check @internal/tui/command.go
 //
@@ -335,15 +342,11 @@ func extractFileRefs(s string) (string, []string) {
 // every other slash-prefixed word is ordinary prose, which is what lets a path (/usr/bin), a
 // fraction (and/or) or a typo (/code-adit) travel to the model untouched. Skill IDs are directory
 // names and so never contain whitespace, which is why this grammar needs no quoted form.
-//
-// The literal token is left in the text — the owner's explicit choice over stripping it: the model
-// sees the invocation the human typed AND the skill body the agent prepends for it.
-func extractSkillRefs(s string, known func(string) bool) []string {
+func skillRefSpans(s string, known func(string) bool) []refSpan {
 	if known == nil {
 		return nil
 	}
-	var ids []string
-	seen := map[string]bool{}
+	var spans []refSpan
 	for i := 0; i < len(s); i++ {
 		if s[i] != '/' {
 			continue
@@ -355,13 +358,41 @@ func extractSkillRefs(s string, known func(string) bool) []string {
 		for end < len(s) && !isInputSpace(s[end]) {
 			end++
 		}
-		if id := s[i+1 : end]; id != "" && !seen[id] && known(id) {
-			seen[id] = true
-			ids = append(ids, id)
+		if id := s[i+1 : end]; id != "" && known(id) {
+			spans = append(spans, refSpan{start: i, end: end, name: id})
 		}
 		i = end - 1 // resume past this token (the loop's own i++ lands on end)
 	}
-	return ids
+	return spans
+}
+
+// spanNames reduces located tokens to the names they resolve to, de-duplicated in first-seen
+// order — so @x and @"x" collapse to one reference, and a skill named twice is invoked once.
+func spanNames(spans []refSpan) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, sp := range spans {
+		if seen[sp.name] {
+			continue
+		}
+		seen[sp.name] = true
+		names = append(names, sp.name)
+	}
+	return names
+}
+
+// extractFileRefs returns s unchanged plus the workspace-relative paths its @file references name
+// (fileRefSpans owns the grammar). The literal @token — quotes included — is left in the text so
+// the model sees what the human pointed at.
+func extractFileRefs(s string) (string, []string) {
+	return s, spanNames(fileRefSpans(s))
+}
+
+// extractSkillRefs returns the catalog IDs the inline "/" tokens of s name (skillRefSpans owns the
+// grammar). The literal token is left in the text — the owner's explicit choice over stripping it:
+// the model sees the invocation the human typed AND the skill body the agent prepends for it.
+func extractSkillRefs(s string, known func(string) bool) []string {
+	return spanNames(skillRefSpans(s, known))
 }
 
 // scanRefToken scans the token of an @file reference and reports the referenced path together

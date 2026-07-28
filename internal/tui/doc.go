@@ -98,6 +98,16 @@
 // in the box ([Model.refuseUnknownSlash], at idle and mid-run alike), because a mistyped invocation
 // silently sent to the model is the confusion the mini-language exists to remove.
 //
+// inputaccent.go is what makes all of that VISIBLE while it is typed: a post-render pass over the
+// prompt block that accents a token exactly when it RESOLVES — a "/id" the catalog confirms, an
+// "@path" the workspace listing holds — and leaves everything else plain, so a typo or a
+// non-existent file fails to light up instead of failing at submit. Both grammars are located by
+// the one scanner the extractors read (refSpan, command.go), so what lights up is by construction
+// what would be acted on; the byte ranges become visual cells through a mirror of the widget's own
+// soft-wrap (wrapRowStarts, pinned against a real textarea), and [Model.inputView] composes the
+// pass BEFORE the drag-selection so a selection wins over any accent it covers. The render path
+// never walks the disk for it (fileCache.holds answers from the listing it already has).
+//
 // presenter.go supplies the last host delegate, and it is the one that decides rather than asks:
 // [uiPresenter] is the Presenter present_document routes a finished deliverable to, and it walks
 // the presentation ladder itself (ADR 0019). It shares [uiAsker]'s seam — called inside a Step, on
@@ -145,8 +155,9 @@
 // one, plus the offset pair caretByteOffset/caretToOffset a mid-draft completion splices by);
 // methods that also read Model-owned state — theme, width/height, opts, lifecycle —
 // stay on the Model rather than duplicate that state (computeAutocomplete, acceptAutocomplete,
-// insertSkillToken, highlightInput, inputContentRect, the region-arbitrating mouse handlers). The
-// Model stays the coordinator that owns the lifecycle state machine, the transcript + render cache, the
+// insertSkillToken, highlightInput, accentTokens, inputContentRect, the region-arbitrating mouse
+// handlers). The Model stays the coordinator that owns the lifecycle state machine, the transcript
+// + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
 // invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps idlePlaceholder
 // ("⏎ send") for runningPlaceholder ("⏎ queue · esc stop") on the lifecycle transitions that open and
@@ -315,7 +326,8 @@
 // human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); worker.go the
 // cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the
 // layout, the status line and the footer; theme.go the palette, the marker glyphs, and the
-// lipgloss styles; transcript.go the append-only scrollback model and transcriptcodec.go its
+// lipgloss styles; inputaccent.go the resolve-gated inline accents the prompt box paints its
+// /skill and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
 // versioned wire form inside a saved session record; sessions.go the /sessions history browser and
 // popup.go the one bordered pane every overlay — that browser, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
