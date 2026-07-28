@@ -500,7 +500,7 @@ func TestBareSkillVerbTeachesThePicker(t *testing.T) {
 func TestComputeAutocompleteCommands(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("/c") // clear, compact, continue, confine all start with "c"
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
 	}
@@ -516,13 +516,13 @@ func TestComputeAutocompleteCommands(t *testing.T) {
 func TestComputeAutocompleteNarrowsAndExact(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("/cl") // only "clear"
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 	if len(ac.items) != 1 || ac.items[0].value != "clear" {
 		t.Fatalf("suggestions = %v, want [clear]", ac.items)
 	}
 	// A plain message is not a command, and yields no overlay.
 	m.input.SetValue("hello there")
-	if ac := m.computeAutocomplete(); ac.active {
+	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.active {
 		t.Error("plain text opened the overlay")
 	}
 }
@@ -530,7 +530,7 @@ func TestComputeAutocompleteNarrowsAndExact(t *testing.T) {
 func TestComputeAutocompleteOffersNewAlias(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("/n") // only "new" begins with "n"
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 
 	if len(ac.items) != 1 || ac.items[0].value != "new" {
 		t.Fatalf("suggestions = %v, want [new]", ac.items)
@@ -540,7 +540,7 @@ func TestComputeAutocompleteOffersNewAlias(t *testing.T) {
 func TestComputeAutocompleteOffersConfine(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("/conf") // only "confine" begins with "conf"
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 
 	if len(ac.items) != 1 || ac.items[0].value != "confine" {
 		t.Fatalf("suggestions = %v, want [confine]", ac.items)
@@ -578,7 +578,7 @@ func TestAutocompleteAcceptWithTab(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/cl")
-	m.autocomplete = m.computeAutocomplete() // simulate the post-edit recompute
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // simulate the post-edit recompute
 	m = step(t, m, keyTab())
 	if eng.clearCalls != 1 {
 		t.Errorf("ClearContext calls = %d, want 1 (accepting a command row runs it)", eng.clearCalls)
@@ -595,8 +595,8 @@ func TestAutocompleteNavigateThenAccept(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/c")
-	m.autocomplete = m.computeAutocomplete() // [clear, compact, continue, confine], selected 0
-	m = step(t, m, keyDown())                // → compact
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // [clear, compact, continue, confine], selected 0
+	m = step(t, m, keyDown())                                   // → compact
 	if m.autocomplete.selected != 1 {
 		t.Fatalf("after down selected = %d, want 1", m.autocomplete.selected)
 	}
@@ -615,7 +615,7 @@ func TestAutocompleteNavigateThenAccept(t *testing.T) {
 func TestAutocompleteEscDismisses(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("/c")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	m = step(t, m, keyEsc())
 	if m.autocomplete.active {
 		t.Error("esc did not dismiss the overlay")
@@ -632,7 +632,7 @@ func TestAutocompleteEnterExactSubmits(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/clear") // exactly the only suggestion
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	m = step(t, m, keyEnter()) // exact match ⇒ Enter submits, not re-completes
 	if eng.clearCalls != 1 {
 		t.Errorf("ClearContext calls = %d, want 1 (exact-match Enter should run the command)", eng.clearCalls)
@@ -663,7 +663,7 @@ func TestAutocompleteOpensWhenTypingSlash(t *testing.T) {
 func TestSlashMenuOpensAfterADraft(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("fix the parser /comp")
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want the command menu open mid-draft", ac.active, ac.kind)
@@ -682,7 +682,7 @@ func TestAcceptCommandRunsItAndKeepsTheDraft(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("fix the parser /comp")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	m, cmd := stepCmd(t, m, keyTab())
 
 	if m.state != stateRunning || cmd == nil {
@@ -711,7 +711,7 @@ func TestEnterOnMidDraftCommandRunsAndKeepsTheDraft(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("hold on /clear")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	m, cmd := stepCmd(t, m, keyEnter())
 
 	if eng.clearCalls != 1 {
@@ -734,7 +734,7 @@ func TestAcceptConfineSplicesWithoutFiring(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/conf")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	before := len(m.transcript.entries)
 	m, cmd := stepCmd(t, m, keyTab())
 
@@ -791,7 +791,7 @@ func TestComputeAutocompleteFiles(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 
 	m.input.SetValue("look at @main")
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 	if !ac.active || ac.kind != acFile {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active file", ac.active, ac.kind)
 	}
@@ -811,8 +811,9 @@ func TestComputeAutocompleteFiles(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // The detector reads both shapes of the ref token: bare rows must behave exactly as they always
-// did, quoted rows keep the overlay alive across the spaces the bare rule tokenizes on.
-func TestTrailingFileToken(t *testing.T) {
+// did, quoted rows keep the overlay alive across the spaces the bare rule tokenizes on. Every row
+// puts the caret at the end of the value — the forward-typing case, unchanged by caret-awareness.
+func TestCaretFileTokenAtTheEnd(t *testing.T) {
 	cases := []struct {
 		name    string
 		value   string
@@ -837,10 +838,13 @@ func TestTrailingFileToken(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			start, partial, ok := trailingFileToken(c.value)
+			start, end, partial, ok := caretFileToken(c.value, len(c.value))
 			if ok != c.ok || partial != c.partial || (ok && start != c.start) {
-				t.Errorf("trailingFileToken(%q) = (%d, %q, %v), want (%d, %q, %v)",
+				t.Errorf("caretFileToken(%q) = (%d, %q, %v), want (%d, %q, %v)",
 					c.value, start, partial, ok, c.start, c.partial, c.ok)
+			}
+			if ok && end != len(c.value) {
+				t.Errorf("caretFileToken(%q) end = %d, want %d (the token reaches the caret)", c.value, end, len(c.value))
 			}
 		})
 	}
@@ -857,7 +861,7 @@ func TestComputeAutocompleteQuotedFiles(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 
 	m.input.SetValue(`look at @"my pl`)
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 	if !ac.active || ac.kind != acFile {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active file", ac.active, ac.kind)
 	}
@@ -884,7 +888,7 @@ func TestAcceptAutocompleteQuotesSpacedPath(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 
 	m.input.SetValue("look at @my")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	m = step(t, m, keyTab())
 	if got, want := m.input.Value(), `look at @"my plan.md" `; got != want {
 		t.Errorf("accepted %q, want %q", got, want)
@@ -902,13 +906,13 @@ func TestAutocompleteQuotedFileEnterExactSubmits(t *testing.T) {
 	m := newTestModelEng(t, eng, opts)
 
 	m.input.SetValue("look at @'my plan.md'")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	if !m.autocompleteExactMatch() {
 		t.Errorf("single-quoted token not an exact match (items=%+v)", m.autocomplete.items)
 	}
 
 	m.input.SetValue(`look at @"my plan.md"`)
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	if !m.autocompleteExactMatch() {
 		t.Fatalf("double-quoted token not an exact match (items=%+v)", m.autocomplete.items)
 	}
@@ -922,6 +926,165 @@ func TestAutocompleteQuotedFileEnterExactSubmits(t *testing.T) {
 	}
 	if want := []string{"my plan.md"}; !reflect.DeepEqual(eng.submitted[0].FileRefs, want) {
 		t.Errorf("submitted FileRefs = %v, want %v", eng.submitted[0].FileRefs, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Caret-aware completion: the token AT the caret, mid-buffer included
+// ----------------------------------------------------------------------------
+
+// caretAt puts the prompt caret at a byte offset into the current value and re-derives the overlay
+// from there — exactly what the Update loop does after every edit (recomputeAutocomplete), so a
+// test can reach a mid-buffer caret without spelling out the arrow keys that walked it there.
+func caretAt(t *testing.T, m Model, off int) Model {
+	t.Helper()
+	m.caretToOffset(off)
+	return m.recomputeAutocomplete()
+}
+
+// caretToken is the whole caret-awareness rule: the word the caret stands in or immediately after,
+// empty when it stands in whitespace.
+func TestCaretToken(t *testing.T) {
+	const value = "fix /rev the parser"
+	cases := []struct {
+		name  string
+		caret int
+		want  string
+	}{
+		{"inside the first word", 1, "fix"},
+		{"immediately after a word", 3, "fix"},
+		{"at a word's first byte", 4, "/rev"},
+		{"inside a token", 6, "/rev"},
+		{"immediately after a token", 8, "/rev"},
+		{"at the next word's first byte", 9, "the"},
+		{"at the very end", len(value), "parser"},
+		{"past the end clamps", len(value) + 5, "parser"},
+		{"before the start clamps", -3, "fix"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			start, end := caretToken(value, c.caret)
+			if got := value[start:end]; got != c.want {
+				t.Errorf("caretToken(%q, %d) = %q, want %q", value, c.caret, got, c.want)
+			}
+		})
+	}
+	// A caret INSIDE a run of whitespace stands in no word at all: the range comes back empty, and
+	// every region but the "/skill " picker (whose partial is legitimately empty) declines it.
+	if start, end := caretToken("fix  it", 4); start != end {
+		t.Errorf("caretToken on whitespace = [%d,%d), want an empty range", start, end)
+	}
+}
+
+// The merged menu follows the CARET, not the end of the buffer: going back to a half-typed token
+// with prose already written after it offers exactly what the end of the draft would.
+func TestCompletionFollowsTheCaretMidBuffer(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.input.SetValue("fix /rev the parser please")
+	m = caretAt(t, m, len("fix /rev"))
+
+	ac := m.autocomplete
+	if !ac.active || ac.kind != acCommand {
+		t.Fatalf("overlay = {active:%v kind:%v}, want the merged menu open on the caret's token", ac.active, ac.kind)
+	}
+	if len(ac.items) != 1 || ac.items[0].value != "review" || !ac.items[0].skill {
+		t.Fatalf("rows = %+v, want the single review skill row", ac.items)
+	}
+	if got := m.input.Value()[ac.tokenStart:ac.tokenEnd]; got != "/rev" {
+		t.Errorf("region = %q, want the caret's token %q — not the rest of the line", got, "/rev")
+	}
+}
+
+// Accepting mid-buffer splices over the token's own range: what was written on BOTH sides survives,
+// the caret lands just after what was written, and no separator is doubled.
+func TestAcceptSplicesInPlaceAndReSeatsTheCaret(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.input.SetValue("fix /rev the parser please")
+	m = caretAt(t, m, len("fix /rev"))
+	m = step(t, m, keyTab())
+
+	const want = "fix /review the parser please"
+	if got := m.input.Value(); got != want {
+		t.Fatalf("after accept input = %q, want %q (the prose after the token untouched)", got, want)
+	}
+	if off, wantOff := m.caretByteOffset(), len("fix /review"); off != wantOff {
+		t.Errorf("caret offset = %d, want %d (just after the spliced token)", off, wantOff)
+	}
+	if got := m.promptEditor.submitParse(m.knownSkillID).skillIDs; !reflect.DeepEqual(got, []string{"review"}) {
+		t.Errorf("the spliced token parses to %v, want [review]", got)
+	}
+}
+
+// The "@" region is caret-aware in both of its shapes — the bare word and the quoted path whose
+// spaces the bare rule would tokenize on.
+func TestFileCompletionAtACaretMidBuffer(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
+	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
+	opts := testOpts
+	opts.Workspace = dir
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+
+	m.input.SetValue("read @mai then stop")
+	m = caretAt(t, m, len("read @mai"))
+	if ac := m.autocomplete; !ac.active || ac.kind != acFile || len(ac.items) != 1 || ac.items[0].value != "main.go" {
+		t.Fatalf("bare @ mid-buffer overlay = %+v", ac)
+	}
+	m = step(t, m, keyTab())
+	if got, want := m.input.Value(), "read @main.go then stop"; got != want {
+		t.Errorf("bare accept = %q, want %q", got, want)
+	}
+
+	m.input.SetValue(`read @"my pl" then stop`)
+	m = caretAt(t, m, len(`read @"my pl`)) // inside the quotes, with the closing quote already typed
+	if ac := m.autocomplete; !ac.active || ac.kind != acFile || len(ac.items) != 1 || ac.items[0].value != "my plan.md" {
+		t.Fatalf("quoted @ mid-buffer overlay = %+v", ac)
+	}
+	m = step(t, m, keyTab())
+	if got, want := m.input.Value(), `read @"my plan.md" then stop`; got != want {
+		t.Errorf("quoted accept = %q, want %q", got, want)
+	}
+}
+
+// A caret elsewhere on the line must not resurrect a menu for a token it has left.
+func TestNoMenuWhenTheCaretLeavesTheToken(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.input.SetValue("/rev the parser")
+
+	if m = caretAt(t, m, len("/rev")); !m.autocomplete.active {
+		t.Fatal("the menu is shut with the caret at the end of its own token")
+	}
+	for _, off := range []int{len("/rev "), len("/rev the")} {
+		if m = caretAt(t, m, off); m.autocomplete.active {
+			t.Errorf("caret at %d (outside the token) still shows a menu: %+v", off, m.autocomplete.items)
+		}
+	}
+}
+
+// A command invoked from the MIDDLE of a draft runs and leaves both sides of it standing — with the
+// two separators the cut would strand collapsed back into the one word-space the human typed.
+func TestCommandRunsFromTheMiddleOfADraft(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("fix the parser /clear and ship it")
+	m = caretAt(t, m, len("fix the parser /clear"))
+	m, cmd := stepCmd(t, m, keyEnter()) // an exact token mid-draft executes through the accept path
+
+	if eng.clearCalls != 1 {
+		t.Fatalf("ClearContext calls = %d, want 1 (⏎ on an exact mid-draft verb runs it)", eng.clearCalls)
+	}
+	if cmd != nil {
+		t.Error("/clear returned a Cmd; it should not launch a worker")
+	}
+	const want = "fix the parser and ship it"
+	if got := m.input.Value(); got != want {
+		t.Errorf("editor = %q, want the draft with the verb cut out (%q)", got, want)
+	}
+	if off, wantOff := m.caretByteOffset(), len("fix the parser "); off != wantOff {
+		t.Errorf("caret offset = %d, want %d (where the cut token stood)", off, wantOff)
+	}
+	if got := eng.submits(); got != 0 {
+		t.Errorf("Submit calls = %d, want 0 — the draft must not be sent by a command", got)
 	}
 }
 

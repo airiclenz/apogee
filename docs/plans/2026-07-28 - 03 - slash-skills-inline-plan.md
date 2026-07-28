@@ -398,7 +398,65 @@ invoking a command never destroys the draft.
 
 **Commit.** `feat(tui): merged command+skill menu; commands run at accept and keep the draft`
 
-## 6. Caret-aware completion — the token at the caret
+## 6. Caret-aware completion — the token at the caret — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): four mechanical deviations, no behavioural ones beyond the item's own text.
+(a) the three region detectors return `(start, end int, partial string, ok bool)` — the region needs an END
+now that accept no longer splices to the end of the value — and the two whose names became false were
+renamed with it: `trailingSlashToken`→`caretSlashToken`, `trailingFileToken`→`caretFileToken` (both built on
+the new pure `caretToken`); `skillArgToken` keeps its name, its name still being true. `autocompleteState`
+gains `tokenEnd` alongside `tokenStart`. (b) `caretOffset` returns a RUNE offset, not the byte offset the
+item's text assumes, so `promptEditor.caretByteOffset` bridges the two coordinate systems through
+`runeOffsetOf`/`byteOffsetOf`, added beside `offsetToLineCol` in mouse.go; `caretToOffset` is the inverse
+seat (offsetToLineCol + the widget's own walk + reseatInput). (c) the "already invoked" exclusion
+(`skillSuggestions`' `outside`) now reads BOTH sides of the region via `outsideRegion(value, start, end)` —
+with a tail in play, a skill named after the caret is invoked just as much as one named before it.
+(d) item 5's deferred "collapse any doubled separator" landed on both accept paths: the cut collapses the
+two separators it strands, and the splice writes its own separator only when the tail does not already
+carry one. `internal/tui/doc.go`'s two clauses the caret rule made false (trailing-token regions, the
+editor's caret family) were amended here as items 3–5 did; the CHANGELOG and the `TODO.md:50-52` un-defer
+stay item 9's sweep.
+
+NOTES (2026-07-28, follow-up): (b)'s `caretToOffset` walk was defective on a SOFT-WRAPPED draft and is
+fixed here. `CursorDown` steps one VISUAL row, so crossing a wrapped logical line leaves `Line()`
+unchanged for every step but the last, and the loop's clamp guard — which compared only the logical row —
+read the first such step as "nothing below" and abandoned the caret on line 1 (tab-accepting `/rev`→
+`/review` on line 2 of a wrapped draft seated the caret at byte 15 instead of the end of the splice, so the
+next keystroke landed mid-line-1). The guard now watches the caret's VISUAL position (logical row plus
+`LineInfo().RowOffset`), which still cannot spin and no longer trips inside a wrapped line; `reseatInput`'s
+guard-free walk was already correct and is untouched. Two regression tests cover it, both of which failed
+before the fix: `TestPromptEditorCaretToOffsetCrossesWrappedRows` (every offset of a wrapped two-line draft
+round-trips through `caretToOffset`/`caretByteOffset`) and `TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft`
+(the reproduction, including the next keystroke landing at the caret).
+**SUPERSEDED by the next note** — that fix only narrowed the defect, and its claim that `reseatInput` was
+correct is false.
+
+NOTES (2026-07-28, third pass — SCOPE WIDENED BY OWNER RULING): the follow-up above diagnosed the walk as
+"visual rows vs logical rows" and it is worse than that: on a logical line that fills its last row exactly
+AND ends with a space, bubbles' `wrap` appends a PHANTOM trailing sub-line (`LineInfo().Height` counts it)
+that `CursorDown` can never enter — its column clamp is `min(StartColumn+Width+2, len(line)-1)`, one short
+of it — so the caret does not move at all and the line cannot be crossed by any number of `CursorDown`s.
+`caretToOffset` therefore still stalled (the RowOffset guard broke the walk on line 0: `/rev`→`/review` at
+the app's real 76-column text area seated the caret at byte 15 and the next `x` landed mid-line-1), and
+`reseatInput` — whose walk had no guard — INFINITE-LOOPED on an ordinary keystroke that grew the box with
+the caret below such a line (pre-existing at HEAD, not an item-6 regression). The owner explicitly widened
+item 6 to cover BOTH walks. Fix: one new `promptEditor.seatCaret(row, col)` seats a LOGICAL row with a
+Height-aware step — `CursorEnd` first (the end of a logical line IS its last sub-row, phantom included, at
+every width, proven from `LineInfo`'s prefix-sum walk), then `CursorDown`, which then always lands on the
+next logical line — so each pass advances `Line()` by exactly one and the walk cannot stall or spin; the
+final `SetHeight(Height())` re-runs the widget's own `repositionView` on the seated caret without moving it
+(`SetCursorColumn` does not reposition), which is what `reseatInput`'s scroll re-clamp needs. Both
+`caretToOffset` and `reseatInput` are now one line each over `seatCaret`; `reseatCaret` stays as-is for
+`caretTo`, whose input is a mouse click's VISUAL row — its bounded `for` loop cannot spin, but a click below
+a phantom-wrapped line still lands imprecisely; that is the mouse path, pre-existing at HEAD, and out of
+item 6's scope (reported as a follow-up). Tests: `TestPromptEditorCaretToOffsetCrossesWrappedRows` is now table-driven over the phantom
+geometries (`"aaa "×19` at width 76; `"wrapped "×20` at widths 8 and 80; a phantom line in the MIDDLE; wide
+runes) and round-trips every rune position through `caretToOffset`/`caretByteOffset` *and* `reseatInput`;
+`TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft` drives the same geometries through the production path
+(WindowSizeMsg + SetValue/MoveToEnd + `recomputeAutocomplete` + `keyTab` + the next keystroke); and the new
+`TestPromptScrollReseatCannotSpin` (model_test.go) drives a paste + a keystroke behind a 10s deadline off
+the test goroutine, so a re-seat that spins FAILS instead of wedging `go test`. All three fail against the
+previous code (the accept test reproduces the verifier's exact `"aaa aaa aaa aaax …"`).
 
 **What.** Lift the end-of-buffer restriction for all three regions (un-defers
 `TODO.md:50-52`; owner chose the caret-aware branch explicitly, files included).

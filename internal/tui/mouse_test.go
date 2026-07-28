@@ -63,6 +63,41 @@ func TestCaretOffset(t *testing.T) {
 	}
 }
 
+// offsetToLineCol must invert caretOffset at EVERY position of a value, line ends and multi-byte
+// runes included — a completion that splices mid-draft computes its new caret as an offset and can
+// only drive the widget by row and column, so a single off-by-one there would drop the caret inside
+// a rune. The byte↔rune bridge the mini-language crosses to reach those offsets is pinned with it.
+func TestCaretOffsetRoundTrips(t *testing.T) {
+	values := []string{
+		"",
+		"hello world",
+		"ab\ncd",
+		"first line\n\nthird line\n",
+		"日本語のテキスト\n絵文字 🚀 も",
+		"/grill-me 見て @internal/tui/model.go",
+	}
+	for _, v := range values {
+		t.Run(v, func(t *testing.T) {
+			for off := 0; off <= len([]rune(v)); off++ {
+				row, col := offsetToLineCol(v, off)
+				if got := caretOffset(v, row, col); got != off {
+					t.Fatalf("offsetToLineCol(%q, %d) = (%d,%d), which caretOffset reads back as %d", v, off, row, col, got)
+				}
+				if got := runeOffsetOf(v, byteOffsetOf(v, off)); got != off {
+					t.Fatalf("runeOffsetOf(byteOffsetOf(%q, %d)) = %d, want %d", v, off, got, off)
+				}
+			}
+			// Out-of-range offsets clamp to the value's two ends rather than panicking.
+			if row, col := offsetToLineCol(v, -1); row != 0 || col != 0 {
+				t.Errorf("offsetToLineCol(%q, -1) = (%d,%d), want the first position", v, row, col)
+			}
+			if got, want := byteOffsetOf(v, len([]rune(v))+9), len(v); got != want {
+				t.Errorf("byteOffsetOf(%q, past the end) = %d, want %d", v, got, want)
+			}
+		})
+	}
+}
+
 func TestSelectionText(t *testing.T) {
 	v := "hello\nworld"
 	cases := []struct {

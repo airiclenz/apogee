@@ -2307,6 +2307,65 @@ func firstInputRow(m Model) string {
 	return strings.Split(ansi.Strip(m.input.View()), "\n")[0]
 }
 
+// reseatDeadline bounds the one keystroke TestPromptScrollReseatCannotSpin drives. It is absurdly
+// generous for a walk of three logical lines — the point is only that a walk which cannot advance
+// FAILS the test instead of wedging the whole suite.
+const reseatDeadline = 10 * time.Second
+
+// TestPromptScrollReseatCannotSpin pins termination on the geometry that used to wedge the re-seat.
+// The middle line fills a visual row exactly and ends with a space, so bubbles' wrap gives it a
+// PHANTOM trailing sub-line that CursorDown's column clamp can never enter: a walk of bare
+// CursorDowns toward a caret BELOW that line never advances and never stops. An ordinary keystroke
+// that grows the box runs that walk (layout re-seats on a height change), so this drives exactly
+// that — one printable rune typed on the last line — behind a deadline. A regression fails here
+// rather than hanging `go test`; the caret must also come back where it was, since a walk that
+// merely terminated early would strand it on the wrong line.
+func TestPromptScrollReseatCannotSpin(t *testing.T) {
+	m := newTestModel(t) // 80 columns ⇒ a 76-column text area
+	iw := m.inputInnerWidth()
+	middle := strings.Repeat("aaa ", 19) // 76 chars: fills one row exactly, ends with a space
+	if len(middle)%iw != 0 {
+		t.Fatalf("middle line is %d chars at width %d; it must fill its last row exactly", len(middle), iw)
+	}
+	// The last line is one column short of the wrap, so the keystroke grows the box — which is what
+	// makes layout run the re-seat with the caret BELOW the phantom-wrapped line.
+	value := "head\n" + middle + "\n" + strings.Repeat("b", iw-1)
+
+	// Both steps run off-goroutine, because BOTH grow the box and so both re-seat: the paste seeds
+	// the draft (production path — the box grows from one row to the draft's) and the keystroke
+	// then grows it by the row it wraps to. A walk that cannot advance fails here instead of
+	// wedging the suite.
+	type outcome struct {
+		m      Model
+		before int
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		next, _ := m.Update(tea.PasteMsg{Content: value})
+		seeded := next.(Model)
+		before := seeded.input.Height()
+		next, _ = seeded.Update(keyRune('x'))
+		done <- outcome{next.(Model), before}
+	}()
+	var got outcome
+	select {
+	case got = <-done:
+	case <-time.After(reseatDeadline):
+		t.Fatalf("a keystroke on a phantom-wrapped draft did not return within %s: the re-seat is spinning", reseatDeadline)
+	}
+	m = got.m
+
+	if m.input.Height() == got.before {
+		t.Fatalf("box height stayed %d; the keystroke never triggered the re-seat", got.before)
+	}
+	if v, want := m.input.Value(), value+"x"; v != want {
+		t.Fatalf("value = %q, want %q", v, want)
+	}
+	if off, want := m.caretByteOffset(), len(value)+1; off != want {
+		t.Errorf("caret at byte %d, want %d — the re-seat moved it off the end", off, want)
+	}
+}
+
 // TestReseatPreservesStickyColumn guards the re-seat's height-change gate: vertical caret
 // navigation does not change the box height, so the re-seat must not run and clobber the
 // textarea's remembered goal column. Moving down through a short line and on to a long one lands

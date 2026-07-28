@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -212,6 +213,57 @@ func caretOffset(value string, row, col int) int {
 		off += len([]rune(lines[i])) + 1 // the +1 is the '\n' that split removed
 	}
 	return off + col
+}
+
+// offsetToLineCol is caretOffset's exact inverse: it turns a rune offset into value back into the
+// (logical row, column) the textarea positions its cursor by. The mouse needs only the forward
+// direction (a click names a cell, the caret follows), but a completion that splices text into the
+// MIDDLE of a draft needs this one: the new caret is known as an offset into the new value, and the
+// widget can only be driven by row and column ([promptEditor.caretToOffset]).
+//
+// An offset past the end of a line lands at that line's end rather than wrapping into the next,
+// which is what makes the two functions inverses at every position, the line ends included: the
+// offset of a row's last column and the offset of the next row's first differ by the '\n' between
+// them. Offsets outside the value clamp to its first and last positions.
+func offsetToLineCol(value string, off int) (row, col int) {
+	if off < 0 {
+		return 0, 0
+	}
+	lines := strings.Split(value, "\n")
+	for i, ln := range lines {
+		n := len([]rune(ln))
+		if off <= n || i == len(lines)-1 {
+			return i, clampInt(off, 0, n)
+		}
+		off -= n + 1 // the +1 is the '\n' that split removed
+	}
+	return 0, 0 // unreachable: Split always yields at least one line
+}
+
+// runeOffsetOf converts a BYTE offset into value to the rune offset of the same position. It is the
+// bridge between the two coordinate systems the input cluster lives in: the chat mini-language
+// slices the value by byte (command.go, autocomplete.go — its tokens are delimited by ASCII
+// whitespace, so byte offsets are the natural currency there), while the textarea counts its cursor
+// in runes. A byte offset past the end clamps to the end.
+func runeOffsetOf(value string, byteOff int) int {
+	return utf8.RuneCountInString(value[:clampInt(byteOff, 0, len(value))])
+}
+
+// byteOffsetOf is runeOffsetOf's inverse: the byte offset at which the runeOff-th rune of value
+// begins. An offset past the last rune yields len(value) — the end position, which is a valid
+// caret site and not a rune of its own.
+func byteOffsetOf(value string, runeOff int) int {
+	if runeOff <= 0 {
+		return 0
+	}
+	n := 0
+	for i := range value { // ranging a string visits the byte index of each rune's first byte
+		if n == runeOff {
+			return i
+		}
+		n++
+	}
+	return len(value)
 }
 
 // selectionText returns the value runes between two offsets (lo inclusive, hi exclusive),

@@ -177,8 +177,9 @@ func (e promptEditor) rows(innerWidth int) int {
 // Walking down from the top re-clamps a scroll offset the widget left stale (its SetHeight only
 // repositions when the caret falls outside the view, never when the box grows), so the caret
 // lands on its real visual row with the least scroll that keeps it visible. It re-derives none
-// of the textarea's wrap, so the geometry holds across bubbles releases. Shared by caretTo (a
-// mouse click's target row) and reseatInput (the caret's own row, after a height change).
+// of the textarea's wrap, so the geometry holds across bubbles releases. It serves caretTo — a
+// mouse click names a VISUAL row, which is the only thing this walk can express; a caret named by
+// a LOGICAL row and column is seated by seatCaret instead, whose step cannot stall.
 func (e *promptEditor) reseatCaret(visRow int) {
 	e.input.MoveToBegin()
 	for i := 0; i < visRow; i++ {
@@ -204,24 +205,71 @@ func (e *promptEditor) caretTo(visRow, visCol int) int {
 	return caretOffset(e.input.Value(), e.input.Line(), e.input.Column())
 }
 
-// reseatInput re-clamps the prompt textarea's internal scroll after a SetHeight changed the
-// box's height. bubbles repositions the view only when the caret falls outside it, so a box that
-// auto-grows keeps a stale downward offset — the first content line scrolls out of sight with a
-// phantom blank row below (ISSUES #2). Re-seating the caret onto its own visual row through the
-// shared reseatCaret idiom unscrolls to the top and re-clamps the offset to the current height,
-// leaving the caret exactly where it was. The caret's visual row is the wrapped rows above its
-// logical line — counted here with the widget's own CursorDown so no wrap is re-derived — plus
-// its within-line sub-row; the logical column is captured and restored so the caret does not
-// move. layout() calls this only on a height change, which never happens during vertical caret
-// navigation, so the textarea's remembered goal column is untouched.
-func (e *promptEditor) reseatInput() {
-	row, col := e.input.Line(), e.input.Column()
-	visRow := e.input.LineInfo().RowOffset // the caret's sub-row within its logical line
+// caretByteOffset reports where the caret stands as a BYTE offset into the editor's value. The
+// widget positions its cursor by logical row and RUNE column while the chat mini-language scans the
+// value by byte (command.go, autocomplete.go), so every completion region reads the caret through
+// this one conversion instead of each doing its own — and every one of them is then a pure function
+// of (value, offset), unit-testable without driving a widget.
+func (e promptEditor) caretByteOffset() int {
+	value := e.input.Value()
+	return byteOffsetOf(value, caretOffset(value, e.input.Line(), e.input.Column()))
+}
+
+// seatCaret drives the textarea caret to a LOGICAL (row, column) and re-clamps the widget's
+// internal scroll onto it — the one seat both the completion splice (caretToOffset) and the
+// auto-grow re-clamp (reseatInput) are expressed in. Like reseatCaret it re-derives none of the
+// textarea's wrap; unlike reseatCaret it steps LOGICAL lines, which is what makes it total.
+//
+// The step is Height-aware, and that is the whole point. bubbles' CursorDown leaves a logical line
+// only when the caret already sits on that line's LAST wrapped sub-row (RowOffset+1 >= Height);
+// anywhere above it, the step guesses the next sub-row's column as min(StartColumn+Width+2,
+// len(line)-1). A logical line that ends with a space exactly at a row boundary wraps to a PHANTOM
+// trailing sub-line (bubbles' wrap appends one), and that len(line)-1 clamp can never reach it — so
+// a walk of bare CursorDowns stands still forever on such a line: it neither crosses it nor moves at
+// all. CursorEnd first puts the caret at the end of the logical line, which IS the last sub-row
+// (phantom included) at every width, so the following CursorDown always lands on the next logical
+// line. Each pass therefore advances Line() by exactly one and the walk cannot stall or spin; the
+// break is unreachable defence, since offsetToLineCol clamps row to a line the value has.
+//
+// MoveToBegin unscrolls to offset 0 first, so the walk down re-clamps the offset with the least
+// scroll that keeps the caret visible (bubbles repositions only when the caret falls OUTSIDE the
+// view, so a box that just grew keeps a stale downward offset — ISSUES #2). SetCursorColumn does
+// not reposition, so the final SetHeight — at the height the box already has, hence a no-op to the
+// geometry — re-runs the widget's own repositioning on the seated caret without moving it, which is
+// what keeps a caret deep inside a wrapped line on screen.
+func (e *promptEditor) seatCaret(row, col int) {
 	e.input.MoveToBegin()
-	for e.input.Line() < row { // count the wrapped rows of the logical lines above the caret
-		e.input.CursorDown()
-		visRow++
+	for e.input.Line() < row {
+		before := e.input.Line()
+		e.input.CursorEnd()  // the logical line's last wrapped sub-row, phantom included
+		e.input.CursorDown() // ⇒ the next logical line
+		if e.input.Line() == before {
+			break // unreachable: the last logical line is the last row offsetToLineCol can name
+		}
 	}
-	e.reseatCaret(visRow)
 	e.input.SetCursorColumn(col)
+	e.input.SetHeight(e.input.Height())
+}
+
+// caretToOffset drives the caret to a BYTE offset into the current value — caretByteOffset's
+// inverse, and what re-seats the caret after a completion splices over a token in the MIDDLE of a
+// draft (acceptAutocomplete), where the widget's own MoveToEnd would jump to the wrong place.
+// offsetToLineCol names the logical row and column; seatCaret walks to them. An offset past the end
+// lands at the end.
+func (e *promptEditor) caretToOffset(byteOff int) {
+	value := e.input.Value()
+	row, col := offsetToLineCol(value, runeOffsetOf(value, byteOff))
+	e.seatCaret(row, col)
+}
+
+// reseatInput re-clamps the prompt textarea's internal scroll after a SetHeight changed the box's
+// height. bubbles repositions the view only when the caret falls outside it, so a box that
+// auto-grows keeps a stale downward offset — the first content line scrolls out of sight with a
+// phantom blank row below (ISSUES #2). Re-seating the caret where it already stands is the whole
+// fix: seatCaret unscrolls to the top and walks back down, which re-clamps the offset to the
+// current height and leaves the caret exactly where it was. layout() calls this only on a height
+// change, which never happens during vertical caret navigation, so the textarea's remembered goal
+// column is untouched.
+func (e *promptEditor) reseatInput() {
+	e.seatCaret(e.input.Line(), e.input.Column())
 }

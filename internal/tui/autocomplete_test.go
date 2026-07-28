@@ -27,7 +27,7 @@ func newDropdownModel(t *testing.T, opts Options) Model {
 func TestAutocompleteSkillDropdownChrome(t *testing.T) {
 	m := newDropdownModel(t, skillOpts())
 	m.input.SetValue("/skill ")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 
 	view := plain(m.View())
 	if !strings.Contains(view, "skills") {
@@ -53,7 +53,7 @@ func TestAutocompleteSkillDropdownChrome(t *testing.T) {
 func TestAutocompleteCommandAndFileTitles(t *testing.T) {
 	cmd := newDropdownModel(t, testOpts)
 	cmd.input.SetValue("/")
-	cmd.autocomplete = cmd.computeAutocomplete()
+	cmd.autocomplete = cmd.computeAutocomplete(cmd.caretByteOffset())
 	if got := plain(cmd.View()); !strings.Contains(got, "commands") {
 		t.Errorf("the \"/\" menu is missing the \"commands\" title:\n%s", got)
 	}
@@ -64,7 +64,7 @@ func TestAutocompleteCommandAndFileTitles(t *testing.T) {
 	opts.Workspace = dir
 	files := newDropdownModel(t, opts)
 	files.input.SetValue("@main")
-	files.autocomplete = files.computeAutocomplete()
+	files.autocomplete = files.computeAutocomplete(files.caretByteOffset())
 	if got := plain(files.View()); !strings.Contains(got, "files") {
 		t.Errorf("an \"@\" token is missing the \"files\" title:\n%s", got)
 	}
@@ -77,7 +77,7 @@ func TestAutocompleteDropdownSpansFullWidth(t *testing.T) {
 	m := newDropdownModel(t, skillOpts())
 	wantWidth := m.width // the full window width, matching the input box
 	m.input.SetValue("/skill ")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	for i, ln := range popupLines(m.renderAutocomplete()) {
 		if w := lipgloss.Width(ln); w != wantWidth {
 			t.Errorf("dropdown line %d is %d cells, want %d: %q", i, w, wantWidth, strip(ln))

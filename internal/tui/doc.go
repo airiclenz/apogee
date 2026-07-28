@@ -44,8 +44,11 @@
 // command.go is a pure [parseInput] that classifies a line as a local /command or an agent
 // message and extracts @file references; autocomplete.go is the suggestion overlay (ONE merged menu
 // of commands and skills on a "/" token, a bounded os.Root workspace-file listing on "@") rendered
-// above the input like the approval-prompt slot. Every region is scoped to the trailing TOKEN, so a
-// draft already in the box does not shut the menu out, and accepting a command row RUNS the command
+// above the input like the approval-prompt slot. Every region is scoped to the TOKEN AT THE CARET
+// (caretToken — the word it stands in or just after, found by scanning to the whitespace on either
+// side), so neither a draft already in the box nor a caret sent back into the middle of it shuts the
+// menu out, accept splices over that token's own range rather than to the end of the buffer (the
+// caret re-seated after it through offsetToLineCol), and accepting a command row RUNS the command
 // — [Model.acceptAutocomplete] cuts the verb out and leaves the rest of the draft standing, which
 // is why [Model.runCommand] never touches the editor and its callers prepare it instead. The
 // whole-input form keeps ownership of arguments ("/confine off --save"), so ⏎ on a finished token
@@ -131,8 +134,10 @@
 // anonymously. Field and self-contained-method promotion keeps the value-copied Model idiom
 // and every call site unchanged (m.input, m.autocomplete, m.caretTo(...) resolve through it). The
 // lift is deliberately partial: only methods touching nothing but the editor's own fields move
-// there (newPromptEditor, submitParse, reset, rows, and the caret re-seat trio caretTo/reseatCaret/
-// reseatInput); methods that also read Model-owned state — theme, width/height, opts, lifecycle —
+// there (newPromptEditor, submitParse, reset, rows, and the caret re-seat family caretTo/reseatCaret
+// for a VISUAL row and seatCaret — which caretToOffset and reseatInput both express — for a LOGICAL
+// one, plus the offset pair caretByteOffset/caretToOffset a mid-draft completion splices by);
+// methods that also read Model-owned state — theme, width/height, opts, lifecycle —
 // stay on the Model rather than duplicate that state (computeAutocomplete, acceptAutocomplete,
 // insertSkillToken, highlightInput, inputContentRect, the region-arbitrating mouse handlers). The
 // Model stays the coordinator that owns the lifecycle state machine, the transcript + render cache, the

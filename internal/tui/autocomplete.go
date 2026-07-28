@@ -16,8 +16,9 @@ import (
 // workspace files (wherever the box is editable, so an interjection references a file as easily as
 // a submitted message does — see computeAutocomplete). It is painted by the shared selector-popup
 // module (popup.go) — a titled, bordered pane rendered above the input box, in a slot that
-// shrinks the transcript viewport to make room. The overlay completes the WORD AT THE END of the
-// input (the common forward-typing case), which keeps it cursor-position-free and robust.
+// shrinks the transcript viewport to make room. The overlay completes the TOKEN AT THE CARET
+// (caretToken): forward typing at the end of the draft is only its commonest case, and going back
+// to fix a misspelled skill id mid-message offers exactly the same menu the end does.
 //
 // Accepting a row is not always a completion. A skill or a file row splices its token and leaves
 // the human typing; a COMMAND row runs the command there and then (acceptAutocomplete), cutting its
@@ -51,20 +52,26 @@ type acItem struct {
 }
 
 // autocompleteState is the overlay's data. active gates rendering and key capture (it is a
-// value field on the Model, so an inactive zero value simply means "hidden"). tokenStart is
-// the byte offset in the input value where the token being completed begins; accept splices
-// from there to the end.
+// value field on the Model, so an inactive zero value simply means "hidden"). tokenStart and
+// tokenEnd bound the byte range of the token being completed — the completion REGION: accept
+// splices over exactly that range and re-seats the caret after it, so whatever the human had
+// already written on either side survives untouched.
 type autocompleteState struct {
 	active     bool
 	kind       acKind
 	items      []acItem
 	selected   int
 	tokenStart int
+	tokenEnd   int
 }
 
-// computeAutocomplete derives the overlay from the current input value, treating the cursor
-// as at the end (the common case while typing). It returns an inactive state when nothing
-// should be suggested. Called at stateIdle and — for the file region only — at stateRunning.
+// computeAutocomplete derives the overlay from the current input value and the caret's byte offset
+// into it. It returns an inactive state when nothing should be suggested. Called at stateIdle and —
+// for the file region only — at stateRunning.
+//
+// The caret arrives as an ARGUMENT rather than being read off the widget, which keeps this a pure
+// function of (value, caret): recomputeAutocomplete is the one place that asks the textarea where
+// its cursor is, and every test constructs the pair directly.
 //
 // The three regions do NOT share a lifetime. An "@file" reference is exactly as useful in a
 // message interjected mid-run as in one submitted at idle (the ref resolves at delivery, fresh),
@@ -74,44 +81,54 @@ type autocompleteState struct {
 // stays idle-only alongside it for now — a hold on the menu, not a limit of what it splices: the
 // inline token it writes is message content, and rides an interjection exactly as an @ref does.
 //
-// Each region is scoped to a TOKEN, never to the whole line: the "/" menu opens on the trailing
-// "/word" of a draft that already holds text, which is what lets a command be summoned — or a skill
-// invoked — without first emptying the box.
-func (m Model) computeAutocomplete() autocompleteState {
+// Each region is scoped to the TOKEN AT THE CARET, never to the whole line and no longer to the end
+// of the buffer: the "/" menu opens on the "/word" being edited in a draft that already holds text
+// — before it, after it, or both — which is what lets a command be summoned, a skill invoked, or a
+// mistyped id repaired without first emptying the box or walking the caret back to the end.
+func (m Model) computeAutocomplete(caret int) autocompleteState {
 	value := m.input.Value()
 	idle := m.state == stateIdle
 
-	// Skill argument: a "/skill <partial>" region (the trailing word after a "/skill" token).
+	// Skill argument: a "/skill <partial>" region (the caret's word, introduced by a "/skill" token).
 	// Checked FIRST so it wins over the merged "/" branch — which would otherwise see the partial as
-	// a "/" token of its own. tokenStart marks the "/skill" itself, so accepting replaces the
+	// a "/" token of its own. The region starts at the "/skill" itself, so accepting replaces the
 	// whole "/skill <partial>" run with the skill's own "/id " token.
-	if start, partial, ok := skillArgToken(value); ok && idle {
-		items := m.skillSuggestions(partial, value[:start])
+	if start, end, partial, ok := skillArgToken(value, caret); ok && idle {
+		items := m.skillSuggestions(partial, outsideRegion(value, start, end))
 		if len(items) == 0 {
 			return autocompleteState{}
 		}
-		return autocompleteState{active: true, kind: acSkill, items: items, tokenStart: start}
+		return autocompleteState{active: true, kind: acSkill, items: items, tokenStart: start, tokenEnd: end}
 	}
 
-	// Command + skill: the trailing word is a "/" token — one namespace, one menu.
-	if start, partial, ok := trailingSlashToken(value); ok && idle {
-		items := m.slashSuggestions(partial, value[:start])
+	// Command + skill: the caret's word is a "/" token — one namespace, one menu.
+	if start, end, partial, ok := caretSlashToken(value, caret); ok && idle {
+		items := m.slashSuggestions(partial, outsideRegion(value, start, end))
 		if len(items) == 0 {
 			return autocompleteState{}
 		}
-		return autocompleteState{active: true, kind: acCommand, items: items, tokenStart: start}
+		return autocompleteState{active: true, kind: acCommand, items: items, tokenStart: start, tokenEnd: end}
 	}
 
-	// File: the input ends in an "@" token being typed — bare, or quoted across its spaces.
-	if start, partial, ok := trailingFileToken(value); ok {
+	// File: the caret stands in an "@" token being typed — bare, or quoted across its spaces.
+	if start, end, partial, ok := caretFileToken(value, caret); ok {
 		items := m.fileSuggestions(partial)
 		if len(items) == 0 {
 			return autocompleteState{}
 		}
-		return autocompleteState{active: true, kind: acFile, items: items, tokenStart: start}
+		return autocompleteState{active: true, kind: acFile, items: items, tokenStart: start, tokenEnd: end}
 	}
 
 	return autocompleteState{}
+}
+
+// outsideRegion is the draft MINUS the completion region: the text the region does not cover. It is
+// what "already invoked" is read against (skillSuggestions), since the token being completed is
+// about to be replaced and so cannot count as its own duplicate. The two halves join directly
+// because a region always begins at a word boundary — the head is empty or ends in whitespace — so
+// cutting the middle out never fuses two words into one.
+func outsideRegion(value string, start, end int) string {
+	return value[:start] + value[end:]
 }
 
 // recomputeAutocomplete re-derives the overlay from the current input and stores it, reloading
@@ -122,13 +139,14 @@ func (m Model) computeAutocomplete() autocompleteState {
 // edge-triggered on skillRegion so a burst of keystrokes inside one open region re-scans disk once,
 // not per byte (mirroring the filecache TTL's "reuse one walk" intent, but keyed to opens), and the
 // two regions share the flag because typing "/skill" and then a space walks straight from one into
-// the other — a single visit to the catalog, not two. Callers use this instead of assigning
-// m.computeAutocomplete() directly; computeAutocomplete itself stays a pure function of the input,
-// so unit tests that call it keep working.
+// the other — a single visit to the catalog, not two. This is also the ONE place the textarea is
+// asked where its cursor is: callers use it instead of assigning m.computeAutocomplete(…) directly,
+// and computeAutocomplete stays a pure function of the (value, caret) pair a test can construct.
 func (m Model) recomputeAutocomplete() Model {
 	value := m.input.Value()
-	_, _, inPicker := skillArgToken(value)
-	_, _, inMenu := trailingSlashToken(value)
+	caret := m.caretByteOffset() // the one place the widget is asked where its cursor is
+	_, _, _, inPicker := skillArgToken(value, caret)
+	_, _, _, inMenu := caretSlashToken(value, caret)
 	// Both regions are idle-only (computeAutocomplete), so a "/" token typed into an interjection is
 	// not one: it must neither re-scan disk nor arm the edge trigger, or the first keystroke back at
 	// idle would find skillRegion already true and skip the reload.
@@ -137,45 +155,66 @@ func (m Model) recomputeAutocomplete() Model {
 		m.opts.ReloadSkills() // region opening: re-scan before computeAutocomplete lists suggestions
 	}
 	m.skillRegion = inSkill
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(caret)
 	return m
 }
 
-// trailingSlashToken reports the "/" token at the very end of value (the token being typed): its
-// start offset, the partial verb-or-id after the slash, and whether value ends in such a token. It
-// is trailingFileToken's bare rule under a different sigil, and it is what turns the "/" menu from
-// a whole-LINE rule into a TOKEN rule: the menu now opens at the end of a draft that already holds
-// text, instead of only on an otherwise-empty box. A value ending in whitespace has no trailing
-// token (the word is finished).
+// caretToken reports the whitespace-delimited token the caret stands in: the byte range
+// [start,end) reaching from the boundary left of the caret to the boundary right of it. It is the
+// whole of the caret-awareness rule, and every completion region is derived from it — which is what
+// scopes a menu to the word being EDITED and never to one further along the line.
+//
+// The caret counts as being in the token when it sits anywhere inside it or immediately after its
+// last byte, because that is where an editing caret sits while a word is being typed or repaired. A
+// caret in a run of whitespace yields an empty range (start == end): there is no word under it, so
+// no region matches — except the "/skill " picker, whose partial is legitimately empty (skillArgToken).
+//
+// Two invariants the callers rely on: start <= caret <= end, and start is either 0 or preceded by
+// whitespace, so a token is at a word boundary by construction (the extractSkillRefs/extractFileRefs
+// rule, arrived at from the other direction).
+func caretToken(value string, caret int) (start, end int) {
+	caret = clampInt(caret, 0, len(value))
+	start, end = caret, caret
+	for start > 0 && !isInputSpace(value[start-1]) {
+		start--
+	}
+	for end < len(value) && !isInputSpace(value[end]) {
+		end++
+	}
+	return start, end
+}
+
+// caretSlashToken reports the "/" token at the caret: its byte range, the partial verb-or-id after
+// the slash, and whether the caret's token is one at all. It is caretFileToken's bare rule under a
+// different sigil, and it is what turns the "/" menu from a whole-LINE rule into a caret-scoped one:
+// the menu opens on the "/word" being edited anywhere in a draft that already holds text, instead of
+// only on an otherwise-empty box. A caret on whitespace has no token (the word is finished).
 //
 // There is no quoted shape to read: command verbs and skill ids are whitespace-free by construction
 // (skill ids are directory names — extractSkillRefs), so the bare word is the whole grammar.
-func trailingSlashToken(value string) (int, string, bool) {
-	start := strings.LastIndexAny(value, " \t\n") + 1
-	word := value[start:]
-	if !strings.HasPrefix(word, "/") {
-		return 0, "", false
+func caretSlashToken(value string, caret int) (start, end int, partial string, ok bool) {
+	start, end = caretToken(value, caret)
+	if start == end || value[start] != '/' {
+		return 0, 0, "", false
 	}
-	return start, word[1:], true
+	return start, end, value[start+1 : end], true
 }
 
-// trailingFileToken reports the "@" token at the very end of value (the token being typed):
-// its start offset, the partial path after the "@" (and after any opening quote), and whether
-// value ends in such a token. The token must sit at a word boundary (start of value or after
-// whitespace); a value ending in whitespace has no trailing token (the ref is complete).
+// caretFileToken reports the "@" token at the caret: its byte range, the partial path after the "@"
+// (and after any opening quote), and whether the caret stands in such a token. The token must sit at
+// a word boundary (start of value or after whitespace); a caret on whitespace stands in no token.
 //
 // It reads both shapes of the ref grammar (scanRefToken owns it, command.go):
 //
-//   - bare — the trailing whitespace-delimited word, "@internal/loop.go";
-//   - quoted — a word-boundary "@" followed by a quote whose token reaches the very end of
-//     value. An open quote keeps the overlay alive across the spaces the bare rule would
-//     tokenize on (@"my pl → partial "my pl"), and a closing quote flush at the end yields the
-//     inner path (@"my plan.md" → partial "my plan.md"), so a fully-typed quoted token can
-//     still match its suggestion exactly and let ⏎ submit.
+//   - bare — the caret's own whitespace-delimited word, "@internal/loop.go";
+//   - quoted — a word-boundary "@" followed by a quote whose token spans the caret. An open quote
+//     keeps the overlay alive across the spaces the bare rule would tokenize on (@"my pl → partial
+//     "my pl"), and a closing quote yields the inner path (@"my plan.md" → partial "my plan.md"), so
+//     a fully-typed quoted token can still match its suggestion exactly and let ⏎ submit.
 //
 // The quoted shape is tried first: its own closing quote and interior spaces are precisely what
-// the bare rule would mis-read. Bare tokens keep their previous behaviour byte for byte.
-func trailingFileToken(value string) (int, string, bool) {
+// the bare rule would mis-read.
+func caretFileToken(value string, caret int) (start, end int, partial string, ok bool) {
 	for i := 0; i < len(value); i++ {
 		if value[i] != '@' {
 			continue
@@ -186,18 +225,17 @@ func trailingFileToken(value string) (int, string, bool) {
 		if i+1 >= len(value) || (value[i+1] != '"' && value[i+1] != '\'') {
 			continue
 		}
-		partial, end := scanRefToken(value, i+1)
-		if end == len(value) {
-			return i, partial, true
+		p, e := scanRefToken(value, i+1)
+		if i <= caret && caret <= e { // the caret stands in (or just after) this quoted token
+			return i, e, p, true
 		}
-		i = end - 1 // a closed quote mid-line: resume scanning past this token
+		i = e - 1 // some other quoted token: resume scanning past it
 	}
-	start := strings.LastIndexAny(value, " \t\n") + 1
-	word := value[start:]
-	if !strings.HasPrefix(word, "@") {
-		return 0, "", false
+	start, end = caretToken(value, caret)
+	if start == end || value[start] != '@' {
+		return 0, 0, "", false
 	}
-	return start, word[1:], true
+	return start, end, value[start+1 : end], true
 }
 
 // fileRefToken renders path as the "@" reference the overlay shows and splices for it: the
@@ -231,24 +269,28 @@ func commandSuggestions(partial string) []acItem {
 	return items
 }
 
-// skillArgToken reports the "/skill <partial>" region at the end of value: the byte offset of
-// the "/skill" token (the point the picked skill's own token is spliced over), the partial
-// id/name being typed, and whether value ends in such a region. The partial is the trailing
-// whitespace-delimited word, and the word immediately before it must be exactly "/skill". It
-// accepts "/skill ", "/skill cl", and mid-line "fix /skill cl"; it rejects a bare "/skill" (no arg
-// yet) and a completed "/skill foo " (the word before the trailing position is "foo", not "/skill").
-func skillArgToken(value string) (int, string, bool) {
-	lastSpace := strings.LastIndexAny(value, " \t\n")
-	if lastSpace < 0 {
-		return 0, "", false // no whitespace ⇒ a bare "/skill" or a single word, no arg region
+// skillArgToken reports the "/skill <partial>" region at the caret: the byte range running from the
+// "/skill" token to the end of the partial (the whole run the picked skill's own token is spliced
+// over), the partial id/name being typed, and whether the caret stands in such a region. The partial
+// is the caret's own word (caretToken — empty when the caret sits just after the "/skill "), and the
+// word immediately before it must be exactly "/skill". It accepts "/skill ", "/skill cl", and
+// mid-line "fix /skill cl"; it rejects a bare "/skill" (no arg yet) and a completed "/skill foo "
+// (the word before the caret is "foo", not "/skill").
+func skillArgToken(value string, caret int) (start, end int, partial string, ok bool) {
+	argStart, argEnd := caretToken(value, caret)
+	if argStart == 0 {
+		return 0, 0, "", false // nothing precedes the partial ⇒ no "/skill" can introduce it
 	}
-	partial := value[lastSpace+1:]
-	before := value[:lastSpace]
-	prevSpace := strings.LastIndexAny(before, " \t\n")
-	if before[prevSpace+1:] != "/skill" {
-		return 0, "", false
+	// caretToken guarantees the byte before argStart is whitespace; the verb is the word ending there.
+	verbEnd := argStart - 1
+	verbStart := verbEnd
+	for verbStart > 0 && !isInputSpace(value[verbStart-1]) {
+		verbStart--
 	}
-	return prevSpace + 1, partial, true
+	if value[verbStart:verbEnd] != "/skill" {
+		return 0, 0, "", false
+	}
+	return verbStart, argEnd, value[argStart:argEnd], true
 }
 
 // slashSuggestions builds the merged "/" menu: first the commands whose name partial prefixes, in
@@ -289,8 +331,9 @@ func (m Model) slashSuggestions(partial, outside string) []acItem {
 // the text is where an invocation lives; there is no attachment state beside it to consult. Delete
 // the token and the skill is offered again, which is the same self-healing rule the inline accents
 // and the submit parse read. outside is the part of the buffer the completion region does NOT
-// cover: the region itself is about to be replaced, so a skill named inside it is not yet invoked
-// (a fully typed "/clean-code" must keep offering its own row, or ⏎ could never confirm it).
+// cover, on BOTH sides of it (outsideRegion): the region itself is about to be replaced, so a skill
+// named inside it is not yet invoked (a fully typed "/clean-code" must keep offering its own row, or
+// ⏎ could never confirm it), while one named further along the draft is.
 func (m Model) skillSuggestions(partial, outside string) []acItem {
 	if m.opts.Skills == nil {
 		return nil
@@ -392,7 +435,8 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 // would earn the typo guard's usage note instead of the picker it is an entry point to.
 func (m Model) autocompleteExactMatch() bool {
 	ac := m.autocomplete
-	if !ac.active || len(ac.items) == 0 || ac.tokenStart > len(m.input.Value()) {
+	value := m.input.Value()
+	if !ac.active || len(ac.items) == 0 || ac.tokenEnd > len(value) || ac.tokenStart > ac.tokenEnd {
 		return false
 	}
 	// Inside the "/skill <partial>" picker the typed text is the PICKER's syntax, never the message
@@ -403,7 +447,7 @@ func (m Model) autocompleteExactMatch() bool {
 		return false
 	}
 	it := ac.items[ac.selected]
-	typed := m.input.Value()[ac.tokenStart:]
+	typed := value[ac.tokenStart:ac.tokenEnd]
 	if ac.kind == acFile {
 		return typed == "@"+it.value ||
 			typed == `@"`+it.value+`"` ||
@@ -418,7 +462,7 @@ func (m Model) autocompleteExactMatch() bool {
 	if spec, ok := commandByName(it.value); ok && spec.menuOnly {
 		return false // /skill chains into the picker; the parser would only refuse it
 	}
-	return strings.TrimSpace(m.input.Value()) == typed
+	return strings.TrimSpace(value) == typed
 }
 
 // acceptAutocomplete applies the highlighted row over the region that opened the overlay — and for
@@ -456,20 +500,36 @@ func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
 	return m.removeCompletionToken().runCommand(parsedInput{kind: kindCommand, command: it.value})
 }
 
+// completionRegion is the byte range the overlay is completing, clamped to the value as it stands
+// now. The clamp is defensive — the value cannot have shrunk between the compute and the accept,
+// which happen inside one Update — but a splice must never slice out of range.
+func (m Model) completionRegion() (start, end int) {
+	n := len(m.input.Value())
+	start = clampInt(m.autocomplete.tokenStart, 0, n)
+	end = clampInt(m.autocomplete.tokenEnd, start, n)
+	return start, end
+}
+
 // removeCompletionToken cuts the token the overlay was completing out of the draft and closes the
 // overlay. It is the editor half of "a command row is an action": the verb is consumed by RUNNING
 // it, so what stays in the box is the message the human was writing, minus the word that invoked
 // the command — never an emptied box (which would lose the draft) and never a dead "/clear" left
 // standing in the text (which would be sent along with it).
 //
-// The region runs from tokenStart to the end of the value — the trailing-token rule the menu opens
-// under — so the cut leaves a prefix and the caret lands at its end. The separator the human typed
-// before the token stays: it is where they were writing, and it is what the next word needs anyway.
+// The caret lands where the token stood, between what flanked it. Cutting a token from the middle of
+// a draft would leave the separators from BOTH sides ("fix /clear it" → "fix  it"), so one of them
+// is collapsed — the word spacing the human typed is restored, not doubled. A token at the end
+// leaves the separator before it standing: it is where they were writing, and it is what the next
+// word needs anyway.
 func (m Model) removeCompletionToken() Model {
 	value := m.input.Value()
-	start := min(m.autocomplete.tokenStart, len(value)) // defensive: the value cannot have shrunk
-	m.input.SetValue(value[:start])
-	m.input.MoveToEnd()
+	start, end := m.completionRegion()
+	head, tail := value[:start], value[end:]
+	if head != "" && tail != "" && isInputSpace(head[len(head)-1]) && isInputSpace(tail[0]) {
+		tail = tail[1:] // collapse the doubled separator the cut would otherwise leave
+	}
+	m.input.SetValue(head + tail)
+	m.caretToOffset(len(head))
 	m.autocomplete = autocompleteState{}
 	m.layout()
 	return m
@@ -484,18 +544,26 @@ func (m Model) insertSkillToken(id string) Model {
 	return m.spliceCompletion("/" + id)
 }
 
-// spliceCompletion writes token, plus the trailing space that ends it, over the completion region
-// and re-derives the overlay. It RECOMPUTES rather than blindly closing: that closes the overlay
-// for a completed command/file/skill token (the trailing space ends the token) but reopens it as
-// the skill picker after "/skill " — the chain the oracle's selectSkill mirrors.
+// spliceCompletion writes token, plus the separator that ends it, over the completion region and
+// re-derives the overlay, leaving the caret just after what it wrote. It RECOMPUTES rather than
+// blindly closing: that closes the overlay for a completed command/file/skill token (the separator
+// ends the token) but reopens it as the skill picker after "/skill " — the chain the oracle's
+// selectSkill mirrors.
+//
+// The separator is written only when the draft does not already carry one: completing a token in the
+// middle of a sentence must not double the space before the next word. The caret then lands after
+// the token — before the space the draft already had, or after the one just written — which is where
+// the human goes on typing either way.
 func (m Model) spliceCompletion(token string) Model {
 	value := m.input.Value()
-	start := m.autocomplete.tokenStart
-	if start > len(value) {
-		start = len(value) // defensive: the value cannot have shrunk, but never slice out of range
+	start, end := m.completionRegion()
+	head, tail := value[:start], value[end:]
+	sep := " "
+	if tail != "" && isInputSpace(tail[0]) {
+		sep = "" // the draft already separates this token from what follows it
 	}
-	m.input.SetValue(value[:start] + token + " ")
-	m.input.MoveToEnd()
+	m.input.SetValue(head + token + sep + tail)
+	m.caretToOffset(len(head) + len(token) + len(sep))
 	m = m.recomputeAutocomplete() // chains "/skill " → picker (reloading the catalog); else closes
 	m.layout()
 	return m

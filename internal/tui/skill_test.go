@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -63,14 +65,36 @@ func TestSkillArgToken(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.value, func(t *testing.T) {
-			start, part, ok := skillArgToken(tc.value)
+			// The caret sits at the end of the value — the forward-typing case these rows describe.
+			start, end, part, ok := skillArgToken(tc.value, len(tc.value))
 			if ok != tc.wantOK {
 				t.Fatalf("skillArgToken(%q) ok = %v, want %v", tc.value, ok, tc.wantOK)
 			}
 			if ok && (start != tc.wantStart || part != tc.wantPart) {
 				t.Errorf("skillArgToken(%q) = (%d, %q), want (%d, %q)", tc.value, start, part, tc.wantStart, tc.wantPart)
 			}
+			// The region always reaches to the end of the partial: accepting replaces the whole run.
+			if ok && end != len(tc.value) {
+				t.Errorf("skillArgToken(%q) end = %d, want %d (the end of the partial)", tc.value, end, len(tc.value))
+			}
 		})
+	}
+}
+
+// The picker region follows the CARET, not the end of the buffer: editing the argument of a
+// "/skill" run that sits mid-draft opens the same picker, scoped to exactly that run.
+func TestSkillArgTokenAtTheCaret(t *testing.T) {
+	value := "fix /skill cl and ship it"
+	start, end, partial, ok := skillArgToken(value, len("fix /skill cl"))
+	if !ok || partial != "cl" {
+		t.Fatalf("skillArgToken(%q, caret) = (%q, %v), want (\"cl\", true)", value, partial, ok)
+	}
+	if got, want := value[start:end], "/skill cl"; got != want {
+		t.Errorf("region = %q, want %q (the whole run the splice replaces)", got, want)
+	}
+	// A caret out in the prose after the run names no picker region at all.
+	if _, _, _, ok := skillArgToken(value, len(value)); ok {
+		t.Error("a caret past the run still opened the picker")
 	}
 }
 
@@ -83,7 +107,7 @@ func TestComputeAutocompleteSkillDropdown(t *testing.T) {
 
 	// "/skill " (empty partial) lists all skills, in display order.
 	m.input.SetValue("/skill ")
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 	if !ac.active || ac.kind != acSkill {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active skill", ac.active, ac.kind)
 	}
@@ -97,7 +121,7 @@ func TestComputeAutocompleteSkillDropdown(t *testing.T) {
 
 	// A partial narrows by id/displayName substring.
 	m.input.SetValue("/skill rev")
-	ac = m.computeAutocomplete()
+	ac = m.computeAutocomplete(m.caretByteOffset())
 	if len(ac.items) != 1 || ac.items[0].value != "review" {
 		t.Fatalf("narrowed suggestions = %+v, want [review]", ac.items)
 	}
@@ -106,7 +130,7 @@ func TestComputeAutocompleteSkillDropdown(t *testing.T) {
 func TestCommandDropdownOffersSkill(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("/sk") // "sessions" also begins with s, so narrow to "sk" for the skill verbs
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
 	}
@@ -121,7 +145,7 @@ func TestCommandDropdownOffersSkill(t *testing.T) {
 	}
 	// The full "/" menu includes /skill alongside the three real commands.
 	m.input.SetValue("/")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	if got := plain(m.View()); !strings.Contains(got, "/skill") {
 		t.Errorf("'/' menu does not offer /skill:\n%s", got)
 	}
@@ -131,11 +155,11 @@ func TestSkillArgWinsOverBareCommand(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	// "/skill" (no space) is the command branch (offers /skill); "/skill " (space) is the picker.
 	m.input.SetValue("/skill")
-	if ac := m.computeAutocomplete(); ac.kind != acCommand {
+	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.kind != acCommand {
 		t.Errorf("'/skill' (no space) kind = %v, want command", ac.kind)
 	}
 	m.input.SetValue("/skill ")
-	if ac := m.computeAutocomplete(); ac.kind != acSkill {
+	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.kind != acSkill {
 		t.Errorf("'/skill ' (space) kind = %v, want skill", ac.kind)
 	}
 }
@@ -149,7 +173,7 @@ func TestSkillArgWinsOverBareCommand(t *testing.T) {
 func TestAcceptSkillSplicesInlineToken(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("fix /skill cl")
-	m.autocomplete = m.computeAutocomplete() // acSkill, [clean-code]
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // acSkill, [clean-code]
 	m = step(t, m, keyTab())
 
 	if got, want := m.input.Value(), "fix /clean-code "; got != want {
@@ -172,12 +196,12 @@ func TestAcceptSkillSplicesInlineToken(t *testing.T) {
 func TestSkillPickerExcludesTokensAlreadyInTheBuffer(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("/clean-code /skill cl")
-	if ac := m.computeAutocomplete(); ac.active {
+	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.active {
 		t.Errorf("a skill already invoked in the text is still offered: %+v", ac.items)
 	}
 	// Delete the token and it is offered again — the exclusion self-heals with the text.
 	m.input.SetValue("/skill cl")
-	if ac := m.computeAutocomplete(); !ac.active || ac.items[0].value != "clean-code" {
+	if ac := m.computeAutocomplete(m.caretByteOffset()); !ac.active || ac.items[0].value != "clean-code" {
 		t.Errorf("removing the token did not restore the suggestion: %+v", ac)
 	}
 }
@@ -185,8 +209,8 @@ func TestSkillPickerExcludesTokensAlreadyInTheBuffer(t *testing.T) {
 func TestSkillCommandChainsIntoPicker(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("/skill")
-	m.autocomplete = m.computeAutocomplete() // command menu, highlighted "skill"
-	m = step(t, m, keyTab())                 // accept the /skill command
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // command menu, highlighted "skill"
+	m = step(t, m, keyTab())                                    // accept the /skill command
 	if got := m.input.Value(); got != "/skill " {
 		t.Fatalf("accepting /skill gave %q, want %q", got, "/skill ")
 	}
@@ -199,7 +223,7 @@ func TestEnterOnSkillCommandDoesNotSubmit(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/skill")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	m = step(t, m, keyEnter()) // Enter completes /skill → picker; never sends "/skill"
 	if m.state != stateIdle {
 		t.Errorf("Enter on /skill launched a worker (state=%v); it must only open the picker", m.state)
@@ -219,7 +243,7 @@ func TestEnterOnSkillCommandDoesNotSubmit(t *testing.T) {
 func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("/c") // four c-commands, and "clean-code" matches as a substring
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 
 	var got []string
 	for _, it := range ac.items {
@@ -243,7 +267,7 @@ func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 func TestAcceptSkillRowFromTheMergedMenu(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("please /rev")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	if len(m.autocomplete.items) != 1 || !m.autocomplete.items[0].skill {
 		t.Fatalf("rows = %+v, want the single review skill row", m.autocomplete.items)
 	}
@@ -257,6 +281,70 @@ func TestAcceptSkillRowFromTheMergedMenu(t *testing.T) {
 	}
 }
 
+// The same accept on a draft whose FIRST line soft-wraps: the caret must land at the end of the
+// spliced token on line 2, so the next keystroke goes there and not into the middle of line 1. The
+// splice re-finds the caret's logical row through the widget's own walk, and a wrapped first line
+// is where a walk that steps VISUAL rows gets it wrong.
+//
+// The geometries are chosen to be the pathological ones, not merely wrapped: each first line ends
+// with a space exactly at a row boundary, which is where bubbles' wrap appends a PHANTOM trailing
+// sub-line that CursorDown can never enter (its column clamp stops one short of it). A walk of bare
+// CursorDowns stands still there forever — it neither crosses the line nor moves — so the caret was
+// abandoned on line 1 and the next keystroke landed in the middle of it. The widths are the app's
+// real one (80 columns ⇒ a 76-column text area) and the two the walk also failed at.
+func TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft(t *testing.T) {
+	cases := []struct {
+		name    string
+		window  int    // window columns; the text area is four narrower (border + padding)
+		first   string // the first logical line
+		phantom bool   // true ⇒ it fills its last row exactly and ends with a space
+	}{
+		{"app width", 80, strings.Repeat("aaa ", 19), true},              // 76 chars at a 76-column text area
+		{"narrow", 12, strings.Repeat("wrapped ", 20), true},             // 8-column rows, filled exactly
+		{"wide", 84, strings.Repeat("wrapped ", 20), true},               // 80-column rows, filled exactly
+		{"plain wrap", 80, strings.Repeat("wrapping prose ", 12), false}, // an ordinary wrapped line
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+			m = step(t, m, tea.WindowSizeMsg{Width: tc.window, Height: 24})
+			iw := m.inputInnerWidth()
+			if tc.phantom {
+				if got := len(tc.first) % iw; got != 0 || !strings.HasSuffix(tc.first, " ") {
+					t.Fatalf("first line is %d chars at width %d (remainder %d, ends in a space: %v); the "+
+						"phantom row needs an exact fill ending in a space",
+						len(tc.first), iw, got, strings.HasSuffix(tc.first, " "))
+				}
+			}
+			// The widget's own reckoning, not the repo's: inputContentRows mirrors the wrap for the
+			// box HEIGHT and does not count the phantom row, so the wrap is asserted through bubbles.
+			if got := wrappedRowsOf(tc.first, iw); got < 2 {
+				t.Fatalf("first line occupies %d wrapped rows in the widget, want a genuinely wrapped one", got)
+			}
+			m.input.SetValue(tc.first + "\nplease /rev")
+			m.input.MoveToEnd()
+			m = m.recomputeAutocomplete()
+			if len(m.autocomplete.items) == 0 {
+				t.Fatalf("no completion offered for the /rev token: %+v", m.autocomplete)
+			}
+			m = step(t, m, keyTab())
+
+			want := tc.first + "\nplease /review "
+			if got := m.input.Value(); got != want {
+				t.Fatalf("accepted %q, want %q", got, want)
+			}
+			if got := m.caretByteOffset(); got != len(want) {
+				t.Errorf("caret at byte %d, want %d — the end of the spliced token", got, len(want))
+			}
+			// The proof that matters to the human: the next keystroke lands where the caret is drawn.
+			m = step(t, m, keyRune('x'))
+			if got := m.input.Value(); got != want+"x" {
+				t.Errorf("the next keystroke produced %q, want %q", got, want+"x")
+			}
+		})
+	}
+}
+
 // A skill whose id collides with a command verb is omitted from the merged rows — the verb owns the
 // name in one namespace — and stays reachable through the /skill picker, whose splice writes the
 // token in a position the whole-input command rule never claims.
@@ -266,14 +354,14 @@ func TestSlashMenuShadowsCollidingSkillID(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
 	m.input.SetValue("/clea")
-	for _, it := range m.computeAutocomplete().items {
+	for _, it := range m.computeAutocomplete(m.caretByteOffset()).items {
 		if it.skill {
 			t.Fatalf("the merged menu offered a skill a command verb shadows: %+v", it)
 		}
 	}
 
 	m.input.SetValue("/skill clea")
-	ac := m.computeAutocomplete()
+	ac := m.computeAutocomplete(m.caretByteOffset())
 	if ac.kind != acSkill || len(ac.items) != 1 || ac.items[0].value != "clear" {
 		t.Fatalf("the /skill picker lost the shadowed skill: %+v", ac)
 	}
@@ -285,7 +373,7 @@ func TestTypedSkillTokenStaysOfferedAndSubmits(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("please /review")
-	m.autocomplete = m.computeAutocomplete()
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 
 	if len(m.autocomplete.items) != 1 || !m.autocomplete.items[0].skill {
 		t.Fatalf("a finished skill token lost its own row: %+v", m.autocomplete.items)
@@ -471,7 +559,7 @@ func TestNilCatalogGuards(t *testing.T) {
 
 	// The picker offers nothing rather than panicking.
 	m.input.SetValue("/skill ")
-	if ac := m.computeAutocomplete(); ac.active {
+	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.active {
 		t.Errorf("skill picker active with a nil catalog: %+v", ac.items)
 	}
 	// No token resolves without a catalog, so the message is ordinary prose — no panic.
@@ -562,8 +650,8 @@ func TestSkillPickerReloadsViaCommandChain(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
 	m.input.SetValue("/skill")
-	m.autocomplete = m.computeAutocomplete() // command menu, "skill" highlighted
-	m = step(t, m, keyTab())                 // accept → acceptAutocomplete splices "/skill " and opens the picker
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // command menu, "skill" highlighted
+	m = step(t, m, keyTab())                                    // accept → acceptAutocomplete splices "/skill " and opens the picker
 	if *reloads != 1 {
 		t.Fatalf("the /skill command chain triggered %d reloads, want exactly 1", *reloads)
 	}

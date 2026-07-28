@@ -77,6 +77,87 @@ func TestPromptEditorResetClearsEverything(t *testing.T) {
 	}
 }
 
+// wrappedRowsOf reports how many wrapped sub-rows the WIDGET gives one logical line at width,
+// read back through its own LineInfo with the caret parked on that line. It is deliberately not
+// inputContentRows: that one mirrors the wrap for the box HEIGHT and does not count the phantom
+// trailing sub-line bubbles appends to a line that fills its last row exactly — which is the very
+// geometry the caret seat has to survive, so the caret tests measure with the widget's reckoning.
+func wrappedRowsOf(line string, width int) int {
+	e := newPromptEditor(defaultCursorShape)
+	e.input.SetWidth(width)
+	e.input.SetValue(line)
+	e.input.MoveToBegin()
+	return e.input.LineInfo().Height
+}
+
+// caretToOffset must reach a logical row that sits below a SOFT-WRAPPED one, and its walk must
+// terminate whatever the geometry. bubbles' CursorDown steps one VISUAL row, so a wrapped line
+// takes several steps to cross — and on a line that fills its last row exactly and ends with a
+// space it takes INFINITELY many: the wrap appends a phantom trailing sub-line, and CursorDown's
+// column clamp (len(line)-1) can never enter it, so the caret does not move at all. A seat built on
+// bare CursorDowns therefore stalls on the first line forever and a completion spliced into the
+// second seats its caret in the middle of the first. Every rune position of each draft round-trips.
+func TestPromptEditorCaretToOffsetCrossesWrappedRows(t *testing.T) {
+	cases := []struct {
+		name  string
+		width int
+		value string
+	}{
+		// The pathological geometries: a first line that ends with a space exactly at a row
+		// boundary, at the app's real text width (76) and the two others the walk failed at.
+		{"phantom row at app width", 76, strings.Repeat("aaa ", 19) + "\nplease /rev"},
+		{"phantom row at width 8", 8, strings.Repeat("wrapped ", 20) + "\nplease /rev"},
+		{"phantom row at width 80", 80, strings.Repeat("wrapped ", 20) + "\nplease /rev"},
+		// Three logical lines, the middle one phantom-wrapped: the walk crosses two of them.
+		{"phantom row in the middle", 76, "head\n" + strings.Repeat("aaa ", 19) + "\ntail past it"},
+		// An ordinarily wrapped line, and one with wide runes, still round-trip.
+		{"plain wrap", 20, strings.Repeat("wrapped ", 12) + "\nsecond line, well past the wrap"},
+		{"wide runes", 20, "日本語のテキストです ここに " + strings.Repeat("あ", 30) + "\nsecond 🎉 line"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped := false
+			for _, line := range strings.Split(tc.value, "\n") {
+				if wrappedRowsOf(line, tc.width) >= 2 {
+					wrapped = true
+				}
+			}
+			if !wrapped {
+				t.Fatal("no logical line wraps at this width; the walk is never asked to cross one")
+			}
+			e := newPromptEditor(defaultCursorShape)
+			e.input.SetWidth(tc.width)
+			e.input.SetHeight(3) // shorter than the draft, so the scroll re-clamp runs for real
+			e.input.SetValue(tc.value)
+			e.input.MoveToEnd()
+
+			// Rune starts only: a byte offset inside a multi-byte rune is not a caret position.
+			offs := []int{len(tc.value)}
+			for i := range tc.value {
+				offs = append(offs, i)
+			}
+			for _, off := range offs {
+				e.caretToOffset(off)
+				if got := e.caretByteOffset(); got != off {
+					t.Fatalf("caretToOffset(%d) seated the caret at %d (row %d, col %d)",
+						off, got, e.input.Line(), e.input.Column())
+				}
+				// The auto-grow re-clamp runs on the same seat and must not move the caret either.
+				e.reseatInput()
+				if got := e.caretByteOffset(); got != off {
+					t.Fatalf("reseatInput moved the caret from %d to %d", off, got)
+				}
+			}
+
+			// An offset past the end lands at the end rather than running away.
+			e.caretToOffset(len(tc.value) + 99)
+			if got := e.caretByteOffset(); got != len(tc.value) {
+				t.Errorf("caretToOffset(past the end) = %d, want %d", got, len(tc.value))
+			}
+		})
+	}
+}
+
 // rows grows one row per logical line and clamps at maxInputRows.
 func TestPromptEditorRowsGrowsAndClamps(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape)
