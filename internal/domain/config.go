@@ -130,6 +130,24 @@ type Config struct {
 	// unknown placeholder fails construction (New/Resume), like a bad Profile.
 	SystemPrompt string
 
+	// ContextFiles are the workspace context files folded into the standing system content —
+	// the RESOLVED names to look for, in inclusion order; nil or empty ⇒ the feature is off.
+	// Each name is workspace-relative (joined to WorkspaceDir): it must be relative and must
+	// not escape the workspace, or construction fails naming the offender. The list is an
+	// INCLUSION set, not a priority chain — every listed name that exists is included, and a
+	// name that does not exist is simply skipped, because discovery is the feature.
+	//
+	// Content is DATA, never a template: it is carried beside SystemPrompt rather than
+	// concatenated into it and is never run through internal/prompt, so a repo's own
+	// {{braces}} reach the model verbatim and can never fail startup. The files are read at
+	// SESSION BOUNDARIES only — construction, /clear|/new, a live restore — so a mid-session
+	// edit never swaps the content under a running session (KV-cache stability), and a
+	// sub-agent inherits the parent session's bytes rather than re-reading. Like SystemPrompt
+	// the content is request-scoped: never committed to history, never in the snapshot. The
+	// host folds a configured list in from config.yaml (file-only); an embedder sets it
+	// directly.
+	ContextFiles []string
+
 	// Budget / Compaction knobs (context/) are structural and load-bearing — they
 	// run even under Bypass. Defaults are sane; overrides are advanced.
 	Context ContextConfig

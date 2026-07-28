@@ -79,6 +79,13 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, err
 	}
 
+	// Likewise for the context-file names: an empty, absolute, or workspace-escaping name
+	// fails construction naming the offender rather than letting the loader reach outside
+	// the workspace. The host's config-side check fires first for config users.
+	if err := validateContextFileNames(cfg.ContextFiles); err != nil {
+		return nil, err
+	}
+
 	a := &Agent{
 		cfg:                cfg,
 		upstream:           up,
@@ -93,6 +100,9 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		tokens:             apogeectx.NewTokenEstimator(),
 		now:                time.Now, // the request-render clock for the system prompt's {{datetime}}
 	}
+	// Fill the context-file cache for this session's first boundary: construction. Every later
+	// refill goes through the same seam at a session boundary (contextfiles.go).
+	a.reloadContextFiles()
 	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
 	a.turns = &turnLifecycle{conv: &a.conv, tracker: a.tracker}

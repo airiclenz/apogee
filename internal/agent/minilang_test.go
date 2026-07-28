@@ -300,9 +300,15 @@ func errorEventContaining(events []domain.Event, substr string) bool {
 	return false
 }
 
+// writeWorkspaceFile writes content to name under dir, creating any parent directories so a
+// nested name works as readily as a root-level one.
 func writeWorkspaceFile(t *testing.T, dir, name, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

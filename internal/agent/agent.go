@@ -92,6 +92,16 @@ type Agent struct {
 	// newAgent seeds it with time.Now; it is never nil on a constructed Agent.
 	now func() time.Time
 
+	// contextFiles is the session's cache of discovered workspace context files
+	// (Config.ContextFiles — internal/agent/contextfiles.go). It is filled at construction and
+	// REFILLED only at a session boundary (ClearContext, a successful RestoreSession), so the
+	// standing content a request carries is byte-stable for the life of a session — a
+	// mid-session edit to a repo's AGENTS.md lands on the next session, not under a running
+	// one. A sub-agent is handed the parent's slice verbatim (newChildAgent), so one session's
+	// nested agents all speak from the same bytes. It is not serialized: the resolved-live
+	// posture of ADR 0023 §6 means a resumed session re-reads the CURRENT files.
+	contextFiles []contextFile
+
 	conv         domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step
 	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state (index, inExchange, exchangeStart) and, from item 2 on, the exits — internal/agent/turn.go
@@ -301,10 +311,14 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 // prior turns; the human keeps their scrollback. Valid only at a quiescent boundary;
 // calling it mid-Exchange is refused (ErrInputPending) so a half-streamed Turn is never
 // orphaned. The Agent stays snapshot-safe after it returns.
+//
+// It is also a session boundary, so the workspace context files are re-read here: the new
+// session speaks from whatever the repo's AGENTS.md says NOW. A refused call changes nothing.
 func (a *Agent) ClearContext() error {
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
+	a.reloadContextFiles()
 	a.conv = *domain.NewConversation(nil)
 	return nil
 }
@@ -322,11 +336,21 @@ func (a *Agent) ClearContext() error {
 // conversation is left untouched — restoreSnapshot decodes into a temporary and swaps only on
 // full success. It does NOT touch the allow-for-session approval cache, the autonomy mode, or the
 // confinement flag: those are live host state re-confirmed per ADR 0008, not part of the Session.
+//
+// A successful restore starts a new session, so the workspace context files are re-read: the
+// resolved-live posture of ADR 0023 §6 — the standing content is not serialized, so a resumed
+// session speaks from the CURRENT files, not the ones its snapshot was taken under. A REFUSED
+// restore (mid-Exchange, or a corrupt/future-version snapshot) leaves the cache untouched
+// along with the conversation.
 func (a *Agent) RestoreSession(snap domain.Session) error {
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
-	return a.restoreSnapshot(snap)
+	if err := a.restoreSnapshot(snap); err != nil {
+		return err
+	}
+	a.reloadContextFiles()
+	return nil
 }
 
 // InExchange reports whether a multi-Turn Exchange is currently open (mid-flight). It is a

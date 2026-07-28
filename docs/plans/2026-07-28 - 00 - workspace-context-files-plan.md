@@ -139,7 +139,16 @@ method, the TUI formats and prints it at the three boundaries it already owns (s
 
 ---
 
-## 1. The loader and the engine's session cache
+## 1. The loader and the engine's session cache — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): two implementation details worth recording. (a) `newChildAgent` assigns the
+parent's cache AFTER its `newAgent` call, so a child performs one discarded construction-time
+read before the parent's slice overwrites it — "no re-read" holds semantically (a child can
+never observe a mid-session edit or deletion, pinned by a test) rather than as a skipped
+syscall; clearing `childCfg.ContextFiles` to avoid it would have left the child's cfg
+disagreeing with the parent's. (b) The existing shared test helper `writeWorkspaceFile`
+(`minilang_test.go`) gained a `MkdirAll` so a nested name works, instead of adding a second
+near-identical helper to `contextfiles_test.go`.
 
 **What.** The engine learns to discover and hold context-file content, re-read at every
 session boundary. Nothing reaches the wire yet (that is item 2), so this item is inert.

@@ -103,7 +103,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // still-running child, a Guards bundle that isolates live state but shares the dangerous
 // floor read-only (Guards.ForSubAgent), a tool set that is a SUBSET of this Agent's tools
 // (defaultSubAgentTools — never an expansion, and withholding sub_agent at the depth bound),
-// the SAME Upstream responder and EventSink, and Depth = parent+1 so its events nest. The
+// the SAME Upstream responder and EventSink, the parent session's context-file content
+// verbatim (copied, never re-read — a sub-agent is not a session boundary), and Depth =
+// parent+1 so its events nest. The
 // nested Agent is NOT given the parent's pending input, conversation, or approval cache — it
 // starts fresh with only the delegated task (the ADR-0008 statelessness boundary).
 func (a *Agent) newChildAgent() (*Agent, error) {
@@ -128,6 +130,10 @@ func (a *Agent) newChildAgent() (*Agent, error) {
 	}
 	child.depth = a.depth + 1
 	child.guards = a.guards.ForSubAgent()
+	// The child belongs to the PARENT's session, so it speaks from the parent's context-file
+	// bytes: copy the cache over the one its own construction just read. A sub-agent is not a
+	// session boundary, so an AGENTS.md edited (or deleted) mid-delegation must not reach it.
+	child.contextFiles = a.contextFiles
 	// A tighten-only view of the parent's live mode (ADR 0013): the child's disposition takes
 	// TighterMode(parentLive, spawnMode), so a parent tightening mid-delegation reaches the child
 	// while a parent loosening cannot loosen it. Capture the parent's modeMu-guarded accessor, not
