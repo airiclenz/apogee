@@ -107,3 +107,35 @@ func escapesWorkspace(name string) bool {
 func (a *Agent) reloadContextFiles() {
 	a.contextFiles = loadContextFiles(a.cfg.WorkspaceDir, a.cfg.ContextFiles)
 }
+
+// contextFileHeader introduces each file's content in the standing system message, so a model
+// reading one merged block can tell whose conventions it is being handed — and where one file's
+// content ends and the next one's begins.
+const contextFileHeader = "## Workspace context: "
+
+// contextBlocks renders the session's cached content as the blocks that ride the seeded system
+// message: one headed block per readable entry, in list order, joined by a blank line. An entry
+// carrying only an error contributes nothing (an unreadable file is reported to the user, never
+// to the model), so a cache of nothing but errors renders "".
+//
+// The content goes out verbatim — no internal/prompt anywhere on this path — so a repo's own
+// {{braces}} reach the model as written. Only trailing newlines are trimmed, so the blank line
+// between blocks is exactly one however the file happened to end.
+//
+// The result is a pure function of the cache, and the cache only moves at a session boundary:
+// every request of a session therefore seeds byte-identical content and the server's prefix KV
+// cache survives the whole session.
+func (a *Agent) contextBlocks() string {
+	if len(a.contextFiles) == 0 {
+		return ""
+	}
+
+	blocks := make([]string, 0, len(a.contextFiles))
+	for _, f := range a.contextFiles {
+		if f.err != nil || f.content == "" {
+			continue
+		}
+		blocks = append(blocks, contextFileHeader+f.name+"\n\n"+strings.TrimRight(f.content, "\r\n"))
+	}
+	return strings.Join(blocks, "\n\n")
+}

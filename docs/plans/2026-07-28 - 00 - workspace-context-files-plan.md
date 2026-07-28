@@ -188,7 +188,14 @@ no request-visible change anywhere (the cache is dark until item 2).
 
 **Commit.** `feat(agent): discover workspace context files at session boundaries`
 
-## 2. Seeding — content rides the first system message
+## 2. Seeding — content rides the first system message — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): two literal-text deviations. (a) The composition lives in a named
+`(a *Agent) standingSystem()` beside `systemPrompt()` in `loop.go` and `buildRequest` calls it,
+rather than being inlined at `loop.go:569` — the plan's own item 4 needs "the SAME composed seed
+item 2 sends" for `StandingTokens`, and a second inline copy of the join would be the thing that
+drifts. (b) Trailing newlines are trimmed with the `"\r\n"` cutset, not `"\n"`, so a CRLF file
+(the repo cross-builds for Windows) does not leave a stray `\r` before the block separator.
 
 **What.** The cached content joins the rendered prompt in the ONE seeded system message.
 

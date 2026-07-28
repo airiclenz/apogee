@@ -10,6 +10,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -498,5 +500,259 @@ func TestNewAgentRejectsUnknownPromptPlaceholder(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Workspace context files (Config.ContextFiles) — the second standing source
+// ----------------------------------------------------------------------------
+//
+// Item 2 of the workspace-context-files plan: the cache filled at a session boundary
+// (contextfiles_test.go owns WHAT is discovered) rides the SAME seeded system message the
+// template does. These tests therefore live here, on the seam harness: they drive the recording
+// fake and assert on the captured provider.Request — one merged system message, prompt first,
+// blocks in list order, content verbatim, and stable for the life of a session.
+//
+// TestPromptSeam_NativeProfileByteIdentical above is the complement: no prompt AND no context
+// files still seeds nothing at all.
+
+// contextSeamConfig returns a menuConfig rooted at dir and looking for names — the wire-facing
+// counterpart of contextfiles_test.go's contextConfig.
+func contextSeamConfig(t *testing.T, sink domain.EventSink, dir string, names ...string) domain.Config {
+	t.Helper()
+	cfg := menuConfig(t, sink)
+	cfg.WorkspaceDir = dir
+	cfg.ContextFiles = names
+	return cfg
+}
+
+// contextBlock renders the block a readable context file is expected to contribute — spelled out
+// here rather than borrowed from the production helper so the tests pin the wire shape itself.
+func contextBlock(name, content string) string {
+	return "## Workspace context: " + name + "\n\n" + content
+}
+
+// seedSystemMessage drives one Turn and returns the wire request's leading system message,
+// failing when the request does not open with exactly one.
+func seedSystemMessage(t *testing.T, a *Agent, responder *recordingResponder, text string) string {
+	t.Helper()
+	if err := a.Submit(domain.UserInput{Text: text}); err != nil {
+		t.Fatalf("Submit(%q): %v", text, err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step(%q): %v", text, err)
+	}
+	got := responder.last
+	if n := countSystemMessages(got.Messages); n != 1 {
+		t.Fatalf("wire request has %d system messages, want exactly 1: %+v", n, got.Messages)
+	}
+	if got.Messages[0].Role != string(domain.RoleSystem) {
+		t.Fatalf("first wire message = %+v, want the seeded system message at position 0", got.Messages[0])
+	}
+	return got.Messages[0].Content
+}
+
+// TestContextSeam_FilesSeedWithoutAPrompt: context files are an INDEPENDENT standing source —
+// found content seeds the system message even with no template configured. The block's trailing
+// newline is trimmed, so a file's own line ending never widens the gap to the next block.
+func TestContextSeam_FilesSeedWithoutAPrompt(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "Run make check before committing.\n")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md") // zero Profile, no SystemPrompt
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	want := contextBlock("AGENTS.md", "Run make check before committing.")
+	if got != want {
+		t.Errorf("seeded system message = %q\nwant %q", got, want)
+	}
+}
+
+// TestContextSeam_PromptThenBlocksInListOrder: the rendered prompt leads, then every found file
+// in LIST order (not alphabetical, not disk order), each under a header naming it.
+func TestContextSeam_PromptThenBlocksInListOrder(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "agents guidance")
+	writeWorkspaceFile(t, dir, "CONVENTIONS.md", "conventions guidance")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "CONVENTIONS.md", "MISSING.md", "AGENTS.md")
+	cfg.Mode = domain.ModeAskBefore
+	cfg.SystemPrompt = promptTemplate
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	rendered := prompt.Render(promptTemplate, prompt.Inputs{
+		Workspace: dir,
+		Mode:      string(domain.ModeAskBefore),
+		Now:       promptNow,
+	})
+	want := rendered + "\n\n" +
+		contextBlock("CONVENTIONS.md", "conventions guidance") + "\n\n" +
+		contextBlock("AGENTS.md", "agents guidance")
+	if got != want {
+		t.Errorf("seeded system message = %q\nwant %q", got, want)
+	}
+}
+
+// TestContextSeam_UnreadableFileNeverReachesTheModel: an error entry is kept for the user-facing
+// notice, but it contributes no block — the model is never told about a file it cannot be shown.
+func TestContextSeam_UnreadableFileNeverReachesTheModel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "AGENTS.md"), 0o755); err != nil { // present, unreadable
+		t.Fatalf("Mkdir: %v", err)
+	}
+	writeWorkspaceFile(t, dir, "CONVENTIONS.md", "conventions guidance")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md", "CONVENTIONS.md")
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	if want := contextBlock("CONVENTIONS.md", "conventions guidance"); got != want {
+		t.Errorf("seeded system message = %q\nwant %q (the unreadable file contributes nothing)", got, want)
+	}
+}
+
+// TestContextSeam_MergesDirectivesAndToolBlock: prompt → context files → mechanism directive →
+// tool block, all in ONE system message — the content joins the existing merge, it does not open
+// a second message.
+func TestContextSeam_MergesDirectivesAndToolBlock(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "agents guidance")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+	cfg.Mode = domain.ModeAskBefore
+	cfg.SystemPrompt = promptTemplate
+	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	const directive = "Always cite the files you read. [seed]"
+	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, seedingHook{text: directive}); err != nil {
+		t.Fatalf("AddExperimental: %v", err)
+	}
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	block, err := processing.InstructionsFor(cfg.Profile, a.toolMenu())
+	if err != nil {
+		t.Fatalf("InstructionsFor: %v", err)
+	}
+	rendered := prompt.Render(promptTemplate, prompt.Inputs{
+		Workspace: dir,
+		Mode:      string(domain.ModeAskBefore),
+		Now:       promptNow,
+	})
+	want := rendered + "\n\n" + contextBlock("AGENTS.md", "agents guidance") + "\n\n" + directive + "\n\n" + block
+	if got != want {
+		t.Errorf("merged system message = %q\nwant %q", got, want)
+	}
+}
+
+// TestContextSeam_ContentIsDataNotTemplate: the SAME token renders in the template and survives
+// verbatim in a file — content never meets internal/prompt, so a repo's own braces reach the
+// model as written (and can never fail apogee's startup).
+func TestContextSeam_ContentIsDataNotTemplate(t *testing.T) {
+	dir := t.TempDir()
+	const fileContent = "Never write outside {{workspace}}."
+	writeWorkspaceFile(t, dir, "AGENTS.md", fileContent)
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+	cfg.Mode = domain.ModeAskBefore
+	cfg.SystemPrompt = promptTemplate // renders {{workspace}} twice
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	if !strings.Contains(got, contextBlock("AGENTS.md", fileContent)) {
+		t.Errorf("seeded system message = %q\nwant the file's braces verbatim in %q", got, fileContent)
+	}
+	if n := strings.Count(got, prompt.PlaceholderWorkspace); n != 1 {
+		t.Errorf("seeded system message carries %s %d times, want exactly 1 (the file's, never the template's):\n%s",
+			prompt.PlaceholderWorkspace, n, got)
+	}
+	if !strings.Contains(got, dir) {
+		t.Errorf("seeded system message = %q, want the template's %s rendered to %q", got, prompt.PlaceholderWorkspace, dir)
+	}
+}
+
+// TestContextSeam_ContentStableWithinASession: a mid-session edit must never swap the content
+// under a running session — two consecutive requests carry byte-identical seeded content, so the
+// model server's prefix KV cache survives the session.
+func TestContextSeam_ContentStableWithinASession(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+
+	turn1 := seedSystemMessage(t, a, responder, "one")
+	writeWorkspaceFile(t, dir, "AGENTS.md", "second") // edited mid-session
+	turn2 := seedSystemMessage(t, a, responder, "two")
+
+	if turn1 != turn2 {
+		t.Errorf("Turn 2 seeded %q, want Turn 1's byte-identical %q", turn2, turn1)
+	}
+	if want := contextBlock("AGENTS.md", "first"); turn2 != want {
+		t.Errorf("seeded system message = %q, want the session's original %q", turn2, want)
+	}
+}
+
+// TestContextSeam_NewSessionCarriesTheNewBytes: /clear ends the session, so the next request
+// speaks from the re-read file — the edit lands on the wire one boundary later.
+func TestContextSeam_NewSessionCarriesTheNewBytes(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	seedSystemMessage(t, a, responder, "one")
+
+	writeWorkspaceFile(t, dir, "AGENTS.md", "second")
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
+	got := seedSystemMessage(t, a, responder, "two")
+
+	if want := contextBlock("AGENTS.md", "second"); got != want {
+		t.Errorf("seeded system message after /clear = %q, want the re-read %q", got, want)
+	}
+}
+
+// TestContextSeam_SubAgentRequestCarriesParentBlocks: a sub-agent belongs to the parent's
+// session, so its own requests speak from the parent's bytes — even with the file gone from disk
+// by the time it spawns.
+func TestContextSeam_SubAgentRequestCarriesParentBlocks(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "parent bytes")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	if err := os.Remove(filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	child, err := a.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	got := seedSystemMessage(t, child, responder, "delegated task")
+
+	if want := contextBlock("AGENTS.md", "parent bytes"); got != want {
+		t.Errorf("sub-agent seeded %q, want the parent session's %q", got, want)
 	}
 }

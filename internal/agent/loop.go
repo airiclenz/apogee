@@ -554,19 +554,20 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 // a hook can read them through req.View().
 func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	msgs := a.conv.Messages()
-	// The configured system prompt (ADR 0023) is seeded at position 0 of the REQUEST
-	// projection — never the conversation — so it is re-rendered per request (armRequest,
-	// and refold after an overflow fold), stays out of history and the snapshot, and both
-	// AppendToSystem (mechanism directives) and the wire seam's tool-instruction block
-	// fold into THIS one message (prompt → directives → tool block). "" seeds nothing:
-	// the no-prompt native anchor stays byte-identical.
+	// The standing system content (ADR 0023) — the configured system prompt and the workspace
+	// context files — is seeded at position 0 of the REQUEST projection, never the conversation,
+	// so it is re-composed per request (armRequest, and refold after an overflow fold), stays out
+	// of history and the snapshot, and both AppendToSystem (mechanism directives) and the wire
+	// seam's tool-instruction block fold into THIS one message (prompt → context files →
+	// directives → tool block). "" seeds nothing: with no prompt AND no context files the native
+	// anchor stays byte-identical.
 	//
 	// Two consequences are deliberate, not defects: the Budget's predictive guard and its
 	// calibration now measure the prompt too (req.State() carries it) — honest accounting of
 	// what the request actually costs; and a post-response scanner reading req.View() sees a
 	// leading system message whenever a prompt is configured — the same shape a seeding
 	// pre-request hook already produced.
-	if sys := a.systemPrompt(); sys != "" {
+	if sys := a.standingSystem(); sys != "" {
 		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
 	}
 	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
@@ -578,6 +579,25 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 		}
 	}
 	return req, deferred
+}
+
+// standingSystem composes this request's standing system content — what buildRequest seeds as
+// the position-0 system message — from the two INDEPENDENT sources of it: the rendered prompt
+// template and the workspace context files' blocks, in that order, separated by a blank line.
+// Either source alone seeds a message; only with neither is the result "" and nothing seeded
+// at all (the no-prompt-AND-no-context-files native anchor).
+//
+// The order is the wire order: standing instructions first, then the workspace's own conventions,
+// then whatever the mechanism directives and the tool block append after both.
+func (a *Agent) standingSystem() string {
+	parts := make([]string, 0, 2)
+	if rendered := a.systemPrompt(); rendered != "" {
+		parts = append(parts, rendered)
+	}
+	if blocks := a.contextBlocks(); blocks != "" {
+		parts = append(parts, blocks)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // systemPrompt renders this request's system prompt from the configured template, or ""
