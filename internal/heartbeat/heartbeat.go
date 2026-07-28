@@ -74,9 +74,14 @@ type Monitor struct {
 // apiKey is the upstream bearer token ("" on a keyless local server, which sends no auth
 // header at all). It rides every beat, because a keyed server answers /v1/models with 401
 // just as readily as it answers a chat call: a monitor without the key would report the
-// Upstream permanently unreachable while the session talks to it perfectly well. The endpoint
-// never changes mid-session (ADR 0024), so this one key holds for the Monitor's whole life —
-// a model rebind reuses the same client through SetModel and therefore the same key.
+// Upstream permanently unreachable while the session talks to it perfectly well.
+//
+// A Monitor is per-SERVER: the endpoint and the key it is built with hold for its whole life,
+// because moving a session to another server (the host's `/server` switch) swaps the whole
+// Monitor rather than mutating one — the composition root holds the current one and replaces
+// it, mirroring provider.Client's own "switching servers means a new Client" contract. What
+// DOES move within a Monitor's life is only the discovery hint, through SetModel below, which
+// is a property of the binding and not of the server.
 func NewMonitor(endpoint, modelHint, apiKey string) *Monitor {
 	return &Monitor{client: provider.NewClient(endpoint, modelHint, provider.WithAPIKey(apiKey))}
 }

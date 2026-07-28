@@ -345,7 +345,15 @@ switch endpoints at idle and the session survives it unbound-but-intact.
 
 **Commit.** `feat(agent): SwitchUpstream — move the session to another endpoint at the boundary`
 
-## 4. The composition root: a swappable Monitor and the two new seams
+## 4. The composition root: a swappable Monitor and the two new seams — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): two precisions on the item's literal text. (a) The holder landed in the
+authorized sibling `cmd/apogee/upstream.go`, so its tests landed in `cmd/apogee/upstream_test.go`
+rather than `wire_test.go` — same package, same seam-level style, co-located with the source per
+the Go testing standard. (b) `upstreamHolder.Beat` holds the mutex only for the pointer read and
+releases it before the observation: holding it across a beat (seconds against a hung server) would
+stall the Update goroutine's next `Swap`/`SetModel` behind it, and the item's own "a swap mid-beat
+is safe because the retired generation makes the landing inert" clause presumes exactly this.
 
 **What.** The holder that makes "the same two seams" true, the picker's server data, and the
 switch closure.

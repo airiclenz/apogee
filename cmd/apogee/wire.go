@@ -311,7 +311,18 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// The resolved api key rides with it: the monitor talks to the same keyed server the
 	// session does, and a beat that could not authenticate would paint a permanently
 	// unreachable Upstream under a session that is working.
-	monitor := heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey)
+	//
+	// It is held rather than passed directly, because a Monitor is per-SERVER (endpoint and key
+	// alike) and a `/server` switch replaces the whole thing. The holder is what keeps that a
+	// composition-root move: Options.Heartbeat below is wired to holder.Beat, one signature for the
+	// life of the session, and the renderer never learns which Monitor answered.
+	holder := newUpstreamHolder(heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey))
+
+	// The servers this session can be moved to: the `servers:` entries plus — unless one of them
+	// already names it — the endpoint it started on, so the way back is always offered. The
+	// closure below resolves a name against THIS list (it needs the key and the hint); the TUI is
+	// handed the display-and-identity projection of the same list, in the same order.
+	choices := upstreamChoices(opts)
 
 	// The `context-window:` pin, captured before anything can move it. Startup no longer probes, so
 	// a non-zero value here is the user's pin and nothing else — which is what lets rebindSpecFor
@@ -341,12 +352,47 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// the binding rather than of the launch. Re-stating it on every commit keeps the next beat
 		// measuring the model the session now runs as "nothing new" — without it a server serving
 		// both the old and the new id would resolve the stale config hint and this very closure
-		// would bind straight back to it on the next beat.
-		monitor.SetModel(spec.Model)
+		// would bind straight back to it on the next beat. Through the holder, so the hint lands on
+		// whichever server the session is currently on.
+		holder.SetModel(spec.Model)
 		return tui.RebindResult{
 			Model:         spec.Model,
 			ContextWindow: spec.MaxContextTokens,
 			Notices:       notices,
+		}, nil
+	}
+
+	// The server-switch closure: the composition root's half of `/server`. The TUI decides WHEN
+	// (at idle, on an explicit act by the human), this decides everything the move touches —
+	// because a server is an endpoint, a key, and a discovery hint, and all three are config the
+	// binary owns. It runs on the Update goroutine at the quiescent boundary Agent.SwitchUpstream
+	// demands, and opens no connection of its own: the first BEAT is what discovers the new server.
+	//
+	// Order matters. Resolution and the engine's own validate-then-commit switch come first, so a
+	// name that resolves to nothing — or an Exchange still open — leaves the session exactly where
+	// it was. Past that call nothing can fail, and the two follow-ups both describe the world the
+	// switch just made true: the Monitor is replaced whole (a Monitor is per-server), and the
+	// session's stored model is cleared, because the switch UNBOUND it and a Save landing in the
+	// gap before the new server's first beat must not claim the model of a server this session no
+	// longer talks to.
+	switchServer := func(name string) (tui.ServerSwitchResult, error) {
+		entry, err := findServer(choices, name)
+		if err != nil {
+			return tui.ServerSwitchResult{}, err
+		}
+		if err := agent.SwitchUpstream(apogee.UpstreamSpec{Endpoint: entry.Endpoint, APIKey: entry.APIKey}); err != nil {
+			return tui.ServerSwitchResult{}, err
+		}
+		holder.Swap(heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey))
+		host.SetModel("")
+		// What the display adopts: the endpoint now on the wire, the entry's name as the footer's
+		// alias, and the `context-window:` pin — which is GLOBAL and therefore survives a switch,
+		// so the renderer still needs no knowledge of it. Unpinned it is 0, which is the honest
+		// "unknown until the first beat binds one" the unbound model reads as too.
+		return tui.ServerSwitchResult{
+			Endpoint:      entry.Endpoint,
+			HostAlias:     entry.Name,
+			ContextWindow: pinnedWindow,
 		}, nil
 	}
 
@@ -373,8 +419,16 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		HostAlias:     opts.hostAlias,
 		// The two upstream seams (ADR 0024): the monitor observes on the TUI's cadence, and the
 		// closure applies what the observation implies. Wiring both is what makes the display live.
-		Heartbeat: monitor.Beat,
+		// Heartbeat goes through the holder, so the observation follows the session onto another
+		// server without the seam — or the renderer — changing shape.
+		Heartbeat: holder.Beat,
 		Rebind:    rebind,
+		// The `/server` half: the servers this session can move to (display and identity only —
+		// the keys and hints stay here) and the one verb that moves it. Both are always wired;
+		// with no `servers:` block the list is the single synthesized row for the endpoint this
+		// session started on, which is exactly "nothing to switch to" without a special case.
+		Servers:      serverChoices(choices),
+		SwitchServer: switchServer,
 		// The resolved `ui:` block: which animation paints the status-line spinner and whether its
 		// colour loop runs. Two independent values, resolved and validated by applyConfig, so the
 		// renderer selects rather than parses.

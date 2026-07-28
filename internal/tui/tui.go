@@ -268,6 +268,33 @@ type Options struct {
 	// rather than an interface for the same reason Heartbeat is: the TUI needs one call, not a type.
 	Rebind func(model string, contextWindow int) (RebindResult, error)
 
+	// Servers are the upstream servers this session can be switched to — the `/server` picker's
+	// rows, in the order the binary assembled them: every `servers:` entry from config.yaml,
+	// preceded by the endpoint this session started on whenever no entry already names it (so the
+	// way back is always offered). It is display and identity only; what a switch actually needs
+	// to talk to a server stays in the binary, behind SwitchServer.
+	//
+	// nil/empty ⇒ nothing to switch to, and `/server` says so rather than opening an empty overlay.
+	Servers []ServerChoice
+
+	// SwitchServer moves the whole session to the server named name: the binary re-points the
+	// provider client at that endpoint with that key (Agent.SwitchUpstream), swaps in a heartbeat
+	// Monitor for it, and restamps the session record. The split is Rebind's exactly — the TUI owns
+	// only WHEN, and here that is an explicit act by the human at idle — because every input to the
+	// move (the endpoint, the per-server key, that server's discovery hint, the window pin) is
+	// config the binary owns.
+	//
+	// The TUI calls it synchronously on the Update loop: it mutates the engine and constructs a
+	// client, and opens no connection of its own — the new server is DISCOVERED by the first beat
+	// of the swapped-in Monitor, and the ordinary rebind path binds what that beat reports. The
+	// switch therefore lands with NO model bound, which is why the result carries no model: the
+	// display says "connecting…" for one beat, exactly as it does on a cold start.
+	//
+	// An error means nothing moved (the engine's own switch is validate-then-commit, and an
+	// unresolvable name never reaches it), so the caller surfaces it as a note and leaves the
+	// session where it was. nil ⇒ switching is unwired, and `/server` degrades to a note.
+	SwitchServer func(name string) (ServerSwitchResult, error)
+
 	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
 	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints
 	// the resumed scrollback beneath it and relights the context gauge from the stored fill — or,
@@ -287,6 +314,37 @@ type RebindResult struct {
 	Model         string   // the model id now bound; what the footer and the start-up box show
 	ContextWindow int      // the BOUND window in tokens (a pin wins over the observation); 0 ⇒ unknown
 	Notices       []string // per-rebind lines to surface as transcript notes, in order
+}
+
+// ServerChoice is one upstream server the `/server` picker offers. Name does three jobs with one
+// value — it labels the row, it is the name SwitchServer is called with, and it becomes the
+// footer's host alias once the session is on that server — mirroring `host-alias:`, which names the
+// startup endpoint exactly that way. Endpoint is shown beside it and is the identity the picker
+// marks the CURRENT row by (string-equal to [Options.Endpoint], the same comparison the binary used
+// when it decided whether the startup endpoint still needed a row of its own).
+//
+// It carries display and identity and nothing else: the per-server api key and discovery hint are
+// what the switch needs, and the switch is the binary's half of the seam, so the renderer never
+// holds a credential it has no use for.
+type ServerChoice struct {
+	Name     string // the row's label, the switch argument, and the footer alias afterwards
+	Endpoint string // the server's base URL; also the identity of the row the session is on
+}
+
+// ServerSwitchResult is what the display adopts once a switch has committed: the endpoint now on
+// the wire, the alias the footer calls it (the chosen entry's own name), and the context window the
+// gauge measures against — the global `context-window:` pin, which is not a per-server value and so
+// survives the move, or 0 when unpinned. The window rides the result for the same reason
+// [RebindResult] carries one: which window wins, and why, is the binary's decision, so the renderer
+// keeps needing no knowledge of the pin.
+//
+// No model is reported, deliberately: a switch UNBINDS the model rather than guessing what the new
+// server serves (ADR 0024), and the first beat of the new server binds one through the ordinary
+// rebind path — one code path with the cold start.
+type ServerSwitchResult struct {
+	Endpoint      string // the new Upstream's base URL, adopted by the footer and the start-up box
+	HostAlias     string // the chosen server's name, now the footer's host label
+	ContextWindow int    // the `context-window:` pin that survives the switch; 0 ⇒ unpinned/unknown
 }
 
 // ResumedSession is the startup-replay payload the composition root hands the TUI when a run
