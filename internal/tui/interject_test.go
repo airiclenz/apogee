@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -513,6 +516,106 @@ func TestStatusLineShowsQueuedCount(t *testing.T) {
 	m = step(t, m, interjectedMsg{items: m.pendingInterjections})
 	if got := plain(m.View()); strings.Contains(got, "queued") {
 		t.Errorf("the count survived a full delivery:\n%s", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The staged-row band above the input box
+// ----------------------------------------------------------------------------
+
+// TestQueuedStripRendersAsIndentedBand pins the band's shape against a real two-row queue: one
+// blank framing row above and one below, every row painted out to the full window width so no seam
+// shows the terminal's own background, and every content row indented into the body column behind
+// its ⧖ marker, oldest first.
+func TestQueuedStripRendersAsIndentedBand(t *testing.T) {
+	m := runningModel(t)
+	m = stageRow(t, m, "one")
+	m = stageRow(t, m, "two")
+
+	lines := strings.Split(ansi.Strip(m.renderPendingInterjections()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("band lines = %d (%q); want two content rows framed by a blank row each side", len(lines), lines)
+	}
+	for i, line := range lines {
+		if got := ansi.StringWidth(line); got != m.width {
+			t.Errorf("line %d width = %d, want the full %d — the band must be painted edge to edge:\n%q",
+				i, got, m.width, line)
+		}
+	}
+	if strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[3]) != "" {
+		t.Errorf("frame rows = %q / %q; want a blank band row above and below the group", lines[0], lines[3])
+	}
+	for i, text := range []string{"one", "two"} {
+		want := bodyIndent + glyphInterject + " " + text
+		if !strings.HasPrefix(lines[i+1], want) {
+			t.Errorf("content line %d = %q; want it to start %q (indented, oldest first)", i, lines[i+1], want)
+		}
+	}
+}
+
+// TestQueuedStripOverflowMarkerRidesInsideTheBand: past the cap the "… N more queued" marker is an
+// ordinary band row — indented, padded, and inside the frame rather than bare above it.
+func TestQueuedStripOverflowMarkerRidesInsideTheBand(t *testing.T) {
+	m := runningModel(t)
+	for i := 0; i <= maxQueuedRows; i++ {
+		m = stageRow(t, m, fmt.Sprintf("row %d", i))
+	}
+
+	lines := strings.Split(ansi.Strip(m.renderPendingInterjections()), "\n")
+	if len(lines) != maxQueuedRows+3 {
+		t.Fatalf("band lines = %d (%q); want the cap plus the marker plus two frame rows", len(lines), lines)
+	}
+	if strings.TrimSpace(lines[0]) != "" {
+		t.Errorf("first line = %q; want the opening frame row above the marker", lines[0])
+	}
+	marker := lines[1]
+	if want := bodyIndent + "… 1 more queued"; !strings.HasPrefix(marker, want) {
+		t.Errorf("marker line = %q; want it to start %q", marker, want)
+	}
+	if got := ansi.StringWidth(marker); got != m.width {
+		t.Errorf("marker width = %d, want the full %d — it is a band row like any other", got, m.width)
+	}
+}
+
+// TestQueuedRowUsesThemeBandStyle pins the look to the theme field rather than to raw SGR bytes:
+// the whole padded line — text, indent, and pad — goes through queuedText in one Render, which is
+// what makes the background reach the window edge.
+func TestQueuedRowUsesThemeBandStyle(t *testing.T) {
+	m := stageRow(t, runningModel(t), "one")
+
+	line := bodyIndent + glyphInterject + " one"
+	line += strings.Repeat(" ", m.width-ansi.StringWidth(line))
+	got := strings.Split(m.renderPendingInterjections(), "\n")[1]
+	if want := m.th.queuedText.Render(line); got != want {
+		t.Errorf("content row = %q; want the theme's queuedText band over %q", got, line)
+	}
+}
+
+// TestQueuedStripHeightCountsItsFrame: View shrinks the transcript viewport by the strip's
+// lipgloss.Height, so the frame rows must be inside the strip's own string for the accounting to
+// stay right — and the chrome below it must survive the taller strip at the standard 80×24.
+func TestQueuedStripHeightCountsItsFrame(t *testing.T) {
+	m := runningModel(t)
+	m = stageRow(t, m, "one")
+	m = stageRow(t, m, "two")
+
+	if got, want := lipgloss.Height(m.renderPendingInterjections()), 4; got != want {
+		t.Errorf("strip height = %d, want %d (two content rows plus the frame)", got, want)
+	}
+	view := plain(m.View())
+	if !strings.Contains(view, "2 queued") {
+		t.Errorf("the status line lost its queued count under the taller band:\n%s", view)
+	}
+	if !strings.Contains(view, "╭") {
+		t.Errorf("the input box lost its top border under the taller band:\n%s", view)
+	}
+}
+
+// TestQueuedStripEmptyWithoutAQueue: no queue, no band — not even the framing rows, which would
+// otherwise leak two blank black lines into every idle frame.
+func TestQueuedStripEmptyWithoutAQueue(t *testing.T) {
+	if got := runningModel(t).renderPendingInterjections(); got != "" {
+		t.Errorf("strip = %q with nothing staged; want the empty string", got)
 	}
 }
 

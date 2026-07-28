@@ -102,6 +102,7 @@ type theme struct {
 	diffRemoved  lipgloss.Style // a "-" diff detail line (reserved)
 	errorText    lipgloss.Style // a recovered-fault notice
 	noteText     lipgloss.Style // a neutral note (cancelled, approval record) + a presentation's status line
+	queuedText   lipgloss.Style // a staged-interjection strip row: faint on black, painted edge to edge so the strip reads as one band (its own role, deliberately not statusBar's)
 	presentTitle lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
@@ -148,6 +149,7 @@ func newTheme() theme {
 		diffRemoved:  lipgloss.NewStyle().Foreground(colDiffDel),
 		errorText:    lipgloss.NewStyle().Foreground(colError).Bold(true),
 		noteText:     lipgloss.NewStyle().Foreground(colFaint),
+		queuedText:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		presentTitle: lipgloss.NewStyle().Bold(true).Foreground(colWhite),
 		mdBold:       lipgloss.NewStyle().Bold(true),
 		mdHeading:    lipgloss.NewStyle().Bold(true).Foreground(colWhite),

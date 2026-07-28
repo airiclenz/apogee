@@ -329,39 +329,53 @@ func heldNote(n int) string {
 // steals its height from the transcript viewport (View's shrink accounting), so an unbounded queue
 // would squeeze the conversation off the screen — the maxAutocompleteItems / maxInputRows posture.
 // Past the cap the NEWEST rows are the ones shown, under a "… N more queued" marker: the row
-// nearest the box is the one Backspace takes back, and the count says nothing was dropped.
+// nearest the box is the one Backspace takes back, and the count says nothing was dropped. The cap
+// counts CONTENT rows only, so the band's worst case is six rows on screen: the cap, the overflow
+// marker, and the two blank rows framing the group.
 const maxQueuedRows = 3
 
-// renderPendingInterjections draws the staged rows shown directly above the input box — dim ⧖
-// lines in delivery order (oldest first, newest nearest the box), in the same slot the
-// attached-skill chips use. It returns "" when nothing is queued, so View treats it exactly like
-// the chips and dropdown slots.
+// renderPendingInterjections draws the staged rows shown directly above the input box, as one band:
+// faint ⧖ lines in delivery order (oldest first, newest nearest the box), each indented into the
+// body column and painted edge to edge on black, framed by one blank band row above and one below
+// so the group separates from the chrome it sits between. It occupies the same slot the
+// attached-skill chips use, and returns "" when nothing is queued — no queue, no band, no frame —
+// so View treats it exactly like the chips and dropdown slots.
 func (m Model) renderPendingInterjections() string {
 	n := len(m.pendingInterjections)
 	if n == 0 {
 		return ""
 	}
 	shown := m.pendingInterjections
-	rows := make([]string, 0, maxQueuedRows+1)
+	rows := make([]string, 0, maxQueuedRows+3)
+	rows = append(rows, m.queuedRow(""))
 	if n > maxQueuedRows {
 		shown = shown[n-maxQueuedRows:]
-		rows = append(rows, m.queuedRow(fmt.Sprintf("… %d more queued", n-maxQueuedRows)))
+		rows = append(rows, m.queuedRow(bodyIndent+fmt.Sprintf("… %d more queued", n-maxQueuedRows)))
 	}
 	for _, it := range shown {
-		rows = append(rows, m.queuedRow(glyphInterject+" "+queuedRowText(it.raw)))
+		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+queuedRowText(it.raw)))
 	}
+	rows = append(rows, m.queuedRow(""))
 	return strings.Join(rows, "\n")
 }
 
-// queuedRow renders one line of the staged-row strip: dim note styling, clipped ANSI-aware to the
-// window so a long message never breaks the chrome's layout (the renderSkillChips posture).
+// queuedRow renders one line of the staged-row band: clipped ANSI-aware to the window so a long
+// message never breaks the chrome's layout (the renderSkillChips posture), then padded with spaces
+// back out to that same width and styled as a whole. Text, indent, and pad alike therefore carry
+// the black background, so the row reads as one solid bar instead of leaving the terminal's own
+// background showing past the text — the statusLine posture. A "" text renders a blank band row.
 func (m Model) queuedRow(text string) string {
-	return m.th.noteText.Render(ansi.Truncate(text, max(1, m.width), "…"))
+	w := max(1, m.width)
+	line := ansi.Truncate(text, w, "…")
+	if pad := w - ansi.StringWidth(line); pad > 0 {
+		line += strings.Repeat(" ", pad)
+	}
+	return m.th.queuedText.Render(line)
 }
 
-// queuedRowText flattens one staged row's raw text to a single line: the strip is chrome, not
-// content, and a queued message may well be multi-line. The message itself is untouched — this is
-// only how the waiting row is previewed.
+// queuedRowText flattens one staged row's raw text to a single line: the band is chrome, not
+// content, and a queued message may well be multi-line — one row per staged message is what the
+// cap counts. The message itself is untouched — this is only how the waiting row is previewed.
 func queuedRowText(raw string) string {
 	return strings.Join(strings.Fields(raw), " ")
 }

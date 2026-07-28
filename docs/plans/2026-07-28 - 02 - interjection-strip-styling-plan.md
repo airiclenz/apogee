@@ -127,7 +127,7 @@ whichever lands second reconciles stale line references mechanically.
 
 ---
 
-## 1. The queued band — theme style, indent, framing rows
+## 1. The queued band — theme style, indent, framing rows — ✅ DONE (2026-07-28)
 
 **What.** The strip becomes a full-width faint-on-black band, its rows indented into the body
 column, framed by one blank band row above and one below.
