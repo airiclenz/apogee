@@ -572,6 +572,9 @@ func TestDisplayModelEmpty(t *testing.T) {
 // startup discovery. It runs the ordinary rebind path from empty — the seam is asked for the
 // observed model, the display adopts what came back, and both places that name a model (the footer
 // and the start-up box seeded before any of this was known) say it.
+//
+// And it says nothing else: this is FIRST CONTACT — a server that was already up when apogee
+// started — so the restated box IS the statement and no "connected:" line is printed under it.
 func TestLateSeedBindsThroughRebind(t *testing.T) {
 	t.Parallel()
 
@@ -586,8 +589,8 @@ func TestLateSeedBindsThroughRebind(t *testing.T) {
 	if m.opts.Model != "served-model" || m.opts.ContextWindow != 16384 {
 		t.Errorf("bound display = %q/%d, want the rebind's own result adopted", m.opts.Model, m.opts.ContextWindow)
 	}
-	if n := countNotes(m, "connected: served-model, context 16k"); n != 1 {
-		t.Errorf("connected notes = %d, want exactly 1; entries = %+v", n, m.transcript.entries)
+	if n := countNotes(m, "connected:"); n != 0 {
+		t.Errorf("connected notes = %d, want none — first contact is quiet; notes = %q", n, noteTexts(m))
 	}
 	footer := ansiPattern.ReplaceAllString(m.footerContent(80), "")
 	if !strings.Contains(footer, "served-model") || strings.Contains(footer, connectingLabel) {
@@ -599,6 +602,75 @@ func TestLateSeedBindsThroughRebind(t *testing.T) {
 	}
 	if m.blockedUpstream() {
 		t.Error("the upstream is still blocked after a model was bound")
+	}
+}
+
+// A connection that had to be WAITED for is news, and says so exactly once: the cold start against
+// a stopped server is offline immediately, so the seed that follows is no longer first contact. The
+// same line doubles as the recovery statement — "connected: <model>" already implies the server
+// answered, so the weaker "server back online" stays suppressed. The window-less variant pins the
+// seed's other wording: a binding whose window nobody could name carries no context clause.
+func TestDelayedConnectNotesOnce(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		window int
+		want   []string
+	}{
+		{
+			name:   "window reported",
+			window: 16384,
+			want:   []string{offlineNote("connection refused"), "connected: served-model, context 16k"},
+		},
+		{
+			name:   "window unknown",
+			window: 0,
+			want:   []string{offlineNote("connection refused"), "connected: served-model", unknownWindowNote},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rb := &fakeRebind{}
+			m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+			m = foldBeatMsg(t, m, downBeat("connection refused"))
+			m = foldBeatMsg(t, m, upBeat("served-model", tc.window))
+
+			if got := noteTexts(m); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("transcript notes =\n%q\nwant\n%q", got, tc.want)
+			}
+			if n := countNotes(m, onlineNote); n != 0 {
+				t.Errorf("recovery notes = %d, want none — the connected line is the single statement", n)
+			}
+		})
+	}
+}
+
+// A server that was up at launch but had nothing loaded is the other case first contact must not
+// swallow: the first beat lands, observes no model, and binds nothing — and when a model finally
+// appears, that IS news. everOnline alone defeats the quiet seed, with no failure needed.
+func TestModellessStartSeedsWithNote(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+	m = foldBeatMsg(t, m, upBeat("", 0)) // the server answers; nothing is loaded
+
+	if len(rb.calls) != 0 {
+		t.Fatalf("rebind calls = %+v, want none — a server serving nothing is not a change", rb.calls)
+	}
+	if !m.blockedUpstream() {
+		t.Error("the submit gate opened with no model bound")
+	}
+
+	m = foldBeatMsg(t, m, upBeat("served-model", 16384))
+
+	if n := countNotes(m, "connected: served-model, context 16k"); n != 1 {
+		t.Errorf("connected notes = %d, want exactly 1 — a model appearing is news; notes = %q", n, noteTexts(m))
 	}
 }
 
@@ -722,7 +794,8 @@ func TestRebindDeferredWhileBusy(t *testing.T) {
 
 // A `context-window:` pin outranks whatever the server reports, and the binary — not the renderer —
 // is what knows that. The TUI adopts the BOUND window, and because it measures change against the
-// OBSERVATION, the server's own differing window never re-triggers a rebind on every beat.
+// OBSERVATION, the server's own differing window never re-triggers a rebind on every beat. The seed
+// is delayed by a failed first beat so that the wording has a note to be read from at all.
 func TestPinnedWindowResultSticks(t *testing.T) {
 	t.Parallel()
 
@@ -733,6 +806,7 @@ func TestPinnedWindowResultSticks(t *testing.T) {
 	opts.ContextWindow = 8192 // the pin the binary already applied at launch
 	m := wireRebind(t, opts, &fakeHeartbeat{}, rb)
 
+	m = foldBeatMsg(t, m, downBeat("connection refused")) // the seed is delayed, so it is not quiet
 	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
 	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
 	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
@@ -847,7 +921,9 @@ func TestBeatScriptNarratesEachChangeOnce(t *testing.T) {
 // A bound model whose window nobody can name is honest about the consequence: the Budget and
 // automatic compaction both bind against the window, so with none known they simply do nothing.
 // The line rides the rebind because that is when the fact is established — at launch it would fire
-// on every cold start and be wrong a second later.
+// on every cold start and be wrong a second later. It survives the quiet first-contact seed: the
+// suppression is aimed at connection narration the restated box already carries, and this is
+// actionable news the box says nothing about.
 func TestUnknownWindowNotedOnBind(t *testing.T) {
 	t.Parallel()
 
@@ -859,16 +935,14 @@ func TestUnknownWindowNotedOnBind(t *testing.T) {
 	if n := countNotes(m, unknownWindowNote); n != 1 {
 		t.Errorf("unknown-window notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
 	}
-	if n := countNotes(m, "connected: served-model"); n != 1 {
-		t.Errorf("connected notes = %d, want exactly 1 with no window clause; notes = %q", n, noteTexts(m))
-	}
-	if n := countNotes(m, "context "); n != 1 {
-		t.Errorf("a window was named for a binding that has none; notes = %q", noteTexts(m))
+	if n := countNotes(m, "connected:"); n != 0 {
+		t.Errorf("connected notes = %d, want none — first contact is quiet; notes = %q", n, noteTexts(m))
 	}
 }
 
 // The notices the composition root produced (a validated set that matched the new model, say) ride
-// the same rebind into the transcript, after the line that says what moved.
+// the same rebind into the transcript, after the line that says what moved — and they survive a
+// quiet first-contact seed, which suppresses only the connection narration itself.
 func TestRebindNoticesSurfaceAsNotes(t *testing.T) {
 	t.Parallel()
 
@@ -879,7 +953,7 @@ func TestRebindNoticesSurfaceAsNotes(t *testing.T) {
 
 	m = foldBeatMsg(t, m, upBeat("served-model", 32768))
 
-	want := []string{"connected: served-model, context 32k", "validated set: strict-json"}
+	want := []string{"validated set: strict-json"}
 	if got := noteTexts(m); !reflect.DeepEqual(got, want) {
 		t.Errorf("transcript notes =\n%q\nwant\n%q", got, want)
 	}

@@ -202,7 +202,16 @@ touches the window edge in any state.
 
 **Commit.** `fix(tui): status-line right slot — gauge and hints — ends two cells short of the edge`
 
-## 2. First contact is quiet — no "connected:" note when the server was already up
+## 2. First contact is quiet — no "connected:" note when the server was already up — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): `TestBeatScriptNarratesEachChangeOnce` (`:826`) ALREADY opens with
+`downBeat("connection refused")` and already expects the offline note in its narration, so the
+prepend the item asks for was a no-op — the test stays green untouched. `TestDelayedConnectNotesOnce`
+is table-driven (`t.Run` subtests) with the window-0 case as its second row, which is how the
+no-window-clause wording assertion moved there. One extra file beyond the item's list:
+`internal/tui/doc.go:264` — the package narration's "nothing at all when a pin means nothing visible
+moved" clause states the same rebindNote rule and would otherwise be false, so it grew the quiet
+first-contact case in the same voice.
 
 **What.** The connected note prints only when it carries news: a recovery after a failed
 start, or a model appearing on a previously modelless server. The ordinary launch — server

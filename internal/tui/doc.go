@@ -262,8 +262,9 @@
 // its facts were frozen when it was seeded, and a late-bound session would otherwise keep a
 // "connecting" box at the top of its scrollback), and words the change once: connected / model
 // changed / context window changed, a refusal noted once per distinct target, and nothing at all
-// when a pin means nothing visible moved. A nil seam is a display-frozen heartbeat — the offline
-// state and the model list still live, no binding ever does.
+// when a pin means nothing visible moved or when the session's FIRST beat lands clean (the restated
+// box is already saying it). A nil seam is a display-frozen heartbeat — the offline state and the
+// model list still live, no binding ever does.
 //
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update

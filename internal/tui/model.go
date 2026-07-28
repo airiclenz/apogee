@@ -1473,13 +1473,18 @@ type heartbeatState struct {
 }
 
 // rebindIntent is one captured binding change: the model the last beat observed the server to be
-// serving and the window it reported for it. It is what the deferred apply stashes and what the
-// [Options.Rebind] seam is called with — plain values, so the value-copied Model carries it safely.
-// It is the OBSERVATION, not the binding: what the binary makes of it (a pinned window outranking
-// the observed one) comes back in the [RebindResult].
+// serving, the window it reported for it, and whether the beat that saw it was the session's first
+// contact. It is what the deferred apply stashes and what the [Options.Rebind] seam is called with
+// — plain values, so the value-copied Model carries it safely. It is the OBSERVATION, not the
+// binding: what the binary makes of it (a pinned window outranking the observed one) comes back in
+// the [RebindResult].
 type rebindIntent struct {
 	model  string
 	window int
+	// quietSeed records that this change was observed at FIRST CONTACT — no beat had ever landed
+	// and none had ever failed. It is an observation FACT, captured before the fold erases the
+	// evidence, rather than presentation state; [rebindNote] is what decides the wording it buys.
+	quietSeed bool
 }
 
 // offlineFailureThreshold is how many consecutive idle beat failures flip the footer offline once
@@ -1543,7 +1548,15 @@ func (m Model) beatTick() tea.Cmd {
 // stronger statement, and it already implies the server answered. The recovery note is for the
 // ordinary case, where the server came back serving exactly what it served before and there is
 // nothing else to report.
+//
+// FIRST CONTACT says nothing at all. When the session's very first beat lands clean — nothing has
+// ever landed, nothing has ever failed — the binding it seeds is not news: the start-up box
+// restated in place a few rows above already names the host, the model and the window, so a
+// "connected:" line under it would only repeat what the human is looking at. That fact has to be
+// read BEFORE the resets below erase it, which is why it is the fold's first statement; it then
+// rides the intent all the way to [rebindNote], which owns the wording.
 func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
+	firstContact := !m.hb.everOnline && m.hb.failures == 0
 	if !beat.Reachable {
 		return m.foldBeatFailure(beat.Failure)
 	}
@@ -1554,7 +1567,7 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	crossed := m.hb.offline
 	m.hb.offline = false
 
-	m, rebound := m.observeBinding(beat)
+	m, rebound := m.observeBinding(beat, firstContact)
 	if crossed && !rebound {
 		m.transcript.addNote(onlineNote)
 	}
@@ -1571,7 +1584,11 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 // seconds, the pin keeps outranking it, and the difference between the two is never mistaken for a
 // fresh change — so the TUI needs no knowledge of the pin at all. A beat that reports no window
 // (0) is not evidence the window changed, only that this beat could not name it.
-func (m Model) observeBinding(beat heartbeat.Beat) (Model, bool) {
+//
+// firstContact is the pre-fold evidence its caller captured (see [Model.foldBeat]); it is stamped
+// into the intent rather than re-derived here, so the deferred path words itself exactly like the
+// immediate one — by construction, whenever the change is finally applied.
+func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bool) {
 	if m.opts.Rebind == nil {
 		return m, false // a display-frozen heartbeat: nothing to apply a change through
 	}
@@ -1581,7 +1598,7 @@ func (m Model) observeBinding(beat heartbeat.Beat) (Model, bool) {
 		return m, false
 	}
 	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, beat.ContextWindow
-	intent := rebindIntent{model: beat.ActiveModel, window: beat.ContextWindow}
+	intent := rebindIntent{model: beat.ActiveModel, window: beat.ContextWindow, quietSeed: firstContact}
 	if m.busy() {
 		// A worker owns the engine, and Agent.Rebind is idle-only by construction. Stash the intent
 		// for finishWorker rather than refuse it: the human is mid-answer, and the switch they made
@@ -1629,7 +1646,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// The box's facts were frozen when it was seeded, so a late seed would otherwise leave a
 	// "connecting" box at the top of the scrollback until the next /clear.
 	m.transcript.refreshStartup(newStartupView(m.opts))
-	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow); note != "" {
+	if note := rebindNote(oldModel, oldWindow, m.opts.Model, m.opts.ContextWindow, intent.quietSeed); note != "" {
 		m.transcript.addNote(note)
 	}
 	for _, notice := range result.Notices {
@@ -1669,17 +1686,24 @@ const unknownWindowNote = "context window unknown — automatic compaction and t
 
 // rebindNote words what a successful rebind actually moved, in the three shapes it can take: the
 // late seed that binds the session's first model (the async cold start — same code path, different
-// words), a model change, and a window-only change. It returns "" when nothing VISIBLE moved, which
-// is the pinned-window case: the server switched to a differently-sized window, the pin outranked
-// it, and the binding the human can see is unchanged — a note there would describe a change that
-// did not happen. The window clause is carried only when the BOUND window moved, so a pin never
-// narrates the change it suppressed.
+// words), a model change, and a window-only change. It returns "" whenever nothing the human is not
+// already shown moved, which is two cases. The pinned window: the server switched to a
+// differently-sized window, the pin outranked it, and the binding the human can see is unchanged —
+// a note there would describe a change that did not happen. And the quiet first-contact seed
+// (quietSeed): the session's very first beat landed clean, so the start-up box restated in place is
+// already saying host, model and window a few rows up, and "connected:" would only say it again.
+// A seed that follows a failed beat, or one where a model finally appeared on a server that was up
+// but serving nothing, is genuine news and keeps its line. The window clause is carried only when
+// the BOUND window moved, so a pin never narrates the change it suppressed.
 //
 // Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
 // note and the chrome beside it can never name the same model two different ways.
-func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int) string {
+func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int, quietSeed bool) string {
 	switch {
 	case oldModel == "":
+		if quietSeed {
+			return ""
+		}
 		note := "connected: " + displayModel(newModel)
 		if newWindow > 0 {
 			note += ", context " + formatTokens(newWindow)
