@@ -2,8 +2,14 @@
   dark gray. Word wrap must apply everywhere, and it breaks short of the right edge:
   two columns stay free between the text and the scroll bar, three between the text
   and the window edge while no bar is painted. The user must be able to scroll up in
-  the chat session to see the complete chat history. The last user prompt must stick to
-  the top of the vivible session area (this is also implemented in apogee-code).
+  the chat session to see the complete chat history. The session area follows the
+  generated output: while the view sits at the bottom, every repaint keeps the tail
+  visible as it streams. An answer shorter than the visible session area opens with its
+  prompt stuck to the top of that area; once an answer outgrows the area the tail stays
+  in view and the prompt it belongs to is overlaid on the top row as a sticky header.
+  Scrolling up detaches from that: the view holds exactly where it was scrolled to and
+  new output no longer moves it. Scrolling back down to the very bottom — or sending a
+  prompt — resumes following (this is also implemented in apogee-code).
 
 ✦ The LLM's answer looks like this. There is exactly one empty line between the users
   prompt and the agents response — and exactly one between the answer and the next

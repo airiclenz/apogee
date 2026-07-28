@@ -1769,7 +1769,7 @@ func (m *Model) layout() {
 // transcriptWidth is the column budget the transcript body wraps to: the viewport's own width
 // less the right gutter (bodyRightGutter), floored at one column so a window too narrow to hold
 // the gutter still wraps rather than going zero or negative. The viewport keeps its full width —
-// only the content is narrower — so the sticky-to-top arithmetic (wrappedOffset) and the mouse
+// only the content is narrower — so the prompt-offset arithmetic (wrappedOffset) and the mouse
 // mapping still measure against the viewport, and the gutter shows up as unpainted columns.
 func (m Model) transcriptWidth() int {
 	return max(1, m.viewport.Width()-bodyRightGutter)

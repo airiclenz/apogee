@@ -12,14 +12,14 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Sticky-to-top offset drift guard (P2.7)
+// Prompt-offset drift guard (P2.7)
 // ----------------------------------------------------------------------------
 
 // TestWrappedOffsetMatchesViewport pins wrappedOffset to the viewport's own soft-wrap
 // accounting: summing every physical line's wrapped height must equal the viewport's
 // TotalLineCount for the same lines at the same width. If the viewport's calculateLine ever
 // changes (or a border/gutter is added, breaking the maxWidth == Width assumption), this
-// fails — and the sticky-to-top SetYOffset would silently mis-pin without it.
+// fails — and refreshViewport would silently mis-size the pad below a short reply without it.
 func TestWrappedOffsetMatchesViewport(t *testing.T) {
 	const width = 10
 	lines := []string{

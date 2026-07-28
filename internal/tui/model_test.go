@@ -1873,7 +1873,7 @@ func TestModelNoBuilderByValue(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Sticky-to-top and auto-grow input (P2.7 — TUI presentation pass)
+// Transcript scroll-follow, sticky header and auto-grow input (P2.7 — TUI presentation pass)
 // ----------------------------------------------------------------------------
 
 // firstVisibleLine returns the viewport's top visible line, styling stripped.

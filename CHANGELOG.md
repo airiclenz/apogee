@@ -379,6 +379,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The transcript now follows the model's output — and stays put where you scrolled to.** Every
+  repaint used to re-pin the view to the last user prompt, so the moment an answer outgrew the
+  screen it streamed out of sight and you had to scroll down by hand, again and again, to watch it
+  arrive. The view now **sticks to the bottom**: while it is at the bottom, each repaint keeps the
+  tail on screen as tokens land, with the prompt the answer belongs to overlaid on the top row as
+  the sticky header. An answer that fits the screen still opens with its prompt pinned to the top,
+  exactly as before — nothing about the short-reply look changes.
+  - **Scrolling up detaches, and detached means still.** Wherever you scroll to is where the view
+    stays; appended output no longer drags it away mid-read. Scrolling back down to the very bottom
+    **re-attaches** and following resumes with the next token — there is no jump-to-bottom button
+    to hunt for, the wheel or `PgDn` is the affordance. Sending a prompt re-attaches too, as do
+    `/new`, `/continue`, resuming a session from `/sessions`, and a staged message going out: asking
+    for something means you are done reading history.
+  - A transcript shorter than the viewport can no longer get stuck detached — at that size the view
+    is always at the bottom, so it always follows.
+
 - **An `@`-reference to a file whose name contains spaces now resolves — write it quoted,
   `@"docs/my plan.md"`.** The reference was cut at its first whitespace and the opening quote rode
   along into it, so `@"docs/plans/2026-07-23 - 04 - version-build-number-plan.md"` reached the loop

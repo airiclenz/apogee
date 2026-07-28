@@ -14,7 +14,7 @@ import (
 // The renderer turns the transcript into the flat slice of physical lines the viewport
 // shows. It returns []string (not a joined string) for two reasons: tool results carry
 // embedded newlines, so the caller feeds viewport.SetContentLines without re-splitting; and
-// the sticky-to-top scroll needs to measure the wrapped height of the lines above the last
+// the prompt-offset arithmetic needs to measure the wrapped height of the lines above the last
 // user prompt, which it can only do over the exact lines the viewport stores. Every element
 // is a single physical line (no embedded newline), so wrappedOffset's soft-wrap arithmetic
 // stays in lockstep with the viewport's own calculateLine (TestWrappedOffsetMatchesViewport).
@@ -33,8 +33,9 @@ type userBlock struct{ start, count int }
 
 // renderedTranscript is the renderer's output: the physical lines, the index of the last user
 // prompt's first line (-1 when the transcript holds no user prompt), and the line range of
-// every user block. The caller pins the last line to the top of the viewport unless the human
-// has scrolled, and overlays the owning user block as a sticky header (model.go).
+// every user block. The caller measures the last prompt's offset to pad the lines below a short
+// reply (so the bottom lands on the prompt row), follows the tail unless the human has scrolled
+// away, and overlays the user block owning the top row as a sticky header (model.go).
 type renderedTranscript struct {
 	lines         []string
 	lastUserStart int
@@ -599,10 +600,6 @@ func railLines(th theme, lines []string, depth int) []string {
 }
 
 // ----------------------------------------------------------------------------
-// Sticky-to-top offset
-// ----------------------------------------------------------------------------
-
-// ----------------------------------------------------------------------------
 // Chrome layout helpers
 // ----------------------------------------------------------------------------
 
@@ -641,11 +638,17 @@ func clampInt(n, lo, hi int) int {
 	return n
 }
 
+// ----------------------------------------------------------------------------
+// Prompt-offset and sticky-header arithmetic
+// ----------------------------------------------------------------------------
+
 // wrappedOffset returns the virtual (soft-wrapped) row at which the line after linesAbove
-// begins — the Y offset that pins that line to the top of the viewport. It mirrors the
-// viewport's calculateLine exactly: each physical line occupies max(1, ceil(width/vpWidth))
-// rows. This holds only while the viewport has no border or gutter (maxWidth == Width, the
-// current wiring); TestWrappedOffsetMatchesViewport guards the equality against drift.
+// begins — the Y offset that puts that line on the viewport's top row. refreshViewport uses it
+// to size the trailing pad below a reply shorter than a screen, so following the tail still
+// lands the prompt on the top row. It mirrors the viewport's calculateLine exactly: each
+// physical line occupies max(1, ceil(width/vpWidth)) rows. This holds only while the viewport
+// has no border or gutter (maxWidth == Width, the current wiring);
+// TestWrappedOffsetMatchesViewport guards the equality against drift.
 func wrappedOffset(linesAbove []string, vpWidth int) int {
 	if vpWidth < 1 {
 		vpWidth = 1

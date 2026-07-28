@@ -604,8 +604,9 @@ func screenRow(t *testing.T, m Model, line int) int {
 	return row
 }
 
-// armTranscriptSelection drags across the settled user block — pinned to the viewport's top row by
-// sticky-to-top — and returns the model with that selection live.
+// armTranscriptSelection drags across the settled user block — on the viewport's top row, because a
+// transcript this short pads out to put the followed bottom on the prompt row — and returns the
+// model with that selection live.
 func armTranscriptSelection(t *testing.T, m Model) Model {
 	t.Helper()
 	m = step(t, m, leftClick(0, 0))

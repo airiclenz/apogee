@@ -236,7 +236,13 @@ moment they return to the bottom or submit.
 
 **Commit.** `fix(tui): scrolling back to the bottom re-attaches transcript follow`
 
-## 3. Documentation close-out
+## 3. Documentation close-out — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): the `render.go:602` banner was an ORPHAN — it labelled nothing (the next banner,
+"Chrome layout helpers", followed immediately, and `wrappedOffset` lives under that one). Rewording
+it in place would have left a section header over empty space, so the reworded banner
+("Prompt-offset and sticky-header arithmetic") was moved down to sit directly above `wrappedOffset`,
+the only thing it ever described. Comment-only change; no code moved.
 
 **What.**
 
