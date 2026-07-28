@@ -19,8 +19,9 @@ import (
 type inputKind int
 
 const (
-	kindMessage inputKind = iota // free text for the agent (with @file refs extracted)
-	kindCommand                  // a recognised /command handled locally or as a canned turn
+	kindMessage      inputKind = iota // free text for the agent (with @file refs extracted)
+	kindCommand                       // a recognised /command handled locally or as a canned turn
+	kindUnknownSlash                  // the whole input is one /word naming nothing — refused, never sent
 )
 
 // parsedInput is the result of classifying one raw input line. For kindCommand, command
@@ -30,7 +31,9 @@ const (
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and /skill
 // tokens left in place so the model sees what was referenced), fileRefs holds the extracted
-// workspace-relative paths and skillIDs the extracted skill references.
+// workspace-relative paths and skillIDs the extracted skill references. For kindUnknownSlash,
+// text is the lone token as typed (leading slash included) — the refusal note names it back
+// (unknownSlashNote) and nothing else on the value is set.
 type parsedInput struct {
 	kind     inputKind
 	command  string
@@ -105,8 +108,60 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 		}
 		return parsed
 	}
+	if token, ok := soleUnknownSlash(trimmed, known); ok {
+		return parsedInput{kind: kindUnknownSlash, text: token}
+	}
 	text, refs := extractFileRefs(trimmed)
 	return parsedInput{kind: kindMessage, text: text, fileRefs: refs, skillIDs: extractSkillRefs(trimmed, known)}
+}
+
+// soleUnknownSlash reports the lone "/word" of an input that is nothing but that word and names
+// nothing this build can act on: no parser verb, no menu verb, no catalog skill. It is the typo
+// guard's whole rule, and it is deliberately narrow — the ONLY input it claims is one the human
+// can have meant as an invocation and nothing else, so every real message keeps travelling
+// untouched:
+//
+//   - "/code-adit"          → guarded: a mistyped skill (or command) that would otherwise be sent
+//     to the model verbatim, which is exactly the confusion this guard exists to end;
+//   - "/code-adit the parser" → a message: more than the one token means prose, whatever it opens
+//     with (the mid-message "/word is prose" rule of extractSkillRefs, unchanged);
+//   - "/clear", "/grill-me" → not unknown: a verb matchCommand recognises never reaches here, and a
+//     token `known` confirms is an ordinary message that happens to invoke a skill (edge default:
+//     an input that is ONLY a skill token sends);
+//   - "/skill"              → guarded, but as a MENU verb rather than a typo: it is unparsed by
+//     construction (commandSpecs.menuOnly), so without this it would be sent as a literal message.
+//     unknownSlashNote is what tells the two apart.
+//
+// A bare "/" carries no word at all and stays a message: there is no token to name back, and the
+// human is mid-thought rather than mistaken.
+func soleUnknownSlash(trimmed string, known func(string) bool) (string, bool) {
+	if len(trimmed) < 2 || trimmed[0] != '/' || strings.ContainsAny(trimmed, " \t\n\r") {
+		return "", false
+	}
+	if _, _, ok := matchCommand(trimmed); ok {
+		return "", false
+	}
+	if known != nil && known(trimmed[1:]) {
+		return "", false
+	}
+	return trimmed, true
+}
+
+// skillPickerUsage is what a bare "/skill" earns: it is the one menuOnly verb (commandSpecs), so
+// the human typed a real entry point and merely stopped short of its argument. Teaching the two
+// working forms is a more useful answer than calling it unknown.
+const skillPickerUsage = "type /skill <name> to pick a skill — or /skills to list them"
+
+// unknownSlashNote words the refusal a kindUnknownSlash earns instead of a send. token is the line
+// as typed, leading slash included, and the note names it back so the human sees WHICH word failed
+// to resolve — a typo'd skill id differs from a mistyped verb only in the spelling, and the fix is
+// the same either way. The menu verb gets its usage line instead (skillPickerUsage), because it
+// resolves fine and only wants an argument.
+func unknownSlashNote(token string) string {
+	if strings.TrimPrefix(token, "/") == "skill" {
+		return skillPickerUsage
+	}
+	return "unknown command or skill: " + token + " — nothing sent"
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is

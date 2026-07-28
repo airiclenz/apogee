@@ -304,7 +304,18 @@ skill token reaches the engine with that skill resolved.
 
 **Commit.** `feat(tui): skills are inline /tokens in the prompt mini-language`
 
-## 4. Sole-token typo guard
+## 4. Sole-token typo guard — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): one classification deviation, no behavioural one. The item's literal rule excludes
+the `menuOnly` verb from `kindUnknownSlash`, but it also requires a bare `/skill` to earn a note — which
+means it cannot stay a `kindMessage` — so `/skill` IS classified `kindUnknownSlash` and the wording
+splits at the note: `unknownSlashNote` returns `skillPickerUsage` for the menu verb and the
+"unknown command or skill: /word — nothing sent" line for everything else (a table-driven drift guard
+fails if a future `menuOnly` row lacks its own usage line). Both ⏎ paths share one
+`Model.refuseUnknownSlash` rather than duplicating the three lines. Consequence of the literal rule,
+recorded rather than softened: a SOLE `/usr/local/bin` is guarded too (a lone path names nothing) —
+mid-message paths are untouched. `internal/tui/doc.go`'s "any other /word is prose" clause was amended
+here because the guard made it false; the CHANGELOG is left to item 9, as items 2 and 3 did.
 
 **What.** `parseInput` classifies a new kind: `kindUnknownSlash` — the ENTIRE trimmed input
 is one whitespace-free `/word` token matching no non-`menuOnly` command, no `menuOnly` verb,

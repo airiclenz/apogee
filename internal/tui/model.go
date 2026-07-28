@@ -798,6 +798,9 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	if parsed.kind == kindCommand {
 		return m.runCommand(parsed)
 	}
+	if parsed.kind == kindUnknownSlash {
+		return m.refuseUnknownSlash(parsed)
+	}
 	held := len(m.pendingInterjections) > 0
 	// Nothing to send only when there is neither text NOR a held row. A message that is only a skill
 	// token ("/grill-me") HAS text — the token itself — so it sends, which is the owner's edge
@@ -836,6 +839,21 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs))
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
 	return m.launchExchange(in)
+}
+
+// refuseUnknownSlash answers the sole-token typo guard (parseInput's kindUnknownSlash): a note
+// naming the word that resolved to nothing, and the line left exactly where it was. It is the
+// blockedUpstream refusal posture — the human typed something they meant as an invocation, so the
+// honest answer is to say it did not land and hand the text back for a one-character fix, never to
+// forward "/skills" to the model as if it were prose.
+//
+// Both ⏎ paths share it, because the guard is about what the WORD names, not about what the model
+// is doing: at idle (submit) and while a worker runs (stageInterjection) alike, nothing is sent,
+// nothing is staged, and no worker is disturbed — hence the nil Cmd.
+func (m Model) refuseUnknownSlash(parsed parsedInput) (tea.Model, tea.Cmd) {
+	m.transcript.addNote(unknownSlashNote(parsed.text))
+	m.refreshViewport()
+	return m, nil
 }
 
 // launchExchange starts the worker over one Exchange and moves the Model into stateRunning: a

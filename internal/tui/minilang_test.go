@@ -399,6 +399,101 @@ func drainCmd(t *testing.T, m Model, cmd tea.Cmd) {
 }
 
 // ----------------------------------------------------------------------------
+// The sole-token typo guard
+// ----------------------------------------------------------------------------
+//
+// The parse-layer rule is command_test.go's (TestParseInputSoleUnknownSlash); these pin what the
+// two ⏎ paths DO with it. The valid counterpart — an input that is only a KNOWN skill token still
+// sends — is skill_test.go's TestSubmitBareSkillTokenSends.
+
+// ⏎ on an input that is nothing but one unrecognised "/word" refuses: the note names the token,
+// the line stays in the box for a one-character fix, and nothing reaches the model. The silent send
+// that made a mistyped (or not-yet-existing) verb look broken is exactly ISSUES #12's complaint.
+func TestUnknownSoleSlashRefusedAtIdle(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, skillOpts())
+	m.input.SetValue("/code-adit")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.state != stateIdle || cmd != nil {
+		t.Fatalf("a refused token drove something: state = %v, cmd != nil = %v", m.state, cmd != nil)
+	}
+	if got := eng.submits(); got != 0 {
+		t.Errorf("Submit calls = %d, want 0 — the typo must never reach the model", got)
+	}
+	if got := m.input.Value(); got != "/code-adit" {
+		t.Errorf("input = %q, want the line kept exactly as typed", got)
+	}
+	if n := countNotes(m, "unknown command or skill: /code-adit"); n != 1 {
+		t.Errorf("refusal notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+}
+
+// The same refusal while a worker runs: a mistyped invocation is no more queued for the model than
+// it is sent to it, and the running Exchange is left entirely alone.
+func TestUnknownSoleSlashRefusedWhileRunning(t *testing.T) {
+	m := runningModel(t)
+	m.input.SetValue("/code-adit")
+	next, cmd := stepCmd(t, m, keyEnter())
+
+	if cmd != nil {
+		t.Error("a refused token returned a Cmd; nothing may be driven while a worker runs")
+	}
+	if len(next.pendingInterjections) != 0 {
+		t.Errorf("staged rows = %+v, want none — a typo is not a message", next.pendingInterjections)
+	}
+	if got := next.input.Value(); got != "/code-adit" {
+		t.Errorf("input = %q, want the line kept exactly as typed", got)
+	}
+	if n := countNotes(next, "unknown command or skill: /code-adit"); n != 1 {
+		t.Errorf("refusal notes = %d, want exactly 1; notes = %q", n, noteTexts(next))
+	}
+}
+
+// More than the one token is an ordinary message, whatever it opens with: the guard claims only
+// the input a human can have meant as an invocation and nothing else.
+func TestUnknownSlashWithMoreWordsStillSends(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, skillOpts())
+	m.input.SetValue("/code-adit the parser")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.state != stateRunning {
+		t.Fatalf("state = %v, want running — a multi-token line is a message", m.state)
+	}
+	drainCmd(t, m, cmd)
+	if len(eng.submitted) != 1 {
+		t.Fatalf("Submit calls = %d, want 1", len(eng.submitted))
+	}
+	if got := eng.submitted[0].Text; got != "/code-adit the parser" {
+		t.Errorf("submitted text = %q, want the line verbatim", got)
+	}
+}
+
+// A bare "/skill" is a menu verb, not a typo, so it earns the picker's usage line instead. The
+// dropdown intercepts ⏎ while it is open (TestEnterOnSkillCommandDoesNotSubmit); this is the path
+// where it is not — the overlay dismissed at idle, or a mid-run box where it never opens.
+func TestBareSkillVerbTeachesThePicker(t *testing.T) {
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, skillOpts())
+	m.input.SetValue("/skill")
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.state != stateIdle || cmd != nil {
+		t.Fatalf("a bare /skill drove something: state = %v, cmd != nil = %v", m.state, cmd != nil)
+	}
+	if got := eng.submits(); got != 0 {
+		t.Errorf("Submit calls = %d, want 0 — /skill is never sent as a literal message", got)
+	}
+	if got := m.input.Value(); got != "/skill" {
+		t.Errorf("input = %q, want the verb kept so an argument can be typed after it", got)
+	}
+	if n := countNotes(m, skillPickerUsage); n != 1 {
+		t.Errorf("usage notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Autocomplete overlay
 // ----------------------------------------------------------------------------
 

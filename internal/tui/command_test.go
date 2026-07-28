@@ -88,12 +88,78 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 }
 
 func TestParseInputUnknownSlashIsMessage(t *testing.T) {
-	// An unrecognised /verb is NOT a command — it is sent to the agent verbatim, so a real
-	// message that happens to start with "/" (a path, a typo) is never silently swallowed.
-	for _, in := range []string{"/skill foo", "/unknown", "/usr/local/bin matters", "/"} {
+	// An unrecognised /verb is NOT a command — a message that merely CONTAINS a "/" word (a path,
+	// a typo, an unparsed "/skill foo") is sent to the agent verbatim, never silently swallowed.
+	// The sole-token case is the typo guard's, and has its own test below.
+	for _, in := range []string{"/skill foo", "/unknown and more", "/usr/local/bin matters", "/"} {
 		got := parseInput(in, nil)
 		if got.kind != kindMessage {
 			t.Errorf("parseInput(%q).kind = %v, want message", in, got.kind)
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The sole-token typo guard
+// ----------------------------------------------------------------------------
+
+// An input that is NOTHING BUT one "/word" naming no verb and no skill is its own kind: the router
+// refuses it with a note instead of sending it, which is what stops a typo'd "/code-adit" — or, in
+// the issue that spawned this, a "/skills" the build did not yet have — from reaching the model as
+// prose. Everything else keeps its old classification exactly.
+func TestParseInputSoleUnknownSlash(t *testing.T) {
+	known := knownSkills("grill-me", "clear")
+	cases := []struct {
+		name string
+		in   string
+		want inputKind
+	}{
+		{"typo'd skill id", "/code-adit", kindUnknownSlash},
+		{"typo'd command verb", "/comapct", kindUnknownSlash},
+		{"whitespace around it still counts", "  /code-adit  ", kindUnknownSlash},
+		{"the menu verb is guarded too", "/skill", kindUnknownSlash},
+		{"a lone path names nothing either", "/usr/local/bin", kindUnknownSlash},
+		{"a real command is a command", "/clear", kindCommand},
+		{"a known skill token is a message", "/grill-me", kindMessage},
+		{"more than the one token is a message", "/code-adit the parser", kindMessage},
+		{"a second line makes it a message", "/code-adit\nplease", kindMessage},
+		{"a bare slash is a message", "/", kindMessage},
+		{"ordinary prose is a message", "fix /code-adit please", kindMessage},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseInput(c.in, known)
+			if got.kind != c.want {
+				t.Fatalf("parseInput(%q).kind = %v, want %v", c.in, got.kind, c.want)
+			}
+			if got.kind == kindUnknownSlash && got.text != strings.TrimSpace(c.in) {
+				t.Errorf("guarded text = %q, want the token as typed %q", got.text, strings.TrimSpace(c.in))
+			}
+		})
+	}
+
+	// With no catalog wired nothing resolves, so the guard still only claims the sole-token form.
+	if got := parseInput("/grill-me", nil); got.kind != kindUnknownSlash {
+		t.Errorf("parseInput(/grill-me, nil).kind = %v, want the guard (no catalog ⇒ nothing resolves)", got.kind)
+	}
+}
+
+// The note names the word that failed to resolve — a typo is fixed by seeing it — while the one
+// menuOnly verb earns its usage line instead, because it resolves fine and only wants an argument.
+func TestUnknownSlashNote(t *testing.T) {
+	if got := unknownSlashNote("/code-adit"); !strings.Contains(got, "/code-adit") || !strings.Contains(got, "unknown command or skill") {
+		t.Errorf("unknownSlashNote(/code-adit) = %q, want it to name the token as unknown", got)
+	}
+	if got := unknownSlashNote("/skill"); got != skillPickerUsage {
+		t.Errorf("unknownSlashNote(/skill) = %q, want the picker usage %q", got, skillPickerUsage)
+	}
+	// Drift guard: every menuOnly verb is a real entry point, so none of them may be called unknown.
+	for _, spec := range commandSpecs {
+		if !spec.menuOnly {
+			continue
+		}
+		if got := unknownSlashNote("/" + spec.name); strings.Contains(got, "unknown command or skill") {
+			t.Errorf("menu verb /%s is refused as unknown (%q); it needs its own usage line", spec.name, got)
 		}
 	}
 }

@@ -67,14 +67,18 @@
 // The skill flow (post-v1 apogee-code feature-parity) is the mini-language's second half, and it
 // is TEXT rather than state beside it: a skill is invoked by naming its id as a "/token" at a word
 // boundary in the message — "/code-audit please check the parser" — exactly as an @path names a
-// file. extractSkillRefs collects the tokens the [SkillCatalog] confirms (any other /word is
-// prose, so a path or a typo travels untouched), the token STAYS in the text the model reads, and
-// the ids ride out as [domain.UserInput.SkillIDs] on a submitted message and on a staged
+// file. extractSkillRefs collects the tokens the [SkillCatalog] confirms (any other /word inside a
+// message is prose, so a path or a typo travels untouched), the token STAYS in the text the model
+// reads, and the ids ride out as [domain.UserInput.SkillIDs] on a submitted message and on a staged
 // interjection alike. Like @file, *resolution* (turning an ID into the prepended skill body) stays
 // in the agent loop, through Config.Skills. The two-step picker survives as an alternate entry
 // point: the "/" menu offers /skill, accepting it chains into an acSkill dropdown over the
 // catalog, and a pick splices the skill's own "/id " token at the strip point. /skill is
 // deliberately NOT a parser command, which keeps an unknown "/skill foo" an ordinary message.
+// The one input that is neither command nor message is the SOLE-TOKEN guard (kindUnknownSlash): an
+// input that is nothing but one /word naming no verb and no skill is refused with a note and left
+// in the box ([Model.refuseUnknownSlash], at idle and mid-run alike), because a mistyped invocation
+// silently sent to the model is the confusion the mini-language exists to remove.
 //
 // presenter.go supplies the last host delegate, and it is the one that decides rather than asks:
 // [uiPresenter] is the Presenter present_document routes a finished deliverable to, and it walks

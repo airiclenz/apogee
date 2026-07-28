@@ -135,18 +135,23 @@ const commandsAtIdleNote = "commands run at idle — not queued"
 // staged row and empties the box, launching nothing (the single-worker invariant is untouched —
 // the running worker delivers the row at its next between-Steps boundary, ADR 0025).
 //
-// Three outcomes, and the input's fate is the difference between them: a /command is REFUSED with
-// a note and the line is left exactly where it was (commandsAtIdleNote); a blank box stages
-// nothing at all; anything else is queued and the editor is cleared, the same way a submit clears
-// it. The row carries both halves — the verbatim editor text for the Backspace restore, and the
-// parsed input the engine consumes, whose @file references deliberately stay unresolved until
-// delivery, so the model reads the file as it stands then.
+// Four outcomes, and the input's fate is the difference between them: a /command is REFUSED with
+// a note and the line is left exactly where it was (commandsAtIdleNote); a lone /word that names
+// nothing is refused the same way, with the typo guard's note (refuseUnknownSlash — a mistyped
+// invocation must no more be queued for the model than sent to it); a blank box stages nothing at
+// all; anything else is queued and the editor is cleared, the same way a submit clears it. The row
+// carries both halves — the verbatim editor text for the Backspace restore, and the parsed input
+// the engine consumes, whose @file references deliberately stay unresolved until delivery, so the
+// model reads the file as it stands then.
 func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
 		m.transcript.addNote(commandsAtIdleNote)
 		m.refreshViewport()
 		return m, nil
+	}
+	if parsed.kind == kindUnknownSlash {
+		return m.refuseUnknownSlash(parsed)
 	}
 	if parsed.text == "" {
 		return m, nil
