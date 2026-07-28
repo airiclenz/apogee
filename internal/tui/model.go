@@ -64,6 +64,12 @@ type Model struct {
 	// value-copied Model like autocompleteState (ADR 0011). It is driven only at idle.
 	sessionBrowser sessionBrowser
 
+	// picker is the shared single-select overlay's state (picker.go): which offering it lists and
+	// which row is highlighted. Its rows are derived at render time from the state they describe —
+	// the /model picker reads hb.models live — so the value itself is three plain values and its
+	// zero value is "closed", the sessionBrowser posture (ADR 0011). It is driven only at idle.
+	picker picker
+
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
 	// skillRegion edge-trigger), the workspace file cache, and the prompt drag-selection
 	// (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its
@@ -613,6 +619,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionBrowserKey(msg)
 	}
 
+	// The /model picker is the browser's simpler sibling and claims keys the same way: while it is
+	// open (idle only) the selection, the accept and esc are all its own (picker.go).
+	if m.state == stateIdle && m.picker.open {
+		return m.pickerKey(msg)
+	}
+
 	// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
 	// including enter and tab — before the normal routing below. Any other key returns
 	// handled=false and falls through to edit the input (which re-derives it). Every region opens
@@ -1032,7 +1044,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 
 	// /continue and /compact are the two commands that open an Exchange, so they answer to the
 	// heartbeat exactly as a typed message does (blockedUpstream). The purely local verbs below —
-	// /clear, /sessions, /version, /confine — stay live while the server is away.
+	// /clear, /sessions, /version, /confine — stay live while the server is away; /model consults
+	// the heartbeat itself, because "which models are served" is a question only a reachable server
+	// can answer (modelSwitchBlocked owns that ladder).
 	if m.blockedUpstream() && (parsed.command == "continue" || parsed.command == "compact") {
 		m.transcript.addNote(m.upstreamBlockNote())
 		m.layout()
@@ -1081,6 +1095,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Open the history-browser overlay: list saved sessions off the Update loop and render the
 		// pane above the input (sessions.go). Synchronous and idle-safe like /clear — no worker.
 		return m.openSessionBrowser()
+
+	case "model":
+		// Open the model picker over what the upstream advertises, or take the id given as an
+		// argument (picker.go). Synchronous and idle-safe like /sessions: the switch it drives is the
+		// heartbeat's own rebind path, which is idle-only by construction.
+		return m.runModelCommand(parsed.args)
 
 	case "version":
 		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
@@ -1454,8 +1474,9 @@ type heartbeatState struct {
 	// lastFailure is the most recent failure's words, quoted in the offline note and in the
 	// refusal of a send. "" once a beat lands.
 	lastFailure string
-	// models is what the server last advertised — the data layer a future model picker reads.
-	// Nothing renders it today; it is kept current so the picker needs no new plumbing.
+	// models is what the server last advertised — the /model picker's rows, derived from it at
+	// render time (picker.go) so a beat landing under an open overlay refreshes the offering in
+	// place rather than leaving the human choosing from a list the server has moved on from.
 	models []heartbeat.ModelSummary
 	// observedModel and observedWindow are what the last beat that mattered reported. They are the
 	// baseline a model/window change is measured against; the rebind orchestration owns them.
@@ -1563,7 +1584,9 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	m.hb.failures = 0
 	m.hb.everOnline = true
 	m.hb.lastFailure = ""
-	m.hb.models = beat.AvailableModels // the future picker's data layer (decision 4); nothing renders it
+	m.hb.models = beat.AvailableModels // the /model picker's rows are derived from it (picker.go)
+	// A shorter offering must not leave an open picker highlighting a row that no longer exists.
+	m.picker.clampSelection(m.pickerCount())
 	crossed := m.hb.offline
 	m.hb.offline = false
 
@@ -1945,12 +1968,16 @@ func (m Model) View() tea.View {
 	dropdown := m.renderAutocomplete()
 	queued := m.renderPendingInterjections()
 	browser := m.renderSessionBrowser()
+	pick := m.renderPicker()
 	shrink := 0
 	if prompt != "" {
 		shrink += lipgloss.Height(prompt)
 	}
 	if browser != "" {
 		shrink += lipgloss.Height(browser)
+	}
+	if pick != "" {
+		shrink += lipgloss.Height(pick)
 	}
 	if dropdown != "" {
 		shrink += lipgloss.Height(dropdown)
@@ -1976,10 +2003,13 @@ func (m Model) View() tea.View {
 	if prompt != "" {
 		rows = append(rows, prompt)
 	}
-	// The /sessions browser overlay sits in the same slot as the approval/ask prompt (they never
-	// co-occur — the browser is idle-only, the prompts belong to busy states).
+	// The /sessions browser and the /model picker share the approval/ask prompt's slot (none of them
+	// co-occur — both overlays are idle-only and modal, the prompts belong to busy states).
 	if browser != "" {
 		rows = append(rows, browser)
+	}
+	if pick != "" {
+		rows = append(rows, pick)
 	}
 	// The single blank line between chat content and the bottom chrome (layout.md), then the
 	// ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay (when

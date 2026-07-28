@@ -25,8 +25,10 @@ const (
 )
 
 // parsedInput is the result of classifying one raw input line. For kindCommand, command
-// names the recognised verb (without the leading slash); confine carries the argument parse of
-// a /confine line (zero value — a status report — for every other verb) and err is set when a
+// names the recognised verb (without the leading slash); args carries the verb's argument tokens
+// for every takesArgs verb (nil for the rest, which ignore what follows them, as they always
+// have); confine carries the dedicated argument parse of a /confine line (zero value — a status
+// report — for every other verb) and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and /skill
@@ -37,6 +39,7 @@ const (
 type parsedInput struct {
 	kind     inputKind
 	command  string
+	args     []string
 	confine  confineArgs
 	err      error
 	text     string
@@ -48,8 +51,11 @@ type parsedInput struct {
 // dropdown shows for it. name is the verb without its leading slash; summary is the one-line
 // description the dropdown displays beside it. The three flags say how the verb behaves:
 //
-//   - takesArgs — the verb reads what follows it. Only /confine does (parseConfine owns its
-//     grammar); every other verb ignores surplus tokens, as it always has.
+//   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
+//     parsedInput.args. /confine, whose grammar is richer than a token list, keeps its dedicated
+//     parse (parseConfine) on top of them; every non-takesArgs verb ignores surplus tokens, as it
+//     always has. It is also what the dropdown reads to COMPLETE such a verb rather than run it
+//     (acceptAutocomplete): firing a verb that is not finished would be wrong.
 //   - whileRunning — the verb is safe to run while a worker is working, because it only REPORTS:
 //     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is
 //     idle-only and earns commandsAtIdleNote mid-run instead of running (parsedInput.safeWhileRunning
@@ -73,8 +79,8 @@ type commandSpec struct {
 //
 // /new is an alias of /clear — both verbs are recognised here and route to the same context-reset
 // logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
-// synchronously in runCommand like /clear). /server is deferred (it needs a swappable provider
-// seam) and so is absent.
+// synchronously in runCommand like /clear); /model opens the model picker over what the upstream
+// advertises (picker.go), the same way.
 //
 // Order is display order, and one pair depends on it: /skill must precede /skills, because the
 // dropdown prefix-matches in table order and highlights its first row — so a typed "/skill"
@@ -86,6 +92,7 @@ var commandSpecs = []commandSpec{
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
+	{name: "model", summary: "switch to another model the server serves", takesArgs: true},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
 	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
@@ -104,6 +111,9 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 	trimmed := strings.TrimSpace(raw)
 	if cmd, args, ok := matchCommand(trimmed); ok {
 		parsed := parsedInput{kind: kindCommand, command: cmd}
+		if spec, found := commandByName(cmd); found && spec.takesArgs {
+			parsed.args = args // a verb that does not read its arguments carries none (commandSpec)
+		}
 		if cmd == "confine" {
 			parsed.confine, parsed.err = parseConfine(args)
 		}
@@ -198,8 +208,9 @@ func (p parsedInput) safeWhileRunning() bool {
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is
 // "/<verb>" for a non-menuOnly verb of commandSpecs, together with the remaining
-// whitespace-separated argument tokens. Only /confine reads the arguments; for every other verb
-// they are surplus and ignored (as they always were). The verb itself is delimited by a space or
+// whitespace-separated argument tokens. Only a takesArgs verb reads them (parseInput hands those
+// on as parsedInput.args); for every other verb they are surplus and ignored (as they always were).
+// The verb itself is delimited by a space or
 // a tab, never a newline — so a multi-line message whose first line is "/clear" stays a message,
 // as it did before arguments existed.
 func matchCommand(trimmed string) (string, []string, bool) {

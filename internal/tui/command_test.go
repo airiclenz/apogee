@@ -50,7 +50,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		})
 	}
 
-	// The parser's verb set survived the merge intact: the seven real commands, and /skill
+	// The parser's verb set survived the merge intact: every real command, and /skill
 	// offered by the menu alone.
 	var parsed, menuOnly []string
 	for _, spec := range commandSpecs {
@@ -60,7 +60,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		}
 		parsed = append(parsed, spec.name)
 	}
-	wantParsed := []string{"clear", "new", "sessions", "compact", "continue", "confine", "version", "skills"}
+	wantParsed := []string{"clear", "new", "sessions", "compact", "continue", "confine", "model", "version", "skills"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
 	}

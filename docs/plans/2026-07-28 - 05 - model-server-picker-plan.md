@@ -396,7 +396,19 @@ exists (one synthesized choice, seams wired, nothing else observable).
 
 **Commit.** `feat(wire): a swappable upstream Monitor behind the heartbeat seam + the SwitchServer seam`
 
-## 5. `/model` — the model picker over `hb.models`
+## 5. `/model` — the model picker over `hb.models` — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): three precisions on the item's literal text. (a) The degrade ladder is asked for
+BOTH forms, not only the bare one: an argument form that reached the accept path with `Rebind == nil`
+would call `applyRebind`, which returns early on a nil seam — moving nothing and saying nothing, the
+one outcome a command must never have. Surplus arguments still short-circuit to the usage note ahead
+of the ladder. (b) `· current` is composed as plain row text rather than "in the faint style":
+`renderPopup`'s contract takes rows escape-stripped and styles them whole (faint, or the highlight
+bar on the selection) before truncating, so a per-fragment style could not survive it — unselected
+rows already render faint. (c) `TestCommandDropdownOffersSkill` (skill_test.go) now asserts the
+computed offering instead of the painted pane: the dropdown paints a scrolled `maxAutocompleteItems`
+window around the selection, so the tenth verb pushed `/skill` out of the visible rows from row 0 —
+pinning the render there would silently cap how many verbs `commandSpecs` may hold.
 
 **What.** The verb, the shared picker overlay, and the accept path that drives the existing
 rebind orchestration.

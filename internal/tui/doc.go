@@ -266,6 +266,19 @@
 // box is already saying it). A nil seam is a display-frozen heartbeat — the offline state and the
 // model list still live, no binding ever does.
 //
+// The /model picker (picker.go) is UI over that machinery and deliberately NOT a third way to bind.
+// The offering every beat carries is already held in heartbeatState.models, so the overlay derives
+// its rows from it at render time — a beat landing under an open picker refreshes the list in place,
+// with the selection clamped — and an accepted row becomes a [rebindIntent] fed to the very same
+// [Model.applyRebind]: one seam call, one set of words, one fail-once posture, whether the switch was
+// observed or asked for. The one thing the accept adds is that it records the pick as the last
+// OBSERVATION before calling the seam, exactly as [Model.observeBinding] records one, so the next
+// beat on a multi-model server measures the picked model as "nothing new" instead of binding the
+// session straight back off the config'd discovery hint. Everything the picker cannot do it SAYS: no
+// monitor, an offline server, a nil rebind seam, an empty offering — each is one honest note and no
+// overlay, and picking the row the session is already on is answered too (rebindNote's "" contract is
+// about the observations nobody asked for, not about an explicit act).
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the three
@@ -330,8 +343,9 @@
 // layout, the status line and the footer; theme.go the palette, the marker glyphs, and the
 // lipgloss styles; inputaccent.go the resolve-gated inline accents the prompt box paints its
 // /skill and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
-// versioned wire form inside a saved session record; sessions.go the /sessions history browser and
-// popup.go the one bordered pane every overlay — that browser, the autocomplete dropdown, the ask
+// versioned wire form inside a saved session record; sessions.go the /sessions history browser,
+// picker.go the modal single-select overlay behind /model, and
+// popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
 // this narration.
 //

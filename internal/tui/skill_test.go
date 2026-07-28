@@ -3,6 +3,7 @@ package tui
 import (
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -143,11 +144,18 @@ func TestCommandDropdownOffersSkill(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"skill", "skills"}) {
 		t.Fatalf("'/sk' suggestions = %v, want [skill skills] in that order", got)
 	}
-	// The full "/" menu includes /skill alongside the three real commands.
+	// The full "/" menu OFFERS /skill alongside every real command. The assertion is against the
+	// offering rather than the painted pane: the popup shows a scrolled window of maxAutocompleteItems
+	// rows around the selection, so which rows are visible from row 0 is a property of the window, not
+	// of the menu — and pinning the render here would silently cap how many verbs commandSpecs may hold.
 	m.input.SetValue("/")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
-	if got := plain(m.View()); !strings.Contains(got, "/skill") {
-		t.Errorf("'/' menu does not offer /skill:\n%s", got)
+	var offered []string
+	for _, it := range m.autocomplete.items {
+		offered = append(offered, it.value)
+	}
+	if !slices.Contains(offered, "skill") {
+		t.Errorf("'/' menu does not offer /skill: %v", offered)
 	}
 }
 

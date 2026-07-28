@@ -1,0 +1,294 @@
+package tui
+
+import (
+	"fmt"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+// ----------------------------------------------------------------------------
+// The shared single-select picker overlay (/model — the model and server pickers)
+// ----------------------------------------------------------------------------
+//
+// The /sessions browser's simpler sibling: a modal list with one highlight, ⏎ to take the
+// highlighted row, esc to close, painted through the shared popup module (renderPopup) so it shares
+// the browser's chrome and right edge. It answers ONE question — which of the things the session
+// could be pointed at should it be pointed at now — so the state is three plain values and the
+// verbs differ only by a [pickerKind].
+//
+// Rows are DERIVED at render time from the state they describe, never captured at open. That is
+// what lets a beat landing under an open /model picker refresh the offering in place (the
+// selection is clamped, the sessionBrowser.clampSelection posture) instead of leaving the human
+// choosing from a list the server has moved on from.
+//
+// The accept path is deliberately not a third way to bind: a picked model becomes a
+// [rebindIntent] fed to [Model.applyRebind] — the very orchestration a heartbeat-observed change
+// takes — so the seam call, the fail-once note, the restated start-up box and the notices all come
+// from the one existing path (ADR 0024's "cold start, late seed and mid-session switch are ONE code
+// path", extended to the switch the human asks for). The pick is also recorded as the last
+// OBSERVATION, exactly as [Model.observeBinding] records one, so the next beat reporting the picked
+// model measures as "nothing new" rather than as a fresh change to bind back.
+
+// pickerKind names WHICH offering an open picker is listing. It is an enum rather than a callback
+// field on the state so the Model keeps holding plain values only (ADR 0011) — every kind-specific
+// answer (the rows, the title, the accept) is one switch away.
+type pickerKind int
+
+const (
+	pickerModel pickerKind = iota // the models the Upstream advertises — /model, over m.hb.models
+)
+
+// picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
+// in the value-copied Model like sessionBrowser and autocompleteState (ADR 0011). selected indexes
+// the rows the current kind derives; it is clamped rather than trusted, because the list underneath
+// it can change while the overlay is open.
+type picker struct {
+	open     bool
+	kind     pickerKind
+	selected int
+}
+
+// maxPickerRows caps how many rows the overlay shows at once; a longer list scrolls a window around
+// the selection (popupRowWindow), the maxSessionRows posture, so the pane never crowds the
+// transcript off a short terminal.
+const maxPickerRows = 8
+
+// pickerHint is the one-line key legend shown at the foot of the overlay.
+const pickerHint = "↑/↓ select · ⏎ switch · esc close"
+
+// currentRowSuffix marks the row the session is already on. It is plain text, not styling: the
+// popup module takes rows escape-stripped and styles them whole (faint, or the highlight bar on the
+// selection), so a per-fragment style could not survive its truncation.
+const currentRowSuffix = " · current"
+
+// modelUsage is the one-line grammar a mistyped /model earns, so surplus arguments teach the two
+// working forms instead of vanishing (the confineUsage posture).
+const modelUsage = "usage: /model [model-id]"
+
+// runModelCommand drives the /model verb in both its forms: bare, it opens the picker over what the
+// server advertises; with one argument it takes that model id directly. Surplus arguments are a
+// usage note.
+//
+// The degrade ladder is asked FIRST and for both forms, because it is about whether this session
+// can switch models at all — an argument form that reached the accept path with no rebind seam
+// would move nothing and say nothing, which is the one outcome a command must never have.
+func (m Model) runModelCommand(args []string) (tea.Model, tea.Cmd) {
+	if len(args) > 1 {
+		return m.pickerNote(modelUsage)
+	}
+	if note, blocked := m.modelSwitchBlocked(); blocked {
+		return m.pickerNote(note)
+	}
+	if len(args) == 1 {
+		for _, offered := range m.hb.models {
+			if offered.ID == args[0] {
+				return m.bindPickedModel(offered.ID, offered.ContextWindow)
+			}
+		}
+		return m.pickerNote(fmt.Sprintf(
+			"unknown model %q — /model with no argument lists what the server serves", args[0]))
+	}
+	m.picker = picker{open: true, kind: pickerModel, selected: m.currentModelRow()}
+	m.layout()
+	return m, nil
+}
+
+// modelSwitchBlocked reports the honest line /model owes when there is nothing to pick from, in the
+// order the reasons stack: no monitor at all, a server that is not answering, a display-frozen
+// heartbeat (no rebind seam), and a server that has answered but advertised nothing. Each is a note
+// and no overlay — an empty pane would be a worse answer than the sentence explaining it.
+func (m Model) modelSwitchBlocked() (string, bool) {
+	switch {
+	case m.opts.Heartbeat == nil:
+		return "/model needs the upstream monitor — not wired", true
+	case m.hb.offline:
+		// The offline facts are already worded once (the endpoint, and why the last beat failed);
+		// saying them a second way here would only invite the two to drift.
+		return m.upstreamBlockNote(), true
+	case m.opts.Rebind == nil:
+		return "model switching is unavailable — the display is read-only", true
+	case len(m.hb.models) == 0:
+		return "the server has not advertised any models yet", true
+	}
+	return "", false
+}
+
+// currentModelRow is the row the picker opens on: the one the session is bound to, or the first row
+// when the binding names nothing the server currently advertises (a stale pin, or a cold start that
+// has not bound yet).
+func (m Model) currentModelRow() int {
+	for i, offered := range m.hb.models {
+		if offered.ID == m.opts.Model {
+			return i
+		}
+	}
+	return 0
+}
+
+// pickerNote is the "one honest line, no overlay" answer every /model degrade takes: a transcript
+// note and an unchanged session.
+func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
+	m.transcript.addNote(note)
+	m.layout()
+	return m, nil
+}
+
+// pickerKey routes a keypress while the picker is open (idle only): ↑/↓ move the highlight (wrapping,
+// the sessionBrowser posture), ⏎ takes the highlighted row, esc closes. It always fully consumes the
+// key — the picker is modal. The count is re-derived and the selection re-clamped on every key,
+// because the rows underneath can have changed since the last one.
+func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	n := m.pickerCount()
+	m.picker.clampSelection(n)
+	switch msg.String() {
+	case "esc":
+		m.picker = picker{}
+		m.layout()
+		return m, nil
+	case "up", "ctrl+p":
+		if n > 0 {
+			m.picker.selected = (m.picker.selected - 1 + n) % n
+		}
+		return m, nil
+	case "down", "ctrl+n":
+		if n > 0 {
+			m.picker.selected = (m.picker.selected + 1) % n
+		}
+		return m, nil
+	case "enter":
+		if n == 0 {
+			return m, nil
+		}
+		return m.acceptPicker()
+	}
+	return m, nil // any other key is swallowed by the modal
+}
+
+// acceptPicker resolves ⏎ on the highlighted row, by kind. The caller has already established that
+// there is a row to take (pickerKey), and the selection is clamped, so the index is safe.
+func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
+	switch m.picker.kind {
+	case pickerModel:
+		picked := m.hb.models[m.picker.selected]
+		return m.bindPickedModel(picked.ID, picked.ContextWindow)
+	}
+	return m, nil
+}
+
+// bindPickedModel is the accept path both forms of /model share — a highlighted row and
+// "/model <id>". It closes the overlay and drives the EXISTING rebind orchestration, so every
+// consequence (the seam call, the fail-once refusal, the restated start-up box, rebindNote's
+// wording, the notices, the unknown-window honesty) is the heartbeat's own and no second set of
+// strings exists to drift from it.
+//
+// The pick is recorded as the last observation BEFORE the seam is called, exactly as
+// [Model.observeBinding] records one: without that, the very next beat on a multi-model server
+// still resolving the old id would measure the picked model as a fresh change and bind it away
+// again within one Interval.
+//
+// Picking the row the session is already on is answered rather than ignored: an explicit act
+// deserves an answer, where rebindNote's "" contract is about the observations nobody asked for.
+func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
+	m.picker = picker{}
+	if id == m.opts.Model {
+		m.transcript.addNote("already bound to " + displayModel(id))
+		m.layout()
+		return m, nil
+	}
+	m.hb.observedModel, m.hb.observedWindow = id, window
+	next, _ := m.applyRebind(rebindIntent{model: id, window: window})
+	next.layout()
+	return next, nil
+}
+
+// pickerCount is how many rows the open kind has RIGHT NOW, read off the state the rows are derived
+// from rather than off a captured list — the one number the selection is clamped and wrapped
+// against.
+func (m Model) pickerCount() int {
+	switch m.picker.kind {
+	case pickerModel:
+		return len(m.hb.models)
+	}
+	return 0
+}
+
+// clampSelection keeps selected inside a row list that moved under the open overlay — a beat
+// carrying a shorter offering, say. An empty list pins the selection at zero (renderPicker shows no
+// highlight for it).
+func (p *picker) clampSelection(n int) {
+	switch {
+	case n == 0:
+		p.selected = 0
+	case p.selected >= n:
+		p.selected = n - 1
+	case p.selected < 0:
+		p.selected = 0
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Rendering
+// ----------------------------------------------------------------------------
+
+// renderPicker paints the open picker through the shared popup module (renderPopup): a titled,
+// bordered pane spanning the full window width (m.width, flush with the input box below) holding the
+// rows and a key legend, the selected row highlighted. It returns "" when the picker is closed, so
+// View treats it exactly like the /sessions browser's slot.
+func (m Model) renderPicker() string {
+	if !m.picker.open {
+		return ""
+	}
+	rows := m.pickerRows()
+	selected := -1 // no rows ⇒ no highlight (the popup module's own convention)
+	if len(rows) > 0 {
+		selected = clampInt(m.picker.selected, 0, len(rows)-1)
+	}
+	return renderPopup(m.th, popupSpec{
+		title:    m.pickerTitle(),
+		rows:     rows,
+		selected: selected,
+		hint:     pickerHint,
+		maxRows:  maxPickerRows,
+	}, m.width)
+}
+
+// pickerTitle names what is being switched and, for the model picker, on which host — the same
+// label the footer and the start-up box use (hostDisplay), so a session with two servers configured
+// can never mistake which one's offering it is looking at.
+func (m Model) pickerTitle() string {
+	switch m.picker.kind {
+	case pickerModel:
+		return "switch model — " + hostDisplay(m.opts)
+	}
+	return ""
+}
+
+// pickerRows composes the FULL row list the popup module paints, by kind. The module adds the
+// marker, the highlight, the truncation and the scroll windowing; rows arrive plain and
+// escape-stripped, as its contract requires — a model id is the SERVER's text, so it is sanitized
+// here rather than trusted.
+func (m Model) pickerRows() []string {
+	switch m.picker.kind {
+	case pickerModel:
+		return m.modelRows()
+	}
+	return nil
+}
+
+// modelRows is one row per advertised model: the id as the footer renders it (displayModel, so the
+// pane and the chrome beside it can never name the same model two different ways), its context
+// window when the server named one, and the "· current" mark on the row the session is bound to.
+func (m Model) modelRows() []string {
+	rows := make([]string, 0, len(m.hb.models))
+	for _, offered := range m.hb.models {
+		label := displayModel(offered.ID)
+		if window := formatTokens(offered.ContextWindow); window != "" {
+			label += " — " + window
+		}
+		if offered.ID == m.opts.Model {
+			label += currentRowSuffix
+		}
+		rows = append(rows, stripEscapes(label))
+	}
+	return rows
+}
