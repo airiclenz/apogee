@@ -22,6 +22,13 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 
 **Remaining:**
 
+- **Sedule Command** A command /schedule with attached prompt that pops up a question or a set 
+  of pre-defined cycle times to re-run the given prompt when the scheduled cycle-time has passed.
+  Stopping a schedule could be done with /shedule-stop. Each time the prompt is re-run, it runs
+  in a fresh context window. I am not sure how or if we should save the schedule-runs as separate
+  sessions for the session history (I think they should be marked / grouped for that schedule run).
+  Needs grilling.
+
 - **[P1] Server / model switching** — **unblocked 2026-07-27; the UI half remains.** The
   upstream-heartbeat work shipped everything this entry was blocked on
   ([ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md),
