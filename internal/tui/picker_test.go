@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -375,5 +376,372 @@ func assertPickerDegrade(t *testing.T, m Model, want string) {
 	}
 	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
 		t.Errorf("notes = %v, want %q", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /server harness
+// ----------------------------------------------------------------------------
+
+// twoServers is the /server fixture: the endpoint testOpts launched on, under the alias its footer
+// shows, beside a second configured server to move to.
+var twoServers = []ServerChoice{
+	{Name: "test-host", Endpoint: "http://localhost:1234"},
+	{Name: "remote", Endpoint: "http://remote:8080"},
+}
+
+// remoteWindow is the `context-window:` pin the fake switch reports back — GLOBAL config, so it
+// survives the move, which is what lets a test tell an adopted result from a cleared one.
+const remoteWindow = 8192
+
+// fakeSwitch stands in for the composition root's switch closure: it records every server name it
+// was asked to move to and answers with what the binary would have returned — the entry's endpoint,
+// its name as the new alias, and the surviving window pin. It is called synchronously on the test's
+// own goroutine, so it needs no guard.
+type fakeSwitch struct {
+	calls  []string
+	answer func(name string) (ServerSwitchResult, error)
+}
+
+func (f *fakeSwitch) switchTo(name string) (ServerSwitchResult, error) {
+	f.calls = append(f.calls, name)
+	if f.answer != nil {
+		return f.answer(name)
+	}
+	for _, choice := range twoServers {
+		if choice.Name == name {
+			return ServerSwitchResult{
+				Endpoint:      choice.Endpoint,
+				HostAlias:     choice.Name,
+				ContextWindow: remoteWindow,
+			}, nil
+		}
+	}
+	return ServerSwitchResult{}, errors.New("unknown server " + name)
+}
+
+// seededServers is a ready model with all three upstream seams wired and one beat folded — the
+// state a human is in when they type /server.
+func seededServers(t *testing.T, sw *fakeSwitch) (Model, *fakeRebind) {
+	t.Helper()
+	opts := testOpts
+	opts.Servers = twoServers
+	opts.SwitchServer = sw.switchTo
+	return seededPicker(t, opts)
+}
+
+// ----------------------------------------------------------------------------
+// The server picker
+// ----------------------------------------------------------------------------
+
+// /server lists the configured servers, marks the one this session is on (by endpoint, the identity
+// the binary assembled the list by) and opens on it.
+func TestServerPickerListsTheConfiguredServers(t *testing.T) {
+	m, _ := seededServers(t, &fakeSwitch{})
+
+	m, cmd := typeCommand(t, m, "/server")
+
+	if cmd != nil {
+		t.Error("/server returned a Cmd; opening the picker switches nothing yet")
+	}
+	if !m.picker.open || m.picker.kind != pickerServer {
+		t.Fatalf("picker = {open:%v kind:%v}, want an open server picker", m.picker.open, m.picker.kind)
+	}
+	if m.picker.selected != 0 {
+		t.Errorf("selected = %d, want 0 — the picker opens on the server the session is on", m.picker.selected)
+	}
+	got := plain(m.View())
+	for _, want := range []string{"switch server", "test-host", "http://remote:8080", pickerHint} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the pane is missing %q:\n%s", want, got)
+		}
+	}
+	rows := m.pickerRows()
+	if len(rows) != 2 {
+		t.Fatalf("rows = %v, want one per configured server", rows)
+	}
+	if !strings.HasSuffix(rows[0], currentRowSuffix) {
+		t.Errorf("rows[0] = %q, want the current server marked %q", rows[0], currentRowSuffix)
+	}
+	if strings.HasSuffix(rows[1], currentRowSuffix) {
+		t.Errorf("rows[1] = %q, want no current marker on a server the session is not on", rows[1])
+	}
+}
+
+// The happy path, end to end: the seam is called with the picked name, the display adopts what came
+// back, the model is UNBOUND, the box is restated, the move is worded — and the new chain's first
+// beat fires at once and binds through the ordinary rebind path, announcing itself (a switch is not
+// a launch, so the quiet first-contact seed does not apply).
+func TestServerSwitchHappyPath(t *testing.T) {
+	sw := &fakeSwitch{}
+	m, rb := seededServers(t, sw)
+	oldGen := m.hb.gen
+	m, _ = typeCommand(t, m, "/server")
+	m = step(t, m, keyDown())
+
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if want := []string{"remote"}; !reflect.DeepEqual(sw.calls, want) {
+		t.Fatalf("switch calls = %v, want %v", sw.calls, want)
+	}
+	if m.picker.open {
+		t.Error("the picker stayed open after an accept")
+	}
+	if m.opts.Endpoint != "http://remote:8080" || m.opts.HostAlias != "remote" {
+		t.Errorf("opts = {%q %q}, want the switch result adopted", m.opts.Endpoint, m.opts.HostAlias)
+	}
+	if m.opts.ContextWindow != remoteWindow {
+		t.Errorf("opts.ContextWindow = %d, want the surviving pin %d", m.opts.ContextWindow, remoteWindow)
+	}
+	if m.opts.Model != "" {
+		t.Errorf("opts.Model = %q, want the model unbound until the new server's first beat", m.opts.Model)
+	}
+	if m.hb.gen == oldGen || !m.hb.switched || len(m.hb.models) != 0 || m.hb.everOnline {
+		t.Errorf("hb = %+v, want a fresh generation, the switched mark, and no memory of the old server", m.hb)
+	}
+	if box := m.transcript.entries[0]; box.kind != entryStartup || box.startup.Host != "remote" || box.startup.Model != "" {
+		t.Errorf("start-up box = %+v, want it restated on the new server with no model", box.startup)
+	}
+	want := "switching server: test-host → remote (http://remote:8080)"
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q", got, want)
+	}
+	if len(rb.calls) != 0 {
+		t.Errorf("rebind calls = %v, want none — the switch binds nothing; the first beat does", rb.calls)
+	}
+
+	// The returned Cmd is the new chain's first beat, fired NOW rather than one Interval later.
+	if cmd == nil {
+		t.Fatal("the switch returned no Cmd — the new server would not be observed for a full Interval")
+	}
+	beat, ok := cmd().(beatMsg)
+	if !ok {
+		t.Fatalf("the switch's Cmd yielded %T, want the new chain's first beatMsg", cmd())
+	}
+	if beat.gen != m.hb.gen {
+		t.Errorf("the first beat carries generation %d, want the switched-in %d", beat.gen, m.hb.gen)
+	}
+
+	m = foldBeatMsg(t, m, upBeat("remote-model", remoteWindow))
+
+	if want := []rebindCall{{model: "remote-model", window: remoteWindow}}; !reflect.DeepEqual(rb.calls, want) {
+		t.Fatalf("rebind calls = %v, want %v — the first beat completes the switch", rb.calls, want)
+	}
+	if n := countNotes(m, "connected: remote-model"); n != 1 {
+		t.Errorf("connected notes = %d, want exactly 1 — a post-switch seed is news; notes = %q",
+			n, noteTexts(m))
+	}
+	if m.blockedUpstream() {
+		t.Error("the upstream is still blocked after the new server bound a model")
+	}
+}
+
+// Everything still in flight on the old chain lands inert: the switch retired that generation, so a
+// beat or a tick from the server the session just left changes nothing and schedules nothing.
+func TestServerSwitchRetiresTheOldChain(t *testing.T) {
+	m, rb := seededServers(t, &fakeSwitch{})
+	oldGen := m.hb.gen
+	m, _ = typeCommand(t, m, "/server remote")
+	notesBefore := len(noteTexts(m))
+
+	stale, cmd := stepCmd(t, m, beatMsg{gen: oldGen, beat: upBeat("test-model", 32768)})
+	if cmd != nil {
+		t.Error("a beat from the retired chain re-armed it — two chains would beat at once")
+	}
+	stale, cmd = stepCmd(t, stale, heartbeatTickMsg{gen: oldGen})
+	if cmd != nil {
+		t.Error("a tick from the retired chain issued a beat")
+	}
+
+	if stale.opts.Model != "" || stale.hb.everOnline {
+		t.Errorf("the old chain moved the switched session: model %q, everOnline %v",
+			stale.opts.Model, stale.hb.everOnline)
+	}
+	if len(rb.calls) != 0 {
+		t.Errorf("rebind calls = %v, want none from a retired chain", rb.calls)
+	}
+	if got := noteTexts(stale); len(got) != notesBefore {
+		t.Errorf("notes = %v, want nothing added by a retired chain", got)
+	}
+}
+
+// In the gap between the switch and the first bind there is nothing to send to, and the refusal
+// names the NEW endpoint — the async cold start's own wording, reached by a second route.
+func TestServerSwitchBlocksSendsUntilTheFirstBind(t *testing.T) {
+	sw := &fakeSwitch{}
+	opts := testOpts
+	opts.Servers = twoServers
+	opts.SwitchServer = sw.switchTo
+	rb := &fakeRebind{}
+	eng := &fakeEngine{}
+	opts.Rebind = rb.rebind
+	opts.Heartbeat = (&fakeHeartbeat{}).beat
+	m := newTestModelEng(t, eng, opts)
+	m = foldBeatMsg(t, m, twoModelBeat())
+
+	m, _ = typeCommand(t, m, "/server remote")
+
+	if !m.blockedUpstream() {
+		t.Fatal("a session with no model bound is not blocked after a switch")
+	}
+	m.input.SetValue("what is the capital of France?")
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd != nil || len(eng.submitted) != 0 {
+		t.Errorf("a send reached the engine in the unbound gap (submitted %d)", len(eng.submitted))
+	}
+	want := "cannot send — still connecting to http://remote:8080"
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q", got, want)
+	}
+}
+
+// The offline debounce goes back to its cold-start posture with the rest of the heartbeat state: a
+// new server that is not there says so on its FIRST failed beat, because nothing observed about the
+// old server is evidence about this one.
+func TestServerSwitchBelievesTheFirstFailureOnTheNewServer(t *testing.T) {
+	m, _ := seededServers(t, &fakeSwitch{})
+	m, _ = typeCommand(t, m, "/server remote")
+
+	m = foldBeatMsg(t, m, downBeat("connection refused"))
+
+	if !m.hb.offline {
+		t.Error("the first failed beat on a freshly switched-to server did not go offline")
+	}
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != offlineNote("connection refused") {
+		t.Errorf("notes = %v, want %q", got, offlineNote("connection refused"))
+	}
+}
+
+// A refused switch moves NOTHING: the seam is validate-then-commit all the way down, so the note is
+// the whole of the answer.
+func TestServerSwitchReportsARefusedSwitch(t *testing.T) {
+	sw := &fakeSwitch{answer: func(string) (ServerSwitchResult, error) {
+		return ServerSwitchResult{}, errors.New("an exchange is in flight")
+	}}
+	m, _ := seededServers(t, sw)
+	before := m.opts
+	beforeGen, beforeBox := m.hb.gen, m.transcript.entries[0]
+
+	m, _ = typeCommand(t, m, "/server remote")
+
+	if m.opts.Endpoint != before.Endpoint || m.opts.HostAlias != before.HostAlias ||
+		m.opts.Model != before.Model || m.opts.ContextWindow != before.ContextWindow {
+		t.Errorf("upstream opts = {%q %q %q %d}, want them unmoved by a refused switch",
+			m.opts.Endpoint, m.opts.HostAlias, m.opts.Model, m.opts.ContextWindow)
+	}
+	if m.hb.gen != beforeGen || m.hb.switched {
+		t.Errorf("hb = %+v, want the live chain untouched by a refused switch", m.hb)
+	}
+	if got := m.transcript.entries[0]; got.startup != beforeBox.startup {
+		t.Errorf("start-up box = %+v, want it unchanged", got.startup)
+	}
+	want := "could not switch server: an exchange is in flight"
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /server — the answers that are notes
+// ----------------------------------------------------------------------------
+
+func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
+	t.Run("already on it", func(t *testing.T) {
+		sw := &fakeSwitch{}
+		m, _ := seededServers(t, sw)
+
+		m, _ = typeCommand(t, m, "/server")
+		m, _ = stepCmd(t, m, keyEnter())
+
+		if len(sw.calls) != 0 {
+			t.Errorf("switch calls = %v, want none — the session is already on that server", sw.calls)
+		}
+		if m.picker.open {
+			t.Error("the picker stayed open after an accept")
+		}
+		want := "already on test-host (http://localhost:1234)"
+		if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+			t.Errorf("notes = %v, want %q", got, want)
+		}
+	})
+
+	t.Run("unknown name lists the configured ones", func(t *testing.T) {
+		sw := &fakeSwitch{}
+		m, _ := seededServers(t, sw)
+
+		m, _ = typeCommand(t, m, "/server nope")
+
+		if len(sw.calls) != 0 {
+			t.Errorf("switch calls = %v, want none", sw.calls)
+		}
+		assertPickerDegrade(t, m, `unknown server "nope" — configured: test-host, remote`)
+	})
+
+	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
+		sw := &fakeSwitch{}
+		m, _ := seededServers(t, sw)
+
+		m, _ = typeCommand(t, m, "/server a b")
+
+		if len(sw.calls) != 0 {
+			t.Errorf("switch calls = %v, want none", sw.calls)
+		}
+		assertPickerDegrade(t, m, serverUsage)
+	})
+
+	t.Run("no servers configured", func(t *testing.T) {
+		// An empty list and an unwired seam are ONE situation for the human, so they are one line.
+		for _, tc := range []struct {
+			name string
+			opts Options
+		}{
+			{name: "empty list", opts: func() Options {
+				o := testOpts
+				o.SwitchServer = (&fakeSwitch{}).switchTo
+				return o
+			}()},
+			{name: "unwired seam", opts: func() Options {
+				o := testOpts
+				o.Servers = twoServers
+				return o
+			}()},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m, _ := seededPicker(t, tc.opts)
+
+				m, _ = typeCommand(t, m, "/server")
+
+				assertPickerDegrade(t, m, noServersNote)
+			})
+		}
+	})
+}
+
+// /server is idle-only by the commandSpecs table: it ends in an engine mutation Agent.SwitchUpstream
+// allows only at a quiescent boundary, so a line typed mid-run earns the standing answer.
+func TestServerCommandIsIdleOnly(t *testing.T) {
+	if spec, ok := commandByName("server"); !ok || spec.whileRunning || !spec.takesArgs {
+		t.Fatalf("commandSpec = %+v, want an idle-only verb that reads its arguments", spec)
+	}
+	sw := &fakeSwitch{}
+	opts := testOpts
+	opts.Servers = twoServers
+	opts.SwitchServer = sw.switchTo
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m, _ = typeCommand(t, m, "open the exchange")
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+
+	m, _ = typeCommand(t, m, "/server remote")
+
+	if m.picker.open {
+		t.Error("the picker opened mid-run; /server is idle-only")
+	}
+	if len(sw.calls) != 0 {
+		t.Errorf("switch calls = %v, want none mid-run", sw.calls)
+	}
+	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
+		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
 	}
 }

@@ -2,12 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
 
 // ----------------------------------------------------------------------------
-// The shared single-select picker overlay (/model — the model and server pickers)
+// The shared single-select picker overlay (/model and /server)
 // ----------------------------------------------------------------------------
 //
 // The /sessions browser's simpler sibling: a modal list with one highlight, ⏎ to take the
@@ -28,6 +29,11 @@ import (
 // path", extended to the switch the human asks for). The pick is also recorded as the last
 // OBSERVATION, exactly as [Model.observeBinding] records one, so the next beat reporting the picked
 // model measures as "nothing new" rather than as a fresh change to bind back.
+//
+// /server is the same overlay over a different question, and its accept is the same shape one level
+// up: the binary moves the whole Upstream behind the unchanged seams ([Options.SwitchServer]) and
+// the TUI folds what came back ([Model.foldServerSwitch]) — a fresh heartbeat generation, no model
+// bound, and the new server's very first beat completing the move through that same rebind path.
 
 // pickerKind names WHICH offering an open picker is listing. It is an enum rather than a callback
 // field on the state so the Model keeps holding plain values only (ADR 0011) — every kind-specific
@@ -35,7 +41,8 @@ import (
 type pickerKind int
 
 const (
-	pickerModel pickerKind = iota // the models the Upstream advertises — /model, over m.hb.models
+	pickerModel  pickerKind = iota // the models the Upstream advertises — /model, over m.hb.models
+	pickerServer                   // the servers config.yaml names — /server, over m.opts.Servers
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -61,9 +68,17 @@ const pickerHint = "↑/↓ select · ⏎ switch · esc close"
 // selection), so a per-fragment style could not survive its truncation.
 const currentRowSuffix = " · current"
 
-// modelUsage is the one-line grammar a mistyped /model earns, so surplus arguments teach the two
-// working forms instead of vanishing (the confineUsage posture).
-const modelUsage = "usage: /model [model-id]"
+// modelUsage and serverUsage are the one-line grammars a mistyped verb earns, so surplus arguments
+// teach the two working forms instead of vanishing (the confineUsage posture).
+const (
+	modelUsage  = "usage: /model [model-id]"
+	serverUsage = "usage: /server [name]"
+)
+
+// noServersNote is the one line /server owes when there is nowhere to switch to. An empty list and
+// an unwired seam are deliberately worded the same: they are one situation for the human — this
+// build was started without alternatives — and two sentences would only invite them to drift.
+const noServersNote = "no servers configured — add a servers: block to config.yaml"
 
 // runModelCommand drives the /model verb in both its forms: bare, it opens the picker over what the
 // server advertises; with one argument it takes that model id directly. Surplus arguments are a
@@ -125,8 +140,89 @@ func (m Model) currentModelRow() int {
 	return 0
 }
 
-// pickerNote is the "one honest line, no overlay" answer every /model degrade takes: a transcript
-// note and an unchanged session.
+// runServerCommand drives the /server verb in both its forms: bare, it opens the picker over the
+// servers the binary assembled; with one argument it takes that server by name. Surplus arguments
+// are a usage note.
+//
+// The degrade is asked first and for both forms, exactly as /model's ladder is and for the same
+// reason: an argument form reaching the accept path with no switch seam would move nothing and say
+// nothing. Unlike /model it consults neither the heartbeat nor the offline state — where the session
+// can go is config, not an observation, and a server switch is the one useful thing to do WHILE the
+// current server is unreachable.
+func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
+	if len(args) > 1 {
+		return m.pickerNote(serverUsage)
+	}
+	if m.opts.SwitchServer == nil || len(m.opts.Servers) == 0 {
+		return m.pickerNote(noServersNote)
+	}
+	if len(args) == 1 {
+		for _, choice := range m.opts.Servers {
+			if choice.Name == args[0] {
+				return m.switchToServer(choice)
+			}
+		}
+		return m.pickerNote(fmt.Sprintf(
+			"unknown server %q — configured: %s", args[0], serverNameList(m.opts.Servers)))
+	}
+	m.picker = picker{open: true, kind: pickerServer, selected: m.currentServerRow()}
+	m.layout()
+	return m, nil
+}
+
+// currentServerRow is the row the server picker opens on: the one this session is on, identified by
+// endpoint — the same comparison the "· current" mark is drawn by, and the same one the binary used
+// when it decided whether the startup endpoint still needed a row of its own.
+func (m Model) currentServerRow() int {
+	for i, choice := range m.opts.Servers {
+		if choice.Endpoint == m.opts.Endpoint {
+			return i
+		}
+	}
+	return 0
+}
+
+// serverNameList names the switchable servers for the unknown-argument note, in the order the
+// picker lists them.
+func serverNameList(servers []ServerChoice) string {
+	names := make([]string, 0, len(servers))
+	for _, choice := range servers {
+		names = append(names, choice.Name)
+	}
+	return strings.Join(names, ", ")
+}
+
+// switchToServer is the accept path both forms of /server share — a highlighted row and
+// "/server <name>". It closes the overlay, asks the binary to move the session
+// ([Options.SwitchServer], synchronously on the Update loop: it mutates the engine and constructs a
+// client, and opens no connection of its own), and folds what came back.
+//
+// The seam is validate-then-commit all the way down, so an error means nothing moved and the note
+// is the whole of the answer. A success is already true by the time it returns, which is why
+// [Model.foldServerSwitch] can state it rather than attempt it.
+//
+// Choosing the server the session is already on is answered rather than ignored, the already-bound
+// posture: an explicit act deserves a reply, and re-switching would tear down a live binding to
+// arrive back where it started.
+func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
+	m.picker = picker{}
+	if choice.Endpoint == m.opts.Endpoint {
+		m.transcript.addNote("already on " + choice.Name + " (" + choice.Endpoint + ")")
+		m.layout()
+		return m, nil
+	}
+	from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
+	result, err := m.opts.SwitchServer(choice.Name)
+	if err != nil {
+		m.transcript.addNote("could not switch server: " + err.Error())
+		m.layout()
+		return m, nil
+	}
+	return m.foldServerSwitch(from, result)
+}
+
+// pickerNote is the "one honest line, no overlay" answer every /model and /server degrade takes: a
+// transcript note and an unchanged session.
 func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
 	m.transcript.addNote(note)
 	m.layout()
@@ -171,6 +267,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 	case pickerModel:
 		picked := m.hb.models[m.picker.selected]
 		return m.bindPickedModel(picked.ID, picked.ContextWindow)
+	case pickerServer:
+		return m.switchToServer(m.opts.Servers[m.picker.selected])
 	}
 	return m, nil
 }
@@ -208,6 +306,8 @@ func (m Model) pickerCount() int {
 	switch m.picker.kind {
 	case pickerModel:
 		return len(m.hb.models)
+	case pickerServer:
+		return len(m.opts.Servers)
 	}
 	return 0
 }
@@ -254,11 +354,14 @@ func (m Model) renderPicker() string {
 
 // pickerTitle names what is being switched and, for the model picker, on which host — the same
 // label the footer and the start-up box use (hostDisplay), so a session with two servers configured
-// can never mistake which one's offering it is looking at.
+// can never mistake which one's offering it is looking at. The server picker needs no such
+// qualifier: its rows name the hosts themselves.
 func (m Model) pickerTitle() string {
 	switch m.picker.kind {
 	case pickerModel:
 		return "switch model — " + hostDisplay(m.opts)
+	case pickerServer:
+		return "switch server"
 	}
 	return ""
 }
@@ -271,6 +374,8 @@ func (m Model) pickerRows() []string {
 	switch m.picker.kind {
 	case pickerModel:
 		return m.modelRows()
+	case pickerServer:
+		return m.serverRows()
 	}
 	return nil
 }
@@ -286,6 +391,22 @@ func (m Model) modelRows() []string {
 			label += " — " + window
 		}
 		if offered.ID == m.opts.Model {
+			label += currentRowSuffix
+		}
+		rows = append(rows, stripEscapes(label))
+	}
+	return rows
+}
+
+// serverRows is one row per configured server: the name the human gave it (which is also the switch
+// argument and the footer alias afterwards) with the endpoint it stands for spelled out beside it,
+// and the "· current" mark on the server this session is on. The endpoint is shown rather than
+// hidden behind the alias because a switch is exactly the moment a name is worth resolving to a URL.
+func (m Model) serverRows() []string {
+	rows := make([]string, 0, len(m.opts.Servers))
+	for _, choice := range m.opts.Servers {
+		label := choice.Name + " — " + choice.Endpoint
+		if choice.Endpoint == m.opts.Endpoint {
 			label += currentRowSuffix
 		}
 		rows = append(rows, stripEscapes(label))

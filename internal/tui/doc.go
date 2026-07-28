@@ -266,6 +266,23 @@
 // box is already saying it). A nil seam is a display-frozen heartbeat — the offline state and the
 // model list still live, no binding ever does.
 //
+// A SERVER switch (`/server`) is the same machinery one level up, and ADR 0024's "cold start, late
+// seed and mid-session switch are ONE code path" is what makes it small. [Options.SwitchServer] is
+// the binary's half — it re-points the provider client, swaps in a Monitor for the new server, and
+// returns the display facts — while [Model.foldServerSwitch] is this package's: the Options adopt
+// the endpoint, the alias and the surviving window pin, the model is UNBOUND (the footer says
+// "connecting…" and blockedUpstream refuses a send, exactly as at a cold start), and the whole
+// heartbeatState is replaced rather than patched. That replacement is the design: the fresh
+// generation retires the old chain so every beat and tick still in flight lands inert, the offering
+// empties with the server that advertised it, and the offline debounce returns to its cold-start
+// posture, so a dead new server is believed on its first failed beat instead of being debounced
+// against evidence about a different machine. The first beat of the new chain fires at once rather
+// than one Interval later, and the ordinary rebind path binds whatever it reports. The one fact
+// carried across the reset is heartbeatState.switched, which defeats the quiet first-contact seed:
+// a launch stays silent because the start-up box a few rows above says it all, while a session that
+// has moved says "connected: <model>" — the box is far up the scrollback by then, and the human
+// asked.
+//
 // The /model picker (picker.go) is UI over that machinery and deliberately NOT a third way to bind.
 // The offering every beat carries is already held in heartbeatState.models, so the overlay derives
 // its rows from it at render time — a beat landing under an open picker refreshes the list in place,
@@ -277,7 +294,12 @@
 // session straight back off the config'd discovery hint. Everything the picker cannot do it SAYS: no
 // monitor, an offline server, a nil rebind seam, an empty offering — each is one honest note and no
 // overlay, and picking the row the session is already on is answered too (rebindNote's "" contract is
-// about the observations nobody asked for, not about an explicit act).
+// about the observations nobody asked for, not about an explicit act). /server is the SAME overlay
+// over [Options.Servers] (one pickerKind, no callback field on the value-copied state), with the
+// current row marked by endpoint rather than by id and the accept calling SwitchServer instead of
+// applyRebind; both verbs also take their choice as an argument ("/model <id>", "/server <name>"),
+// both are idle-only by the commandSpecs table, and /server's whole degrade ladder is one line —
+// an unwired seam and an empty list are the same situation for the human.
 //
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
@@ -344,7 +366,7 @@
 // lipgloss styles; inputaccent.go the resolve-gated inline accents the prompt box paints its
 // /skill and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
 // versioned wire form inside a saved session record; sessions.go the /sessions history browser,
-// picker.go the modal single-select overlay behind /model, and
+// picker.go the modal single-select overlay behind /model and /server, and
 // popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
 // this narration.

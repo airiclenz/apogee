@@ -66,8 +66,9 @@ type Model struct {
 
 	// picker is the shared single-select overlay's state (picker.go): which offering it lists and
 	// which row is highlighted. Its rows are derived at render time from the state they describe —
-	// the /model picker reads hb.models live — so the value itself is three plain values and its
-	// zero value is "closed", the sessionBrowser posture (ADR 0011). It is driven only at idle.
+	// the /model picker reads hb.models live, the /server picker opts.Servers — so the value itself
+	// is three plain values and its zero value is "closed", the sessionBrowser posture (ADR 0011).
+	// It is driven only at idle.
 	picker picker
 
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
@@ -619,8 +620,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionBrowserKey(msg)
 	}
 
-	// The /model picker is the browser's simpler sibling and claims keys the same way: while it is
-	// open (idle only) the selection, the accept and esc are all its own (picker.go).
+	// The /model and /server picker is the browser's simpler sibling and claims keys the same way:
+	// while it is open (idle only) the selection, the accept and esc are all its own (picker.go).
 	if m.state == stateIdle && m.picker.open {
 		return m.pickerKey(msg)
 	}
@@ -1044,9 +1045,10 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 
 	// /continue and /compact are the two commands that open an Exchange, so they answer to the
 	// heartbeat exactly as a typed message does (blockedUpstream). The purely local verbs below —
-	// /clear, /sessions, /version, /confine — stay live while the server is away; /model consults
-	// the heartbeat itself, because "which models are served" is a question only a reachable server
-	// can answer (modelSwitchBlocked owns that ladder).
+	// /clear, /sessions, /version, /confine, /server — stay live while the server is away (moving to
+	// another server is the one useful thing to do with an unreachable one); /model consults the
+	// heartbeat itself, because "which models are served" is a question only a reachable server can
+	// answer (modelSwitchBlocked owns that ladder).
 	if m.blockedUpstream() && (parsed.command == "continue" || parsed.command == "compact") {
 		m.transcript.addNote(m.upstreamBlockNote())
 		m.layout()
@@ -1101,6 +1103,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// argument (picker.go). Synchronous and idle-safe like /sessions: the switch it drives is the
 		// heartbeat's own rebind path, which is idle-only by construction.
 		return m.runModelCommand(parsed.args)
+
+	case "server":
+		// Open the server picker over what config.yaml names, or take the server named as an
+		// argument (picker.go). Synchronous and idle-safe like /model: the seam it drives mutates
+		// the engine and constructs a client, which Agent.SwitchUpstream allows only at a boundary.
+		return m.runServerCommand(parsed.args)
 
 	case "version":
 		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
@@ -1471,6 +1479,12 @@ type heartbeatState struct {
 	// everOnline records that at least one beat has landed. Before that there is nothing to weigh a
 	// failure against, so the first one is believed immediately.
 	everOnline bool
+	// switched records that this session has moved to another server (/server). It is set by the
+	// switch fold and never cleared — a session that has switched once is no longer a launch,
+	// whatever it does afterwards — and its one job is to defeat the quiet first-contact seed: the
+	// start-up box a launch's silence relies on is deep in the scrollback by then, and the human
+	// asked for this move, so the new server's first bind is the answer to it.
+	switched bool
 	// lastFailure is the most recent failure's words, quoted in the offline note and in the
 	// refusal of a send. "" once a beat lands.
 	lastFailure string
@@ -1576,8 +1590,13 @@ func (m Model) beatTick() tea.Cmd {
 // "connected:" line under it would only repeat what the human is looking at. That fact has to be
 // read BEFORE the resets below erase it, which is why it is the fold's first statement; it then
 // rides the intent all the way to [rebindNote], which owns the wording.
+//
+// A session that has SWITCHED servers has no such first contact left to be quiet about, even though
+// the fresh heartbeat state looks exactly like a launch's. The box is no longer "a few rows above"
+// but far up the scrollback, and the human explicitly asked for the move — so every post-switch
+// seed announces itself (see heartbeatState.switched).
 func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
-	firstContact := !m.hb.everOnline && m.hb.failures == 0
+	firstContact := !m.hb.everOnline && m.hb.failures == 0 && !m.hb.switched
 	if !beat.Reachable {
 		return m.foldBeatFailure(beat.Failure)
 	}
@@ -1715,9 +1734,11 @@ const unknownWindowNote = "context window unknown — automatic compaction and t
 // a note there would describe a change that did not happen. And the quiet first-contact seed
 // (quietSeed): the session's very first beat landed clean, so the start-up box restated in place is
 // already saying host, model and window a few rows up, and "connected:" would only say it again.
-// A seed that follows a failed beat, or one where a model finally appeared on a server that was up
-// but serving nothing, is genuine news and keeps its line. The window clause is carried only when
-// the BOUND window moved, so a pin never narrates the change it suppressed.
+// A seed that follows a failed beat, one where a model finally appeared on a server that was up but
+// serving nothing, or one that lands on a server the human just SWITCHED to (heartbeatState.switched
+// — the box is far up the scrollback by then and the move was asked for), is genuine news and keeps
+// its line. The window clause is carried only when the BOUND window moved, so a pin never narrates
+// the change it suppressed.
 //
 // Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
 // note and the chrome beside it can never name the same model two different ways.
@@ -1764,6 +1785,54 @@ func windowWord(n int) string {
 		return "unknown"
 	}
 	return formatTokens(n)
+}
+
+// foldServerSwitch folds a COMMITTED server switch (`/server`, picker.go) into the display. It is
+// reached only after [Options.SwitchServer] has returned successfully, so the engine is already
+// pointed at the new endpoint and nothing here can fail: every statement below describes a world
+// that is already true. from is the label the footer used for the server being left, captured by
+// the caller before the Options move.
+//
+// The heartbeat state is replaced WHOLESALE rather than patched, and that is what makes the switch
+// need no unwinding. The fresh generation retires the old chain, so every beat and tick still in
+// flight against the old server lands inert ([Model.heartbeatLive]). The offering empties with the
+// server that advertised it. The offline debounce returns to its cold-start posture, which is the
+// honest one here — nothing has been observed of this server yet, so its first failed beat is
+// believed at once rather than debounced against evidence gathered about a different machine. The
+// one fact carried across is switched, which keeps the seed that follows from being read as a
+// launch (see [Model.foldBeat]).
+//
+// The model is UNBOUND, deliberately: the switch guesses nothing about what the new server serves
+// (ADR 0024), so the footer says "connecting…", [Model.blockedUpstream] refuses a send, and the
+// first beat binds through the ordinary rebind path — one code path with the cold start. ctxUsed
+// survives, exactly as it survives a model rebind. The returned Cmd is that first beat, fired NOW
+// rather than one Interval from now: the human just acted and should not watch "connecting…" for
+// ten seconds.
+func (m Model) foldServerSwitch(from string, result ServerSwitchResult) (tea.Model, tea.Cmd) {
+	m.opts.Endpoint = result.Endpoint
+	m.opts.HostAlias = result.HostAlias
+	m.opts.ContextWindow = result.ContextWindow
+	m.opts.Model = ""
+	m.hb = heartbeatState{gen: m.hb.gen + 1, switched: true}
+	// The box's facts were frozen when it was seeded; restate it so the top of the scrollback names
+	// the server this session is now on rather than the one it launched against (applyRebind's own
+	// reason, one level up).
+	m.transcript.refreshStartup(newStartupView(m.opts))
+	m.transcript.addNote(serverSwitchNote(from, m.opts))
+	m.layout()
+	return m, m.beatCmd()
+}
+
+// serverSwitchNote words a committed switch: the server left, by the label the footer called it, and
+// the one now on the wire — its alias with the endpoint spelled out beside it, because the alias is
+// the human's own word for a URL and the switch is exactly the moment to show which URL it stands
+// for. An aliasless server would name the endpoint twice, so it says it once.
+func serverSwitchNote(from string, to Options) string {
+	note := "switching server: " + from + " → " + hostDisplay(to)
+	if hostDisplay(to) != to.Endpoint {
+		note += " (" + to.Endpoint + ")"
+	}
+	return note
 }
 
 // foldBeatFailure folds a beat that could not read the server. Three rules, in order:
@@ -2003,8 +2072,9 @@ func (m Model) View() tea.View {
 	if prompt != "" {
 		rows = append(rows, prompt)
 	}
-	// The /sessions browser and the /model picker share the approval/ask prompt's slot (none of them
-	// co-occur — both overlays are idle-only and modal, the prompts belong to busy states).
+	// The /sessions browser and the /model | /server picker share the approval/ask prompt's slot
+	// (none of them co-occur — both overlays are idle-only and modal, the prompts belong to busy
+	// states).
 	if browser != "" {
 		rows = append(rows, browser)
 	}

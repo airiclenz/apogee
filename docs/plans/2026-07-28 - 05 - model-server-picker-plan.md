@@ -468,7 +468,17 @@ keypress (footer, box, note), and the session STAYS on it across later beats.
 
 **Commit.** `feat(tui): /model — pick among the models the server serves`
 
-## 6. `/server` — the endpoint switch
+## 6. `/server` — the endpoint switch — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): four precisions on the item's literal text. (a) The "/server is deferred" sentence
+was already gone — item 5 rewrote that whole `commandSpecs` paragraph — so this item extended the
+rewritten clause to name `/server` beside `/model` instead of deleting a sentence that no longer
+existed. (b) The switch fold landed in `model.go` as `Model.foldServerSwitch`, beside the rebind
+orchestration whose `heartbeatState` it replaces (the item's Accept bullet names no file); `picker.go`
+keeps the verb, the overlay and the accept path that calls it. (c) The refused-switch note is prefixed
+`could not switch server: <err>` rather than being the bare error text — a lone error string in the
+scrollback has no subject, the `rebindFailNote` posture. (d) The switching note's `(<endpoint>)` clause
+is omitted when the alias IS the endpoint (an aliasless server would otherwise be named twice).
 
 **What.** The second picker kind and the switch fold that rehomes the session.
 
