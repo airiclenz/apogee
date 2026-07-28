@@ -171,6 +171,17 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
+			name: "servers are file-only (default empty)",
+			file: layer{servers: []serverEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, servers: []serverEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
+		},
+		{
+			name: "servers are NOT settable by env or flag (file-only)",
+			env:  layer{servers: []serverEntry{{Name: "fromenv", Endpoint: "http://env:1111"}}},
+			flag: layer{servers: []serverEntry{{Name: "fromflag", Endpoint: "http://flag:1111"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+		},
+		{
 			name: "model profile is file-only (default zero)",
 			file: layer{profile: &apogee.ModelProfile{
 				ToolCallFormat: apogee.FormatMarkdownFenced,
@@ -609,6 +620,132 @@ func TestApplyConfigMCPServers(t *testing.T) {
 	}
 	if !reflect.DeepEqual(opts.mcpServers, want) {
 		t.Errorf("mcpServers = %+v; want %+v", opts.mcpServers, want)
+	}
+}
+
+// The servers config block parses into opts.servers: every entry, in file order, with all four
+// fields — so the composition root can offer them as the servers this session may move to. It is
+// file-only, like mcp-servers, and the two optional keys default empty (a keyless server with no
+// model hint), which is what a plain local entry looks like.
+func TestApplyConfigServers(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configYAML string
+		want       []serverEntry
+	}{
+		{
+			name:       "no config file at all ⇒ no servers",
+			configYAML: "",
+			want:       nil,
+		},
+		{
+			name:       "a config without the block ⇒ no servers",
+			configYAML: "model: fake\n",
+			want:       nil,
+		},
+		{
+			name: "every entry resolves in file order, with all four fields",
+			configYAML: `servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    model: gpt-oss-20b
+  - name: rented-box
+    endpoint: https://llm.example.com
+    api-key: sk-rented-token
+    model: qwen2.5-coder
+`,
+			want: []serverEntry{
+				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", Model: "gpt-oss-20b"},
+				{Name: "rented-box", Endpoint: "https://llm.example.com", APIKey: "sk-rented-token", Model: "qwen2.5-coder"},
+			},
+		},
+		{
+			name:       "api-key and model are optional (a keyless server, no hint)",
+			configYAML: "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n",
+			want:       []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if tt.configYAML != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+			opts := options{configDir: home}
+			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if !reflect.DeepEqual(opts.servers, tt.want) {
+				t.Errorf("opts.servers = %#v; want %#v", opts.servers, tt.want)
+			}
+		})
+	}
+}
+
+// An entry that could never be switched to is a loud startup error that counts the offending entry
+// out — not a row that fails at the moment of the switch, and not a name that silently resolves to
+// whichever entry came first.
+func TestApplyConfigServersInvalid(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configYAML string
+		wantErr    []string
+	}{
+		{
+			name:       "an entry with no name",
+			configYAML: "servers:\n  - endpoint: http://box:1111\n",
+			wantErr:    []string{"servers: entry 1", "http://box:1111", "has no name"},
+		},
+		{
+			name:       "an entry whose name is only whitespace",
+			configYAML: "servers:\n  - name: \"   \"\n    endpoint: http://box:1111\n",
+			wantErr:    []string{"servers: entry 1", "has no name"},
+		},
+		{
+			name:       "an entry with no endpoint",
+			configYAML: "servers:\n  - name: workstation\n",
+			wantErr:    []string{"servers: entry 1", "workstation", "has no endpoint"},
+		},
+		{
+			name:       "an entry whose endpoint is only whitespace",
+			configYAML: "servers:\n  - name: workstation\n    endpoint: \"  \"\n",
+			wantErr:    []string{"servers: entry 1", "workstation", "has no endpoint"},
+		},
+		{
+			name:       "two entries sharing one name",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n  - name: box\n    endpoint: http://two:1111\n",
+			wantErr:    []string{"servers: entry 2", "box", "already has that name"},
+		},
+		{
+			// The whole list is checked, so a defect below a usable entry is still named.
+			name:       "a defect after a well-formed entry",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n  - name: other\n",
+			wantErr:    []string{"servers: entry 2", "other", "has no endpoint"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			opts := options{configDir: home}
+			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+			if err == nil {
+				t.Fatalf("applyConfig = nil error; want the entry refused (opts.servers = %#v)", opts.servers)
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q; want it to contain %q", err, want)
+				}
+			}
+		})
 	}
 }
 

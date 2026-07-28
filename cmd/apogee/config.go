@@ -50,6 +50,13 @@ type settings struct {
 	// ⇒ no Authorization header at all.
 	apiKey string
 
+	// servers is the resolved `servers:` list: the named upstream endpoints a running session can
+	// be switched to, in file order. File-only (no flag, no env — like mcpServers): naming another
+	// machine's endpoint and its key is a config act, not an invocation one. Absent/empty ⇒ no
+	// alternatives are configured, which is the default; the endpoint this session started on
+	// stands on its own either way, so this key only ADDS the servers it can move to.
+	servers []serverEntry
+
 	// confineToWorkspace is GLOBAL-CONFIG-ONLY (ADR 0012): it is resolved from the config
 	// file alone, never from a flag or env, so a hostile repo invoking apogee cannot loosen
 	// Auto's blast radius. Default true. (There is no project-level config file today; the
@@ -402,6 +409,11 @@ type layer struct {
 	// configures no key, so resolution falls through to the empty default: no auth header.
 	apiKey *string
 
+	// servers is set only by the FILE layer (the `servers:` list is config'd, default-empty, with
+	// no flag/env — like mcpServers). A nil slice means the source names no server, so resolution
+	// falls through to the empty default.
+	servers []serverEntry
+
 	// confineToWorkspace is set only by the FILE layer (global-config-only, ADR 0012). The
 	// env and flag layers leave it nil so the invocation environment cannot loosen it.
 	confineToWorkspace *bool
@@ -516,6 +528,7 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	if file.contextWindow != nil {
 		s.contextWindow = *file.contextWindow
 	}
+	s.servers = file.servers             // file-only; env/flag never name an upstream server
 	s.mcpServers = file.mcpServers       // file-only (P3.15); env/flag never set MCP servers
 	s.mechanisms = file.mechanisms       // file-only (Phase 4); env/flag never enable Mechanisms
 	if file.validatedSetsEnable != nil { // file-only (ADR 0016); env/flag never touch the surface
@@ -639,6 +652,11 @@ type fileConfig struct {
 	// Authorization header, which is the keyless local-server default. This file is plain
 	// text: on a shared machine prefer the environment variable, or restrict its permissions.
 	APIKey string `yaml:"api-key"`
+	// Servers names the upstream endpoints besides the one above — the alternatives a running
+	// session can be moved to. File-only (no flag/env), like mcp-servers: the list describes
+	// machines, not this invocation. Absent/empty ⇒ none is configured, which changes nothing
+	// about the session's own upstream (see serverEntry for what an entry carries).
+	Servers []serverEntry `yaml:"servers"`
 	// ConfineToWorkspace is global-config-only (ADR 0012): a pointer so an explicit
 	// `confine-to-workspace: false` is distinguishable from an absent key (which keeps the
 	// secure default true). It has no flag or env — editing the global config IS the
@@ -744,6 +762,59 @@ type unconfinedHost struct {
 	ID           string `yaml:"id"`
 	Acknowledged string `yaml:"acknowledged"`
 	Note         string `yaml:"note"`
+}
+
+// serverEntry is one named upstream server (`servers:` in config.yaml): an endpoint this session
+// can be moved to, plus what that server needs in order to be talked to. It is ONE type on disk
+// and resolved (the unconfinedHost posture) because there is nothing to map across — every field
+// travels to the composition root exactly as the user wrote it.
+//
+// Name does three jobs with one value: it labels the entry for the user, it is the name the
+// session is switched by, and it becomes the footer's host alias once the session is on that
+// server — which is why it is required and must be unique (it mirrors `host-alias:`, which names
+// the startup endpoint the same way). Endpoint is required for the obvious reason.
+//
+// APIKey and Model are optional. An empty key sends no Authorization header, the keyless
+// local-server default; an empty model leaves that server's discovery hint unset, so whatever it
+// serves is bound. APIKey is FILE-ONLY on purpose: APOGEE_API_KEY is a single value and it belongs
+// to the STARTUP server (the top-level `endpoint:`), so a keyed alternative carries its own key
+// here rather than borrowing that one.
+type serverEntry struct {
+	Name     string `yaml:"name"`
+	Endpoint string `yaml:"endpoint"`
+	APIKey   string `yaml:"api-key"`
+	Model    string `yaml:"model"`
+}
+
+// validateServers rejects an entry that could never be switched to, at the startup boundary where
+// the message can count the entry out for the user: one with no name (nothing to select it by, and
+// nothing for the footer to call it), one with no endpoint (nothing to talk to), and one whose
+// name an earlier entry already took — a name resolves to ONE server, so a repeat is a defect in
+// the file rather than a preference between two entries.
+//
+// It runs over the whole list rather than stopping at the first usable entry, on the
+// contextFilesSettings.validate reasoning: a defect in the file outlives the day it was written,
+// and a typo found months later has lost its context. What is deliberately NOT checked is whether
+// an endpoint answers — that is what the heartbeat asks, live, and a server that is merely off
+// today must still be listed.
+func validateServers(servers []serverEntry) error {
+	seen := make(map[string]struct{}, len(servers))
+	for i, s := range servers {
+		if strings.TrimSpace(s.Name) == "" {
+			return fmt.Errorf("apogee: servers: entry %d (%q): has no name — the name is what selects "+
+				"the server, and what the status footer calls it once the session is on it", i+1, s.Endpoint)
+		}
+		if _, dup := seen[s.Name]; dup {
+			return fmt.Errorf("apogee: servers: entry %d (%q): an earlier entry already has that name — "+
+				"one name names one server, so give this one its own", i+1, s.Name)
+		}
+		seen[s.Name] = struct{}{}
+		if strings.TrimSpace(s.Endpoint) == "" {
+			return fmt.Errorf("apogee: servers: entry %d (%q): has no endpoint — give the server's "+
+				"OpenAI-compatible URL, the same kind of value the top-level endpoint: takes", i+1, s.Name)
+		}
+	}
+	return nil
 }
 
 // validatedSetsConfig is the on-disk schema for the Validated-set surface (ADR 0016):
@@ -948,6 +1019,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if len(fc.UnconfinedHosts) > 0 {
 		l.unconfinedHosts = fc.UnconfinedHosts
+	}
+	if len(fc.Servers) > 0 {
+		l.servers = fc.Servers
 	}
 	if fc.WebSearch != "" {
 		l.webSearchEndpoint = &fc.WebSearch
@@ -1166,12 +1240,21 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := s.contextFiles.validate(); err != nil {
 		return err
 	}
+	// A `servers:` entry that could never be switched to — no name, no endpoint, or a name an
+	// earlier entry already took — is refused here for the same reason: it is a defect in the file,
+	// independent of this machine and of whether the session ever reaches for that server. Left to
+	// the moment of the switch it would surface as an entry that cannot be selected, or a name
+	// resolving to whichever entry happened to come first, long after the line was written.
+	if err := validateServers(s.servers); err != nil {
+		return err
+	}
 	opts.endpoint = s.endpoint
 	opts.model = s.model
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.hostAlias = s.hostAlias
 	opts.apiKey = s.apiKey
+	opts.servers = s.servers
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.unconfinedHosts = s.unconfinedHosts
 	opts.webSearchEndpoint = s.webSearchEndpoint

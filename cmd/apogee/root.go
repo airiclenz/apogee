@@ -43,6 +43,12 @@ type options struct {
 	// never logged, persisted, or displayed — only its presence is ever reported.
 	apiKey string
 
+	// servers is the resolved `servers:` list — the named upstream endpoints besides the one this
+	// session started on, in file order. Loaded from the config file only (default-empty ⇒ no
+	// alternatives are configured); applyConfig sets it from the resolved settings, having already
+	// refused an entry that could never be switched to.
+	servers []serverEntry
+
 	// confineToWorkspace tunes Auto's blast radius (ADR 0012); default true. It is NOT a
 	// flag — it is loaded from the GLOBAL config file only (a project config cannot loosen
 	// it), so applyConfig sets it from the resolved settings. It is the EFFECTIVE value:

@@ -241,7 +241,7 @@ parses. `internal/heartbeat/heartbeat_test.go` runs a fake `/v1/models` server.
 
 ---
 
-## 1. The `servers:` config key — named upstream endpoints
+## 1. The `servers:` config key — named upstream endpoints — ✅ DONE (2026-07-28)
 
 **What.** A file-only list of named servers the `/server` picker offers.
 

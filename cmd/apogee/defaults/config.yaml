@@ -47,6 +47,36 @@
 # model: qwen2.5-coder
 
 # =============================================================================
+# The OTHER servers you run models on. endpoint: above is where a session STARTS; each entry
+# here is a server the running session can be moved to with /server, without restarting apogee
+# and without losing the conversation. Config-file only (no flag or env). Default: empty — no
+# alternatives are offered, and nothing else changes.
+#
+#   name       what the entry is called: the label /server lists it under, the argument
+#              `/server <name>` takes, and the host name the status footer shows once the
+#              session is on it (host-alias: above, once per server). Required, and no two
+#              entries may share one.
+#   endpoint   that server's OpenAI-compatible URL, like the endpoint: above. Required.
+#   api-key    the bearer token that server wants, if it wants one. Optional, and config-file
+#              only: APOGEE_API_KEY is a single value and it belongs to the STARTUP server, so
+#              a keyed server here carries its own key. Leave it out for a keyless local one.
+#   model      that server's model hint — exactly the model: above, per server: which of the
+#              models it serves you mean. Optional: leave it out and the first heartbeat there
+#              binds whatever is loaded.
+#
+# The server this session started on is always offered too, whether or not you list it here, so
+# you can always switch back. A switch lasts for the SESSION only: nothing is written back to
+# this file, and the next launch starts at endpoint: above again.
+#
+# servers:
+#   - name: workstation
+#     endpoint: http://192.168.64.1:1111
+#     model: gpt-oss-20b
+#   - name: rented-box
+#     endpoint: https://llm.example.com
+#     api-key: sk-rented-token
+
+# =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).
 #   plan        — read-only: no writes, no command execution
 #   ask-before  — every write, command, and external reach needs your approval (the default)
