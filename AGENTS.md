@@ -14,8 +14,8 @@ and states the conventions you cannot derive from the code.
   section before design work. Large — read sections, don't load it wholesale.
 - `docs/adr/` — 25+ architectural decision records. Settled questions live here;
   check for an ADR before re-opening one.
-- `docs/design/` — design contracts (confinement execution contract, MCP client,
-  mechanism catalogue, technical design).
+- `docs/design/` — design contracts (confinement execution contract, hook
+  mutation API, MCP client, mechanism catalogue, technical design).
 - `docs/plans/` — implementation plans in the house format: numbered `## N.` H2
   items with What/Tests/Acceptance/commit. Plans are saved repo docs, executed
   item-by-item; completed plans get archived.
@@ -34,8 +34,10 @@ and states the conventions you cannot derive from the code.
 - **No AI attribution trailers** in commit messages (no Co-Authored-By /
   "generated with" lines); a local commit-msg hook strips them as a backstop.
 - Run `make check` before committing.
-- Distribution is Homebrew/binaries, **not** `go install` — proxy.golang.org
-  still serves stale, deleted v1.x tags from its immutable cache; known, not a bug.
+- Distribution is build-from-source for now (no Homebrew formula, no prebuilt
+  binaries published yet), and never `go install` — proxy.golang.org still serves
+  the deleted v1.x tags from its immutable cache, so `@latest` resolves to stale
+  `v1.7.0`; known, not a bug.
 - Config home is a single `~/.apogee` dotdir on every OS (like `~/.aws`). Settled
   decision — do not propose XDG / `os.UserConfigDir`.
 - The Bubble Tea `Model` is copied by value on every `Update`: never let a

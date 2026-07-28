@@ -20,7 +20,7 @@ sensible guardrails.
 Apogee brings together two things most coding agents keep separate:
 
 - **A complete agentic coding assistant** — the *agent loop*, with provider
-  abstraction, a ~21-tool suite (file ops, grep/glob, git, terminal, web,
+  abstraction, a ~21-tool suite (file ops, grep, git, terminal, web,
   sub-agents, showing you a finished document), an MCP client, sessions, four
   autonomy modes (Plan / Ask-Before / Allow-Edits / Auto), and security
   guardrails.
@@ -51,9 +51,10 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 **`v0.9.x` on `main` — pre-production.** The release line was deliberately reset
 from `1.x` to `0.x` (2026-07-23): the old numbering overstated maturity, and under
 SemVer a `0.x` version makes no API-stability promise — the Go API is still allowed
-to move while the tool hardens. One consequence: install from source or from
-GitHub Releases, **not** `go install …@latest` — proxy.golang.org retains the
-retired `v1.x` module versions immutably, so that still resolves to old `v1.7.0`.
+to move while the tool hardens. One consequence: build from source (prebuilt
+binaries are not published yet), **not** `go install …@latest` — proxy.golang.org
+retains the retired `v1.x` module versions immutably, so that still resolves to
+old `v1.7.0`.
 
 Functionally the loop is complete: full tool suite, MCP client, sub-agents, skills,
 and OS-confined Auto mode on **all three** platforms — Linux landlock, macOS
@@ -68,7 +69,7 @@ this box?" without running an agent, and `/confine` is the way out (see
 Newest on `main`: the **session system** — every session autosaves per turn and is
 browsable, resumable, and crash-safe (see [Sessions](#sessions)). Current work is
 per-model bench validation of the mechanism catalogue: the full catalogue is
-ported, and the first Validated set (gemma-4-E4B) ships with the binary.
+ported, and the first Validated set (`gemma-4-e4b-it-qat`) ships with the binary.
 See [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
 next.
 
@@ -132,6 +133,7 @@ you.
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) |
 | `/sessions` | Browse saved sessions — resume, rename, or delete |
 | `/skill` | Attach a skill to your next message |
+| `/version` | Show the apogee version |
 
 ## Sessions
 
