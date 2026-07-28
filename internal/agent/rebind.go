@@ -7,6 +7,10 @@ package agent
 // the one entry point that swaps all of them together, and the deferred-binding relaxation
 // (Config.Model may start empty, errNoModelBound guards Submit) is what lets a session start
 // before any model is known at all.
+//
+// SwitchUpstream lives here too: moving the session to another SERVER is the same lifecycle
+// concern one level up — it leaves the session unbound and lets the new Upstream's first
+// observed model complete the move through Rebind, so there is still exactly one way to bind.
 
 import (
 	"errors"
@@ -14,6 +18,7 @@ import (
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/prompt"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 var (
@@ -127,6 +132,64 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	if binder, ok := a.upstream.(interface{ SetModel(string) }); ok {
 		binder.SetModel(spec.Model)
 	}
+	a.tokens = apogeectx.NewTokenEstimator()
+	a.compactSat = false
+	return nil
+}
+
+// UpstreamSpec carries the new Upstream target Agent.SwitchUpstream moves the session to. It is
+// deliberately only the two facts a server is: where it lives and how to authenticate to it. It
+// names no model — a switch UNBINDS the model rather than guessing what the new server serves
+// (ADR 0024's one-code-path rule: the new Upstream's first observed model binds through Rebind
+// like every other binding does).
+type UpstreamSpec struct {
+	// Endpoint is the new Upstream's base URL. Required — errMissingEndpoint stands.
+	Endpoint string
+	// APIKey is the new server's bearer token; "" sends no auth header. Keys are per-server, so
+	// this replaces the old one outright rather than being carried over.
+	APIKey string
+}
+
+// SwitchUpstream moves the session to another Upstream: it binds a fresh provider client at
+// spec.Endpoint carrying spec.APIKey, and leaves the session with NO model bound. It is the
+// engine half of the host's `/server` switch (ADR 0024).
+//
+// A new client rather than a mutated one is the provider's own contract (provider.Client.SetModel
+// rebinds the model and deliberately never the endpoint), so the wire target moves atomically
+// with the key rather than through two independent mutations.
+//
+// Unbinding is the honest posture, not a shortcut: the new server's model, context window,
+// system-prompt template and Mechanism set are all facts only that server can report, so the
+// host's heartbeat discovers them and the ordinary Rebind applies them — one code path with the
+// cold start and the late seed. errNoModelBound guards Submit in the gap, exactly as it does
+// before a session's first bind.
+//
+// Idle-only, like Rebind: it refuses mid-Exchange (ErrInputPending) so no request is ever
+// re-pointed at a different server underneath itself, and the boundary the host crosses to call
+// this IS the synchronization for the loop's un-mutexed cfg reads.
+//
+// What stands: the conversation and Turn counters, the autonomy mode, session approvals, the
+// confinement flag, the resolved tools, and the model profile with its parse-seam collaborators —
+// none of them describe a server. The catalogued Mechanism registry also stands, still armed for
+// the model that just went away, until the follow-up Rebind rebuilds it for the new one; it is
+// unreachable meanwhile, since no request can open while nothing is bound.
+// What resets, with Rebind's own rationale: the token estimator (its chars→token calibration
+// described a model this session no longer speaks to) and the compaction saturation latch (it was
+// judged against a window that is no longer bound).
+func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
+	if a.turns.inExchange {
+		return domain.ErrInputPending
+	}
+	if spec.Endpoint == "" {
+		return errMissingEndpoint
+	}
+
+	// Commit — from here on nothing can fail (provider.NewClient never does; a malformed
+	// endpoint surfaces at request time, matching construction).
+	a.upstream = provider.NewClient(spec.Endpoint, "", provider.WithAPIKey(spec.APIKey))
+	a.cfg.Endpoint = spec.Endpoint
+	a.cfg.APIKey = spec.APIKey
+	a.cfg.Model = ""
 	a.tokens = apogeectx.NewTokenEstimator()
 	a.compactSat = false
 	return nil

@@ -295,7 +295,15 @@ what the next beat resolves.
 
 **Commit.** `feat(heartbeat): Monitor.SetModel — the discovery hint follows the binding`
 
-## 3. `Agent.SwitchUpstream` — the engine half of a server switch
+## 3. `Agent.SwitchUpstream` — the engine half of a server switch — ✅ DONE (2026-07-28)
+
+NOTES (2026-07-28): the "client actually swapped" test could not use the item's literal shape —
+a *fake* new responder observing `SetModel("new")` — because `SwitchUpstream` constructs a real
+`provider.NewClient` by contract, so nothing fake can be behind the seam after a switch. Same
+guarantee, stronger evidence: `TestSwitchUpstreamSwapsTheProviderClient` points the switch at an
+httptest OpenAI-compatible server, then asserts the post-switch `Rebind` + Exchange lands ONE
+request there carrying `model: "new-model"` and `Authorization: Bearer new-key`, while the
+retired fake responder records neither a `SetModel` nor a further request.
 
 **What.** The one entry point that moves a session to another endpoint, honouring
 `provider.Client`'s "new Client, not a mutated one" contract and Rebind's boundary discipline.

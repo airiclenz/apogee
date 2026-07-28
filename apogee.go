@@ -67,6 +67,12 @@ func Resume(cfg Config, snap Session) (*Agent, error) { return agent.Resume(cfg,
 // a quiescent boundary. See internal/agent for the contract.
 type RebindSpec = agent.RebindSpec
 
+// UpstreamSpec carries the new Upstream target Agent.SwitchUpstream moves a session to — the
+// endpoint and its bearer token. The switch leaves the session with no model bound; the new
+// server's first observed model binds through Rebind, so there is one binding path either way.
+// See internal/agent for the contract.
+type UpstreamSpec = agent.UpstreamSpec
+
 // ----------------------------------------------------------------------------
 // Construction & autonomy (internal/domain)
 // ----------------------------------------------------------------------------
