@@ -85,6 +85,10 @@ type commandSpec struct {
 // same way — though /load's accept then runs a blocking launcher verb behind the actuation latch
 // rather than finishing on the Update loop (actuation.go, ADR 0029).
 //
+// /unload and /stop are that same latch without an overlay: they take no argument because there is
+// nothing to choose — both act on the server this session is talking to and on nothing else, which is
+// what keeps the one mistake available here (stopping somebody else's server) off the table.
+//
 // Order is display order, and one pair depends on it: /skill must precede /skills, because the
 // dropdown prefix-matches in table order and highlights its first row — so a typed "/skill"
 // completes to the picker rather than to the listing that merely shares its prefix.
@@ -98,6 +102,8 @@ var commandSpecs = []commandSpec{
 	{name: "model", summary: "switch to another model the server serves", takesArgs: true},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
 	{name: "load", summary: "load a llama-launcher profile into a local server", takesArgs: true},
+	{name: "unload", summary: "free the model of the server this session is on"},
+	{name: "stop", summary: "stop the server this session is on"},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
 	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},

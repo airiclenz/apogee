@@ -1148,6 +1148,18 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// goroutine under the actuation latch and the beat after it completes the move (ADR 0029).
 		return m.runLoadCommand(parsed.args)
 
+	case "unload":
+		// Free the model of the server this session is talking to. No picker and no argument: the
+		// session's own endpoint is the only thing either actuation verb may act on (ADR 0029 D3), and
+		// it is read on this loop rather than captured, so the verb acts on where the session is NOW.
+		return m.startServerActuation(verbUnload, m.opts.UnloadServer)
+
+	case "stop":
+		// Stop that server outright. Idle-only like its siblings and latched like /load — the call
+		// blocks through the launcher's stop escalation — and afterwards the ordinary offline crossing
+		// narrates the rest, because the downtime is real (actuation.go, ADR 0029).
+		return m.startServerActuation(verbStop, m.opts.StopServer)
+
 	case "version":
 		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
 		// seam) as a transcript note and stay idle — no upstream call, no worker.

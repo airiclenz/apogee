@@ -1449,15 +1449,22 @@ func TestUnloadAndStopActOnTheSessionsEndpoint(t *testing.T) {
 	if !slices.Equal(result.Steps, steps) || !result.ServerStopped {
 		t.Errorf("unload result = %+v; want the launcher's steps and ServerStopped true (a managed backend)", result)
 	}
+	if result.Backend != "llamacpp" || result.Addr != "127.0.0.1:8080" {
+		t.Errorf("unload result = %+v; want the discovered instance named for the renderer's wording", result)
+	}
 	if !slices.Equal(ops.unloaded, []string{"llamacpp 127.0.0.1:8080"}) {
 		t.Errorf("unload calls = %v; want the backend and address discovery reported for the session", ops.unloaded)
 	}
 
-	if _, err := wiring.stop("http://127.0.0.1:11434"); err != nil {
+	stopped, err := wiring.stop("http://127.0.0.1:11434")
+	if err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if !slices.Equal(ops.stopped, []string{"127.0.0.1:11434"}) {
 		t.Errorf("stop calls = %v; want the address the endpoint reduced to", ops.stopped)
+	}
+	if stopped.Backend != "ollama" || stopped.Addr != "127.0.0.1:11434" {
+		t.Errorf("stop result = %+v; want the instance answering at the session's address", stopped)
 	}
 }
 
@@ -1503,15 +1510,21 @@ func TestActuationResultKeepsTheStepsBesideTheError(t *testing.T) {
 
 	failed := errors.New("the process did not exit")
 	steps := []string{"Sending SIGTERM", "Sending SIGKILL"}
-	result, err := actuationResult(&llamalauncher.StopResult{Steps: steps}, failed)
+	on := &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080}
+	result, err := actuationResult(on, &llamalauncher.StopResult{Steps: steps}, failed)
 	if !errors.Is(err, failed) {
 		t.Errorf("err = %v; want the launcher's own error passed through", err)
 	}
 	if !slices.Equal(result.Steps, steps) {
 		t.Errorf("result.Steps = %v; want the steps completed before the failure %v", result.Steps, steps)
 	}
-	if result, err := actuationResult(nil, failed); len(result.Steps) != 0 || !errors.Is(err, failed) {
-		t.Errorf("actuationResult(nil, err) = %+v, %v; want the zero result and the error", result, err)
+	// The failed verb still names what it was acting on — the renderer heads the steps with it, and a
+	// StopResult carries no instance of its own once the operation failed.
+	if result.Backend != "llamacpp" || result.Addr != "127.0.0.1:8080" {
+		t.Errorf("result = %+v; want the aimed-at instance's backend and address", result)
+	}
+	if result, err := actuationResult(nil, nil, failed); len(result.Steps) != 0 || !errors.Is(err, failed) {
+		t.Errorf("actuationResult(nil, nil, err) = %+v, %v; want the zero result and the error", result, err)
 	}
 }
 

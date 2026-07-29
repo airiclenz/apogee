@@ -107,6 +107,44 @@ const startupTimeoutCoda = " — the heartbeat will bind it if it comes up"
 // them and names the key that turns them on.
 const noLauncherNote = "llama-launcher not configured — set llama-launcher: in config.yaml or install the launcher"
 
+// stopHeading is the line `/stop` puts ABOVE the launcher's recorded steps. The steps are terse and
+// subject-less ("Sending stop signal", "Waiting for shutdown"), so without a heading the transcript
+// never says what they were done TO — and "what was it stopping" is the whole question a human reads
+// this block to answer. It names the launcher's own backend and address rather than the session's
+// endpoint, because those are what the verb actually acted on.
+//
+// A result that names neither earns no heading at all: an empty "stopping" would say less than the
+// steps it introduces.
+func stopHeading(res ActuationResult) string {
+	subject := res.Backend
+	switch {
+	case subject == "":
+		subject = res.Addr
+	case res.Addr != "":
+		subject += " (" + res.Addr + ")"
+	}
+	if subject == "" {
+		return ""
+	}
+	return "stopping " + subject
+}
+
+// unloadOutcome words the one thing `/unload` has to be honest about: whether freeing the model also
+// took the server with it. On a MANAGED backend the model is baked into the process arguments, so an
+// unload IS a stop and the session's server is now gone — a fact the human needs before wondering why
+// the beat went quiet — while an external backend keeps serving and can be loaded again without a
+// launch. The backend is named when the launcher said which one, because WHICH server just went down
+// is the next thing asked.
+func unloadOutcome(res ActuationResult) string {
+	if !res.ServerStopped {
+		return "model unloaded — server still up"
+	}
+	if res.Backend == "" {
+		return "model unloaded — this stopped the server"
+	}
+	return "model unloaded — this stopped " + res.Backend
+}
+
 // actuationBlocked reports whether command is one of the verbs the latch refuses while it is held:
 // the two that open an Exchange (a typed message is the third path and is gated in submit) and the
 // five that switch or actuate. Everything else — scrollback, /clear, /sessions, /version, /confine —
@@ -282,6 +320,14 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 	for _, notice := range ev.load.Notices {
 		m.transcript.addNote(stripEscapes(notice))
 	}
+	if verb == verbStop {
+		// The heading goes FIRST, so the steps beneath it have a subject. It is written here rather
+		// than when the verb was asked for because only the launcher can say which server answers at
+		// the session's address — and it says so in the result.
+		if heading := stopHeading(ev.result); heading != "" {
+			m.transcript.addNote(stripEscapes(heading))
+		}
+	}
 	for _, step := range ev.result.Steps {
 		m.transcript.addNote(stripEscapes(step))
 	}
@@ -296,9 +342,14 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if verb != verbLoad {
-		// `/unload` and `/stop` have already said what they did through their steps; the display's
-		// next move belongs to the heartbeat (a stopped server crosses offline the ordinary way,
-		// which is now honest — the latch is released and the downtime is real).
+		// `/stop` has already said everything it did — the heading and the steps beneath it — while
+		// `/unload` owes one more sentence, because its two outcomes look identical in the steps and
+		// only one of them leaves the session without a server. Then the display's next move belongs
+		// to the heartbeat (a stopped server crosses offline the ordinary way, which is now honest —
+		// the latch is released and the downtime is real).
+		if verb == verbUnload {
+			m.transcript.addNote(stripEscapes(unloadOutcome(ev.result)))
+		}
 		m.refreshViewport()
 		return m, nil
 	}

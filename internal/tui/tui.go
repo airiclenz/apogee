@@ -440,9 +440,17 @@ type ProfileLoadResult struct {
 // honest about what it did: on a MANAGED backend the model is baked into the server's process
 // arguments, so unloading it means stopping the server (true), while an external backend takes an API
 // unload and keeps running (false). `/stop` always reports true on success.
+//
+// Backend and Addr name WHAT was acted on — the instance discovery answered the session's endpoint
+// with. The renderer cannot derive either and the steps do not carry them: the launcher's own steps
+// are terse and subject-less ("Sending stop signal", "Unloading model"), and the session holds an
+// endpoint URL rather than the address the launcher manages or the name of the server program
+// answering there. They are display facts only, and empty when the launcher did not say.
 type ActuationResult struct {
 	Steps         []string // the orchestration steps taken, in order; present even on failure
 	ServerStopped bool     // the server process itself was stopped, not just its model freed
+	Backend       string   // the acted-on server's backend — llamacpp, ollama, lmstudio; "" when unknown
+	Addr          string   // the host:port acted on, as the launcher spells it; "" when unknown
 }
 
 // ResumedSession is the startup-replay payload the composition root hands the TUI when a run

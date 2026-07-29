@@ -449,7 +449,8 @@ func (w launcherWiring) unload(endpoint string) (tui.ActuationResult, error) {
 	if err != nil {
 		return tui.ActuationResult{}, err
 	}
-	return actuationResult(w.ops.unload(instance.Backend, instanceAddr(instance)))
+	res, err := w.ops.unload(instance.Backend, instanceAddr(instance))
+	return actuationResult(instance, res, err)
 }
 
 // stop is [tui.Options.StopServer]: stop the server at the session's endpoint outright, whether or
@@ -460,7 +461,8 @@ func (w launcherWiring) stop(endpoint string) (tui.ActuationResult, error) {
 	if err != nil {
 		return tui.ActuationResult{}, err
 	}
-	return actuationResult(w.ops.stop(instanceAddr(instance)))
+	res, err := w.ops.stop(instanceAddr(instance))
+	return actuationResult(instance, res, err)
 }
 
 // managedInstance answers the question both actuation verbs have to ask first: is the server this
@@ -492,9 +494,18 @@ func (w launcherWiring) managedInstance(endpoint string) (*llamalauncher.Running
 // all. The facade returns a NON-NIL result even on failure, carrying the steps completed before it —
 // so the steps travel out beside the error rather than being discarded with it: how far a stop got
 // before it failed is exactly what the human needs, and it is the only place that information exists.
-func actuationResult(res *llamalauncher.StopResult, err error) (tui.ActuationResult, error) {
-	if res == nil {
-		return tui.ActuationResult{}, err
+//
+// on is the instance the verb was aimed at — discovery's own answer for the session's endpoint —
+// and it, rather than the result's own Instance, is what names the backend and address the renderer
+// narrates with: StopResult carries no instance when the operation failed, and a stop that failed is
+// precisely when saying WHAT it was stopping matters.
+func actuationResult(on *llamalauncher.RunningInstance, res *llamalauncher.StopResult, err error) (tui.ActuationResult, error) {
+	out := tui.ActuationResult{Addr: instanceAddr(on)}
+	if on != nil {
+		out.Backend = on.Backend
 	}
-	return tui.ActuationResult{Steps: res.Steps, ServerStopped: res.ServerStopped}, err
+	if res != nil {
+		out.Steps, out.ServerStopped = res.Steps, res.ServerStopped
+	}
+	return out, err
 }

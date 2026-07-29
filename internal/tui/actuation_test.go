@@ -625,3 +625,242 @@ func TestServerActuationNotesEveryStep(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// /unload and /stop (ADR 0029 D3)
+// ----------------------------------------------------------------------------
+
+// Both verbs are typed with no argument — there is nothing to choose, they act on the server this
+// session is talking to and on nothing else — and both run through the ONE latch: while either is in
+// flight all three launcher verbs are refused, which is the per-address serialization the facade
+// demands of its caller now covering the whole trio.
+func TestUnloadAndStopActOnTheSessionsServer(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		line    string
+		verb    string
+		unloads []string
+		stops   []string
+	}{
+		{line: "/unload", verb: verbUnload, unloads: []string{testOpts.Endpoint}},
+		{line: "/stop", verb: verbStop, stops: []string{testOpts.Endpoint}},
+	} {
+		t.Run(tc.line, func(t *testing.T) {
+			t.Parallel()
+
+			unloader, stopper := newLauncher(), newLauncher()
+			m, _ := wireLauncher(t, newLauncher())
+			m.opts.UnloadServer, m.opts.StopServer = unloader.act, stopper.act
+
+			m, cmd := typeCommand(t, m, tc.line)
+
+			if !m.actuation.inFlight || m.actuation.verb != tc.verb {
+				t.Fatalf("actuation = {inFlight:%v verb:%q}, want the %s latch held",
+					m.actuation.inFlight, m.actuation.verb, tc.verb)
+			}
+			for _, refused := range []string{"/load alpha", "/unload", "/stop"} {
+				next, blocked := typeCommand(t, m, refused)
+				if blocked != nil {
+					t.Errorf("%q returned a Cmd while %s was in flight", refused, tc.verb)
+				}
+				want := tc.verb + " in flight"
+				if got := noteTexts(next); len(got) == 0 || got[len(got)-1] != want {
+					t.Errorf("%q: notes = %v, want %q", refused, got, want)
+				}
+			}
+
+			m, cmd = driveActuation(t, m, cmd)
+
+			if m.actuation.inFlight {
+				t.Fatal("the latch was not released by the completion")
+			}
+			if cmd != nil {
+				t.Error("an actuation on the session's own server fired a beat of its own")
+			}
+			if got := unloader.actuated(); !reflect.DeepEqual(got, tc.unloads) {
+				t.Errorf("unload seam called with %v, want %v", got, tc.unloads)
+			}
+			if got := stopper.actuated(); !reflect.DeepEqual(got, tc.stops) {
+				t.Errorf("stop seam called with %v, want %v", got, tc.stops)
+			}
+		})
+	}
+}
+
+// /unload owes one sentence its steps cannot carry: whether freeing the model also took the server
+// with it. On a managed backend an unload IS a stop — the session's server is gone, which is what the
+// human needs before wondering why the beat went quiet — while an external backend keeps serving. A
+// FAILED unload claims neither: the launcher's error is the last word.
+func TestUnloadWordsTheManagedSemantic(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		res  ActuationResult
+		err  error
+		want []string
+	}{
+		{
+			name: "managed backend",
+			res:  ActuationResult{Steps: []string{"Unloading model"}, ServerStopped: true, Backend: "llamacpp"},
+			want: []string{"Unloading model", "model unloaded — this stopped llamacpp"},
+		},
+		{
+			name: "external backend",
+			res:  ActuationResult{Steps: []string{"Unloading model"}, Backend: "ollama"},
+			want: []string{"Unloading model", "model unloaded — server still up"},
+		},
+		{
+			name: "backend unnamed",
+			res:  ActuationResult{ServerStopped: true},
+			want: []string{"model unloaded — this stopped the server"},
+		},
+		{
+			name: "failed",
+			res:  ActuationResult{Steps: []string{"Unloading model"}, Backend: "ollama"},
+			err:  errors.New("the model is still loaded"),
+			want: []string{"Unloading model", "the model is still loaded"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newLauncher()
+			fake.actResult, fake.actErr = tc.res, tc.err
+			m, _ := wireLauncher(t, fake)
+			notesBefore := len(noteTexts(m))
+
+			m, cmd := typeCommand(t, m, "/unload")
+			m, _ = driveActuation(t, m, cmd)
+
+			if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("notes = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// /stop heads the launcher's steps with what it was stopping. The steps themselves are terse and
+// subject-less ("Sending stop signal"), and the renderer cannot derive the subject — the session holds
+// an endpoint URL, not the address the launcher manages nor the name of the server answering there —
+// so the heading is the only line that says what just went down. A launcher that named neither earns
+// no heading rather than an empty one.
+func TestStopHeadsTheStepsWithWhatItStopped(t *testing.T) {
+	t.Parallel()
+
+	steps := []string{"Sending stop signal", "Waiting for shutdown"}
+	for _, tc := range []struct {
+		name string
+		res  ActuationResult
+		want []string
+	}{
+		{
+			name: "backend and address",
+			res:  ActuationResult{Steps: steps, ServerStopped: true, Backend: "llamacpp", Addr: "localhost:1234"},
+			want: []string{"stopping llamacpp (localhost:1234)", "Sending stop signal", "Waiting for shutdown"},
+		},
+		{
+			name: "address alone",
+			res:  ActuationResult{Steps: steps, ServerStopped: true, Addr: "localhost:1234"},
+			want: []string{"stopping localhost:1234", "Sending stop signal", "Waiting for shutdown"},
+		},
+		{
+			name: "nothing named",
+			res:  ActuationResult{Steps: steps, ServerStopped: true},
+			want: steps,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newLauncher()
+			fake.actResult = tc.res
+			m, _ := wireLauncher(t, fake)
+			notesBefore := len(noteTexts(m))
+
+			m, cmd := typeCommand(t, m, "/stop")
+			m, _ = driveActuation(t, m, cmd)
+
+			if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("notes = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// An endpoint the launcher does not manage is refused by the bridge, and the refusal reaches the human
+// verbatim: nothing was acted on, and naming the endpoint is what makes that actionable (a remote
+// server's local half is the launcher's MCP adapter, not this verb). The latch releases all the same.
+func TestServerActuationReportsTheNotManagedRefusal(t *testing.T) {
+	t.Parallel()
+
+	for _, line := range []string{"/unload", "/stop"} {
+		t.Run(line, func(t *testing.T) {
+			t.Parallel()
+
+			want := "the launcher doesn't manage " + testOpts.Endpoint
+			fake := newLauncher()
+			fake.actErr = errors.New(want)
+			m, _ := wireLauncher(t, fake)
+			notesBefore := len(noteTexts(m))
+
+			m, cmd := typeCommand(t, m, line)
+			m, _ = driveActuation(t, m, cmd)
+
+			if m.actuation.inFlight {
+				t.Fatal("a refused actuation left the latch held")
+			}
+			if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, []string{want}) {
+				t.Errorf("notes = %v, want the bridge's refusal alone %q", got, want)
+			}
+		})
+	}
+}
+
+// Without the launcher wired both verbs degrade to the one line every launcher verb owes, and neither
+// latches: there is nothing in flight to serialize.
+func TestUnloadAndStopWithoutTheLauncher(t *testing.T) {
+	t.Parallel()
+
+	m, _ := seededPicker(t, testOpts) // no launcher seams wired
+	for _, line := range []string{"/unload", "/stop"} {
+		next, cmd := typeCommand(t, m, line)
+
+		if cmd != nil {
+			t.Errorf("%q returned a Cmd with no launcher wired", line)
+		}
+		if next.actuation.inFlight {
+			t.Errorf("%q took the latch with no launcher wired", line)
+		}
+		if got := noteTexts(next); len(got) == 0 || got[len(got)-1] != noLauncherNote {
+			t.Errorf("%q: notes = %v, want %q", line, got, noLauncherNote)
+		}
+	}
+}
+
+// After a /stop the downtime is REAL, and the display says so the ordinary way: the latch released
+// with the completion, so the beat shadow is gone and the same debounce that narrates a server dying
+// on its own crosses this session offline.
+func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	fake.actResult = ActuationResult{
+		Steps: []string{"Sending stop signal"}, ServerStopped: true, Backend: "llamacpp", Addr: "localhost:1234",
+	}
+	m, _ := wireLauncher(t, fake)
+	m, cmd := typeCommand(t, m, "/stop")
+	m, _ = driveActuation(t, m, cmd)
+
+	for range offlineFailureThreshold {
+		m = foldBeatMsg(t, m, downBeat("connection refused"))
+	}
+
+	if !m.hb.offline {
+		t.Error("the session did not cross offline after its own server was stopped")
+	}
+	if n := countNotes(m, "server offline"); n != 1 {
+		t.Errorf("offline notes = %d, want the crossing narrated once", n)
+	}
+}

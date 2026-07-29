@@ -302,7 +302,26 @@ no-Builder-by-value rule holds on every new Model field.
 
 **Commit.** `feat(tui): actuation latch + narrated profile loads — the beat completes the move`
 
-## 6. `/unload` and `/stop`
+## 6. `/unload` and `/stop` — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): four deviations from the item's literal text, all about where this item's wording
+gets its facts.
+(a) `tui.ActuationResult` gained `Backend` and `Addr`. Item 3 fixed the shape as `{Steps,
+ServerStopped}`, but both sentences this item specifies name the backend — and the renderer cannot
+derive it: the session holds an endpoint URL, not the address the launcher manages nor the name of the
+server answering there, and the launcher's own steps are terse and subject-less ("Sending stop
+signal"). `cmd/apogee` fills them from the instance `managedInstance` already discovered rather than
+from `StopResult.Instance`, which is nil exactly when the verb failed — the moment naming what it was
+acting on matters most.
+(b) The `stopping <backend> (<addr>)` line is written at COMPLETION, directly above the steps, not when
+the verb is asked for. Item 3's seam takes no progress callback, so an actuation's steps exist only in
+the returned result; and the backend is the launcher's answer, unknown until the call returns. The
+footer's `stop…` covers the in-flight window, as it does for a load before its first step.
+(c) Both wordings degrade rather than print a blank: no backend and no address earns no heading at all,
+a bare address heads the steps alone, and an unnamed backend makes the unload sentence `model unloaded
+— this stopped the server`.
+(d) A failed `/unload` prints no outcome sentence — the launcher's error is the last word, and
+"model unloaded" beside it would be a claim the verb did not earn.
 
 **What.** The two remaining verbs (ADR 0029 D3), no pickers: command rows + dispatch; both
 run through item 5's latch and pump (steps → notes). `/unload`: note the managed semantic
