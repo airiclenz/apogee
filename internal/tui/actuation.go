@@ -12,8 +12,8 @@ import (
 // ----------------------------------------------------------------------------
 //
 // An actuation is one call into the launcher that CHANGES the world — `/model` activating a Launch
-// profile, `/unload` freeing the session's model, `/stop` stopping its server. Three facts shape
-// everything below.
+// profile, `/unload-model` freeing the session's model, `/stop-server` stopping its server. Three
+// facts shape everything below.
 //
 // It BLOCKS. The facade waits up to ~30 s for health, escalates a stop for another ~20 s, and
 // gives a large model load minutes; so the verb runs on a Cmd goroutine and the Update loop keeps
@@ -55,8 +55,8 @@ type actuation struct {
 // The three verbs, as the footer spells them and the completion fold switches on them.
 const (
 	verbLoad   = "load"
-	verbUnload = "unload"
-	verbStop   = "stop"
+	verbUnload = "unload-model"
+	verbStop   = "stop-server"
 )
 
 // actuationBuffer is how many narration steps the pump can hold before the launcher's callback
@@ -74,8 +74,9 @@ type actuationEvent struct {
 	step string
 	// final marks the completion item. Everything below it is meaningful only then.
 	final bool
-	// load is a completed profile load's answer, and result a completed `/unload`/`/stop`'s. Which one
-	// carries the outcome is decided by the latch's verb, not by inspecting them.
+	// load is a completed profile load's answer, and result a completed
+	// `/unload-model`/`/stop-server`'s. Which one carries the outcome is decided by the latch's
+	// verb, not by inspecting them.
 	load   ProfileLoadResult
 	result ActuationResult
 	// err is what the seam returned. Steps and notices recorded before it still travel, because
@@ -108,11 +109,11 @@ const startupTimeoutCoda = " — the heartbeat will bind it if it comes up"
 // them and names the key that turns them on.
 const noLauncherNote = "llama-launcher not configured — set llama-launcher: in config.yaml or install the launcher"
 
-// stopHeading is the line `/stop` puts ABOVE the launcher's recorded steps. The steps are terse and
-// subject-less ("Sending stop signal", "Waiting for shutdown"), so without a heading the transcript
-// never says what they were done TO — and "what was it stopping" is the whole question a human reads
-// this block to answer. It names the launcher's own backend and address rather than the session's
-// endpoint, because those are what the verb actually acted on.
+// stopHeading is the line `/stop-server` puts ABOVE the launcher's recorded steps. The steps are
+// terse and subject-less ("Sending stop signal", "Waiting for shutdown"), so without a heading the
+// transcript never says what they were done TO — and "what was it stopping" is the whole question a
+// human reads this block to answer. It names the launcher's own backend and address rather than the
+// session's endpoint, because those are what the verb actually acted on.
 //
 // A result that names neither earns no heading at all: an empty "stopping" would say less than the
 // steps it introduces.
@@ -130,12 +131,12 @@ func stopHeading(res ActuationResult) string {
 	return "stopping " + subject
 }
 
-// unloadOutcome words the one thing `/unload` has to be honest about: whether freeing the model also
-// took the server with it. On a MANAGED backend the model is baked into the process arguments, so an
-// unload IS a stop and the session's server is now gone — a fact the human needs before wondering why
-// the beat went quiet — while an external backend keeps serving and can be loaded again without a
-// launch. The backend is named when the launcher said which one, because WHICH server just went down
-// is the next thing asked.
+// unloadOutcome words the one thing `/unload-model` has to be honest about: whether freeing the
+// model also took the server with it. On a MANAGED backend the model is baked into the process
+// arguments, so an unload IS a stop and the session's server is now gone — a fact the human needs
+// before wondering why the beat went quiet — while an external backend keeps serving and can be
+// loaded again without a launch. The backend is named when the launcher said which one, because
+// WHICH server just went down is the next thing asked.
 func unloadOutcome(res ActuationResult) string {
 	if !res.ServerStopped {
 		return "model unloaded — server still up"
@@ -152,7 +153,7 @@ func unloadOutcome(res ActuationResult) string {
 // stays live, because none of them touches the server being worked on.
 func actuationBlocked(command string) bool {
 	switch command {
-	case "unload", "stop", "model", "server", "continue", "compact":
+	case "unload-model", "stop-server", "model", "server", "continue", "compact":
 		return true
 	}
 	return false
@@ -214,9 +215,9 @@ func (m Model) startProfileLoad(name string) (tea.Model, tea.Cmd) {
 }
 
 // startServerActuation is the same entry point for the two verbs that act on the server this
-// session is talking to rather than on a named profile (`/unload`, `/stop`). The endpoint is read
-// HERE, on the Update loop, so the verb acts on the server the session is on at the moment the
-// human asked — not on wherever it may have moved to by the time the call returns.
+// session is talking to rather than on a named profile (`/unload-model`, `/stop-server`). The
+// endpoint is read HERE, on the Update loop, so the verb acts on the server the session is on at the
+// moment the human asked — not on wherever it may have moved to by the time the call returns.
 func (m Model) startServerActuation(verb string, act func(endpoint string) (ActuationResult, error)) (tea.Model, tea.Cmd) {
 	if act == nil {
 		return m.pickerNote(noLauncherNote)
@@ -344,8 +345,8 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if verb != verbLoad {
-		// `/stop` has already said everything it did — the heading and the steps beneath it — while
-		// `/unload` owes one more sentence, because its two outcomes look identical in the steps and
+		// `/stop-server` has already said everything it did — the heading and the steps beneath it — while
+		// `/unload-model` owes one more sentence, because its two outcomes look identical in the steps and
 		// only one of them leaves the session without a server. Then the display's next move belongs
 		// to the heartbeat (a stopped server crosses offline the ordinary way, which is now honest —
 		// the latch is released and the downtime is real).

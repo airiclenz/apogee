@@ -36,8 +36,7 @@ func TestParseInputCommands(t *testing.T) {
 
 // TestCommandTableDrivesParserAndMenu pins the one-registry guarantee: commandSpecs is the only
 // list of "/" verbs, so a verb can never be offered by the dropdown while the parser has never
-// heard of it (or vice versa). Exactly the non-menuOnly rows parse; every non-hidden row is offered
-// (the two flags are each other's inverse — commandSpec).
+// heard of it (or vice versa). Exactly the non-menuOnly rows parse; every row is offered.
 func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	for _, spec := range commandSpecs {
 		t.Run(spec.name, func(t *testing.T) {
@@ -64,7 +63,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 	wantParsed := []string{
 		"clear", "compact", "confine", "continue", "model", "new", "server", "sessions",
-		"skills", "stop", "unload", "version"}
+		"skills", "stop-server", "unload-model", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
 	}
@@ -72,13 +71,10 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		t.Errorf("menu-only verbs = %v, want [skill]", menuOnly)
 	}
 
-	// The empty partial lists every offerable row, in table order, labelled from the same table.
-	// Hidden verbs are the one exclusion, and they have their own test below.
+	// The empty partial lists EVERY row, in table order, labelled from the same table — no verb of
+	// the registry is withheld from the menu.
 	var want, wantLabels []string
 	for _, spec := range commandSpecs {
-		if spec.hidden {
-			continue
-		}
 		want = append(want, spec.name)
 		wantLabels = append(wantLabels, "/"+spec.name+"  "+spec.summary)
 	}
@@ -115,52 +111,56 @@ func TestCommandSpecsReadAlphabetically(t *testing.T) {
 	}
 }
 
-// TestHiddenVerbsAreParsedNeverOffered pins commandSpec.hidden, menuOnly's exact inverse: /unload
-// and /stop keep every bit of their behaviour (the parser, the latch, the wording of item 6) and
-// simply leave the menu. The prefix forms matter as much as the bare "/" one — a dropdown that
-// answered "/unl" would be offering the verb again by the back door — and the typo guard must not
-// claim them either, since they still resolve.
-func TestHiddenVerbsAreParsedNeverOffered(t *testing.T) {
-	hidden := []string{"unload", "stop"}
-	for _, name := range hidden {
-		spec, ok := commandByName(name)
-		if !ok || !spec.hidden {
-			t.Fatalf("commandByName(%q) = {%+v, %v}, want a hidden row", name, spec, ok)
-		}
-	}
-	for _, partial := range []string{"", "s", "st", "stop", "u", "unl", "unload"} {
+// The two verbs that act on the session's server are ordinary rows: named for what they act on,
+// /stop-server and /unload-model carry no ambiguity to guard against, so the dropdown offers them on
+// the bare "/" and on every prefix of their own names — a verb the human cannot discover is a verb
+// they will not find. The busy menu offers them too, tagged (the row below pins the tag itself).
+func TestServerVerbsAreOffered(t *testing.T) {
+	for _, tc := range []struct{ partial, want string }{
+		{"", "stop-server"},
+		{"", "unload-model"},
+		{"s", "stop-server"},
+		{"st", "stop-server"},
+		{"stop", "stop-server"},
+		{"stop-server", "stop-server"},
+		{"u", "unload-model"},
+		{"un", "unload-model"},
+		{"unload", "unload-model"},
+		{"unload-model", "unload-model"},
+	} {
 		for _, busy := range []bool{false, true} {
-			for _, it := range commandSuggestions(partial, busy) {
-				if containsString(hidden, it.value) {
-					t.Errorf("commandSuggestions(%q, busy=%v) offers the hidden /%s", partial, busy, it.value)
-				}
+			var got []string
+			for _, it := range commandSuggestions(tc.partial, busy) {
+				got = append(got, it.value)
 			}
-		}
-	}
-	// Typed, they are the commands they always were — and the typo guard never claims them, because
-	// the parser resolves them before it is consulted (soleUnknownSlash).
-	for _, name := range hidden {
-		parsed := parseInput("/"+name, nil)
-		if parsed.kind != kindCommand || parsed.command != name {
-			t.Errorf("parseInput(/%s) = {kind:%v cmd:%q}, want the command still parsed", name, parsed.kind, parsed.command)
-		}
-		if token, guarded := soleUnknownSlash("/"+name, nil); guarded {
-			t.Errorf("the typo guard claims the hidden verb %q; hiding a verb does not unmake it", token)
+			if !containsString(got, tc.want) {
+				t.Errorf("commandSuggestions(%q, busy=%v) = %v, want /%s offered",
+					tc.partial, busy, got, tc.want)
+			}
 		}
 	}
 }
 
-// The merged "/" dropdown the human actually sees omits the hidden verbs too — the exclusion lives
-// in commandSuggestions, so nothing downstream can put them back.
-func TestSlashMenuOmitsHiddenVerbs(t *testing.T) {
+// The merged "/" dropdown the human actually sees offers them as well — one registry feeds it, so a
+// row the table declares reaches the menu whole.
+func TestSlashMenuOffersTheServerVerbs(t *testing.T) {
 	m := newTestModel(t)
-	for _, typed := range []string{"/", "/s", "/st", "/u"} {
-		m.input.SetValue(typed)
+	for _, tc := range []struct{ typed, want string }{
+		{"/", "stop-server"},
+		{"/", "unload-model"},
+		{"/s", "stop-server"},
+		{"/st", "stop-server"},
+		{"/u", "unload-model"},
+		{"/un", "unload-model"},
+	} {
+		m.input.SetValue(tc.typed)
 		ac := m.computeAutocomplete(m.caretByteOffset())
+		var got []string
 		for _, it := range ac.items {
-			if it.value == "unload" || it.value == "stop" {
-				t.Errorf("typing %q offers the hidden /%s", typed, it.value)
-			}
+			got = append(got, it.value)
+		}
+		if !containsString(got, tc.want) {
+			t.Errorf("typing %q offers %v, want /%s among them", tc.typed, got, tc.want)
 		}
 	}
 }
@@ -169,18 +169,12 @@ func TestSlashMenuOmitsHiddenVerbs(t *testing.T) {
 // ISSUES #12 symptom — but the rows that cannot run there say so. The tag follows commandSpecs'
 // whileRunning column exactly, so a future verb flipping that flag needs no second edit here.
 func TestCommandSuggestionsTagIdleOnlyRowsWhileBusy(t *testing.T) {
-	var offerable []commandSpec
-	for _, spec := range commandSpecs {
-		if !spec.hidden {
-			offerable = append(offerable, spec)
-		}
-	}
 	rows := commandSuggestions("", true)
-	if len(rows) != len(offerable) {
-		t.Fatalf("rows = %d, want every one of the %d offered verbs listed while busy", len(rows), len(offerable))
+	if len(rows) != len(commandSpecs) {
+		t.Fatalf("rows = %d, want every one of the %d verbs listed while busy", len(rows), len(commandSpecs))
 	}
 	for i, it := range rows {
-		spec := offerable[i]
+		spec := commandSpecs[i]
 		tagged := strings.Contains(it.label, idleOnlyTag)
 		if tagged == spec.whileRunning {
 			t.Errorf("row %q label = %q; tagged = %v, want %v (whileRunning = %v)",

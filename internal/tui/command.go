@@ -49,7 +49,7 @@ type parsedInput struct {
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
 // dropdown shows for it. name is the verb without its leading slash; summary is the one-line
-// description the dropdown displays beside it. The four flags say how the verb behaves:
+// description the dropdown displays beside it. The three flags say how the verb behaves:
 //
 //   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
 //     parsedInput.args. /confine, whose grammar is richer than a token list, keeps its dedicated
@@ -63,21 +63,17 @@ type parsedInput struct {
 //   - menuOnly — the dropdown offers the verb but the parser must never recognise it. /skill is
 //     the one: accepting it chains into the skill picker, and keeping it unparsed is exactly
 //     what keeps an unknown "/skill foo" line an ordinary message.
-//   - hidden — menuOnly's exact inverse: the parser recognises the verb, the dropdown never offers
-//     it (commandSuggestions skips the row). /unload and /stop are the two — typed they act, listed
-//     they are not, which is the owner's call after the first live run.
 type commandSpec struct {
 	name         string
 	summary      string
 	takesArgs    bool
 	whileRunning bool
 	menuOnly     bool
-	hidden       bool
 }
 
 // commandSpecs is THE registry of "/" verbs, in display order (alphabetical — see below): one table
 // feeding both the parser (matchCommand recognises every non-menuOnly name) and the dropdown
-// (commandSuggestions renders every non-hidden row, summaries included), so the two can no longer
+// (commandSuggestions renders every row, summaries included), so the two can no longer
 // drift apart. The parser intercepts a line only when its first whitespace token is exactly
 // "/<verb>" for a verb in this table; any other slash-prefixed line is treated as an ordinary
 // message (never silently swallowed).
@@ -91,14 +87,14 @@ type commandSpec struct {
 // Update loop: it runs a blocking launcher verb behind the actuation latch instead (actuation.go,
 // ADR 0029).
 //
-// /unload and /stop are that same latch without an overlay: they take no argument because there is
-// nothing to choose — both act on the server this session is talking to and on nothing else, which is
-// what keeps the one mistake available here (stopping somebody else's server) off the table. Both are
-// HIDDEN: rarely wanted and easy to hit by accident, they are kept typed-reachable and off the menu
-// (the owner's call after the first live run). One consequence rides along — a hidden verb still
-// SHADOWS a skill of the same id, because shadowing follows the PARSER (matchCommand still claims the
-// line, and slashSuggestions drops the collision on that answer), not the menu. That is the price of
-// keeping the verb typed-reachable, and "unload"/"stop" are names a skill should not take anyway.
+// /unload-model and /stop-server are that same latch without an overlay: they take no argument because
+// there is nothing to choose — both act on the server this session is talking to and on nothing else,
+// which is what keeps the one mistake available here (stopping somebody else's server) off the table.
+// Their NAMES carry that object, which is why they are offered like every other row: "/stop" alone
+// reads as "stop the running turn" (which is Esc) and "/unload" names nothing at all, so the two were
+// briefly kept off the menu — but the hazard lived in the silence of those names, not in the verbs,
+// and naming what they act on removes it at the source. A verb the human cannot discover is a verb
+// they will not find.
 //
 // Order is display order, and it is ALPHABETICAL — declared here in the literal rather than sorted
 // at render time, because this table is the registry and the order the dropdown reads is one of the
@@ -121,8 +117,8 @@ var commandSpecs = []commandSpec{
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
-	{name: "stop", summary: "stop the server this session is on", hidden: true},
-	{name: "unload", summary: "free the model of the server this session is on", hidden: true},
+	{name: "stop-server", summary: "stop the server this session is on"},
+	{name: "unload-model", summary: "free the model of the server this session is on"},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
 }
 

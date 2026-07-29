@@ -268,11 +268,6 @@ const idleOnlyTag = "— idle only"
 // "/skill " and chains into the skill picker (acceptAutocomplete recomputes the overlay), never
 // sending "/skill" as a literal message — like the apogee-code oracle's selectSkill.
 //
-// Every row but the HIDDEN ones, that is: commandSpec.hidden is menuOnly read the other way round,
-// and this loop is the whole of it. /unload and /stop are parsed exactly as they were and simply
-// never named here, on any partial — including their own, since a menu that answered "/unl" would
-// be offering the verb again by the back door.
-//
 // busy says a worker owns the engine, which is what the idleOnlyTag is appended from: the verbs
 // commandSpec.whileRunning marks as reporting-only stay untagged (they run right here), every other
 // row carries the tag and earns commandsAtIdleNote if accepted. The tag is a property of the
@@ -280,7 +275,7 @@ const idleOnlyTag = "— idle only"
 func commandSuggestions(partial string, busy bool) []acItem {
 	var items []acItem
 	for _, c := range commandSpecs {
-		if c.hidden || !strings.HasPrefix(c.name, partial) {
+		if !strings.HasPrefix(c.name, partial) {
 			continue
 		}
 		label := "/" + c.name
@@ -329,8 +324,7 @@ func skillArgToken(value string, caret int) (start, end int, partial string, ok 
 // merged rows, because the whole-input parse would read "/id" as that command anyway. The collision
 // is settled here, menu-side, so the parse layer never has to know skills exist — and the shadowed
 // skill stays reachable through the /skill picker, which splices its token where no command rule
-// claims it. Shadowing follows the PARSER, so a hidden verb shadows too (commandSpec): "/unload" is
-// nowhere in this menu and still claims that line.
+// claims it.
 //
 // outside is the draft text OUTSIDE the region being completed, so the half-typed token can never
 // suppress its own row while the already-invoked ones stay out (skillSuggestions).

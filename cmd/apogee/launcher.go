@@ -246,8 +246,8 @@ func intValue(p *int) int {
 }
 
 // endpointAddr reduces an apogee endpoint URL to the host:port the launcher speaks in — the
-// translation that lets a session say "act on the server I am talking to" (`/unload`, `/stop`)
-// and lets a profile's address be compared against the current one (`/model`).
+// translation that lets a session say "act on the server I am talking to" (`/unload-model`,
+// `/stop-server`) and lets a profile's address be compared against the current one (`/model`).
 //
 // A URL with no explicit port resolves to its scheme's default, because that IS the address the
 // wire connects to; a value with no host, an unparseable one, or a portless one whose scheme has

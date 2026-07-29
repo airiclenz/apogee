@@ -1143,13 +1143,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// the engine and constructs a client, which Agent.SwitchUpstream allows only at a boundary.
 		return m.runServerCommand(parsed.args)
 
-	case "unload":
+	case "unload-model":
 		// Free the model of the server this session is talking to. No picker and no argument: the
 		// session's own endpoint is the only thing either actuation verb may act on (ADR 0029 D3), and
 		// it is read on this loop rather than captured, so the verb acts on where the session is NOW.
 		return m.startServerActuation(verbUnload, m.opts.UnloadServer)
 
-	case "stop":
+	case "stop-server":
 		// Stop that server outright. Idle-only like its siblings and latched like a profile load — the
 		// call blocks through the launcher's stop escalation — and afterwards the ordinary offline
 		// crossing narrates the rest, because the downtime is real (actuation.go, ADR 0029).

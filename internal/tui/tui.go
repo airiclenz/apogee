@@ -308,8 +308,8 @@ type Options struct {
 	//
 	// nil ⇒ the llama-launcher integration is not configured on this host (`llama-launcher: off`, or
 	// auto-detect found no launcher config): `/model` then offers what the server itself advertises,
-	// and `/unload`/`/stop` degrade to a note naming the key. The four launcher seams are wired
-	// together or not at all, so one nil check speaks for all of them.
+	// and `/unload-model`/`/stop-server` degrade to a note naming the key. The four launcher seams
+	// are wired together or not at all, so one nil check speaks for all of them.
 	LaunchProfiles func() ([]LaunchProfileChoice, error)
 
 	// LoadProfile activates the named Launch profile and reports what the session must adopt — the
@@ -433,14 +433,14 @@ type ProfileLoadResult struct {
 	Notices []string           // launcher notices to surface as transcript notes, in order
 }
 
-// ActuationResult is what `/unload` and `/stop` did: the launcher's own [StopResult] projected. Steps
-// are the orchestration steps it recorded, in order, rendered one transcript note each — and they are
-// present even on an error, carrying how far the verb got before it failed.
+// ActuationResult is what `/unload-model` and `/stop-server` did: the launcher's own [StopResult]
+// projected. Steps are the orchestration steps it recorded, in order, rendered one transcript note
+// each — and they are present even on an error, carrying how far the verb got before it failed.
 //
-// ServerStopped tells the two unload outcomes apart, which is the whole reason `/unload` can be
-// honest about what it did: on a MANAGED backend the model is baked into the server's process
-// arguments, so unloading it means stopping the server (true), while an external backend takes an API
-// unload and keeps running (false). `/stop` always reports true on success.
+// ServerStopped tells the two unload outcomes apart, which is the whole reason `/unload-model` can
+// be honest about what it did: on a MANAGED backend the model is baked into the server's process
+// arguments, so unloading it means stopping the server (true), while an external backend takes an
+// API unload and keeps running (false). `/stop-server` always reports true on success.
 //
 // Backend and Addr name WHAT was acted on — the instance discovery answered the session's endpoint
 // with. The renderer cannot derive either and the steps do not carry them: the launcher's own steps

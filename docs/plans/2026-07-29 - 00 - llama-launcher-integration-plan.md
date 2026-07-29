@@ -395,7 +395,28 @@ aliased. Items 13–14 carry it — item 14 records the amendment in ADR 0029 be
 than leaving the code to contradict the design record. Both sit ahead of item 8 in this file
 because item 8 is the last thing that runs and now depends on them.
 
-## 13. `/unload-model` and `/stop-server` — named for what they act on, offered again
+## 13. `/unload-model` and `/stop-server` — named for what they act on, offered again — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): four deviations from the item's literal text.
+(a) `TestSlashMenuMergesCommandsAndSkills` (skill_test.go) and the `/`-suggestion expectation
+(`TestComputeAutocompleteCommands`, minilang_test.go) were NOT edited: both type `/c`, so neither new
+name is in their prefix range and there is no alphabetical slot for either to gain. The bare-`/`
+offering is pinned where the item's other bullet already puts it — `TestCommandTableDrivesParserAndMenu`
+now walks the WHOLE table — plus the two new tests below.
+(b) `TestSlashMenuOmitsHiddenVerbs` (command_test.go) retired alongside
+`TestHiddenVerbsAreParsedNeverOffered`, which the item names as the only casualty: it is the same pin
+read from the merged-menu side and asserted the exact posture this item reverses. It is replaced in
+place by `TestSlashMenuOffersTheServerVerbs`, its inverse (`/`, `/s`, `/st`, `/u`, `/un` all offer the
+row), beside `TestServerVerbsAreOffered` at the `commandSuggestions` level.
+(c) The old-spelling refusal test (`TestTheOldVerbSpellingsAreGone`) went into `actuation_test.go`
+beside the verbs it retires rather than `command_test.go` — item 9's `/load` template
+(`TestLoadIsNoLongerAVerb`) lives beside its verb too, and the assertion needs a wired Model to show
+that nothing acted.
+(d) Code comments naming either verb OUTSIDE the four files the item lists were re-spelled as well —
+`internal/tui/tui.go` (the `Options` seam docs and `ActuationResult`), `internal/tui/model.go`'s
+dispatch comments, `cmd/apogee/wire.go` and `cmd/apogee/launcher.go`. A comment naming a verb the
+parser no longer recognises is stale by the same argument the item makes about the registry, and none
+of them is a doc file, so item 14's boundary is untouched.
 
 **What.** The rename above, and the un-hiding that rides on it. This item **supersedes item 10's
 posture**: item 10 stays ✅ DONE and is NOT edited — hiding was the right answer for the names the

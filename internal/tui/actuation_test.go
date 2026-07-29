@@ -38,7 +38,7 @@ type fakeLauncher struct {
 	steps     []string          // the narration a load emits, in order, before it answers
 	result    ProfileLoadResult // what a load reports back
 	loadErr   error
-	actResult ActuationResult // what /unload and /stop report back
+	actResult ActuationResult // what /unload-model and /stop-server report back
 	actErr    error
 	panics    bool // the seam falls over mid-verb; the latch must still release
 
@@ -90,7 +90,7 @@ func (f *fakeLauncher) loaded() []string {
 	return append([]string(nil), f.loads...)
 }
 
-// actuated reports the endpoints /unload or /stop were called with, in order.
+// actuated reports the endpoints /unload-model or /stop-server were called with, in order.
 func (f *fakeLauncher) actuated() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -245,7 +245,7 @@ func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 }
 
 // Esc does not cancel an actuation: the facade offers no mid-flight cancel — its own cancel is
-// /stop, available the moment the verb returns — so the key that stops a worker leaves the latch
+// /stop-server, available the moment the verb returns — so the key that stops a worker leaves the latch
 // exactly where it is (ADR 0029 D6).
 func TestActuationEscDoesNotCancel(t *testing.T) {
 	t.Parallel()
@@ -277,7 +277,7 @@ func TestActuationBlockNoteNamesTheVerb(t *testing.T) {
 
 	m, _ = wireLauncher(t, newLauncher())
 	m2, _ := m.startServerActuation(verbStop, m.opts.StopServer)
-	if got, want := m2.(Model).actuationBlockNote(), "stop in flight"; got != want {
+	if got, want := m2.(Model).actuationBlockNote(), "stop-server in flight"; got != want {
 		t.Errorf("stop block note = %q, want %q", got, want)
 	}
 }
@@ -310,7 +310,7 @@ func TestActuationFooterNarratesTheVerb(t *testing.T) {
 
 	m, _ = wireLauncher(t, newLauncher())
 	stopping, _ := m.startServerActuation(verbStop, m.opts.StopServer)
-	if got := stopping.(Model).upstreamSegments(); len(got) != 1 || got[0] != "stop…" {
+	if got := stopping.(Model).upstreamSegments(); len(got) != 1 || got[0] != "stop-server…" {
 		t.Errorf("upstream segments = %v, want the stop verb named", got)
 	}
 }
@@ -368,7 +368,7 @@ func TestActuationStaleGenerationIsInert(t *testing.T) {
 
 // A failed beat while an actuation is in flight counts toward NOTHING: the server is expected to be
 // down mid-restart. Once the latch releases the ordinary debounce applies again, unchanged — the
-// downtime after a /stop is real and crosses offline the ordinary way.
+// downtime after a /stop-server is real and crosses offline the ordinary way.
 func TestActuationShadowsFailedBeats(t *testing.T) {
 	t.Parallel()
 
@@ -627,8 +627,41 @@ func TestServerActuationNotesEveryStep(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// /unload and /stop (ADR 0029 D3)
+// /unload-model and /stop-server (ADR 0029 D3)
 // ----------------------------------------------------------------------------
+
+// The old spellings name nothing any more. They were removed outright rather than aliased: an alias
+// would put the ambiguous names — "/stop" reads as "stop the running turn", "/unload" names no object
+// at all — back in the PARSER, which is the one place the rename exists to take them out of. So a
+// typed "/unload" or "/stop" earns the sole-token typo guard's refusal and acts on nothing, exactly
+// as "/load" does since the launcher's profiles became /model's offering.
+func TestTheOldVerbSpellingsAreGone(t *testing.T) {
+	t.Parallel()
+
+	for _, old := range []string{"unload", "stop"} {
+		t.Run(old, func(t *testing.T) {
+			t.Parallel()
+
+			if spec, ok := commandByName(old); ok {
+				t.Errorf("commandSpecs still carries %+v; the verbs name their object now", spec)
+			}
+			m, _ := wireLauncher(t, newLauncher())
+
+			m, cmd := typeCommand(t, m, "/"+old)
+
+			if cmd != nil {
+				t.Errorf("/%s returned a Cmd; the word names nothing", old)
+			}
+			if m.actuation.inFlight {
+				t.Errorf("/%s still acted: actuation %+v", old, m.actuation)
+			}
+			want := unknownSlashNote("/" + old)
+			if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+				t.Errorf("notes = %v, want the unknown-slash refusal %q", got, want)
+			}
+		})
+	}
+}
 
 // Both verbs are typed with no argument — there is nothing to choose, they act on the server this
 // session is talking to and on nothing else — and both run through the ONE latch: while either is in
@@ -643,8 +676,8 @@ func TestUnloadAndStopActOnTheSessionsServer(t *testing.T) {
 		unloads []string
 		stops   []string
 	}{
-		{line: "/unload", verb: verbUnload, unloads: []string{testOpts.Endpoint}},
-		{line: "/stop", verb: verbStop, stops: []string{testOpts.Endpoint}},
+		{line: "/unload-model", verb: verbUnload, unloads: []string{testOpts.Endpoint}},
+		{line: "/stop-server", verb: verbStop, stops: []string{testOpts.Endpoint}},
 	} {
 		t.Run(tc.line, func(t *testing.T) {
 			t.Parallel()
@@ -659,7 +692,7 @@ func TestUnloadAndStopActOnTheSessionsServer(t *testing.T) {
 				t.Fatalf("actuation = {inFlight:%v verb:%q}, want the %s latch held",
 					m.actuation.inFlight, m.actuation.verb, tc.verb)
 			}
-			for _, refused := range []string{"/model alpha", "/unload", "/stop"} {
+			for _, refused := range []string{"/model alpha", "/unload-model", "/stop-server"} {
 				next, blocked := typeCommand(t, m, refused)
 				if blocked != nil {
 					t.Errorf("%q returned a Cmd while %s was in flight", refused, tc.verb)
@@ -688,7 +721,7 @@ func TestUnloadAndStopActOnTheSessionsServer(t *testing.T) {
 	}
 }
 
-// /unload owes one sentence its steps cannot carry: whether freeing the model also took the server
+// /unload-model owes one sentence its steps cannot carry: whether freeing the model also took the server
 // with it. On a managed backend an unload IS a stop — the session's server is gone, which is what the
 // human needs before wondering why the beat went quiet — while an external backend keeps serving. A
 // FAILED unload claims neither: the launcher's error is the last word.
@@ -731,7 +764,7 @@ func TestUnloadWordsTheManagedSemantic(t *testing.T) {
 			m, _ := wireLauncher(t, fake)
 			notesBefore := len(noteTexts(m))
 
-			m, cmd := typeCommand(t, m, "/unload")
+			m, cmd := typeCommand(t, m, "/unload-model")
 			m, _ = driveActuation(t, m, cmd)
 
 			if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, tc.want) {
@@ -741,7 +774,7 @@ func TestUnloadWordsTheManagedSemantic(t *testing.T) {
 	}
 }
 
-// /stop heads the launcher's steps with what it was stopping. The steps themselves are terse and
+// /stop-server heads the launcher's steps with what it was stopping. The steps themselves are terse and
 // subject-less ("Sending stop signal"), and the renderer cannot derive the subject — the session holds
 // an endpoint URL, not the address the launcher manages nor the name of the server answering there —
 // so the heading is the only line that says what just went down. A launcher that named neither earns
@@ -779,7 +812,7 @@ func TestStopHeadsTheStepsWithWhatItStopped(t *testing.T) {
 			m, _ := wireLauncher(t, fake)
 			notesBefore := len(noteTexts(m))
 
-			m, cmd := typeCommand(t, m, "/stop")
+			m, cmd := typeCommand(t, m, "/stop-server")
 			m, _ = driveActuation(t, m, cmd)
 
 			if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, tc.want) {
@@ -795,7 +828,7 @@ func TestStopHeadsTheStepsWithWhatItStopped(t *testing.T) {
 func TestServerActuationReportsTheNotManagedRefusal(t *testing.T) {
 	t.Parallel()
 
-	for _, line := range []string{"/unload", "/stop"} {
+	for _, line := range []string{"/unload-model", "/stop-server"} {
 		t.Run(line, func(t *testing.T) {
 			t.Parallel()
 
@@ -824,7 +857,7 @@ func TestUnloadAndStopWithoutTheLauncher(t *testing.T) {
 	t.Parallel()
 
 	m, _ := seededPicker(t, testOpts) // no launcher seams wired
-	for _, line := range []string{"/unload", "/stop"} {
+	for _, line := range []string{"/unload-model", "/stop-server"} {
 		next, cmd := typeCommand(t, m, line)
 
 		if cmd != nil {
@@ -839,7 +872,7 @@ func TestUnloadAndStopWithoutTheLauncher(t *testing.T) {
 	}
 }
 
-// After a /stop the downtime is REAL, and the display says so the ordinary way: the latch released
+// After a /stop-server the downtime is REAL, and the display says so the ordinary way: the latch released
 // with the completion, so the beat shadow is gone and the same debounce that narrates a server dying
 // on its own crosses this session offline.
 func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
@@ -850,7 +883,7 @@ func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
 		Steps: []string{"Sending stop signal"}, ServerStopped: true, Backend: "llamacpp", Addr: "localhost:1234",
 	}
 	m, _ := wireLauncher(t, fake)
-	m, cmd := typeCommand(t, m, "/stop")
+	m, cmd := typeCommand(t, m, "/stop-server")
 	m, _ = driveActuation(t, m, cmd)
 
 	for range offlineFailureThreshold {

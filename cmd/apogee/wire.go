@@ -432,10 +432,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// session started on, which is exactly "nothing to switch to" without a special case.
 		Servers:      serverChoices(choices),
 		SwitchServer: switchServer,
-		// The `/model`-over-profiles, `/unload`, `/stop` half (ADR 0029): browse the launcher's profiles,
-		// activate one — following it onto another server when it lives there — and free or stop the
-		// server this session is on. All four are nil when the integration is not configured, which
-		// is the whole of the degrade.
+		// The `/model`-over-profiles, `/unload-model`, `/stop-server` half (ADR 0029): browse the
+		// launcher's profiles, activate one — following it onto another server when it lives
+		// there — and free or stop the server this session is on. All four are nil when the
+		// integration is not configured, which is the whole of the degrade.
 		LaunchProfiles: launchProfilesSeam,
 		LoadProfile:    loadProfileSeam,
 		UnloadServer:   unloadServerSeam,
