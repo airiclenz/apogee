@@ -2,13 +2,15 @@ package tui
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
 
 // ----------------------------------------------------------------------------
-// The shared single-select picker overlay (/model and /server)
+// The shared single-select picker overlay (/model, /server and /load)
 // ----------------------------------------------------------------------------
 //
 // The /sessions browser's simpler sibling: a modal list with one highlight, ⏎ to take the
@@ -34,6 +36,13 @@ import (
 // up: the binary moves the whole Upstream behind the unchanged seams ([Options.SwitchServer]) and
 // the TUI folds what came back ([Model.foldServerSwitch]) — a fresh heartbeat generation, no model
 // bound, and the new server's very first beat completing the move through that same rebind path.
+//
+// /load is the third question — which model should the world be made to serve (ADR 0029 D3) — and
+// the one whose accept does not finish on the Update loop: activating a Launch profile blocks for as
+// long as a server takes to come up, so the accept hands off to the actuation latch (actuation.go)
+// and the completion fold there ends in one of the two shapes above. Its rows are also the one
+// offering read at open rather than derived per frame, because they live in the launcher's config
+// file rather than in Model state.
 
 // pickerKind names WHICH offering an open picker is listing. It is an enum rather than a callback
 // field on the state so the Model keeps holding plain values only (ADR 0011) — every kind-specific
@@ -43,6 +52,7 @@ type pickerKind int
 const (
 	pickerModel  pickerKind = iota // the models the Upstream advertises — /model, over m.hb.models
 	pickerServer                   // the servers config.yaml names — /server, over m.opts.Servers
+	pickerLoad                     // the Launch profiles the launcher defines — /load, over m.picker.profiles
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -53,6 +63,13 @@ type picker struct {
 	open     bool
 	kind     pickerKind
 	selected int
+	// profiles are the /load rows, and the one offering that is NOT derived at render time. The
+	// other two describe Model state (the advertised models, the configured servers) and so can be
+	// re-read every frame; a Launch profile lives in the launcher's config FILE, behind a seam that
+	// re-reads it from disk (ADR 0029 D4). Reading once per open is what makes those rows fresh —
+	// a profile added in the launcher's own TUI a moment ago is offered here — without turning a
+	// keypress into a file read. A plain slice of plain values, safe in the copied Model.
+	profiles []LaunchProfileChoice
 }
 
 // maxPickerRows caps how many rows the overlay shows at once; a longer list scrolls a window around
@@ -73,6 +90,7 @@ const currentRowSuffix = " · current"
 const (
 	modelUsage  = "usage: /model [model-id]"
 	serverUsage = "usage: /server [name]"
+	loadUsage   = "usage: /load [profile]"
 )
 
 // noServersNote is the one line /server owes when there is nowhere to switch to. An empty list and
@@ -221,6 +239,135 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	return m.foldServerSwitch(from, result)
 }
 
+// ----------------------------------------------------------------------------
+// /load — the Launch-profile picker (ADR 0029 D3)
+// ----------------------------------------------------------------------------
+
+// loadPickerTitle names what the third offering is and whose it is. Unlike the model picker's
+// title it does not qualify by host: a Launch profile carries its own address, and the rows say so
+// when it differs from the session's.
+const loadPickerTitle = "load profile — llama-launcher"
+
+// runningRowSuffix marks a profile discovery attributes to a live instance right now — the
+// currentRowSuffix posture (plain text, because the popup module styles rows whole), for a fact that
+// is about the world rather than about this session: a running profile is not necessarily the one
+// this session is talking to.
+const runningRowSuffix = " · running"
+
+// noProfilesNote is what a launcher config with nothing in it earns. It names no path, deliberately:
+// where the launcher's config lives is the composition root's knowledge (ADR 0029 D1/D4), and a
+// renderer that guessed a path would eventually name the wrong one.
+const noProfilesNote = "no launch profiles defined — add profiles to the llama-launcher config"
+
+// runLoadCommand drives the /load verb in both its forms: bare, it opens the picker over the Launch
+// profiles the launcher's config defines; with one argument it activates that profile by name.
+// Surplus arguments are a usage note.
+//
+// The rows are read at OPEN and for BOTH forms, which is the whole of ADR 0029 D4's freshness rule:
+// the seam re-reads the launcher's config from disk, so a profile added seconds ago in the
+// launcher's own TUI is offered here — and the argument form is checked against the same list the
+// picker would have shown, so the two forms can never disagree about what exists.
+//
+// The degrade ladder is asked FIRST, like /model's and for the same reason, and it is three rungs
+// deep because three different things can be missing: the integration itself, the config it reads,
+// and the profiles that config was supposed to hold. Each is one sentence and no overlay.
+func (m Model) runLoadCommand(args []string) (tea.Model, tea.Cmd) {
+	if len(args) > 1 {
+		return m.pickerNote(loadUsage)
+	}
+	if m.opts.LaunchProfiles == nil || m.opts.LoadProfile == nil {
+		return m.pickerNote(noLauncherNote)
+	}
+	profiles, err := m.opts.LaunchProfiles()
+	if err != nil {
+		// The one failure that sinks the list — no config at the configured path, a config that will
+		// not parse. It is the launcher's own words about a file on this machine, so it is
+		// escape-stripped like every other untrusted line reaching the terminal.
+		return m.pickerNote(stripEscapes(err.Error()))
+	}
+	if len(profiles) == 0 {
+		return m.pickerNote(noProfilesNote)
+	}
+	if len(args) == 1 {
+		for _, choice := range profiles {
+			if choice.Name == args[0] {
+				return m.startProfileLoad(choice.Name)
+			}
+		}
+		return m.pickerNote(fmt.Sprintf(
+			"unknown launch profile %q — configured: %s", args[0], profileNameList(profiles)))
+	}
+	m.picker = picker{open: true, kind: pickerLoad, profiles: profiles}
+	m.layout()
+	return m, nil
+}
+
+// profileNameList names the defined profiles for the unknown-argument note, in the order the picker
+// lists them (the launcher's own display order, favourites first).
+func profileNameList(profiles []LaunchProfileChoice) string {
+	names := make([]string, 0, len(profiles))
+	for _, choice := range profiles {
+		names = append(names, stripEscapes(choice.Name))
+	}
+	return strings.Join(names, ", ")
+}
+
+// launchProfileRows is one row per Launch profile: the name the human gave it in the launcher's
+// config (which is also the /load argument and the footer alias afterwards), the backend it runs on,
+// the context window it was configured with when it states one, the port it would serve at when that
+// is NOT where this session is pointed, and the running mark.
+//
+// The port is shown only for a profile that lives somewhere else, because that is the moment it
+// matters: loading it will move the session. A profile on the session's own server needs no address —
+// it is the address the footer is already showing.
+func (m Model) launchProfileRows() []string {
+	here := sessionAddr(m.opts.Endpoint)
+	rows := make([]string, 0, len(m.picker.profiles))
+	for _, choice := range m.picker.profiles {
+		label := choice.Name
+		if choice.Backend != "" {
+			label += " — " + choice.Backend
+		}
+		if window := formatTokens(choice.ContextWindow); window != "" {
+			label += " · " + window
+		}
+		if port := elsewherePort(choice.Addr, here); port != "" {
+			label += " (" + port + ")"
+		}
+		if choice.Running {
+			label += runningRowSuffix
+		}
+		rows = append(rows, stripEscapes(label))
+	}
+	return rows
+}
+
+// sessionAddr reduces the session's endpoint URL to the host:port a Launch profile's address is
+// spelled in, for the comparison the port marker is drawn by. An endpoint that will not parse
+// reduces to nothing, which shows every row its port — the safe direction, since an unknown session
+// address is no evidence that a profile shares it.
+func sessionAddr(endpoint string) string {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// elsewherePort is the "(:8081)" a row earns when the profile would serve at an address other than
+// the session's. An address the launcher could not resolve carries no marker: there is nothing
+// truthful to show, and ":0" would read as a fact.
+func elsewherePort(addr, here string) string {
+	if addr == "" || addr == here {
+		return ""
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return ""
+	}
+	return ":" + port
+}
+
 // pickerNote is the "one honest line, no overlay" answer every /model and /server degrade takes: a
 // transcript note and an unchanged session.
 func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
@@ -269,6 +416,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		return m.bindPickedModel(picked.ID, picked.ContextWindow)
 	case pickerServer:
 		return m.switchToServer(m.opts.Servers[m.picker.selected])
+	case pickerLoad:
+		return m.startProfileLoad(m.picker.profiles[m.picker.selected].Name)
 	}
 	return m, nil
 }
@@ -308,6 +457,8 @@ func (m Model) pickerCount() int {
 		return len(m.hb.models)
 	case pickerServer:
 		return len(m.opts.Servers)
+	case pickerLoad:
+		return len(m.picker.profiles)
 	}
 	return 0
 }
@@ -362,6 +513,8 @@ func (m Model) pickerTitle() string {
 		return "switch model — " + hostDisplay(m.opts)
 	case pickerServer:
 		return "switch server"
+	case pickerLoad:
+		return loadPickerTitle
 	}
 	return ""
 }
@@ -376,6 +529,8 @@ func (m Model) pickerRows() []string {
 		return m.modelRows()
 	case pickerServer:
 		return m.serverRows()
+	case pickerLoad:
+		return m.launchProfileRows()
 	}
 	return nil
 }

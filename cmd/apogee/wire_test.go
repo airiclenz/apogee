@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1355,6 +1356,41 @@ func TestLoadProfileUnknownNameNeverActuates(t *testing.T) {
 	}
 	if len(agent.specs) != 0 {
 		t.Errorf("SwitchUpstream called %+v; want the session left where it was", agent.specs)
+	}
+}
+
+// The launcher's health-wait timeout crosses the seam PROJECTED onto the renderer's own sentinel
+// (ADR 0029 D1 keeps facade sentinels out of internal/tui exactly as it keeps facade types out), so
+// the completion fold can recognise the one failure that earns a coda. Both chains survive the
+// projection, and the launcher's own words — the PID and log path it names — are kept intact.
+func TestLoadProfileProjectsTheStartupTimeout(t *testing.T) {
+	t.Parallel()
+
+	timeout := fmt.Errorf("llama-server did not become healthy (pid 4711, log /tmp/a.log): %w",
+		llamalauncher.ErrStartupTimeout)
+	ops := &fakeLauncher{cfg: twoServerConfig(t), loadErr: timeout}
+	wiring, agent, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	_, err := wiring.load("there", nil)
+
+	if !errors.Is(err, tui.ErrStartupTimeout) {
+		t.Errorf("load error = %v; want it to answer to tui.ErrStartupTimeout", err)
+	}
+	if !errors.Is(err, llamalauncher.ErrStartupTimeout) {
+		t.Errorf("load error = %v; want the launcher's own sentinel still reachable through it", err)
+	}
+	if err.Error() != timeout.Error() {
+		t.Errorf("load error text = %q; want the launcher's own words unchanged (%q)", err, timeout)
+	}
+	if len(agent.specs) != 0 {
+		t.Errorf("SwitchUpstream called %+v; want the session left where it was", agent.specs)
+	}
+
+	// Every other failure crosses untouched — only the timeout may claim the coda.
+	other := &fakeLauncher{cfg: twoServerConfig(t), loadErr: errors.New("model file not found")}
+	wiring, _, _, _ = launcherWiringFixture(t, other, "http://127.0.0.1:8080")
+	if _, err := wiring.load("there", nil); errors.Is(err, tui.ErrStartupTimeout) {
+		t.Errorf("load error = %v; want an ordinary failure NOT marked as a startup timeout", err)
 	}
 }
 

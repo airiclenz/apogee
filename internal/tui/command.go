@@ -80,8 +80,10 @@ type commandSpec struct {
 // /new is an alias of /clear — both verbs are recognised here and route to the same context-reset
 // logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
 // synchronously in runCommand like /clear); /model opens the model picker over what the upstream
-// advertises and /server the server picker over what config.yaml names (picker.go, one overlay for
-// both), the same way.
+// advertises, /server the server picker over what config.yaml names, and /load the Launch-profile
+// picker over what the llama-launcher config defines (picker.go, one overlay for all three), the
+// same way — though /load's accept then runs a blocking launcher verb behind the actuation latch
+// rather than finishing on the Update loop (actuation.go, ADR 0029).
 //
 // Order is display order, and one pair depends on it: /skill must precede /skills, because the
 // dropdown prefix-matches in table order and highlights its first row — so a typed "/skill"
@@ -95,6 +97,7 @@ var commandSpecs = []commandSpec{
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "model", summary: "switch to another model the server serves", takesArgs: true},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
+	{name: "load", summary: "load a llama-launcher profile into a local server", takesArgs: true},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
 	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},

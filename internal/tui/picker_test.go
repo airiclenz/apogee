@@ -745,3 +745,225 @@ func TestServerCommandIsIdleOnly(t *testing.T) {
 		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// /load — the Launch-profile picker (ADR 0029 D3)
+// ----------------------------------------------------------------------------
+//
+// The harness is the launcher fake in actuation_test.go: /load's rows come from a seam rather than
+// from Model state, so these tests script what the launcher's config defines and assert what the
+// overlay makes of it. The accept path stops at the LATCH — what happens after it is the actuation
+// suite's subject.
+
+// seededLoad is a ready model with the heartbeat, the rebind and the four launcher seams wired —
+// the state a human is in when they type /load.
+func seededLoad(t *testing.T, fake *fakeLauncher) Model {
+	t.Helper()
+	m, _ := wireLauncher(t, fake)
+	return m
+}
+
+// /load lists what the launcher's config defines, in the launcher's own order, and each row carries
+// the facts the choice is made on: the backend, the configured context window, the port when the
+// profile lives somewhere other than this session's server, and the running mark.
+func TestLoadPickerListsTheLaunchProfiles(t *testing.T) {
+	fake := newLauncher()
+	m := seededLoad(t, fake)
+
+	m, cmd := typeCommand(t, m, "/load")
+
+	if cmd != nil {
+		t.Error("/load returned a Cmd; opening the picker actuates nothing")
+	}
+	if !m.picker.open || m.picker.kind != pickerLoad {
+		t.Fatalf("picker = {open:%v kind:%v}, want an open load picker", m.picker.open, m.picker.kind)
+	}
+	if m.picker.selected != 0 {
+		t.Errorf("selected = %d, want the first row — the launcher's order puts favourites first",
+			m.picker.selected)
+	}
+	if got := fake.listCount(); got != 1 {
+		t.Errorf("the profile list was read %d times, want exactly one fresh read at open", got)
+	}
+	want := []string{"alpha — llamacpp · 32k", "beta — ollama · 8k (:8081) · running"}
+	if got := m.pickerRows(); !reflect.DeepEqual(got, want) {
+		t.Errorf("rows = %v, want %v", got, want)
+	}
+	got := plain(m.View())
+	for _, want := range []string{loadPickerTitle, "alpha — llamacpp", "beta — ollama", pickerHint} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the pane is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The rows are re-read on EVERY open (ADR 0029 D4), so a profile added in the launcher's own TUI a
+// moment ago is offered here without restarting apogee.
+func TestLoadPickerReadsTheProfilesFreshOnEveryOpen(t *testing.T) {
+	fake := newLauncher()
+	m := seededLoad(t, fake)
+	m, _ = typeCommand(t, m, "/load")
+	m = step(t, m, keyEsc())
+
+	fake.profiles = append(fake.profiles, LaunchProfileChoice{Name: "gamma", Backend: "lmstudio"})
+	m, _ = typeCommand(t, m, "/load")
+
+	if got := fake.listCount(); got != 2 {
+		t.Errorf("the profile list was read %d times, want one read per open", got)
+	}
+	if got := m.pickerRows(); len(got) != 3 || !strings.HasPrefix(got[2], "gamma") {
+		t.Errorf("rows = %v, want the profile added since the last open", got)
+	}
+}
+
+// ⏎ on a row hands off to the actuation latch: the overlay closes, the latch is taken for THAT
+// profile, and the blocking verb rides the returned Cmd (actuation.go owns everything after this).
+func TestLoadPickerAcceptTakesTheLatch(t *testing.T) {
+	m := seededLoad(t, newLauncher())
+	m, _ = typeCommand(t, m, "/load")
+	m = step(t, m, keyDown())
+
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.picker.open {
+		t.Error("the picker stayed open after an accept")
+	}
+	if !m.actuation.inFlight || m.actuation.verb != verbLoad || m.actuation.profile != "beta" {
+		t.Fatalf("actuation = %+v, want the latch held for the picked profile", m.actuation)
+	}
+	if cmd == nil {
+		t.Error("the accept returned no Cmd — the blocking verb would never run")
+	}
+}
+
+// Esc closes the picker and actuates nothing.
+func TestLoadPickerEscCloses(t *testing.T) {
+	fake := newLauncher()
+	m := seededLoad(t, fake)
+	m, _ = typeCommand(t, m, "/load")
+
+	m = step(t, m, keyEsc())
+
+	if m.picker.open {
+		t.Error("esc left the picker open")
+	}
+	if m.actuation.inFlight {
+		t.Error("esc took the actuation latch")
+	}
+	if got := fake.loaded(); len(got) != 0 {
+		t.Errorf("loads = %v, want none — esc activates nothing", got)
+	}
+}
+
+func TestLoadCommandArgumentForm(t *testing.T) {
+	t.Run("known name activates without an overlay", func(t *testing.T) {
+		m := seededLoad(t, newLauncher())
+
+		m, cmd := typeCommand(t, m, "/load beta")
+
+		if m.picker.open {
+			t.Error("the argument form opened an overlay; it takes the name directly")
+		}
+		if !m.actuation.inFlight || m.actuation.profile != "beta" {
+			t.Fatalf("actuation = %+v, want the latch held for the named profile", m.actuation)
+		}
+		if cmd == nil {
+			t.Error("the argument form returned no Cmd — the blocking verb would never run")
+		}
+	})
+
+	t.Run("unknown name lists the defined ones", func(t *testing.T) {
+		m := seededLoad(t, newLauncher())
+
+		m, _ = typeCommand(t, m, "/load nope")
+
+		if m.actuation.inFlight {
+			t.Error("an unknown name took the latch")
+		}
+		assertPickerDegrade(t, m, `unknown launch profile "nope" — configured: alpha, beta`)
+	})
+
+	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
+		m := seededLoad(t, newLauncher())
+
+		m, _ = typeCommand(t, m, "/load a b")
+
+		if m.actuation.inFlight {
+			t.Error("a usage error took the latch")
+		}
+		assertPickerDegrade(t, m, loadUsage)
+	})
+}
+
+// Each rung of the degrade ladder is one honest sentence and no overlay: the integration itself, the
+// config it reads, and the profiles that config was supposed to hold.
+func TestLoadCommandDegradesWithAnHonestNote(t *testing.T) {
+	t.Run("launcher not configured", func(t *testing.T) {
+		// All four seams are wired together or not at all, so the nil check speaks for all of them.
+		m, _ := seededPicker(t, testOpts)
+
+		m, _ = typeCommand(t, m, "/load")
+
+		assertPickerDegrade(t, m, noLauncherNote)
+	})
+
+	t.Run("the config could not be read", func(t *testing.T) {
+		fake := newLauncher()
+		fake.listErr = errors.New("no launcher config at /home/x/.config/llama-launcher/config.yaml")
+		m := seededLoad(t, fake)
+
+		m, _ = typeCommand(t, m, "/load")
+
+		assertPickerDegrade(t, m, "no launcher config at /home/x/.config/llama-launcher/config.yaml")
+	})
+
+	t.Run("no profiles defined", func(t *testing.T) {
+		m := seededLoad(t, &fakeLauncher{})
+
+		m, _ = typeCommand(t, m, "/load")
+
+		assertPickerDegrade(t, m, noProfilesNote)
+	})
+
+	t.Run("the argument form takes the same ladder", func(t *testing.T) {
+		// A degrade must answer BOTH forms: an argument reaching the accept path with no seam would
+		// actuate nothing and say nothing, which is the one outcome a command must never have.
+		m, _ := seededPicker(t, testOpts)
+
+		m, _ = typeCommand(t, m, "/load alpha")
+
+		if m.actuation.inFlight {
+			t.Error("the argument form took the latch with no seam wired")
+		}
+		assertPickerDegrade(t, m, noLauncherNote)
+	})
+}
+
+// /load is idle-only by the commandSpecs table: it ends in a blocking launcher verb that changes the
+// server the running Exchange is talking to, so a line typed mid-run earns the standing answer.
+func TestLoadCommandIsIdleOnly(t *testing.T) {
+	if spec, ok := commandByName("load"); !ok || spec.whileRunning || !spec.takesArgs {
+		t.Fatalf("commandSpec = %+v, want an idle-only verb that reads its arguments", spec)
+	}
+	fake := newLauncher()
+	opts := testOpts
+	opts.LaunchProfiles = fake.list
+	opts.LoadProfile = fake.load
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m, _ = typeCommand(t, m, "open the exchange")
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+
+	m, _ = typeCommand(t, m, "/load alpha")
+
+	if m.picker.open {
+		t.Error("the picker opened mid-run; /load is idle-only")
+	}
+	if m.actuation.inFlight {
+		t.Error("the latch was taken mid-run")
+	}
+	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
+		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	}
+}

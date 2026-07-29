@@ -61,7 +61,8 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
-		"clear", "new", "sessions", "compact", "continue", "confine", "model", "server", "version", "skills"}
+		"clear", "new", "sessions", "compact", "continue", "confine", "model", "server", "load",
+		"version", "skills"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
 	}

@@ -64,6 +64,13 @@ type Model struct {
 	// value-copied Model like autocompleteState (ADR 0011). It is driven only at idle.
 	sessionBrowser sessionBrowser
 
+	// actuation is the launcher latch (actuation.go, ADR 0029 D5): which blocking launcher verb is
+	// in flight, on what, and the channel its narration is pumped back through. Its zero value is
+	// "nothing in flight", and everything on it is a plain value or a channel — a reference header —
+	// so it copies with the Model like the overlays above (ADR 0011). While it is held, sends and
+	// every switching or actuating verb are refused, and a failed beat counts toward nothing.
+	actuation actuation
+
 	// picker is the shared single-select overlay's state (picker.go): which offering it lists and
 	// which row is highlighted. Its rows are derived at render time from the state they describe —
 	// the /model picker reads hb.models live, the /server picker opts.Servers — so the value itself
@@ -546,6 +553,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return next, next.beatTick()
 
+	case actuationMsg:
+		// One item off the in-flight launcher verb's pump (actuation.go): a narration step to note
+		// and re-arm on, or the completion that releases the latch. It arrives off a Cmd goroutine
+		// like a beat, and carries the same kind of generation guard.
+		return m.foldActuation(msg)
+
 	case heartbeatTickMsg:
 		// The interval since the last landed beat has elapsed: issue the next one. Same generation
 		// guard as the spinner chain — a tick from a retired chain schedules nothing.
@@ -826,6 +839,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	if parsed.text == "" && !held {
 		return m, nil
 	}
+	if m.actuation.inFlight {
+		// A launcher verb owns the server this message would go to (ADR 0029 D5). Refuse it exactly
+		// as an offline upstream is refused, and for the same reason: the typed line stays in the box
+		// so ⏎ sends it the moment the actuation completes.
+		m.transcript.addNote(m.actuationBlockNote())
+		m.refreshViewport()
+		return m, nil
+	}
 	if m.blockedUpstream() {
 		// There is nothing to send to. Refuse at the boundary and say why — and leave the typed
 		// message exactly where it is: the human wrote it, the server's absence is not their
@@ -1043,6 +1064,16 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// One actuation at a time (ADR 0029 D5). While a launcher verb is in flight the latch refuses
+	// every command that would open an Exchange or move the session — the same serialization the
+	// facade demands of its caller, and the honest answer for the human: the server is mid-restart,
+	// so there is nothing to send to and nothing stable to switch. Everything else stays live.
+	if m.actuation.inFlight && actuationBlocked(parsed.command) {
+		m.transcript.addNote(m.actuationBlockNote())
+		m.layout()
+		return m, nil
+	}
+
 	// /continue and /compact are the two commands that open an Exchange, so they answer to the
 	// heartbeat exactly as a typed message does (blockedUpstream). The purely local verbs below —
 	// /clear, /sessions, /version, /confine, /server — stay live while the server is away (moving to
@@ -1109,6 +1140,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// argument (picker.go). Synchronous and idle-safe like /model: the seam it drives mutates
 		// the engine and constructs a client, which Agent.SwitchUpstream allows only at a boundary.
 		return m.runServerCommand(parsed.args)
+
+	case "load":
+		// Open the Launch-profile picker over what the launcher's config defines, or activate the
+		// profile named as an argument (picker.go). Idle-only like its two siblings, and the one of
+		// the three whose accept does not finish here: the launcher verb blocks, so it runs on a Cmd
+		// goroutine under the actuation latch and the beat after it completes the move (ADR 0029).
+		return m.runLoadCommand(parsed.args)
 
 	case "version":
 		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
@@ -1835,11 +1873,15 @@ func serverSwitchNote(from string, to Options) string {
 	return note
 }
 
-// foldBeatFailure folds a beat that could not read the server. Three rules, in order:
+// foldBeatFailure folds a beat that could not read the server. Four rules, in order:
 //
 //   - While an Exchange is in flight the failure is IGNORED — counter, state and words untouched.
 //     A streaming reply is stronger evidence that the server is there than a timed-out /v1/models
 //     on a single-slot server busy serving that very stream.
+//   - While an ACTUATION is in flight it is ignored for the mirror-image reason (ADR 0029 D5): the
+//     server is EXPECTED to be down mid-restart, so a beat that cannot read it is evidence of
+//     nothing. A beat that LANDS in that shadow is folded normally — a server answering mid-load is
+//     harmless news, and the post-actuation beat is what completes the move.
 //   - Before any beat has ever landed, one failure is enough: a cold start against a server that
 //     is not running should say so at once rather than after a debounce it has no evidence for.
 //   - Otherwise the crossing waits for offlineFailureThreshold consecutive idle failures.
@@ -1847,7 +1889,7 @@ func serverSwitchNote(from string, to Options) string {
 // The crossing is noted exactly once; every further failed beat is silent until a success crosses
 // back (foldBeat).
 func (m Model) foldBeatFailure(failure string) (Model, bool) {
-	if m.busy() {
+	if m.busy() || m.actuation.inFlight {
 		return m, false
 	}
 	m.hb.failures++
@@ -2320,7 +2362,14 @@ const (
 // the single word "connecting…" while a wired heartbeat has not bound a model yet. The two are
 // replaced TOGETHER — a context-window pin is not a fact about a model nobody has named yet — and
 // with the monitor unwired the pair is rendered exactly as it always was.
+//
+// An actuation in flight outranks both (ADR 0029 D6): "loading <profile>…" is the more specific
+// truth than "connecting…", and while a model is still bound it is the honest replacement for a
+// binding the launcher is in the middle of invalidating.
 func (m Model) upstreamSegments() []string {
+	if label := m.actuationLabel(); label != "" {
+		return []string{label}
+	}
 	if m.opts.Model == "" && m.opts.Heartbeat != nil {
 		return []string{connectingLabel}
 	}

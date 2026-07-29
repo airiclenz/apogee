@@ -198,7 +198,22 @@ voice.
 **Commit.** `feat(wire): launcher seams — load follows the profile, unload/stop act on the
 session's endpoint`
 
-## 4. `/load` — the command and the picker
+## 4. `/load` — the command and the picker — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): the owner decided items 4 and 5 land together as ONE commit — item 4's accept
+path is the real latch hand-off, never a stub — so both items were implemented in one run and are
+verified and committed as a unit. Three deviations from this item's literal text.
+(a) The zero-profiles note names NO path: `no launch profiles defined — add profiles to the
+llama-launcher config`. The seam item 3 fixed carries rows and one error, so the renderer never
+learns where the launcher's config lives — and ADR 0029 D1 is why it should not (a renderer that
+guessed a path would eventually name the wrong one). The path is still named on the rung where it is
+known: a configured-but-missing config comes back as the bridge's own error text.
+(b) `picker` gained a `profiles []LaunchProfileChoice` field, the one offering NOT derived at render
+time. The chassis' "rows are derived, never captured" rule is about state the Model holds; a Launch
+profile lives in a config FILE behind a seam that re-reads it, so once-per-open IS ADR 0029 D4's
+freshness — deriving per frame would make a keypress a file read.
+(c) The unknown-argument note is `unknown launch profile "x" — configured: a, b` — the `/server`
+grammar with CONTEXT.md's term in place of the bare word.
 
 **What.** ADR 0029 D3's first verb, built on the shipped picker chassis
 (`internal/tui/picker.go`). A `pickerProfile` kind in the enum (:41-46); command-table row
@@ -223,7 +238,26 @@ required.
 
 **Commit.** `feat(tui): /load — the launch-profile picker over the launcher seams`
 
-## 5. The actuation latch, the progress narration, and the completion folds
+## 5. The actuation latch, the progress narration, and the completion folds — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): landed together with item 4 as one commit (see that item's note). Five
+deviations from this item's literal text.
+(a) `errors.Is(err, launcher.ErrStartupTimeout)` cannot be asked in `internal/tui` — ADR 0029 D1
+keeps the facade out of the renderer, sentinels included. So the renderer owns
+`tui.ErrStartupTimeout` and `cmd/apogee/launcher.go` (the only file that may name the library) marks
+the launcher's own timeout with it through a wrapper that adds no text: both sentinels stay reachable
+by `errors.Is` and the launcher's words (the PID and log path) reach the transcript unchanged. The
+fold matches the projection; that is the whole difference.
+(b) The pump is ONE channel carrying the steps AND the completion, not a steps channel beside a
+separate done Msg. Two concurrently-run Cmds have no defined order, so a single queue is what makes
+"every step is painted before the completion" an ordering guarantee instead of a race.
+(c) `m.actuation` therefore also carries `gen` and that channel beside the three fields the item
+lists — both are this item's own requirements (the generation-guarded pump), not new state.
+(d) The completion's final item is sent from a DEFER, which is what makes "latch released on every
+path, panic included" true by construction rather than by inspection.
+(e) `startServerActuation` — the latch, pump and completion fold for `/unload`/`/stop` — is
+implemented and tested here, since this item owns them, but no command dispatches it yet: item 6
+wires the two verbs and owns their wording (the managed-unload sentence, the `stopping …` line).
 
 **What.** The concurrency and UX heart (ADR 0029 D5/D6).
 

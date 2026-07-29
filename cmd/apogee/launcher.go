@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -373,7 +374,7 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 	// this", and a world already serving it needs nothing done to it.
 	instance, _, err := w.ops.loadProfile(cfg, profile, false, progress, collect)
 	if err != nil {
-		return tui.ProfileLoadResult{Notices: notices}, err
+		return tui.ProfileLoadResult{Notices: notices}, projectStartupTimeout(err)
 	}
 
 	// Where the profile now serves. The resolved profile is the authority — it is what was asked for,
@@ -412,6 +413,32 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 	}
 	return tui.ProfileLoadResult{Moved: true, Switch: switched, Notices: notices}, nil
 }
+
+// projectStartupTimeout marks the launcher's health-wait timeout so the renderer can recognise it
+// without ever naming the library. internal/tui holds a sentinel of its own ([tui.ErrStartupTimeout])
+// precisely because ADR 0029 D1 keeps facade types AND facade sentinels out of it — the heartbeat.Beat
+// posture, applied to an error — and this is the one place that can bridge the two, being the only
+// file that imports the facade.
+//
+// The launcher's own message and chain are kept intact: the wrapper adds no text, so the transcript
+// still prints exactly what the library said (the PID and log path it names are the point), and
+// errors.Is finds BOTH sentinels through it.
+func projectStartupTimeout(err error) error {
+	if err != nil && errors.Is(err, llamalauncher.ErrStartupTimeout) {
+		return startupTimeout{err}
+	}
+	return err
+}
+
+// startupTimeout is that marker: an error that answers to [tui.ErrStartupTimeout] as well as to
+// everything the wrapped error already answered to.
+type startupTimeout struct{ error }
+
+// Is answers for the projected sentinel; Unwrap keeps the launcher's own chain reachable, so
+// errors.Is(err, llamalauncher.ErrStartupTimeout) still holds through the wrapper.
+func (startupTimeout) Is(target error) bool { return target == tui.ErrStartupTimeout }
+
+func (e startupTimeout) Unwrap() error { return e.error }
 
 // unload is [tui.Options.UnloadServer]: free the model of the server this session is talking to. On a
 // MANAGED backend the launcher's own semantic is a full stop (the model is baked into the process
