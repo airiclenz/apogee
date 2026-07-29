@@ -667,7 +667,7 @@ them; item 8 does, on hardware.
 
 **Commit.** `fix(cmd): one server, two spellings — a wildcard bind and a loopback dial match`
 
-## 8. Owner-run live pass (same-machine host)
+## 8. Owner-run live pass (same-machine host) — ✅ DONE (2026-07-29)
 
 NOTES (2026-07-29): the pass RAN and is **partial** — the item stays open. **PASS:** (1) the cold
 load — the server starts, the steps narrate, the beat binds, the footer completes; (3) the
@@ -714,6 +714,31 @@ RUN. **Scenario (7)** stays deliberately deferred by the owner.
 (d) This item therefore depends on item **15** as well as 9–14 — item 15 changes two of the folds
 these scenarios exercise, so a pass run before it lands would validate a surface about to move. The
 Acceptance below says so.
+
+NOTES (2026-07-29, final): the pass CLOSED on the owner's hardware, **six of seven** scenarios
+exercised. **PASS:** (1) the cold load — recorded above, unchanged. (2) the same-app restart,
+llama.cpp → llama.cpp on port 1111 — run after item 15 landed, switching between two llama.cpp
+profiles on the default port: the stop/start narration arrived as the corrected expectation (b)
+above says it does, the latch held, and no spurious `switching server:` fold appeared. This is the
+scenario's actual subject, the restart half that stood NOT RUN through both earlier blocks. (3) the
+cross-app switch llama.cpp → ollama on one endpoint — recorded above, unchanged. (4) the `Moved`
+fold, **RE-RUN** after item 15 — this PASS supersedes the retraction above, which had been the
+item-15 defect firing `Moved` on every load rather than a genuine move; the fold now fires for a
+move and means what it says. (5) `/unload-model`, re-run after item 15 — it had failed with `the
+launcher doesn't manage http://127.0.0.1:1111` before that item landed. (6) `/stop-server`, re-run
+after item 15 — the same prior failure, the same resolution.
+**NOT RUN — WAIVED by the owner:** (7) the load-timeout coda and the late bind. The owner declined
+to exercise the swapping / oversized-model path and waived the scenario explicitly. This is a
+decision, not an oversight and not deferred work, and it is the reason this item is marked ✅ DONE
+with six of seven scenarios exercised. Plainly, for whoever reads this later: **the load-timeout
+coda and the late bind have no live coverage.** This item's ✅ is not evidence that either was ever
+seen on hardware — only the CI fake has met them.
+(e) **Item 15's fix, confirmed in the field.** The wildcard-bind / loopback-dial defect — the one
+that failed (5) and (6) and was counterfeiting (4) — is gone on the very host that found it: with
+`defaults.host: "0.0.0.0"` in the launcher config and the session dialling `http://127.0.0.1:1111`,
+both verbs act on a session that has performed no load, and a load of the profile already serving
+that endpoint moves nothing. That is item 15's Acceptance, observed on hardware rather than against
+the fake.
 
 **What.** The end the CI fake cannot see (ADR 0029 consequences): on a host with the real
 launcher config and a llama.cpp profile — (1) `/load` a profile cold (server starts, steps
