@@ -152,7 +152,10 @@ type launchProfile struct {
 	// Backend is the server the profile runs on: llamacpp, ollama, lmstudio.
 	Backend string
 	// Addr is the resolved host:port the profile would serve at, after the launcher's merge of
-	// profile over defaults over backend fallback. Empty only if that merge left it unstated.
+	// profile over defaults over backend fallback, in the spelling a client on this machine DIALS
+	// it at: a profile that binds the wildcard address carries the loopback form (dialAddr), since
+	// this value's whole job downstream is to be compared against the session's endpoint. Empty
+	// only if that merge left the address unstated.
 	Addr string
 	// ContextWindow is the profile's merged context_size, or 0 when it is unset — the launcher
 	// leaves the server's own default in place there, so 0 means UNKNOWN, not zero tokens.
@@ -190,7 +193,7 @@ func launchProfiles(ops launcherOps, path string) ([]launchProfile, []string, er
 		rows = append(rows, launchProfile{
 			Name:          name,
 			Backend:       profile.Backend,
-			Addr:          profileAddr(profile),
+			Addr:          dialAddr(profileAddr(profile)),
 			ContextWindow: intValue(profile.ContextSize),
 		})
 	}
@@ -220,14 +223,15 @@ func launchProfiles(ops launcherOps, path string) ([]launchProfile, []string, er
 	return rows, warnings, nil
 }
 
-// profileAddr renders a resolved profile's host:port. The launcher's own merge fills both fields
+// profileAddr renders a resolved profile's host:port, exactly as the launcher resolved it — a BIND
+// address, which is not always an address anything dials. The launcher's own merge fills both fields
 // from the backend's defaults when the profile states neither, so an empty answer here means the
 // address genuinely could not be resolved — reported as unknown rather than as a bogus ":0".
 //
 // It is built the same way endpointAddr builds its answer, because the two are COMPARED: a profile
 // load decides whether it has to move the session by asking whether the profile's address is the one
-// the session is already on, and a comparison between two spellings of one address would answer
-// that wrongly.
+// the session is already on. That comparison goes through sameServer rather than through `==`,
+// precisely because the two sides may legitimately spell one server differently.
 func profileAddr(profile *llamalauncher.ResolvedProfile) string {
 	if profile == nil || profile.Host == nil || profile.Port == nil {
 		return ""
@@ -289,12 +293,132 @@ func addrEndpoint(addr string) string {
 // instanceAddr renders a discovered instance's host:port the way profileAddr and endpointAddr render
 // theirs — through net.JoinHostPort, so an IPv6 host is bracketed exactly once. RunningInstance's own
 // Addr formats with %s:%d and would leave a v6 host bare, and these three values are COMPARED against
-// each other: one spelling for one address is the property the matching rests on.
+// each other (through sameServer): one bracketing rule for one address is what leaves that predicate
+// only the differences that are real.
 func instanceAddr(instance *llamalauncher.RunningInstance) string {
 	if instance == nil {
 		return ""
 	}
 	return net.JoinHostPort(instance.Host, strconv.Itoa(instance.Port))
+}
+
+// sameServer answers the question both folds of this integration ask: does a launcher-side address
+// name the same server as the address this session dials? A launcher that binds `0.0.0.0` — the
+// posture of anyone who wants their server reachable off-box — resolves its profiles and reports its
+// instances at that address, while the session talks to `127.0.0.1`. Those are the BIND and the DIAL
+// spelling of one server, and asking the question with plain string equality answers it wrongly on
+// the default configuration.
+//
+// True when the two addresses are spelled identically, or when they name the same PORT while the
+// launcher's host is unspecified (`0.0.0.0`, `::`, or empty — a wildcard bind answers on every
+// interface this machine holds, loopback included) and the endpoint's host is one this machine
+// answers as.
+//
+// Everything else is two servers. A wildcard bind is not a licence to claim somebody else's server —
+// the one mistake available here is stopping a stranger's — and two ports are two servers however
+// they are spelled.
+func sameServer(launcherAddr, endpointAddr string) bool {
+	return sameServerOn(launcherAddr, endpointAddr, machineAddrs)
+}
+
+// sameServerOn is sameServer with the machine's own addresses supplied rather than looked up, so the
+// last arm of the predicate can be decided in a test by a value stated in the test — the LAN cases
+// mean the same thing on every host the suite runs on, including one that happens to hold the
+// address the test calls a stranger's.
+func sameServerOn(launcherAddr, endpointAddr string, machine func() []net.IP) bool {
+	if launcherAddr == endpointAddr {
+		return true
+	}
+	launcherHost, launcherPort, err := net.SplitHostPort(launcherAddr)
+	if err != nil {
+		return false
+	}
+	endpointHost, endpointPort, err := net.SplitHostPort(endpointAddr)
+	if err != nil {
+		return false
+	}
+	if launcherPort != endpointPort || !unspecifiedHost(launcherHost) {
+		return false
+	}
+	return thisMachine(endpointHost, machine)
+}
+
+// unspecifiedHost reports whether a host is the wildcard a server BINDS to rather than an address a
+// client dials: `0.0.0.0`, `::`, or nothing at all. Such a server answers on every address this
+// machine holds, which is the whole reason one server can be spelled two ways.
+func unspecifiedHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
+}
+
+// thisMachine reports whether an endpoint's host names the machine the launcher runs on. Loopback
+// answers yes — the literal addresses, and `localhost`, the one name that can mean nothing else —
+// and any other address is checked against the machine's own interfaces, because a session pointed
+// at this box's LAN address is still pointed at this box.
+//
+// A name that is not `localhost` is NOT resolved: a DNS round trip inside a comparison would block a
+// verb on the network, and a name this side cannot vouch for is somebody else's server.
+func thisMachine(host string, machine func() []net.IP) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	for _, own := range machine() {
+		if own.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// machineAddrs is the addresses configured on this machine's interfaces — sameServer's production
+// input, read fresh because an interface can come and go inside one session. A lookup that fails
+// yields none, which makes the predicate answer "not this machine": the safe direction, since an
+// address this side cannot account for is left alone.
+func machineAddrs() []net.IP {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, addr := range addrs {
+		switch a := addr.(type) {
+		case *net.IPNet:
+			ips = append(ips, a.IP)
+		case *net.IPAddr:
+			ips = append(ips, a.IP)
+		}
+	}
+	return ips
+}
+
+// dialAddr turns a BIND address into the address a client on this machine reaches it at: a wildcard
+// host becomes the loopback of its own family, and every other address — including one the launcher
+// config states explicitly — is returned exactly as it stands. Anything that is not a host:port at
+// all is passed through untouched, since there is nothing here to improve.
+//
+// This is the projection that keeps the picker honest without teaching it about bind addresses: the
+// renderer compares a profile's address against the session's endpoint by string, and a wildcard
+// bind reaching it as `127.0.0.1` is what makes those two agree (ADR 0029 D1).
+func dialAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || !unspecifiedHost(host) {
+		return addr
+	}
+	loopback := "127.0.0.1"
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		loopback = "::1"
+	}
+	return net.JoinHostPort(loopback, port)
 }
 
 // ----------------------------------------------------------------------------
@@ -385,7 +509,10 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 		addr = instanceAddr(instance)
 	}
 	// The comparison is against the endpoint the session is on RIGHT NOW, read from the holder rather
-	// than captured at wire time, because a `/server` switch may have moved it since. An endpoint that
+	// than captured at wire time, because a `/server` switch may have moved it since. It goes through
+	// sameServer, so a profile that binds the wildcard address and a session that dials this machine's
+	// loopback are recognised as the one server they are (ADR 0029 D2 moves the session only when the
+	// profile resolves ELSEWHERE, and two spellings of one address are not elsewhere). An endpoint that
 	// will not reduce to an address cannot be shown equal to anything, so it reads as "somewhere else"
 	// and the load follows the profile — the direction that ends with the session pointed at the
 	// server it just asked for.
@@ -393,7 +520,7 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 	if reduced, err := endpointAddr(w.holder.Endpoint()); err == nil {
 		current = reduced
 	}
-	if addr == "" || addr == current {
+	if addr == "" || sameServer(addr, current) {
 		// Nothing moves. The load landed on the very server this session talks to (or the launcher
 		// could not say where it landed, which is not a licence to re-point the wire), and the next
 		// beat observes the model change and rebinds through the ordinary path — ADR 0029 D1's "only
@@ -467,7 +594,13 @@ func (w launcherWiring) stop(endpoint string) (tui.ActuationResult, error) {
 
 // managedInstance answers the question both actuation verbs have to ask first: is the server this
 // session is talking to one the launcher's config implies? It reduces the endpoint to an address,
-// re-reads the config fresh, and matches that address against a discovery sweep.
+// re-reads the config fresh, and matches that address against a discovery sweep — through sameServer,
+// so an instance the launcher reports at its wildcard bind is recognised by a session dialling the
+// loopback it answers on, without a profile load first to make the two spell it alike.
+//
+// What comes back is the INSTANCE, so the verbs go on to address the launcher with the address the
+// launcher itself holds (instanceAddr) rather than with the spelling the match was made through:
+// matching is normalised, addressing is not — the library is asked about the server on its own terms.
 //
 // No match is an error naming the endpoint rather than a best guess. The verbs act on a REAL address
 // or on nothing: an unmanaged endpoint is usually a remote server (whose local half is the launcher's
@@ -483,7 +616,7 @@ func (w launcherWiring) managedInstance(endpoint string) (*llamalauncher.Running
 		return nil, err
 	}
 	for _, instance := range w.ops.discover(cfg) {
-		if instance != nil && instanceAddr(instance) == addr {
+		if instance != nil && sameServer(instanceAddr(instance), addr) {
 			return instance, nil
 		}
 	}

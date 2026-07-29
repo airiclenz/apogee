@@ -1340,6 +1340,122 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 	}
 }
 
+// wildcardBoundConfig is twoServerConfig under the posture anyone who wants their server reachable
+// off-box runs: `defaults.host: "0.0.0.0"`. The profiles resolve to the address the server BINDS,
+// while the session dials one of the addresses that bind answers on — one server, two legitimate
+// spellings, and the fixture the cases below are read from.
+func wildcardBoundConfig(t *testing.T) *llamalauncher.Config {
+	t.Helper()
+	return launcherFixture(t, []string{"here.gguf", "there.gguf"}, `
+servers:
+  llamacpp:
+    api_key: llamacpp-key
+  ollama: true
+defaults:
+  server: llamacpp
+  host: 0.0.0.0
+  context_size: 4096
+profiles:
+  here:
+    model: here.gguf
+    port: 8080
+  there:
+    model: there.gguf
+    port: 9090
+`)
+}
+
+// A wildcard bind answers on every interface this machine holds, loopback included, so a session
+// dialling that loopback IS talking to the launcher's server — with no profile load first to make
+// the two sides spell the address the same way. What the launcher is then ASKED about is its own
+// address, never the dial spelling the match was made through: matching is normalised, addressing
+// is not.
+func TestUnloadAndStopActOnAWildcardBoundServer(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg: wildcardBoundConfig(t),
+		instances: []*llamalauncher.RunningInstance{
+			{Backend: "llamacpp", Host: "0.0.0.0", Port: 8080},
+			{Backend: "ollama", Host: "::", Port: 11434},
+		},
+		actuateResult: &llamalauncher.StopResult{ServerStopped: true},
+	}
+	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	result, err := wiring.unload("http://127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("unload: %v; want the verb to ACT — the session dials an address the `0.0.0.0` bind "+
+			"answers on, and no load has happened to align the two spellings", err)
+	}
+	if !slices.Equal(ops.unloaded, []string{"llamacpp 0.0.0.0:8080"}) {
+		t.Errorf("unload calls = %v; want the LAUNCHER's own address, not the dial spelling matched by", ops.unloaded)
+	}
+	if result.Backend != "llamacpp" || result.Addr != "0.0.0.0:8080" {
+		t.Errorf("unload result = %+v; want the discovered instance as the launcher holds it", result)
+	}
+
+	// The v6 wildcard is the same claim in the other family.
+	if _, err := wiring.stop("http://[::1]:11434"); err != nil {
+		t.Fatalf("stop against a `::`-bound server: %v; want the verb to act", err)
+	}
+	if !slices.Equal(ops.stopped, []string{"[::]:11434"}) {
+		t.Errorf("stop calls = %v; want the launcher's own `::` spelling", ops.stopped)
+	}
+
+	// And the direction that must never widen: a wildcard bind does not make somebody else's server
+	// ours, however well the ports line up.
+	if _, err := wiring.stop("http://remote.invalid:8080"); err == nil {
+		t.Errorf("stop against a remote endpoint returned no error; want the refusal — a wildcard bind " +
+			"is not a licence to stop a server on another machine")
+	}
+	if !slices.Equal(ops.stopped, []string{"[::]:11434"}) {
+		t.Errorf("stop calls = %v; want the refused endpoint to have driven nothing", ops.stopped)
+	}
+}
+
+// A profile whose resolved address is the BIND spelling of the very server this session dials moves
+// nothing: the wildcard-vs-loopback difference is one server spelled twice, and re-pointing the wire
+// on it would unbind the model and re-announce the seed on every single load. Two PORTS remain two
+// servers, wildcard bind or not.
+func TestLoadProfileWildcardBindMovesNothing(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:        wildcardBoundConfig(t),
+		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "0.0.0.0", Port: 8080},
+	}
+	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	result, err := wiring.load("here", nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if result.Moved {
+		t.Errorf("result = %+v; want Moved false — `0.0.0.0:8080` and `127.0.0.1:8080` are one server", result)
+	}
+	if len(agent.specs) != 0 {
+		t.Errorf("SwitchUpstream called %+v; want no engine move at all", agent.specs)
+	}
+	if len(host.models) != 0 {
+		t.Errorf("SetModel called %v; want the stored model untouched — nothing was unbound", host.models)
+	}
+	if got := holder.Endpoint(); got != "http://127.0.0.1:8080" {
+		t.Errorf("holder endpoint = %q; want the session's own spelling, unchanged", got)
+	}
+	if len(ops.loadedNames) != 1 || ops.loadedNames[0] != "here" {
+		t.Errorf("loadProfile names = %v; want exactly [here] — the profile still had to be activated", ops.loadedNames)
+	}
+
+	moved, err := wiring.load("there", nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !moved.Moved {
+		t.Errorf("result = %+v; want Moved true — another PORT is another server however it is bound", moved)
+	}
+}
+
 // A nil progress callback is the documented safe case, and a load that cannot even resolve its
 // profile never reaches the launcher: no activation is attempted and nothing moves.
 func TestLoadProfileUnknownNameNeverActuates(t *testing.T) {

@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -257,6 +259,108 @@ profiles:
 	}
 	if broken.discoverCalls != 0 {
 		t.Errorf("discover calls = %d; want 0 — nothing to mark, and no reason to probe", broken.discoverCalls)
+	}
+}
+
+// The predicate both folds ask their question through: a bind address and a dial address may be one
+// server, and everything else is two. The machine's own addresses are stated rather than looked up,
+// so the LAN cases mean the same thing on a host that happens to hold 192.168.1.50 as on one that
+// does not.
+func TestSameServerMatchesOneServerSpelledTwice(t *testing.T) {
+	t.Parallel()
+
+	machine := func() []net.IP {
+		return []net.IP{net.ParseIP("192.168.1.7"), net.ParseIP("fe80::abcd")}
+	}
+	tests := []struct {
+		name     string
+		launcher string
+		endpoint string
+		want     bool
+	}{
+		{"one spelling twice", "127.0.0.1:1111", "127.0.0.1:1111", true},
+		{"a wildcard bind, a loopback dial", "0.0.0.0:1111", "127.0.0.1:1111", true},
+		{"a v6 wildcard bind, a v6 loopback dial", "[::]:1111", "[::1]:1111", true},
+		{"a v6 wildcard bind, a v4 loopback dial", "[::]:1111", "127.0.0.1:1111", true},
+		{"a bare-empty bind host", ":1111", "127.0.0.1:1111", true},
+		{"loopback by its one name", "0.0.0.0:1111", "localhost:1111", true},
+		{"this machine's own LAN address", "0.0.0.0:1111", "192.168.1.7:1111", true},
+		// The case that must not regress: the one mistake available here is stopping somebody
+		// else's server, and a wildcard bind is not a claim on the LAN.
+		{"a LAN PEER", "0.0.0.0:1111", "192.168.1.50:1111", false},
+		{"a name this side cannot vouch for", "0.0.0.0:1111", "remote.invalid:1111", false},
+		{"a remote endpoint entirely", "0.0.0.0:1111", "remote.invalid:9999", false},
+		{"two ports on one host", "127.0.0.1:1111", "127.0.0.1:2222", false},
+		{"two ports, one of them wildcard-bound", "0.0.0.0:1111", "127.0.0.1:2222", false},
+		{"a bind host the launcher actually stated", "192.168.1.7:1111", "127.0.0.1:1111", false},
+		{"nothing that parses as an address", "not-an-address", "127.0.0.1:1111", false},
+		{"nothing on the endpoint side", "0.0.0.0:1111", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := sameServerOn(tt.launcher, tt.endpoint, machine); got != tt.want {
+				t.Errorf("sameServer(%q, %q) = %v; want %v", tt.launcher, tt.endpoint, got, tt.want)
+			}
+		})
+	}
+
+	// The wired-up form asks the machine itself, on the two answers no host can disagree about.
+	if !sameServer("0.0.0.0:1111", "127.0.0.1:1111") {
+		t.Errorf("sameServer over the real interfaces refused the wildcard/loopback pair")
+	}
+	if sameServer("0.0.0.0:1111", "remote.invalid:1111") {
+		t.Errorf("sameServer over the real interfaces claimed a server it cannot name")
+	}
+}
+
+// A profile whose resolved host is the WILDCARD a server binds to reaches the row as the loopback
+// address a client on this machine dials it at. The projection belongs here, at the root: the picker
+// decides the already-loaded profile's exclusion and the elsewhere-port stamp by comparing this
+// string against the session's endpoint, and internal/tui knows nothing of bind addresses (ADR 0029
+// D1). An address the launcher actually stated is left exactly as it stands.
+func TestLaunchProfilesProjectsTheDialSpelling(t *testing.T) {
+	t.Parallel()
+
+	cfg := launcherFixture(t, []string{"wild.gguf", "six.gguf", "named.gguf"}, `
+servers:
+  llamacpp: true
+defaults:
+  server: llamacpp
+  host: 0.0.0.0
+  port: 1111
+profiles:
+  wild:
+    model: wild.gguf
+  six:
+    model: six.gguf
+    host: "::"
+    port: 2222
+  named:
+    model: named.gguf
+    host: 192.168.1.50
+    port: 3333
+`)
+	rows, warnings, err := launchProfiles(&fakeLauncher{cfg: cfg}, "config.yaml")
+	if err != nil {
+		t.Fatalf("launchProfiles: unexpected error %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v; want none — every profile resolves", warnings)
+	}
+
+	want := map[string]string{
+		"wild":  "127.0.0.1:1111",
+		"six":   "[::1]:2222",
+		"named": "192.168.1.50:3333",
+	}
+	got := make(map[string]string, len(rows))
+	for _, row := range rows {
+		got[row.Name] = row.Addr
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("row addresses = %v; want %v — a wildcard bind reaches the picker as the spelling "+
+			"the session dials, so the two agree by construction", got, want)
 	}
 }
 

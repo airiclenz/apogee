@@ -555,7 +555,27 @@ that actually occurs, on the default posture rather than an exotic one. Item 15 
 sits ahead of item 8 in this file for the same reason 13–14 do: item 8 is the last thing that runs,
 and it now depends on this.
 
-## 15. `sameServer` — the bind address and the dial address name one server
+## 15. `sameServer` — the bind address and the dial address name one server — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): three things the implementation settled beyond the item's literal text.
+(a) The predicate's "an address of this machine" arm reads `net.InterfaceAddrs`, so it takes an
+injected lister — `sameServerOn(launcher, endpoint string, machine func() []net.IP)`, with
+`sameServer` the two-argument production wrapper. Without it the LAN-peer case (`192.168.1.50`,
+the one that must never widen) would mean something different on a host that happens to hold that
+address, and pinning it through a mutable package var would race the parallel tests under `-race`.
+(b) `localhost` counts as loopback, by NAME and without a DNS lookup — the one name that can mean
+nothing else, and the spelling item 8's NOTES (c) originally imagined. No other name is resolved:
+a round trip inside a comparison would block a verb on the network, and a name this side cannot
+vouch for is somebody else's server.
+(c) The dial projection is applied at the ROW assembly (`dialAddr(profileAddr(profile))` at :193),
+leaving `profileAddr` itself in the launcher's bind spelling. That keeps the `Moved` fold asking
+`sameServer` about the launcher's own address (its first parameter's meaning) and honours this
+item's "matching is normalised; addressing is not" — with the consequence recorded below, in item
+3/6's territory rather than fixed here: a load that GENUINELY moves the session to a wildcard-bound
+profile on another port still re-points the wire at `http://0.0.0.0:<port>` (`addrEndpoint` over
+the bind spelling), which Windows cannot dial and which leaves that session's picker rows spelled
+differently from its endpoint again. Unreached by item 15's own acceptance, and no test asserts it
+either way.
 
 **What.** One predicate, in the file that already owns every address the launcher speaks
 (`cmd/apogee/launcher.go` — item 2 made it the only file allowed to name the library's types).
