@@ -64,7 +64,26 @@ write-back lands on `options`.
 
 **Commit.** `feat(config): file-only llama-launcher key — auto-detect, off, or a path`
 
-## 2. The launcher bridge — `cmd/apogee/launcher.go` + the dependency
+## 2. The launcher bridge — `cmd/apogee/launcher.go` + the dependency — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): six deviations from the item's literal text, all mechanical.
+(a) The facade is imported **aliased as `llamalauncher`** — `cmd/apogee` already owns the
+identifier `launcher` (root.go's function type for "the thing that opens the TUI"), so the seam
+reads `*llamalauncher.Config`, not `*launcher.Config`. (b) `go.mod`'s go directive moved
+`1.26` → `1.26.3`, forced by the launcher's own go.mod; nothing else in the graph changed but
+the new direct requirement and `golang.org/x/term` as indirect. (c) `launchProfiles` returns
+`([]launchProfile, []string, error)` — rows, collected warnings, and the one error that sinks
+the list — over a cmd-local `launchProfile` row type (item 3 projects it onto
+`tui.LaunchProfileChoice`); the plan left the signature open. (d) `endpointAddr` fills a
+**scheme default port** (http→80, https→443) for a portless URL rather than refusing it — that
+is the address the wire actually connects to; a portless URL whose scheme has no default is
+still refused. (e) `fakeLauncher` scripts instances/errors/notices in memory but hands back a
+**really parsed** `*llamalauncher.Config` (built from a temp config file through the facade's own
+loader), because the launcher's `ServerConfig` type is not exported by the facade and a `Config`
+literal therefore cannot be written outside that module — and faking `ProfileNames`/`ResolveProfile`
+would fake the very ordering and merging this bridge projects. (f) `.gitignore` gained
+`/go.work` + `/go.work.sum`, so the cross-repo dev override the file header documents cannot be
+committed by accident.
 
 **What.** The only file that imports the facade, and the seam that makes every later item
 fake-testable. `go.mod` gains `github.com/airiclenz/llama-launcher v1.6.1` (tagged — never a

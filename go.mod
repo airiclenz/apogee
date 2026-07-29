@@ -1,11 +1,12 @@
 module github.com/airiclenz/apogee
 
-go 1.26
+go 1.26.3
 
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.4
+	github.com/airiclenz/llama-launcher v1.6.1
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/lucasb-eyer/go-colorful v1.4.0
@@ -37,5 +38,6 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )

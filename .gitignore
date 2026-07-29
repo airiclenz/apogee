@@ -10,3 +10,9 @@
 
 # Local per-tool loader shim — AGENTS.md is the canonical, checked-in agent guide
 /CLAUDE.md
+
+# Local cross-repo development against a sibling checkout (llama-launcher — ADR 0029 D7).
+# The module graph must only ever record a TAGGED requirement, so the workspace file that
+# overrides it stays in the developer's tree and never reaches a clone.
+/go.work
+/go.work.sum
