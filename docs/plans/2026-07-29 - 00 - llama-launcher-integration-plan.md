@@ -486,7 +486,14 @@ already loaded.
 **Commit.** `feat(tui): /model follows the launcher — profiles are the offering, the loaded
 one excluded`
 
-## 10. `/unload` and `/stop` go hidden — recognised, never offered
+## 10. `/unload` and `/stop` go hidden — recognised, never offered — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): one deviation from the item's literal text. The acceptance line asks that item
+6's tests stay green untouched, and they did — but two MENU tests in `command_test.go`
+(`TestCommandTableDrivesParserAndMenu`, `TestCommandSuggestionsTagIdleOnlyRowsWhileBusy`) asserted
+"every row of `commandSpecs` is offered" and had to be narrowed to "every non-hidden row", which is
+this item's own change read from the other side: a menu assertion that ignored the new flag would
+contradict the item's first test. No verb test was touched.
 
 **What.** The owner keeps the verbs' logic but takes them off the menu. `commandSpec`
 (command.go:66-72) gains a `hidden` flag beside `menuOnly` — the inverse posture: `menuOnly`
