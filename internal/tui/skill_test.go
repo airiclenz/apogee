@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -17,12 +18,16 @@ import (
 // ----------------------------------------------------------------------------
 
 // fakeSkillCatalog is a deterministic SkillCatalog for the TUI tests. List returns its skills
-// in the given order (the real catalog sorts by DisplayName; tests pass them pre-sorted).
+// in the given order (the real catalog sorts by DisplayName; tests pass them pre-sorted), and
+// skipped stands in for the SKILL.md files a real scan found but could not load.
 type fakeSkillCatalog struct {
-	skills []skills.Skill
+	skills  []skills.Skill
+	skipped []skills.SkipError
 }
 
 func (f fakeSkillCatalog) List() []skills.Skill { return f.skills }
+
+func (f fakeSkillCatalog) Skipped() []skills.SkipError { return f.skipped }
 
 func (f fakeSkillCatalog) Get(id string) (skills.Skill, bool) {
 	for _, s := range f.skills {
@@ -618,6 +623,8 @@ type reloadableCatalog struct {
 
 func (f reloadableCatalog) List() []skills.Skill { return *f.skills }
 
+func (f reloadableCatalog) Skipped() []skills.SkipError { return nil }
+
 func (f reloadableCatalog) Get(id string) (skills.Skill, bool) {
 	for _, s := range *f.skills {
 		if s.ID == id {
@@ -800,18 +807,69 @@ func TestSkillsCommandWithNoCatalog(t *testing.T) {
 // skillCatalogNote is pure, so its wording is pinned without a Model: the singular header, a
 // skill with no summary, and the fallbacks that stand in for the two unwired roots.
 func TestSkillCatalogNote(t *testing.T) {
-	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, "/home/.apogee", "/ws")
+	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, nil, "/home/.apogee", "/ws")
 	if !strings.HasPrefix(one, "1 skill available:") {
 		t.Errorf("singular header wrong:\n%s", one)
 	}
 	if !strings.Contains(one, "/review  Review") || strings.Contains(one, "—") {
 		t.Errorf("a summary-less skill must render without the dash:\n%s", one)
 	}
-	empty := skillCatalogNote(nil, "", "")
+	empty := skillCatalogNote(nil, nil, "", "")
 	if !strings.Contains(empty, "<workspace>") {
 		t.Errorf("an unwired workspace must render the placeholder:\n%s", empty)
 	}
 	if !strings.Contains(empty, filepath.Join("~", ".apogee", "skills")) {
 		t.Errorf("an unwired home must render the ~/.apogee spelling:\n%s", empty)
+	}
+}
+
+// A skill discovery refused must be NAMED in the report, with its reason and its file — the
+// whole point of carrying skips: a malformed skill and an absent one are otherwise identical
+// from the picker. Pinned in both shapes: alongside loaded skills, and as the only finding.
+func TestSkillCatalogNoteReportsSkipped(t *testing.T) {
+	bad := skills.SkipError{
+		Path: filepath.Join("/home", ".apogee", "skills", "implement-plan", "SKILL.md"),
+		Err:  errors.New("malformed YAML frontmatter"),
+	}
+
+	both := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, []skills.SkipError{bad}, "/home/.apogee", "/ws")
+	for _, want := range []string{"1 skill available:", "1 skill found but not loaded:", "implement-plan", "malformed YAML frontmatter", bad.Path} {
+		if !strings.Contains(both, want) {
+			t.Errorf("report is missing %q:\n%s", want, both)
+		}
+	}
+
+	// Nothing loaded but something refused: the where-we-looked note would be a lie here, since
+	// discovery DID find a skill — the failure has to lead instead.
+	only := skillCatalogNote(nil, []skills.SkipError{bad}, "/home/.apogee", "/ws")
+	if strings.Contains(only, "no skills found") {
+		t.Errorf("a refused skill must not be reported as nothing found:\n%s", only)
+	}
+	if !strings.Contains(only, "implement-plan") || !strings.Contains(only, "malformed YAML frontmatter") {
+		t.Errorf("the sole finding must still name the skill and the reason:\n%s", only)
+	}
+}
+
+// The /skills command reads the skips off the SAME catalog it lists, so a broken skill surfaces
+// through the real command path and not merely through the pure renderer.
+func TestSkillsCommandReportsSkipped(t *testing.T) {
+	o := testOpts
+	o.Skills = fakeSkillCatalog{
+		skills: []skills.Skill{{ID: "review", DisplayName: "Review", Summary: "review a diff"}},
+		skipped: []skills.SkipError{{
+			Path: filepath.Join("lib", "skills", "broken", "SKILL.md"),
+			Err:  errors.New("malformed YAML frontmatter"),
+		}},
+	}
+	m := newTestModelEng(t, &fakeEngine{}, o)
+	note := runSkillsNote(t, m)
+
+	if !strings.Contains(note, "/review") {
+		t.Errorf("the loaded half is missing:\n%s", note)
+	}
+	for _, want := range []string{"broken", "malformed YAML frontmatter"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("/skills did not report the skipped skill (%q missing):\n%s", want, note)
+		}
 	}
 }

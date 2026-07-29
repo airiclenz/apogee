@@ -1,18 +1,26 @@
 package skills
 
 import (
+	"errors"
+	"slices"
 	"sort"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// Catalog is the resolved set of discovered skills keyed by ID. It is built by Load and read
-// by two consumers over different seams: the TUI's /skill picker (List/Get) and the agent loop
-// (ResolveSkills, the domain.SkillResolver it satisfies). The same *Catalog is injected into
-// both — it is read-only after Load, so sharing it across the UI and the loop goroutine is safe
-// (no method mutates byID).
+// Catalog is the outcome of one discovery scan: the skills that loaded, keyed by ID, AND the
+// SKILL.md files that did not (Skipped). It is built by Load and read by two consumers over
+// different seams: the TUI's /skill picker (List/Get/Skipped) and the agent loop (ResolveSkills,
+// the domain.SkillResolver it satisfies). The same *Catalog is injected into both — it is
+// read-only after Load, so sharing it across the UI and the loop goroutine is safe (no method
+// mutates byID or skipped).
+//
+// The failures ride along WITH the loaded skills rather than beside them so a reader can never
+// pair a fresh listing with a stale set of failures: Provider swaps the whole *Catalog under one
+// atomic pointer, which makes "19 loaded, 1 skipped" always one scan's answer.
 type Catalog struct {
-	byID map[string]Skill
+	byID    map[string]Skill
+	skipped []SkipError
 }
 
 // newCatalog returns an empty catalog ready for set. Load always returns a non-nil *Catalog —
@@ -27,6 +35,29 @@ func newCatalog() *Catalog {
 // — wins (a workspace skill overrides a global one).
 func (c *Catalog) set(s Skill) {
 	c.byID[s.ID] = s
+}
+
+// addSkip records one SKILL.md discovery could not load, in walk order.
+func (c *Catalog) addSkip(e SkipError) {
+	c.skipped = append(c.skipped, e)
+}
+
+// Skipped returns the SKILL.md files this scan found but could not load, in discovery order —
+// the "why is my skill missing?" half of the /skills report. It returns a copy, keeping the
+// catalog read-only after Load exactly as List does.
+func (c *Catalog) Skipped() []SkipError {
+	return slices.Clone(c.skipped)
+}
+
+// skipError joins the recorded skips into the single soft error Load returns, so a caller that
+// wants one error value gets the same set Skipped exposes structurally. Nil when nothing was
+// skipped (errors.Join of nothing).
+func (c *Catalog) skipError() error {
+	errs := make([]error, 0, len(c.skipped))
+	for _, e := range c.skipped {
+		errs = append(errs, e)
+	}
+	return errors.Join(errs...)
 }
 
 // List returns every skill sorted by DisplayName (then ID, so the order is total and stable

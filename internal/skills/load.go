@@ -1,7 +1,6 @@
 package skills
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -41,14 +40,17 @@ type Sources struct {
 // returned *Catalog is always non-nil and usable — a missing source dir is skipped and a
 // malformed skill is skipped — so a caller may safely ignore the error and still get a working
 // (possibly partial) catalog. The error, when non-nil, joins the per-skill soft failures for a
-// caller that wants to surface them; it never signals "the catalog is unusable".
+// caller that wants one error value; it never signals "the catalog is unusable".
+//
+// Dropping that error loses nothing: the same failures are recorded ON the catalog
+// (Catalog.Skipped), so the caller that ignores the error can still tell the human WHICH skill
+// did not load and why.
 func Load(src Sources) (*Catalog, error) {
 	cat := newCatalog()
-	var softErrs []error
 	for _, dir := range sourceDirs(src) {
-		softErrs = append(softErrs, loadDir(cat, dir)...)
+		loadDir(cat, dir)
 	}
-	return cat, errors.Join(softErrs...)
+	return cat, cat.skipError()
 }
 
 // sourceDirs lists the skill dirs in increasing priority (later overrides earlier on an id
@@ -69,20 +71,19 @@ func sourceDirs(src Sources) []string {
 	return dirs
 }
 
-// loadDir walks one source dir through os.Root and loads every SKILL.md it finds, returning a
-// soft error per unreadable/malformed skill (a missing or unopenable dir yields none — it is
-// simply skipped). The os.Root fence is the same idiom as the TUI's workspace file walk: a
-// symlink that escapes the dir cannot be followed, so a workspace skills/ symlinked at host
-// files reads nothing out of bounds. Dotted subdirs are skipped (no .git, no hidden folders).
-func loadDir(cat *Catalog, dir string) []error {
+// loadDir walks one source dir through os.Root and loads every SKILL.md it finds, recording a
+// SkipError on the catalog per unreadable/malformed skill (a missing or unopenable dir records
+// none — it is simply skipped). The os.Root fence is the same idiom as the TUI's workspace file
+// walk: a symlink that escapes the dir cannot be followed, so a workspace skills/ symlinked at
+// host files reads nothing out of bounds. Dotted subdirs are skipped (no .git, no hidden folders).
+func loadDir(cat *Catalog, dir string) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil // a missing/unreadable source dir is fine — there just are no skills here
+		return // a missing/unreadable source dir is fine — there just are no skills here
 	}
 	defer root.Close()
 	fsys := root.FS()
 
-	var errs []error
 	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || p == "." {
 			return nil // skip an unreadable entry (incl. an escaping symlink) / the root itself
@@ -99,26 +100,28 @@ func loadDir(cat *Catalog, dir string) []error {
 		if cat.Len() >= maxSkills {
 			// Cap reached: a hostile repo cannot grow the catalog without bound. Stop this dir's
 			// walk and note the skip once rather than per remaining file.
-			errs = append(errs, fmt.Errorf("skills: skill cap (%d) reached; skipped %s and any later skills under %s",
-				maxSkills, p, dir))
+			cat.addSkip(SkipError{
+				Path: absSkillPath(dir, p),
+				Err: fmt.Errorf("skill cap (%d) reached; this and any later skills under %s were not loaded",
+					maxSkills, dir),
+			})
 			return fs.SkipAll
 		}
-		if err := loadSkillFile(cat, fsys, dir, p); err != nil {
-			errs = append(errs, err)
-		}
+		loadSkillFile(cat, fsys, dir, p)
 		return nil
 	})
-	return errs
 }
 
 // loadSkillFile reads and parses one SKILL.md at the dir-relative path p (read through the
 // os.Root FS, so the fence still holds) and inserts the parsed Skill, stamping its absolute Dir.
-// A read or parse failure is returned as a soft error so the walk continues past one bad file.
-func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) error {
-	abs := filepath.Join(dir, filepath.FromSlash(p))
+// A read or parse failure is recorded as a SkipError on the catalog rather than returned, so the
+// walk continues past one bad file AND the human can still be told that file was passed over.
+func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) {
+	abs := absSkillPath(dir, p)
 	data, err := readBounded(fsys, p, maxSkillFileBytes)
 	if err != nil {
-		return fmt.Errorf("skills: read %s: %w", abs, err)
+		cat.addSkip(SkipError{Path: abs, Err: err})
+		return
 	}
 	skillDirRel := path.Dir(p)
 	dirName := path.Base(skillDirRel)
@@ -129,11 +132,17 @@ func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) error {
 	}
 	sk, err := parseSkill(string(data), dirName)
 	if err != nil {
-		return fmt.Errorf("skills: skip %s: %w", abs, err)
+		cat.addSkip(SkipError{Path: abs, Err: err})
+		return
 	}
 	sk.Dir = filepath.Join(dir, filepath.FromSlash(skillDirRel))
 	cat.set(sk)
-	return nil
+}
+
+// absSkillPath resolves a walk-relative SKILL.md path back to a host path under dir, so a
+// reported skip names a file the human can open.
+func absSkillPath(dir, p string) string {
+	return filepath.Join(dir, filepath.FromSlash(p))
 }
 
 // readBounded reads at most max bytes of the file at p through fsys, REFUSING (rather than

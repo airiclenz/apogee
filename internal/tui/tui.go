@@ -12,14 +12,16 @@ import (
 )
 
 // SkillCatalog is the read-only view of the discovered skills the TUI needs: the full sorted
-// list for the /skill picker (List) and a by-id lookup for an attached chip's label (Get). It
-// is satisfied by *skills.Catalog; the TUI depends only on this interface so it stays
-// unit-testable with a fake, and — being an interface — it is a reference header safe to hold
-// in the value-copied Model (ADR 0011). A nil catalog means no skills are wired; every reader
-// guards for it.
+// list for the /skill picker (List), a by-id lookup for an attached chip's label (Get), and the
+// files discovery could not load (Skipped) so /skills can say why a skill is missing instead of
+// silently omitting it. It is satisfied by *skills.Catalog; the TUI depends only on this
+// interface so it stays unit-testable with a fake, and — being an interface — it is a reference
+// header safe to hold in the value-copied Model (ADR 0011). A nil catalog means no skills are
+// wired; every reader guards for it.
 type SkillCatalog interface {
 	List() []skills.Skill
 	Get(id string) (skills.Skill, bool)
+	Skipped() []skills.SkipError
 }
 
 // SessionHost is the session-persistence seam the TUI drives: it persists the active session

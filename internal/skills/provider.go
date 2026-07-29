@@ -29,7 +29,8 @@ type Provider struct {
 // NewProvider loads the initial catalog from src and returns a Provider ready to serve and
 // reload. The initial load error is soft (a missing source dir is skipped, a malformed skill is
 // skipped — Load's always-usable contract), so it is dropped here; the stored catalog is always
-// non-nil and usable, possibly partial.
+// non-nil and usable, possibly partial. Dropping it hides nothing: the same failures are on the
+// catalog, reachable through Skipped.
 func NewProvider(src Sources) *Provider {
 	p := &Provider{src: src}
 	cat, _ := Load(src)
@@ -55,6 +56,11 @@ func (p *Provider) List() []Skill { return p.current().List() }
 
 // Get looks up a skill by exact ID in the current snapshot (see Catalog.Get).
 func (p *Provider) Get(id string) (Skill, bool) { return p.current().Get(id) }
+
+// Skipped returns the SKILL.md files the last scan could not load (see Catalog.Skipped). It
+// reads the SAME snapshot List does, so the /skills report's two halves always describe one
+// scan — never a fresh listing paired with stale failures.
+func (p *Provider) Skipped() []SkipError { return p.current().Skipped() }
 
 // ResolveSkills satisfies domain.SkillResolver against the current snapshot, so the loop resolves
 // attached IDs through whatever catalog the last Reload installed (see Catalog.ResolveSkills).

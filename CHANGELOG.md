@@ -554,6 +554,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A skill apogee refuses to load now says so, instead of just not being there.** Discovery is
+  deliberately soft — one malformed `SKILL.md` must never sink the whole catalog — but the reason
+  it skipped a file was assembled and then thrown away at every call site, so a skill with (say) a
+  stray `": "` in its unquoted `description:` was indistinguishable from one that did not exist:
+  absent from the picker, absent from `/skills`, and no error anywhere to search for. The failures
+  now ride **on** the catalog beside the skills that loaded (`Catalog.Skipped`), so the snapshot the
+  picker lists and the reasons `/skills` prints always describe one scan, and `/skills` closes with
+  a *found but not loaded* section naming each skill, why it was refused, and the file to go and
+  fix. Dropping the load error is now lossless, which is what makes the soft-skip behaviour safe to
+  keep.
+
 - **A model the session moved to is no longer yanked back to the one `config.yaml` named.** The
   discovery hint — which of the models a multi-model server serves apogee means — was fixed at
   launch and never moved again, so on a server serving both, a session that had bound a *different*

@@ -119,6 +119,70 @@ func TestLoadMalformedSkillSkippedWithSoftError(t *testing.T) {
 	}
 }
 
+// A skip must be reported STRUCTURALLY on the catalog, not only as a joined error string: the
+// /skills report names the skill and the file, and a caller that drops Load's error (as
+// NewProvider does) must still be able to tell the human why a skill vanished. Without this,
+// a malformed skill and an absent one are indistinguishable.
+func TestLoadRecordsSkippedSkillOnCatalog(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "good", "---\nid: good\nsummary: fine\n---\nbody")
+	// A plain scalar containing ": " is the real-world break — YAML reads it as a nested mapping.
+	writeSkill(t, filepath.Join(home, "skills"), "bad", "---\nname: bad\ndescription: oops: here\n---\nbody")
+
+	cat, _ := Load(Sources{Home: home}) // the error is deliberately dropped, as NewProvider does
+
+	skipped := cat.Skipped()
+	if len(skipped) != 1 {
+		t.Fatalf("Skipped() = %d entries, want 1: %+v", len(skipped), skipped)
+	}
+	if got := skipped[0].Name(); got != "bad" {
+		t.Errorf("skip Name() = %q, want the folder name %q", got, "bad")
+	}
+	want := filepath.Join(home, "skills", "bad", "SKILL.md")
+	if skipped[0].Path != want {
+		t.Errorf("skip Path = %q, want %q", skipped[0].Path, want)
+	}
+	if !strings.Contains(skipped[0].Reason(), "frontmatter") {
+		t.Errorf("skip Reason() = %q, want it to name the frontmatter failure", skipped[0].Reason())
+	}
+	if len(cat.List()) != 1 {
+		t.Errorf("the good sibling did not survive the skip: %+v", cat.List())
+	}
+}
+
+// Skipped returns a copy, so the catalog stays read-only after Load — a caller mutating the
+// returned slice must not corrupt the snapshot the picker and the loop share.
+func TestSkippedIsACopy(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "bad", "")
+
+	cat, _ := Load(Sources{Home: home})
+	first := cat.Skipped()
+	if len(first) != 1 {
+		t.Fatalf("Skipped() = %d entries, want 1", len(first))
+	}
+	first[0] = SkipError{Path: "clobbered"}
+
+	if got := cat.Skipped()[0].Path; got == "clobbered" {
+		t.Error("mutating the returned slice mutated the catalog's own skips")
+	}
+}
+
+// A clean scan reports no skips and no error — the negative case, so the report never invents a
+// failures section for a healthy library.
+func TestLoadCleanScanHasNoSkips(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "good", "---\nid: good\nsummary: fine\n---\nbody")
+
+	cat, err := Load(Sources{Home: home})
+	if err != nil {
+		t.Fatalf("Load soft error on a clean scan: %v", err)
+	}
+	if got := cat.Skipped(); len(got) != 0 {
+		t.Errorf("Skipped() = %+v, want empty on a clean scan", got)
+	}
+}
+
 // TestLoadOversizeSkillFileRefused pins the bounded read (item 8): a SKILL.md past the byte
 // cap is refused as a soft error and never materialized, while a well-sized sibling still loads
 // — a hostile repo cannot OOM discovery with a giant marker file.
