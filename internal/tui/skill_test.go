@@ -257,7 +257,7 @@ func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 	for _, it := range ac.items {
 		got = append(got, it.value)
 	}
-	want := []string{"clear", "compact", "continue", "confine", "clean-code"}
+	want := []string{"clear", "compact", "confine", "continue", "clean-code"} // the verbs alphabetically, then the skill
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged rows = %v, want the commands before the skills %v", got, want)
 	}

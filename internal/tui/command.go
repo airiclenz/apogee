@@ -75,11 +75,12 @@ type commandSpec struct {
 	hidden       bool
 }
 
-// commandSpecs is THE registry of "/" verbs, in display order: one table feeding both the parser
-// (matchCommand recognises every non-menuOnly name) and the dropdown (commandSuggestions renders
-// every non-hidden row, summaries included), so the two can no longer drift apart. The parser
-// intercepts a line only when its first whitespace token is exactly "/<verb>" for a verb in this
-// table; any other slash-prefixed line is treated as an ordinary message (never silently swallowed).
+// commandSpecs is THE registry of "/" verbs, in display order (alphabetical — see below): one table
+// feeding both the parser (matchCommand recognises every non-menuOnly name) and the dropdown
+// (commandSuggestions renders every non-hidden row, summaries included), so the two can no longer
+// drift apart. The parser intercepts a line only when its first whitespace token is exactly
+// "/<verb>" for a verb in this table; any other slash-prefixed line is treated as an ordinary
+// message (never silently swallowed).
 //
 // /new is an alias of /clear — both verbs are recognised here and route to the same context-reset
 // logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
@@ -99,23 +100,30 @@ type commandSpec struct {
 // line, and slashSuggestions drops the collision on that answer), not the menu. That is the price of
 // keeping the verb typed-reachable, and "unload"/"stop" are names a skill should not take anyway.
 //
-// Order is display order, and one pair depends on it: /skill must precede /skills, because the
-// dropdown prefix-matches in table order and highlights its first row — so a typed "/skill"
-// completes to the picker rather than to the listing that merely shares its prefix.
+// Order is display order, and it is ALPHABETICAL — declared here in the literal rather than sorted
+// at render time, because this table is the registry and the order the dropdown reads is one of the
+// things it declares. A menu the human can scan without knowing the table is worth more than any
+// hand-curated grouping, and it settles where a future verb goes without a judgement call.
+// TestCommandSpecsReadAlphabetically pins it, so a row added out of place fails loudly instead of
+// quietly un-sorting the menu. The one ordering DEPENDENCY holds by construction: /skill must precede
+// /skills, because the dropdown prefix-matches in table order and highlights its first row — so a
+// typed "/skill" completes to the picker rather than to the listing that merely shares its prefix —
+// and a strict prefix always sorts before the name extending it. Alphabetical order therefore needs
+// no exception carved out of it.
 var commandSpecs = []commandSpec{
 	{name: "clear", summary: "reset the model's memory of this session"},
-	{name: "new", summary: "start a fresh conversation (same as /clear)"},
-	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
-	{name: "continue", summary: "ask the model to keep going"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
+	{name: "continue", summary: "ask the model to keep going"},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true},
+	{name: "new", summary: "start a fresh conversation (same as /clear)"},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
-	{name: "unload", summary: "free the model of the server this session is on", hidden: true},
-	{name: "stop", summary: "stop the server this session is on", hidden: true},
-	{name: "version", summary: "show the apogee version", whileRunning: true},
+	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
+	{name: "stop", summary: "stop the server this session is on", hidden: true},
+	{name: "unload", summary: "free the model of the server this session is on", hidden: true},
+	{name: "version", summary: "show the apogee version", whileRunning: true},
 }
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text

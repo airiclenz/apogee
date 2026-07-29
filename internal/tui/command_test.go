@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -62,8 +63,8 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
-		"clear", "new", "sessions", "compact", "continue", "confine", "model", "server",
-		"unload", "stop", "version", "skills"}
+		"clear", "compact", "confine", "continue", "model", "new", "server", "sessions",
+		"skills", "stop", "unload", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
 	}
@@ -91,6 +92,26 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotLabels, wantLabels) {
 		t.Errorf("labels = %q, want them read off the table %q", gotLabels, wantLabels)
+	}
+}
+
+// TestCommandSpecsReadAlphabetically pins the dropdown's order at its source. The table IS the
+// display order — commandSuggestions renders it as it stands, no render-time sort — so a verb added
+// in the wrong place would quietly un-sort the menu; this fails loudly instead. The table comment's
+// one ordering dependency rides along for free: /skill sorts before /skills because a strict prefix
+// always precedes the name extending it, which is why alphabetical order needs no exception (the
+// completion BEHAVIOUR that rests on it is TestCommandDropdownOffersSkill's).
+func TestCommandSpecsReadAlphabetically(t *testing.T) {
+	names := make([]string, 0, len(commandSpecs))
+	for _, spec := range commandSpecs {
+		names = append(names, spec.name)
+	}
+
+	if !slices.IsSorted(names) {
+		t.Errorf("commandSpecs order = %v, want alphabetical", names)
+	}
+	if skill, skills := slices.Index(names, "skill"), slices.Index(names, "skills"); skill >= skills {
+		t.Errorf("/skill at %d, /skills at %d; the picker verb must come first (%v)", skill, skills, names)
 	}
 }
 

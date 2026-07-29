@@ -499,7 +499,7 @@ func TestBareSkillVerbTeachesThePicker(t *testing.T) {
 
 func TestComputeAutocompleteCommands(t *testing.T) {
 	m := newTestModel(t)
-	m.input.SetValue("/c") // clear, compact, continue, confine all start with "c"
+	m.input.SetValue("/c") // clear, compact, confine, continue all start with "c"
 	ac := m.computeAutocomplete(m.caretByteOffset())
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
@@ -508,8 +508,8 @@ func TestComputeAutocompleteCommands(t *testing.T) {
 	for _, it := range ac.items {
 		got = append(got, it.value)
 	}
-	if !reflect.DeepEqual(got, []string{"clear", "compact", "continue", "confine"}) {
-		t.Errorf("suggestions = %v, want every c-command in menu order", got)
+	if !reflect.DeepEqual(got, []string{"clear", "compact", "confine", "continue"}) {
+		t.Errorf("suggestions = %v, want every c-command in menu (alphabetical) order", got)
 	}
 }
 

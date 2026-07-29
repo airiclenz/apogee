@@ -514,7 +514,19 @@ not the verbs.
 
 **Commit.** `feat(tui): /unload and /stop go hidden — typed they act, listed they are not`
 
-## 11. The dropdown reads alphabetically
+## 11. The dropdown reads alphabetically — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): two notes beyond the item's literal text.
+(a) Three EXISTING assertions pinned the old table order and had to follow the reorder — the parser's
+verb list in `TestCommandTableDrivesParserAndMenu`, the merged-menu row list in
+`TestSlashMenuMergesCommandsAndSkills` (skill_test.go) and the `/c` suggestion list in
+`TestComputeAutocompleteCommands` (minilang_test.go). Each is this item's own change read from the
+other side: a test that asserted the old order would contradict the reorder by construction. No
+behaviour was changed, only the expected sequence (and one stale comment naming the old order).
+(b) The "/skill-completes-to-the-picker behavior re-asserted over the new order" is the EXISTING
+`TestCommandDropdownOffersSkill`, which pins `[skill skills]` on a typed `/sk` and now runs over the
+alphabetical table unchanged; the new test adds the structural half (the two indices) beside the
+sortedness assertion, so the dependency is pinned at the table as well as at the menu.
 
 **What.** `commandSpecs` (command.go:95-110) reorders alphabetically — the literal itself,
 not a render-time sort: the table is THE registry and display order is one of the things it
