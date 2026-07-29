@@ -44,10 +44,11 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     endpoint; the session follows the loaded Launch profile; one actuation latch; the
     launcher's config as the single profile store behind a file-only `llama-launcher:` key —
     CONTEXT.md now defines **Launch profile**). Execution:
-    `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md` here, blocked on the
-    launcher's **portability release v1.7.0** (`docs/plans/2026-07-29-portability-release-plan.md`
-    + ADR-0012 in that repo — the export prerequisite recorded here earlier SHIPPED as launcher
-    v1.6.0/ADR-0011 on 2026-07-29, but compiles darwin-only, which the portability release fixes).
+    `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md` here — **unblocked
+    2026-07-29**, item 1 (the `llama-launcher:` config key) landed. Both launcher-side
+    prerequisites shipped that day: the public API export as **v1.6.0**/ADR-0011, and the
+    **portability release as v1.6.1**/ADR-0012 (`docs/plans/2026-07-29-portability-release-plan.md`
+    in that repo), which fixed v1.6.0's darwin-only compile. The fix stayed in the 1.6.x line.
   - The switchable **model-profile** abstraction (sampling params, context-budget %,
     thinking/tool-call format — reuse `internal/processing`), still unstarted and still
     deliberately **global**: `model-profile` is not per-model, and neither a rebind nor a server

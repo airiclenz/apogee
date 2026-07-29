@@ -1,11 +1,12 @@
 # Plan — llama-launcher as a library: /load, /unload, /stop
 
 **Date:** 2026-07-29
-**Status:** READY (design grilled 2026-07-29; all four TODO forks resolved by the owner — no
-needs-design-call escalation expected). **Prerequisite:** llama-launcher **v1.6.1** (the
-portability release — its plan `docs/plans/2026-07-29-portability-release-plan.md` *in that
-repo*) must be tagged and pushed before item 2 lands; item 1 has no dependency and can go
-first in either order.
+**Status:** IN PROGRESS (design grilled 2026-07-29; all four TODO forks resolved by the owner —
+no needs-design-call escalation expected). Item 1 landed 2026-07-29; item 2 is next.
+**Prerequisite — MET 2026-07-29:** llama-launcher **v1.6.1** (the portability release — its
+plan `docs/plans/2026-07-29-portability-release-plan.md` *in that repo*) is tagged and pushed;
+it builds on linux/darwin/windows and exports `ErrUnsupported` + `ErrStartupTimeout`. The
+portability fix stayed in the **1.6.x** line — there is no v1.7.0 of the launcher.
 **Design authority:** [ADR 0029](../adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
 (written in the grill session that produced this plan), extending ADR 0024/0028. CONTEXT.md
 already carries the **Launch profile** term (same session).

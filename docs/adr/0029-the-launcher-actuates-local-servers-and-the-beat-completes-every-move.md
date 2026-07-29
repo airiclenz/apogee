@@ -98,7 +98,8 @@ PID and log path; apogee prints that error plus the honest coda — the heartbea
 server if it comes up, which decision 1 makes true for free.
 
 **7. Portability is the launcher's obligation, not every client's.** The launcher's v1.6.1
-("compiles everywhere, actuates where it can" — its own ADR) build-tags the platform-specific
+(shipped 2026-07-29; "compiles everywhere, actuates where it can" — its own ADR-0012, and the
+fix stayed in the 1.6.x line) build-tags the platform-specific
 seams: Linux becomes fully functional, Windows compiles with the HTTP-based verbs working and
 the managed-fork/kill paths returning a clean unsupported error. Apogee therefore imports
 unconditionally — **no build tags in apogee**, ADR 0020's cross-build stands untouched.
@@ -116,7 +117,8 @@ local cross-repo dev via an untracked `go.work`.
   launcher, real llama.cpp) is owner-run on a same-machine host — recorded in the integration
   plan, the `APOGEE_LIVE_ENDPOINT` convention's sibling.
 - The launcher-side prerequisite recorded in TODO.md (export a public API) shipped as v1.6.0
-  before this ADR; what this ADR requires of that repo is only the v1.6.1 portability release.
+  before this ADR; the v1.6.1 portability release this ADR additionally requires of that repo
+  shipped the same day (2026-07-29, tagged and pushed), so nothing here is outstanding.
 - CONTEXT.md gains **Launch profile**; "profile" unqualified is now an _Avoid_ in docs. The
   model-profile abstraction (request-side, still unstarted) is untouched by all of this and
   remains the [P1] entry's live half.
