@@ -144,7 +144,11 @@ through the shared popup module); one argument switches directly on an exact mat
 note. One state struct serves both verbs, distinguished by a **kind enum** rather than a callback
 field, so the value-copied Model keeps holding plain values only (ADR 0011). Rows are **derived at
 render time** — a beat landing under an open `/model` picker refreshes the offering in place,
-selection clamped — and the row matching the current binding carries a `· current` suffix. Every
+selection clamped — and the row matching the current binding carries a `· current` suffix.
+*(Amended 2026-07-29 by [ADR 0029](0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)'s
+D3 amendment: `/model` no longer **offers** the row the session is already on, so that mark is
+`/server`'s alone. The rest of this paragraph stands, the argument form's `already bound to …`
+included.)* Every
 way the verb cannot work is a sentence and no overlay: heartbeat unwired, upstream offline, nothing
 advertised yet, `Rebind` nil (a display-frozen heartbeat), nothing configured to switch to. And
 choosing what the session is already on is **answered** (`already bound to …`, `already on …`),

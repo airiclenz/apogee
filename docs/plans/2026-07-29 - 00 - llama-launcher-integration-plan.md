@@ -544,7 +544,30 @@ re-asserted over the new order.
 
 **Commit.** `feat(tui): the command dropdown reads alphabetically`
 
-## 12. Docs pass — the revised surface
+## 12. Docs pass — the revised surface — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): five deviations from the item's literal text, all of them the opening clause
+("every claim items 9–11 made stale") reaching past the file list that follows it.
+(a) The footer section's `loading <profile>…` line WAS verb-named — "while a `/load` actuation is in
+flight" — so it had to change; it now says "while a profile load is in flight", which names the act
+rather than any verb and so cannot go stale again. Without this the item's own grep acceptance over
+layout.md could not pass.
+(b) Two more layout.md claims fell to item 9 and had to follow: the picker paragraph's "the row the
+session is already on carries a faint `· current` in the first two" (now `/server`'s alone, and the
+absence of that row is what makes `pickerHint`'s `⏎ switch` honest) and the actuation paragraph's
+"five switching verbs" (four, `/load` gone). One sentence was ADDED to the dropdown paragraph for
+items 10–11 — the rows read alphabetically, and `/unload`/`/stop` are parsed but never offered —
+because a rendering spec that describes the `/` menu must say which verbs are in it.
+(c) ADR 0028's D3-era paragraph claims the `/model` picker marks the current row `· current`. The
+item routes the design record through ADR 0029's amendment, so ADR 0028 got a one-sentence dated
+pointer to it rather than an amendment of its own — an ADR left contradicting the code is exactly
+what this item exists to prevent.
+(d) TODO.md's shipped-pointer line named `/load` + `/unload` + `/stop` as the surface. Item 7 owns
+that file and is done; the line is one clause and stating a retired verb, so it was corrected here.
+(e) CHANGELOG: the launcher entry and the ADR-0028 `/model` entry were REVISED in place rather than
+followed by a "Changed" note. Both sit under `## [Unreleased]` and have never been in a release, so
+there is no shipped claim to correct — only a description of what this version will ship, which must
+describe the surface as it will actually ship.
 
 **What.** Every claim items 9–11 made stale, plus the design record. README: the
 slash-command table loses `/load`, rewords `/model` (the launcher offering when configured,

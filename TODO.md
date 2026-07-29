@@ -41,7 +41,8 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     authoritative record:**
     [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
     (the decision), `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md` (the
-    execution) and the CHANGELOG entry (what a user sees): `/load` + `/unload` + `/stop` over
+    execution) and the CHANGELOG entry (what a user sees): `/model` over the launcher's Launch
+    profiles when one is configured, plus the typed-only `/unload` + `/stop`, all over
     llama-launcher **v1.6.1** imported as a library, behind the file-only `llama-launcher:` key,
     with **Launch profile** now a CONTEXT.md term. **Still open:** only that plan's last item, the
     owner-run live pass on a host with a real launcher config — failures there reopen the item they

@@ -69,6 +69,22 @@ the display. Neither `/unload` nor `/stop` takes a picker. All three are ordinar
 rows: idle-only, not `whileRunning`, one-line degrades when the integration is absent or the
 endpoint is not one the launcher's config implies.
 
+> **Amendment 2026-07-29 — the three verbs become one offered verb.** The owner's first live
+> run against a single-model llama.cpp server found the surface wrong at its most-used point:
+> `/model` opened a one-row picker (the model already bound) under a `⏎ switch` hint that
+> switched nothing, while the list the human actually thinks in — the Launch profiles — sat
+> behind a second verb. The two lists describe **one** world on this host, so asking "switch
+> model" twice was the error. Revised: **`/load` is retired and its whole behaviour becomes
+> `/model`'s** when the launcher seams are wired (picker, argument form, degrade ladder, the
+> actuation latch), while a host without a launcher keeps the advertised offering unchanged;
+> **whichever offering answers, the thing the session is already on is not offered**, which is
+> what makes the hint honest and ends the one-row picker; and `/unload`/`/stop` keep their
+> logic and their typed forms but go **hidden** — parsed, never listed — being rarely wanted
+> and easy to hit by accident. Decisions 1, 2 and 4–7 are untouched: the same latch, the same
+> folds, the same freshness rule, the verb renamed under them. Where this ADR says `/load`,
+> read "`/model` on a host with a launcher". Recorded in
+> `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md`, items 9–12.
+
 **4. The launcher's config is the single profile store.** Apogee never defines, writes, or
 caches launch profiles. One new **file-only** key, `llama-launcher:`: empty or absent means
 auto-detect (`DefaultConfigPath()`, integration lights up only if that file exists — silently

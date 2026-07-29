@@ -170,7 +170,7 @@ named yet — and only ever by one word:
 
 - `connecting…` while a wired heartbeat has not bound a model: the seconds between the first paint
   and the first landed beat, and again after a `/server` switch until the new server answers.
-- `loading <profile>…` while a `/load` actuation is in flight. It **outranks** `connecting…`, and
+- `loading <profile>…` while a profile load is in flight. It **outranks** `connecting…`, and
   it replaces a model that is still bound, because the launcher is in the middle of invalidating
   that binding and the profile being waited on is the more specific truth. `/unload` and `/stop`
   show `unload…` and `stop…` the same way — neither has a profile to name.
@@ -229,7 +229,9 @@ shrinks the transcript to make room. It is titled `commands and skills` and it l
 commands first, prefix-matched, each with its one-line summary; then skills, matched on id and
 display name, each row led by the `✦` skill glyph so the two kinds never read alike. `@` opens the
 same pane over workspace files. At most eight rows show; the hint line under them reads
-`↑/↓ select · ⏎/tab accept · esc dismiss`.
+`↑/↓ select · ⏎/tab accept · esc dismiss`. The command rows read **alphabetically**, so the menu
+can be scanned without knowing the table behind it, and two verbs are deliberately not in it:
+`/unload` and `/stop` are recognised when typed but never offered.
 
 **It follows the caret, not the end of the line.** The token being completed is the word the caret
 stands in or immediately after — so a draft already in the box does not shut the menu out, and
@@ -239,33 +241,36 @@ everything on either side is untouched.
 
 **Accepting a command RUNS it.** The `/verb` is cut out of the draft and the command fires; the
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
-follows them are the exception and complete instead: the four that take arguments — `/confine`,
-`/model`, `/server` and `/load` (and arguments are only ever read from a whole-line invocation) —
+follows them are the exception and complete instead: the three that take arguments — `/confine`,
+`/model` and `/server` (and arguments are only ever read from a whole-line invocation) —
 plus `/skill`, which chains into the picker over the catalog. Accepting a skill row writes that skill's
 own `/id ` token into the text.
 
-**One overlay for "which one?".** `/model`, `/server` and `/load` with nothing after them open a
+**One overlay for "which one?".** `/model` and `/server` with nothing after them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight, `↑/↓
 select · ⏎ switch · esc close` under it, at most eight rows with a window scrolling around the
-selection. It is modal — while it is open every key belongs to it. `/model` lists what the server
-currently advertises (`model — 32k`), refreshed in place if a heartbeat lands underneath it;
-`/server` lists the servers `config.yaml` names plus the one this session started on
-(`name — endpoint`); `/load` lists the Launch profiles the llama-launcher config defines, in the
-launcher's own order (`name — backend · 32k (:8080) · running`, where the port shows only for a
-profile that does not live where this session is pointed and `· running` marks one that is live
-right now). The row the session is already on carries a faint `· current` in the first two, and
-picking it says so instead of switching. Given an argument (`/model <id>`, `/server <name>`,
-`/load <name>`) the verb acts straight away and no pane opens at all. When there is nothing to
-pick — no monitor, an unreachable server, nothing advertised yet, no `servers:` block, no launcher
-configured, no launcher config where one was named, no profiles in it — the answer is one honest
-line in the transcript and no empty pane.
+selection. It is modal — while it is open every key belongs to it. `/server` lists the servers
+`config.yaml` names plus the one this session started on (`name — endpoint`), and the row the
+session is on carries a faint `· current` — picking it says so instead of switching. `/model` has
+two offerings and lists whichever one this host can answer from: with llama-launcher configured,
+the Launch profiles its config defines, in the launcher's own order (`name — backend · 32k (:8080)
+· running`, where the port shows only for a profile that does not live where this session is
+pointed and `· running` marks one that is live right now); without it, what the server currently
+advertises (`model — 32k`), refreshed in place if a heartbeat lands underneath it. Either way what
+the session is ALREADY on is not among the rows — there is no `· current` mark to pick, because
+there is no row that would switch nothing, which is what makes the hint's `⏎ switch` true of every
+row. Given an argument (`/model <name>`, `/server <name>`) the verb acts straight away and no pane
+opens at all. When there is nothing to
+pick — no monitor, an unreachable server, nothing advertised yet, nothing but the model already
+bound, no `servers:` block, no launcher config where one was named, no profiles in it, only the
+profile already loaded — the answer is one honest line in the transcript and no empty pane.
 
-**`/load`'s accept is the one that does not finish on the spot.** Picking a Launch profile takes
-the actuation latch and hands the pane's decision to a blocking launcher verb: the overlay closes,
-the footer's model slot says `loading <profile>…`, and the launcher's steps arrive as transcript
-notes until the beat completes the move. While that latch is held, the paths that would open an
-Exchange (a send, `/continue`, `/compact`) and the five switching verbs (`/load`, `/unload`,
-`/stop`, `/model`, `/server`) are each refused with one line instead of acting; Esc does not cancel
+**`/model`'s launcher accept is the one that does not finish on the spot.** Picking a Launch profile
+takes the actuation latch and hands the pane's decision to a blocking launcher verb: the overlay
+closes, the footer's model slot says `loading <profile>…`, and the launcher's steps arrive as
+transcript notes until the beat completes the move. While that latch is held, the paths that would
+open an Exchange (a send, `/continue`, `/compact`) and the four switching verbs (`/model`,
+`/server`, `/unload`, `/stop`) are each refused with one line instead of acting; Esc does not cancel
 an actuation, because the launcher's own cancel is `/stop` once the verb returns.
 
 **The box never goes dead while the model works.** Every region stays open. A command that needs a
