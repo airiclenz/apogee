@@ -32,7 +32,14 @@ notices/progress arrive on the calling goroutine as callbacks.
 
 ---
 
-## 1. The `llama-launcher:` config key — file-only, auto-detect by default
+## 1. The `llama-launcher:` config key — file-only, auto-detect by default — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): `validateLlamaLauncher` refuses two shapes rather than nothing at all — a
+whitespace-only value (the `servers:` blank-name posture: it reads as configured but names
+nothing) and a value carrying a `://` scheme (the key takes a LOCAL path; a remote launcher is
+an `mcp-servers:` entry — ADR 0029). Still no existence or reachability check, as specified.
+The template's example path is a placeholder (`~/path/to/…`) rather than the launcher's real
+default config path, which this repo cannot state until item 2 imports the facade.
 
 **What.** The one new config surface (ADR 0029 D4). `cmd/apogee/config.go`: a
 `LlamaLauncher string` field on `fileConfig` (yaml `llama-launcher`), plus the file-only

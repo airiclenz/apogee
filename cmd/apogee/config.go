@@ -57,6 +57,17 @@ type settings struct {
 	// stands on its own either way, so this key only ADDS the servers it can move to.
 	servers []serverEntry
 
+	// llamaLauncher is the resolved `llama-launcher:` key (ADR 0029): whether — and through which
+	// of that tool's config files — this session may start, switch and stop LOCAL servers itself.
+	// File-only on the `servers:` reasoning: naming a tool installed on this machine is a config
+	// act, not an invocation one. It is carried exactly as the user WROTE it, because the ladder
+	// it spells is resolved at the composition root rather than here: empty/absent ⇒ auto-detect
+	// (the launcher's own default config path, used only if that file exists — so a machine
+	// without the launcher simply has no local-server verbs), `off` ⇒ disabled even where a
+	// config is present, anything else ⇒ the launcher config to read. Whether that file exists is
+	// deliberately not asked at startup (validateLlamaLauncher says why).
+	llamaLauncher string
+
 	// confineToWorkspace is GLOBAL-CONFIG-ONLY (ADR 0012): it is resolved from the config
 	// file alone, never from a flag or env, so a hostile repo invoking apogee cannot loosen
 	// Auto's blast radius. Default true. (There is no project-level config file today; the
@@ -414,6 +425,12 @@ type layer struct {
 	// falls through to the empty default.
 	servers []serverEntry
 
+	// llamaLauncher is set only by the FILE layer (the launcher key is config'd, with no flag/env
+	// — like servers above). A nil pointer means the source says nothing about the launcher, so
+	// resolution falls through to the empty default, which the composition root reads as
+	// auto-detect.
+	llamaLauncher *string
+
 	// confineToWorkspace is set only by the FILE layer (global-config-only, ADR 0012). The
 	// env and flag layers leave it nil so the invocation environment cannot loosen it.
 	confineToWorkspace *bool
@@ -527,6 +544,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	}
 	if file.contextWindow != nil {
 		s.contextWindow = *file.contextWindow
+	}
+	if file.llamaLauncher != nil { // file-only (ADR 0029); env/flag never point at the launcher
+		s.llamaLauncher = *file.llamaLauncher
 	}
 	s.servers = file.servers             // file-only; env/flag never name an upstream server
 	s.mcpServers = file.mcpServers       // file-only (P3.15); env/flag never set MCP servers
@@ -657,6 +677,16 @@ type fileConfig struct {
 	// machines, not this invocation. Absent/empty ⇒ none is configured, which changes nothing
 	// about the session's own upstream (see serverEntry for what an entry carries).
 	Servers []serverEntry `yaml:"servers"`
+	// LlamaLauncher says whether this session may start, switch and stop the LOCAL servers it
+	// talks to — through llama-launcher — and which of that tool's config files to read (ADR
+	// 0029). File-only (no flag/env), like Servers above. Absent/empty ⇒ auto-detect: the
+	// launcher's own default config path is read if that file exists, and the local-server verbs
+	// stay silently dormant if it does not (the container case, where the launcher's MCP adapter
+	// listed under mcp-servers: is the remote answer instead). `off` ⇒ disabled even on a machine
+	// that has a launcher config. Any other value ⇒ the launcher config to read, with `~`
+	// expanded. Whether that file exists is deliberately not asked at startup, on the Servers
+	// reasoning: a missing one degrades at the moment a verb reaches for it.
+	LlamaLauncher string `yaml:"llama-launcher"`
 	// ConfineToWorkspace is global-config-only (ADR 0012): a pointer so an explicit
 	// `confine-to-workspace: false` is distinguishable from an absent key (which keeps the
 	// secure default true). It has no flag or env — editing the global config IS the
@@ -813,6 +843,36 @@ func validateServers(servers []serverEntry) error {
 			return fmt.Errorf("apogee: servers: entry %d (%q): has no endpoint — give the server's "+
 				"OpenAI-compatible URL, the same kind of value the top-level endpoint: takes", i+1, s.Name)
 		}
+	}
+	return nil
+}
+
+// validateLlamaLauncher rejects a `llama-launcher:` value that is not one of the three shapes the
+// key has (ADR 0029): absent/empty (auto-detect), `off` (disabled), or the path of a llama-launcher
+// config file. Only defects in the FILE itself are caught here, on exactly the validateServers
+// posture above — whether the named file EXISTS is deliberately not asked, because a launcher
+// config is a property of the machine rather than of the config that travels between machines, and
+// a session that never reaches for a local server must not be refused a start over one. A path that
+// is not there degrades at the moment a verb wants it, where the message can name the file.
+//
+// So two things are refused. A value that is only whitespace reads as configured but names nothing,
+// and would otherwise resolve silently back to auto-detect — the `servers:` entry-with-a-blank-name
+// case. And a value carrying a URL scheme is the one confusion the key invites: llama-launcher is
+// also reachable over MCP, and that remote form belongs under `mcp-servers:` — this key takes a
+// LOCAL file path, so a URL here would fail much later as a missing file.
+func validateLlamaLauncher(v string) error {
+	if v == "" {
+		return nil
+	}
+	if strings.TrimSpace(v) == "" {
+		return errors.New("apogee: llama-launcher: is only whitespace — leave the key out (or empty) " +
+			"to auto-detect the launcher's own config, set it to off to disable, or give the path of " +
+			"a llama-launcher config file")
+	}
+	if strings.Contains(v, "://") {
+		return fmt.Errorf("apogee: llama-launcher: %q looks like a URL — this key takes the path of a "+
+			"LOCAL llama-launcher config file (or off, or nothing at all to auto-detect); a launcher on "+
+			"another machine is reached as an mcp-servers: entry instead", v)
 	}
 	return nil
 }
@@ -1022,6 +1082,9 @@ func (fc fileConfig) layer() layer {
 	}
 	if len(fc.Servers) > 0 {
 		l.servers = fc.Servers
+	}
+	if fc.LlamaLauncher != "" {
+		l.llamaLauncher = &fc.LlamaLauncher
 	}
 	if fc.WebSearch != "" {
 		l.webSearchEndpoint = &fc.WebSearch
@@ -1248,6 +1311,13 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := validateServers(s.servers); err != nil {
 		return err
 	}
+	// `llama-launcher:` is checked on the same footing, and just as shallowly: a value that names
+	// nothing, or that names a URL where the key takes a local path, is wrong in the file itself.
+	// Whether the launcher config it points at is present on THIS machine is not asked here (ADR
+	// 0029 — a missing one degrades at the first verb, not at startup).
+	if err := validateLlamaLauncher(s.llamaLauncher); err != nil {
+		return err
+	}
 	opts.endpoint = s.endpoint
 	opts.model = s.model
 	opts.mode = s.mode
@@ -1255,6 +1325,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.hostAlias = s.hostAlias
 	opts.apiKey = s.apiKey
 	opts.servers = s.servers
+	opts.llamaLauncher = s.llamaLauncher
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.unconfinedHosts = s.unconfinedHosts
 	opts.webSearchEndpoint = s.webSearchEndpoint

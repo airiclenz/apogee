@@ -77,6 +77,23 @@
 #     api-key: sk-rented-token
 
 # =============================================================================
+# Start, switch and stop the LOCAL servers yourself, with llama-launcher. The servers: list above
+# says where a session may MOVE to; this says apogee may also bring one up: /load picks one of the
+# launcher's launch profiles and waits while it starts, /unload frees the model, /stop stops the
+# server. Config-file only (no flag or env). Three values:
+#
+#   (unset)   auto-detect — apogee reads llama-launcher's own default config if that file is
+#             there, and the three commands simply do not appear if it is not. This is the
+#             default, and on a machine with the launcher installed it needs no configuration.
+#   off       leave the local-server commands off, even on a machine that has a launcher config.
+#   <path>    read THIS launcher config instead of the default one (~ expands).
+#
+# Nothing is checked at startup: a path that is not there is reported the first time a command
+# reaches for it, not as a refusal to start. A launcher running on ANOTHER machine is a different
+# thing — reach that one as an mcp-servers: entry below; the two compose.
+# llama-launcher: ~/path/to/llama-launcher/config.yaml
+
+# =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).
 #   plan        — read-only: no writes, no command execution
 #   ask-before  — every write, command, and external reach needs your approval (the default)
