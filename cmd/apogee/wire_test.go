@@ -1456,6 +1456,127 @@ func TestLoadProfileWildcardBindMovesNothing(t *testing.T) {
 	}
 }
 
+// A load that GENUINELY moves the session hands the wire an address the session can DIAL. The
+// profile resolves to the wildcard the server binds; what the `Switch` result, the engine's upstream
+// spec and the endpoint holder all take is the loopback spelling — the same projection the picker's
+// rows already carry, applied at the one site that BUILDS a session endpoint out of a launcher
+// address. `http://0.0.0.0:9090` is not a destination on Windows at all, and it would re-split the
+// two spellings for exactly the sessions that have moved.
+func TestLoadProfileCrossAddressDialsTheLoopback(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:        wildcardBoundConfig(t),
+		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "0.0.0.0", Port: 9090},
+	}
+	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	result, err := wiring.load("there", nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !result.Moved {
+		t.Fatalf("result = %+v; want Moved true — another PORT is another server however it is bound", result)
+	}
+
+	const dial, bind = "http://127.0.0.1:9090", "http://0.0.0.0:9090"
+	want := tui.ServerSwitchResult{Endpoint: dial, HostAlias: "there", ContextWindow: 16384}
+	if result.Switch != want {
+		t.Errorf("result.Switch = %+v; want %+v", result.Switch, want)
+	}
+	wantSpec := apogee.UpstreamSpec{Endpoint: dial, APIKey: "llamacpp-key"}
+	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
+		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v]", agent.specs, wantSpec)
+	}
+	if got := holder.Endpoint(); got != dial {
+		t.Errorf("holder endpoint = %q; want %q — the Monitor beats at the dial spelling", got, dial)
+	}
+	// Said the other way round too, because the defect this pins is one specific wrong value: the
+	// bind spelling must reach nothing the session talks through.
+	reached := []string{result.Switch.Endpoint, holder.Endpoint()}
+	for _, spec := range agent.specs {
+		reached = append(reached, spec.Endpoint)
+	}
+	for _, got := range reached {
+		if got == bind {
+			t.Errorf("endpoint = %q; want %q — a wildcard bind is an address to listen on, not one "+
+				"to dial", got, dial)
+		}
+	}
+	if !slices.Equal(host.models, []string{""}) {
+		t.Errorf("SetModel calls = %v; want exactly one unbinding \"\" — a move unbinds the model", host.models)
+	}
+
+	// Item 9's exclusion holds for the session that moved, pinned where it is DECIDED: the profile
+	// this session now serves reaches the picker spelled exactly as its endpoint reduces, so
+	// offerableProfiles drops that row and no row carries a spurious elsewhere stamp.
+	rows, _, err := launchProfiles(ops, "config.yaml")
+	if err != nil {
+		t.Fatalf("launchProfiles: %v", err)
+	}
+	session, err := endpointAddr(holder.Endpoint())
+	if err != nil {
+		t.Fatalf("endpointAddr(%q): %v", holder.Endpoint(), err)
+	}
+	var loaded string
+	for _, row := range rows {
+		if row.Name == "there" {
+			loaded = row.Addr
+		}
+	}
+	if loaded != session {
+		t.Errorf("the moved-to profile's row Addr = %q; want %q — the endpoint the session now holds, "+
+			"reduced, is what the picker compares against", loaded, session)
+	}
+}
+
+// The session that has just moved still asks the LAUNCHER about the server on the launcher's own
+// terms. The move projected the endpoint to the loopback, `managedInstance` matches the discovered
+// `0.0.0.0:9090` instance against it through sameServer, and the verbs act — while ops.unload and
+// ops.stop receive the bind spelling. Matching is normalised; addressing is not.
+func TestUnloadAndStopActOnTheServerASessionMovedTo(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:        wildcardBoundConfig(t),
+		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "0.0.0.0", Port: 9090},
+		instances: []*llamalauncher.RunningInstance{
+			{Backend: "llamacpp", Host: "0.0.0.0", Port: 9090},
+		},
+		actuateResult: &llamalauncher.StopResult{ServerStopped: true},
+	}
+	wiring, _, _, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	if _, err := wiring.load("there", nil); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	moved := holder.Endpoint()
+	if moved != "http://127.0.0.1:9090" {
+		t.Fatalf("holder endpoint after the move = %q; want http://127.0.0.1:9090 — the verbs below act "+
+			"on the endpoint the session was left holding", moved)
+	}
+
+	result, err := wiring.unload(moved)
+	if err != nil {
+		t.Fatalf("unload after a move: %v; want the verb to ACT — the moved session dials an address "+
+			"the `0.0.0.0` bind answers on", err)
+	}
+	if !slices.Equal(ops.unloaded, []string{"llamacpp 0.0.0.0:9090"}) {
+		t.Errorf("unload calls = %v; want the LAUNCHER's own address, not the dial spelling the match "+
+			"was made through", ops.unloaded)
+	}
+	if result.Backend != "llamacpp" || result.Addr != "0.0.0.0:9090" {
+		t.Errorf("unload result = %+v; want the discovered instance as the launcher holds it", result)
+	}
+
+	if _, err := wiring.stop(moved); err != nil {
+		t.Fatalf("stop after a move: %v; want the verb to act", err)
+	}
+	if !slices.Equal(ops.stopped, []string{"0.0.0.0:9090"}) {
+		t.Errorf("stop calls = %v; want the launcher's own bind spelling", ops.stopped)
+	}
+}
+
 // A nil progress callback is the documented safe case, and a load that cannot even resolve its
 // profile never reaches the launcher: no activation is attempted and nothing moves.
 func TestLoadProfileUnknownNameNeverActuates(t *testing.T) {

@@ -504,6 +504,12 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 	// Where the profile now serves. The resolved profile is the authority — it is what was asked for,
 	// and it answers even when a health-wait left no instance behind — with the discovered instance
 	// as the fallback for a merge that stated no address.
+	//
+	// Both sources speak the address the server BINDS, and it stays in that spelling here: this value
+	// is sameServer's first argument below, whose declared meaning is "the launcher's own address",
+	// and hiding a wildcard from the predicate's wildcard arm would send every session that dials
+	// this machine by some other spelling back to moving on every load. The dial projection sits at
+	// the endpoint construction, below the choice of source, and nowhere above it.
 	addr := profileAddr(profile)
 	if addr == "" {
 		addr = instanceAddr(instance)
@@ -528,13 +534,20 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 		return tui.ProfileLoadResult{Notices: notices}, nil
 	}
 
+	// The session moves, so the address it is moved TO is projected to the spelling this machine
+	// dials: a wildcard bind becomes the loopback of its own family, and a host the launcher's config
+	// states explicitly is handed to the wire exactly as it stands (dialAddr). `0.0.0.0` is an address
+	// to listen on, not one to reach — macOS and Linux happen to connect to it, Windows cannot at all —
+	// and it is the same projection the picker's rows already take, so the session's endpoint and the
+	// profile row that names it keep agreeing after a move as they do before one.
+	//
 	// The api key the launcher's config carries for THIS profile's server, so the session — and the
 	// Monitor that beats at it — authenticate against a keyed local server exactly as the launcher
 	// does. Empty when unset, which is the common keyless local case and sends no header at all.
 	// APIKeyFor is one of the accessors the facade's type aliases expose without a compatibility
 	// promise; it is the only such call in apogee, and it is confined to this file with the rest of
 	// the library's vocabulary.
-	switched, err := w.move(addrEndpoint(addr), name, "", cfg.APIKeyFor(profile.Backend))
+	switched, err := w.move(addrEndpoint(dialAddr(addr)), name, "", cfg.APIKeyFor(profile.Backend))
 	if err != nil {
 		return tui.ProfileLoadResult{Notices: notices}, err
 	}

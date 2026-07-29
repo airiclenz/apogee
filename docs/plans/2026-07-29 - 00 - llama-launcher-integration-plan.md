@@ -680,7 +680,20 @@ untested either way. Item 16 is the item that revisits it. It sits beside item 1
 are halves of one defect; item 8 below is CLOSED, so nothing in this file's order runs after it any
 more.
 
-## 16. The moved endpoint takes the dial spelling — a bind address never reaches the wire
+## 16. The moved endpoint takes the dial spelling — a bind address never reaches the wire — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): two things beyond the item's literal text, neither of them a behaviour the item
+did not state. (a) The change to shipped code IS the single expression named —
+`addrEndpoint(dialAddr(addr))`, launcher.go:550 — but a comment block was also added at the `addr :=`
+site (:507) recording why the BIND spelling stays there: it is `sameServer`'s first argument, and the
+item's "where the projection must NOT go" is worth more in the code than only in this plan. No code
+above the construction moved. (b) The item's third test bullet — item 9's exclusion for a session that
+has MOVED — is asserted inside `TestLoadProfileCrossAddressDialsTheLoopback` rather than as a separate
+function, because it reads the holder's endpoint AFTER that test's move; the assertion is the one the
+bullet specifies (`launchProfiles`' row for the moved-to profile equals `endpointAddr` of the endpoint
+the session was left holding). The two new tests are
+`TestLoadProfileCrossAddressDialsTheLoopback` and `TestUnloadAndStopActOnTheServerASessionMovedTo`;
+both were confirmed to FAIL before the change (the wire read `http://0.0.0.0:9090`) and pass after.
 
 **What.** One projection, at the one site item 15 left in the launcher's spelling.
 `cmd/apogee/launcher.go` — still the only file in apogee allowed to name the library's types (item
