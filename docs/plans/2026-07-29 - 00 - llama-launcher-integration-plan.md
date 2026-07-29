@@ -127,7 +127,32 @@ processes, no network.
 
 **Commit.** `feat(cmd): launcher bridge — facade dependency, ops seam, profile rows`
 
-## 3. The seams: `tui.Options` members + the wire closures
+## 3. The seams: `tui.Options` members + the wire closures — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): six deviations from the item's literal text.
+(a) The four seam BODIES live in `cmd/apogee/launcher.go` (a `launcherWiring` type embedding the
+shared mover), not in wire.go: they name facade types — `RunningInstance`, `StopResult` — and item 2
+made launcher.go the only file allowed to. wire.go keeps the WIRING (the enable decision and the four
+`tui.Options` members), which is what "beside the switch closure" is about.
+(b) The shared core the item asks be extracted rather than copied is `sessionMover.move` in
+`upstream.go`, over two new package-private seams (`upstreamSwitcher`, `modelStamper`) so the fold is
+drivable in a test without constructing an Agent — `/server`'s closure is now resolution + `move`.
+(c) `upstreamHolder` gained the current endpoint (`Endpoint()`; `Swap` takes it alongside the
+Monitor). A `heartbeat.Monitor` deliberately exposes no endpoint, and the item requires the
+same-address comparison read the session's endpoint *at call time* — which after a `/server` switch is
+not `opts.endpoint`. The holder is the value the item itself names for that.
+(d) The literal seam signatures are kept, so `LaunchProfiles` has no channel for item 2's collected
+config warnings and they stop at that closure; the launcher's notices reach the human through
+`ProfileLoadResult.Notices` — the one notices channel the fixed result shapes provide, and the verb
+that actually acts on the config — while `ActuationResult.Steps` is `/unload`/`/stop`'s whole voice.
+(e) `ops.loadProfile` is called with `restart=false` (the item left the flag unstated): the launcher's
+idempotent activation, so a server already serving the profile is left alone and a drift notice is
+preferred over restarting a server the human may be mid-conversation with.
+(f) The move target is the resolved profile's address with the discovered instance's as a fallback,
+and an address that stays empty reads as "same server" — an unknown address is never a licence to
+re-point the wire. The per-profile key is `cfg.APIKeyFor(profile.Backend)`, an accessor the facade's
+type aliases expose without a compatibility promise; it is apogee's only such call and it is confined
+to launcher.go with the rest of the library's vocabulary.
 
 **What.** The TUI-facing surface (ADR 0029 D1/D2), all nil-degrading like their ADR 0024/0028
 siblings (`internal/tui/tui.go`):

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/tui"
 	llamalauncher "github.com/airiclenz/llama-launcher/launcher"
 )
 
@@ -282,4 +283,191 @@ func endpointAddr(endpoint string) (string, error) {
 // a locally started llama.cpp, Ollama or LM Studio server terminates no TLS.
 func addrEndpoint(addr string) string {
 	return "http://" + addr
+}
+
+// instanceAddr renders a discovered instance's host:port the way profileAddr and endpointAddr render
+// theirs — through net.JoinHostPort, so an IPv6 host is bracketed exactly once. RunningInstance's own
+// Addr formats with %s:%d and would leave a v6 host bare, and these three values are COMPARED against
+// each other: one spelling for one address is the property the matching rests on.
+func instanceAddr(instance *llamalauncher.RunningInstance) string {
+	if instance == nil {
+		return ""
+	}
+	return net.JoinHostPort(instance.Host, strconv.Itoa(instance.Port))
+}
+
+// ----------------------------------------------------------------------------
+// The four TUI-facing seams (ADR 0029 D1/D2)
+// ----------------------------------------------------------------------------
+
+// launcherWiring is the composition root's half of the launcher seams: the bridge this file owns
+// (the ops and the resolved config path) plus the session move, because `/load` is the one verb that
+// can end in one. wire.go builds a single value and hands its four methods to internal/tui as
+// closures, so the renderer sees func values and never the library.
+//
+// The bodies live here rather than in wire.go because they name facade types — RunningInstance,
+// StopResult, ResolvedProfile — and this file is the only place in apogee that may (see the header).
+// What wire.go keeps is the WIRING decision: whether the integration is on at all, and therefore
+// whether the four members are func values or nil.
+type launcherWiring struct {
+	sessionMover
+	ops  launcherOps
+	path string
+}
+
+// profiles is [tui.Options.LaunchProfiles]: the row assembly above, projected onto the renderer's
+// type. A fresh config read every call is the point (ADR 0029 D4) — the picker opens on what the
+// launcher's config says now, not on what it said at launch.
+//
+// The warnings launchProfiles collects stop here, because the seam the plan fixed carries rows and
+// the one error that sinks the list. Nothing is lost that the human needs: a profile that would not
+// resolve is already reported by the ROW'S ABSENCE, and the launcher's config warnings reach the
+// transcript through ProfileLoadResult.Notices — on the verb that actually acts on that config,
+// where they are news rather than noise repeated on every browse.
+func (w launcherWiring) profiles() ([]tui.LaunchProfileChoice, error) {
+	rows, _, err := launchProfiles(w.ops, w.path)
+	if err != nil {
+		return nil, err
+	}
+	choices := make([]tui.LaunchProfileChoice, len(rows))
+	for i, row := range rows {
+		choices[i] = tui.LaunchProfileChoice{
+			Name:          row.Name,
+			Backend:       row.Backend,
+			Addr:          row.Addr,
+			ContextWindow: row.ContextWindow,
+			Running:       row.Running,
+		}
+	}
+	return choices, nil
+}
+
+// load is [tui.Options.LoadProfile], the composite verb of ADR 0029 D2: activate the Launch profile,
+// then decide whether the session has to follow it.
+//
+// It BLOCKS — the facade's contract, and the reason the TUI runs it on a Cmd goroutine under the
+// actuation latch. Everything it reads it reads fresh: the config, so a profile added seconds ago in
+// the launcher's own TUI resolves, and the session's CURRENT endpoint, so the same-server question is
+// answered about where the session is rather than where it launched.
+//
+// The notices channel is deliberately one collector across both calls: LoadConfig's warnings and
+// LoadProfile's drift notice are the same kind of thing to the human — the launcher speaking in its
+// own words — and they travel out even beside an error, because a load that failed after warning
+// about the config still warned.
+func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoadResult, error) {
+	var notices []string
+	collect := func(notice string) { notices = append(notices, notice) }
+
+	cfg, err := w.ops.loadConfig(w.path, collect)
+	if err != nil {
+		return tui.ProfileLoadResult{Notices: notices}, err
+	}
+	profile, err := cfg.ResolveProfile(name)
+	if err != nil {
+		return tui.ProfileLoadResult{Notices: notices}, err
+	}
+
+	// restart=false is the launcher's idempotent activation (its ADR-0007): a server already serving
+	// this profile is left alone, and drifted parameters produce a notice rather than a silent
+	// restart of a server the human may be mid-conversation with. `/load` means "make the world serve
+	// this", and a world already serving it needs nothing done to it.
+	instance, _, err := w.ops.loadProfile(cfg, profile, false, progress, collect)
+	if err != nil {
+		return tui.ProfileLoadResult{Notices: notices}, err
+	}
+
+	// Where the profile now serves. The resolved profile is the authority — it is what was asked for,
+	// and it answers even when a health-wait left no instance behind — with the discovered instance
+	// as the fallback for a merge that stated no address.
+	addr := profileAddr(profile)
+	if addr == "" {
+		addr = instanceAddr(instance)
+	}
+	// The comparison is against the endpoint the session is on RIGHT NOW, read from the holder rather
+	// than captured at wire time, because a `/server` switch may have moved it since. An endpoint that
+	// will not reduce to an address cannot be shown equal to anything, so it reads as "somewhere else"
+	// and the load follows the profile — the direction that ends with the session pointed at the
+	// server it just asked for.
+	current := ""
+	if reduced, err := endpointAddr(w.holder.Endpoint()); err == nil {
+		current = reduced
+	}
+	if addr == "" || addr == current {
+		// Nothing moves. The load landed on the very server this session talks to (or the launcher
+		// could not say where it landed, which is not a licence to re-point the wire), and the next
+		// beat observes the model change and rebinds through the ordinary path — ADR 0029 D1's "only
+		// a Beat binds", one code path with the cold start.
+		return tui.ProfileLoadResult{Notices: notices}, nil
+	}
+
+	// The api key the launcher's config carries for THIS profile's server, so the session — and the
+	// Monitor that beats at it — authenticate against a keyed local server exactly as the launcher
+	// does. Empty when unset, which is the common keyless local case and sends no header at all.
+	// APIKeyFor is one of the accessors the facade's type aliases expose without a compatibility
+	// promise; it is the only such call in apogee, and it is confined to this file with the rest of
+	// the library's vocabulary.
+	switched, err := w.move(addrEndpoint(addr), name, "", cfg.APIKeyFor(profile.Backend))
+	if err != nil {
+		return tui.ProfileLoadResult{Notices: notices}, err
+	}
+	return tui.ProfileLoadResult{Moved: true, Switch: switched, Notices: notices}, nil
+}
+
+// unload is [tui.Options.UnloadServer]: free the model of the server this session is talking to. On a
+// MANAGED backend the launcher's own semantic is a full stop (the model is baked into the process
+// arguments), which is why the projected result keeps ServerStopped — the note has to be able to say
+// which of the two things happened.
+func (w launcherWiring) unload(endpoint string) (tui.ActuationResult, error) {
+	instance, err := w.managedInstance(endpoint)
+	if err != nil {
+		return tui.ActuationResult{}, err
+	}
+	return actuationResult(w.ops.unload(instance.Backend, instanceAddr(instance)))
+}
+
+// stop is [tui.Options.StopServer]: stop the server at the session's endpoint outright, whether or
+// not the launcher started it (its ADR-0001). Afterwards the heartbeat's existing offline handling
+// owns the display — this verb reports only what it did.
+func (w launcherWiring) stop(endpoint string) (tui.ActuationResult, error) {
+	instance, err := w.managedInstance(endpoint)
+	if err != nil {
+		return tui.ActuationResult{}, err
+	}
+	return actuationResult(w.ops.stop(instanceAddr(instance)))
+}
+
+// managedInstance answers the question both actuation verbs have to ask first: is the server this
+// session is talking to one the launcher's config implies? It reduces the endpoint to an address,
+// re-reads the config fresh, and matches that address against a discovery sweep.
+//
+// No match is an error naming the endpoint rather than a best guess. The verbs act on a REAL address
+// or on nothing: an unmanaged endpoint is usually a remote server (whose local half is the launcher's
+// MCP adapter, ADR 0029 D4), and acting on the nearest thing found instead would stop a server nobody
+// asked about.
+func (w launcherWiring) managedInstance(endpoint string) (*llamalauncher.RunningInstance, error) {
+	addr, err := endpointAddr(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := w.ops.loadConfig(w.path, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, instance := range w.ops.discover(cfg) {
+		if instance != nil && instanceAddr(instance) == addr {
+			return instance, nil
+		}
+	}
+	return nil, fmt.Errorf("the launcher doesn't manage %s", endpoint)
+}
+
+// actuationResult projects the launcher's StopResult onto the renderer's ActuationResult, error and
+// all. The facade returns a NON-NIL result even on failure, carrying the steps completed before it —
+// so the steps travel out beside the error rather than being discarded with it: how far a stop got
+// before it failed is exactly what the human needs, and it is the only place that information exists.
+func actuationResult(res *llamalauncher.StopResult, err error) (tui.ActuationResult, error) {
+	if res == nil {
+		return tui.ActuationResult{}, err
+	}
+	return tui.ActuationResult{Steps: res.Steps, ServerStopped: res.ServerStopped}, err
 }

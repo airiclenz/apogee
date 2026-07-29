@@ -316,7 +316,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// alike) and a `/server` switch replaces the whole thing. The holder is what keeps that a
 	// composition-root move: Options.Heartbeat below is wired to holder.Beat, one signature for the
 	// life of the session, and the renderer never learns which Monitor answered.
-	holder := newUpstreamHolder(heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey))
+	holder := newUpstreamHolder(opts.endpoint, heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey))
 
 	// The servers this session can be moved to: the `servers:` entries plus — unless one of them
 	// already names it — the endpoint it started on, so the way back is always offered. The
@@ -362,38 +362,41 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		}, nil
 	}
 
+	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
+	// `/load`'s follow-the-profile: engine switch, Monitor swap, stored model cleared, in that order
+	// (see sessionMover.move, which carries the reasoning).
+	mover := sessionMover{agent: agent, holder: holder, host: host, pinnedWindow: pinnedWindow}
+
 	// The server-switch closure: the composition root's half of `/server`. The TUI decides WHEN
 	// (at idle, on an explicit act by the human), this decides everything the move touches —
 	// because a server is an endpoint, a key, and a discovery hint, and all three are config the
 	// binary owns. It runs on the Update goroutine at the quiescent boundary Agent.SwitchUpstream
 	// demands, and opens no connection of its own: the first BEAT is what discovers the new server.
 	//
-	// Order matters. Resolution and the engine's own validate-then-commit switch come first, so a
-	// name that resolves to nothing — or an Exchange still open — leaves the session exactly where
-	// it was. Past that call nothing can fail, and the two follow-ups both describe the world the
-	// switch just made true: the Monitor is replaced whole (a Monitor is per-server), and the
-	// session's stored model is cleared, because the switch UNBOUND it and a Save landing in the
-	// gap before the new server's first beat must not claim the model of a server this session no
-	// longer talks to.
+	// All this closure adds to the shared fold is RESOLUTION, and it comes first: a name that
+	// resolves to nothing never reaches the engine, so the session is left exactly where it was.
 	switchServer := func(name string) (tui.ServerSwitchResult, error) {
 		entry, err := findServer(choices, name)
 		if err != nil {
 			return tui.ServerSwitchResult{}, err
 		}
-		if err := agent.SwitchUpstream(apogee.UpstreamSpec{Endpoint: entry.Endpoint, APIKey: entry.APIKey}); err != nil {
-			return tui.ServerSwitchResult{}, err
-		}
-		holder.Swap(heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey))
-		host.SetModel("")
-		// What the display adopts: the endpoint now on the wire, the entry's name as the footer's
-		// alias, and the `context-window:` pin — which is GLOBAL and therefore survives a switch,
-		// so the renderer still needs no knowledge of it. Unpinned it is 0, which is the honest
-		// "unknown until the first beat binds one" the unbound model reads as too.
-		return tui.ServerSwitchResult{
-			Endpoint:      entry.Endpoint,
-			HostAlias:     entry.Name,
-			ContextWindow: pinnedWindow,
-		}, nil
+		return mover.move(entry.Endpoint, entry.Name, entry.Model, entry.APIKey)
+	}
+
+	// The llama-launcher seams (ADR 0029 D1): four closures over the bridge in launcher.go, which is
+	// the only file that names the library. The `llama-launcher:` key's three values resolve HERE,
+	// at the layer that knows the launcher — and when they resolve to "not enabled" all four members
+	// stay nil, which is the renderer's one-line degrade rather than a second configuration path.
+	// They are wired together or not at all, so the TUI's nil check on one speaks for all of them.
+	var launchProfilesSeam func() ([]tui.LaunchProfileChoice, error)
+	var loadProfileSeam func(name string, progress func(step string)) (tui.ProfileLoadResult, error)
+	var unloadServerSeam, stopServerSeam func(endpoint string) (tui.ActuationResult, error)
+	if launcherPath, launcherEnabled := launcherConfigPath(opts); launcherEnabled {
+		wiring := launcherWiring{sessionMover: mover, ops: realLauncher{}, path: launcherPath}
+		launchProfilesSeam = wiring.profiles
+		loadProfileSeam = wiring.load
+		unloadServerSeam = wiring.unload
+		stopServerSeam = wiring.stop
 	}
 
 	// The prompt caret's shape. applyConfig already refused a name this build does not know, so the
@@ -429,6 +432,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// session started on, which is exactly "nothing to switch to" without a special case.
 		Servers:      serverChoices(choices),
 		SwitchServer: switchServer,
+		// The `/load`, `/unload`, `/stop` half (ADR 0029): browse the launcher's Launch profiles,
+		// activate one — following it onto another server when it lives there — and free or stop the
+		// server this session is on. All four are nil when the integration is not configured, which
+		// is the whole of the degrade.
+		LaunchProfiles: launchProfilesSeam,
+		LoadProfile:    loadProfileSeam,
+		UnloadServer:   unloadServerSeam,
+		StopServer:     stopServerSeam,
 		// The resolved `ui:` block: which animation paints the status-line spinner and whether its
 		// colour loop runs. Two independent values, resolved and validated by applyConfig, so the
 		// renderer selects rather than parses.

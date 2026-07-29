@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -23,14 +24,22 @@ import (
 // the lock across it would stall the Update goroutine's next swap behind a server that stopped
 // answering. A swap mid-beat is therefore possible and safe by design: the in-flight beat lands
 // carrying the retired heartbeat generation, which the TUI's generation guard makes inert.
+//
+// It also remembers the endpoint the current Monitor observes, because a Monitor deliberately does
+// not expose one (it is per-server and immutable) and something at the composition root has to be
+// able to answer "which server is this session on RIGHT NOW". `/load` asks exactly that, to decide
+// whether the profile it just activated is already the session's server or somewhere else (ADR 0029
+// D2) — and the launch-time `endpoint:` is the wrong answer the moment a `/server` switch has moved.
 type upstreamHolder struct {
-	mu      sync.Mutex
-	monitor *heartbeat.Monitor
+	mu       sync.Mutex
+	endpoint string
+	monitor  *heartbeat.Monitor
 }
 
-// newUpstreamHolder seeds the holder with the Monitor for the server this session STARTS on.
-func newUpstreamHolder(monitor *heartbeat.Monitor) *upstreamHolder {
-	return &upstreamHolder{monitor: monitor}
+// newUpstreamHolder seeds the holder with the Monitor for the server this session STARTS on, and the
+// endpoint that Monitor observes.
+func newUpstreamHolder(endpoint string, monitor *heartbeat.Monitor) *upstreamHolder {
+	return &upstreamHolder{endpoint: endpoint, monitor: monitor}
 }
 
 // Beat observes whichever Upstream is current when the beat starts. It is the value wired into
@@ -48,13 +57,25 @@ func (h *upstreamHolder) SetModel(model string) {
 	h.current().SetModel(model)
 }
 
-// Swap makes monitor the one subsequent beats observe. It is called once a switch has already
-// COMMITTED in the engine (Agent.SwitchUpstream), so there is no failure to unwind: from the next
-// beat on, the display observes the server the wire is actually pointed at.
-func (h *upstreamHolder) Swap(monitor *heartbeat.Monitor) {
+// Swap makes monitor — observing endpoint — the one subsequent beats observe. It is called once a
+// switch has already COMMITTED in the engine (Agent.SwitchUpstream), so there is no failure to
+// unwind: from the next beat on, the display observes the server the wire is actually pointed at.
+// The two fields move together under one lock, so no reader can see a Monitor paired with the
+// endpoint it is not observing.
+func (h *upstreamHolder) Swap(endpoint string, monitor *heartbeat.Monitor) {
 	h.mu.Lock()
+	h.endpoint = endpoint
 	h.monitor = monitor
 	h.mu.Unlock()
+}
+
+// Endpoint reports the Upstream the session is on right now — the launch endpoint until a move
+// replaces it. It is the question `/load` asks before deciding whether it has to follow the profile
+// it just activated.
+func (h *upstreamHolder) Endpoint() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.endpoint
 }
 
 // current reads the live Monitor under the mutex and hands it back, so callers hold the lock for a
@@ -63,6 +84,67 @@ func (h *upstreamHolder) current() *heartbeat.Monitor {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.monitor
+}
+
+// ----------------------------------------------------------------------------
+// The shared move (ADR 0028's switch and ADR 0029's follow-the-profile)
+// ----------------------------------------------------------------------------
+
+// upstreamSwitcher is the engine mutation a move performs, named as the ONE method it needs so the
+// fold below is exercisable without constructing an Agent. Satisfied by *apogee.Agent.
+type upstreamSwitcher interface {
+	SwitchUpstream(apogee.UpstreamSpec) error
+}
+
+// modelStamper is the session-metadata half of the same move: the model id stamped on saved records,
+// which a move CLEARS because it unbinds the model. Satisfied by *sessionHost.
+type modelStamper interface {
+	SetModel(model string)
+}
+
+// sessionMover is the shared core of every move to another Upstream: `/server`'s explicit switch
+// (ADR 0028) and `/load`'s follow-the-profile (ADR 0029 D2) do exactly the same three things in
+// exactly the same order, so they do them through one function rather than two copies free to drift
+// apart. What differs between the two callers is only the four values move takes.
+//
+// It holds the collaborators rather than closing over them so the fold can be driven directly in a
+// test, which is what makes the launcher seams built on it testable without a live server.
+type sessionMover struct {
+	agent        upstreamSwitcher
+	holder       *upstreamHolder
+	host         modelStamper
+	pinnedWindow int
+}
+
+// move re-points the whole session at endpoint and reports what the display should adopt.
+//
+// Order matters, and it is the order the `/server` closure established. The engine's own
+// validate-then-commit switch goes FIRST, so a refusal — an Exchange still open, an endpoint the
+// provider will not take — leaves the session exactly where it was. Past that call nothing can fail,
+// and the two follow-ups both describe the world the switch just made true: the Monitor is replaced
+// whole (a Monitor is per-server, endpoint and key alike), and the session's stored model is cleared,
+// because the switch UNBOUND it and a Save landing in the gap before the new server's first beat must
+// not claim the model of a server this session no longer talks to.
+//
+// alias is what the footer will call the server — a `servers:` entry's name for a switch, the profile
+// name for a load — and hint is that server's discovery hint, which for a load is deliberately empty:
+// a Launch profile's name is not a wire model id, and guessing one would send discovery looking for a
+// model no server advertises.
+func (m sessionMover) move(endpoint, alias, hint, apiKey string) (tui.ServerSwitchResult, error) {
+	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{Endpoint: endpoint, APIKey: apiKey}); err != nil {
+		return tui.ServerSwitchResult{}, err
+	}
+	m.holder.Swap(endpoint, heartbeat.NewMonitor(endpoint, hint, apiKey))
+	m.host.SetModel("")
+	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the
+	// `context-window:` pin — which is GLOBAL and therefore survives a move, so the renderer still
+	// needs no knowledge of it. Unpinned it is 0, the honest "unknown until the first beat binds one"
+	// that the unbound model reads as too.
+	return tui.ServerSwitchResult{
+		Endpoint:      endpoint,
+		HostAlias:     alias,
+		ContextWindow: m.pinnedWindow,
+	}, nil
 }
 
 // upstreamChoices assembles the servers this session can be switched to: every `servers:` entry in

@@ -295,6 +295,57 @@ type Options struct {
 	// session where it was. nil ⇒ switching is unwired, and `/server` degrades to a note.
 	SwitchServer func(name string) (ServerSwitchResult, error)
 
+	// LaunchProfiles lists the Launch profiles the launcher's config defines — the `/load` picker's
+	// rows, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile added in the
+	// launcher's own TUI a moment ago is offered here without restarting apogee. The binary owns the
+	// read because it is the only layer that knows the launcher exists at all; the renderer receives
+	// rows it can label and pick from, and nothing else.
+	//
+	// The error is the one failure that sinks the list — no config at a configured path, a config
+	// that will not parse — and reaches the human as a one-line note rather than an overlay. A single
+	// profile that cannot be resolved is NOT that failure: it is simply absent from the rows, because
+	// one moved model file must not cost the user their other nine profiles.
+	//
+	// nil ⇒ the llama-launcher integration is not configured on this host (`llama-launcher: off`, or
+	// auto-detect found no launcher config), and `/load` degrades to a note naming the key. The four
+	// launcher seams are wired together or not at all, so one nil check speaks for all of them.
+	LaunchProfiles func() ([]LaunchProfileChoice, error)
+
+	// LoadProfile activates the named Launch profile and reports what the session must adopt — the
+	// composite verb of ADR 0029 D2. The binary drives the launcher (a BLOCKING call: up to ~30 s
+	// waiting for health, plus a stop escalation when a restart displaces an occupant, and minutes
+	// for a large model), then decides whether the session has to move at all: a profile that
+	// resolves to the endpoint this session is already on moves nothing — Moved false, and the next
+	// beat observes the new model and rebinds through the ordinary path — while one that resolves
+	// elsewhere is FOLLOWED with the same fold `/server` performs, reported as Moved true carrying
+	// the [ServerSwitchResult] that fold already understands. No result here is ever a binding; only
+	// a Beat binds (ADR 0029 D1).
+	//
+	// Because it blocks, the TUI runs it on a Cmd goroutine and holds the actuation latch across it —
+	// that latch is also the per-address serialization the launcher's contract demands of its caller.
+	// progress receives the launcher's lifecycle steps one call per step, ON THE CALLING GOROUTINE, so
+	// the TUI pumps them into the transcript rather than rendering from them; nil is safe.
+	//
+	// nil ⇒ unwired; see LaunchProfiles.
+	LoadProfile func(name string, progress func(step string)) (ProfileLoadResult, error)
+
+	// UnloadServer frees the model of the server this session is talking to, and StopServer stops
+	// that server outright (ADR 0029 D3). Both take the session's endpoint rather than reading one:
+	// the renderer is the side that knows which server the session is on — it may have moved since
+	// launch — while the binary is the side that knows which addresses the launcher's config implies.
+	// An endpoint the launcher does not manage comes back as an error naming it; neither verb ever
+	// guesses an address to act on, because the one mistake available here stops somebody else's
+	// server.
+	//
+	// Both BLOCK for the stop escalation (~20 s worst case) and run under LoadProfile's latch, for
+	// the same serialization reason. The result carries the steps taken EVEN WHEN the error is
+	// non-nil — how far a stop got before it failed is exactly what the human needs to know — so the
+	// caller renders the steps first and the error after.
+	//
+	// nil ⇒ unwired; see LaunchProfiles.
+	UnloadServer func(endpoint string) (ActuationResult, error)
+	StopServer   func(endpoint string) (ActuationResult, error)
+
 	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
 	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints
 	// the resumed scrollback beneath it and relights the context gauge from the stored fill — or,
@@ -345,6 +396,53 @@ type ServerSwitchResult struct {
 	Endpoint      string // the new Upstream's base URL, adopted by the footer and the start-up box
 	HostAlias     string // the chosen server's name, now the footer's host label
 	ContextWindow int    // the `context-window:` pin that survives the switch; 0 ⇒ unpinned/unknown
+}
+
+// LaunchProfileChoice is one Launch profile the `/load` picker offers (CONTEXT.md: a Launch profile
+// is the LAUNCH-side description of a model — model file, server, flags — owned by the launcher's
+// config, opposite the request-side Model profile). Name does two jobs with one value, the
+// [ServerChoice] shape: it labels the row, and it is the name [Options.LoadProfile] is called with.
+// Everything else is what the choice is made on and is display only.
+//
+// It carries the launcher's facts PROJECTED, never a launcher type — the same posture that keeps
+// heartbeat.Beat out of the facade's vocabulary — so the renderer holds no dependency on the library
+// and this seam survives a facade that changes shape.
+type LaunchProfileChoice struct {
+	Name          string // the profile's key in the launcher config: the row's label and the load argument
+	Backend       string // the server it runs on — llamacpp, ollama, lmstudio
+	Addr          string // the host:port it would serve at; "" when the launcher could not resolve one
+	ContextWindow int    // the merged context_size, or 0 for UNKNOWN — unset leaves the server's own default
+	Running       bool   // discovery attributes a live instance to this profile right now
+}
+
+// ProfileLoadResult is what a completed `/load` hands back: whether the session had to MOVE to follow
+// the profile, and — when it did — the same [ServerSwitchResult] a `/server` switch produces, so the
+// completion fold that already exists understands both without a second shape (ADR 0029 D2).
+//
+// Moved false is the ordinary local case, not a failure: the profile loaded into the very server this
+// session is talking to, nothing was re-pointed, and the next beat observes the model change and
+// rebinds through the ordinary path. Switch is meaningful only when Moved is true.
+//
+// Notices are the launcher's own lines worth telling the human — config warnings, the drift notice a
+// non-restarting activation emits — surfaced in order as transcript notes. They are carried even
+// alongside an error, because a load that failed after warning about the config still warned.
+type ProfileLoadResult struct {
+	Moved   bool               // the session was re-pointed at the profile's server
+	Switch  ServerSwitchResult // what the display adopts; zero unless Moved
+	Notices []string           // launcher notices to surface as transcript notes, in order
+}
+
+// ActuationResult is what `/unload` and `/stop` did: the launcher's own [StopResult] projected. Steps
+// are the orchestration steps it recorded, in order, rendered one transcript note each — and they are
+// present even on an error, carrying how far the verb got before it failed.
+//
+// ServerStopped tells the two unload outcomes apart, which is the whole reason `/unload` can be
+// honest about what it did: on a MANAGED backend the model is baked into the server's process
+// arguments, so unloading it means stopping the server (true), while an external backend takes an API
+// unload and keeps running (false). `/stop` always reports true on success.
+type ActuationResult struct {
+	Steps         []string // the orchestration steps taken, in order; present even on failure
+	ServerStopped bool     // the server process itself was stopped, not just its model freed
 }
 
 // ResumedSession is the startup-replay payload the composition root hands the TUI when a run

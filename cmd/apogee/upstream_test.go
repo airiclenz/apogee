@@ -43,16 +43,24 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	first := upstreamServer(t, "model-a", 4096)
 	second := upstreamServer(t, "model-b", 8192)
 
-	holder := newUpstreamHolder(heartbeat.NewMonitor(first.URL, "", ""))
+	holder := newUpstreamHolder(first.URL, heartbeat.NewMonitor(first.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
 		t.Fatalf("first beat = %+v; want a reachable model-a from the seeded Monitor", beat)
 	}
+	if got := holder.Endpoint(); got != first.URL {
+		t.Errorf("Endpoint before the swap = %q; want the seeded %q", got, first.URL)
+	}
 
-	holder.Swap(heartbeat.NewMonitor(second.URL, "", ""))
+	holder.Swap(second.URL, heartbeat.NewMonitor(second.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-b" {
 		t.Errorf("beat after Swap = %+v; want a reachable model-b — the holder still observes the old server", beat)
+	}
+	// The endpoint moves with the Monitor, because "which server is this session on" is the question
+	// `/load` asks to decide whether it has to follow the profile it just activated.
+	if got := holder.Endpoint(); got != second.URL {
+		t.Errorf("Endpoint after the swap = %q; want %q", got, second.URL)
 	}
 	// The hint moves through the holder too (the rebind closure's line), and lands on the CURRENT
 	// Monitor: a hint for a model the swapped-in server does not serve simply falls back, which is

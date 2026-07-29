@@ -13,11 +13,13 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
+	llamalauncher "github.com/airiclenz/llama-launcher/launcher"
 )
 
 // The label-walk pre-warm trigger is the mirror of the degradation gate: it fires exactly when
@@ -1180,5 +1182,346 @@ func TestFriendlyConstructErr(t *testing.T) {
 	other := errors.New("some other failure")
 	if got := friendlyConstructErr(other); !errors.Is(got, other) {
 		t.Errorf("friendlyConstructErr(other) = %v; want passthrough", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The llama-launcher seams (ADR 0029 D1/D2)
+// ----------------------------------------------------------------------------
+
+// fakeSwitcher stands in for the Agent at the one method a move calls, recording every spec it was
+// handed so a test can prove the wire moved — or, more often, that it did NOT.
+type fakeSwitcher struct {
+	specs []apogee.UpstreamSpec
+	err   error
+}
+
+func (f *fakeSwitcher) SwitchUpstream(spec apogee.UpstreamSpec) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.specs = append(f.specs, spec)
+	return nil
+}
+
+// fakeStamper stands in for the session host at the metadata half of a move.
+type fakeStamper struct{ models []string }
+
+func (f *fakeStamper) SetModel(model string) { f.models = append(f.models, model) }
+
+// launcherWiringFixture builds the wiring under test over a scripted launcher and a session sitting
+// on endpoint, and hands back the collaborators the assertions read.
+func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
+	launcherWiring, *fakeSwitcher, *fakeStamper, *upstreamHolder) {
+	t.Helper()
+	agent := &fakeSwitcher{}
+	host := &fakeStamper{}
+	holder := newUpstreamHolder(endpoint, heartbeat.NewMonitor(endpoint, "", ""))
+	wiring := launcherWiring{
+		sessionMover: sessionMover{agent: agent, holder: holder, host: host, pinnedWindow: 16384},
+		ops:          ops,
+		path:         "/etc/llama-launcher/config.yaml",
+	}
+	return wiring, agent, host, holder
+}
+
+// twoServerConfig is a launcher config with one profile per backend on two different addresses —
+// the fixture the same-address and cross-address load paths are told apart on.
+func twoServerConfig(t *testing.T) *llamalauncher.Config {
+	t.Helper()
+	return launcherFixture(t, []string{"here.gguf", "there.gguf"}, `
+servers:
+  llamacpp:
+    api_key: llamacpp-key
+  ollama: true
+defaults:
+  server: llamacpp
+  host: 127.0.0.1
+  context_size: 4096
+profiles:
+  here:
+    model: here.gguf
+    port: 8080
+  there:
+    model: there.gguf
+    port: 9090
+`)
+}
+
+// A profile that resolves to the server the session is ALREADY on moves nothing: the wire is not
+// re-pointed, the stored model is not cleared, and the result says so — the next beat observes the
+// model change and rebinds through the ordinary path (ADR 0029 D2).
+func TestLoadProfileSameAddressMovesNothing(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:          twoServerConfig(t),
+		loadProgress: []string{"Stopping the occupant", "Starting llama-server", "Waiting for health"},
+		loadNotices:  []string{"parameters drifted — re-run with restart to apply"},
+		notices:      []string{"servers.llamacpp: api_key has leading/trailing whitespace"},
+		loadResult:   &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080},
+	}
+	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	var steps []string
+	result, err := wiring.load("here", func(step string) { steps = append(steps, step) })
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if result.Moved {
+		t.Errorf("result = %+v; want Moved false — the profile serves the session's own endpoint", result)
+	}
+	if result.Switch != (tui.ServerSwitchResult{}) {
+		t.Errorf("result.Switch = %+v; want the zero value when nothing moved", result.Switch)
+	}
+	if len(agent.specs) != 0 {
+		t.Errorf("SwitchUpstream called %+v; want no engine move at all", agent.specs)
+	}
+	if len(host.models) != 0 {
+		t.Errorf("SetModel called %v; want the stored model untouched — nothing was unbound", host.models)
+	}
+	if got := holder.Endpoint(); got != "http://127.0.0.1:8080" {
+		t.Errorf("holder endpoint = %q; want the unchanged session endpoint", got)
+	}
+	if len(ops.loadedNames) != 1 || ops.loadedNames[0] != "here" {
+		t.Errorf("loadProfile names = %v; want exactly [here] — the profile still had to be activated", ops.loadedNames)
+	}
+	// Progress steps reach the caller as they happen (the pump item 5 drains), and both notice
+	// sources land in one ordered list: the config's warnings first, then the load's own.
+	if !slices.Equal(steps, ops.loadProgress) {
+		t.Errorf("progress steps = %v; want %v in order", steps, ops.loadProgress)
+	}
+	wantNotices := []string{ops.notices[0], ops.loadNotices[0]}
+	if !slices.Equal(result.Notices, wantNotices) {
+		t.Errorf("result.Notices = %v; want %v", result.Notices, wantNotices)
+	}
+}
+
+// A profile that resolves ELSEWHERE is followed: the same fold `/server` performs, with the profile
+// name as the alias, the launcher's own api key for that backend, and no discovery hint — a profile
+// name is not a wire model id.
+func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:        twoServerConfig(t),
+		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090},
+	}
+	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	result, err := wiring.load("there", nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if !result.Moved {
+		t.Fatalf("result = %+v; want Moved true — the profile serves another address", result)
+	}
+	want := tui.ServerSwitchResult{
+		Endpoint:      "http://127.0.0.1:9090",
+		HostAlias:     "there",
+		ContextWindow: 16384,
+	}
+	if result.Switch != want {
+		t.Errorf("result.Switch = %+v; want %+v (alias = the profile name, the global pin survives)", result.Switch, want)
+	}
+	wantSpec := apogee.UpstreamSpec{Endpoint: "http://127.0.0.1:9090", APIKey: "llamacpp-key"}
+	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
+		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v] — the key is the launcher config's own",
+			agent.specs, wantSpec)
+	}
+	if got := holder.Endpoint(); got != "http://127.0.0.1:9090" {
+		t.Errorf("holder endpoint = %q; want the profile's endpoint — the Monitor did not follow", got)
+	}
+	if !slices.Equal(host.models, []string{""}) {
+		t.Errorf("SetModel calls = %v; want exactly one unbinding \"\" — a move unbinds the model", host.models)
+	}
+}
+
+// A nil progress callback is the documented safe case, and a load that cannot even resolve its
+// profile never reaches the launcher: no activation is attempted and nothing moves.
+func TestLoadProfileUnknownNameNeverActuates(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{cfg: twoServerConfig(t)}
+	wiring, agent, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	if _, err := wiring.load("typo", nil); err == nil {
+		t.Fatal("load with an unresolvable profile returned no error")
+	}
+	if len(ops.loadedNames) != 0 {
+		t.Errorf("loadProfile called %v; want nothing activated", ops.loadedNames)
+	}
+	if len(agent.specs) != 0 {
+		t.Errorf("SwitchUpstream called %+v; want the session left where it was", agent.specs)
+	}
+}
+
+// The picker's rows cross the seam projected onto the renderer's type, in the launcher's own order.
+func TestLaunchProfilesSeamProjectsRows(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:       twoServerConfig(t),
+		instances: []*llamalauncher.RunningInstance{{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090, ActiveProfile: "there"}},
+	}
+	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	rows, err := wiring.profiles()
+	if err != nil {
+		t.Fatalf("profiles: %v", err)
+	}
+	want := []tui.LaunchProfileChoice{
+		{Name: "here", Backend: "llamacpp", Addr: "127.0.0.1:8080", ContextWindow: 4096},
+		{Name: "there", Backend: "llamacpp", Addr: "127.0.0.1:9090", ContextWindow: 4096, Running: true},
+	}
+	if !slices.Equal(rows, want) {
+		t.Errorf("rows = %+v; want %+v", rows, want)
+	}
+
+	// The one failure that sinks the list travels out as the error the renderer notes.
+	broken := &fakeLauncher{cfgErr: errors.New("no config file at /nope/config.yaml")}
+	wiring, _, _, _ = launcherWiringFixture(t, broken, "http://127.0.0.1:8080")
+	if rows, err := wiring.profiles(); err == nil || rows != nil {
+		t.Errorf("profiles over an unreadable config = %+v, %v; want no rows and the loader's error", rows, err)
+	}
+}
+
+// Both actuation verbs act on the instance discovery finds at the SESSION's address — the backend
+// name for an unload comes from that instance, and the steps travel out projected.
+func TestUnloadAndStopActOnTheSessionsEndpoint(t *testing.T) {
+	t.Parallel()
+
+	instances := []*llamalauncher.RunningInstance{
+		{Backend: "ollama", Host: "127.0.0.1", Port: 11434},
+		{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080},
+	}
+	steps := []string{"Sending SIGTERM", "Waiting for the port to release"}
+
+	ops := &fakeLauncher{
+		cfg:           twoServerConfig(t),
+		instances:     instances,
+		actuateResult: &llamalauncher.StopResult{ServerStopped: true, Steps: steps},
+	}
+	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	result, err := wiring.unload("http://127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("unload: %v", err)
+	}
+	if !slices.Equal(result.Steps, steps) || !result.ServerStopped {
+		t.Errorf("unload result = %+v; want the launcher's steps and ServerStopped true (a managed backend)", result)
+	}
+	if !slices.Equal(ops.unloaded, []string{"llamacpp 127.0.0.1:8080"}) {
+		t.Errorf("unload calls = %v; want the backend and address discovery reported for the session", ops.unloaded)
+	}
+
+	if _, err := wiring.stop("http://127.0.0.1:11434"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if !slices.Equal(ops.stopped, []string{"127.0.0.1:11434"}) {
+		t.Errorf("stop calls = %v; want the address the endpoint reduced to", ops.stopped)
+	}
+}
+
+// An endpoint no discovered instance answers for is refused by name rather than acted on: the one
+// mistake available here would stop somebody else's server.
+func TestUnloadAndStopRefuseAnUnmanagedEndpoint(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:       twoServerConfig(t),
+		instances: []*llamalauncher.RunningInstance{{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080}},
+	}
+	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://remote.invalid:9999")
+
+	for _, verb := range []struct {
+		name string
+		call func(string) (tui.ActuationResult, error)
+	}{{"unload", wiring.unload}, {"stop", wiring.stop}} {
+		t.Run(verb.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := verb.call("http://remote.invalid:9999")
+			if err == nil {
+				t.Fatalf("%s against an unmanaged endpoint returned no error", verb.name)
+			}
+			if !strings.Contains(err.Error(), "http://remote.invalid:9999") {
+				t.Errorf("error %q does not name the endpoint it refused", err)
+			}
+			if len(result.Steps) != 0 || result.ServerStopped {
+				t.Errorf("a refused %s still returned %+v; want the zero result", verb.name, result)
+			}
+		})
+	}
+	if len(ops.unloaded) != 0 || len(ops.stopped) != 0 {
+		t.Errorf("the launcher was driven anyway: unloaded=%v stopped=%v", ops.unloaded, ops.stopped)
+	}
+}
+
+// A failed actuation still reports how far it got: the facade returns a non-nil result carrying the
+// steps completed before the failure, and discarding them with the error would throw away the only
+// account of what happened.
+func TestActuationResultKeepsTheStepsBesideTheError(t *testing.T) {
+	t.Parallel()
+
+	failed := errors.New("the process did not exit")
+	steps := []string{"Sending SIGTERM", "Sending SIGKILL"}
+	result, err := actuationResult(&llamalauncher.StopResult{Steps: steps}, failed)
+	if !errors.Is(err, failed) {
+		t.Errorf("err = %v; want the launcher's own error passed through", err)
+	}
+	if !slices.Equal(result.Steps, steps) {
+		t.Errorf("result.Steps = %v; want the steps completed before the failure %v", result.Steps, steps)
+	}
+	if result, err := actuationResult(nil, failed); len(result.Steps) != 0 || !errors.Is(err, failed) {
+		t.Errorf("actuationResult(nil, err) = %+v, %v; want the zero result and the error", result, err)
+	}
+}
+
+// The `llama-launcher:` key decides whether the four seams exist at all: off wires them nil (the
+// renderer's one-line degrade), a named path wires them together — no half-wired state, so the
+// TUI's nil check on one member speaks for all four.
+func TestRunRootWiresTheLauncherSeamsTogetherOrNotAtAll(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		key   string
+		wired bool
+	}{
+		{name: "off ⇒ no local-server verbs", key: "off"},
+		{name: "a named config ⇒ all four", key: filepath.Join(t.TempDir(), "launcher.yaml"), wired: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			upstream := upstreamServer(t, "model-a", 4096)
+			rec := &recordingLauncher{}
+			opts := options{
+				endpoint:      upstream.URL,
+				mode:          "ask-before",
+				workspace:     t.TempDir(),
+				configDir:     t.TempDir(),
+				autoCompact:   true,
+				llamaLauncher: tt.key,
+			}
+			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+				t.Fatalf("runRoot: %v", err)
+			}
+
+			wired := map[string]bool{
+				"LaunchProfiles": rec.opts.LaunchProfiles != nil,
+				"LoadProfile":    rec.opts.LoadProfile != nil,
+				"UnloadServer":   rec.opts.UnloadServer != nil,
+				"StopServer":     rec.opts.StopServer != nil,
+			}
+			for member, got := range wired {
+				if got != tt.wired {
+					t.Errorf("tui.Options.%s wired = %v; want %v", member, got, tt.wired)
+				}
+			}
+		})
 	}
 }
