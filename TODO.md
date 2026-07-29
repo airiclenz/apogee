@@ -30,25 +30,22 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   Needs grilling.
 
 - **[P1] Server / model switching** — **the switching itself SHIPPED 2026-07-28; the local-server
-  half is GRILLED + PLANNED 2026-07-29 (awaiting execution); the profile half remains.** Both
-  user-facing switches exist and are recorded in
+  half SHIPPED 2026-07-29; the profile half remains.** Both user-facing switches exist and are
+  recorded in
   [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
   (see the ledger below): `/model` picks among what the beat reported and drives the existing
   Rebind, `/server` moves the whole Upstream (a new provider client, the per-server Monitor swapped
   behind the unchanged seam, the model unbound until the new server's first beat binds it), and the
   file-only `servers:` key names where a session may go. **Remaining:**
-  - **Local server start/stop — grilled 2026-07-29; the body left this file for the
-    authoritative record.** Decision:
+  - **Local server start/stop — SHIPPED 2026-07-29; the body left this file for the
+    authoritative record:**
     [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
-    (llama-launcher imported as a library; `/load` + `/unload` + `/stop` on the session's
-    endpoint; the session follows the loaded Launch profile; one actuation latch; the
-    launcher's config as the single profile store behind a file-only `llama-launcher:` key —
-    CONTEXT.md now defines **Launch profile**). Execution:
-    `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md` here — **unblocked
-    2026-07-29**, item 1 (the `llama-launcher:` config key) landed. Both launcher-side
-    prerequisites shipped that day: the public API export as **v1.6.0**/ADR-0011, and the
-    **portability release as v1.6.1**/ADR-0012 (`docs/plans/2026-07-29-portability-release-plan.md`
-    in that repo), which fixed v1.6.0's darwin-only compile. The fix stayed in the 1.6.x line.
+    (the decision), `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md` (the
+    execution) and the CHANGELOG entry (what a user sees): `/load` + `/unload` + `/stop` over
+    llama-launcher **v1.6.1** imported as a library, behind the file-only `llama-launcher:` key,
+    with **Launch profile** now a CONTEXT.md term. **Still open:** only that plan's last item, the
+    owner-run live pass on a host with a real launcher config — failures there reopen the item they
+    belong to, not this entry.
   - The switchable **model-profile** abstraction (sampling params, context-budget %,
     thinking/tool-call format — reuse `internal/processing`), still unstarted and still
     deliberately **global**: `model-profile` is not per-model, and neither a rebind nor a server

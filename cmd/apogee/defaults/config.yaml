@@ -82,16 +82,19 @@
 # launcher's launch profiles and waits while it starts, /unload frees the model, /stop stops the
 # server. Config-file only (no flag or env). Three values:
 #
-#   (unset)   auto-detect — apogee reads llama-launcher's own default config if that file is
-#             there, and the three commands simply do not appear if it is not. This is the
-#             default, and on a machine with the launcher installed it needs no configuration.
+#   (unset)   auto-detect — apogee reads llama-launcher's own default config,
+#             ~/.config/llama-launcher/config.yaml, if that file is there. If it is not, the three
+#             commands stay listed and answer "llama-launcher not configured" when you reach for
+#             one. This is the default, and on a machine with the launcher installed it needs no
+#             configuration.
 #   off       leave the local-server commands off, even on a machine that has a launcher config.
 #   <path>    read THIS launcher config instead of the default one (~ expands).
 #
 # Nothing is checked at startup: a path that is not there is reported the first time a command
-# reaches for it, not as a refusal to start. A launcher running on ANOTHER machine is a different
-# thing — reach that one as an mcp-servers: entry below; the two compose.
-# llama-launcher: ~/path/to/llama-launcher/config.yaml
+# reaches for it, not as a refusal to start. Each command re-reads the file, so a profile you add
+# in the launcher's own TUI is offered by the next /load. A launcher running on ANOTHER machine is
+# a different thing — reach that one as an mcp-servers: entry below; the two compose.
+# llama-launcher: ~/configs/llama-launcher.yaml
 
 # =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).

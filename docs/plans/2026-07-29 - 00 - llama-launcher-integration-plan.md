@@ -337,7 +337,28 @@ not-managed endpoint; stop then simulated beat failures cross offline normally (
 
 **Commit.** `feat(tui): /unload and /stop — the session's server, freed and stopped`
 
-## 7. Docs pass
+## 7. Docs pass — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): four deviations from the item's literal text.
+(a) `layout.md` had NO prose about the footer at all — no `connecting…` sentence to put one beside —
+so the `loading <profile>…` state landed as a new short section, *The footer's upstream slot*, which
+states the slot's contents and the one-word replacements (`connecting…`, `loading <profile>…`,
+`unload…`/`stop…`) and their precedence. The same file's mini-language section carried two claims the
+shipped code had made stale — "the three that take arguments" (four now, `/load` joined) and the
+picker overlay being `/model` and `/server` only — so both were corrected here rather than left
+contradicting item 4.
+(b) The template block was more than "verify voice": it claimed the three commands "simply do not
+appear" without a launcher, which the shipped command table contradicts (they are static rows that
+answer `llama-launcher not configured`). Corrected, and the launcher's real default config path is
+now named — item 1's NOTES deferred exactly that until the facade was imported, which item 2 did.
+(c) VERSION went `v0.9.9` → `v0.10.0` — the minor bump ADR 0029's consequences call for, rather than
+the running patch bump this 0.9.x line has been taking.
+(d) Of the three findings handed down from earlier items: the `filepath.IsAbs` guard on auto-detect
+(a) IS folded in, as the "under your home directory" clause in the README's ladder and the named
+default path in the template — the ladder is documented there, so the guard is user-visible fact. The
+untested `restart=false` load seam (b) is NOT a doc change (item 7 has no known-limitations surface)
+and is reported as a follow-up defect in item 3's territory instead. This plan's own stale header
+line (c) is not in item 7's stated file list and was left for the plan's runner.
 
 **What.** README: the slash-command table gains `/load`, `/unload`, `/stop` — **and the
 missing `/model` + `/server` rows** (pre-existing doc gap, verified 2026-07-29) — plus a short

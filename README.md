@@ -147,6 +147,11 @@ before you send.
 | `/compact` | Summarise the conversation to reclaim context | — |
 | `/continue` | Ask the model to keep going | — |
 | `/sessions` | Browse saved sessions — resume, rename, or delete | — |
+| `/model` | Switch to another model this server serves — picker, or `/model <id>` | — |
+| `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
+| `/load` | Start a llama-launcher Launch profile — picker, or `/load <name>`; see [below](#local-servers--llama-launcher) | — |
+| `/unload` | Free the model on the server this session is on | — |
+| `/stop` | Stop the server this session is on | — |
 
 A lone `/word` that names neither a command nor a skill is **not** sent to the model:
 apogee says `unknown command or skill: /…` and leaves your line in the box to fix.
@@ -266,6 +271,66 @@ resolved (`api key: configured (sent as a bearer token)`), and the provider clie
 redacts it from any error text the server echoes back. One caveat is yours to
 weigh: `config.yaml` is plain text, so on a shared machine prefer the environment
 variable, or restrict the file's permissions yourself.
+
+### Local servers — llama-launcher
+
+`/server` moves a session between servers that are **already running**. Bringing one
+*up* is what [llama-launcher](https://github.com/airiclenz/llama-launcher) does — a
+separate tool that stores the **Launch profiles** llama.cpp itself has no store for:
+which model file, which server (llama.cpp, Ollama, LM Studio), and under what flags.
+Apogee imports it as a library, so three commands act on this machine's servers:
+
+- **`/load`** — make the world serve a profile. Bare, it opens a picker over the
+  profiles the launcher's config defines, in the launcher's own order (favourites
+  first); each row carries the backend, the context window the profile configures,
+  `· running` when that profile is live right now, and the port when it is not the one
+  this session is pointed at. `/load <name>` activates one by name.
+- **`/unload`** — free the model on the server this session is on. On a *managed*
+  llama.cpp server the model is baked into the process, so unloading it stops the
+  server — the transcript says which of the two happened.
+- **`/stop`** — stop the server this session is on; the footer's ordinary offline
+  handling narrates the rest.
+
+Apogee never becomes a process manager. The launcher **actuates**, the ten-second
+heartbeat **observes**, and it is the next beat that binds whatever it finds — the same
+path a model changed from the server side already travels. A profile that resolves to
+another server moves the session there, conversation and all, exactly like `/server`; a
+profile on the server you are already on moves nothing.
+
+A load blocks while the server comes up, so it is narrated rather than modal: each
+launcher step lands as a transcript note as it happens, and the footer's model slot
+shows `loading <profile>…` until the beat binds. One actuation runs at a time — while
+one is in flight, sends and the other switching commands are refused with a single line
+— and there is no mid-flight cancel: `/stop` is the cancel, available the moment the
+verb returns. When the health wait times out the launcher deliberately leaves the server
+running and names its PID and log path; apogee prints that and adds the honest coda —
+the heartbeat will bind it if it comes up.
+
+One **file-only** key drives all of it, and it usually needs nothing:
+
+```yaml
+# ~/.apogee/config.yaml
+llama-launcher: ~/configs/llama-launcher.yaml   # unset = auto-detect · off = disabled
+```
+
+Unset (the default) is **auto-detect**: apogee reads the launcher's own default config
+under your home directory — `~/.config/llama-launcher/config.yaml` — if that file is
+there, so a machine with the launcher installed needs no configuration and a machine
+without one simply has three commands that answer `llama-launcher not configured`. `off`
+keeps them off on a machine that *does* have a launcher config; a path names a different
+config. Nothing is checked at
+startup — a path that is not there is reported the first time a command reaches for it,
+never as a refusal to start — and every command re-reads the file, so a profile added in
+the launcher's own TUI is offered by the next `/load`.
+
+Two limits are worth knowing. The launcher runs local processes, so the start/stop verbs
+need a Unix-like host: on **Windows** apogee still builds and everything the launcher
+drives over HTTP works (discovery, load/unload against Ollama or LM Studio, activating a
+profile on a server that is already up), while starting a managed `llama-server` or
+signalling one to stop reports a clean unsupported error. And a launcher on **another
+machine** is a different thing — reach that one as an `mcp-servers:` entry pointing at
+the launcher's MCP adapter; the two compose. See
+[ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
 
 ### The system prompt
 
