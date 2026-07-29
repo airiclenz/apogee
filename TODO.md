@@ -30,42 +30,24 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   Needs grilling.
 
 - **[P1] Server / model switching** — **the switching itself SHIPPED 2026-07-28; the local-server
-  and profile halves remain (the local-server half has a settled integration decision below,
-  awaiting its grill + plans).** Both user-facing switches now exist and are recorded in
+  half is GRILLED + PLANNED 2026-07-29 (awaiting execution); the profile half remains.** Both
+  user-facing switches exist and are recorded in
   [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
   (see the ledger below): `/model` picks among what the beat reported and drives the existing
   Rebind, `/server` moves the whole Upstream (a new provider client, the per-server Monitor swapped
   behind the unchanged seam, the model unbound until the new server's first beat binds it), and the
   file-only `servers:` key names where a session may go. **Remaining:**
-  - **Local server start/stop — DECIDED 2026-07-28: llama-launcher becomes an importable
-    library; apogee is its client, not its port.** `/server` moves between servers that are
-    already running; nothing yet starts one — and the machinery that starts one already exists
-    as the owner's `llama-launcher` (`github.com/airiclenz/llama-launcher`, sibling checkout):
-    the three backend protocols (llama.cpp, Ollama, LM Studio) behind its `LLMServer` interface,
-    plus the profile store llama.cpp itself lacks. One code home: porting that into apogee is
-    rejected, and MCP is not the primary integration. Division of labour: the launcher
-    **actuates** (start/stop/load/unload), the heartbeat **observes** — a profile load is
-    completed by the next beat binding what it finds, the ADR 0028 shape; the dead
-    `provider.ServerManager` stays dead (apogee grows no process manager of its own).
-    - **Prerequisite, in the launcher repo:** all launcher code is `internal/launcher/` today,
-      so the launcher must first export a public facade (config load, profile listing, the
-      lifecycle verbs) — an ADR + minor release there before apogee can import anything.
-    - **Module mechanics:** dependency direction strictly apogee → llama-launcher (the launcher
-      stays agent-free); apogee's committed `go.mod` requires a **tagged** launcher release,
-      never a `replace` to the sibling checkout (build-from-source must work from a bare clone);
-      local cross-repo dev via an untracked `go.work`.
-    - **Scope limit, accepted:** the library only manages servers on apogee's own machine.
-      Remote lifecycle control (apogee in a container, server on the host) stays with the
-      launcher's own `llama-launcher-mcp` adapter, configured as an ordinary `mcp-servers:`
-      entry — the two compose, they do not compete. Consequence for tests: CI covers the seam
-      with a fake launcher; the end-to-end pass is owner-run on a same-machine host.
-    - **Grill before planning (the open forks):** the exported surface (minimal verbs vs the
-      full capability set); the config source (reuse `~/.config/llama-launcher/config.yaml` as
-      the single profile store — argued for — vs an apogee-passed config); where profiles
-      surface (`/server`, `/model`, or a new command) and how a launcher-backed `servers:`
-      entry is marked; the load-latency UX (what apogee shows between a slow profile load
-      returning and the first successful beat). Then two plans: the export plan in
-      llama-launcher, the integration plan here.
+  - **Local server start/stop — grilled 2026-07-29; the body left this file for the
+    authoritative record.** Decision:
+    [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
+    (llama-launcher imported as a library; `/load` + `/unload` + `/stop` on the session's
+    endpoint; the session follows the loaded Launch profile; one actuation latch; the
+    launcher's config as the single profile store behind a file-only `llama-launcher:` key —
+    CONTEXT.md now defines **Launch profile**). Execution:
+    `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md` here, blocked on the
+    launcher's **portability release v1.7.0** (`docs/plans/2026-07-29-portability-release-plan.md`
+    + ADR-0012 in that repo — the export prerequisite recorded here earlier SHIPPED as launcher
+    v1.6.0/ADR-0011 on 2026-07-29, but compiles darwin-only, which the portability release fixes).
   - The switchable **model-profile** abstraction (sampling params, context-budget %,
     thinking/tool-call format — reuse `internal/processing`), still unstarted and still
     deliberately **global**: `model-profile` is not per-model, and neither a rebind nor a server

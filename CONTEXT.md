@@ -108,6 +108,22 @@ translated to the `processing` parsers at the boundary, not the parsers' own con
 _Avoid_: "model config" (overloaded with sampling/endpoint knobs), "adapter", "format" alone
 (there are two axes, not one).
 
+**Launch profile**:
+The recipe for *getting a model running* — which model file, which [Upstream](#identity-and-shape)
+hosts it (llama.cpp, Ollama, LM Studio) and under what launch flags — defined and stored by
+**llama-launcher**, the owner's separate server-lifecycle tool, never by apogee. Apogee imports the
+launcher as a library, and `/load` activates a Launch profile: the launcher **actuates** (starts and
+stops servers, loads and unloads models), the [Heartbeat](#probing-and-model-identity) **observes**,
+and every actuation is completed by the next Beat binding what it finds — the session follows the
+loaded profile to its server. The deliberate contrast is the [Model profile](#identity-and-shape):
+a Launch profile is **launch-side** (how a model comes to exist at an endpoint), a Model profile is
+**request-side** (how apogee speaks to whatever exists). The two never touch — loading a Launch
+profile changes what runs; the Model profile is global and stands through it. See
+[ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
+_Avoid_: "profile" unqualified in docs (two profile namespaces exist; inside `/load`'s own picker
+the short word is fine — context disambiguates), "launcher profile" (owner-named where the pair is
+axis-named), "server profile" (collides with the launcher's own `servers:` config notion).
+
 **Thinking channel** (a model's private reasoning):
 The reasoning stream a model emits separately from its user-facing answer — either **delimited**
 inline (`<think>…</think>`), **harmony** (gpt-oss's `<|channel|>analysis…<|message|>…`), or split
