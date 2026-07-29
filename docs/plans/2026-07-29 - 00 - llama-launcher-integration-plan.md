@@ -2,12 +2,12 @@
 
 **Date:** 2026-07-29
 **Status:** IN PROGRESS (design grilled 2026-07-29; all four TODO forks resolved by the owner —
-no needs-design-call escalation expected). Items 1–7 and 9–14 landed 2026-07-29. Item 15 was added
-2026-07-29 from the continuation of that live pass (see the third addendum, above item 8) and is
-next — one address compare, wrong in three places at once under the owner's own `0.0.0.0` launcher
-bind. Item 8 (the owner-run live pass) stays open — two of its seven scenarios stand passed, one
-earlier pass is retracted and two failed, and its NOTES record which — and completes AFTER item 15
-lands, so the pass validates the surface as revised and fixed rather than the one it replaced.
+no needs-design-call escalation expected). Items 1–15 landed 2026-07-29, item 8's owner-run live
+pass included — six of its seven scenarios exercised on hardware, (7) waived by the owner, and its
+NOTES record which. Item 16 was added 2026-07-29 from item 15's own verifier and a live probe on
+the owner's host (see the fourth addendum, above item 8) and is the only open item: the residual
+half of item 15's defect, at the one site that BUILDS an endpoint out of a launcher address, where
+a genuine move still hands the wire the bind spelling.
 **Prerequisite — MET 2026-07-29:** llama-launcher **v1.6.1** (the portability release — its
 plan `docs/plans/2026-07-29-portability-release-plan.md` *in that repo*) is tagged and pushed;
 it builds on linux/darwin/windows and exports `ErrUnsupported` + `ErrStartupTimeout`. The
@@ -666,6 +666,138 @@ refused by name. Item 8's scenarios (4), (5) and (6) become re-runnable — this
 them; item 8 does, on hardware.
 
 **Commit.** `fix(cmd): one server, two spellings — a wildcard bind and a loopback dial match`
+
+## Addendum 2026-07-29 (fourth) — the same two spellings, at the site that BUILDS the address
+
+**Source:** item 15's own verifier, confirmed live on the owner's host the same day (the probe
+logged `Switch.Endpoint="http://0.0.0.0:7171"` on a genuine move), and the owner's approval of the
+fix 2026-07-29. Item 15 taught the two COMPARES that a wildcard bind and a loopback dial name one
+server, and projected the dial spelling into the picker's rows. It did not touch the one place that
+CONSTRUCTS a session endpoint out of a launcher address, so a load that genuinely moves the session
+still hands the wire the launcher's bind spelling. Item 15's NOTES (c) recorded exactly this
+residue — in item 3/6's territory rather than fixed there, unreached by that item's acceptance, and
+untested either way. Item 16 is the item that revisits it. It sits beside item 15 because the two
+are halves of one defect; item 8 below is CLOSED, so nothing in this file's order runs after it any
+more.
+
+## 16. The moved endpoint takes the dial spelling — a bind address never reaches the wire
+
+**What.** One projection, at the one site item 15 left in the launcher's spelling.
+`cmd/apogee/launcher.go` — still the only file in apogee allowed to name the library's types (item
+2), and still the file that owns every address the launcher speaks.
+
+- **The defect.** `loadProfile` settles where the profile now serves at launcher.go:507 — `addr :=
+  profileAddr(profile)`, with `instanceAddr(instance)` as the fallback at :509 — and BOTH of those
+  speak the address the server BINDS. That value goes through `sameServer` at :523 (item 15's fix,
+  which is why a same-server load correctly moves nothing), and when the compare says the session
+  genuinely has to move, it is handed to the wire as `addrEndpoint(addr)` at :537. Under the
+  owner's `defaults.host: "0.0.0.0"` the session is therefore re-pointed at `http://0.0.0.0:<port>`.
+  Reasoned first, then seen: the probe logged `Switch.Endpoint="http://0.0.0.0:7171"`, and the
+  owner's `gemma-4-12b-it-qat-q4-0-1112-cpp` profile (port 1112) reproduces it on demand from a
+  session on another port.
+- **Two consequences.**
+  1. **Portability, and not theoretically.** macOS and Linux happen to connect to `0.0.0.0`
+     successfully; Windows cannot — the unspecified address is not a destination there. This binary
+     cross-builds for Windows (the launcher's v1.6.1 portability release, the prerequisite at the
+     top of this plan, is what makes that possible at all), so every genuine cross-address load on
+     a Windows host would re-point the wire at an address that host cannot dial, and the next beat
+     would find the session offline for a load that succeeded.
+  2. **The spelling re-splits for the moved session.** Item 15 projects the picker's rows to the
+     DIAL spelling (`launchProfiles`, :196) while this site leaves the ENDPOINT in the bind
+     spelling, so after a genuine move the two sides disagree again — the exact split item 15
+     closed everywhere else, reopened for exactly the sessions that have moved. Item 9's exclusion
+     (picker.go:352) is defeated for that session: the profile it is serving right now is offered
+     as though it were elsewhere, and every row regains the spurious `(:<port>)` elsewhere stamp
+     (:409).
+- **Scope and history, stated honestly.** This is items 3 and 6 territory. Both stay ✅ DONE and
+  are NOT edited — the item 10/13/15 precedent: the record of what was decided, and when, is worth
+  more than a plan retroactively made correct. The defect is PRE-EXISTING and is not a regression
+  of item 15; item 15 STRICTLY NARROWED it. Before that item the `Moved` fold fired on every load
+  under a wildcard bind, so every load re-pointed the wire at `0.0.0.0`; now only a genuine
+  cross-address move does. That narrowing is also why item 8's closed live pass does not need
+  reopening: its scenario (4) moved genuinely and genuinely passed, on a host that dials `0.0.0.0`
+  without complaint. Item 8 stays ✅ DONE and is NOT edited — what its hardware could not show is
+  the platform this item is for, and the split spelling it left behind on the session it moved.
+- **The fix (owner-approved 2026-07-29).** The SAME projection item 15 introduced, applied at the
+  construction site: the wire receives `addrEndpoint(dialAddr(addr))`. `dialAddr` (:412) already
+  means precisely this and needs no change — a wildcard host becomes the loopback of its own family
+  (v4 or v6), and every other address, including one the launcher's config states explicitly, is
+  returned exactly as it stands. So a launcher that binds a named host still hands the wire that
+  host untouched, and the `instanceAddr` fallback is covered by the same single call because the
+  projection sits BELOW the choice of source. **No second normalisation concept is introduced** —
+  item 15's helpers are the vocabulary; if the work seems to want another one, that is a signal to
+  stop and report.
+- **Where the projection must NOT go.** Not onto `addr` itself at :507/:509. That value is also
+  `sameServer`'s FIRST argument at :523, whose declared meaning is "the launcher's own address":
+  projecting it early would hide the wildcard from the predicate's wildcard arm and undo item 15
+  for every session that dials this machine by a spelling other than `127.0.0.1` — a session on
+  `localhost:1111` against a `0.0.0.0`-bound launcher would go straight back to firing `Moved` on
+  every load. One expression, at the endpoint construction, and nothing above it.
+- **The invariant, stated so it cannot be blurred.** `ops.unload(backend, addr)` (:579),
+  `ops.stop(addr)` (:591) and every other call INTO the llama-launcher library keep receiving
+  `instanceAddr(instance)` — the launcher's own bind spelling. The library is asked about the
+  server on the terms it holds it. **Only the address apogee DIALS is projected.** Item 15
+  established this split ("matching is normalised; addressing is not"); item 16 adds exactly one
+  site to what is dialled and moves that line not at all.
+- **Scope boundary.** `cmd/apogee/launcher.go` and its tests. `internal/tui` is **NOT** edited —
+  the renderer's compares agree by construction once both sides carry the dial spelling, which is
+  the same argument item 15 made about the rows, and reaching into `sessionAddr` would still
+  deserve its own item with its own justification. If the picker appears to need an edit to agree,
+  **stop and report** rather than widen the diff.
+- **No docs, no CHANGELOG entry, no ADR amendment.** Nothing user-visible is added or renamed:
+  the `## [Unreleased]` launcher entry describes code that has never shipped, so there is no
+  shipped claim to correct (item 12(e)'s posture), and ADR 0029 D2 already says the session follows
+  the profile when it resolves elsewhere — this item only makes the address it follows to one the
+  session can actually reach, which is what D2 meant. The version number is the owner's call alone
+  and no item of this plan states one.
+
+**Tests.** `wire_test.go` against the `fakeLauncher`, in the existing table style — item 15 already
+built the fixture this item needs (`wildcardBoundConfig`, wire_test.go:1347: two profiles, ports
+8080 and 9090, `defaults.host: 0.0.0.0`):
+
+- **A genuine cross-port move dials the LOOPBACK.** A session on `http://127.0.0.1:8080` loads the
+  profile that resolves to `0.0.0.0:9090` — `TestLoadProfileCrossAddressFollowsTheProfile`'s shape
+  (:1305) read over `wildcardBoundConfig`: `Moved` true, and `result.Switch.Endpoint`, the
+  `SwitchUpstream` spec's endpoint and the holder's endpoint are ALL `http://127.0.0.1:9090`. The
+  assertion is two-sided — the value must equal the loopback spelling and must **never** be
+  `http://0.0.0.0:9090`. This test must **FAIL before the fix** (today it reads
+  `http://0.0.0.0:9090`) and pass after; an implementer who cannot make it fail first has not
+  reproduced the defect.
+- **The library still receives the bind spelling after such a move.** `/unload-model` and
+  `/stop-server` on the session that just moved: `managedInstance` matches the discovered
+  `0.0.0.0:9090` instance against the new `127.0.0.1:9090` endpoint through `sameServer` (:619),
+  the verbs act rather than refuse, and `ops.unload`/`ops.stop` receive `0.0.0.0:9090` — the
+  launcher's own address, not the dial spelling the match was made through.
+  `TestUnloadAndStopActOnAWildcardBoundServer` (:1373) is the template; this is its after-a-move
+  twin.
+- **Item 9's exclusion holds for a session that has moved**, pinned where it is decided rather than
+  in the renderer: after the move, `launchProfiles` over the same config returns the moved-to
+  profile's row with an `Addr` equal to the session's endpoint reduced through `endpointAddr` — the
+  two values `offerableProfiles` (picker.go:352) and the port stamp (:409) consume — so the loaded
+  profile is not offered and no row is stamped with the session's own port. Item 9's own picker
+  tests cover the rendering, unedited.
+- **Item 15's tests keep their expectations, unchanged and unrelaxed**, and stay green:
+  `TestLoadProfileSameAddressMovesNothing` (:1255), `TestLoadProfileWildcardBindMovesNothing`
+  (:1421), `TestLoadProfileCrossAddressFollowsTheProfile` (:1305),
+  `TestUnloadAndStopActOnAWildcardBoundServer` (:1373),
+  `TestUnloadAndStopRefuseAnUnmanagedEndpoint`, plus launcher_test.go's
+  `TestSameServerMatchesOneServerSpelledTwice` (:269) and
+  `TestLaunchProfilesProjectsTheDialSpelling` (:322). In particular a SAME-address load must still
+  move nothing: this item changes what a move BUILDS, never whether one happens.
+
+**Acceptance.** Green gate (`make check`) incl. `-race`. A genuine cross-port load against a
+wildcard-bound profile leaves the session on `http://127.0.0.1:<port>` — the `Switch` result, the
+agent's upstream spec and the endpoint holder alike — and no `0.0.0.0` endpoint reaches the wire,
+the Monitor or the transcript on any path. That same session's `/unload-model` and `/stop-server`
+still act, with the launcher asked about `0.0.0.0:<port>`. `/model` on that session offers every
+profile but the one it is serving and stamps no row with a port that is the session's. A profile
+whose launcher config names an explicit host is untouched — the wire dials exactly what the config
+says. `grep -n "addrEndpoint(" cmd/apogee/launcher.go` shows the dial projection on the one call
+that builds a session endpoint, and no `internal/tui` file appears in the diff. Live confirmation
+is available but is NOT a gate here — item 8 is closed: loading the owner's port-1112 profile from
+a session on 1111 shows the footer and the transcript naming `127.0.0.1:1112`.
+
+**Commit.** `fix(cmd): a genuine move dials what it can reach — the dial spelling at the endpoint`
 
 ## 8. Owner-run live pass (same-machine host) — ✅ DONE (2026-07-29)
 
