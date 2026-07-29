@@ -2,11 +2,12 @@
 
 **Date:** 2026-07-29
 **Status:** IN PROGRESS (design grilled 2026-07-29; all four TODO forks resolved by the owner —
-no needs-design-call escalation expected). Items 1–7 and 9–12 landed 2026-07-29. Items 13–14
-were added 2026-07-29 from the owner's partial live pass (see the second addendum, above item 8)
-and are next; item 8 (the owner-run live pass) stays open — three of its seven scenarios passed
-on 2026-07-29 and its NOTES record which — and completes AFTER 13–14 land, so the pass validates
-the surface as revised rather than the one it replaced.
+no needs-design-call escalation expected). Items 1–7 and 9–14 landed 2026-07-29. Item 15 was added
+2026-07-29 from the continuation of that live pass (see the third addendum, above item 8) and is
+next — one address compare, wrong in three places at once under the owner's own `0.0.0.0` launcher
+bind. Item 8 (the owner-run live pass) stays open — two of its seven scenarios stand passed, one
+earlier pass is retracted and two failed, and its NOTES record which — and completes AFTER item 15
+lands, so the pass validates the surface as revised and fixed rather than the one it replaced.
 **Prerequisite — MET 2026-07-29:** llama-launcher **v1.6.1** (the portability release — its
 plan `docs/plans/2026-07-29-portability-release-plan.md` *in that repo*) is tagged and pushed;
 it builds on linux/darwin/windows and exports `ErrUnsupported` + `ErrStartupTimeout`. The
@@ -540,6 +541,112 @@ sentences, the template's comment block); CHANGELOG and VERSION move in step.
 
 **Commit.** `docs: /unload-model and /stop-server — README, layout, template, ADR 0029 amendment`
 
+## Addendum 2026-07-29 (third) — one server, two spellings
+
+**Source:** the continuation of item 8's live pass, 2026-07-29, and the owner's ratification of the
+fix the same day. The owner's llama-launcher config sets `defaults.host: "0.0.0.0"` — the bind
+address any server that wants to be reachable from another machine must carry — so every
+`ResolvedProfile` and every `RunningInstance` says `0.0.0.0`, while apogee dials `127.0.0.1`. Every
+address comparison this integration makes is a plain string equality, so one server spelled two
+ways never matches itself, and **three** shipped behaviours fail from that single cause. Item 8's
+NOTES (c) already named the class — "one server, two spellings" — against the hypothetical
+`localhost` case and deferred it as not a notes-only item's to fix; the live pass found the spelling
+that actually occurs, on the default posture rather than an exotic one. Item 15 carries it, and
+sits ahead of item 8 in this file for the same reason 13–14 do: item 8 is the last thing that runs,
+and it now depends on this.
+
+## 15. `sameServer` — the bind address and the dial address name one server
+
+**What.** One predicate, in the file that already owns every address the launcher speaks
+(`cmd/apogee/launcher.go` — item 2 made it the only file allowed to name the library's types).
+
+- **The defect.** `managedInstance` (launcher.go:476-490) matches a discovered instance by
+  `instanceAddr(instance) == addr` (:486) — plain string equality against the session endpoint
+  reduced through `endpointAddr`. Under `defaults.host: "0.0.0.0"` that compare reads
+  `"0.0.0.0:1111" == "127.0.0.1:1111"` and can never be true. This is **not** a scheme mismatch and
+  **not** the `localhost`-vs-`127.0.0.1` case item 8's NOTES (c) imagined: it is a *bind* address
+  compared against a *dial* address, the two legitimate spellings of one server. It is independent
+  of backend — a llama.cpp profile refuses exactly as an ollama one does — and it is what anyone
+  who wants their server reachable off-box will hit.
+- **Three consequences, one cause.**
+  1. `/unload-model` and `/stop-server` refuse with `the launcher doesn't manage
+     http://127.0.0.1:1111` on any session that has not itself performed a profile load. These are
+     item 8's scenarios (5) and (6), and they failed.
+  2. The `Moved` fold's compare (:396) is the same equality and therefore fires `Moved` on **every**
+     load: apogee re-points its wire at `http://0.0.0.0:1111`, unbinds the model and re-announces
+     the seed each time, for a load that moved nothing. It is also what **masks** consequence (1) —
+     after any load both sides spell the address `0.0.0.0`, `managedInstance` starts matching, and
+     the two verbs begin working. A tester who loads before unloading never meets the refusal, which
+     is exactly how the live pass met it only on the second session.
+  3. Item 9's exclusion is silently defeated. `internal/tui/picker.go:352` and :409 compare
+     `sessionAddr(opts.Endpoint)` against `choice.Addr`, which under a wildcard bind never match:
+     the already-loaded profile is still offered (the one-row picker item 9 exists to end) and every
+     row carries a spurious `(:1111)` elsewhere stamp. `sessionAddr` (picker.go:434) additionally
+     lacks `endpointAddr`'s scheme-default-port fill (item 2's NOTES (d)) — a second, smaller
+     normalisation split on the same seam.
+- **The fix (owner-ratified 2026-07-29).** A single package-private predicate,
+  `sameServer(launcherAddr, endpointAddr string) bool`: true when the two strings are equal, **or**
+  when their PORTS are equal AND the launcher's host is unspecified (`0.0.0.0`, `::`, or empty — a
+  wildcard bind answers on every interface this machine holds, loopback included) AND the endpoint's
+  host is loopback or an address of this machine. Everything else stays unequal — a wildcard bind
+  does not make somebody else's server ours, and two ports are two servers. Both compares take it,
+  `managedInstance` at :486 and the `Moved` fold at :396, because they are the same question asked
+  twice (ADR 0029 D2 decides the session moves only when the profile resolves *elsewhere*; "one
+  server, two spellings" is not elsewhere).
+- **The picker follows from the root, not from an edit to the renderer.** `launchProfiles` projects
+  the DIAL spelling into `launchProfile.Addr` (:193, through `profileAddr`): a resolved host that is
+  unspecified reaches the row as the loopback spelling the session dials. picker.go's two compares
+  then agree by construction, and `internal/tui` keeps knowing nothing about wildcard binds — the
+  ADR 0029 D1 boundary, held.
+- **`instanceAddr` keeps the launcher's own spelling.** The address handed to `ops.unload(backend,
+  addr)` / `ops.stop(addr)` stays `instanceAddr(instance)`, never the dial spelling the predicate
+  matched by: the library is asked about the server on the terms it holds it. Matching is
+  normalised; addressing is not.
+- **Scope boundary.** `cmd/apogee/launcher.go` and its tests. `internal/tui` is **not** edited by
+  this item — the projection at :193 exists precisely so it need not be. If the implementer finds
+  the picker cannot be made to agree from the composition root, that is a signal to **stop and
+  report**, not to widen the diff: touching `sessionAddr` reaches into a renderer this integration
+  is designed not to reach into, and that deserves its own item with its own justification.
+- **Ownership, plainly.** Item 3 SPECIFIED this compare and this wording — "match the session
+  endpoint's `host:port` → no match = error `the launcher doesn't manage <endpoint>`" — so the
+  shipped code is as written, not a slip under it. Item 15 **supersedes that specification**; item 3
+  stays ✅ DONE and is NOT edited, on the item 10/13 precedent: the record of what was decided, and
+  when, is worth more than a plan retroactively made correct. Item 8's NOTES (c) recorded the class
+  and deferred it to "whichever item revisits that comparison" — this is that item.
+
+**Tests.** `launcher_test.go` / `wire_test.go` against the `fakeLauncher`, the existing table style:
+
+- `sameServer` directly: equal strings match; `0.0.0.0:1111` against a loopback endpoint on 1111
+  is MANAGED; `[::]:1111` (and a bare-empty host) likewise; a wildcard launcher against
+  `remote.invalid:9999` is REFUSED; a wildcard launcher against a LAN peer such as
+  `192.168.1.50:1111` is REFUSED — **this is the case that must not regress**, the one mistake
+  available here being to stop somebody else's server; equal hosts on different ports stay unequal.
+- The verbs through the wiring against a `0.0.0.0`-bound discovery: `/unload-model` and
+  `/stop-server` act on a session that has performed no load, and `ops.unload`/`ops.stop` receive
+  the LAUNCHER's address (`0.0.0.0:1111`), not the dial spelling.
+- The `Moved` fold does NOT fire when the only difference is wildcard-vs-loopback spelling — the
+  `TestLoadProfileSameAddressMovesNothing` shape over a wildcard-resolving profile: `Moved` false,
+  no `SwitchUpstream`, the stored model untouched, the holder's endpoint unchanged.
+- Item 9's exclusion under a wildcard config, pinned where it is decided: `launchProfiles` over a
+  `0.0.0.0` config returns rows whose `Addr` carries the dial spelling — which is precisely what
+  `offerableProfiles` (picker.go:352) and the port stamp (:409) consume — so the loaded profile is
+  not offered and no row is stamped `(:1111)`. Item 9's own picker tests then cover the rest,
+  unedited.
+- Existing expectations keep theirs, unchanged: the remote refusal (wire_test.go:1473) differs in
+  HOST with a non-wildcard launcher, and the two load tests (:1255 and :1305) differ by PORT — the
+  predicate keeps all three unequal. No test in `cmd/apogee` names `0.0.0.0` today, so every case
+  above is new coverage rather than a rewritten expectation.
+
+**Acceptance.** Green gate (`make check`) incl. `-race`. On a host whose launcher binds `0.0.0.0`
+and whose session dials `http://127.0.0.1:1111`: both verbs act instead of refusing without a load
+first; a load of the profile already serving that endpoint reports `Moved` false and leaves the
+wire, the bound model and the announced seed alone; `/model` offers every profile but the loaded
+one and stamps no row with a port that is the session's. A genuinely remote endpoint is still
+refused by name. Item 8's scenarios (4), (5) and (6) become re-runnable — this item does not claim
+them; item 8 does, on hardware.
+
+**Commit.** `fix(cmd): one server, two spellings — a wildcard bind and a loopback dial match`
+
 ## 8. Owner-run live pass (same-machine host)
 
 NOTES (2026-07-29): the pass RAN and is **partial** — the item stays open. **PASS:** (1) the cold
@@ -569,6 +676,25 @@ the wire re-pointed and the seed re-announced each time. Not observed on this ho
 the same way), and not a defect this notes-only item may fix — recorded here so whichever item
 revisits that comparison has the case.
 
+NOTES (2026-07-29, continued): the pass went on, and it cost this item one of its passes. The class
+note (c) above guessed at the wrong spelling: the owner's launcher config binds `defaults.host:
+"0.0.0.0"` while the session dials `127.0.0.1`, and that is the compare that fails on this host.
+**RETRACTED — scenario (4).** The `Moved` fold the owner watched fire was not a genuine cross-server
+move and does not evidence one: it was consequence (2) of the item-15 defect, which fires `Moved` on
+EVERY load under a wildcard bind, throwaway port-1112 profile or not. The earlier PASS is withdrawn;
+the scenario must be RE-RUN after item 15 lands, when a fired `Moved` will mean what it says.
+**FAILED — scenarios (5) and (6).** Both `/unload-model` and `/stop-server` refused with `the
+launcher doesn't manage http://127.0.0.1:1111` — the same defect read from `managedInstance`'s side,
+on a session that had performed no load. Both must be RE-RUN after item 15 lands.
+**Scenario (2), observed and accepted:** shutting apogee down does NOT stop the LLM server — on
+restart apogee simply reconnects to the server still running. The owner is content with that; it is
+recorded as observed-and-accepted, not as a defect and not as work. The scenario's actual subject,
+the same-app RESTART path (`/model` to the other profile from inside a running app), remains NOT
+RUN. **Scenario (7)** stays deliberately deferred by the owner.
+(d) This item therefore depends on item **15** as well as 9–14 — item 15 changes two of the folds
+these scenarios exercise, so a pass run before it lands would validate a surface about to move. The
+Acceptance below says so.
+
 **What.** The end the CI fake cannot see (ADR 0029 consequences): on a host with the real
 launcher config and a llama.cpp profile — (1) `/load` a profile cold (server starts, steps
 narrate, beat binds, footer completes); (2) `/load` the other profile from the same app (restart
@@ -584,9 +710,11 @@ item's NOTES; failures reopen the relevant item.
 **Tests.** This *is* the test. Nothing committed but the NOTES.
 
 **Acceptance.** Every scenario observed on hardware; the plan archives only after this item.
-After items 9–14 land, the scenarios drive `/model` where they say `/load` and `/unload-model` /
+After items 9–15 land, the scenarios drive `/model` where they say `/load` and `/unload-model` /
 `/stop-server` where they said `/unload` / `/stop` — same folds, same latch, the verbs renamed
-under them. Scenarios (2) and (5)–(7) are what remains.
+under them, and the address compare fixed beneath them. Scenarios (2) and (4)–(7) are what
+remains: (4) re-run after its retraction, (5) and (6) re-run after their failure, (2) reduced to
+its restart half, (7) deferred.
 
 **Commit.** — (notes-only; any fixes commit under their own item)
 
