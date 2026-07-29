@@ -2,10 +2,11 @@
 
 **Date:** 2026-07-29
 **Status:** IN PROGRESS (design grilled 2026-07-29; all four TODO forks resolved by the owner —
-no needs-design-call escalation expected). Items 1–7 landed 2026-07-29. Items 9–12 were added
-2026-07-29 from the owner's first live run (see the addendum below) and are next; item 8 (the
-owner-run live pass) stays open and should run AFTER they land, so the pass validates the
-surface as revised rather than the one it replaced.
+no needs-design-call escalation expected). Items 1–7 and 9–12 landed 2026-07-29. Items 13–14
+were added 2026-07-29 from the owner's partial live pass (see the second addendum, above item 8)
+and are next; item 8 (the owner-run live pass) stays open — three of its seven scenarios passed
+on 2026-07-29 and its NOTES record which — and completes AFTER 13–14 land, so the pass validates
+the surface as revised rather than the one it replaced.
 **Prerequisite — MET 2026-07-29:** llama-launcher **v1.6.1** (the portability release — its
 plan `docs/plans/2026-07-29-portability-release-plan.md` *in that repo*) is tagged and pushed;
 it builds on linux/darwin/windows and exports `ErrUnsupported` + `ErrStartupTimeout`. The
@@ -380,22 +381,173 @@ deliberate (nothing silently dropped).
 
 **Commit.** `docs: llama-launcher integration — README, template, layout, TODO close-out`
 
+## Addendum 2026-07-29 (second) — the names the live pass argued for
+
+**Source:** owner decision 2026-07-29, ratified after the partial live pass recorded in item 8's
+NOTES. Item 10 took `/unload` and `/stop` off the menu because they are rarely wanted and easy to
+hit by accident — but the accident it guarded against was a property of the NAMES, not of the
+verbs: `/stop` names no object (the reflex reading is "stop the running turn", which is Esc) and
+`/unload` names none either. Name them for what they act on and the hazard leaves with the
+ambiguity, while a verb the human cannot discover stays a verb they will not find. The owner's
+call, three parts: `/unload` becomes **`/unload-model`** and `/stop` becomes **`/stop-server`**;
+both are **offered again** in the `/` dropdown; the old spellings are **removed outright**, not
+aliased. Items 13–14 carry it — item 14 records the amendment in ADR 0029 beside item 12's rather
+than leaving the code to contradict the design record. Both sit ahead of item 8 in this file
+because item 8 is the last thing that runs and now depends on them.
+
+## 13. `/unload-model` and `/stop-server` — named for what they act on, offered again
+
+**What.** The rename above, and the un-hiding that rides on it. This item **supersedes item 10's
+posture**: item 10 stays ✅ DONE and is NOT edited — hiding was the right answer for the names the
+verbs had then, and its `hidden` flag is exactly what a parsed-never-offered verb needs — but the
+hazard it guarded against lived in those names, and the rename removes it at the source, so the
+flag comes back off both rows here.
+
+- **The names.** `unload` → `unload-model`, `stop` → `stop-server`, everywhere the verb is
+  spelled: the `commandSpecs` rows (command.go:124-125), the dispatch cases (model.go:1146,
+  :1152), `actuationBlocked`'s refusal list (actuation.go:155) and the verb constants
+  `verbUnload`/`verbStop` (actuation.go:57-59) — which are also the footer's and the latch
+  refusal's spelling (actuation.go:165-181), so the footer's model slot reads `unload-model…` /
+  `stop-server…` and a refused send reads `stop-server in flight`. The verb the human typed is the
+  verb the surface names back; that is what those constants are for. The two summaries need no
+  rewording — they already name the object ("stop the server this session is on", "free the model
+  of the server this session is on"), which is the same argument the rename makes.
+- **Back on the menu.** `hidden: true` comes off both rows (item 10), so bare `/` and the prefix
+  forms offer them again, in their alphabetical slots.
+- **The old spellings are removed OUTRIGHT** — no alias row, no deprecation nudge. A typed
+  `/unload` or `/stop` falls to `unknownSlashNote`, exactly as `/load` does after item 9.
+  Pre-production (AGENTS.md) is why a shim would be the wrong price: an alias would put the
+  ambiguous names back in the PARSER, which is the one place this item exists to remove them from.
+- **The `hidden` field itself.** Un-hiding both rows leaves the flag with no user, and it is
+  **REMOVED**: the field (command.go:75), its skip in `commandSuggestions` (autocomplete.go:283),
+  the table comment's hidden paragraph (command.go:96-101), the shadowing sentence at
+  autocomplete.go:332, and `TestHiddenVerbsAreParsedNeverOffered` (command_test.go:118-151). An
+  unused flag in THE registry is a claim about the surface that the surface no longer makes, and
+  removing it returns the two menu assertions item 10's NOTES recorded as weakened —
+  `TestCommandTableDrivesParserAndMenu` and `TestCommandSuggestionsTagIdleOnlyRowsWhileBusy`, both
+  narrowed then from "every row of `commandSpecs` is offered" to "every non-hidden row" — to the
+  stronger invariant, which is worth more than a flag nothing sets. If a future verb wants hiding,
+  item 10's diff is the recipe for putting it back with its own justification. `menuOnly` stays
+  (`/skill` uses it), so the inverse posture is still expressible.
+- **Item 11's invariant holds without help.** The new names sort where the old rows already sat —
+  `… skill, skills, stop-server, unload-model, version` — so neither row moves,
+  `TestCommandSpecsReadAlphabetically` keeps passing **unweakened**, and the table comment's one
+  ordering dependency (`/skill` before `/skills`) is untouched.
+- **Scope.** Code and tests only. Every doc, template, CHANGELOG and ADR mention of either verb
+  belongs to item 14 — including the `## [Unreleased]` entry that still calls them typed-only.
+
+**Tests.** `command_test.go` / `actuation_test.go`, the existing style:
+
+- the dropdown OFFERS both rows — bare `/` and the prefix forms (`/un`, `/st`) — the exact inverse
+  of `TestHiddenVerbsAreParsedNeverOffered`, which retires with the flag it pinned; the merged
+  menu (`TestSlashMenuMergesCommandsAndSkills`, skill_test.go) and the `/`-suggestion expectations
+  gain both names in their alphabetical slots;
+- `TestCommandTableDrivesParserAndMenu` and `TestCommandSuggestionsTagIdleOnlyRowsWhileBusy` go
+  back to asserting that every row of the table is offered;
+- `TestCommandSpecsReadAlphabetically` passes untouched — not relaxed, not re-listed;
+- typed `/unload` and `/stop` earn the unknown-slash refusal (item 9's `/load` assertion is the
+  template), and the typo guard does not resurrect them;
+- item 6's behavioural tests follow the rename and stay green: both verbs dispatch through item
+  5's latch against the fake, the managed-vs-external unload wording, the not-managed endpoint
+  error, stop-then-offline-crossing after the latch releases — plus the footer and refusal strings
+  asserted at their new spellings.
+
+**Acceptance.** Green gate incl. `-race`. Bare `/` offers `stop-server` and `unload-model` in
+their alphabetical slots; typing either old name earns the unknown-slash refusal; the alphabetical
+guard test passes unweakened; item 6's latch and seam tests are green under the new names; `grep
+-rn "hidden" internal/tui/*.go` finds no `commandSpec` sense of the word left. No doc file is
+touched by this item — item 14 owns them, so the docs are knowingly stale for exactly one commit.
+
+**Commit.** `feat(tui): /unload-model and /stop-server — the verbs name their object, and return
+to the menu`
+
+## 14. Docs pass — the renamed, re-surfaced verbs
+
+**What.** Item 13 lands first — the docs describe the names the code carries, never the other way
+round. Then every mention of the two verbs outside the code, plus the design record:
+
+- **README.md**: the slash-command table gains `stop-server` and `unload-model` rows, and the
+  "typed-only" note item 12 wrote (README.md:153, :300) retires with the posture it describes —
+  offered verbs are table rows, not a footnote; the "Local servers via llama-launcher" section
+  names the new verbs.
+- **layout.md**: the dropdown paragraph's "`/unload` and `/stop` are recognised when typed but
+  never offered" (layout.md:234) retires — a rendering spec that says which verbs the `/` menu
+  holds must say the truth about these two; the footer's upstream-slot section (layout.md:176)
+  spells the one-word states `unload-model…` and `stop-server…`.
+- **CONTEXT.md**: any actuation vocabulary naming either old verb (item 12 already made the
+  **Launch profile** entry verb-free — verify, and reword whatever else names them).
+- **`cmd/apogee/defaults/config.yaml`**: the `llama-launcher:` comment block's verb sentence
+  (config.yaml:84) names both verbs anew and drops the typed-only claim.
+- **CHANGELOG.md + VERSION**: the launcher entry under `## [Unreleased]` is REVISED in place —
+  item 12(e)'s posture, since nothing here has shipped and the entry describes what this version
+  *will* ship — and its "Those two are **typed-only**" sentence goes with the posture it
+  describes. VERSION moves in step, the command-surface-change bump items 7(c) and 12 took.
+- **ADR 0029**: a SECOND dated amendment note under **D3**, 2026-07-29, in the same voice and the
+  same place as item 12's — recording that the two hidden verbs are renamed `/unload-model` and
+  `/stop-server` and return to the offered surface, that the hazard the hiding guarded against was
+  the old names' silence about their object, and that the old spellings are removed rather than
+  aliased. Item 12's amendment is **NOT rewritten**: an ADR's amendment trail is the record of the
+  decisions in the order they were made, and editing the first would erase the reason the second
+  exists.
+
+**Tests.** None (docs); `make check` still gates.
+
+**Acceptance.** No doc claims a verb the code lacks, and none calls either verb typed-only.
+`grep -rnE '/(unload|stop)([^-]|$)'` over README.md, layout.md, CONTEXT.md and
+`cmd/apogee/defaults/config.yaml` finds nothing — the bare old spellings survive only in ADR
+0029's amendment history and in this plan's own text; `grep -rn "/unload-model\|/stop-server"`
+finds both documented as **offered** verbs (README table rows, layout.md's dropdown and footer
+sentences, the template's comment block); CHANGELOG and VERSION move in step.
+
+**Commit.** `docs: /unload-model and /stop-server — README, layout, template, ADR 0029 amendment`
+
 ## 8. Owner-run live pass (same-machine host)
 
+NOTES (2026-07-29): the pass RAN and is **partial** — the item stays open. **PASS:** (1) the cold
+load — the server starts, the steps narrate, the beat binds, the footer completes; (3) the
+cross-app switch llama.cpp → ollama on one endpoint — the auto-stop sweep and the
+external-instance address fallback both behaved; (4) the `Moved` fold, exercised through a
+throwaway launcher profile pinned to port 1112 — the footer alias becomes the profile name and the
+announced seed prints. **NOT RUN:** (2) the same-app restart — what was tried instead was a
+RECONNECT (apogee exited, the server left up, apogee reconnected), which does not exercise the
+stop/start path at all; (5) `/unload-model`; (6) `/stop-server`; (7) the load-timeout coda and the
+late bind — deliberately deferred by the owner. Three things the pass settled, beyond pass/fail:
+(a) Scenarios (5) and (6) are re-pointed at the verbs' NEW names (item 13), so this item now
+depends on items **13–14** as well as 9–12; the What and Acceptance below say so.
+(b) **Expectation correction, scenario (2).** The plan's "~20 s stop escalation narrated" was
+wrong and is corrected in the What above. On the same-app restart path the launcher passes a
+**nil** progress sink into its own stop, so apogee narrates `Stopping current server`, then up to
+~20 s of SILENCE (15 s SIGTERM + 5 s SIGKILL), then `Starting server`. The per-step stop
+escalation is narrated only by `/stop-server` and `/unload-model` — and there it arrives BATCHED
+when the call returns, because item 3's actuation seam takes no progress callback (item 6's NOTES
+(b)). A tester waiting for running commentary through a restart will read the silence as a hang.
+(c) **Scenario (4)'s `Moved` fold cannot fire on a single-endpoint host.** The trigger is a plain
+string compare of `host:port` (`cmd/apogee/launcher.go:393-396`), so exercising it needs a second
+address — the throwaway profile on port 1112 is what was done, and it is what any future run of
+this scenario needs too. The same string compare says an endpoint spelled `localhost:1111` against
+a launcher resolving `127.0.0.1:1111` would fire `Moved` on EVERY load: one server, two spellings,
+the wire re-pointed and the seed re-announced each time. Not observed on this host (both spell it
+the same way), and not a defect this notes-only item may fix — recorded here so whichever item
+revisits that comparison has the case.
+
 **What.** The end the CI fake cannot see (ADR 0029 consequences): on a host with the real
-launcher config and a llama.cpp profile — `/load` a profile cold (server starts, steps
-narrate, beat binds, footer completes); `/load` the other profile (restart path, ~20 s stop
-escalation narrated); `/load` a profile on a second server (the `Moved` fold — footer alias
-becomes the profile name, announced seed prints); `/unload` (managed → stopped wording);
-`/stop` → offline crossing; a load that times out (an oversized model) → the coda, then the
-late bind when it comes up. Record pass/fail per scenario in this item's NOTES; failures
-reopen the relevant item.
+launcher config and a llama.cpp profile — (1) `/load` a profile cold (server starts, steps
+narrate, beat binds, footer completes); (2) `/load` the other profile from the same app (restart
+path — `Stopping current server`, then up to ~20 s of silence, then `Starting server`: the
+launcher passes a nil progress sink into its own stop, so the escalation is not narrated here);
+(3) a cross-app switch on one endpoint (llama.cpp → ollama — the launcher's auto-stop sweep, the
+external-instance address fallback); (4) `/load` a profile on a second server (the `Moved` fold —
+footer alias becomes the profile name, announced seed prints); (5) `/unload-model` (managed →
+stopped wording); (6) `/stop-server` → offline crossing; (7) a load that times out (an oversized
+model) → the coda, then the late bind when it comes up. Record pass/fail per scenario in this
+item's NOTES; failures reopen the relevant item.
 
 **Tests.** This *is* the test. Nothing committed but the NOTES.
 
 **Acceptance.** Every scenario observed on hardware; the plan archives only after this item.
-After items 9–12 land, the scenarios drive `/model` where they say `/load` — same folds, same
-latch, the verb renamed under them.
+After items 9–14 land, the scenarios drive `/model` where they say `/load` and `/unload-model` /
+`/stop-server` where they said `/unload` / `/stop` — same folds, same latch, the verbs renamed
+under them. Scenarios (2) and (5)–(7) are what remains.
 
 **Commit.** — (notes-only; any fixes commit under their own item)
 
