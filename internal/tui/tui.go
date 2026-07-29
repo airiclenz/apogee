@@ -201,7 +201,7 @@ type Options struct {
 	Version string
 
 	// BaseVersion is the release version WITHOUT build provenance (apogee.BaseVersion — the
-	// trimmed VERSION file, e.g. "v1.8.0"), the value the start-up box displays. It is a separate
+	// trimmed VERSION file, e.g. "vX.Y.Z"), the value the start-up box displays. It is a separate
 	// seam from Version so the box reads clean while /version and --version keep the full string;
 	// the TUI stays format-agnostic (cmd/apogee resolves both). Empty ⇒ unwired.
 	BaseVersion string
