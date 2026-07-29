@@ -10,9 +10,9 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
-- **`/model` brings the server up too — plus `/unload` and `/stop`, for freeing its model or
-  shutting it down without leaving the session.** `/server` moves between servers that are already
-  *running*; this makes one **exist**. Apogee now imports **llama-launcher** — the separate tool
+- **`/model` brings the server up too — plus `/unload-model` and `/stop-server`, for freeing its
+  model or shutting it down without leaving the session.** `/server` moves between servers that
+  are already *running*; this makes one **exist**. Apogee now imports **llama-launcher** — the separate tool
   that stores Launch profiles (which model file, which server, under what flags) and knows how to
   start llama.cpp, Ollama and LM Studio — as a library, and drives it from your conversation.
   Configure a launcher and `/model` answers from its side: the picker lists the **Launch profiles**
@@ -20,11 +20,12 @@ point is a **minor** bump, not a breaking change.
   the backend, the context window the profile configures, `· running` when that profile is live
   right now, and the port when it is somewhere other than where this session is pointed; picking
   one starts what it takes to serve it. `/model <name>` activates one by name, and a host without a
-  launcher keeps exactly the `/model` it had — what the server advertises. `/unload` frees the
-  model on the server this session is on and says whether that also stopped it — on a managed
-  llama.cpp server the model is baked into the process, so it does. `/stop` stops that server,
-  after which the footer's ordinary offline handling narrates the rest. Those two are **typed-only**
-  — rarely wanted and easy to hit by accident, they act when typed but are not offered in the menu.
+  launcher keeps exactly the `/model` it had — what the server advertises. `/unload-model` frees
+  the model of the server this session is on and says whether that also stopped it — on a managed
+  llama.cpp server the model is baked into the process, so it does. `/stop-server` stops that
+  server, after which the footer's ordinary offline handling narrates the rest. All three are
+  ordinary rows in the `/` menu: the two that act on this session's own server say so in their
+  names, which is what keeps them safe to offer.
   - **The launcher actuates, the heartbeat observes.** Apogee grows no process manager of its own:
     it asks the launcher to change the world, and the next ten-second beat binds whatever it finds
     — the same single path a model changed from the server side already travels. A profile that
@@ -35,17 +36,17 @@ point is a **minor** bump, not a breaking change.
     as a transcript note as it happens and the footer's model slot shows `loading <profile>…` until
     the beat completes the move. One actuation runs at a time — while one is in flight, a send and
     the other switching commands are refused with a single line — and there is no mid-flight
-    cancel: `/stop` is the cancel, available the moment the verb returns. A beat that fails *during*
-    an actuation counts nothing toward the offline crossing (the server is expected to be down
-    mid-restart), and a health wait that times out is not a dead end: the launcher deliberately
+    cancel: `/stop-server` is the cancel, available the moment the verb returns. A beat that fails
+    *during* an actuation counts nothing toward the offline crossing (the server is expected to be
+    down mid-restart), and a health wait that times out is not a dead end: the launcher deliberately
     leaves the server running and names its PID and log path, and apogee adds the honest coda —
     the heartbeat will bind it if it comes up.
   - **One new file-only key, `llama-launcher:`, and it usually needs nothing.** Unset means
     **auto-detect**: apogee reads the launcher's own default config
     (`~/.config/llama-launcher/config.yaml`) if that file is there, so a machine with the launcher
     installed needs no configuration. On a machine without one nothing is lost: `/model` lists what
-    the server advertises, as it always did, and `/unload` and `/stop` answer `llama-launcher not
-    configured`. `off` keeps the integration off on a machine that *does* have a
+    the server advertises, as it always did, and `/unload-model` and `/stop-server` answer
+    `llama-launcher not configured`. `off` keeps the integration off on a machine that *does* have a
     launcher config; a path names a different one. Nothing is probed at startup (the `servers:`
     posture — a missing config is reported at the first command, never as a refusal to start), and
     every command re-reads the file, so a profile added in the launcher's own TUI is offered by the
@@ -54,10 +55,10 @@ point is a **minor** bump, not a breaking change.
     the composition root only — the engine and the TUI see nil-degrading closures, never the
     library — so a bare clone still builds from source and no build tags enter apogee. It compiles
     on all three platforms: on **Windows** everything the launcher drives over HTTP works
-    (discovery, load/unload against Ollama or LM Studio, activating a profile on a server that is
-    already up), while starting a managed `llama-server` or signalling one to stop reports a clean
-    unsupported error. A launcher on *another* machine stays what it was — an `mcp-servers:` entry
-    pointing at its MCP adapter; the two compose.
+    (discovery, loading and unloading models against Ollama or LM Studio, activating a profile on a
+    server that is already up), while starting a managed `llama-server` or signalling one to stop
+    reports a clean unsupported error. A launcher on *another* machine stays what it was — an
+    `mcp-servers:` entry pointing at its MCP adapter; the two compose.
 
   See [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
 

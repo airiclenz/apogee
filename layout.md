@@ -172,8 +172,9 @@ named yet — and only ever by one word:
   and the first landed beat, and again after a `/server` switch until the new server answers.
 - `loading <profile>…` while a profile load is in flight. It **outranks** `connecting…`, and
   it replaces a model that is still bound, because the launcher is in the middle of invalidating
-  that binding and the profile being waited on is the more specific truth. `/unload` and `/stop`
-  show `unload…` and `stop…` the same way — neither has a profile to name.
+  that binding and the profile being waited on is the more specific truth. `/unload-model` and
+  `/stop-server` show `unload-model…` and `stop-server…` the same way — neither has a profile to
+  name, so the slot spells the verb the human typed back at them.
 
 The slot holds one word at a time and says nothing else: an actuation's own progress steps are
 transcript notes, not chrome. The `✦ offline` marker is separate again — it is *appended* to the
@@ -230,8 +231,9 @@ commands first, prefix-matched, each with its one-line summary; then skills, mat
 display name, each row led by the `✦` skill glyph so the two kinds never read alike. `@` opens the
 same pane over workspace files. At most eight rows show; the hint line under them reads
 `↑/↓ select · ⏎/tab accept · esc dismiss`. The command rows read **alphabetically**, so the menu
-can be scanned without knowing the table behind it, and two verbs are deliberately not in it:
-`/unload` and `/stop` are recognised when typed but never offered.
+can be scanned without knowing the table behind it, and every verb the parser knows is in it —
+`/stop-server` and `/unload-model` included. Those two act on the session's own server and say so
+in their names, and a verb the human cannot discover is a verb they will not find.
 
 **It follows the caret, not the end of the line.** The token being completed is the word the caret
 stands in or immediately after — so a draft already in the box does not shut the menu out, and
@@ -270,8 +272,9 @@ takes the actuation latch and hands the pane's decision to a blocking launcher v
 closes, the footer's model slot says `loading <profile>…`, and the launcher's steps arrive as
 transcript notes until the beat completes the move. While that latch is held, the paths that would
 open an Exchange (a send, `/continue`, `/compact`) and the four switching verbs (`/model`,
-`/server`, `/unload`, `/stop`) are each refused with one line instead of acting; Esc does not cancel
-an actuation, because the launcher's own cancel is `/stop` once the verb returns.
+`/server`, `/unload-model`, `/stop-server`) are each refused with one line instead of acting; Esc
+does not cancel an actuation, because the launcher's own cancel is `/stop-server` once the verb
+returns.
 
 **The box never goes dead while the model works.** Every region stays open. A command that needs a
 quiescent engine is not hidden — its row renders with a trailing `— idle only` tag in the pane's

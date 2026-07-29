@@ -482,7 +482,25 @@ touched by this item — item 14 owns them, so the docs are knowingly stale for 
 **Commit.** `feat(tui): /unload-model and /stop-server — the verbs name their object, and return
 to the menu`
 
-## 14. Docs pass — the renamed, re-surfaced verbs
+## 14. Docs pass — the renamed, re-surfaced verbs — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): four deviations from the item's literal text.
+(a) **VERSION was NOT touched.** The working tree carries the owner's own uncommitted change to that
+file (HEAD `v0.11.0`, working tree `v0.10.1`) and the item pins no number, so the bump this
+command-surface change calls for — `v0.11.0` → `v0.12.0` on the item 7(c)/12 posture — is left to
+the owner rather than fought with in a docs commit. CHANGELOG moved; VERSION did not.
+(b) The layout.md dropdown sentence did not merely retire — a rendering spec that describes the `/`
+menu must say what is in it, so it is replaced by its inverse: every verb the parser knows is
+offered, `/stop-server` and `/unload-model` included, with the one-line reason their names are what
+makes that safe.
+(c) Two README sentences that spell a prose alternation with a slash — "the start/stop verbs" and
+"discovery, load/unload against Ollama or LM Studio" — were reworded even though neither names a
+verb, because both match this item's own acceptance regex and a grep that cannot be run clean is not
+an acceptance. The parallel CHANGELOG sentence followed for consistency.
+(d) TODO.md's shipped-pointer line (TODO.md:45) still called both verbs typed-only at their old
+spellings. The file is item 7's and item 7 is done, but the clause states exactly what this item's
+acceptance forbids ("none calls either verb typed-only"), and item 12's NOTES (d) corrected the same
+line for the same reason — so it was corrected here, one clause, nothing else in that entry touched.
 
 **What.** Item 13 lands first — the docs describe the names the code carries, never the other way
 round. Then every mention of the two verbs outside the code, plus the design record:

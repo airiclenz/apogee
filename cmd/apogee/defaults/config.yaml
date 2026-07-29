@@ -80,15 +80,15 @@
 # Start, switch and stop the LOCAL servers yourself, with llama-launcher. The servers: list above
 # says where a session may MOVE to; this says apogee may also bring one up: with a launcher
 # configured /model offers the launcher's launch profiles instead of what the server advertises and
-# waits while the one you pick starts, /unload frees the model, /stop stops the server (those two
-# are typed-only — they work, they are just not listed in the / menu). Config-file only (no flag or
+# waits while the one you pick starts, /unload-model frees the model of that server and
+# /stop-server stops it. All three are ordinary rows in the / menu. Config-file only (no flag or
 # env). Three values:
 #
 #   (unset)   auto-detect — apogee reads llama-launcher's own default config,
 #             ~/.config/llama-launcher/config.yaml, if that file is there. If it is not, /model
-#             lists what the server advertises, as it always did, and /unload and /stop answer
-#             "llama-launcher not configured" when you reach for one. This is the default, and on
-#             a machine with the launcher installed it needs no configuration.
+#             lists what the server advertises, as it always did, and /unload-model and
+#             /stop-server answer "llama-launcher not configured" when you reach for one. This is
+#             the default, and on a machine with the launcher installed it needs no configuration.
 #   off       leave the local-server commands off, even on a machine that has a launcher config.
 #   <path>    read THIS launcher config instead of the default one (~ expands).
 #

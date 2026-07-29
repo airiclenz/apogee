@@ -85,6 +85,25 @@ endpoint is not one the launcher's config implies.
 > read "`/model` on a host with a launcher". Recorded in
 > `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md`, items 9–12.
 
+> **Amendment 2026-07-29 (second) — the two hidden verbs are renamed, and offered again.** The
+> live pass that followed the amendment above found the hiding aimed at the wrong target. The
+> hazard was never the verbs: it was the **silence of their names**. `/stop` names no object, so
+> its reflex reading is "stop the running turn" — which is Esc — and `/unload` names none either,
+> which is why an accidental keystroke was a plausible way to lose a server. Name them for what
+> they act on and the ambiguity leaves with the hazard, while a verb the human cannot discover
+> stays a verb they will not find. Revised: `/unload` becomes **`/unload-model`** and `/stop`
+> becomes **`/stop-server`**; both are **offered** in the `/` dropdown again, in their
+> alphabetical slots, so the `hidden` posture the amendment above introduced is withdrawn (and
+> the `commandSpec` flag that carried it is removed — an unused flag in the registry is a claim
+> about the surface the surface no longer makes). The old spellings are **removed outright, not
+> aliased**: an alias would put the ambiguous names back in the parser, which is the one place
+> this change exists to remove them from, and pre-production (AGENTS.md) is why no deprecation
+> shim is owed. The verbs' logic, their latch, their folds and their degrades are untouched —
+> only the spelling, which the footer and the latch refusal now echo back (`stop-server…`,
+> `unload-model in flight`). The first amendment is left standing as written: it is the record of
+> why hiding was tried, which is the reason this one exists. Recorded in
+> `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md`, items 13–14.
+
 **4. The launcher's config is the single profile store.** Apogee never defines, writes, or
 caches launch profiles. One new **file-only** key, `llama-launcher:`: empty or absent means
 auto-detect (`DefaultConfigPath()`, integration lights up only if that file exists — silently
