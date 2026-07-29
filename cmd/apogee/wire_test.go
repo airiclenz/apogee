@@ -1473,19 +1473,23 @@ func TestUnloadAndStopActOnTheSessionsEndpoint(t *testing.T) {
 func TestUnloadAndStopRefuseAnUnmanagedEndpoint(t *testing.T) {
 	t.Parallel()
 
-	ops := &fakeLauncher{
-		cfg:       twoServerConfig(t),
-		instances: []*llamalauncher.RunningInstance{{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080}},
-	}
-	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://remote.invalid:9999")
-
+	// Each verb gets its OWN scripted launcher, so the two parallel subtests share nothing to
+	// record over — and each can assert, in its own scope, that the launcher was never driven.
+	// The table names the methods rather than binding them, since the wiring is built per subtest.
 	for _, verb := range []struct {
 		name string
-		call func(string) (tui.ActuationResult, error)
-	}{{"unload", wiring.unload}, {"stop", wiring.stop}} {
+		call func(launcherWiring, string) (tui.ActuationResult, error)
+	}{{"unload", launcherWiring.unload}, {"stop", launcherWiring.stop}} {
 		t.Run(verb.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := verb.call("http://remote.invalid:9999")
+
+			ops := &fakeLauncher{
+				cfg:       twoServerConfig(t),
+				instances: []*llamalauncher.RunningInstance{{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080}},
+			}
+			wiring, _, _, _ := launcherWiringFixture(t, ops, "http://remote.invalid:9999")
+
+			result, err := verb.call(wiring, "http://remote.invalid:9999")
 			if err == nil {
 				t.Fatalf("%s against an unmanaged endpoint returned no error", verb.name)
 			}
@@ -1495,10 +1499,10 @@ func TestUnloadAndStopRefuseAnUnmanagedEndpoint(t *testing.T) {
 			if len(result.Steps) != 0 || result.ServerStopped {
 				t.Errorf("a refused %s still returned %+v; want the zero result", verb.name, result)
 			}
+			if len(ops.unloaded) != 0 || len(ops.stopped) != 0 {
+				t.Errorf("the launcher was driven anyway: unloaded=%v stopped=%v", ops.unloaded, ops.stopped)
+			}
 		})
-	}
-	if len(ops.unloaded) != 0 || len(ops.stopped) != 0 {
-		t.Errorf("the launcher was driven anyway: unloaded=%v stopped=%v", ops.unloaded, ops.stopped)
 	}
 }
 
