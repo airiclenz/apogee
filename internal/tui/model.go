@@ -1130,9 +1130,11 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m.openSessionBrowser()
 
 	case "model":
-		// Open the model picker over what the upstream advertises, or take the id given as an
-		// argument (picker.go). Synchronous and idle-safe like /sessions: the switch it drives is the
-		// heartbeat's own rebind path, which is idle-only by construction.
+		// Open the picker over the launcher's Launch profiles when llama-launcher is configured and
+		// over what the upstream advertises when it is not, or take the name given as an argument
+		// (picker.go). Idle-only either way: the advertised form drives the heartbeat's own rebind
+		// path, and the profile form hands a BLOCKING launcher verb to the actuation latch, which the
+		// beat after it completes (actuation.go, ADR 0029).
 		return m.runModelCommand(parsed.args)
 
 	case "server":
@@ -1141,13 +1143,6 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// the engine and constructs a client, which Agent.SwitchUpstream allows only at a boundary.
 		return m.runServerCommand(parsed.args)
 
-	case "load":
-		// Open the Launch-profile picker over what the launcher's config defines, or activate the
-		// profile named as an argument (picker.go). Idle-only like its two siblings, and the one of
-		// the three whose accept does not finish here: the launcher verb blocks, so it runs on a Cmd
-		// goroutine under the actuation latch and the beat after it completes the move (ADR 0029).
-		return m.runLoadCommand(parsed.args)
-
 	case "unload":
 		// Free the model of the server this session is talking to. No picker and no argument: the
 		// session's own endpoint is the only thing either actuation verb may act on (ADR 0029 D3), and
@@ -1155,9 +1150,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m.startServerActuation(verbUnload, m.opts.UnloadServer)
 
 	case "stop":
-		// Stop that server outright. Idle-only like its siblings and latched like /load — the call
-		// blocks through the launcher's stop escalation — and afterwards the ordinary offline crossing
-		// narrates the rest, because the downtime is real (actuation.go, ADR 0029).
+		// Stop that server outright. Idle-only like its siblings and latched like a profile load — the
+		// call blocks through the launcher's stop escalation — and afterwards the ordinary offline
+		// crossing narrates the rest, because the downtime is real (actuation.go, ADR 0029).
 		return m.startServerActuation(verbStop, m.opts.StopServer)
 
 	case "version":

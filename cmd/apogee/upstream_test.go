@@ -58,7 +58,7 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 		t.Errorf("beat after Swap = %+v; want a reachable model-b — the holder still observes the old server", beat)
 	}
 	// The endpoint moves with the Monitor, because "which server is this session on" is the question
-	// `/load` asks to decide whether it has to follow the profile it just activated.
+	// a profile load asks to decide whether it has to follow the profile it just activated.
 	if got := holder.Endpoint(); got != second.URL {
 		t.Errorf("Endpoint after the swap = %q; want %q", got, second.URL)
 	}

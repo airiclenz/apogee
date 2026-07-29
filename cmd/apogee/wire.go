@@ -363,7 +363,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	}
 
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
-	// `/load`'s follow-the-profile: engine switch, Monitor swap, stored model cleared, in that order
+	// a profile load's follow-the-profile: engine switch, Monitor swap, stored model cleared, in order
 	// (see sessionMover.move, which carries the reasoning).
 	mover := sessionMover{agent: agent, holder: holder, host: host, pinnedWindow: pinnedWindow}
 
@@ -432,7 +432,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// session started on, which is exactly "nothing to switch to" without a special case.
 		Servers:      serverChoices(choices),
 		SwitchServer: switchServer,
-		// The `/load`, `/unload`, `/stop` half (ADR 0029): browse the launcher's Launch profiles,
+		// The `/model`-over-profiles, `/unload`, `/stop` half (ADR 0029): browse the launcher's profiles,
 		// activate one — following it onto another server when it lives there — and free or stop the
 		// server this session is on. All four are nil when the integration is not configured, which
 		// is the whole of the degrade.

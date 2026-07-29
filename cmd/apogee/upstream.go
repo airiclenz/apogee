@@ -27,7 +27,7 @@ import (
 //
 // It also remembers the endpoint the current Monitor observes, because a Monitor deliberately does
 // not expose one (it is per-server and immutable) and something at the composition root has to be
-// able to answer "which server is this session on RIGHT NOW". `/load` asks exactly that, to decide
+// able to answer "which server is this session on RIGHT NOW". A profile load asks exactly that, to decide
 // whether the profile it just activated is already the session's server or somewhere else (ADR 0029
 // D2) — and the launch-time `endpoint:` is the wrong answer the moment a `/server` switch has moved.
 type upstreamHolder struct {
@@ -70,8 +70,8 @@ func (h *upstreamHolder) Swap(endpoint string, monitor *heartbeat.Monitor) {
 }
 
 // Endpoint reports the Upstream the session is on right now — the launch endpoint until a move
-// replaces it. It is the question `/load` asks before deciding whether it has to follow the profile
-// it just activated.
+// replaces it. It is the question a profile load asks before deciding whether it has to follow the
+// profile it just activated.
 func (h *upstreamHolder) Endpoint() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -103,7 +103,7 @@ type modelStamper interface {
 }
 
 // sessionMover is the shared core of every move to another Upstream: `/server`'s explicit switch
-// (ADR 0028) and `/load`'s follow-the-profile (ADR 0029 D2) do exactly the same three things in
+// (ADR 0028) and a profile load's follow-the-profile (ADR 0029 D2) do exactly the same three things in
 // exactly the same order, so they do them through one function rather than two copies free to drift
 // apart. What differs between the two callers is only the four values move takes.
 //

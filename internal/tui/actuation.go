@@ -11,8 +11,9 @@ import (
 // The actuation latch, the progress narration, and the completion folds (ADR 0029 D5/D6)
 // ----------------------------------------------------------------------------
 //
-// An actuation is one call into the launcher that CHANGES the world — `/load` a Launch profile,
-// `/unload` the session's model, `/stop` its server. Three facts shape everything below.
+// An actuation is one call into the launcher that CHANGES the world — `/model` activating a Launch
+// profile, `/unload` freeing the session's model, `/stop` stopping its server. Three facts shape
+// everything below.
 //
 // It BLOCKS. The facade waits up to ~30 s for health, escalates a stop for another ~20 s, and
 // gives a large model load minutes; so the verb runs on a Cmd goroutine and the Update loop keeps
@@ -73,7 +74,7 @@ type actuationEvent struct {
 	step string
 	// final marks the completion item. Everything below it is meaningful only then.
 	final bool
-	// load is a completed `/load`'s answer, and result a completed `/unload`/`/stop`'s. Which one
+	// load is a completed profile load's answer, and result a completed `/unload`/`/stop`'s. Which one
 	// carries the outcome is decided by the latch's verb, not by inspecting them.
 	load   ProfileLoadResult
 	result ActuationResult
@@ -147,11 +148,11 @@ func unloadOutcome(res ActuationResult) string {
 
 // actuationBlocked reports whether command is one of the verbs the latch refuses while it is held:
 // the two that open an Exchange (a typed message is the third path and is gated in submit) and the
-// five that switch or actuate. Everything else — scrollback, /clear, /sessions, /version, /confine —
+// four that switch or actuate. Everything else — scrollback, /clear, /sessions, /version, /confine —
 // stays live, because none of them touches the server being worked on.
 func actuationBlocked(command string) bool {
 	switch command {
-	case "load", "unload", "stop", "model", "server", "continue", "compact":
+	case "unload", "stop", "model", "server", "continue", "compact":
 		return true
 	}
 	return false
@@ -193,10 +194,11 @@ func (m Model) holdActuation(verb, profile string) Model {
 	return m
 }
 
-// startProfileLoad is `/load`'s accept path, shared by the picker's ⏎ and "/load <name>". It closes
-// the overlay, takes the latch, and puts the blocking verb on a Cmd goroutine with its narration
-// pumped back one step at a time. Nothing is bound here and nothing is claimed: the completion fold
-// decides whether the session has to follow the profile, and the beat after it is what binds.
+// startProfileLoad is the accept path of `/model`'s launcher offering, shared by the picker's ⏎ and
+// "/model <profile>" (picker.go: pickLaunchProfile). It closes the overlay, takes the latch, and
+// puts the blocking verb on a Cmd goroutine with its narration pumped back one step at a time.
+// Nothing is bound here and nothing is claimed: the completion fold decides whether the session has
+// to follow the profile, and the beat after it is what binds.
 func (m Model) startProfileLoad(name string) (tea.Model, tea.Cmd) {
 	m.picker = picker{}
 	load := m.opts.LoadProfile
@@ -299,13 +301,13 @@ func (m Model) foldActuation(msg actuationMsg) (tea.Model, tea.Cmd) {
 // below, so every path out of here leaves the session actuable again — and then what happened is
 // told, in the order it happened.
 //
-// A `/load` that MOVED the session takes the `/server` fold whole ([Model.foldServerSwitch]): the
-// composition root already re-pointed the wire, so the display adopts the new server, the old
-// heartbeat chain retires, and the fresh chain's first beat — fired now rather than one Interval
-// from now — binds what the profile actually loaded. A load that moved nothing says so and fires
-// the same immediate beat, which is what completes it: the ordinary rebind path then words the
-// change ("model changed: A → B"), because that IS what happened to a session whose server swapped
-// its model underneath it.
+// A profile load that MOVED the session takes the `/server` fold whole
+// ([Model.foldServerSwitch]): the composition root already re-pointed the wire, so the display
+// adopts the new server, the old heartbeat chain retires, and the fresh chain's first beat — fired
+// now rather than one Interval from now — binds what the profile actually loaded. A load that
+// moved nothing says so and fires the same immediate beat, which is what completes it: the ordinary
+// rebind path then words the change ("model changed: A → B"), because that IS what happened to a
+// session whose server swapped its model underneath it.
 //
 // A failure is the launcher's own words. The one that earns a coda is the health-wait timeout: the
 // server was left running, so the heartbeat binding it later is a real outcome rather than

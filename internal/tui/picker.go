@@ -7,10 +7,12 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/heartbeat"
 )
 
 // ----------------------------------------------------------------------------
-// The shared single-select picker overlay (/model, /server and /load)
+// The shared single-select picker overlay (/model and /server)
 // ----------------------------------------------------------------------------
 //
 // The /sessions browser's simpler sibling: a modal list with one highlight, ⏎ to take the
@@ -37,12 +39,20 @@ import (
 // the TUI folds what came back ([Model.foldServerSwitch]) — a fresh heartbeat generation, no model
 // bound, and the new server's very first beat completing the move through that same rebind path.
 //
-// /load is the third question — which model should the world be made to serve (ADR 0029 D3) — and
-// the one whose accept does not finish on the Update loop: activating a Launch profile blocks for as
-// long as a server takes to come up, so the accept hands off to the actuation latch (actuation.go)
-// and the completion fold there ends in one of the two shapes above. Its rows are also the one
-// offering read at open rather than derived per frame, because they live in the launcher's config
-// file rather than in Model state.
+// /model has a SECOND offering, and on a host where llama-launcher is configured it is the only one:
+// the Launch profiles the launcher defines (ADR 0029 D3). "Switch model" is one question, not two —
+// on the single-model local server this integration exists for, what the server advertises is a
+// one-row view of the same world the profiles describe — so the verb asks it once and the wiring
+// decides which half of the world can answer. That form's accept is the one that does not finish on
+// the Update loop: activating a Launch profile blocks for as long as a server takes to come up, so it
+// hands off to the actuation latch (actuation.go) and the completion fold there ends in one of the
+// two shapes above. Its rows are also the one offering read at open rather than derived per frame,
+// because they live in the launcher's config file rather than in Model state.
+//
+// Whichever offering /model lists, what the session is already on is NOT in it: a row that switches
+// nothing is not a choice, and pickerHint's "⏎ switch" would be a promise it could not keep. /server
+// keeps its "· current" row instead, because where the session IS is half of what a server list is
+// read for.
 
 // pickerKind names WHICH offering an open picker is listing. It is an enum rather than a callback
 // field on the state so the Model keeps holding plain values only (ADR 0011) — every kind-specific
@@ -50,9 +60,9 @@ import (
 type pickerKind int
 
 const (
-	pickerModel  pickerKind = iota // the models the Upstream advertises — /model, over m.hb.models
+	pickerModel  pickerKind = iota // the models the Upstream advertises — /model without a launcher
 	pickerServer                   // the servers config.yaml names — /server, over m.opts.Servers
-	pickerLoad                     // the Launch profiles the launcher defines — /load, over m.picker.profiles
+	pickerLoad                     // the Launch profiles the launcher defines — /model with one
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -63,8 +73,8 @@ type picker struct {
 	open     bool
 	kind     pickerKind
 	selected int
-	// profiles are the /load rows, and the one offering that is NOT derived at render time. The
-	// other two describe Model state (the advertised models, the configured servers) and so can be
+	// profiles are the Launch-profile rows, and the one offering that is NOT derived at render time.
+	// The other two describe Model state (the advertised models, the configured servers) and so can be
 	// re-read every frame; a Launch profile lives in the launcher's config FILE, behind a seam that
 	// re-reads it from disk (ADR 0029 D4). Reading once per open is what makes those rows fresh —
 	// a profile added in the launcher's own TUI a moment ago is offered here — without turning a
@@ -80,17 +90,22 @@ const maxPickerRows = 8
 // pickerHint is the one-line key legend shown at the foot of the overlay.
 const pickerHint = "↑/↓ select · ⏎ switch · esc close"
 
-// currentRowSuffix marks the row the session is already on. It is plain text, not styling: the
-// popup module takes rows escape-stripped and styles them whole (faint, or the highlight bar on the
-// selection), so a per-fragment style could not survive its truncation.
+// currentRowSuffix marks the server row the session is already on. It is plain text, not styling:
+// the popup module takes rows escape-stripped and styles them whole (faint, or the highlight bar on
+// the selection), so a per-fragment style could not survive its truncation.
+//
+// It is /server's alone. /model does not mark what the session is bound to — it does not OFFER it
+// (offeredModels, offerableProfiles), because a row that switches nothing is not a choice; a server
+// list is read to see where the session is as much as to move it, so there the mark stays.
 const currentRowSuffix = " · current"
 
 // modelUsage and serverUsage are the one-line grammars a mistyped verb earns, so surplus arguments
-// teach the two working forms instead of vanishing (the confineUsage posture).
+// teach the two working forms instead of vanishing (the confineUsage posture). /model names both of
+// the things its one argument can be, because which one it takes is decided by whether this host has
+// a launcher rather than by anything the human typed.
 const (
-	modelUsage  = "usage: /model [model-id]"
+	modelUsage  = "usage: /model [profile|model-id]"
 	serverUsage = "usage: /server [name]"
-	loadUsage   = "usage: /load [profile]"
 )
 
 // noServersNote is the one line /server owes when there is nowhere to switch to. An empty list and
@@ -98,21 +113,40 @@ const (
 // build was started without alternatives — and two sentences would only invite them to drift.
 const noServersNote = "no servers configured — add a servers: block to config.yaml"
 
-// runModelCommand drives the /model verb in both its forms: bare, it opens the picker over what the
-// server advertises; with one argument it takes that model id directly. Surplus arguments are a
-// usage note.
+// runModelCommand drives the /model verb — the one "serve me something else" verb — in both its
+// forms and over both its offerings. Which offering answers is decided ONCE, here, by whether the
+// launcher seams are wired: with a launcher, the Launch profiles it defines are what this host can
+// be made to serve, and that supersedes the advertised list rather than sitting beside it (the
+// owner's decision, 2026-07-29 — the two lists describe the same world, and a verb per list made the
+// smaller one the default answer). Without a launcher, what the server already advertises is all
+// there is, and a multi-model or remote server keeps exactly the picker it had.
 //
-// The degrade ladder is asked FIRST and for both forms, because it is about whether this session
-// can switch models at all — an argument form that reached the accept path with no rebind seam
-// would move nothing and say nothing, which is the one outcome a command must never have.
+// Surplus arguments are refused before either branch: the grammar belongs to the verb, not to the
+// offering behind it.
 func (m Model) runModelCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 1 {
 		return m.pickerNote(modelUsage)
 	}
+	if m.opts.LaunchProfiles != nil && m.opts.LoadProfile != nil {
+		return m.pickLaunchProfile(args)
+	}
+	return m.pickAdvertisedModel(args)
+}
+
+// pickAdvertisedModel is /model over what the server itself says it serves — the offering on every
+// host without a launcher. Bare, it opens the picker; with one argument it takes that model id
+// directly.
+//
+// The degrade ladder is asked FIRST and for both forms, because it is about whether this session can
+// switch models at all — an argument form that reached the accept path with no rebind seam would
+// move nothing and say nothing, which is the one outcome a command must never have.
+func (m Model) pickAdvertisedModel(args []string) (tea.Model, tea.Cmd) {
 	if note, blocked := m.modelSwitchBlocked(); blocked {
 		return m.pickerNote(note)
 	}
 	if len(args) == 1 {
+		// Matched against the WHOLE offering rather than the offered rows: the human named a model
+		// instead of picking one, and "already bound to it" is a truer answer than calling it unknown.
 		for _, offered := range m.hb.models {
 			if offered.ID == args[0] {
 				return m.bindPickedModel(offered.ID, offered.ContextWindow)
@@ -121,15 +155,43 @@ func (m Model) runModelCommand(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(fmt.Sprintf(
 			"unknown model %q — /model with no argument lists what the server serves", args[0]))
 	}
-	m.picker = picker{open: true, kind: pickerModel, selected: m.currentModelRow()}
+	if len(m.offeredModels()) == 0 {
+		return m.pickerNote(noOtherModelNote)
+	}
+	m.picker = picker{open: true, kind: pickerModel}
 	m.layout()
 	return m, nil
 }
 
-// modelSwitchBlocked reports the honest line /model owes when there is nothing to pick from, in the
-// order the reasons stack: no monitor at all, a server that is not answering, a display-frozen
-// heartbeat (no rebind seam), and a server that has answered but advertised nothing. Each is a note
-// and no overlay — an empty pane would be a worse answer than the sentence explaining it.
+// noOtherModelNote is what a server serving exactly what the session is bound to earns: the rung
+// below modelSwitchBlocked's "nothing advertised yet", reached once the current binding is excluded
+// from the offering. A note and no overlay, like every other degrade — an empty pane would say less.
+const noOtherModelNote = "the server serves no other model"
+
+// offeredModels is what the model picker lists: everything the server advertises EXCEPT the model
+// this session is already bound to. Switching to the model you are on is not a choice, and offering
+// it is what made the overlay a one-row menu on a single-model server.
+//
+// It is DERIVED, like the rows themselves, so a beat landing under an open picker moves the
+// exclusion with the offering — a server that starts advertising a second model grows a row, and one
+// that rebinds under the session loses the row it just became.
+func (m Model) offeredModels() []heartbeat.ModelSummary {
+	offered := make([]heartbeat.ModelSummary, 0, len(m.hb.models))
+	for _, model := range m.hb.models {
+		if model.ID == m.opts.Model {
+			continue
+		}
+		offered = append(offered, model)
+	}
+	return offered
+}
+
+// modelSwitchBlocked reports the honest line the ADVERTISED offering owes when there is nothing to
+// pick from, in the order the reasons stack: no monitor at all, a server that is not answering, a
+// display-frozen heartbeat (no rebind seam), and a server that has answered but advertised nothing.
+// Each is a note and no overlay — an empty pane would be a worse answer than the sentence explaining
+// it. It is the launcher-less branch's ladder alone: every rung is about what this server has told
+// us, and a Launch profile is read from a config file rather than observed (pickLaunchProfile).
 func (m Model) modelSwitchBlocked() (string, bool) {
 	switch {
 	case m.opts.Heartbeat == nil:
@@ -144,18 +206,6 @@ func (m Model) modelSwitchBlocked() (string, bool) {
 		return "the server has not advertised any models yet", true
 	}
 	return "", false
-}
-
-// currentModelRow is the row the picker opens on: the one the session is bound to, or the first row
-// when the binding names nothing the server currently advertises (a stale pin, or a cold start that
-// has not bound yet).
-func (m Model) currentModelRow() int {
-	for i, offered := range m.hb.models {
-		if offered.ID == m.opts.Model {
-			return i
-		}
-	}
-	return 0
 }
 
 // runServerCommand drives the /server verb in both its forms: bare, it opens the picker over the
@@ -240,13 +290,14 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 }
 
 // ----------------------------------------------------------------------------
-// /load — the Launch-profile picker (ADR 0029 D3)
+// /model over the Launch profiles — the launcher's offering (ADR 0029 D3)
 // ----------------------------------------------------------------------------
 
-// loadPickerTitle names what the third offering is and whose it is. Unlike the model picker's
-// title it does not qualify by host: a Launch profile carries its own address, and the rows say so
-// when it differs from the session's.
-const loadPickerTitle = "load profile — llama-launcher"
+// loadPickerTitle names the offering and whose it is. It is /model's own title with the launcher in
+// place of the host, because that is the honest qualifier here: the advertised offering belongs to
+// one server, while a Launch profile carries its own address — and the rows say so when that address
+// differs from the session's.
+const loadPickerTitle = "switch model — llama-launcher"
 
 // runningRowSuffix marks a profile discovery attributes to a live instance right now — the
 // currentRowSuffix posture (plain text, because the popup module styles rows whole), for a fact that
@@ -259,25 +310,22 @@ const runningRowSuffix = " · running"
 // renderer that guessed a path would eventually name the wrong one.
 const noProfilesNote = "no launch profiles defined — add profiles to the llama-launcher config"
 
-// runLoadCommand drives the /load verb in both its forms: bare, it opens the picker over the Launch
-// profiles the launcher's config defines; with one argument it activates that profile by name.
-// Surplus arguments are a usage note.
+// pickLaunchProfile is /model over the Launch profiles the launcher's config defines — the offering
+// on a host where llama-launcher is wired. Bare, it opens the picker; with one argument it activates
+// that profile by name.
 //
 // The rows are read at OPEN and for BOTH forms, which is the whole of ADR 0029 D4's freshness rule:
 // the seam re-reads the launcher's config from disk, so a profile added seconds ago in the
 // launcher's own TUI is offered here — and the argument form is checked against the same list the
 // picker would have shown, so the two forms can never disagree about what exists.
 //
-// The degrade ladder is asked FIRST, like /model's and for the same reason, and it is three rungs
-// deep because three different things can be missing: the integration itself, the config it reads,
-// and the profiles that config was supposed to hold. Each is one sentence and no overlay.
-func (m Model) runLoadCommand(args []string) (tea.Model, tea.Cmd) {
-	if len(args) > 1 {
-		return m.pickerNote(loadUsage)
-	}
-	if m.opts.LaunchProfiles == nil || m.opts.LoadProfile == nil {
-		return m.pickerNote(noLauncherNote)
-	}
+// The ladder here is about the launcher rather than about the server, which is why it consults
+// nothing the heartbeat observed — not even the offline rung: bringing a server up is the one useful
+// act while the current one is down, exactly as /server's is (and what displacing a running server
+// or a loaded model costs is the LAUNCHER's own config to answer, auto_stop_server and auto_unload
+// included; apogee adds no policy of its own). Two things can be missing instead: the config the
+// seam reads, and the profiles it was supposed to hold. Each is one sentence and no overlay.
+func (m Model) pickLaunchProfile(args []string) (tea.Model, tea.Cmd) {
 	profiles, err := m.opts.LaunchProfiles()
 	if err != nil {
 		// The one failure that sinks the list — no config at the configured path, a config that will
@@ -289,6 +337,10 @@ func (m Model) runLoadCommand(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(noProfilesNote)
 	}
 	if len(args) == 1 {
+		// Matched against every DEFINED profile rather than the offered rows, the advertised form's
+		// posture: a profile that is already loaded is still configured, and answering "unknown" for a
+		// name the config plainly holds would be a lie. Re-activating it is the launcher's own
+		// idempotent no-op, which says so.
 		for _, choice := range profiles {
 			if choice.Name == args[0] {
 				return m.startProfileLoad(choice.Name)
@@ -297,9 +349,41 @@ func (m Model) runLoadCommand(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(fmt.Sprintf(
 			"unknown launch profile %q — configured: %s", args[0], profileNameList(profiles)))
 	}
-	m.picker = picker{open: true, kind: pickerLoad, profiles: profiles}
+	offered := offerableProfiles(profiles, sessionAddr(m.opts.Endpoint))
+	if len(offered) == 0 {
+		return m.pickerNote(onlyProfileLoadedNote)
+	}
+	m.picker = picker{open: true, kind: pickerLoad, profiles: offered}
 	m.layout()
 	return m, nil
+}
+
+// onlyProfileLoadedNote is what a launcher whose every defined profile is the one already serving
+// this session earns — the launcher-side twin of noOtherModelNote, and the rung below noProfilesNote:
+// profiles exist, but none of them is somewhere else to go.
+const onlyProfileLoadedNote = "the only launch profile is already loaded"
+
+// offerableProfiles drops the Launch profile this session is ALREADY served by: one the launcher
+// attributes to a live instance at the very address the session is talking to. Every other profile
+// stays, running ones included — a profile running on another port is precisely the switch this verb
+// exists for, and its row says where it lives (elsewherePort).
+//
+// Two unknowns exclude nothing, both in the same direction: a session endpoint that would not parse
+// (sessionAddr's honest ""), and attribution the bridge could not make unambiguously (which reaches
+// here as no profile marked running at all). An address we cannot name is no evidence that a profile
+// shares it, and dropping a row on that guess would hide the very profile the human came to load.
+func offerableProfiles(profiles []LaunchProfileChoice, here string) []LaunchProfileChoice {
+	if here == "" {
+		return profiles
+	}
+	offered := make([]LaunchProfileChoice, 0, len(profiles))
+	for _, choice := range profiles {
+		if choice.Running && choice.Addr == here {
+			continue
+		}
+		offered = append(offered, choice)
+	}
+	return offered
 }
 
 // profileNameList names the defined profiles for the unknown-argument note, in the order the picker
@@ -312,10 +396,11 @@ func profileNameList(profiles []LaunchProfileChoice) string {
 	return strings.Join(names, ", ")
 }
 
-// launchProfileRows is one row per Launch profile: the name the human gave it in the launcher's
-// config (which is also the /load argument and the footer alias afterwards), the backend it runs on,
-// the context window it was configured with when it states one, the port it would serve at when that
-// is NOT where this session is pointed, and the running mark.
+// launchProfileRows is one row per OFFERED Launch profile (the profile already serving this session
+// is not among them — offerableProfiles): the name the human gave it in the launcher's config, which
+// is also the /model argument and the footer alias afterwards, the backend it runs on, the context
+// window it was configured with when it states one, the port it would serve at when that is NOT
+// where this session is pointed, and the running mark.
 //
 // The port is shown only for a profile that lives somewhere else, because that is the moment it
 // matters: loading it will move the session. A profile on the session's own server needs no address —
@@ -412,7 +497,7 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 	switch m.picker.kind {
 	case pickerModel:
-		picked := m.hb.models[m.picker.selected]
+		picked := m.offeredModels()[m.picker.selected]
 		return m.bindPickedModel(picked.ID, picked.ContextWindow)
 	case pickerServer:
 		return m.switchToServer(m.opts.Servers[m.picker.selected])
@@ -433,8 +518,9 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 // still resolving the old id would measure the picked model as a fresh change and bind it away
 // again within one Interval.
 //
-// Picking the row the session is already on is answered rather than ignored: an explicit act
-// deserves an answer, where rebindNote's "" contract is about the observations nobody asked for.
+// NAMING the model the session is already on is answered rather than ignored: an explicit act
+// deserves an answer, where rebindNote's "" contract is about the observations nobody asked for. No
+// picked ROW reaches it any more — that row is not offered — but "/model <id>" can still name one.
 func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 	m.picker = picker{}
 	if id == m.opts.Model {
@@ -454,7 +540,7 @@ func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 func (m Model) pickerCount() int {
 	switch m.picker.kind {
 	case pickerModel:
-		return len(m.hb.models)
+		return len(m.offeredModels())
 	case pickerServer:
 		return len(m.opts.Servers)
 	case pickerLoad:
@@ -535,18 +621,17 @@ func (m Model) pickerRows() []string {
 	return nil
 }
 
-// modelRows is one row per advertised model: the id as the footer renders it (displayModel, so the
-// pane and the chrome beside it can never name the same model two different ways), its context
-// window when the server named one, and the "· current" mark on the row the session is bound to.
+// modelRows is one row per OFFERED model (offeredModels — everything advertised but the binding this
+// session already has): the id as the footer renders it (displayModel, so the pane and the chrome
+// beside it can never name the same model two different ways), and its context window when the
+// server named one. No row needs a "· current" mark, because the current one is not among them.
 func (m Model) modelRows() []string {
-	rows := make([]string, 0, len(m.hb.models))
-	for _, offered := range m.hb.models {
+	offering := m.offeredModels()
+	rows := make([]string, 0, len(offering))
+	for _, offered := range offering {
 		label := displayModel(offered.ID)
 		if window := formatTokens(offered.ContextWindow); window != "" {
 			label += " — " + window
-		}
-		if offered.ID == m.opts.Model {
-			label += currentRowSuffix
 		}
 		rows = append(rows, stripEscapes(label))
 	}

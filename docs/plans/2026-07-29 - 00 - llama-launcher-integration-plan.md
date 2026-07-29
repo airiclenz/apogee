@@ -413,7 +413,31 @@ and `/stop` keep their logic but stop being offered; the dropdown reads alphabet
 Items 9–12 carry that decision. ADR 0029 D3's three-verb surface is thereby revised —
 item 12 records the amendment in the ADR rather than leaving the code to contradict it.
 
-## 9. `/model` follows the launcher — profiles are the offering, the loaded one excluded
+## 9. `/model` follows the launcher — profiles are the offering, the loaded one excluded — ✅ DONE (2026-07-29)
+
+NOTES (2026-07-29): six deviations from the item's literal text.
+(a) `currentRowSuffix` did NOT retire — only `currentModelRow` and the constant's `/model` USE did.
+The item's own next clause keeps `/server`'s current-row posture untouched, and `serverRows` is the
+constant's other caller; the two clauses cannot both be taken literally, so the narrower one wins.
+Its doc comment now says the mark is `/server`'s alone and why.
+(b) The exclusion is the OFFERING's, not the argument form's ("the row … is not offered"). `/model
+<id>` still matches the whole advertised list, so the bound model earns `already bound to …` rather
+than being called unknown; `/model <profile>` still matches every DEFINED profile, so a loaded one is
+not called unknown either — re-activating it is the launcher's own idempotent no-op. In the launcher
+branch the zero-profiles rung therefore stays ABOVE the argument form and the exclusion below it.
+(c) `modelUsage` is reworded to `usage: /model [profile|model-id]`: the item retires `loadUsage` and
+has `modelUsage` cover both forms, which the old `[model-id]` text did not.
+(d) `runModelCommand` branches at the top into two package-private halves — `pickAdvertisedModel` and
+`pickLaunchProfile` — rather than holding both ladders inline; `pickerLoad`, `launchProfileRows` and
+the title constant keep their names, and only the title's TEXT becomes `switch model —
+llama-launcher`.
+(e) Two consequences outside the item's stated file list, both created BY it: `"load"` left
+`actuationBlocked`'s refusal list (no dispatcher can produce that verb any more), and the doc
+comments naming `/load` were reworded across `internal/tui` and `cmd/apogee` — a comment naming a
+verb this item deletes is stale by this item, not a drive-by.
+(f) `offerableProfiles` excludes nothing when the session endpoint will not parse (`sessionAddr` ⇒
+`""`), the direction `elsewherePort` already takes: an address we cannot name is no evidence that a
+profile shares it.
 
 **What.** The merge of `/load` into `/model` (owner decision above), and the end of the
 one-row picker.

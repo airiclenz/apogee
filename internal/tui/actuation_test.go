@@ -21,7 +21,7 @@ import (
 // socket, or reads a file — the launcher itself is proven in its own repo, and what these tests are
 // about is the LATCH, the pump's ordering, and the two shapes a completion folds into.
 
-// twoProfiles is the /load fixture: a profile on the very server this session is talking to
+// twoProfiles is the profile fixture: a profile on the very server this session is talking to
 // (testOpts.Endpoint), beside one that lives on another port and is running right now.
 var twoProfiles = []LaunchProfileChoice{
 	{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", ContextWindow: 32768},
@@ -105,7 +105,7 @@ func (f *fakeLauncher) listCount() int {
 }
 
 // wireLauncher builds a ready, idle model with the heartbeat, the rebind AND the four launcher seams
-// wired, one beat folded — the state a human is in when they type /load.
+// wired, one beat folded — the state a human is in when they type /model on a launcher host.
 func wireLauncher(t *testing.T, fake *fakeLauncher) (Model, *fakeRebind) {
 	t.Helper()
 	opts := testOpts
@@ -184,13 +184,13 @@ func driveActuation(t *testing.T, m Model, cmd tea.Cmd) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// startLoad types "/load <name>" and returns the model with the latch held and the actuation's Cmd
+// startLoad types "/model <profile>" and returns the model with the latch held and the actuation's Cmd
 // unrun — the in-flight window every latch assertion is made in.
 func startLoad(t *testing.T, m Model, name string) (Model, tea.Cmd) {
 	t.Helper()
-	m, cmd := typeCommand(t, m, "/load "+name)
+	m, cmd := typeCommand(t, m, "/model "+name)
 	if !m.actuation.inFlight {
-		t.Fatalf("/load %s did not take the latch", name)
+		t.Fatalf("/model %s did not take the latch", name)
 	}
 	return m, cmd
 }
@@ -213,7 +213,7 @@ func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 	m, _ = startLoad(t, m, "alpha")
 	want := "profile load in flight — alpha"
 
-	for _, line := range []string{"/load beta", "/model other-model", "/server remote", "/continue", "/compact", "hello"} {
+	for _, line := range []string{"/model other-model", "/server remote", "/continue", "/compact", "hello"} {
 		t.Run(line, func(t *testing.T) {
 			next, cmd := typeCommand(t, m, line)
 
@@ -236,7 +236,7 @@ func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 		t.Errorf("the latch now names %q, want the verb it was taken for", m.actuation.profile)
 	}
 	if got := fake.listCount(); got != 1 {
-		t.Errorf("the profile list was read %d times, want only the refused /load's predecessor", got)
+		t.Errorf("the profile list was read %d times, want only the /model that took the latch", got)
 	}
 	if len(sw.calls) != 0 || len(rb.calls) != 0 || len(eng.submitted) != 0 {
 		t.Errorf("a refused verb still drove a seam: switches %v, rebinds %v, submits %d",
@@ -659,7 +659,7 @@ func TestUnloadAndStopActOnTheSessionsServer(t *testing.T) {
 				t.Fatalf("actuation = {inFlight:%v verb:%q}, want the %s latch held",
 					m.actuation.inFlight, m.actuation.verb, tc.verb)
 			}
-			for _, refused := range []string{"/load alpha", "/unload", "/stop"} {
+			for _, refused := range []string{"/model alpha", "/unload", "/stop"} {
 				next, blocked := typeCommand(t, m, refused)
 				if blocked != nil {
 					t.Errorf("%q returned a Cmd while %s was in flight", refused, tc.verb)

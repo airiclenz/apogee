@@ -32,11 +32,22 @@ func offerBeat(active string, window int, models ...heartbeat.ModelSummary) hear
 }
 
 // twoModelBeat is the fixture most picker tests open on: the bound test-model beside a second
-// model the server also serves.
+// model the server also serves — which, once the bound one is excluded from the offering, is a
+// one-row picker.
 func twoModelBeat() heartbeat.Beat {
 	return offerBeat("test-model", 32768,
 		heartbeat.ModelSummary{ID: "test-model", ContextWindow: 32768},
 		heartbeat.ModelSummary{ID: "other-model", ContextWindow: 16384},
+	)
+}
+
+// threeModelBeat is the same server serving one model more, so the offering left after the
+// exclusion still has a second row to move the highlight onto.
+func threeModelBeat() heartbeat.Beat {
+	return offerBeat("test-model", 32768,
+		heartbeat.ModelSummary{ID: "test-model", ContextWindow: 32768},
+		heartbeat.ModelSummary{ID: "other-model", ContextWindow: 16384},
+		heartbeat.ModelSummary{ID: "third-model", ContextWindow: 8192},
 	)
 }
 
@@ -63,7 +74,9 @@ func seededPicker(t *testing.T, opts Options) (Model, *fakeRebind) {
 // Opening the picker
 // ----------------------------------------------------------------------------
 
-// /model lists what the server advertises, marks the row the session is bound to, and opens on it.
+// /model on a host without a launcher lists what the server advertises MINUS the model this session
+// is already bound to: every offered row switches something, which is what makes pickerHint's
+// "⏎ switch" true on all of them.
 func TestModelPickerListsTheOffering(t *testing.T) {
 	m, _ := seededPicker(t, testOpts)
 
@@ -75,24 +88,21 @@ func TestModelPickerListsTheOffering(t *testing.T) {
 		t.Fatalf("picker = {open:%v kind:%v}, want an open model picker", m.picker.open, m.picker.kind)
 	}
 	if m.picker.selected != 0 {
-		t.Errorf("selected = %d, want 0 — the picker opens on the bound model's row", m.picker.selected)
+		t.Errorf("selected = %d, want the first row — no row is the current one any more", m.picker.selected)
 	}
 
 	got := plain(m.View())
-	for _, want := range []string{"switch model — test-host", "test-model", "other-model", "16k", pickerHint} {
+	for _, want := range []string{"switch model — test-host", "other-model", "16k", pickerHint} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the pane is missing %q:\n%s", want, got)
 		}
 	}
 	rows := m.pickerRows()
-	if len(rows) != 2 {
-		t.Fatalf("rows = %v, want one per advertised model", rows)
+	if len(rows) != 1 || !strings.HasPrefix(rows[0], "other-model") {
+		t.Fatalf("rows = %v, want only the advertised models the session is NOT bound to", rows)
 	}
-	if !strings.HasSuffix(rows[0], currentRowSuffix) {
-		t.Errorf("rows[0] = %q, want the bound model marked %q", rows[0], currentRowSuffix)
-	}
-	if strings.HasSuffix(rows[1], currentRowSuffix) {
-		t.Errorf("rows[1] = %q, want no current marker on a model the session is not bound to", rows[1])
+	if strings.Contains(rows[0], currentRowSuffix) {
+		t.Errorf("rows[0] = %q, want no current marker in an offering that excludes the current row", rows[0])
 	}
 }
 
@@ -100,14 +110,15 @@ func TestModelPickerListsTheOffering(t *testing.T) {
 // list can no longer hold is clamped rather than left pointing past the end.
 func TestModelPickerFollowsTheOfferingWhileOpen(t *testing.T) {
 	m, _ := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat()) // two offered rows once the bound model is excluded
 	m, _ = typeCommand(t, m, "/model")
 	m = step(t, m, keyDown())
 	if m.picker.selected != 1 {
 		t.Fatalf("precondition: selected = %d, want the second row", m.picker.selected)
 	}
 
-	// The server drops back to serving only what the session is bound to.
-	m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+	// The server drops back to serving what the session is bound to plus one alternative.
+	m = foldBeatMsg(t, m, twoModelBeat())
 
 	if !m.picker.open {
 		t.Fatal("the picker closed on a beat; a refreshed offering must not dismiss it")
@@ -116,7 +127,7 @@ func TestModelPickerFollowsTheOfferingWhileOpen(t *testing.T) {
 		t.Errorf("selected = %d, want 0 — the selection is clamped into the shorter list", m.picker.selected)
 	}
 	if got := m.pickerRows(); len(got) != 1 {
-		t.Errorf("rows = %v, want the refreshed one-model offering", got)
+		t.Errorf("rows = %v, want the refreshed one-row offering", got)
 	}
 }
 
@@ -139,13 +150,12 @@ func TestModelPickerEscCloses(t *testing.T) {
 // Accepting a row
 // ----------------------------------------------------------------------------
 
-// Accepting another row drives the EXISTING rebind orchestration: the seam is called with the
-// picked id and its window, the display adopts what came back, the start-up box is restated, and
-// the change is worded by rebindNote — no second set of strings.
+// Accepting a row drives the EXISTING rebind orchestration: the seam is called with the picked id
+// and its window, the display adopts what came back, the start-up box is restated, and the change
+// is worded by rebindNote — no second set of strings.
 func TestModelPickerAcceptRebindsThroughTheSeam(t *testing.T) {
 	m, rb := seededPicker(t, testOpts)
 	m, _ = typeCommand(t, m, "/model")
-	m = step(t, m, keyDown())
 
 	m, cmd := stepCmd(t, m, keyEnter())
 
@@ -177,7 +187,6 @@ func TestModelPickerAcceptRebindsThroughTheSeam(t *testing.T) {
 func TestModelPickerPickSurvivesTheNextBeat(t *testing.T) {
 	m, rb := seededPicker(t, testOpts)
 	m, _ = typeCommand(t, m, "/model")
-	m = step(t, m, keyDown())
 	m, _ = stepCmd(t, m, keyEnter())
 	notesBefore := len(noteTexts(m))
 
@@ -203,7 +212,6 @@ func TestModelPickerAcceptReportsARefusedRebind(t *testing.T) {
 	m, rb := seededPicker(t, testOpts)
 	rb.answer = func(string, int) (RebindResult, error) { return RebindResult{}, errors.New("engine busy") }
 	m, _ = typeCommand(t, m, "/model")
-	m = step(t, m, keyDown())
 
 	m, _ = stepCmd(t, m, keyEnter())
 
@@ -216,16 +224,16 @@ func TestModelPickerAcceptReportsARefusedRebind(t *testing.T) {
 	}
 }
 
-// Accepting the row the session is already on is ANSWERED, not ignored — an explicit act deserves a
-// reply — and drives no seam.
-func TestModelPickerAcceptCurrentRowIsANote(t *testing.T) {
+// NAMING the model the session is already on is ANSWERED, not ignored — an explicit act deserves a
+// reply — and drives no seam. No ROW can reach this any more (that row is not offered), so the
+// argument form is the one route left to it.
+func TestModelCommandNamingTheBoundModelIsANote(t *testing.T) {
 	m, rb := seededPicker(t, testOpts)
-	m, _ = typeCommand(t, m, "/model")
 
-	m, _ = stepCmd(t, m, keyEnter())
+	m, _ = typeCommand(t, m, "/model test-model")
 
 	if m.picker.open {
-		t.Error("the picker stayed open after an accept")
+		t.Error("the argument form opened an overlay")
 	}
 	if len(rb.calls) != 0 {
 		t.Errorf("rebind calls = %v, want none — the session is already on that model", rb.calls)
@@ -361,6 +369,17 @@ func TestModelCommandDegradesWithAnHonestNote(t *testing.T) {
 		m, _ = typeCommand(t, m, "/model")
 
 		assertPickerDegrade(t, m, "the server has not advertised any models yet")
+	})
+
+	t.Run("nothing but what the session is already bound to", func(t *testing.T) {
+		// The rung below "nothing advertised yet": the server answered, but everything it serves is
+		// what this session is on — so the exclusion empties the offering and the note takes over.
+		m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
+		m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+
+		m, _ = typeCommand(t, m, "/model")
+
+		assertPickerDegrade(t, m, noOtherModelNote)
 	})
 }
 
@@ -747,36 +766,36 @@ func TestServerCommandIsIdleOnly(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// /load — the Launch-profile picker (ADR 0029 D3)
+// /model over the Launch profiles — the launcher's offering (ADR 0029 D3)
 // ----------------------------------------------------------------------------
 //
-// The harness is the launcher fake in actuation_test.go: /load's rows come from a seam rather than
+// The harness is the launcher fake in actuation_test.go: these rows come from a seam rather than
 // from Model state, so these tests script what the launcher's config defines and assert what the
 // overlay makes of it. The accept path stops at the LATCH — what happens after it is the actuation
 // suite's subject.
 
 // seededLoad is a ready model with the heartbeat, the rebind and the four launcher seams wired —
-// the state a human is in when they type /load.
+// the state a human is in when they type /model on a host with a launcher.
 func seededLoad(t *testing.T, fake *fakeLauncher) Model {
 	t.Helper()
 	m, _ := wireLauncher(t, fake)
 	return m
 }
 
-// /load lists what the launcher's config defines, in the launcher's own order, and each row carries
-// the facts the choice is made on: the backend, the configured context window, the port when the
-// profile lives somewhere other than this session's server, and the running mark.
-func TestLoadPickerListsTheLaunchProfiles(t *testing.T) {
+// With the launcher wired, /model lists what its config defines, in the launcher's own order, and
+// each row carries the facts the choice is made on: the backend, the configured context window, the
+// port when the profile lives somewhere other than this session's server, and the running mark.
+func TestModelPickerListsTheLaunchProfiles(t *testing.T) {
 	fake := newLauncher()
 	m := seededLoad(t, fake)
 
-	m, cmd := typeCommand(t, m, "/load")
+	m, cmd := typeCommand(t, m, "/model")
 
 	if cmd != nil {
-		t.Error("/load returned a Cmd; opening the picker actuates nothing")
+		t.Error("/model returned a Cmd; opening the picker actuates nothing")
 	}
 	if !m.picker.open || m.picker.kind != pickerLoad {
-		t.Fatalf("picker = {open:%v kind:%v}, want an open load picker", m.picker.open, m.picker.kind)
+		t.Fatalf("picker = {open:%v kind:%v}, want the launcher's offering", m.picker.open, m.picker.kind)
 	}
 	if m.picker.selected != 0 {
 		t.Errorf("selected = %d, want the first row — the launcher's order puts favourites first",
@@ -797,16 +816,57 @@ func TestLoadPickerListsTheLaunchProfiles(t *testing.T) {
 	}
 }
 
+// The profile this session is ALREADY served by is not offered: the launcher attributes a running
+// instance to it at the very address the session is talking to, so loading it would switch nothing.
+// A profile running SOMEWHERE ELSE is exactly the switch this verb is for and keeps its row, port
+// marker and all.
+func TestModelPickerExcludesTheLoadedProfile(t *testing.T) {
+	fake := newLauncher()
+	fake.profiles = []LaunchProfileChoice{
+		{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", ContextWindow: 32768, Running: true},
+		{Name: "beta", Backend: "ollama", Addr: "localhost:8081", ContextWindow: 8192, Running: true},
+	}
+	m := seededLoad(t, fake)
+
+	m, _ = typeCommand(t, m, "/model")
+
+	if !m.picker.open {
+		t.Fatal("the picker did not open; one profile is still switchable")
+	}
+	want := []string{"beta — ollama · 8k (:8081) · running"}
+	if got := m.pickerRows(); !reflect.DeepEqual(got, want) {
+		t.Errorf("rows = %v, want %v — the profile serving this session is not a choice", got, want)
+	}
+}
+
+// An unresolvable session address excludes NOTHING: not knowing where the session points is no
+// evidence that a profile points there, and dropping a row on that guess would hide the very
+// profile the human came to load.
+func TestModelPickerExcludesNothingWithoutASessionAddress(t *testing.T) {
+	fake := newLauncher()
+	fake.profiles = []LaunchProfileChoice{
+		{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", Running: true},
+	}
+	m := seededLoad(t, fake)
+	m.opts.Endpoint = "://not a url"
+
+	m, _ = typeCommand(t, m, "/model")
+
+	if !m.picker.open || len(m.pickerRows()) != 1 {
+		t.Errorf("picker = {open:%v rows:%v}, want the profile still offered", m.picker.open, m.pickerRows())
+	}
+}
+
 // The rows are re-read on EVERY open (ADR 0029 D4), so a profile added in the launcher's own TUI a
 // moment ago is offered here without restarting apogee.
-func TestLoadPickerReadsTheProfilesFreshOnEveryOpen(t *testing.T) {
+func TestModelPickerReadsTheProfilesFreshOnEveryOpen(t *testing.T) {
 	fake := newLauncher()
 	m := seededLoad(t, fake)
-	m, _ = typeCommand(t, m, "/load")
+	m, _ = typeCommand(t, m, "/model")
 	m = step(t, m, keyEsc())
 
 	fake.profiles = append(fake.profiles, LaunchProfileChoice{Name: "gamma", Backend: "lmstudio"})
-	m, _ = typeCommand(t, m, "/load")
+	m, _ = typeCommand(t, m, "/model")
 
 	if got := fake.listCount(); got != 2 {
 		t.Errorf("the profile list was read %d times, want one read per open", got)
@@ -818,9 +878,9 @@ func TestLoadPickerReadsTheProfilesFreshOnEveryOpen(t *testing.T) {
 
 // ⏎ on a row hands off to the actuation latch: the overlay closes, the latch is taken for THAT
 // profile, and the blocking verb rides the returned Cmd (actuation.go owns everything after this).
-func TestLoadPickerAcceptTakesTheLatch(t *testing.T) {
+func TestModelPickerAcceptTakesTheLatch(t *testing.T) {
 	m := seededLoad(t, newLauncher())
-	m, _ = typeCommand(t, m, "/load")
+	m, _ = typeCommand(t, m, "/model")
 	m = step(t, m, keyDown())
 
 	m, cmd := stepCmd(t, m, keyEnter())
@@ -837,10 +897,10 @@ func TestLoadPickerAcceptTakesTheLatch(t *testing.T) {
 }
 
 // Esc closes the picker and actuates nothing.
-func TestLoadPickerEscCloses(t *testing.T) {
+func TestProfilePickerEscCloses(t *testing.T) {
 	fake := newLauncher()
 	m := seededLoad(t, fake)
-	m, _ = typeCommand(t, m, "/load")
+	m, _ = typeCommand(t, m, "/model")
 
 	m = step(t, m, keyEsc())
 
@@ -855,11 +915,11 @@ func TestLoadPickerEscCloses(t *testing.T) {
 	}
 }
 
-func TestLoadCommandArgumentForm(t *testing.T) {
+func TestModelCommandProfileArgumentForm(t *testing.T) {
 	t.Run("known name activates without an overlay", func(t *testing.T) {
 		m := seededLoad(t, newLauncher())
 
-		m, cmd := typeCommand(t, m, "/load beta")
+		m, cmd := typeCommand(t, m, "/model beta")
 
 		if m.picker.open {
 			t.Error("the argument form opened an overlay; it takes the name directly")
@@ -872,10 +932,26 @@ func TestLoadCommandArgumentForm(t *testing.T) {
 		}
 	})
 
+	t.Run("a profile that is already loaded is still a name", func(t *testing.T) {
+		// The exclusion is about the OFFERING. A name the config plainly holds is never "unknown",
+		// and re-activating it is the launcher's own idempotent no-op.
+		fake := newLauncher()
+		fake.profiles = []LaunchProfileChoice{
+			{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", Running: true},
+		}
+		m := seededLoad(t, fake)
+
+		m, _ = typeCommand(t, m, "/model alpha")
+
+		if !m.actuation.inFlight || m.actuation.profile != "alpha" {
+			t.Fatalf("actuation = %+v, want the named profile activated all the same", m.actuation)
+		}
+	})
+
 	t.Run("unknown name lists the defined ones", func(t *testing.T) {
 		m := seededLoad(t, newLauncher())
 
-		m, _ = typeCommand(t, m, "/load nope")
+		m, _ = typeCommand(t, m, "/model nope")
 
 		if m.actuation.inFlight {
 			t.Error("an unknown name took the latch")
@@ -886,33 +962,25 @@ func TestLoadCommandArgumentForm(t *testing.T) {
 	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
 		m := seededLoad(t, newLauncher())
 
-		m, _ = typeCommand(t, m, "/load a b")
+		m, _ = typeCommand(t, m, "/model a b")
 
 		if m.actuation.inFlight {
 			t.Error("a usage error took the latch")
 		}
-		assertPickerDegrade(t, m, loadUsage)
+		assertPickerDegrade(t, m, modelUsage)
 	})
 }
 
-// Each rung of the degrade ladder is one honest sentence and no overlay: the integration itself, the
-// config it reads, and the profiles that config was supposed to hold.
-func TestLoadCommandDegradesWithAnHonestNote(t *testing.T) {
-	t.Run("launcher not configured", func(t *testing.T) {
-		// All four seams are wired together or not at all, so the nil check speaks for all of them.
-		m, _ := seededPicker(t, testOpts)
-
-		m, _ = typeCommand(t, m, "/load")
-
-		assertPickerDegrade(t, m, noLauncherNote)
-	})
-
+// Each rung of the launcher offering's degrade ladder is one honest sentence and no overlay: the
+// config the seam reads, the profiles that config was supposed to hold, and the profile list that
+// held nothing but what is already loaded.
+func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
 	t.Run("the config could not be read", func(t *testing.T) {
 		fake := newLauncher()
 		fake.listErr = errors.New("no launcher config at /home/x/.config/llama-launcher/config.yaml")
 		m := seededLoad(t, fake)
 
-		m, _ = typeCommand(t, m, "/load")
+		m, _ = typeCommand(t, m, "/model")
 
 		assertPickerDegrade(t, m, "no launcher config at /home/x/.config/llama-launcher/config.yaml")
 	})
@@ -920,31 +988,62 @@ func TestLoadCommandDegradesWithAnHonestNote(t *testing.T) {
 	t.Run("no profiles defined", func(t *testing.T) {
 		m := seededLoad(t, &fakeLauncher{})
 
-		m, _ = typeCommand(t, m, "/load")
+		m, _ = typeCommand(t, m, "/model")
 
 		assertPickerDegrade(t, m, noProfilesNote)
 	})
 
-	t.Run("the argument form takes the same ladder", func(t *testing.T) {
-		// A degrade must answer BOTH forms: an argument reaching the accept path with no seam would
-		// actuate nothing and say nothing, which is the one outcome a command must never have.
-		m, _ := seededPicker(t, testOpts)
+	t.Run("the only profile is the one already loaded", func(t *testing.T) {
+		fake := newLauncher()
+		fake.profiles = []LaunchProfileChoice{
+			{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", Running: true},
+		}
+		m := seededLoad(t, fake)
 
-		m, _ = typeCommand(t, m, "/load alpha")
+		m, _ = typeCommand(t, m, "/model")
+
+		assertPickerDegrade(t, m, onlyProfileLoadedNote)
+	})
+
+	t.Run("the argument form takes the same ladder", func(t *testing.T) {
+		// A degrade must answer BOTH forms: an argument reaching the accept path past a config that
+		// cannot be read would actuate nothing and say nothing.
+		fake := newLauncher()
+		fake.listErr = errors.New("no launcher config at /home/x/.config/llama-launcher/config.yaml")
+		m := seededLoad(t, fake)
+
+		m, _ = typeCommand(t, m, "/model alpha")
 
 		if m.actuation.inFlight {
-			t.Error("the argument form took the latch with no seam wired")
+			t.Error("the argument form took the latch with no config to read")
 		}
-		assertPickerDegrade(t, m, noLauncherNote)
+		assertPickerDegrade(t, m, "no launcher config at /home/x/.config/llama-launcher/config.yaml")
 	})
 }
 
-// /load is idle-only by the commandSpecs table: it ends in a blocking launcher verb that changes the
-// server the running Exchange is talking to, so a line typed mid-run earns the standing answer.
-func TestLoadCommandIsIdleOnly(t *testing.T) {
-	if spec, ok := commandByName("load"); !ok || spec.whileRunning || !spec.takesArgs {
-		t.Fatalf("commandSpec = %+v, want an idle-only verb that reads its arguments", spec)
+// The launcher's offering is NOT gated on the heartbeat — not even on the offline rung, /server's
+// posture: bringing a server up is the one useful act while the current one is down, and that is
+// exactly what this verb does now.
+func TestModelPickerOffersProfilesWhileOffline(t *testing.T) {
+	m := seededLoad(t, newLauncher())
+	for range offlineFailureThreshold {
+		m = foldBeatMsg(t, m, downBeat("dial tcp: refused"))
 	}
+	if !m.hb.offline {
+		t.Fatalf("precondition: the session is not offline after %d failed beats", offlineFailureThreshold)
+	}
+
+	m, _ = typeCommand(t, m, "/model")
+
+	if !m.picker.open || m.picker.kind != pickerLoad {
+		t.Errorf("picker = {open:%v kind:%v}, want the launcher's offering open while offline",
+			m.picker.open, m.picker.kind)
+	}
+}
+
+// /model is idle-only by the commandSpecs table, and that covers the launcher offering too: it ends
+// in a blocking launcher verb that changes the server the running Exchange is talking to.
+func TestModelCommandIsIdleOnlyWithTheLauncher(t *testing.T) {
 	fake := newLauncher()
 	opts := testOpts
 	opts.LaunchProfiles = fake.list
@@ -955,15 +1054,37 @@ func TestLoadCommandIsIdleOnly(t *testing.T) {
 		t.Fatalf("precondition: state = %v, want running", m.state)
 	}
 
-	m, _ = typeCommand(t, m, "/load alpha")
+	m, _ = typeCommand(t, m, "/model alpha")
 
 	if m.picker.open {
-		t.Error("the picker opened mid-run; /load is idle-only")
+		t.Error("the picker opened mid-run; /model is idle-only")
 	}
 	if m.actuation.inFlight {
 		t.Error("the latch was taken mid-run")
 	}
 	if got := plain(m.View()); !strings.Contains(got, commandsAtIdleNote) {
 		t.Errorf("the refusal note is missing from the transcript:\n%s", got)
+	}
+}
+
+// /load is not a verb any more: the launcher's profiles are /model's offering, so the old word earns
+// the sole-token typo guard's refusal rather than quietly doing something.
+func TestLoadIsNoLongerAVerb(t *testing.T) {
+	if spec, ok := commandByName("load"); ok {
+		t.Errorf("commandSpecs still carries %+v; /model is the launcher's verb now", spec)
+	}
+	m := seededLoad(t, newLauncher())
+
+	m, cmd := typeCommand(t, m, "/load")
+
+	if cmd != nil {
+		t.Error("/load returned a Cmd; the word names nothing")
+	}
+	if m.picker.open || m.actuation.inFlight {
+		t.Errorf("/load still acted: picker %v, actuation %+v", m.picker.open, m.actuation)
+	}
+	want := unknownSlashNote("/load")
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want the unknown-slash refusal %q", got, want)
 	}
 }

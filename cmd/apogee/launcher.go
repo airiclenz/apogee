@@ -141,13 +141,13 @@ func launcherConfigPath(opts options) (string, bool) {
 	return path, true
 }
 
-// launchProfile is one row of `/load`'s picker as this bridge assembles it — a Launch profile
-// (CONTEXT.md) reduced to the facts the choice is made on. It is the composition root's own type,
+// launchProfile is one row of `/model`'s launcher picker as this bridge assembles it — a Launch
+// profile (CONTEXT.md) reduced to the facts the choice is made on. It is the composition root's own type,
 // projected onto the renderer's LaunchProfileChoice at the seam, so no launcher type ever reaches
 // internal/tui (the heartbeat.Beat precedent).
 type launchProfile struct {
-	// Name is the profile's key in the launcher config — the label, and the identity `/load`
-	// activates by.
+	// Name is the profile's key in the launcher config — the label, and the identity a profile
+	// load activates by.
 	Name string
 	// Backend is the server the profile runs on: llamacpp, ollama, lmstudio.
 	Backend string
@@ -224,8 +224,8 @@ func launchProfiles(ops launcherOps, path string) ([]launchProfile, []string, er
 // from the backend's defaults when the profile states neither, so an empty answer here means the
 // address genuinely could not be resolved — reported as unknown rather than as a bogus ":0".
 //
-// It is built the same way endpointAddr builds its answer, because the two are COMPARED: `/load`
-// decides whether it has to move the session by asking whether the profile's address is the one
+// It is built the same way endpointAddr builds its answer, because the two are COMPARED: a profile
+// load decides whether it has to move the session by asking whether the profile's address is the one
 // the session is already on, and a comparison between two spellings of one address would answer
 // that wrongly.
 func profileAddr(profile *llamalauncher.ResolvedProfile) string {
@@ -247,7 +247,7 @@ func intValue(p *int) int {
 
 // endpointAddr reduces an apogee endpoint URL to the host:port the launcher speaks in — the
 // translation that lets a session say "act on the server I am talking to" (`/unload`, `/stop`)
-// and lets a profile's address be compared against the current one (`/load`).
+// and lets a profile's address be compared against the current one (`/model`).
 //
 // A URL with no explicit port resolves to its scheme's default, because that IS the address the
 // wire connects to; a value with no host, an unparseable one, or a portless one whose scheme has
@@ -302,9 +302,9 @@ func instanceAddr(instance *llamalauncher.RunningInstance) string {
 // ----------------------------------------------------------------------------
 
 // launcherWiring is the composition root's half of the launcher seams: the bridge this file owns
-// (the ops and the resolved config path) plus the session move, because `/load` is the one verb that
-// can end in one. wire.go builds a single value and hands its four methods to internal/tui as
-// closures, so the renderer sees func values and never the library.
+// (the ops and the resolved config path) plus the session move, because activating a Launch profile
+// is the one thing that can end in one. wire.go builds a single value and hands its four methods to
+// internal/tui as closures, so the renderer sees func values and never the library.
 //
 // The bodies live here rather than in wire.go because they name facade types — RunningInstance,
 // StopResult, ResolvedProfile — and this file is the only place in apogee that may (see the header).
@@ -370,7 +370,7 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 
 	// restart=false is the launcher's idempotent activation (its ADR-0007): a server already serving
 	// this profile is left alone, and drifted parameters produce a notice rather than a silent
-	// restart of a server the human may be mid-conversation with. `/load` means "make the world serve
+	// restart of a server the human may be mid-conversation with. A profile load means "make the world serve
 	// this", and a world already serving it needs nothing done to it.
 	instance, _, err := w.ops.loadProfile(cfg, profile, false, progress, collect)
 	if err != nil {

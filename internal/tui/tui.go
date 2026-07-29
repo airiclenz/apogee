@@ -295,11 +295,11 @@ type Options struct {
 	// session where it was. nil ⇒ switching is unwired, and `/server` degrades to a note.
 	SwitchServer func(name string) (ServerSwitchResult, error)
 
-	// LaunchProfiles lists the Launch profiles the launcher's config defines — the `/load` picker's
-	// rows, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile added in the
-	// launcher's own TUI a moment ago is offered here without restarting apogee. The binary owns the
-	// read because it is the only layer that knows the launcher exists at all; the renderer receives
-	// rows it can label and pick from, and nothing else.
+	// LaunchProfiles lists the Launch profiles the launcher's config defines — what `/model` offers on
+	// a host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile
+	// added in the launcher's own TUI a moment ago is offered here without restarting apogee. The
+	// binary owns the read because it is the only layer that knows the launcher exists at all; the
+	// renderer receives rows it can label and pick from, and nothing else.
 	//
 	// The error is the one failure that sinks the list — no config at a configured path, a config
 	// that will not parse — and reaches the human as a one-line note rather than an overlay. A single
@@ -307,8 +307,9 @@ type Options struct {
 	// one moved model file must not cost the user their other nine profiles.
 	//
 	// nil ⇒ the llama-launcher integration is not configured on this host (`llama-launcher: off`, or
-	// auto-detect found no launcher config), and `/load` degrades to a note naming the key. The four
-	// launcher seams are wired together or not at all, so one nil check speaks for all of them.
+	// auto-detect found no launcher config): `/model` then offers what the server itself advertises,
+	// and `/unload`/`/stop` degrade to a note naming the key. The four launcher seams are wired
+	// together or not at all, so one nil check speaks for all of them.
 	LaunchProfiles func() ([]LaunchProfileChoice, error)
 
 	// LoadProfile activates the named Launch profile and reports what the session must adopt — the
@@ -398,7 +399,7 @@ type ServerSwitchResult struct {
 	ContextWindow int    // the `context-window:` pin that survives the switch; 0 ⇒ unpinned/unknown
 }
 
-// LaunchProfileChoice is one Launch profile the `/load` picker offers (CONTEXT.md: a Launch profile
+// LaunchProfileChoice is one Launch profile `/model` offers (CONTEXT.md: a Launch profile
 // is the LAUNCH-side description of a model — model file, server, flags — owned by the launcher's
 // config, opposite the request-side Model profile). Name does two jobs with one value, the
 // [ServerChoice] shape: it labels the row, and it is the name [Options.LoadProfile] is called with.
@@ -415,7 +416,7 @@ type LaunchProfileChoice struct {
 	Running       bool   // discovery attributes a live instance to this profile right now
 }
 
-// ProfileLoadResult is what a completed `/load` hands back: whether the session had to MOVE to follow
+// ProfileLoadResult is what a completed profile load hands back: whether the session had to MOVE to follow
 // the profile, and — when it did — the same [ServerSwitchResult] a `/server` switch produces, so the
 // completion fold that already exists understands both without a second shape (ADR 0029 D2).
 //

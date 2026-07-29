@@ -116,7 +116,7 @@ func launcherFixture(t *testing.T, models []string, body string) *llamalauncher.
 	return cfg
 }
 
-// The rows `/load` browses are the launcher's own list, projected: its display order (favourites
+// The rows `/model` browses are the launcher's own list, projected: its display order (favourites
 // first, then by server, then by name), the resolved address, and the merged context size —
 // inherited from defaults where a profile states none. Running is discovery's attribution, from
 // a SINGLE sweep however many rows it marks.
@@ -327,7 +327,7 @@ func TestEndpointAddrBothDirections(t *testing.T) {
 	}
 
 	// Round trip: an address the launcher reported becomes an endpoint, and reduces back to the
-	// same address — the property `/load`'s same-server comparison rests on.
+	// same address — the property a profile load's same-server comparison rests on.
 	for _, addr := range []string{"127.0.0.1:8080", "192.168.64.1:1111", "[::1]:11434"} {
 		back, err := endpointAddr(addrEndpoint(addr))
 		if err != nil {

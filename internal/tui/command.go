@@ -79,11 +79,12 @@ type commandSpec struct {
 //
 // /new is an alias of /clear — both verbs are recognised here and route to the same context-reset
 // logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
-// synchronously in runCommand like /clear); /model opens the model picker over what the upstream
-// advertises, /server the server picker over what config.yaml names, and /load the Launch-profile
-// picker over what the llama-launcher config defines (picker.go, one overlay for all three), the
-// same way — though /load's accept then runs a blocking launcher verb behind the actuation latch
-// rather than finishing on the Update loop (actuation.go, ADR 0029).
+// synchronously in runCommand like /clear); /model and /server open the shared picker (picker.go)
+// the same way — /server over what config.yaml names, /model over the Launch profiles the
+// llama-launcher config defines when the launcher is configured and over what the upstream
+// advertises when it is not. That first offering is the one whose accept does not finish on the
+// Update loop: it runs a blocking launcher verb behind the actuation latch instead (actuation.go,
+// ADR 0029).
 //
 // /unload and /stop are that same latch without an overlay: they take no argument because there is
 // nothing to choose — both act on the server this session is talking to and on nothing else, which is
@@ -99,9 +100,8 @@ var commandSpecs = []commandSpec{
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
-	{name: "model", summary: "switch to another model the server serves", takesArgs: true},
+	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
-	{name: "load", summary: "load a llama-launcher profile into a local server", takesArgs: true},
 	{name: "unload", summary: "free the model of the server this session is on"},
 	{name: "stop", summary: "stop the server this session is on"},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
