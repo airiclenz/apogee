@@ -15,10 +15,43 @@ import (
 const maxSummaryLen = 200
 
 // frontmatterRe splits a SKILL.md into its YAML frontmatter (group 1) and body (group 2): an
-// optional BOM, a "---" fence line, the frontmatter, a closing "---" fence line, then the rest.
-// (?s) makes "." span newlines and the non-greedy first group stops at the first closing fence.
-// \r? tolerates CRLF files. It mirrors the oracle's /^?---\n([\s\S]*?)\n---\n([\s\S]*)$/.
-var frontmatterRe = regexp.MustCompile(`(?s)\A\x{feff}?-{3}[ \t]*\r?\n(.*?)\r?\n-{3}[ \t]*\r?\n?(.*)\z`)
+// optional BOM, leading blank space, a "---" fence line, the frontmatter, a closing "---" fence
+// line, then the rest. (?s) makes "." span newlines and the non-greedy first group stops at the
+// first closing fence. \r? tolerates CRLF files. It widens the oracle's
+// /^?---\n([\s\S]*?)\n---\n([\s\S]*)$/ by the leading-whitespace allowance.
+//
+// That allowance matters more than it looks: a file whose fence is preceded by one stray blank
+// line does not merely lose its frontmatter, it falls through to parseFallback and loads a
+// GARBAGE skill — displayName and summary both read "---", the fence itself. Tolerating the blank
+// line is what keeps an invisible whitespace slip from putting nonsense in the picker. Only
+// whitespace is skipped, so a plain-Markdown skill (no fence at the top) still takes the fallback
+// path it is meant to.
+var frontmatterRe = regexp.MustCompile(`(?s)\A\x{feff}?[ \t\r\n]*-{3}[ \t]*\r?\n(.*?)\r?\n-{3}[ \t]*\r?\n?(.*)\z`)
+
+// keyLineRe matches one "key: value" line for the lenient scan: a key, a colon, then the
+// remainder of the line taken verbatim as the value. Indentation is allowed before the key —
+// a tab-indented "\tdescription:" is exactly the kind of slip the scan exists to recover, and
+// refusing indented keys would read it as prose belonging to the line above. The value group is
+// optional so a bare "key:" (whatever follows belongs to it) still registers. Requiring
+// whitespace after the colon keeps "foo:bar" a plain value, as YAML has it.
+var keyLineRe = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_.-]*)[ \t]*:(?:[ \t]+(.*))?$`)
+
+// blockScalarRe matches a bare YAML block-scalar indicator ("|", ">-", "|+2"). It introduces a
+// value on the following lines rather than being one, so the scan drops it and lets those lines
+// fold in as the value instead of prefixing the summary with punctuation.
+var blockScalarRe = regexp.MustCompile(`^[|>][+-]?\d*$`)
+
+// recognisedKeys is the set of frontmatter keys the lenient scan will adopt, lowercased. Only
+// these are read: an unmodelled key ("argument-hint", "metadata", "allowed-tools") closes the
+// current field instead of contributing to it, so its own indented block cannot be mistaken for
+// continuation text belonging to the skill's description.
+var recognisedKeys = map[string]bool{
+	"id":          true,
+	"name":        true,
+	"displayname": true,
+	"summary":     true,
+	"description": true,
+}
 
 // frontmatter is the recognised YAML frontmatter keys, including the apogee-code/agent-skills
 // aliases: id|name for the identifier, displayName for the picker label, summary|description
@@ -32,10 +65,11 @@ type frontmatter struct {
 }
 
 // parseSkill turns one SKILL.md's content into a Skill, deriving the ID from dirName when the
-// frontmatter omits it. It has two paths: frontmatter (the canonical case) and a no-frontmatter
-// fallback (the oracle's leniency — id from the folder, displayName/summary sniffed from the
-// first lines). Either path must yield a non-empty id, displayName, AND summary, else the skill
-// is rejected so the caller skips it with a soft error. Load sets Dir; parseSkill leaves it "".
+// frontmatter omits it. It has two paths: frontmatter (the canonical case, itself strict-then-
+// lenient — see parseFrontmatterFields) and a no-frontmatter fallback (the oracle's leniency —
+// id from the folder, displayName/summary sniffed from the first lines). Either path must yield
+// a non-empty id, displayName, AND summary, else the skill is rejected so the caller skips it
+// with a soft error. Load sets Dir; parseSkill leaves it "".
 func parseSkill(content, dirName string) (Skill, error) {
 	if m := frontmatterRe.FindStringSubmatch(content); m != nil {
 		return parseWithFrontmatter(m[1], m[2], dirName)
@@ -47,9 +81,9 @@ func parseSkill(content, dirName string) (Skill, error) {
 // the oracle's alias/derivation rules: id = id||name||dirName, displayName = displayName||
 // titleCase(id), summary = summary||description.
 func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
-	var fm frontmatter
-	if err := yaml.Unmarshal([]byte(fmText), &fm); err != nil {
-		return Skill{}, fmt.Errorf("malformed YAML frontmatter: %w", err)
+	fm, err := parseFrontmatterFields(fmText)
+	if err != nil {
+		return Skill{}, err
 	}
 	id := firstNonEmpty(fm.ID, fm.Name, dirName)
 	return validate(Skill{
@@ -58,6 +92,117 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 		Summary:     clampSummary(firstNonEmpty(fm.Summary, fm.Description)),
 		Body:        strings.TrimSpace(body),
 	})
+}
+
+// parseFrontmatterFields reads the recognised keys out of a frontmatter block, strictly first
+// and leniently second.
+//
+// Strict YAML is the canonical path and runs unchanged, so a well-formed block keeps exactly its
+// YAML meaning — quoting, block scalars, comments, the lot. The lenient scan runs ONLY when
+// yaml.v3 rejects the block, and reads it as what SKILL.md frontmatter almost always is in
+// practice: a flat run of "key: value" lines. That recovers the everyday authoring slips a human
+// would not even call ambiguous — an unquoted value containing ": ", a tab indent, an unbalanced
+// quote — each of which a strict parser can only answer by making the entire skill disappear.
+//
+// The trade is deliberate. These files are shared with tools whose parsers are more forgiving, so
+// a skill another tool lists must not silently vanish here; apogee would rather load a skill whose
+// frontmatter is sloppy than withhold one whose intent is plain. Nothing is lost when the block IS
+// valid — the strict result is used untouched, and only a hard YAML failure reaches the scan.
+//
+// When even the scan finds no recognised key, the original YAML error is returned rather than the
+// scan's silence: it names the actual line and fault, which is the more useful thing to print.
+func parseFrontmatterFields(text string) (frontmatter, error) {
+	var strict frontmatter
+	strictErr := yaml.Unmarshal([]byte(text), &strict)
+	if strictErr == nil {
+		return strict, nil
+	}
+	if lenient, ok := scanFrontmatterFields(text); ok {
+		return lenient, nil
+	}
+	return frontmatter{}, fmt.Errorf("malformed YAML frontmatter: %w", strictErr)
+}
+
+// scanFrontmatterFields is the lenient reader: it walks the block line by line, taking each
+// recognised "key: value" as a field and folding every following unkeyed line into it (the shape
+// a wrapped value takes). A line that is wholly a comment is dropped, but a "#" INSIDE a value
+// stays literal here — the strict parser already had its say, and on this path the author's text
+// is more trustworthy than YAML's comment rule. Keys are lowercased, so displayName and
+// displayname both land.
+//
+// Two rules keep a recovery from inventing meaning. FIRST DECLARATION WINS, so a repeated key
+// cannot overwrite the one the author led with. And any key outside recognisedKeys CLOSES the
+// open field rather than extending it, which is what stops a nested block ("metadata:" and its
+// indented children) from being folded into the description above it.
+//
+// ok reports whether any recognised key came back with a value; false means there is nothing here
+// worth preferring over the strict parser's error.
+func scanFrontmatterFields(text string) (frontmatter, bool) {
+	values := map[string]string{}
+	openKey := ""
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		m := keyLineRe.FindStringSubmatch(line)
+		if m == nil { // not a key line — continuation text for whatever field is open
+			if openKey != "" {
+				values[openKey] = strings.TrimSpace(values[openKey] + " " + line)
+			}
+			continue
+		}
+		key := strings.ToLower(m[1])
+		if _, declared := values[key]; declared || !recognisedKeys[key] {
+			openKey = "" // a repeat, or a key we do not model: end the run rather than absorb it
+			continue
+		}
+		values[key] = stripBlockScalar(unquoteValue(strings.TrimSpace(m[2])))
+		openKey = key
+	}
+	fm := frontmatter{
+		ID:          values["id"],
+		Name:        values["name"],
+		DisplayName: values["displayname"],
+		Summary:     values["summary"],
+		Description: values["description"],
+	}
+	return fm, fm != (frontmatter{})
+}
+
+// stripBlockScalar drops a value that is only a block-scalar indicator, so the lines folded in
+// after it become the value rather than trailing a stray "|" or ">-".
+func stripBlockScalar(v string) string {
+	if blockScalarRe.MatchString(v) {
+		return ""
+	}
+	return v
+}
+
+// unquoteValue strips one layer of surrounding quotes, so a value the author quoted for YAML's
+// benefit ("execute: a path") does not carry its quotes through the lenient path, which otherwise
+// takes the line verbatim.
+//
+// A LONE opening quote is stripped too — that unclosed quote is the very fault that sent the
+// block down this path, and leaving it would put a stray character in the picker. The strip is
+// gated on the quote being the only one in the value, so a value that merely begins with a quoted
+// phrase (`"hello" world`) keeps every character it has.
+func unquoteValue(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	for _, quote := range []byte{'"', '\''} {
+		if s[0] != quote {
+			continue
+		}
+		if s[len(s)-1] == quote {
+			return s[1 : len(s)-1]
+		}
+		if strings.Count(s, string(quote)) == 1 {
+			return s[1:]
+		}
+	}
+	return s
 }
 
 // parseFallback handles a SKILL.md with no frontmatter (the oracle's fallback): id = dirName,

@@ -19,8 +19,17 @@
 //
 // Layering (load.go): later sources override earlier on an id collision, so a workspace skill
 // shadows a global one of the same id. Robustness is by design — a missing source dir is
-// skipped, and a malformed skill is skipped with a soft error rather than failing the whole
-// load, so one bad file never blanks the catalog.
+// skipped, and a malformed skill is skipped rather than failing the whole load, so one bad file
+// never blanks the catalog. Every skip is recorded ON the catalog (Catalog.Skipped) so the /skills
+// report can say which file was passed over and why: soft must not mean silent, or a broken skill
+// is indistinguishable from an absent one.
+//
+// Parsing is forgiving before it gives up (parse.go). Frontmatter is read as strict YAML first,
+// and only a hard YAML failure falls through to a line-by-line "key: value" scan that recovers the
+// ordinary authoring slips — an unquoted value containing ": ", a tab indent, an unclosed quote.
+// These same SKILL.md files are shared with tools whose parsers are more forgiving, so a skill
+// another tool lists must not vanish here; a block that IS valid YAML keeps its exact YAML meaning
+// and never reaches the scan.
 //
 // No builtin/embedded skills and no auto-created ~/.apogee/skills directory ship in v1 (the
 // creation-deferred convention — a writer creates what it needs); both are additive future

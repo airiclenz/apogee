@@ -554,6 +554,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Frontmatter a human reads without hesitation no longer costs a skill its place in the
+  catalogue.** `SKILL.md` frontmatter was parsed as strict YAML and nothing else, so ordinary
+  authoring slips deleted the whole skill: an unquoted `description:` containing `": "` (YAML reads
+  it as a nested mapping), a tab indent, an unclosed quote. These files are shared with tools whose
+  parsers are more forgiving, so the same skill would list in one and be missing here. Strict YAML
+  is still the canonical path and a valid block keeps its exact YAML meaning — quoting, block
+  scalars, comments — but a hard YAML failure now falls through to a line-by-line `key: value` scan
+  that recovers the author's intent. The recovery is bounded so it cannot invent meaning: first
+  declaration wins, an unmodelled key (`metadata:`, `allowed-tools:`) ends the current field rather
+  than being folded into it, and a block with no recognisable key is still skipped — reported with
+  the original YAML diagnosis, which names the line and the fault.
+
+- **A stray blank line above the opening `---` no longer loads a garbage skill.** The fence had to
+  be the very first thing in the file; one leading blank line and the frontmatter was not
+  frontmatter, so the file fell through to the plain-Markdown path and produced an entry whose name
+  and summary were both `"---"` — the fence itself, sitting in the picker. Leading blank space is
+  now skipped before the fence. Only whitespace, so a genuine plain-Markdown skill still takes the
+  fallback path it is meant to.
+
 - **A skill apogee refuses to load now says so, instead of just not being there.** Discovery is
   deliberately soft — one malformed `SKILL.md` must never sink the whole catalog — but the reason
   it skipped a file was assembled and then thrown away at every call site, so a skill with (say) a

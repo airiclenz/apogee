@@ -126,8 +126,9 @@ func TestLoadMalformedSkillSkippedWithSoftError(t *testing.T) {
 func TestLoadRecordsSkippedSkillOnCatalog(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, filepath.Join(home, "skills"), "good", "---\nid: good\nsummary: fine\n---\nbody")
-	// A plain scalar containing ": " is the real-world break — YAML reads it as a nested mapping.
-	writeSkill(t, filepath.Join(home, "skills"), "bad", "---\nname: bad\ndescription: oops: here\n---\nbody")
+	// Unrecoverable on BOTH paths: invalid YAML (an unbalanced quote), and no recognised key for
+	// the lenient scan to salvage — so it is a genuine skip, not one the leniency now rescues.
+	writeSkill(t, filepath.Join(home, "skills"), "bad", "---\nnope: \"unbalanced\n---\nbody")
 
 	cat, _ := Load(Sources{Home: home}) // the error is deliberately dropped, as NewProvider does
 
