@@ -4,7 +4,7 @@
 **Status:** READY (design grilled 2026-07-24; all forks owner-resolved — no needs-design-call
 escalation expected). Touches `internal/tui`, `internal/domain/ask.go`,
 `internal/tools/ask_user.go` (+ CHANGELOG).
-**Source:** handoff `docs/handoffs/2026-07-24 - 00 - ask-prompt-popup-adoption-design.md` +
+**Source:** handoff `docs/handoffs/archived/2026-07-24 - 00 - ask-prompt-popup-adoption-design.md` +
 owner grilling 2026-07-24. Owner explicitly widened scope mid-grill: the ask_user layout
 redesign is folded in NOW (multiple-choice + free text), not left as a future adopter note.
 **Track:** post-`v1.0.0` TUI quality + one additive tool-surface feature. The `AskRequest` /

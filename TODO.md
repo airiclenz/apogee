@@ -29,30 +29,27 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   sessions for the session history (I think they should be marked / grouped for that schedule run).
   Needs grilling.
 
-- **[P1] Server / model switching** — **the switching itself SHIPPED 2026-07-28; the local-server
-  half SHIPPED 2026-07-29; the profile half remains.** Both user-facing switches exist and are
-  recorded in
-  [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
-  (see the ledger below): `/model` picks among what the beat reported and drives the existing
-  Rebind, `/server` moves the whole Upstream (a new provider client, the per-server Monitor swapped
-  behind the unchanged seam, the model unbound until the new server's first beat binds it), and the
-  file-only `servers:` key names where a session may go. **Remaining:**
-  - **Local server start/stop — SHIPPED 2026-07-29; the body left this file for the
-    authoritative record:**
-    [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
-    (the decision), `docs/plans/2026-07-29 - 00 - llama-launcher-integration-plan.md` (the
-    execution) and the CHANGELOG entry (what a user sees): `/model` over the launcher's Launch
-    profiles when one is configured, plus `/unload-model` + `/stop-server`, all over
-    llama-launcher **v1.6.1** imported as a library, behind the file-only `llama-launcher:` key,
-    with **Launch profile** now a CONTEXT.md term. **Still open:** only that plan's last item, the
-    owner-run live pass on a host with a real launcher config — failures there reopen the item they
-    belong to, not this entry.
+- **[P1] Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
+  2026-07-29 the local-server half); the profile half is all that remains.** The shipped bodies have
+  left this file for their authoritative records — see the ledger at the end of this entry
+  ([ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
+  for `/model` + `/server`,
+  [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
+  for the launcher). **Remaining:**
   - The switchable **model-profile** abstraction (sampling params, context-budget %,
     thinking/tool-call format — reuse `internal/processing`), still unstarted and still
     deliberately **global**: `model-profile` is not per-model, and neither a rebind nor a server
-    switch touches it. Distinct from the launcher's profiles above, which are **launch-side**
-    (model file, server flags); `model-profile` is **request-side** — the grill above should
-    keep the two "profile" namespaces from colliding in the UX.
+    switch touches it. Distinct from the launcher's **Launch profiles**, which are **launch-side**
+    (model file, server flags); `model-profile` is **request-side** — the grill it needs must
+    keep the two "profile" namespaces from colliding in the UX. Note the producer already exists
+    with no switchable consumer: `apogee probe model` prints a suggested `model-profile:` block as
+    paste-ready YAML ([ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)),
+    and `modelProfileConfig` (`cmd/apogee/config.go`) reads one static block today — `tool-call-format`,
+    `tool-call-pattern`, `thinking`, and nothing else. Two ADRs already lean on the layer this item
+    would build: [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md)
+    pins "global, not per-model" into the rebind contract, and
+    [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 defers the
+    user-after-tool wire risk to it by name.
   - Deliberate non-goals of the 2026-07-28 work, additive later if wanted: a `--save` form for
     `/server`, a `server:` startup key selecting a named entry, and persisting a switched endpoint
     in the session record (`--resume` returns to the configured one).
@@ -97,14 +94,14 @@ disposition table but no user-facing override. See *Configurable tool × mode se
 - The upstream **Heartbeat** (a ten-second monitor, async startup, offline state, live rebind on
   an observed model/window change, the `/v1/models` data layer) — 2026-07-27,
   [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md) +
-  `docs/plans/2026-07-27 - 00 - upstream-heartbeat-plan.md`. It is the engine half of the `/server`
+  `docs/plans/archived/2026-07-27 - 00 - upstream-heartbeat-plan.md`. It is the engine half of the `/server`
   item above, not that item's close-out.
 - **One `/` namespace** — direct `/skill-id` invocation as inline text tokens (the chip strip
   retired), one merged command+skill menu that runs a command at accept without destroying the
   draft, `/skills`, the sole-token typo guard, resolve-gated inline accents, and the per-command
   while-running policy — 2026-07-28,
   [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) +
-  `docs/plans/2026-07-28 - 03 - slash-skills-inline-plan.md`. It closes the payload half of the
+  `docs/plans/archived/2026-07-28 - 03 - slash-skills-inline-plan.md`. It closes the payload half of the
   oracle note above (`{text, skillIds, fileRefs}`) — parity of payload, not of UI.
 - **`/model` and `/server`** — the picker UI over the heartbeat's prepared seams and the endpoint
   switch, both halves of the *Server / model switching* item above: the `/model` picker over
@@ -113,7 +110,16 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   behind the unchanged `tui.Options` seams plus the new `SwitchServer` one; and the file-only
   `servers:` config key — 2026-07-28,
   [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md) +
-  `docs/plans/2026-07-28 - 05 - model-server-picker-plan.md`.
+  `docs/plans/archived/2026-07-28 - 05 - model-server-picker-plan.md`.
+- **Local server start/stop — the launcher half** of the *Server / model switching* item above:
+  `/model` over the launcher's **Launch profiles** when one is configured, plus `/unload-model` and
+  `/stop-server`, all over llama-launcher **v1.6.1** imported as a library at the composition root,
+  behind the file-only `llama-launcher:` key (unset = auto-detect), with **Launch profile** now a
+  CONTEXT.md term — 2026-07-29,
+  [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md) +
+  `docs/plans/archived/2026-07-29 - 00 - llama-launcher-integration-plan.md`. The owner-run live
+  pass closed with it (six of seven scenarios; (7) waived), so nothing of this half is open —
+  a later live failure reopens the item it belongs to, not this entry.
 
 ---
 
@@ -616,7 +622,7 @@ any standing constraint that must not be re-filed.
 
 - **Mid-string (non-trailing) token completion** — CLOSED 2026-07-28, **shipped rather than
   deferred** ([ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) decision 5;
-  `docs/plans/2026-07-28 - 03 - slash-skills-inline-plan.md` item 6). The deferral's own rationale
+  `docs/plans/archived/2026-07-28 - 03 - slash-skills-inline-plan.md` item 6). The deferral's own rationale
   — that the trailing-token rule bought a "cursor-position-free, robust" design — was the defect:
   it is why a draft already in the box had no `/` namespace at all. All three regions (`/`, `@`,
   `/skill <partial>`) now complete the token at the caret. **Standing:** the caret walk is
