@@ -2,7 +2,10 @@
 
 **Date:** 2026-07-29
 **Status:** IN PROGRESS (design grilled 2026-07-29; all four TODO forks resolved by the owner —
-no needs-design-call escalation expected). Item 1 landed 2026-07-29; item 2 is next.
+no needs-design-call escalation expected). Items 1–7 landed 2026-07-29. Items 9–12 were added
+2026-07-29 from the owner's first live run (see the addendum below) and are next; item 8 (the
+owner-run live pass) stays open and should run AFTER they land, so the pass validates the
+surface as revised rather than the one it replaced.
 **Prerequisite — MET 2026-07-29:** llama-launcher **v1.6.1** (the portability release — its
 plan `docs/plans/2026-07-29-portability-release-plan.md` *in that repo*) is tagged and pushed;
 it builds on linux/darwin/windows and exports `ErrUnsupported` + `ErrStartupTimeout`. The
@@ -391,5 +394,135 @@ reopen the relevant item.
 **Tests.** This *is* the test. Nothing committed but the NOTES.
 
 **Acceptance.** Every scenario observed on hardware; the plan archives only after this item.
+After items 9–12 land, the scenarios drive `/model` where they say `/load` — same folds, same
+latch, the verb renamed under them.
 
 **Commit.** — (notes-only; any fixes commit under their own item)
+
+---
+
+## Addendum 2026-07-29 — the surface as the first live session found it
+
+**Source:** owner decision 2026-07-29, after the first live run of the shipped verbs. On a
+single-model llama.cpp server the `/model` picker is a one-row list — the current model, under
+a "⏎ switch" hint (`pickerHint`, picker.go:81) that switches nothing — while the list the
+owner actually thinks in, the launcher's profiles, sits behind a separate verb. The owner's
+call, four parts: `/model` IS the switching verb and offers the Launch profiles when the
+launcher is configured, current one excluded; `/load` disappears from the surface; `/unload`
+and `/stop` keep their logic but stop being offered; the dropdown reads alphabetically.
+Items 9–12 carry that decision. ADR 0029 D3's three-verb surface is thereby revised —
+item 12 records the amendment in the ADR rather than leaving the code to contradict it.
+
+## 9. `/model` follows the launcher — profiles are the offering, the loaded one excluded
+
+**What.** The merge of `/load` into `/model` (owner decision above), and the end of the
+one-row picker.
+
+- Command table (`command.go:102-104`): `/model`'s summary widens to cover both offerings
+  (e.g. `switch model — the launcher's profiles, or what the server serves`); the `load` row
+  is REMOVED. A typed `/load` then falls to the unknown-slash refusal (`unknownSlashNote`) —
+  correct for a verb that no longer exists. Dispatch: the `"load"` case (model.go:1149)
+  goes; `runLoadCommand` folds into `runModelCommand`.
+- `runModelCommand` (picker.go:108-127) branches on the wired seams, ONCE, at the top:
+  - **Launcher mode** (`opts.LaunchProfiles != nil && opts.LoadProfile != nil`): the verb
+    is the old `/load`, whole — rows via `opts.LaunchProfiles()` read at open (ADR 0029 D4
+    freshness), `/load`'s own degrade ladder (config error → the launcher's words as a note;
+    zero profiles → `noProfilesNote`), the argument form matching profile names with the
+    `profileNameList` unknown-note, accept → `startProfileLoad` through the actuation latch
+    (actuation.go) — which is where the owner's `auto_stop_server`/`auto_unload` semantics
+    live: the LAUNCHER honors its own config when a load displaces a running server or model
+    (facade contract, item 2); apogee adds nothing. Deliberately NOT consulted here:
+    `modelSwitchBlocked`'s offline rung — like `/server`, bringing a server up is the one
+    useful act while the current one is down, and `/load` never consulted it either.
+  - **Fallback** (seams nil — launcher `off` or absent): today's advertised-models behavior
+    (`m.hb.models`, `modelSwitchBlocked` ladder, `bindPickedModel` accept), unchanged but for
+    the exclusion below. A multi-model or remote server without the launcher keeps its picker.
+- **The exclusion** (both modes — the feedback's headline): the row for what the session is
+  already bound to is not offered. Launcher mode: drop a profile that is `Running` AND whose
+  resolved `Addr` equals `sessionAddr(m.opts.Endpoint)` (the `elsewherePort` comparison);
+  ambiguous attribution (item 2: marks nothing) excludes nothing. Fallback: drop the row where
+  `offered.ID == m.opts.Model` (`currentRowSuffix` and `currentModelRow` retire with it —
+  `/server`'s current-row posture is NOT touched). Zero rows after exclusion is a note, no
+  overlay: launcher mode `the only launch profile is already loaded`, fallback `the server
+  serves no other model`. With every offered row switchable, `pickerHint`'s `⏎ switch` is
+  true by construction — the hint's honesty is this item's acceptance, not a wording change.
+- `pickerLoad`'s kind, rows renderer (`launchProfileRows`) and title stay; the launcher-mode
+  title reads as `/model`'s (`switch model — llama-launcher`). `loadUsage` retires with the
+  verb; `modelUsage` covers both forms.
+
+**Tests.** `picker_test.go`/`actuation_test.go` style: launcher-mode `/model` lists profiles
+minus the loaded one (running-elsewhere rows stay, port-marked); accept reaches the latch;
+argument form matches a profile and refuses an unknown one naming the candidates; fallback
+lists advertised models minus current; both zero-row notes; offline + launcher mode still
+opens (the /server posture); `/load` earns the unknown-slash refusal.
+
+**Acceptance.** Green gate incl. `-race`. No path shows a picker whose only row is the thing
+already loaded.
+
+**Commit.** `feat(tui): /model follows the launcher — profiles are the offering, the loaded
+one excluded`
+
+## 10. `/unload` and `/stop` go hidden — recognised, never offered
+
+**What.** The owner keeps the verbs' logic but takes them off the menu. `commandSpec`
+(command.go:66-72) gains a `hidden` flag beside `menuOnly` — the inverse posture: `menuOnly`
+is offered-never-parsed, `hidden` is parsed-never-offered. `commandSuggestions`
+(autocomplete.go:264-...) skips hidden rows; `matchCommand` and dispatch are untouched, so
+the typed forms still act exactly as item 6 shipped them (latch, wording, folds). `unload`
+and `stop` are marked hidden. One consequence stated in the table comment: a hidden verb
+still shadows a same-named skill (shadowing follows the PARSER, command.go:117-119, which
+still recognises it) — the price of keeping the verb typed-reachable, and `stop`/`unload`
+are names a skill should not take anyway.
+
+**Tests.** Dropdown suggestions omit both verbs (bare `/` and prefix forms); typed `/unload`
+and `/stop` still dispatch through the latch against the fake; the unknown-slash refusal does
+NOT claim them.
+
+**Acceptance.** Green gate; item 6's tests stay green untouched — hiding changed the menu,
+not the verbs.
+
+**Commit.** `feat(tui): /unload and /stop go hidden — typed they act, listed they are not`
+
+## 11. The dropdown reads alphabetically
+
+**What.** `commandSpecs` (command.go:95-110) reorders alphabetically — the literal itself,
+not a render-time sort: the table is THE registry and display order is one of the things it
+declares (its own comment says so, command.go:92-94). That comment's one ordering dependency
+— `/skill` before `/skills`, because the dropdown prefix-matches in table order — is
+PRESERVED by alphabetical order (a strict prefix sorts first), so the comment is updated to
+say the order is alphabetical and that the dependency holds by construction. A test asserts
+sortedness, so a future verb added out of place fails loudly instead of quietly un-sorting
+the menu.
+
+**Tests.** The sortedness assertion; the existing `/skill`-completes-to-the-picker behavior
+re-asserted over the new order.
+
+**Acceptance.** Green gate; bare `/` lists every visible verb alphabetically.
+
+**Commit.** `feat(tui): the command dropdown reads alphabetically`
+
+## 12. Docs pass — the revised surface
+
+**What.** Every claim items 9–11 made stale, plus the design record. README: the
+slash-command table loses `/load`, rewords `/model` (the launcher offering when configured,
+the advertised one otherwise), and moves `/unload`/`/stop` to a short "typed-only" note —
+documented, since they still act, but marked as not listed; the "Local servers via
+llama-launcher" section rewords `/load` → `/model`. `cmd/apogee/defaults/config.yaml`: the
+`llama-launcher:` comment block's verb sentence (item 1 wrote it around `/load`) rewords the
+same way. `layout.md`: the mini-language section's takesArgs count (three now: `/confine
+/model /server`) and the picker-overlay verb list (`/model /server` — `/load` gone); the
+footer section's `loading <profile>…` state stays, it was never verb-named. ADR 0029: an
+**amendment note under D3**, dated 2026-07-29, recording the owner's decision (the
+three-verb surface folded into `/model`; `/unload`/`/stop` hidden; source: first live run)
+— the ADR stays the design authority by saying what changed rather than being contradicted.
+CONTEXT.md: verify the **Launch profile** entry names no verb, or reword it. CHANGELOG +
+VERSION: minor bump (command-surface change — the item 7(c) posture), `v0.10.0` → `v0.11.0`.
+
+**Tests.** None (docs); `make check` still gates.
+
+**Acceptance.** No doc claims a capability or a verb the code lacks; `grep -r "/load"` over
+README, layout.md, CONTEXT.md and the template finds only the ADR amendment's history and
+this plan.
+
+**Commit.** `docs: the launcher surface folds into /model — README, template, layout, ADR
+0029 amendment`
