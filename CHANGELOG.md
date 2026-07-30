@@ -554,6 +554,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`make install` no longer reports success after putting the binary somewhere your shell cannot
+  see it.** On a machine where no candidate directory was both on `PATH` and writable without
+  `sudo` — the ordinary macOS case, where `/usr/local/bin` belongs to root and neither
+  `~/.local/bin` nor `~/bin` is on the default `PATH` that `/etc/paths` builds — the target fell
+  through to creating `~/.local/bin`, copied the binary there, printed `installed apogee -> …` and
+  exited 0, with the fact that it was unreachable relegated to a trailing warning. Typing `apogee`
+  then did nothing, on a build that had just said it was installed. Auto-detection now never
+  installs off-`PATH`: it stops, prints each candidate with the reason it was passed over (missing,
+  not on `PATH`, not writable), and gives the two one-line ways to finish — a `sudo install` into
+  `/usr/local/bin`, or `make install PREFIX=…` with the line that puts that directory on `PATH`.
+  The Go bin dir (`go env GOBIN`, else `$(go env GOPATH)/bin`) joins the candidate list, which is
+  where a Go developer's `PATH` usually already points, so the common macOS case now just works.
+  An explicit `PREFIX` is still honoured off-`PATH`, with the warning it always had. Installing
+  over a copy of `apogee` that sits earlier on `PATH` — a stale `go install` binary in `~/go/bin`,
+  say — now warns that the name still resolves to the other one, rather than leaving you to wonder
+  why the version did not change.
+
 - **Frontmatter a human reads without hesitation no longer costs a skill its place in the
   catalogue.** `SKILL.md` frontmatter was parsed as strict YAML and nothing else, so ordinary
   authoring slips deleted the whole skill: an unquoted `description:` containing `": "` (YAML reads

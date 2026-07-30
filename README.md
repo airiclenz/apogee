@@ -538,11 +538,22 @@ A `Makefile` wraps the common Go invocations:
 | Command | Does |
 |---|---|
 | `make build` | Compile the binary to `./apogee` |
+| `make install` | Build, then copy the binary to a directory on your `PATH` |
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
 | `make test` | Run the test suite with the race detector |
 | `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
 | `make check` | The full acceptance gate — gofmt, vet, build, race tests, cross-build |
 | `make help` | List every target |
+
+To run `apogee` from anywhere, `make install` copies the built binary to the first
+directory that is both on your `PATH` and writable without `sudo`, trying
+`/usr/local/bin`, your Go bin dir (`go env GOBIN`, else `$(go env GOPATH)/bin`),
+`/opt/homebrew/bin`, `~/.local/bin` and `~/bin` in that order. It never installs
+somewhere your shell cannot find it: if nothing qualifies — the usual case on macOS,
+where `/usr/local/bin` belongs to root — it stops and prints the two ways to finish,
+either `sudo install -m 0755 ./apogee /usr/local/bin/apogee` or an explicit
+`make install PREFIX=~/.local/bin` plus the line that puts that directory on your
+`PATH`. `PREFIX` overrides the search entirely.
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names. Releases are cross-compiled to

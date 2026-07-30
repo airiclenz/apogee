@@ -34,12 +34,20 @@ LIVE_ENDPOINT ?= http://192.168.64.1:1111
 
 # Where `install` drops the binary. Leave empty to let `install` auto-pick the
 # first candidate dir that is already on $PATH *and* writable without sudo,
-# trying, in order: /usr/local/bin (Intel macOS + most Linux), /opt/homebrew/bin
-# (Apple Silicon), ~/.local/bin, ~/bin. If none qualifies it creates and uses
-# ~/.local/bin and warns if that is not on PATH. Override with
-# `make install PREFIX=/some/dir` (use sudo if the dir needs root).
+# trying, in order: /usr/local/bin (most Linux, and macOS if you own it), the Go
+# bin dir (`go env GOBIN`, else `$(go env GOPATH)/bin` — on PATH for most Go
+# developers), /opt/homebrew/bin (Apple Silicon), ~/.local/bin, ~/bin. Nothing is
+# ever installed off-PATH by auto-detection: if no candidate qualifies, `install`
+# stops and prints the one-line ways to finish, because a binary copied somewhere
+# the shell cannot see is not an install. Override with
+# `make install PREFIX=/some/dir` (use sudo if the dir needs root); an explicit
+# PREFIX is honoured even when it is off-PATH, with a warning.
+#
+# `=` (not `:=`) keeps the `go env` calls out of every other target.
 PREFIX ?=
-INSTALL_CANDIDATES := /usr/local/bin /opt/homebrew/bin $$HOME/.local/bin $$HOME/bin
+GO_BIN_DIR = $(shell go env GOBIN 2>/dev/null)
+GOPATH_BIN = $(shell p="$$(go env GOPATH 2>/dev/null)"; [ -n "$$p" ] && printf '%s/bin' "$$p")
+INSTALL_CANDIDATES = /usr/local/bin $(or $(GO_BIN_DIR),$(GOPATH_BIN)) /opt/homebrew/bin $$HOME/.local/bin $$HOME/bin
 
 .DEFAULT_GOAL := help
 
@@ -70,7 +78,26 @@ install: build
 			case ":$$PATH:" in *":$$d:"*) ;; *) continue ;; esac; \
 			if [ -d "$$d" ] && [ -w "$$d" ]; then dir="$$d"; break; fi; \
 		done; \
-		if [ -z "$$dir" ]; then dir="$$HOME/.local/bin"; mkdir -p "$$dir"; fi; \
+	fi; \
+	if [ -z "$$dir" ]; then \
+		echo "error: no candidate directory is both on your PATH and writable without sudo:" >&2; \
+		for d in $(INSTALL_CANDIDATES); do \
+			why=""; \
+			[ -d "$$d" ] || why="does not exist"; \
+			if [ -z "$$why" ]; then case ":$$PATH:" in *":$$d:"*) ;; *) why="not on your PATH" ;; esac; fi; \
+			[ -n "$$why" ] || why="not writable (owned by another user)"; \
+			printf '  %-28s %s\n' "$$d" "$$why" >&2; \
+		done; \
+		echo "" >&2; \
+		echo "./$(BINARY) is built — finish the install with either:" >&2; \
+		echo "" >&2; \
+		echo "  sudo install -m 0755 ./$(BINARY) /usr/local/bin/$(BINARY)" >&2; \
+		echo "      system-wide; asks for your password" >&2; \
+		echo "" >&2; \
+		echo "  make install PREFIX=\"\$$HOME/.local/bin\"" >&2; \
+		echo "      then put that dir on your PATH, e.g. (zsh — bash: ~/.bashrc):" >&2; \
+		echo "      echo 'export PATH=\"\$$HOME/.local/bin:\$$PATH\"' >> ~/.zshrc" >&2; \
+		exit 1; \
 	fi; \
 	if [ ! -w "$$dir" ]; then \
 		echo "error: $$dir is not writable — re-run with sudo, or 'make install PREFIX=<writable dir on PATH>'." >&2; \
@@ -78,10 +105,15 @@ install: build
 	fi; \
 	rm -f "$$dir/$(BINARY)"; \
 	cp "$(BINARY)" "$$dir/$(BINARY)" || exit 1; \
+	chmod 0755 "$$dir/$(BINARY)" || exit 1; \
 	echo "installed $(BINARY) -> $$dir/$(BINARY)"; \
 	case ":$$PATH:" in \
-		*":$$dir:"*) ;; \
-		*) echo "warning: $$dir is not on your PATH — add it (e.g. 'export PATH=\"$$dir:\$$PATH\"') to run '$(BINARY)' by name." ;; \
+		*":$$dir:"*) \
+			found="$$(command -v $(BINARY) 2>/dev/null || true)"; \
+			if [ -n "$$found" ] && [ "$$found" != "$$dir/$(BINARY)" ]; then \
+				echo "warning: '$(BINARY)' still resolves to $$found, which comes earlier on your PATH — remove that copy or reorder PATH." >&2; \
+			fi ;; \
+		*) echo "warning: $$dir is not on your PATH — add it (e.g. 'export PATH=\"$$dir:\$$PATH\"') to run '$(BINARY)' by name." >&2 ;; \
 	esac
 
 ## test: run the full test suite with the race detector
