@@ -47,7 +47,7 @@ LIVE_ENDPOINT ?= http://192.168.64.1:1111
 PREFIX ?=
 GO_BIN_DIR = $(shell go env GOBIN 2>/dev/null)
 GOPATH_BIN = $(shell p="$$(go env GOPATH 2>/dev/null)"; [ -n "$$p" ] && printf '%s/bin' "$$p")
-INSTALL_CANDIDATES = /usr/local/bin $(or $(GO_BIN_DIR),$(GOPATH_BIN)) /opt/homebrew/bin $$HOME/.local/bin $$HOME/bin
+INSTALL_CANDIDATES = /usr/local/bin $(or $(GO_BIN_DIR),$(GOPATH_BIN)) $$HOME/.local/bin /opt/homebrew/bin $$HOME/bin
 
 .DEFAULT_GOAL := help
 
