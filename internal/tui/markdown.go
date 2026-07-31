@@ -26,11 +26,15 @@ import (
 
 // renderMarkdownBody renders an assistant message's markdown into styled physical lines at the
 // content width — the columns inside the ✦ marker gutter; the caller re-attaches the marker via
-// withMarker. It walks the text block by block: fenced code blocks, ATX headings, bullet/numbered
-// list items, then plain paragraphs. An empty message yields one empty line so its marker still
-// shows (matching the old wrapText("") behaviour for a just-opened assistant buffer). Runs of two
-// or more blank lines are collapsed to one first (collapseBlankRuns), so a padded message never
-// opens a two- or three-row gap inside its own block.
+// withMarker. It walks the text block by block: fenced code blocks, ATX headings, pipe tables,
+// bullet/numbered list items, then plain paragraphs. The table matcher is offered a line before
+// the list matcher, which would otherwise read a delimiter row written without outer pipes
+// ("- | -") as a bullet; a block that is no table — or is one the width cannot fit — falls through
+// to the paragraph path, which is what it rendered as before tables existed. An empty message
+// yields one empty line so its marker still shows (matching the old wrapText("") behaviour for a
+// just-opened assistant buffer). Runs of two or more blank lines are collapsed to one first
+// (collapseBlankRuns), so a padded message never opens a two- or three-row gap inside its own
+// block.
 func renderMarkdownBody(th theme, text string, width int) []string {
 	if width < 1 {
 		width = 1
@@ -57,6 +61,13 @@ func renderMarkdownBody(th theme, text string, width int) []string {
 		case isHeading(line):
 			out = append(out, renderHeadingLine(th, headingText(line), width)...)
 		default:
+			if tbl, span, ok := matchTableBlock(lines, i); ok {
+				if rendered, fits := renderTable(th, tbl, width); fits {
+					out = append(out, rendered...)
+					i += span - 1 // the loop's own i++ steps past the block's last line
+					continue
+				}
+			}
 			if li, ok := matchListItem(line); ok {
 				out = append(out, renderListItem(th, li, width)...)
 				continue

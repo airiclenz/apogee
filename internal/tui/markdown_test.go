@@ -234,25 +234,41 @@ func visible(lines []string) []string {
 }
 
 // Plain text with no markup is returned byte-identical (the no-regression property that keeps
-// existing assistant-text assertions green).
+// existing assistant-text assertions green). A pipe that is not part of a table — no delimiter
+// row under it — is plain text like any other character.
 func TestPlainTextUnchanged(t *testing.T) {
 	th := newTheme()
-	const in = "just plain assistant text"
-	out := renderMarkdownBody(th, in, 80)
-	if len(out) != 1 || out[0] != in {
-		t.Errorf("renderMarkdownBody(%q) = %#v; want a single unchanged line", in, out)
+	for _, in := range []string{
+		"just plain assistant text",
+		"run cat file | grep needle",
+		"a | b",
+		"| a | b |",
+		"--- | ---",
+		"the range is 1 -- 3",
+	} {
+		out := renderMarkdownBody(th, in, 80)
+		if len(out) != 1 || out[0] != in {
+			t.Errorf("renderMarkdownBody(%q) = %#v; want a single unchanged line", in, out)
+		}
 	}
 }
 
 // Every rendered line stays within the content width, even when a bold span crosses a soft-wrap
-// boundary — the guarantee that baked-in ANSI never perturbs the wrap arithmetic.
+// boundary — the guarantee that baked-in ANSI never perturbs the wrap arithmetic. A table obeys
+// the same cap: its columns shrink and its cells truncate until the whole block fits.
 func TestWidthNeverExceeds(t *testing.T) {
 	th := newTheme()
 	const width = 20
-	body := "**" + strings.Repeat("alpha ", 10) + "**bold tail"
-	for _, ln := range renderMarkdownBody(th, body, width) {
-		if w := lipgloss.Width(ln); w > width {
-			t.Errorf("line %q has visible width %d > %d", strip(ln), w, width)
+	bodies := []string{
+		"**" + strings.Repeat("alpha ", 10) + "**bold tail",
+		"| header one | header two |\n| :-- | --: |\n| " + strings.Repeat("long ", 6) + "| 7 |",
+		"| a | b | c |\n| --- | :-: | ---: |\n| **bold cell** | `code cell` | x |",
+	}
+	for _, body := range bodies {
+		for _, ln := range renderMarkdownBody(th, body, width) {
+			if w := lipgloss.Width(ln); w > width {
+				t.Errorf("line %q has visible width %d > %d", strip(ln), w, width)
+			}
 		}
 	}
 }

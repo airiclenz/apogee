@@ -2,7 +2,10 @@ package tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+
+	lipgloss "charm.land/lipgloss/v2"
 )
 
 // ----------------------------------------------------------------------------
@@ -227,5 +230,297 @@ func TestTableMatchBlockOutOfRange(t *testing.T) {
 		if _, _, ok := matchTableBlock(lines, start); ok && start != 0 {
 			t.Errorf("matchTableBlock(lines, %d) detected a table; want none", start)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Markdown tables: layout and rendering
+// ----------------------------------------------------------------------------
+//
+// These assertions are written against the visible text (strip) and the visible width
+// (lipgloss.Width) like markdown_test.go's, because a column position is exactly what the reader
+// sees: the styling may or may not be emitted, but the cells must land in the same columns
+// either way.
+
+// The worked example in layout.md's "Markdown tables in assistant text", rendered at the width
+// that section states — the spec of record, asserted line for line.
+func TestTableRendersLayoutExample(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| Tool | Calls | Notes |",
+		"|:--|--:|:-:|",
+		"| Read File | 12 | fast |",
+		"| Run | 3 | `go test ./...` |",
+	}, "\n")
+	want := []string{
+		"Tool       Calls      Notes",
+		"─────────  ─────  ─────────────",
+		"Read File     12      fast",
+		"Run            3  go test ./...",
+	}
+
+	got := renderMarkdownBody(th, source, 34)
+
+	if !reflect.DeepEqual(visible(got), want) {
+		t.Errorf("table render mismatch:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(visible(got), "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The table's own syntax is consumed: no pipe and no delimiter hyphens survive into the rendered
+// block, and the header is styled where the profile emits colour.
+func TestTableConsumesItsSyntax(t *testing.T) {
+	th := newTheme()
+	source := "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
+
+	got := renderMarkdownBody(th, source, 40)
+
+	if len(got) != 3 {
+		t.Fatalf("got %d lines, want 3 (header, rule, one row): %#v", len(got), visible(got))
+	}
+	for i, ln := range got {
+		v := strip(ln)
+		if strings.Contains(v, "|") {
+			t.Errorf("line %d still shows a pipe: %q", i, v)
+		}
+		if strings.Contains(v, "---") {
+			t.Errorf("line %d still shows the delimiter row: %q", i, v)
+		}
+	}
+	if v := strip(got[1]); v != "─  ─  ─" {
+		t.Errorf("rule row = %q; want %q (a ─ run per column, bare gutters)", v, "─  ─  ─")
+	}
+	if colorActive(th) && !strings.Contains(got[0], "\x1b") {
+		t.Errorf("header row emitted no styling: %q", got[0])
+	}
+	if colorActive(th) && !strings.Contains(got[1], "\x1b") {
+		t.Errorf("rule row emitted no styling: %q", got[1])
+	}
+}
+
+// Each column is padded on the side its delimiter cell names, header cells included.
+func TestTableAlignsColumns(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| left | right | mid |",
+		"| :--- | ----: | :-: |",
+		"| x | y | z |",
+	}, "\n")
+
+	got := visible(renderMarkdownBody(th, source, 40))
+
+	if len(got) != 3 {
+		t.Fatalf("got %#v; want three lines", got)
+	}
+	// Columns are 4, 5 and 3 cells wide, so the row is "x…  " + "    y" + "  " + " z ".
+	if want := "x         y   z"; got[2] != want {
+		t.Errorf("row = %q; want %q (left, right, centred)", got[2], want)
+	}
+	if want := "left  right  mid"; got[0] != want {
+		t.Errorf("header = %q; want %q (the header aligns with its column too)", got[0], want)
+	}
+}
+
+// A centred cell with an odd remainder takes the extra space on its right (layout.md).
+func TestTableCentreOddRemainder(t *testing.T) {
+	th := newTheme()
+	source := "| head |\n| :-: |\n| ab |"
+
+	got := visible(renderMarkdownBody(th, source, 20))
+
+	if want := " ab"; got[2] != want {
+		t.Errorf("centred row = %q; want %q (one space left, the odd one right and trimmed)", got[2], want)
+	}
+}
+
+// Inline markup inside a cell styles as it does in a paragraph, and it is the rendered width that
+// sets the column: the ** and ` markers must not push the column open.
+func TestTableInlineMarkupInCells(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| name | note |",
+		"| --- | --- |",
+		"| **bold** | plain |",
+		"| `code` | x |",
+	}, "\n")
+
+	got := renderMarkdownBody(th, source, 40)
+	text := visible(got)
+
+	for i, v := range text {
+		if strings.Contains(v, "**") || strings.Contains(v, "`") {
+			t.Errorf("line %d still carries inline markers: %q", i, v)
+		}
+	}
+	// "bold" and "code" are four cells wide once rendered, the same as "name": the column stays
+	// four wide and "note" starts in the same place on every row.
+	for i, v := range text {
+		if i == 1 {
+			continue // the rule row has no gutter text to line up
+		}
+		if len(v) > 4 && !strings.HasPrefix(v[4:], "  ") {
+			t.Errorf("line %d = %q; want the second column to start at column 6", i, v)
+		}
+	}
+	if colorActive(th) && !strings.Contains(got[3], "\x1b") {
+		t.Errorf("a `code` cell emitted no styling: %q", got[3])
+	}
+}
+
+// The width cap is absolute: an over-wide table shrinks its widest column and cuts the cells that
+// no longer fit with a … tail, and no rendered line exceeds the width.
+func TestTableTruncatesToWidth(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| id | description |",
+		"| --- | --- |",
+		"| 1 | " + strings.Repeat("very long ", 6) + "|",
+	}, "\n")
+	const width = 24
+
+	got := renderMarkdownBody(th, source, width)
+
+	for _, ln := range got {
+		if w := lipgloss.Width(ln); w > width {
+			t.Errorf("line %q has visible width %d > %d", strip(ln), w, width)
+		}
+	}
+	if v := strip(got[2]); !strings.HasSuffix(v, "…") {
+		t.Errorf("over-wide cell = %q; want it cut with a … tail", v)
+	}
+	if len(got) != 3 {
+		t.Errorf("got %d lines, want 3 — a row is one physical line however wide its cells", len(got))
+	}
+}
+
+// A table shrinks as far as one cell per column before it gives up, and every line it draws stays
+// inside the width all the way down.
+func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
+	th := newTheme()
+	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
+
+	for _, width := range []int{8, 9, 12, 20} {
+		got := renderMarkdownBody(th, source, width)
+		if len(got) != 3 {
+			t.Errorf("width %d: got %d lines, want 3: %#v", width, len(got), visible(got))
+		}
+		for _, ln := range got {
+			if w := lipgloss.Width(ln); w > width {
+				t.Errorf("width %d: line %q has visible width %d", width, strip(ln), w)
+			}
+		}
+	}
+}
+
+// Below that floor the block is not a table at all: it falls back to the plain paragraphs it
+// rendered before tables existed, delimiter row and pipes visible. (Those paragraphs wrap exactly
+// as they always have — wrapText leaves a line of one- and three-cell tokens over-wide at width 3,
+// which is the pre-existing behaviour of the wrapper and not the table path's to change.)
+func TestTableUnfittableFallsBack(t *testing.T) {
+	th := newTheme()
+	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
+
+	for _, width := range []int{1, 3, 6} {
+		got := strings.Join(visible(renderMarkdownBody(th, source, width)), "\n")
+		if strings.Contains(got, "─") {
+			t.Errorf("width %d: block drew a rule; want the plain-paragraph fallback:\n%s", width, got)
+		}
+		if !strings.Contains(got, "---") {
+			t.Errorf("width %d: delimiter row was consumed; want it left as source text:\n%s", width, got)
+		}
+	}
+}
+
+// While a table streams in, the header row that has no delimiter under it yet is an ordinary
+// paragraph — the same contract every other half-typed construct keeps.
+func TestTableStreamingDegradesToParagraphs(t *testing.T) {
+	th := newTheme()
+	const header = "| Tool | Calls |"
+
+	got := renderMarkdownBody(th, header, 40)
+
+	if len(got) != 1 || got[0] != header {
+		t.Errorf("partial table = %#v; want the source line unchanged", visible(got))
+	}
+}
+
+// A table ends where its block ends: whatever follows renders as its own block, and the table is
+// not re-parsed line by line into it.
+func TestTableFollowedByOtherBlocks(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| a | b |",
+		"| --- | --- |",
+		"| 1 | 2 |",
+		"",
+		"# Title",
+		"- item",
+		"```",
+		"code()",
+		"```",
+	}, "\n")
+
+	got := visible(renderMarkdownBody(th, source, 40))
+
+	want := []string{"a  b", "─  ─", "1  2", "", "Title", "• item", "  code()"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mixed blocks:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A table that opens partway down a message leaves the prose above and below it alone.
+func TestTableInsideProse(t *testing.T) {
+	th := newTheme()
+	source := "Here it is:\n| a | b |\n| - | - |\n| 1 | 2 |\ndone"
+
+	got := visible(renderMarkdownBody(th, source, 40))
+
+	want := []string{"Here it is:", "a  b", "─  ─", "1  2", "done"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("prose around a table:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// fitColumns takes space from the widest column, and from the leftmost of equally wide ones, so a
+// table lays out identically on every repaint.
+func TestTableFitColumns(t *testing.T) {
+	cases := []struct {
+		name   string
+		widths []int
+		budget int
+		want   []int
+		ok     bool
+	}{
+		{"already fits", []int{3, 4}, 10, []int{3, 4}, true},
+		{"widest gives way first", []int{2, 9}, 8, []int{2, 6}, true},
+		{"equal columns: the leftmost gives way first", []int{5, 5, 3}, 10, []int{3, 4, 3}, true},
+		{"levels down to the runner-up before touching it", []int{9, 4, 2}, 10, []int{4, 4, 2}, true},
+		{"all the way to one cell each", []int{9, 9}, 2, []int{1, 1}, true},
+		{"one cell each still overflows", []int{9, 9}, 1, nil, false},
+		{"no budget at all", []int{4}, 0, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			widths := append([]int(nil), tc.widths...)
+			ok := fitColumns(widths, tc.budget)
+			if ok != tc.ok {
+				t.Fatalf("fitColumns(%v, %d) = %v; want %v", tc.widths, tc.budget, ok, tc.ok)
+			}
+			if !ok {
+				return
+			}
+			if !reflect.DeepEqual(widths, tc.want) {
+				t.Errorf("fitColumns(%v, %d) = %v; want %v", tc.widths, tc.budget, widths, tc.want)
+			}
+			total := len(widths) - 1
+			for _, w := range widths {
+				total += w
+				if w < 1 {
+					t.Errorf("column shrunk to %d; want a floor of one cell", w)
+				}
+			}
+		})
 	}
 }

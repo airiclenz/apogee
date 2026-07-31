@@ -65,6 +65,7 @@ const (
 	glyphSkill      = "✦" // marks a skill: the sent block's chips and the "/" menu's skill rows
 	glyphPresented  = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
 	glyphInterject  = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
+	glyphTableRule  = "─" // one cell of the rule under a markdown table's header row (mdtable.go)
 )
 
 // subAgentLabel is the one-line header that opens each contiguous run of sub-agent
@@ -109,11 +110,13 @@ type theme struct {
 	presentTitle lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
-	// as bold white, `inline code` and ``` fenced blocks ``` in orange.
+	// as bold white, `inline code` and ``` fenced blocks ``` in orange, and the dim rule a
+	// table draws under its header row.
 	mdBold        lipgloss.Style // **bold** span
 	mdHeading     lipgloss.Style // # … ###### heading line (bold white)
 	mdCode        lipgloss.Style // `inline code` span (orange)
 	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (orange)
+	mdRule        lipgloss.Style // the ─ run under a markdown table's header (faint: the rule frames the columns, it is not content)
 	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
 	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
 	popupBorder   lipgloss.Style // selector-popup chrome (renderPopup): startupBorder's rounded shape, filled solid black so the pane reads as a distinct overlay
@@ -163,6 +166,7 @@ func newTheme() theme {
 		mdHeading:    lipgloss.NewStyle().Bold(true).Foreground(colWhite),
 		mdCode:       lipgloss.NewStyle().Foreground(colCode),
 		mdCodeBlock:  lipgloss.NewStyle().Foreground(colCode),
+		mdRule:       lipgloss.NewStyle().Foreground(colFaint),
 		inputBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderBottom(false).

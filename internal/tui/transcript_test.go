@@ -267,6 +267,30 @@ func TestTranscriptCollapsesInteriorBlankRun(t *testing.T) {
 	}
 }
 
+// A table in an answer is framed like the rest of the message: the ✦ marker leads its first line
+// and every following line hangs under it, so the columns stay in the body column (mdtable.go).
+func TestTranscriptRendersMarkdownTable(t *testing.T) {
+	tr := feed(domain.MessageEvent{Text: strings.Join([]string{
+		"Counts:",
+		"",
+		"| Tool | Calls |",
+		"| :-- | --: |",
+		"| Read File | 12 |",
+		"| Run | 3 |",
+	}, "\n")})
+	want := strings.Join([]string{
+		"✦ Counts:",
+		"",
+		"  Tool       Calls",
+		"  ─────────  ─────",
+		"  Read File     12",
+		"  Run            3",
+	}, "\n")
+	if got := plainRender(tr); got != want {
+		t.Errorf("table block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 // The same trim applies to pre-tool narration finalised by the first ToolCall: exactly one
 // empty line between the narration and the tool block it introduces.
 func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {

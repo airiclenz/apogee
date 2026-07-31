@@ -1,16 +1,22 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+)
 
 // ----------------------------------------------------------------------------
 // Markdown tables: detection and parsing
 // ----------------------------------------------------------------------------
 //
 // GFM pipe tables in assistant text, whose visual contract is layout.md's "Markdown tables in
-// assistant text". This is the pure data half: no theme, no width, no ANSI — it answers only
-// "does a table start on this line, how far does it run, and what are its cells?", leaving every
-// styling and layout decision to the renderer. Cell text comes out as markdown source, because
-// the column widths that matter are the widths of the *rendered* cells.
+// assistant text". The file is two halves either side of the divider below: this one is pure
+// data — no theme, no width, no ANSI — answering only "does a table start on this line, how far
+// does it run, and what are its cells?", and the second lays those cells out as columns. Cell
+// text comes out of the parser as markdown source, because the column widths that matter are the
+// widths of the *rendered* cells.
 //
 // Detection is the two-line lookahead GFM describes: a line carrying at least one unescaped pipe,
 // immediately followed by a delimiter row of the same cell count. Everything here is prefix and
@@ -187,4 +193,183 @@ func hasUnescapedPipe(s string) bool {
 		}
 	}
 	return false
+}
+
+// ----------------------------------------------------------------------------
+// Markdown tables: layout and rendering
+// ----------------------------------------------------------------------------
+//
+// A table is drawn borderless — columns of text and two spaces of gutter, with one dim rule
+// under the header and no verticals anywhere — so it sits in the body column like any other
+// paragraph rather than as a boxed object dropped into the transcript. Every width here is a
+// display width (lipgloss.Width over the rendered, ANSI-carrying cell), never a byte count: the
+// cells are styled before they are measured, so markup characters and escape bytes can never
+// push a column open. One row is one physical line, which is what the line-oriented renderer
+// above this file requires (render.go), so an over-wide cell is cut with a … rather than wrapped.
+
+// tableGutter separates two adjacent columns: exactly two spaces, no vertical rule (layout.md).
+const tableGutter = "  "
+
+// renderTable lays a parsed table out as styled physical lines at the given width: bold header,
+// a ─ rule per column, then the body rows, each cell inline-rendered and padded on the side its
+// column's alignment names. It reports false when the table cannot be made to fit — the width is
+// too narrow even with every column down to a single cell — and the caller then leaves the block
+// to the paragraph path it would have taken before tables were rendered at all, which is always
+// readable and never overflows.
+func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
+	if len(tbl.header) == 0 {
+		return nil, false
+	}
+
+	header := make([]string, len(tbl.header))
+	for i, cell := range tbl.header {
+		header[i] = th.mdBold.Render(renderInline(th, cell))
+	}
+	rows := make([][]string, len(tbl.rows))
+	for i, row := range tbl.rows {
+		cells := make([]string, len(row))
+		for j, cell := range row {
+			cells[j] = renderInline(th, cell)
+		}
+		rows[i] = cells
+	}
+
+	widths := tableColumnWidths(header, rows)
+	if !fitColumns(widths, width-len(tableGutter)*(len(widths)-1)) {
+		return nil, false
+	}
+
+	out := make([]string, 0, len(rows)+2)
+	out = append(out, layoutTableRow(header, widths, tbl.align))
+	out = append(out, tableRuleRow(th, widths))
+	for _, row := range rows {
+		out = append(out, layoutTableRow(row, widths, tbl.align))
+	}
+	return out, true
+}
+
+// tableColumnWidths measures each column's natural width: the widest rendered cell in it, header
+// included, floored at one cell so a column of nothing but empty cells still holds a place
+// between its gutters instead of running them together.
+func tableColumnWidths(header []string, rows [][]string) []int {
+	widths := make([]int, len(header))
+	for i, cell := range header {
+		widths[i] = max(1, lipgloss.Width(cell))
+	}
+	for _, row := range rows {
+		for i, cell := range row {
+			if i >= len(widths) {
+				break
+			}
+			widths[i] = max(widths[i], lipgloss.Width(cell))
+		}
+	}
+	return widths
+}
+
+// fitColumns shrinks widths in place until they sum to no more than budget — the width left over
+// once the gutters are paid for — and reports whether they fit at all. Space is always taken from
+// the widest column and, where two are equally wide, from the leftmost, so the same table lays out
+// the same way on every repaint (layout.md). It steps a whole level at a time rather than one cell
+// at a time — the identical outcome, without a loop proportional to the overflow — because the
+// markdown walk re-runs over the whole transcript on every streamed token (model.go).
+func fitColumns(widths []int, budget int) bool {
+	total := 0
+	for _, w := range widths {
+		total += w
+	}
+	if len(widths) > budget {
+		return false // even a single cell per column overflows the width
+	}
+
+	for total > budget {
+		// The widest width, how many columns share it, and the width just below it: the level
+		// this pass brings that group down to.
+		top, next, count := 0, 0, 0
+		for _, w := range widths {
+			switch {
+			case w > top:
+				top, next, count = w, top, 1
+			case w == top:
+				count++
+			case w > next:
+				next = w
+			}
+		}
+		// Never take more than the overflow: the last cells come off the group left to right,
+		// which is what leaves the extra cell with the rightmost of equally wide columns.
+		take := min(total-budget, count*(top-next))
+		each, extra := take/count, take%count
+		for i, w := range widths {
+			if w != top {
+				continue
+			}
+			cut := each
+			if extra > 0 {
+				cut++
+				extra--
+			}
+			widths[i] -= cut
+		}
+		total -= take
+	}
+	return true
+}
+
+// layoutTableRow lays one row's rendered cells into the fitted column widths: a cell wider than
+// its column is cut ANSI-aware with a … tail, the rest are padded on the side their column names,
+// and the columns are joined by the gutter. The row's trailing padding is dropped — the last
+// column has nothing to line up against, and a line ending in spaces is whitespace a drag
+// selection would pick up.
+func layoutTableRow(cells []string, widths []int, align []mdAlign) string {
+	var b strings.Builder
+	for i, w := range widths {
+		if i > 0 {
+			b.WriteString(tableGutter)
+		}
+		cell := ""
+		if i < len(cells) {
+			cell = cells[i]
+		}
+		a := mdAlignLeft
+		if i < len(align) {
+			a = align[i]
+		}
+		b.WriteString(padTableCell(cell, w, a))
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
+// padTableCell fits one rendered cell to its column: truncated with a … when it is too wide, then
+// padded to the column with the spaces its alignment asks for — on the right for a left-aligned
+// cell, on the left for a right-aligned one, split for a centred one with the odd cell going to
+// its right (layout.md).
+func padTableCell(cell string, width int, align mdAlign) string {
+	if lipgloss.Width(cell) > width {
+		cell = ansi.Truncate(cell, width, "…")
+	}
+	pad := width - lipgloss.Width(cell)
+	if pad <= 0 {
+		return cell
+	}
+	switch align {
+	case mdAlignRight:
+		return strings.Repeat(" ", pad) + cell
+	case mdAlignCenter:
+		left := pad / 2
+		return strings.Repeat(" ", left) + cell + strings.Repeat(" ", pad-left)
+	default:
+		return cell + strings.Repeat(" ", pad)
+	}
+}
+
+// tableRuleRow renders the line under the header: one ─ run per column, each as wide as its
+// column, with the gutters between them left bare so it reads as a rule under each column rather
+// than as a border drawn around the table.
+func tableRuleRow(th theme, widths []int) string {
+	rules := make([]string, len(widths))
+	for i, w := range widths {
+		rules[i] = th.mdRule.Render(strings.Repeat(glyphTableRule, w))
+	}
+	return strings.Join(rules, tableGutter)
 }

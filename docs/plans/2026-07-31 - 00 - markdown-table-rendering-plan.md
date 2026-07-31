@@ -135,9 +135,24 @@ terminated by blank line and by a pipe-free line; single-column table (`| a |`).
 
 **Commit:** `feat(tui): add pure GFM table block detection and parsing`
 
-## 3. Table layout, rendering, and dispatch from `renderMarkdownBody`
+## 3. Table layout, rendering, and dispatch from `renderMarkdownBody` — ✅ DONE (2026-07-31)
 
 Depends on item 2.
+
+**NOTES (2026-07-31):** four deviations from the item's literal text. (a) No existing muted style fits
+the rule row — every faint style is role-named for another surface (`toolDetail` = tool branch lines,
+`statusFaint`/`footerText` = chrome) — so Decision 4's escape hatch was taken: a `mdRule` field
+(`colFaint`, no new colour) plus a `glyphTableRule` constant, both in `theme.go`. (b) A row's trailing
+padding is trimmed: the last column has nothing to line up against and a line ending in spaces is
+selectable whitespace — `layout.md`'s worked example is written that way and the transcript's own
+`renderPlain` trims it anyway. (c) The shrink loop steps a whole level at a time instead of one cell
+at a time — provably the same widths, without a loop proportional to the overflow (Decision 2's
+per-token cost constraint); `TestTableFitColumns` pins the tie-breaking. (d) The "width 3 and width 1
+neither panic nor overflow" test lands as two tests: at those widths the block takes the
+plain-paragraph fallback, and `wrapText`/`ansi.Wrap` already leaves a line of one- and three-cell
+tokens (`| --- | --- |`) over-wide there — pre-existing wrapper behaviour, untouched by this item — so
+the no-overflow assertion covers every width where a table is actually drawn (8 and up, down to one
+cell per column) and the narrow case asserts the fallback is taken.
 
 **What:** In `mdtable.go`, add the renderer implementing Decisions 4–8: per-cell
 `renderInline`, `th.mdBold` header, column measurement via `lipgloss.Width` on rendered
