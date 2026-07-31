@@ -401,9 +401,56 @@ passes; `make check` passes.
 
 **Commit:** `fix(tui): map mouse columns through the width authority`
 
-## 5. Correct the input-box caret mirrors
+## 5. Correct the input-box caret mirrors — ✅ DONE (2026-07-31)
 
 Depends on item 2.
+
+NOTES (2026-07-31): the mirrors now measure with `uniseg.StringWidth` — the widget's own function, not a
+grapheme-clustered stand-in for it. `runesWidth` is that one measure and both mirrors route through it
+(`cellToRuneOffset` inverts it over rune prefixes, exactly as `textarea.LineInfo` builds `CharOffset` and
+`textarea.Cursor` its x). `github.com/rivo/uniseg` therefore moves from the indirect block of `go.mod` to
+the direct one; no version changed. Reaching for `ansi.GraphemeWidth` instead would have been a second
+guess at the widget rather than a mirror of it.
+
+NOTES (2026-07-31): DEVIATION — one of the three named `inputaccent.go` sites deliberately KEEPS
+`runewidth.RuneWidth`: the last-rune term of the hard-word-break test, because the widget itself weighs
+that rune with go-runewidth there (`bubbles/v2@v2.1.0/textarea/textarea.go:1838-1839`, `lastCharLen`)
+while measuring the word with uniseg. "Measure the way the widget does" is the rule, and at that one term
+the widget does not use uniseg. It is also load-bearing: `rw.RuneWidth(U+FE0F) == 0` is what lets a
+VS16-filled word reach the full row width without ever tripping the break, which is how the widget comes
+to draw an EMPTY leading row (see the test note below).
+
+NOTES (2026-07-31): DEVIATION (scope) — this item also lands the accent-pass reconciliation item 4's
+NOTES flagged, since item 4 is ✅ and its note assigned it here. `inputCellSpans` now takes the width
+authority and measures its COLUMNS with it, and `accentTokens`' clamp moved off `lipgloss.Width` (the
+`inputaccent.go:116` Findings assigns to the mirror group). The rule is now stated at both sites: a
+mirror's ROWS are the widget's — only it decides which runes it put on which line — while the COLUMNS
+address cells the painter has already drawn, so they are the authority's. `accentTokens`' doc no longer
+claims `shadeCells` cuts with `ansi.Cut`; it has cut through the authority since item 4.
+
+NOTES (2026-07-31): `TestWrapRowStartsMirrorsTheWidget` now keys its expectation by `LineInfo.RowOffset`
+instead of reading `StartColumn` in order. The `⚠️⚠️⚠️ end` fixture at width 6 makes the widget draw an
+empty FIRST row (the group overflows without the hard break firing), and an empty row is addressed by no
+cursor column at all — the old dedup-in-order oracle could not see it, and would have demanded the mirror
+drop a row that is on screen, which is exactly a row an accent would then paint one line too high.
+
+NOTES (2026-07-31): both fixtures fail against the pre-change per-rune measure, as the item requires.
+`TestWrapRowStartsMirrorsTheWidget`: `an emoji carrying VS16` and `a VS16 run filling the row` report
+"widget draws 3 rows, wrapRowStarts says 2", and `VS16 inside a word too wide for the row` reports
+"col 4: runesWidth from the row start = 3, widget's CharOffset = 4". `TestCellToRuneOffset`:
+`cellToRuneOffset("a⚠️b", 3) = 4, want 3` — the caret one glyph past the click. And
+`TestCellToRuneOffsetInvertsWidth` breaks at every boundary after the first VS16 (5 boundaries of
+`"a⚠️b ⚠️"`).
+
+NOTES (2026-07-31): FOLLOW-UP for item 7 or a new item — `inputContentRows` (`render.go:648`), the third
+widget mirror item 3's NOTES asked this item to adopt, was NOT adopted: it is not a measurement fix but a
+box-height change, and the two mirrors disagree far too widely to fold in under this item's tests. Checked
+against a real textarea's `LineInfo.Height`: `wrapRowStarts` matches the widget on every non-tab case
+tried while `inputContentRows` does not — `"hello world"` at width 5 is 4 widget rows and it says 3,
+`"a b  c"` at 3 is 3 and it says 2, `"a-b-c-d"` at 3 is 3 and it says 4 — and over 4000 random
+prompt-shaped inputs the two differ on 41%. It under-counts, which is the ISSUES #2 failure mode its own
+docstring describes. `Σ len(wrapRowStarts(line, w))` is the drop-in replacement; both mirrors are still
+wrong on tabs (the widget expands them).
 
 **What:** Close symptom 3, which is independent of the painter question: the `textarea`
 widget measures with `uniseg.StringWidth` (grapheme-clustered), while apogee's two mirrors

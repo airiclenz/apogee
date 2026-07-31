@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -309,6 +309,12 @@ func TestCellToRuneOffset(t *testing.T) {
 		{"cjk inside wide rune → left edge", "日本語", 5, 2},
 		{"mixed: first ascii after the cjk run", "日本語 text", 7, 4}, // 6 cells cjk + 1 space, then 't'
 		{"mixed clamps past end", "日本語 text", 999, 8},
+		// The widget measures "⚠️" as one two-cell grapheme (uniseg), so cell 3 is the 'b' after
+		// it — a per-rune ruler reads U+26A0 as one cell and U+FE0F as none and lands on 'b' a
+		// cell early, taking the caret with it.
+		{"vs16 cluster is two cells wide", "a⚠️b", 3, 3},
+		{"vs16 end", "a⚠️b", 4, 4},
+		{"vs16 clamps past end", "a⚠️b", 99, 4},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -321,19 +327,22 @@ func TestCellToRuneOffset(t *testing.T) {
 
 // TestCellToRuneOffsetInvertsWidth is the invariant the caret relies on: at every rune boundary,
 // the offset that renders at that boundary's cumulative cell width maps back to that same
-// boundary — for any script — using the same runewidth the textarea's cursor math uses. It holds
-// only for runs of non-zero-width runes (the prompt content), so the fixtures avoid combining
-// marks.
+// boundary — for any script.
+//
+// The oracle is the widget's own cursor math, so the cumulative width is uniseg.StringWidth of the
+// prefix, exactly as textarea.LineInfo computes CharOffset and textarea.Cursor its x. Reaching for
+// the library directly rather than for runesWidth keeps this a check against the widget instead of
+// a check of the mirror against itself. The "⚠️" fixture is the one a per-rune ruler fails: it
+// reads the cluster as one cell where the widget reads two, so every boundary after it maps back
+// short. The invariant holds only for prefixes whose width strictly grows, so the fixtures avoid
+// combining marks.
 func TestCellToRuneOffsetInvertsWidth(t *testing.T) {
-	for _, s := range []string{"hello", "日本語 text", "aあb🙂c", ""} {
+	for _, s := range []string{"hello", "日本語 text", "aあb🙂c", "a⚠️b ⚠️", ""} {
 		runes := []rune(s)
-		acc := 0
 		for k := 0; k <= len(runes); k++ {
+			acc := uniseg.StringWidth(string(runes[:k]))
 			if got := cellToRuneOffset(runes, acc); got != k {
 				t.Errorf("%q: cellToRuneOffset(., %d cells) = %d, want boundary %d", s, acc, got, k)
-			}
-			if k < len(runes) {
-				acc += runewidth.RuneWidth(runes[k])
 			}
 		}
 	}

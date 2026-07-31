@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
 )
 
 // ----------------------------------------------------------------------------
@@ -195,18 +194,25 @@ func visualSubline(value string, row, start, width int) []rune {
 }
 
 // cellToRuneOffset maps a display-cell column within a run of runes to the rune offset at that
-// column, accumulating each rune's width with the same runewidth the textarea's own cursor math
-// uses (so the mapping inverts the widget's rendering). A column that lands inside a wide rune
-// resolves to that rune's left edge; a column past the run's end returns the full rune count —
-// the clamp the caller relies on, expressed in runes rather than cells.
+// column: the last offset whose text still fits inside cells (runesWidth, inputaccent.go). A column
+// that lands inside a wide grapheme resolves to that grapheme's left edge; a column past the run's
+// end returns the full rune count — the clamp the caller relies on, expressed in runes rather than
+// cells.
+//
+// Its ORACLE is the textarea widget, not the width authority (width.go), and the two genuinely
+// differ: the authority follows the PAINTER, while this inverts the widget's own cursor math, which
+// measures with uniseg whatever the painter is doing (bubbles/v2@v2.1.0 textarea.LineInfo's
+// CharOffset, and textarea.Cursor's x, are both uniseg.StringWidth of the row prefix). The caret
+// this feeds is drawn at that CharOffset, so measuring here in any other ruler would seat the caret
+// at a column the widget then draws it somewhere else from. Where a click's own column has to be
+// read as PAINTED cells — the selection highlight, the accent overlay — the authority is the right
+// ruler and is used instead; this one conversion lives in the widget's space because its answer is
+// consumed by the widget.
 func cellToRuneOffset(runes []rune, cells int) int {
-	acc := 0
-	for i, r := range runes {
-		w := runewidth.RuneWidth(r)
-		if acc+w > cells {
+	for i := range runes {
+		if runesWidth(runes[:i+1]) > cells {
 			return i
 		}
-		acc += w
 	}
 	return len(runes)
 }

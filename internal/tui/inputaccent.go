@@ -4,8 +4,8 @@ import (
 	"strings"
 	"unicode"
 
-	lipgloss "charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 )
 
 // ----------------------------------------------------------------------------
@@ -91,8 +91,8 @@ func (m Model) knownWorkspaceFile(path string) bool {
 // scrolled out of view are skipped, so a draft taller than the box costs only the spans it shows.
 //
 // Overlapping accents cannot occur (the two grammars claim disjoint tokens), and two accents on one
-// row compose: shadeCells slices by display cell with ansi.Cut, which leaves the flanking parts —
-// the first accent among them — exactly as they were.
+// row compose: shadeCells slices by display cell through the width authority, which leaves the
+// flanking parts — the first accent among them — exactly as they were.
 func (m Model) accentTokens(view string) string {
 	spans := m.resolvingTokens()
 	if len(spans) == 0 {
@@ -108,22 +108,23 @@ func (m Model) accentTokens(view string) string {
 			style = m.th.fileToken
 		}
 		from, to := runeOffsetOf(value, sp.start), runeOffsetOf(value, sp.end)
-		for _, cs := range inputCellSpans(value, width, from, to) {
+		for _, cs := range inputCellSpans(m.th.measure, value, width, from, to) {
 			r := cs.row - scroll
 			if r < 0 || r >= len(lines) {
 				continue // above or below the rows the box currently shows
 			}
-			w := lipgloss.Width(lines[r])
+			// The clamp, the columns and the cut are all the PAINTER's measure (width.go): the
+			// cells being re-styled are cells the terminal already painted, so a bound or a
+			// slice in any other measure names a different run of cells than the one on screen.
+			// Only the ROW came from the widget's own wrap (inputCellSpans → wrapRowStarts), and
+			// that split is the whole rule for a widget mirror: WHICH runes the widget put on a
+			// row is the widget's answer, WHERE those runes then land is the painter's.
+			w := m.th.measure.Width(lines[r])
 			c0 := clampInt(cs.c0, 0, w)
 			c1 := clampInt(cs.c1, c0, w)
 			if c1 <= c0 {
 				continue
 			}
-			// The slice is in the painter's measure (shadeCells, width.go) because the cells
-			// being re-styled are cells the terminal already painted. The COLUMNS reaching it
-			// still come from the widget mirror below (runesWidth), which measures per rune —
-			// the mirror's own oracle is the widget, and reconciling the two is the caret
-			// mirrors' item, not this pass's.
 			lines[r] = shadeCells(m.th.measure, lines[r], c0, c1, style)
 		}
 	}
@@ -135,11 +136,16 @@ func (m Model) accentTokens(view string) string {
 // one names the LOGICAL row and column, this one folds in the soft-wrap the widget applied to that
 // logical line (wrapRowStarts) to reach the visual geometry the rendered block is addressed by.
 //
+// The two halves answer to two different oracles, deliberately. The ROWS are the widget's: only it
+// decides which runes it put on which line, so they are mirrored from its own wrap. The COLUMNS are
+// the painter's — measure, the width authority (width.go) — because they address cells on a row the
+// terminal has already drawn, which is what the caller then re-styles.
+//
 // A token never crosses a newline — both grammars break on one (isInputSpace includes '\n', and a
 // quoted @ref stops at it, scanRefToken) — so a range spanning two logical lines is not a token this
 // pass drew and yields nothing rather than a guess. Within its line the range may still straddle any
 // number of soft-wraps, and it yields one span per row it touches.
-func inputCellSpans(value string, width, from, to int) []inputCellSpan {
+func inputCellSpans(measure widthAuthority, value string, width, from, to int) []inputCellSpan {
 	if to <= from || width < 1 {
 		return nil
 	}
@@ -165,8 +171,8 @@ func inputCellSpans(value string, width, from, to int) []inputCellSpan {
 		if lo >= hi {
 			continue
 		}
-		c0 := runesWidth(runes[s:lo]) // lo < hi <= len(runes), so the row start is in range too
-		out = append(out, inputCellSpan{row: base + k, c0: c0, c1: c0 + runesWidth(runes[lo:hi])})
+		c0 := measure.Width(string(runes[s:lo])) // lo < hi <= len(runes), so the row start is in range too
+		out = append(out, inputCellSpan{row: base + k, c0: c0, c1: c0 + measure.Width(string(runes[lo:hi]))})
 	}
 	return out
 }
@@ -179,6 +185,12 @@ func inputCellSpans(value string, width, from, to int) []inputCellSpan {
 // textarea's LineInfo at every column, so a change to the widget's wrap fails here rather than
 // silently sliding the accents sideways.
 //
+// Its ORACLE is therefore the widget, never the width authority (width.go): the authority follows
+// the painter, and the painter has no vote in where a third-party widget decided to break a line.
+// So every measure here is runesWidth — uniseg, the widget's own — and it stays that way whatever
+// the authority is on. The one exception is the last-rune term of the hard-break test below, where
+// the widget itself reaches for go-runewidth; mirroring that means spelling it the same way.
+//
 // The widget's rule, in its own terms: text accumulates as WORD + trailing SPACES groups, and a
 // group that would overflow the row opens a new one carrying the whole group (which is why a run of
 // spaces can land alone on a row). A word too wide for any row is broken where it stands — and the
@@ -186,54 +198,55 @@ func inputCellSpans(value string, width, from, to int) []inputCellSpan {
 // mirrored here deliberately, since matching the split is the whole point. Finally a line whose
 // content REACHES the width gains one trailing row, the seat the widget keeps for a caret past a
 // full line (the same rule inputContentRows sizes the box by).
+//
+// The row and the pending word are re-measured from the line rather than accumulated per rune,
+// which is not a detail: a grapheme cluster measures as a whole, so summing its runes one at a time
+// would under-count exactly the sequences (an emoji carrying VARIATION SELECTOR-16) the widget
+// counts as two cells. The two slices measured are the widget's own operands — the runes already on
+// the row, and the pending word — so the mirror weighs the same text at the same moments it does.
 func wrapRowStarts(line []rune, width int) []int {
 	if width < 1 {
 		width = 1
 	}
 	starts := []int{0}
-	rowWidth := 0              // display width of the runes already placed on the current row
-	consumed := 0              // runes of line already placed on a row
-	wordLen, wordWidth := 0, 0 // the pending word: a run of non-space runes
-	spaces := 0                // the whitespace run trailing that word
+	consumed := 0 // runes of line already placed on a row
+	wordLen := 0  // the pending word: a run of non-space runes
+	spaces := 0   // the whitespace run trailing that word
 	for _, r := range line {
 		if unicode.IsSpace(r) {
 			spaces++
 		} else {
 			wordLen++
-			wordWidth += runewidth.RuneWidth(r)
 		}
+		word := line[consumed : consumed+wordLen] // the widget's `word`, r included
 		switch {
 		case spaces > 0: // the group is finished: place it, on a new row if it does not fit
-			if rowWidth+wordWidth+spaces > width {
+			row := line[starts[len(starts)-1]:consumed] // the widget's `lines[row]`
+			if runesWidth(row)+runesWidth(word)+spaces > width {
 				starts = append(starts, consumed)
-				rowWidth = 0
 			}
-			rowWidth += wordWidth + spaces
 			consumed += wordLen + spaces
-			wordLen, wordWidth, spaces = 0, 0, 0
-		case wordWidth+runewidth.RuneWidth(r) > width: // a word wider than a row: break it here
+			wordLen, spaces = 0, 0
+		case runesWidth(word)+runewidth.RuneWidth(r) > width: // a word wider than a row: break it here
 			if consumed > starts[len(starts)-1] { // the current row already holds something
 				starts = append(starts, consumed)
-				rowWidth = 0
 			}
-			rowWidth += wordWidth
 			consumed += wordLen
-			wordLen, wordWidth = 0, 0
+			wordLen = 0
 		}
 	}
-	if rowWidth+wordWidth+spaces >= width {
+	row, word := line[starts[len(starts)-1]:consumed], line[consumed:consumed+wordLen]
+	if runesWidth(row)+runesWidth(word)+spaces >= width {
 		starts = append(starts, consumed) // the trailing row a width-filling line keeps for the caret
 	}
 	return starts
 }
 
-// runesWidth is the display width of a rune slice, accumulated per rune exactly as
-// [cellToRuneOffset] inverts it — the two are the forward and backward halves of one cell↔rune
-// mapping, so a token's start cell and its width are measured by the same ruler the caret is.
+// runesWidth is the display width of a rune run measured the way the textarea measures its own
+// content — uniseg.StringWidth over the whole run, so a grapheme cluster counts once, as the cells
+// the widget believes it drew. It is the forward half of the cell↔rune mapping [cellToRuneOffset]
+// inverts, so a token's start cell and the caret's column are read off the same ruler, and it is
+// that widget's ruler rather than the painter's: both are mirrors of its internal math.
 func runesWidth(rs []rune) int {
-	w := 0
-	for _, r := range rs {
-		w += runewidth.RuneWidth(r)
-	}
-	return w
+	return uniseg.StringWidth(string(rs))
 }

@@ -58,10 +58,18 @@ func accentTestModel(t *testing.T, width int, workspace, value string) Model {
 }
 
 // wrapRowStarts is a MIRROR of the bubbles textarea's own soft-wrap, so the oracle is that widget
-// itself: at every column of a value, LineInfo names the wrapped row the caret stands on
-// (StartColumn — the row's own rune offset — and Height, the line's row count), and CharOffset
-// names the display cell it stands at. A change to the widget's wrap has to fail HERE, where the
-// accents are still only mis-measured, rather than in a screenshot nobody diffs.
+// itself: at every column of a value, LineInfo names the wrapped row the caret stands on (RowOffset
+// — the row's INDEX — and StartColumn, that row's own rune offset), Height names the line's row
+// count, and CharOffset names the display cell the caret stands at. A change to the widget's wrap
+// has to fail HERE, where the accents are still only mis-measured, rather than in a screenshot
+// nobody diffs.
+//
+// The expectation is keyed by RowOffset rather than read off in order, because a row the widget
+// draws EMPTY is addressed by no column at all and would otherwise vanish from the oracle while
+// still occupying a row on screen — which is precisely the row an accent would then be painted one
+// line too high on. The widget leaves one when a first group overflows its row without ever
+// tripping the hard-word-break, which VS16 makes reachable (that break weighs the last rune with
+// go-runewidth, and U+FE0F weighs nothing there).
 func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -76,6 +84,12 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 		{"trailing space at a row boundary", "aaa aaa aaa aaax ", 8},
 		{"a line of nothing but spaces", "     ", 3},
 		{"wide runes", "日本語のテキスト 絵文字", 7},
+		// The VS16 cases are the ones a per-rune mirror gets wrong: go-runewidth reads U+26A0 as
+		// one cell and U+FE0F as none, while the widget measures the cluster whole (uniseg) and
+		// wraps as if it were two. The widths are chosen so that difference decides a break.
+		{"an emoji carrying VS16", "warn ⚠️ here", 7},
+		{"a VS16 run filling the row", "⚠️⚠️⚠️ end", 6},
+		{"VS16 inside a word too wide for the row", "aa⚠️bb⚠️cc", 4},
 		{"the acceptance draft", "/grill-me check @internal/tui/model.go and /code-adit", 20},
 	}
 	for _, c := range cases {
@@ -91,18 +105,30 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 			runes := []rune(c.line)
 			got := wrapRowStarts(runes, ta.Width())
 
-			var want []int
+			want := make([]int, len(got))
+			addressed := make([]bool, len(got))
 			for col := 0; col <= len(runes); col++ {
 				ta.SetCursorColumn(col)
 				li := ta.LineInfo()
-				if len(want) == 0 || want[len(want)-1] != li.StartColumn {
-					want = append(want, li.StartColumn)
-				}
 				if li.Height != len(got) {
 					t.Fatalf("col %d: widget draws %d rows, wrapRowStarts says %d (%v)", col, li.Height, len(got), got)
 				}
+				if li.RowOffset < 0 || li.RowOffset >= len(got) {
+					t.Fatalf("col %d: widget puts the caret on row %d of %d", col, li.RowOffset, len(got))
+				}
+				want[li.RowOffset] = li.StartColumn
+				addressed[li.RowOffset] = true
 				if cw := runesWidth(runes[li.StartColumn:col]); cw != li.CharOffset {
 					t.Fatalf("col %d: runesWidth from the row start = %d, widget's CharOffset = %d", col, cw, li.CharOffset)
+				}
+			}
+			for i := len(want) - 1; i >= 0; i-- {
+				if addressed[i] {
+					continue
+				}
+				want[i] = len(runes) // a trailing empty row begins past the last rune…
+				if i+1 < len(want) {
+					want[i] = want[i+1] // …and any other one begins where the row below it does
 				}
 			}
 			if !reflect.DeepEqual(got, want) {
@@ -115,9 +141,15 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 // The byte range → visual geometry mapping: within one row, across a soft-wrap, and offset by the
 // rows the logical lines above it occupy. A range crossing a newline is not a token this pass ever
 // drew, and yields nothing rather than a guess.
+//
+// The two coordinates answer to two oracles, and the VS16 cases are where that shows: the ROW comes
+// from the widget's wrap, which counts "⚠️" as two cells whatever the terminal does, while the
+// COLUMNS come from the width authority, which counts it as the painter will — one cell on a
+// terminal that never answered mode 2027, two on one that did.
 func TestInputCellSpans(t *testing.T) {
 	cases := []struct {
 		name       string
+		measure    widthAuthority // the zero value is the painter's default, ansi.WcWidth
 		value      string
 		width      int
 		from, to   int // rune offsets
@@ -156,12 +188,29 @@ func TestInputCellSpans(t *testing.T) {
 			to:        10,
 			wantSpans: []inputCellSpan{{row: 0, c0: 5, c1: 12}},
 		},
+		{
+			name:      "a VS16 glyph ahead of the token takes the painter's one cell",
+			value:     "a⚠️ /review", // runes: a, U+26A0, U+FE0F, ' ', then the 7-rune token
+			width:     40,
+			from:      4,
+			to:        11,
+			wantSpans: []inputCellSpan{{row: 0, c0: 3, c1: 10}},
+		},
+		{
+			name:      "the same glyph takes two cells once the painter answers mode 2027",
+			measure:   widthAuthority{method: ansi.GraphemeWidth},
+			value:     "a⚠️ /review",
+			width:     40,
+			from:      4,
+			to:        11,
+			wantSpans: []inputCellSpan{{row: 0, c0: 4, c1: 11}},
+		},
 		{name: "a range across a newline is no token", value: "a\nb", width: 40, from: 0, to: 3, wantNothin: true},
 		{name: "an empty range", value: "/review", width: 40, from: 3, to: 3, wantNothin: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := inputCellSpans(c.value, c.width, c.from, c.to)
+			got := inputCellSpans(c.measure, c.value, c.width, c.from, c.to)
 			if c.wantNothin {
 				if got != nil {
 					t.Fatalf("inputCellSpans = %v, want nothing", got)
