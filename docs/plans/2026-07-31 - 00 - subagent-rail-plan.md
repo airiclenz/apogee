@@ -33,7 +33,16 @@
     the rail's.
   - Any version identifier change (see closing note).
 
-## 1. Rail the spacer lines inside a sub-agent run
+## 1. Rail the spacer lines inside a sub-agent run — ✅ DONE (2026-07-31)
+
+NOTES (2026-07-31): the item's test list names only `TestRenderGroupsInsideSubAgent` as a golden
+to update, but the min-rule necessarily changes four more depth-bearing goldens, all updated:
+`TestRenderGroupBreakers`/"a deeper sub-agent call" and `TestTranscriptLayoutGolden`
+(render_test.go), `TestTranscriptDepthNestedSequenceGolden` and `TestTranscriptDepthLabelsEachLevel`
+(transcript_test.go). Every depth-0-only golden is untouched, as the item requires. Also added one
+test beyond the list — `TestRenderSpacerRailIsStyledAndUntrailed` — pinning that the railed spacer
+carries the `subRail` role and has no trailing whitespace (the plan's "never a trailing space",
+which the ANSI-stripping `renderPlain` helper cannot see).
 
 **What:** In `internal/tui/render.go`, `renderView`'s `appendBlock` closure (~line 56)
 currently separates blocks with a bare `""` line, which visibly breaks the `│` rail

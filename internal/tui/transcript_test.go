@@ -508,9 +508,9 @@ func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
 		"✦ delegating",
 		"",
 		"│ ⤷ sub-agent",
-		"",
+		"│", // inside the run: the separator carries the rail
 		"│ ✦ child work",
-		"",
+		"", // the climb-out joins at depth 0: the rail ends with the run's last line
 		"✦ back to parent",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -527,11 +527,11 @@ func TestTranscriptDepthLabelsEachLevel(t *testing.T) {
 
 	want := strings.Join([]string{
 		"│ ⤷ sub-agent",
-		"",
+		"│",
 		"│ ✦ child",
-		"",
+		"│", // the 1→2 descent joins at depth 1: the outer rail alone
 		"│ │ ⤷ sub-agent",
-		"",
+		"│ │",
 		"│ │ ✦ grandchild",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {

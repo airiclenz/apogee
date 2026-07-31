@@ -44,7 +44,8 @@ type renderedTranscript struct {
 
 // renderView renders the committed entries plus any in-progress assistant buffer into the
 // viewport's lines, recording where the last user block begins. Blocks are separated by one
-// blank line (layout.md).
+// line (layout.md), railed at the depth the two blocks share so a sub-agent run's frame is
+// continuous through its separators (railSpacer).
 func (t *transcript) renderView(th theme, width int) renderedTranscript {
 	if width < 1 {
 		width = 1
@@ -53,15 +54,21 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 	var userBlocks []userBlock
 	lastUserStart := -1
 
-	appendBlock := func(isUser bool, block []string) {
+	// prevBlockDepth is the depth of the block appended last — the left half of the next
+	// spacer's join. It is deliberately per-APPENDED-BLOCK rather than per-entry (the loop's
+	// prevDepth below): the ⤷ label blocks the descent loop emits carry depths of their own,
+	// and a spacer's rail follows the blocks it actually sits between.
+	prevBlockDepth := 0
+	appendBlock := func(isUser bool, depth int, block []string) {
 		if len(lines) > 0 {
-			lines = append(lines, "") // the single blank line between blocks
+			lines = append(lines, railSpacer(th, min(prevBlockDepth, depth)))
 		}
 		if isUser {
 			lastUserStart = len(lines)
 			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block)})
 		}
 		lines = append(lines, block...)
+		prevBlockDepth = depth
 	}
 
 	prevDepth := 0
@@ -72,7 +79,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// per level, until the stream climbs back out (P3.14).
 		if e.depth > prevDepth {
 			for d := prevDepth + 1; d <= e.depth; d++ {
-				appendBlock(false, renderSubAgentLabel(th, d, width))
+				appendBlock(false, d, renderSubAgentLabel(th, d, width))
 			}
 		}
 		// Consecutive same-label tool calls fold into one block at render time, so a batch of
@@ -80,10 +87,10 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// call that arrives mid-stream joins its group on the next repaint for free, and a run
 		// is same-depth by construction, so the label logic above fires exactly as before.
 		if run := toolCallRun(t.entries, i); len(run) > 1 {
-			appendBlock(false, railLines(th, renderToolBlock(th, run, railedWidth(width, e.depth)), e.depth))
+			appendBlock(false, e.depth, railLines(th, renderToolBlock(th, run, railedWidth(width, e.depth)), e.depth))
 			i += len(run) - 1
 		} else {
-			appendBlock(e.kind == entryUser, renderEntryLines(th, e, width))
+			appendBlock(e.kind == entryUser, e.depth, renderEntryLines(th, e, width))
 		}
 		prevDepth = e.depth
 	}
@@ -92,7 +99,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// buffer keeps them (a mid-stream "\n\n" may be a paragraph break about to be continued),
 		// but the preview must not grow a wobbling gap above the footer. An empty buffer still
 		// renders its lone marker line, so the human sees that streaming has begun.
-		appendBlock(false, renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width))
+		appendBlock(false, 0, renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width))
 	}
 	return renderedTranscript{lines: lines, lastUserStart: lastUserStart, userBlocks: userBlocks}
 }
@@ -582,6 +589,23 @@ func railedWidth(width, depth int) int {
 		return width
 	}
 	return max(1, width-depth*railWidth)
+}
+
+// railSpacer is the one separating line between two adjacent blocks, framed for the run the two
+// of them share: depth is the JOIN of their depths (the shallower one), so the rail is drawn only
+// as deep as both sides reach. Depth 0 — the flat transcript, and either side of a sub-agent run's
+// boundary — is the bare "" the layout has always used, so a top-level transcript renders exactly
+// as before; deeper joins draw the gutter alone, which is what makes a run's frame continuous
+// through its separators instead of breaking at every block.
+//
+// The gutter's trailing space is trimmed BEFORE it is styled, so a spacer's visible text is "│"
+// at depth 1 and "│ │" at depth 2 — never a styled trailing blank, which would leave an invisible
+// SGR run hanging off the right of an otherwise empty row.
+func railSpacer(th theme, depth int) string {
+	if depth <= 0 {
+		return ""
+	}
+	return th.subRail.Render(strings.TrimRight(strings.Repeat(glyphSubRail+" ", depth), " "))
 }
 
 // railLines frames a Depth-level block: it prepends one styled "│ " rail gutter per nesting

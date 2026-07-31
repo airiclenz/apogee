@@ -84,6 +84,150 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The sub-agent rail through the inter-block spacers
+// ----------------------------------------------------------------------------
+
+// The one separator row between two blocks is railed at the JOIN of their depths — the shallower
+// of the two — and that single rule is the whole of the continuous rail: a spacer inside a run
+// carries the gutter, a spacer that crosses a run boundary does not. Each case pins the entire
+// rendered scrollback, so a separator that gained or lost a rail shows as the row it is.
+func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  []string
+	}{
+		{
+			name: "two different-label blocks inside one run",
+			build: func(tr *transcript) {
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				tr.apply(domain.ToolCallEvent{
+					EventBase: domain.EventBase{Depth: 1},
+					Call:      domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)},
+				})
+			},
+			want: []string{
+				"│ ⤷ sub-agent",
+				"│",
+				"│ ✦ Read File",
+				"│   ┕ a.go 1 - 5",
+				"│", // both sides sit at depth 1: the rail runs straight through
+				"│ ✦ Run",
+				"│   ┕ go test",
+			},
+		},
+		{
+			name: "a climb-out to the top level ends the rail",
+			build: func(tr *transcript) {
+				tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child"})
+				tr.apply(domain.MessageEvent{Text: "back to parent"})
+			},
+			want: []string{
+				"│ ⤷ sub-agent",
+				"│",
+				"│ ✦ child",
+				"", // join 0: the rail ends on the run's last line, not on the spacer
+				"✦ back to parent",
+			},
+		},
+		{
+			name: "a 0 to 2 descent joins the stacked labels at depth 1",
+			build: func(tr *transcript) {
+				tr.apply(domain.MessageEvent{Text: "delegating"})
+				tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "deep"})
+			},
+			want: []string{
+				"✦ delegating",
+				"",
+				"│ ⤷ sub-agent",
+				"│", // the outer rail alone: the inner run has not opened yet
+				"│ │ ⤷ sub-agent",
+				"│ │",
+				"│ │ ✦ deep",
+			},
+		},
+		{
+			name: "a 2 to 1 climb-out keeps the outer rail",
+			build: func(tr *transcript) {
+				tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "deep"})
+				tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "shallower"})
+			},
+			want: []string{
+				"│ ⤷ sub-agent",
+				"│",
+				"│ │ ⤷ sub-agent",
+				"│ │",
+				"│ │ ✦ deep",
+				"│", // the inner run closed; the outer one is still open
+				"│ ✦ shallower",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+
+			got, want := renderPlain(tr, 80), strings.Join(tc.want, "\n")
+
+			if got != want {
+				t.Errorf("spacer rail mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// The issue's core case: two sub-agent calls back to back are never visually connected. The
+// second call's own tool-call block sits at the parent's depth between the two runs, so the join
+// dips to 0, the rail breaks, and a fresh ⤷ sub-agent label opens the second run.
+func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"first"}`)}})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "first child"})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: []byte(`{"task":"second"}`)}})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "second child"})
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ first",
+		"",
+		"│ ⤷ sub-agent",
+		"│",
+		"│ ✦ first child",
+		"", // the first run closes here…
+		"✦ Sub-Agent",
+		"  ┕ second",
+		"", // …and the second call is fenced off from it on both sides
+		"│ ⤷ sub-agent",
+		"│",
+		"│ ✦ second child",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("consecutive sub-agent runs mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A railed spacer is a real rail: it carries the subRail role's styling (an unstyled gutter would
+// read as stray punctuation rather than as the frame continuing) and it ends on the glyph — the
+// gutter's trailing space is trimmed, so the row never leaves a styled blank hanging off its right.
+func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
+	th := newTheme()
+	tr := feed(
+		domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "one"},
+		domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "two"},
+	)
+
+	spacer := tr.renderLines(th, 80)[1] // the label → block separator inside the run
+
+	if want := th.subRail.Render(glyphSubRail); spacer != want {
+		t.Errorf("railed spacer = %q; want the subRail-styled gutter %q", spacer, want)
+	}
+	if plain := ansi.Strip(spacer); plain != strings.TrimRight(plain, " ") {
+		t.Errorf("railed spacer %q carries trailing whitespace", plain)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The tool header's label styling
 // ----------------------------------------------------------------------------
 
@@ -157,7 +301,8 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 }
 
 // A grouped run inside a sub-agent is framed like any other block: the ⤷ label opens the run once
-// and every line of the group — header and branches alike — carries the │ rail gutter.
+// and every line of the group — header, branches, and the separator between the label and the
+// block alike — carries the │ rail gutter, so the run reads as one continuous frame.
 func TestRenderGroupsInsideSubAgent(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "a.go", 1, 5, 1)
@@ -165,7 +310,7 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 
 	want := strings.Join([]string{
 		"│ ⤷ sub-agent",
-		"",
+		"│",
 		"│ ✦ Read File",
 		"│   ┝ a.go  1 - 5",
 		"│   ┕ bb.go 1 - 9",
@@ -497,9 +642,9 @@ func TestRenderGroupBreakers(t *testing.T) {
 			want: []string{
 				"✦ Read File",
 				"  ┕ a.go 1 - 5",
-				"",
+				"", // the descent's own spacer joins at depth 0: the rail starts at the label
 				"│ ⤷ sub-agent",
-				"",
+				"│",
 				"│ ✦ Read File",
 				"│   ┕ b.go 1 - 9",
 			},
@@ -542,7 +687,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 // output hangs beneath its command, a diff whose "+2 -2" rides its branch over a coloured body, an
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
-// shows as the single empty row between every block, the bracketless bold-orange label as the
+// shows as the single separator row between every block — empty at the top level, the │ rail
+// gutter inside the sub-agent run — the bracketless bold-orange label as the
 // header text, the grouping as the one aligned Read File block, and the uniform shape as the fact
 // that every header here — grouped, standalone, railed — is a label and nothing else, with the
 // target always leading a branch and the outcome split into the summary beside it and the body
@@ -597,7 +743,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"· approval allow: terminal",
 		"",
 		"│ ⤷ sub-agent",
-		"",
+		"│",
 		"│ ✦ Read File",
 		"│   ┕ main.go 1 - 154",
 	}, "\n")
