@@ -103,7 +103,16 @@ list — session search, session export, and sub-agent session persistence stay.
 
 **Commit:** `docs(adr): adopt LLM session titles as a cosmetic out-of-band call`
 
-## 2. internal/title: prompt builder and sanitizer
+## 2. internal/title: prompt builder and sanitizer — ✅ DONE (2026-07-31)
+
+NOTES (2026-07-31): two additions inside the specified sanitize pipeline, both supersets of the
+item's text rather than departures from it — (a) the affix strips (quotes/backticks, comment or
+heading marker, `Title:` label) repeat until the string stops changing (bounded at 4 passes), so
+`"Title: X"` and `Title: "X"` both reduce to `X`; (b) a fence opener *glued* to the text
+(` ```fix the parser `, which never gets its own line and so cannot be skipped as a marker line)
+is stripped with the other leading markers. Also: whitespace control characters (tab) are exempt
+from the control-escape strip, since they collapse to a single space one step later and dropping
+them would weld two words together.
 
 **What:** New package `internal/title` with two pure, dependency-light pieces. (a)
 `Prompt(firstPrompt, workspaceBase string, date time.Time)` returning the messages for
