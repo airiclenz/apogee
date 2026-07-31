@@ -63,16 +63,19 @@ type Model struct {
 	// value-copied Model like autocompleteState (ADR 0011). It is driven only at idle.
 	sessionBrowser sessionBrowser
 
-	// Automatic session naming (autotitle.go; ADR 0022 addendum). autoTitleFired latches the one
+	// Session naming (autotitle.go; ADR 0022 addendum). autoTitleFired latches the one
 	// cosmetic naming call a Session record gets — set when it fires, and set UP FRONT on a resumed
-	// record, which already has a name. titleTouched records that a human named this session, which
-	// drops a late-landing automatic title (never clobber). pendingTitle stashes a title that
-	// resolved before the first Save minted an id to rename, applied at that save's completion.
-	// Three plain values, safe in the value-copied Model (ADR 0011); startNewSession resets all
-	// three, so the session /clear opens names itself afresh.
+	// record, which already has a name. titleTouched records that a human named this session (the
+	// browser's `r`, either form of /rename), which drops a late-landing automatic title (never
+	// clobber). pendingTitle stashes a title that resolved before the first Save minted an id to
+	// rename, applied at that save's completion, and pendingSource remembers who asked for it — the
+	// stash outlives the never-clobber check, so the flush makes it again (flushPendingTitle).
+	// Four plain values, safe in the value-copied Model (ADR 0011); startNewSession resets the
+	// three that carry state, so the session /clear opens names itself afresh.
 	autoTitleFired bool
 	titleTouched   bool
 	pendingTitle   string
+	pendingSource  titleSource
 
 	// actuation is the launcher latch (actuation.go, ADR 0029 D5): which blocking launcher verb is
 	// in flight, on what, and the channel its narration is pumped back through. Its zero value is
@@ -550,6 +553,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// has since named themselves all leave the heuristic title standing. Nothing else moves: the
 		// title is not a Turn, so no transcript entry, no event, and no gauge answers to it.
 		return m, m.foldAutoTitle(msg)
+
+	case manualTitleMsg:
+		// A bare /rename's naming call returned (autotitle.go). This one was asked for, so it answers:
+		// the title applies even over a name the human set by hand, and every outcome — the failures
+		// included — lands as a note. Still not a Turn: no event, no gauge, no engine.
+		return m, m.foldManualTitle(msg)
 
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
@@ -1177,6 +1186,14 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Open the history-browser overlay: list saved sessions off the Update loop and render the
 		// pane above the input (sessions.go). Synchronous and idle-safe like /clear — no worker.
 		return m.openSessionBrowser()
+
+	case "rename":
+		// Name THIS session: take the argument as the title, or — bare — ask the model for one
+		// (autotitle.go). Idle-only because of that bare form: it issues the same out-of-band
+		// completion the first prompt fires, and firing one into a live Exchange would contend with
+		// the answer being streamed. It drives no worker either way; the generated form answers as a
+		// manualTitleMsg.
+		return m.runRename(parsed.args)
 
 	case "model":
 		// Open the picker over the launcher's Launch profiles when llama-launcher is configured and

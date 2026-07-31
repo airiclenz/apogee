@@ -62,7 +62,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
-		"clear", "compact", "confine", "continue", "model", "new", "server", "sessions",
+		"clear", "compact", "confine", "continue", "model", "new", "rename", "server", "sessions",
 		"skills", "stop-server", "unload-model", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
@@ -204,6 +204,8 @@ func TestSafeWhileRunningReadsTheLine(t *testing.T) {
 		{"/clear", false},
 		{"/new", false},
 		{"/sessions", false},
+		{"/rename", false}, // the bare form issues a completion of its own
+		{"/rename my own name", false},
 		{"/compact", false},
 		{"/continue", false},
 	}

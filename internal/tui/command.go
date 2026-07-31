@@ -80,7 +80,11 @@ type commandSpec struct {
 //
 // /new is an alias of /clear — both verbs are recognised here and route to the same context-reset
 // logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
-// synchronously in runCommand like /clear); /model and /server open the shared picker (picker.go)
+// synchronously in runCommand like /clear); /rename names THIS session instead of a browsed one —
+// with an argument it takes what was typed, and BARE it asks the model for a title (autotitle.go),
+// which is the reason it is idle-only: that bare form issues a completion, and a completion fired
+// into a live Exchange would contend with the answer being streamed. /model and /server open the
+// shared picker (picker.go)
 // the same way — /server over what config.yaml names, /model over the Launch profiles the
 // llama-launcher config defines when the launcher is configured and over what the upstream
 // advertises when it is not. That first offering is the one whose accept does not finish on the
@@ -113,6 +117,7 @@ var commandSpecs = []commandSpec{
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)"},
+	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},

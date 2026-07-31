@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -399,5 +400,280 @@ func TestAutoTitleLatchedByAResumedSession(t *testing.T) {
 	}
 	if m.pendingTitle != "" {
 		t.Errorf("pendingTitle = %q, want dropped: it was stashed for the outgoing session", m.pendingTitle)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /rename — the human's half of the naming machinery (item 6)
+// ----------------------------------------------------------------------------
+
+// lastNote returns the transcript's most recent note. /rename answers in notes — unlike the
+// automatic call it was asked for — so every case below reads the one it left behind.
+func lastNote(m Model) string {
+	notes := noteTexts(m)
+	if len(notes) == 0 {
+		return ""
+	}
+	return notes[len(notes)-1]
+}
+
+// idle returns the model to stateIdle after a submitted prompt, so the idle-only /rename may run.
+func idle(t *testing.T, m Model) Model {
+	t.Helper()
+	return step(t, m, exchangeDoneMsg{})
+}
+
+// `/rename <text>` names the session outright: the tokens re-join with single spaces, run through
+// the same sanitizer a generated title does, and land through Rename — with titleTouched set, so
+// nothing generated may overwrite what the human typed.
+func TestRenameWithArgumentsNamesTheSession(t *testing.T) {
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1", Title: "please fix the broken parser in token…"})
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, cmd := sendPrompt(t, m, `/rename   the "parser"   rewrite.`)
+	cmdMsg(cmd) // the quiet rename runs off the loop
+
+	if !m.titleTouched {
+		t.Error("a manual rename left titleTouched unset; a generated title could still overwrite it")
+	}
+	want := []renameCall{{id: "s1", title: `the "parser" rewrite`}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want %+v (joined on single spaces, sanitized)", got, want)
+	}
+	if got := lastNote(m); !strings.Contains(got, `the "parser" rewrite`) {
+		t.Errorf("note = %q, want the new title reported back", got)
+	}
+	if m.sessionBrowser.open {
+		t.Error("/rename opened the /sessions browser; it names this session in place")
+	}
+}
+
+// A name that sanitizes away to nothing is refused with the form that always works, and changes
+// nothing — the same posture a mistyped /confine gets, for the same reason.
+func TestRenameWithAnEmptyNameIsRefused(t *testing.T) {
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, cmd := sendPrompt(t, m, "/rename ```")
+	if cmd != nil {
+		t.Error("a refused rename dispatched a Cmd")
+	}
+	if m.titleTouched {
+		t.Error("a refused rename set titleTouched; nothing was named")
+	}
+	if got := lastNote(m); !strings.Contains(got, renameUsage) {
+		t.Errorf("note = %q, want the usage line", got)
+	}
+	if got := host.renamedTitles(); len(got) != 0 {
+		t.Errorf("renames = %+v, want none", got)
+	}
+}
+
+// The two ways a bare /rename cannot ask the model. Both SAY so: the automatic call is silent
+// because nobody asked for it, and this one was asked for by name.
+func TestRenameBareRefusals(t *testing.T) {
+	cases := []struct {
+		name   string
+		seam   *titleSeam
+		prompt string
+		want   string
+	}{
+		{"seam unwired", nil, "fix the broken parser", "title generation is not available"},
+		{"nothing said yet", &titleSeam{reply: "a title"}, "", "nothing to name yet"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			host := &fakeSessionHost{}
+			host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
+			m := newTitlingModel(t, host, tc.seam, false)
+			if tc.prompt != "" {
+				m, _ = sendPrompt(t, m, tc.prompt)
+				m = idle(t, m)
+			}
+
+			m, cmd := sendPrompt(t, m, "/rename")
+			if cmd != nil {
+				t.Error("a refused /rename dispatched a naming call")
+			}
+			if got := lastNote(m); !strings.Contains(got, tc.want) {
+				t.Errorf("note = %q, want it to carry %q", got, tc.want)
+			}
+			if got := host.renamedTitles(); len(got) != 0 {
+				t.Errorf("renames = %+v, want none", got)
+			}
+		})
+	}
+}
+
+// Without a persistence host there is no Session record, so there is no name to change — and
+// /rename says that rather than reporting a title it could not store.
+func TestRenameWithoutPersistenceSaysSo(t *testing.T) {
+	m := newTitlingModel(t, nil, &titleSeam{reply: "a generated name"}, true)
+
+	m, cmd := sendPrompt(t, m, "/rename the parser rewrite")
+	if cmd != nil {
+		t.Error("/rename dispatched a Cmd with no session to name")
+	}
+	if got := lastNote(m); !strings.Contains(got, "not being saved") {
+		t.Errorf("note = %q, want it to say the session is not being saved", got)
+	}
+	if m.titleTouched || m.pendingTitle != "" {
+		t.Errorf("naming state moved: touched=%v pending=%q", m.titleTouched, m.pendingTitle)
+	}
+}
+
+// Bare /rename regenerates on demand — including with auto-titling switched OFF, which gates only
+// the automatic firing (Ratified design 7) — and its answer applies OVER a name the human set by
+// hand a moment ago: the request is the newer instruction.
+func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1"})
+	seam := &titleSeam{reply: "Title: the generated name"}
+	m := newTitlingModel(t, host, seam, false)
+	m, _ = sendPrompt(t, m, "fix the broken parser in tokenizer.go")
+	m = idle(t, m)
+
+	m, cmd := sendPrompt(t, m, "/rename my own name")
+	cmdMsg(cmd)
+
+	m, cmd = sendPrompt(t, m, "/rename")
+	if cmd == nil {
+		t.Fatal("bare /rename dispatched no naming call")
+	}
+	msg, ok := cmdMsg(cmd).(manualTitleMsg)
+	if !ok {
+		t.Fatal("bare /rename did not yield a manualTitleMsg")
+	}
+	m, cmd = stepCmd(t, m, msg)
+	cmdMsg(cmd)
+
+	want := []renameCall{{id: "s1", title: "my own name"}, {id: "s1", title: "the generated name"}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want %+v (the asked-for title wins over the typed one)", got, want)
+	}
+	if !m.titleTouched {
+		t.Error("a regenerated title left titleTouched unset; an automatic one could overwrite it")
+	}
+	if got := lastNote(m); !strings.Contains(got, "the generated name") {
+		t.Errorf("note = %q, want the new title reported back", got)
+	}
+	if asked, want := seam.asked(), []string{"fix the broken parser in tokenizer.go"}; !reflect.DeepEqual(asked, want) {
+		t.Errorf("seam asked about %q, want the first user message %q", asked, want)
+	}
+}
+
+// A bare /rename that comes back with nothing usable says so and leaves the stored title alone —
+// quietly, with the form that always works.
+func TestRenameBareFailureNotesAndKeepsTheTitle(t *testing.T) {
+	cases := []struct {
+		name string
+		seam *titleSeam
+	}{
+		{"call failed", &titleSeam{err: errors.New("upstream refused")}},
+		{"reply unusable", &titleSeam{reply: "```\n```"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			host := &fakeSessionHost{}
+			host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
+			m := newTitlingModel(t, host, tc.seam, false)
+			m, _ = sendPrompt(t, m, "fix the broken parser")
+			m = idle(t, m)
+
+			m, cmd := sendPrompt(t, m, "/rename")
+			if cmd == nil {
+				t.Fatal("bare /rename dispatched no naming call")
+			}
+			m, cmd = stepCmd(t, m, cmdMsg(cmd))
+			if cmd != nil {
+				t.Error("a failed /rename dispatched a rename")
+			}
+			if got := lastNote(m); !strings.Contains(got, renameUsage) {
+				t.Errorf("note = %q, want the usage line", got)
+			}
+			if got := host.renamedTitles(); len(got) != 0 {
+				t.Errorf("renames = %+v, want none", got)
+			}
+			if m.titleTouched {
+				t.Error("a failed /rename set titleTouched; nothing was named")
+			}
+		})
+	}
+}
+
+// Naming a session BEFORE it has been saved stashes the title until the first Save mints an id —
+// which is what lets a session be named before it has said anything — and that stash is the
+// human's, so it flushes even though titleTouched is set.
+func TestRenameBeforeTheFirstSaveStashesTheName(t *testing.T) {
+	host := &fakeSessionHost{} // no active record yet
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, cmd := sendPrompt(t, m, "/rename the parser rewrite")
+	if cmd != nil {
+		t.Error("a rename dispatched one with no record to rename")
+	}
+	if m.pendingTitle != "the parser rewrite" || m.pendingSource != titleManual {
+		t.Fatalf("stash = %q from %v, want the typed title from the human", m.pendingTitle, m.pendingSource)
+	}
+	if !m.titleTouched {
+		t.Error("a stashed manual rename left titleTouched unset")
+	}
+
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0); err != nil {
+		t.Fatalf("seeding the first Save: %v", err)
+	}
+	m, cmd = stepCmd(t, m, saveDoneMsg{})
+	cmdMsg(cmd)
+
+	want := []renameCall{{id: "s1", title: "the parser rewrite"}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want %+v (the human's stash flushes over the heuristic title)", got, want)
+	}
+	if m.pendingTitle != "" {
+		t.Errorf("pendingTitle = %q, want cleared once applied", m.pendingTitle)
+	}
+}
+
+// The never-clobber rule holds ACROSS the stash: a generated title waiting for an id is dropped at
+// the flush when a human named a session while it waited, rather than landing on the record the
+// first Save has just minted.
+func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
+	host := &fakeSessionHost{} // no active record: the naming call beat the first Save
+	storeMeta(host, "old1", "an older task", "/ws", time.Now(), 0, nil)
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, cmd := stepCmd(t, m, autoTitleMsg{title: "a generated name"})
+	if cmd != nil {
+		t.Fatal("a title that arrived before any id dispatched a rename")
+	}
+	if m.pendingTitle != "a generated name" || m.pendingSource != titleAutomatic {
+		t.Fatalf("stash = %q from %v, want the generated title from the naming call", m.pendingTitle, m.pendingSource)
+	}
+
+	// The human names a session by hand while the generated one waits for an id.
+	m = openBrowser(t, m)
+	m = step(t, m, keyRune('r'))
+	m.sessionBrowser.renameBuf = "my own name"
+	m, cmd = stepCmd(t, m, keyEnter())
+	cmdMsg(cmd)
+	if !m.titleTouched {
+		t.Fatal("committing a browser rename left titleTouched unset")
+	}
+
+	// The first Save mints the id the stash was waiting for — and it must not be spent.
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0); err != nil {
+		t.Fatalf("seeding the first Save: %v", err)
+	}
+	m, cmd = stepCmd(t, m, saveDoneMsg{})
+	cmdMsg(cmd)
+
+	if m.pendingTitle != "" {
+		t.Errorf("pendingTitle = %q, want dropped once a human had named the session", m.pendingTitle)
+	}
+	want := []renameCall{{id: "old1", title: "my own name"}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want only the human's %+v", got, want)
 	}
 }

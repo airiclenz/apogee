@@ -148,6 +148,7 @@ blue for a file your workspace has — so a typo is visible before you send.
 | `/compact` | Summarise the conversation to reclaim context | — |
 | `/continue` | Ask the model to keep going | — |
 | `/sessions` | Browse saved sessions — resume, rename, or delete | — |
+| `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | — |
 | `/model` | Switch model — the Launch profiles [llama-launcher](#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | — |
 | `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
 | `/unload-model` | Free the model of the server this session is on — see [below](#local-servers--llama-launcher) | — |

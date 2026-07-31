@@ -386,7 +386,10 @@
 // ([Options.GenerateTitle]) fired at the first prompt's submit, in parallel with the Exchange it
 // starts, which never reaches the Engine (ADR 0011), is not a Turn, enters no transcript, applies
 // through Rename (the only writer of a stored title) or waits for the id that first Save mints, and
-// is dropped without a word whenever it fails or a human has named the session first;
+// is dropped without a word whenever it fails or a human has named the session first — plus /rename
+// ([Model.runRename]), the human's half of that same machinery, which takes the name it is given or
+// asks the model for one on demand and, being asked for rather than automatic, reports every
+// outcome and outranks a title the human set a moment ago;
 // picker.go the modal single-select overlay behind /model and /server, and
 // popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go

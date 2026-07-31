@@ -241,9 +241,22 @@ byte-identical with and without a landed auto-title.
 
 **Commit:** `feat(tui): auto-title new sessions on first prompt`
 
-## 6. /rename command
+## 6. /rename command — ✅ DONE (2026-07-31)
 
 Depends on item 5.
+
+NOTES (2026-07-31): four additions to the item's literal text. (a) The carried-over never-clobber gap is
+closed with provenance rather than a bare check: a `titleSource` rides with the stash (`Model.pendingSource`,
+a fourth naming field written only by `applyTitle`), and `flushPendingTitle` drops an AUTOMATIC stash when
+`titleTouched` is set while flushing a manual one regardless — a generated title waiting for an id is the one
+way an automatic title outlives `foldAutoTitle`'s check, and `/rename <text>` pre-Save now stashes too.
+(b) With no SessionHost wired, both forms note "this session is not being saved…" instead of reporting a
+title nothing would store (the item names the seam-nil and no-prompt refusals but not this one).
+(c) `autoTitleCmd` generalized into `titleCmd(firstUserText, wrap)`, since the manual path needs the identical
+call under `manualTitleMsg`. (d) The spec row omits `whileRunning: false`: every other row in `commandSpecs`
+omits its false flags, and an explicit zero value reads as a mistake there — the behaviour is unchanged and
+pinned by `TestSafeWhileRunningReadsTheLine`. Also: `doc.go`'s file-by-file narration and the `wantParsed`
+list in `TestCommandTableDrivesParserAndMenu` gained the new verb.
 
 **What:** In `internal/tui/command.go`: add the spec row `{name: "rename", summary:
 "rename this session (bare = ask the model)", takesArgs: true, whileRunning: false}` —
