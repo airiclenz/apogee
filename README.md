@@ -129,11 +129,12 @@ Both work **anywhere in the line and at any time**: the menu completes the token
 cursor is on, so you can start typing a message and reach for a command halfway
 through, or go back and fix a misspelled name. Accepting a command from the menu
 **runs it and keeps the rest of your draft**. The menu stays open while the model is
-working, too — commands that need a quiet engine are shown tagged `— idle only` and
-say so if you pick one, while `/version`, `/skills` and `/confine`'s status report
-answer immediately. A token lights up in the box exactly when it resolves — violet for
-a skill your catalog has, blue for a file your workspace has — so a typo is visible
-before you send.
+working, too — commands that need a quiet engine wear an `— idle only` tag for as long
+as the engine is busy, and say so if you pick one anyway, while `/version`, `/skills`
+and `/confine`'s status report answer immediately. Once the engine is idle that tag is
+gone from the menu entirely — there is nothing left for it to warn about. A token
+lights up in the box exactly when it resolves — violet for a skill your catalog has,
+blue for a file your workspace has — so a typo is visible before you send.
 
 | What you type | Does | While the model works |
 |---|---|---|
