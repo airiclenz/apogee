@@ -13,9 +13,11 @@ import (
 //
 // Assistant messages arrive as markdown source; this file turns the small, common subset the
 // transcript needs into styled physical lines: **bold**, # headings (bold white), `inline code`
-// and ``` fenced blocks ``` (orange), and bullet/numbered lists. It is a deliberately spare,
-// lipgloss-only renderer (no syntax highlighting, no external dependency) — pure and
-// table-testable, matching toolpresent.go's posture; render.go owns the marker and depth framing.
+// and ``` fenced blocks ``` (orange), bullet/numbered lists, and GFM pipe tables — the last
+// dispatched from the walk below into its companion mdtable.go, which draws them as borderless
+// aligned columns under the same absolute width cap. It is a deliberately spare, lipgloss-only
+// renderer (no syntax highlighting, no external dependency) — pure and table-testable, matching
+// toolpresent.go's posture; render.go owns the marker and depth framing.
 //
 // Two properties keep it safe inside the existing line-oriented renderer. The styling is baked
 // into the text as ANSI before wrapping, and ansi.Wrap/Hardwrap are SGR-aware (they re-emit a

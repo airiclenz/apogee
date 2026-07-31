@@ -135,8 +135,12 @@
 //
 // Three files round out the renderer without touching the state machine. markdown.go turns the
 // common markdown subset in assistant text (**bold**, # headings, `inline`/fenced code, bullet/
-// numbered lists) into styled physical lines — a spare, pure, lipgloss-only renderer matching
-// toolpresent.go's posture, with render.go still owning the marker and depth framing. filecache.go
+// numbered lists, GFM pipe tables) into styled physical lines — a spare, pure, lipgloss-only
+// renderer matching toolpresent.go's posture, with render.go still owning the marker and depth
+// framing. Tables are the one construct with a file of their own, mdtable.go: it parses the block
+// and lays it out as borderless aligned columns, measuring the RENDERED cell so markup and colour
+// escapes never widen a column, and falling back to plain paragraphs where even single-cell
+// columns cannot fit the width (layout.md is the visual contract). filecache.go
 // backs the "@" overlay with a short-TTL, single-walk workspace listing filtered in memory, so a
 // typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke. mouse.go
 // implements click-to-position caret and drag-to-select (with OSC52 copy) in BOTH rectangles —

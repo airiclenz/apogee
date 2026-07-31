@@ -182,9 +182,17 @@ green, including `TestWidthNeverExceeds`, `TestPlainTextUnchanged`,
 
 **Commit:** `feat(tui): render markdown tables as aligned columns in the transcript`
 
-## 4. Docs closeout
+## 4. Docs closeout — ✅ DONE (2026-07-31)
 
 Depends on item 3.
+
+**NOTES (2026-07-31):** one addition beyond the item's literal text. The `doc.go` paragraph names
+`mdtable.go` as well as tables — its "three files round out the renderer" sentence is a module map,
+and a new file in the package that the map does not mention is exactly the kind of drift that
+paragraph exists to prevent; the count still reads three, with `mdtable.go` named as `markdown.go`'s
+companion. The plan's closing note suggests `0.8.0` → `0.9.0`; `VERSION` has since moved to
+`v0.10.4`, so the equivalent bump today is `0.11.0` — still not performed here, still the owner's
+call.
 
 **What:** (a) Update the `markdown.go` file-header narration (`markdown.go:14-25`) and the
 `doc.go` markdown paragraph (`doc.go:136-139`) to name tables among the handled

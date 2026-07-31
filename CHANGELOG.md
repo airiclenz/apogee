@@ -10,6 +10,30 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Markdown tables in an answer now render as a table.** A pipe table the model emitted used to
+  fall through to the plain-paragraph path: every row was word-wrapped on its own, the columns
+  lined up only as far as the model's own source padding happened to carry them, the `|---|:---:|`
+  delimiter row appeared verbatim as a line of visible punctuation, and a row wider than the chat
+  soft-wrapped into a second one. The transcript now draws it: **borderless aligned columns** —
+  each cell padded to the widest in its column, columns two spaces apart, no verticals and no
+  frame — with a **bold header** over a `─` rule as wide as each column, and the delimiter row's
+  alignment markers honoured (`:--` left, `--:` right, `:-:` centred). Cells are rendered as inline
+  markdown first, so `**bold**` and `` `code` `` inside a cell style exactly as they do in a
+  paragraph, and it is that rendered width — not the source width — that sets the column, so markup
+  characters and colour escapes never push one open.
+  - **It never overflows the chat.** Where the columns plus their gutters do not fit, the widest
+    column is shrunk until they do and an over-wide cell is cut with a `…` tail; where even
+    single-cell columns cannot fit, the block falls back to the plain paragraphs it rendered as
+    before, which always fits. One row is always exactly one line — no cell wraps in this version.
+  - **A half-arrived table is just text.** A table becomes a table on the row that completes it —
+    the header row plus a valid delimiter row beneath it — so everything streaming in ahead of that
+    reads as ordinary paragraphs, the same contract every other half-typed construct keeps. Columns
+    go on measuring themselves as rows arrive, so a table may widen as it streams.
+
+  Plain text and prose that merely *contains* pipes are untouched, byte for byte. The renderer stays
+  hand-rolled and dependency-free — no markdown library joins the build — and the visual contract is
+  specced in `layout.md` ("Markdown tables in assistant text").
+
 - **`/model` brings the server up too — plus `/unload-model` and `/stop-server`, for freeing its
   model or shutting it down without leaving the session.** `/server` moves between servers that
   are already *running*; this makes one **exist**. Apogee now imports **llama-launcher** — the separate tool
