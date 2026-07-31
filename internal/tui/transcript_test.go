@@ -284,7 +284,7 @@ func TestTranscriptRendersMarkdownTable(t *testing.T) {
 		"✦ Counts:",
 		"",
 		"  Tool       Calls",
-		"  ─────────  ─────",
+		"  ────────────────",
 		"  Read File     12",
 		"  Run            3",
 	}, "\n")

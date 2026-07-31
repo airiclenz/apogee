@@ -257,7 +257,7 @@ func TestTableRendersLayoutExample(t *testing.T) {
 	}, "\n")
 	want := []string{
 		"Tool       Calls      Notes",
-		"─────────  ─────  ─────────────",
+		"───────────────────────────────",
 		"Read File     12      fast",
 		"Run            3  go test ./...",
 	}
@@ -321,14 +321,48 @@ func TestTableConsumesItsSyntax(t *testing.T) {
 			t.Errorf("line %d still shows the delimiter row: %q", i, v)
 		}
 	}
-	if v := strip(got[1]); v != "─  ─  ─" {
-		t.Errorf("rule row = %q; want %q (a ─ run per column, bare gutters)", v, "─  ─  ─")
+	if v := strip(got[1]); v != "───────" {
+		t.Errorf("rule row = %q; want %q (one unbroken run, gutters ruled too)", v, "───────")
 	}
 	if colorActive(th) && !strings.Contains(got[0], "\x1b") {
 		t.Errorf("header row emitted no styling: %q", got[0])
 	}
 	if colorActive(th) && !strings.Contains(got[1], "\x1b") {
 		t.Errorf("rule row emitted no styling: %q", got[1])
+	}
+}
+
+// The rule under the header is ONE unbroken line: the gutters between the columns are ruled like
+// the columns themselves, so it reads as a single horizontal rule under the whole table rather than
+// a dash per column interrupted at every column division. A space anywhere inside that line is the
+// bare-gutter regression. The run is also exactly as wide as every other line of the block — the
+// gutters are now filled rather than blank, so the width the rule spans is the width it draws.
+func TestTableRuleIsContinuous(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| Tool | Calls | Notes |",
+		"|:--|--:|:-:|",
+		"| Read File | 12 | fast |",
+		"| Run | 3 | `go test ./...` |",
+	}, "\n")
+
+	got := renderMarkdownBody(th, source, 40) // wider than the table, so no column is shrunk
+
+	if len(got) != 4 {
+		t.Fatalf("got %d lines, want 4 (header, rule, two rows): %#v", len(got), visible(got))
+	}
+	rule := strip(got[1])
+	if strings.Contains(rule, " ") {
+		t.Errorf("rule row = %q; want one unbroken run — the gutters are ruled too, not bare", rule)
+	}
+	if want := strings.Repeat(glyphTableRule, lipgloss.Width(rule)); rule != want {
+		t.Errorf("rule row = %q; want nothing but %q", rule, glyphTableRule)
+	}
+	for i, ln := range got {
+		if w := lipgloss.Width(ln); w != lipgloss.Width(got[1]) {
+			t.Errorf("line %d is %d cells wide but the rule is %d — the rule spans the table exactly: %q",
+				i, w, lipgloss.Width(got[1]), strip(ln))
+		}
 	}
 }
 
@@ -497,7 +531,7 @@ func TestTableFollowedByOtherBlocks(t *testing.T) {
 
 	got := visible(renderMarkdownBody(th, source, 40))
 
-	want := []string{"a  b", "─  ─", "1  2", "", "Title", "• item", "  code()"}
+	want := []string{"a  b", "────", "1  2", "", "Title", "• item", "  code()"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("mixed blocks:\n--- got ---\n%s\n--- want ---\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -511,7 +545,7 @@ func TestTableInsideProse(t *testing.T) {
 
 	got := visible(renderMarkdownBody(th, source, 40))
 
-	want := []string{"Here it is:", "a  b", "─  ─", "1  2", "done"}
+	want := []string{"Here it is:", "a  b", "────", "1  2", "done"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("prose around a table:\n--- got ---\n%s\n--- want ---\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))

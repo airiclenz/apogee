@@ -167,6 +167,17 @@ line it cuts. `layout.md` states the invariant and notes that its worked example
 cannot be shown in print; `TestTableRendersLayoutExample` keeps pinning that example's visible text and
 the new `TestTableRowsShareOneWidth` / `TestTranscriptTableFillsTheBodyColumn` pin the widths.
 
+**NOTES (2026-07-31, follow-up 2):** the rule under the header is now **one continuous run** across the
+table instead of a `─` run per column with bare gutters — the owner reported the line reading as
+interrupted at every column division. `tableRuleRow` draws `sum(widths) + 2×(columns−1)` glyphs in the
+same `mdRule` style, one line tall, which is exactly the width `layoutTableRow` produces, so the
+equal-width invariant above holds unchanged. This amends Decision 4 and the `layout.md` section item 1
+wrote (prose **and** its worked before/after example, whose rule line is now 31 unbroken glyphs);
+`TestTableRendersLayoutExample`, `TestTableConsumesItsSyntax`, `TestTableFollowedByOtherBlocks`,
+`TestTableInsideProse` and `TestTranscriptRendersMarkdownTable` were updated with it, and the new
+`TestTableRuleIsContinuous` fails on any interior space in the rule line. Nothing else about the block
+changed: widths, cell gutters, alignment, header bolding and the shrink behaviour are untouched.
+
 **What:** In `mdtable.go`, add the renderer implementing Decisions 4–8: per-cell
 `renderInline`, `th.mdBold` header, column measurement via `lipgloss.Width` on rendered
 cells, alignment padding, two-space gutters, the `─` rule line, the shrink-widest /

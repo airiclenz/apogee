@@ -200,8 +200,8 @@ func hasUnescapedPipe(s string) bool {
 // ----------------------------------------------------------------------------
 //
 // A table is drawn borderless — columns of text and two spaces of gutter, with one dim rule
-// under the header and no verticals anywhere — so it sits in the body column like any other
-// paragraph rather than as a boxed object dropped into the transcript. Every width here is a
+// running unbroken under the header and no verticals anywhere — so it sits in the body column
+// like any other paragraph rather than a boxed object dropped into the transcript. Every width is a
 // display width (lipgloss.Width over the rendered, ANSI-carrying cell), never a byte count: the
 // cells are styled before they are measured, so markup characters and escape bytes can never
 // push a column open. One row is one physical line, which is what the line-oriented renderer
@@ -211,11 +211,11 @@ func hasUnescapedPipe(s string) bool {
 const tableGutter = "  "
 
 // renderTable lays a parsed table out as styled physical lines at the given width: bold header,
-// a ─ rule per column, then the body rows, each cell inline-rendered and padded on the side its
-// column's alignment names. It reports false when the table cannot be made to fit — the width is
-// too narrow even with every column down to a single cell — and the caller then leaves the block
-// to the paragraph path it would have taken before tables were rendered at all, which is always
-// readable and never overflows.
+// one continuous ─ rule the full width of the table, then the body rows, each cell inline-rendered
+// and padded on the side its column's alignment names. It reports false when the table cannot be
+// made to fit — the width is too narrow even with every column down to a single cell — and the
+// caller then leaves the block to the paragraph path it would have taken before tables were
+// rendered at all, which is always readable and never overflows.
 func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 	if len(tbl.header) == 0 {
 		return nil, false
@@ -367,13 +367,18 @@ func padTableCell(cell string, width int, align mdAlign) string {
 	}
 }
 
-// tableRuleRow renders the line under the header: one ─ run per column, each as wide as its
-// column, with the gutters between them left bare so it reads as a rule under each column rather
-// than as a border drawn around the table.
+// tableRuleRow renders the line under the header: one unbroken ─ run spanning the whole table,
+// gutters included, so the header is underlined by a single continuous rule rather than by one
+// dash per column broken at every column division. Its width is the sum of the columns and the
+// gutters between them — the same arithmetic layoutTableRow walks — which keeps the rule exactly
+// as wide as every other line of the block.
 func tableRuleRow(th theme, widths []int) string {
-	rules := make([]string, len(widths))
+	width := 0
 	for i, w := range widths {
-		rules[i] = th.mdRule.Render(strings.Repeat(glyphTableRule, w))
+		if i > 0 {
+			width += len(tableGutter)
+		}
+		width += w
 	}
-	return strings.Join(rules, tableGutter)
+	return th.mdRule.Render(strings.Repeat(glyphTableRule, width))
 }

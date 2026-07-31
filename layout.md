@@ -144,9 +144,11 @@ that stopped at its last word instead would leave a wider gap to the scroll-bar 
 above it does, which reads as the bar stepping inward beside the body.
 
 **The header and its rule.** The header row's cells are bold, the same weight `**bold**` earns
-anywhere else. The delimiter row renders as a run of `─` per column, each as wide as the column it
-belongs to, with the two-space gutters left bare — so it reads as one ruled line under each column
-rather than a border drawn around the table.
+anywhere else. The delimiter row renders as a **single unbroken run of `─`** spanning the whole
+table: the two-space gutters are ruled along with the columns, so the line reads as one continuous
+horizontal rule under the header rather than a dash per column interrupted at every column
+division. It is exactly one line tall, wears the same muted colour as before, and — the gutters
+being filled rather than blank — is exactly as wide as every other line of the block.
 
 **Alignment is the delimiter row's word.** `:--` left, `--:` right, `:-:` centred, a plain `---`
 left; every cell is padded on the side its column names, header cells included. A centred cell with
@@ -185,7 +187,7 @@ and what the transcript draws for it at 34 columns of body width — `Tool` left
 
 ```
 Tool       Calls      Notes
-─────────  ─────  ─────────────
+───────────────────────────────
 Read File     12      fast
 Run            3  go test ./...
 ```
