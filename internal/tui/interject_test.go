@@ -691,8 +691,8 @@ func TestAutocompleteOpensWhileRunning(t *testing.T) {
 	if len(m.autocomplete.items) != 1 || m.autocomplete.items[0].value != "clear" {
 		t.Fatalf("rows = %+v, want [clear]", m.autocomplete.items)
 	}
-	if label := m.autocomplete.items[0].label; !strings.Contains(label, idleOnlyTag) {
-		t.Errorf("row label = %q, want the %q tag — /clear cannot run mid-Step", label, idleOnlyTag)
+	if cells := m.autocomplete.items[0].cells; !containsString(cells, idleOnlyTag) {
+		t.Errorf("row cells = %q, want the %q tag cell — /clear cannot run mid-Step", cells, idleOnlyTag)
 	}
 	if got := plain(m.View()); !strings.Contains(got, idleOnlyTag) {
 		t.Errorf("the rendered dropdown is missing the idle-only tag:\n%s", got)

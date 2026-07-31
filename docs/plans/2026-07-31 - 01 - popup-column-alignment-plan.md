@@ -87,9 +87,20 @@ the pre-change output. Existing invariants must keep passing unmodified:
 
 **Commit:** `feat(tui): cell-based popup rows with vertical column alignment`
 
-## 2. Slash menus: commands and skills emit cells
+## 2. Slash menus: commands and skills emit cells — ✅ DONE (2026-07-31)
 
 Depends on item 1.
+
+NOTES (2026-07-31): the merged menu's skill cell is built by a new `skillMenuCell` helper in
+`autocomplete.go` — it flattens the picker's `["DisplayName", "Summary"]` cells into the one
+`"<label>"` cell the merged schema gives a skill, joined by `popupGutter` (a row cannot be in two
+column schemas at once, and the merged menu aligns the description against the command summaries).
+NOTES (2026-07-31): the three named `autocomplete_test.go` tests needed NO change — they assert on
+the pane's title/border/marker/width, never on a label — so they pass unmodified. Two files the plan
+did not list had to change instead, because the `label` field they read no longer exists:
+`minilang_test.go` (the `/confine` label check and the two `@path` label equalities, now `cells`
+comparisons) and the `commandSuggestions("")` label list at `command_test.go:76-91` (now compares
+`popupRow` cells against the table).
 
 **What:** In `internal/tui/autocomplete.go`: replace `acItem.label` (one pre-concatenated
 string, `autocomplete.go:51`) with a `cells popupRow` field. Producers emit fixed

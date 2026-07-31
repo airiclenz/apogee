@@ -545,8 +545,8 @@ func TestComputeAutocompleteOffersConfine(t *testing.T) {
 	if len(ac.items) != 1 || ac.items[0].value != "confine" {
 		t.Fatalf("suggestions = %v, want [confine]", ac.items)
 	}
-	if !strings.Contains(ac.items[0].label, "/confine") {
-		t.Errorf("label = %q, want it to show the verb", ac.items[0].label)
+	if !containsString(ac.items[0].cells, "/confine") {
+		t.Errorf("cells = %q, want the verb in its own column", ac.items[0].cells)
 	}
 }
 
@@ -795,8 +795,9 @@ func TestComputeAutocompleteFiles(t *testing.T) {
 	if !ac.active || ac.kind != acFile {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active file", ac.active, ac.kind)
 	}
-	if len(ac.items) != 1 || ac.items[0].value != "main.go" || ac.items[0].label != "@main.go" {
-		t.Fatalf("file suggestions = %+v, want one main.go", ac.items)
+	if len(ac.items) != 1 || ac.items[0].value != "main.go" ||
+		!reflect.DeepEqual(ac.items[0].cells, popupRow{"@main.go"}) {
+		t.Fatalf("file suggestions = %+v, want one single-cell main.go row", ac.items)
 	}
 	// Accept splices the @path at the token boundary, preserving the prefix text.
 	m.autocomplete = ac
@@ -865,7 +866,8 @@ func TestComputeAutocompleteQuotedFiles(t *testing.T) {
 	if !ac.active || ac.kind != acFile {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active file", ac.active, ac.kind)
 	}
-	if len(ac.items) != 1 || ac.items[0].value != "my plan.md" || ac.items[0].label != `@"my plan.md"` {
+	if len(ac.items) != 1 || ac.items[0].value != "my plan.md" ||
+		!reflect.DeepEqual(ac.items[0].cells, popupRow{`@"my plan.md"`}) {
 		t.Fatalf("file suggestions = %+v, want one quoted my plan.md row", ac.items)
 	}
 	m.autocomplete = ac

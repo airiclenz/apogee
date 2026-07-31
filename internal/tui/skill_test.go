@@ -270,8 +270,9 @@ func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 	if !row.skill {
 		t.Error("the skill row is not marked as a skill; accept would treat it as a command")
 	}
-	if !strings.Contains(row.label, glyphSkill) || !strings.Contains(row.label, "/clean-code") {
-		t.Errorf("skill row label = %q, want the %q marker and the /id token it writes", row.label, glyphSkill)
+	if len(row.cells) == 0 || !strings.Contains(row.cells[0], glyphSkill) || !strings.Contains(row.cells[0], "/clean-code") {
+		t.Errorf("skill row cells = %q, want the %q marker and the /id token it writes in the first column",
+			row.cells, glyphSkill)
 	}
 }
 

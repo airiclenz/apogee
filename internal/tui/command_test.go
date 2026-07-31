@@ -71,23 +71,26 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		t.Errorf("menu-only verbs = %v, want [skill]", menuOnly)
 	}
 
-	// The empty partial lists EVERY row, in table order, labelled from the same table — no verb of
-	// the registry is withheld from the menu.
-	var want, wantLabels []string
+	// The empty partial lists EVERY row, in table order, with its cells read off the same table — no
+	// verb of the registry is withheld from the menu. The row is CELLS, not one concatenated label:
+	// the verb, its summary and the (here empty, because idle) idle-only tag, each its own column.
+	var want []string
+	var wantCells []popupRow
 	for _, spec := range commandSpecs {
 		want = append(want, spec.name)
-		wantLabels = append(wantLabels, "/"+spec.name+"  "+spec.summary)
+		wantCells = append(wantCells, popupRow{"/" + spec.name, spec.summary, ""})
 	}
-	var got, gotLabels []string
+	var got []string
+	var gotCells []popupRow
 	for _, it := range commandSuggestions("", false) {
 		got = append(got, it.value)
-		gotLabels = append(gotLabels, it.label)
+		gotCells = append(gotCells, it.cells)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commandSuggestions(\"\") = %v, want every offered row in table order %v", got, want)
 	}
-	if !reflect.DeepEqual(gotLabels, wantLabels) {
-		t.Errorf("labels = %q, want them read off the table %q", gotLabels, wantLabels)
+	if !reflect.DeepEqual(gotCells, wantCells) {
+		t.Errorf("cells = %q, want them read off the table %q", gotCells, wantCells)
 	}
 }
 
@@ -175,10 +178,10 @@ func TestCommandSuggestionsTagIdleOnlyRowsWhileBusy(t *testing.T) {
 	}
 	for i, it := range rows {
 		spec := commandSpecs[i]
-		tagged := strings.Contains(it.label, idleOnlyTag)
+		tagged := containsString(it.cells, idleOnlyTag)
 		if tagged == spec.whileRunning {
-			t.Errorf("row %q label = %q; tagged = %v, want %v (whileRunning = %v)",
-				spec.name, it.label, tagged, !spec.whileRunning, spec.whileRunning)
+			t.Errorf("row %q cells = %q; tagged = %v, want %v (whileRunning = %v)",
+				spec.name, it.cells, tagged, !spec.whileRunning, spec.whileRunning)
 		}
 	}
 }

@@ -44,13 +44,17 @@ const (
 )
 
 // acItem is one suggestion: value is the text spliced in (the command name, the skill id or the
-// file path, without the "/"/"@" sigil), label is what the row displays, and skill marks a row of
-// the merged "/" menu that names a SKILL rather than a command. The mark is not decoration: the two
-// kinds of row do different things at accept (a skill writes its token, a command RUNS), so the row
-// has to carry which it is.
+// file path, without the "/"/"@" sigil), cells are the row's COLUMNS in its menu's fixed schema
+// (popupRow — the popup module pads them into vertically aligned columns, so no producer here
+// concatenates its own spacing), and skill marks a row of the merged "/" menu that names a SKILL
+// rather than a command. The mark is not decoration: the two kinds of row do different things at
+// accept (a skill writes its token, a command RUNS), so the row has to carry which it is.
+//
+// Only the cells are display: prefix matching and accept-on-enter read value (and the parsed verb)
+// exclusively, so re-columning a menu can never change what a row DOES.
 type acItem struct {
 	value string
-	label string
+	cells popupRow
 	skill bool
 }
 
@@ -254,38 +258,39 @@ func fileRefToken(path string) string {
 	return "@" + path
 }
 
-// idleOnlyTag closes the label of a command row that cannot run in the state the menu is open in.
-// The dropdown offers every verb while a worker works — hiding half the namespace is what made the
-// "/" menu useless mid-run — so the row that would be refused says so instead of pretending. It
+// idleOnlyTag fills the third column of a command row that cannot run in the state the menu is open
+// in. The dropdown offers every verb while a worker works — hiding half the namespace is what made
+// the "/" menu useless mid-run — so the row that would be refused says so instead of pretending. It
 // needs no style of its own: renderPopup paints every unselected row faint already, and the
-// selected one on its highlight bar, so the tag inherits whichever the row is wearing.
+// selected one on its highlight bar, so the tag inherits whichever the row is wearing (layout.md's
+// "in the pane's faint unselected style").
 const idleOnlyTag = "— idle only"
 
 // commandSuggestions returns the verbs of commandSpecs (command.go — the one registry the parser
-// reads too) whose name has partial as a prefix, in table order, labeling each "/verb  summary"
-// (the value stays the bare verb). It is the command half of the merged "/" menu
-// (slashSuggestions). Every row is offered, menuOnly ones included: accepting /skill completes to
-// "/skill " and chains into the skill picker (acceptAutocomplete recomputes the overlay), never
-// sending "/skill" as a literal message — like the apogee-code oracle's selectSkill.
+// reads too) whose name has partial as a prefix, in table order, each as the command schema's three
+// cells — ["/verb", summary, idle-only tag] — which the popup module lays out as columns, so the
+// summaries line up down the pane however long the verbs beside them are (the value stays the bare
+// verb). It is the command half of the merged "/" menu (slashSuggestions). Every row is offered,
+// menuOnly ones included: accepting /skill completes to "/skill " and chains into the skill picker
+// (acceptAutocomplete recomputes the overlay), never sending "/skill" as a literal message — like
+// the apogee-code oracle's selectSkill.
 //
-// busy says a worker owns the engine, which is what the idleOnlyTag is appended from: the verbs
-// commandSpec.whileRunning marks as reporting-only stay untagged (they run right here), every other
+// busy says a worker owns the engine, which is what fills the tag cell: the verbs
+// commandSpec.whileRunning marks as reporting-only leave it empty (they run right here), every other
 // row carries the tag and earns commandsAtIdleNote if accepted. The tag is a property of the
-// MOMENT, not of the verb, so it is a parameter rather than a second table column.
+// MOMENT, not of the verb, so it is a parameter rather than a second table column. At idle no row
+// fills that cell at all and the whole column collapses (layoutPopupRow), costing the pane nothing.
 func commandSuggestions(partial string, busy bool) []acItem {
 	var items []acItem
 	for _, c := range commandSpecs {
 		if !strings.HasPrefix(c.name, partial) {
 			continue
 		}
-		label := "/" + c.name
-		if c.summary != "" {
-			label += "  " + c.summary
-		}
+		tag := ""
 		if busy && !c.whileRunning {
-			label += "  " + idleOnlyTag
+			tag = idleOnlyTag
 		}
-		items = append(items, acItem{value: c.name, label: label})
+		items = append(items, acItem{value: c.name, cells: popupRow{"/" + c.name, c.summary, tag}})
 	}
 	return items
 }
@@ -332,25 +337,45 @@ func skillArgToken(value string, caret int) (start, end int, partial string, ok 
 // The skill rows are never tagged, whatever the model is doing: a skill token is message content
 // that rides an interjection to the running Exchange, so it is as invocable mid-run as at idle. Only
 // the command half answers to the while-running policy (commandSuggestions takes m.busy()).
+//
+// A skill row follows the merged menu's schema, not the picker's: ["✦ /id", what the skill is]. The
+// two kinds of row therefore share one second column, so a skill's description starts exactly where
+// the command summaries above it do rather than wherever its own token happened to end.
 func (m Model) slashSuggestions(partial, outside string) []acItem {
 	items := commandSuggestions(partial, m.busy())
 	for _, sk := range m.skillSuggestions(partial, outside) {
 		if _, shadowed := commandByName(sk.value); shadowed {
 			continue
 		}
-		label := glyphSkill + " /" + sk.value
-		if sk.label != "" {
-			label += "  " + sk.label
-		}
-		items = append(items, acItem{value: sk.value, label: label, skill: true})
+		items = append(items, acItem{
+			value: sk.value,
+			cells: popupRow{glyphSkill + " /" + sk.value, skillMenuCell(sk.cells)},
+			skill: true,
+		})
 	}
 	return items
 }
 
+// skillMenuCell flattens a skill picker row's cells — display name, summary — into the ONE cell the
+// merged "/" menu gives a skill, joined by the module's own gutter so the flattened text reads with
+// the same rhythm the columns elsewhere do. The picker aligns those two tiers against each other;
+// the merged menu instead aligns the whole description against the command summaries, and a row
+// cannot be in two column schemas at once. Empty tiers drop out rather than leaving a hanging gutter.
+func skillMenuCell(cells popupRow) string {
+	parts := make([]string, 0, len(cells))
+	for _, cell := range cells {
+		if cell != "" {
+			parts = append(parts, cell)
+		}
+	}
+	return strings.Join(parts, popupGutter)
+}
+
 // skillSuggestions lists skills matching partial (a case-insensitive substring of id or
-// displayName), excluding those the message already invokes, as rows showing "displayName
-// summary". The value is the skill ID (what the accepted row splices in as a "/id" token). A nil
-// catalog yields nothing (the picker is dark).
+// displayName), excluding those the message already invokes, as the picker's two cells —
+// ["DisplayName", "Summary"] — which the popup module lays out as columns, so what each skill DOES
+// starts at one shared offset however long the names beside it run. The value is the skill ID (what
+// the accepted row splices in as a "/id" token). A nil catalog yields nothing (the picker is dark).
 //
 // "Already invoked" is read off the BUFFER — the /tokens standing in the text right now — because
 // the text is where an invocation lives; there is no attachment state beside it to consult. Delete
@@ -378,11 +403,7 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 			!strings.Contains(strings.ToLower(sk.DisplayName), needle) {
 			continue
 		}
-		label := sk.DisplayName
-		if sk.Summary != "" {
-			label += "  " + sk.Summary
-		}
-		items = append(items, acItem{value: sk.ID, label: label})
+		items = append(items, acItem{value: sk.ID, cells: popupRow{sk.DisplayName, sk.Summary}})
 		if len(items) >= maxAutocompleteItems {
 			break
 		}
@@ -394,12 +415,15 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 // rows for paths with spaces (fileRefToken), so the dropdown teaches the syntax before the user
 // ever types a quote — served through the Model's file cache so a typing burst reuses one
 // workspace walk (filecache.go). newModel always installs the cache, so m.files is never nil
-// here. The item's value stays the raw path; only the label carries the sigil and quotes.
+// here. The item's value stays the raw path; only the cell carries the sigil and quotes.
+//
+// A path is one thing, not a name and a description, so a file row stays SINGLE-CELL: one column,
+// which the popup module lays out as the plain "@path" it always was.
 func (m Model) fileSuggestions(partial string) []acItem {
 	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
-		items = append(items, acItem{value: p, label: fileRefToken(p)})
+		items = append(items, acItem{value: p, cells: popupRow{fileRefToken(p)}})
 	}
 	return items
 }
@@ -634,22 +658,23 @@ func autocompleteTitle(kind acKind) string {
 // renderAutocomplete draws the suggestion dropdown shown above the input box, through the shared
 // popup module (renderPopup): a titled, bordered pane spanning the full window width (m.width,
 // flush with the input box below) holding the suggestion rows and a key legend, the selected row
-// highlighted. The kind picks the title ("commands and skills"/"files"/"skills"); row
-// composition (the acItem labels, verbatim) stays caller-side while the module owns the marker,
-// highlight, truncation, and scroll windowing. It returns "" when the overlay is inactive, so
-// View treats it like the approval-prompt slot.
+// highlighted. The kind picks the title ("commands and skills"/"files"/"skills"); each row hands
+// over its CELLS and the module owns the column alignment along with the marker, highlight,
+// truncation, and scroll windowing — so a menu mixing "/clear" with "✦ /clean-code" still starts
+// every summary at one column. It returns "" when the overlay is inactive, so View treats it like
+// the approval-prompt slot.
 func (m Model) renderAutocomplete() string {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 {
 		return ""
 	}
-	labels := make([]string, len(ac.items))
+	rows := make([]popupRow, len(ac.items))
 	for i, it := range ac.items {
-		labels[i] = it.label
+		rows[i] = it.cells
 	}
 	spec := popupSpec{
 		title:    autocompleteTitle(ac.kind),
-		rows:     singleCellRows(labels),
+		rows:     rows,
 		selected: ac.selected,
 		hint:     autocompleteHint,
 		maxRows:  maxAutocompleteItems,
