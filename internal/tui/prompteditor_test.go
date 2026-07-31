@@ -79,9 +79,10 @@ func TestPromptEditorResetClearsEverything(t *testing.T) {
 
 // wrappedRowsOf reports how many wrapped sub-rows the WIDGET gives one logical line at width,
 // read back through its own LineInfo with the caret parked on that line. It is deliberately not
-// inputContentRows: that one mirrors the wrap for the box HEIGHT and does not count the phantom
-// trailing sub-line bubbles appends to a line that fills its last row exactly — which is the very
-// geometry the caret seat has to survive, so the caret tests measure with the widget's reckoning.
+// inputContentRows: that one is apogee's MIRROR of this answer (pinned to it by
+// TestInputContentRowsMirrorsTheWidget), and a caret test that leaned on the mirror would go green
+// on a geometry the widget never drew — including the phantom trailing sub-line bubbles appends to
+// a line that fills its last row exactly, which is the very geometry the caret seat has to survive.
 func wrappedRowsOf(line string, width int) int {
 	e := newPromptEditor(defaultCursorShape)
 	e.input.SetWidth(width)

@@ -330,8 +330,9 @@ func TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft(t *testing.T) {
 						len(tc.first), iw, got, strings.HasSuffix(tc.first, " "))
 				}
 			}
-			// The widget's own reckoning, not the repo's: inputContentRows mirrors the wrap for the
-			// box HEIGHT and does not count the phantom row, so the wrap is asserted through bubbles.
+			// The widget's own reckoning, not the repo's mirror of it (inputContentRows): the
+			// premise of this fixture is a genuinely wrapped first line, so it is asserted through
+			// bubbles rather than through code that only claims to agree with bubbles.
 			if got := wrappedRowsOf(tc.first, iw); got < 2 {
 				t.Fatalf("first line occupies %d wrapped rows in the widget, want a genuinely wrapped one", got)
 			}

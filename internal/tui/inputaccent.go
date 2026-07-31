@@ -197,7 +197,11 @@ func inputCellSpans(measure widthAuthority, value string, width, from, to int) [
 // widget compares its width against the row counting the word's last rune twice, an off-by-one
 // mirrored here deliberately, since matching the split is the whole point. Finally a line whose
 // content REACHES the width gains one trailing row, the seat the widget keeps for a caret past a
-// full line (the same rule inputContentRows sizes the box by).
+// full line.
+//
+// Its row COUNT — len(starts) — is what sizes the prompt box: inputContentRows (render.go) is the
+// sum of this over the value's logical lines, which is the widget's own decomposition
+// (totalVisualLines). So the box's height and the rows an accent lands on come off one ruler.
 //
 // The row and the pending word are re-measured from the line rather than accumulated per rune,
 // which is not a detail: a grapheme cluster measures as a whole, so summing its runes one at a time

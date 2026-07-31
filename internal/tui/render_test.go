@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -899,6 +901,132 @@ func TestInputContentRows(t *testing.T) {
 func TestInputContentRowsZeroWidth(t *testing.T) {
 	if got := inputContentRows("ab", 0); got < 1 {
 		t.Errorf("inputContentRows with zero width = %d, want >= 1 (width floored to one)", got)
+	}
+}
+
+// widgetContentRows is the row count a REAL textarea draws for value at width, and the effective
+// text width it settled on. It is the oracle inputContentRows mirrors, read straight off the widget
+// rather than re-derived: DynamicHeight makes the textarea publish its own totalVisualLines as its
+// height (bubbles/v2@v2.1.0/textarea/textarea.go:1666-1692), and MaxHeight is cleared so nothing
+// clamps that answer. It is the whole-value counterpart of the per-line LineInfo.Height oracle
+// TestWrapRowStartsMirrorsTheWidget pins wrapRowStarts to — the same widget, asked the same
+// question the box-sizing path asks.
+func widgetContentRows(t *testing.T, value string, width int) (rows, effWidth int) {
+	t.Helper()
+	ta := textarea.New()
+	ta.Prompt = ""
+	ta.ShowLineNumbers = false
+	ta.CharLimit = 0
+	ta.MaxHeight = 0 // uncapped: the height it reports is then its raw visual-line total
+	ta.MinHeight = 1
+	ta.DynamicHeight = true
+	ta.SetWidth(width)
+	ta.SetValue(value)
+	return ta.Height(), ta.Width()
+}
+
+// TestInputContentRowsMirrorsTheWidget pins the box-sizing count to the widget itself, which the
+// old Wordwrap+Hardwrap approximation was not: it under-counted "hello world" at width 5 (four
+// widget rows, it said three) and "a b  c" at width 3 (three, it said two), and over-counted
+// "a-b-c-d" at width 3 (three, it said four). The count now delegates to wrapRowStarts, so the box's
+// height and the rows the accent pass paints on come off one ruler.
+//
+// Tabs are deliberately absent: the widget's sanitizer expands them and neither mirror does, the one
+// divergence left standing (TODO.md, "The TUI width authority — what it did not convert").
+func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		width int
+	}{
+		// The three the follow-up finding named, each a concrete failure of the old count.
+		{"word-wrapped prose", "hello world", 5},
+		{"a double space between words", "a b  c", 3},
+		{"a hyphen run", "a-b-c-d", 3},
+
+		{"empty", "", 10},
+		{"short line", "abc", 10},
+		{"one under the width", strings.Repeat("a", 9), 10},
+		{"exact width", strings.Repeat("a", 10), 10},
+		{"one over the width", strings.Repeat("a", 11), 10},
+		{"two full widths", strings.Repeat("a", 20), 10},
+		{"trailing newline", "abc\n", 10},
+		{"two logical lines", "abc\ndef", 10},
+		{"two full logical lines", strings.Repeat("a", 10) + "\n" + strings.Repeat("b", 10), 10},
+		{"a blank line between two", "abc\n\ndef", 10},
+		{"a line of nothing but spaces", "     ", 3},
+		{"trailing space at a row boundary", "aaa aaa aaa aaax ", 8},
+		{"a word longer than the row", "averyveryverylongwordindeed", 6},
+		{"wide glyphs count by display cells", strings.Repeat("あ", 5), 10},
+		{"wide runes wrapping mid-word", "日本語のテキスト 絵文字", 7},
+		{"an emoji carrying VS16", "warn ⚠️ here", 7},
+		{"a VS16 run filling the row", "⚠️⚠️⚠️ end", 6},
+		{"VS16 inside a word too wide for the row", "aa⚠️bb⚠️cc", 4},
+		{"a realistic draft", "/grill-me check @internal/tui/model.go and /code-adit", 20},
+		{"a multi-line draft", "fix the wrap bug\n\nsee @internal/tui/render.go — the mirror under-counts", 24},
+		{"one column", "ab cd", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			want, w := widgetContentRows(t, c.value, c.width)
+			if got := inputContentRows(c.value, w); got != want {
+				t.Errorf("inputContentRows(%q, %d) = %d, the widget draws %d rows", c.value, w, got, want)
+			}
+		})
+	}
+}
+
+// The same oracle over a spread of generated prompt-shaped drafts, which is what turns "the three
+// named cases agree" into "the mirror is faithful": the old count differed from the widget on
+// roughly 41% of inputs like these, so any regression to an approximation fails here loudly rather
+// than on one lucky fixture. Deterministic — a fixed seed, so a failure is reproducible.
+func TestInputContentRowsMirrorsTheWidgetOnGeneratedDrafts(t *testing.T) {
+	// The alphabet is chosen for the boundaries the two mirrors disagreed at: spaces (the widget's
+	// word/space grouping), hyphens (a breakpoint to ansi.Wordwrap but not to the widget), a wide
+	// rune and a VS16 cluster (grapheme-vs-rune measurement), and newlines (logical lines).
+	glyphs := []string{"a", "b", "c", " ", " ", "-", "@", "/", "あ", "⚠️", "\n"}
+	rng := rand.New(rand.NewSource(20260731))
+	for _, width := range []int{1, 2, 3, 5, 8, 13, 40} {
+		for i := 0; i < 300; i++ {
+			var sb strings.Builder
+			for n := rng.Intn(24); n > 0; n-- {
+				sb.WriteString(glyphs[rng.Intn(len(glyphs))])
+			}
+			value := sb.String()
+			want, w := widgetContentRows(t, value, width)
+			if got := inputContentRows(value, w); got != want {
+				t.Fatalf("inputContentRows(%q, %d) = %d, the widget draws %d rows", value, w, got, want)
+			}
+		}
+	}
+}
+
+// The clamp above the count still holds now that it can report MORE rows than the old
+// approximation: the box never grows past maxInputRows (past it the widget scrolls internally) and
+// never shrinks below minInputRows, whatever the mirror returns. inputContentRows itself stays
+// unclamped — layout() derives the viewport's height from the clamped box height, not from this.
+func TestPromptEditorRowsClampsTheWidgetCount(t *testing.T) {
+	const width = 8
+	cases := []string{
+		"",
+		"short",
+		strings.Repeat("a", width*maxInputRows*2),   // one very long soft-wrapped line
+		strings.Repeat("word ", width*maxInputRows), // many wrapped words
+		strings.Repeat("line\n", maxInputRows*3),    // many logical lines
+		strings.Repeat("⚠️", width*maxInputRows),    // VS16 clusters, the widest measure gap
+		strings.Repeat("a", width) + "\n" + "b",     // an exact width fill plus a line
+	}
+	for _, value := range cases {
+		e := newPromptEditor(defaultCursorShape)
+		e.input.SetValue(value)
+		raw := inputContentRows(e.input.Value(), width) // what the editor holds, not what was handed to it
+		got := e.rows(width)
+		if got < minInputRows || got > maxInputRows {
+			t.Fatalf("rows(%q) = %d, outside [%d, %d] (unclamped count %d)", value, got, minInputRows, maxInputRows, raw)
+		}
+		if want := clampInt(raw, minInputRows, maxInputRows); got != want {
+			t.Errorf("rows(%q) = %d, want %d (clamp of the unclamped count %d)", value, got, want, raw)
+		}
 	}
 }
 

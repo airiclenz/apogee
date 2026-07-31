@@ -620,6 +620,16 @@ point is a **minor** bump, not a breaking change.
   exception are recorded in
   [ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md).
 
+- **The prompt box is as tall as the draft it holds.** Its height came from a second guess at how
+  the text widget wraps rather than from the widget's own wrap, and the two disagreed on roughly
+  two drafts in five. Where the guess came in low — `hello world` in a five-column box wraps to
+  four rows and it sized the box for three — the box came up short and the widget scrolled inside
+  it, taking the top of what you had typed out of sight while there was still room on screen for
+  the box to grow; where it came in high, the box carried a blank row under the text. The height is
+  now read off the same mirror of the widget the inline `/skill` and `@file` accents are painted
+  through, so the box, the accents and the widget all agree on where each row is. Tabs stay the one
+  case both mirrors get wrong — the widget expands them (`TODO.md`).
+
 - **Text stays inside the chat on very narrow layouts.** `layout.md` promises that no rendered
   line ever exceeds the width its block was given; a line of pipes or hyphens broke that promise
   at any width — the wrapper grows a word onto an already-full line when the break is a

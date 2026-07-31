@@ -621,7 +621,8 @@ moment to give `ConfineWritablePaths` its first writer.
 `docs/plans/`, archived on completion) —
 [ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md). Nothing
 here breaks the absolute width cap; each is a place the package still measures in a measure the
-painter may not be using, or mirrors a widget imperfectly.
+painter may not be using, or mirrors a widget imperfectly. The `inputContentRows` residue was
+closed on 2026-07-31 (owner-approved follow-up); its entry stays below with what remains of it.
 
 **The four sites the plan could not touch.** `popup.go:185, 212, 293` and `interject.go:393` still
 measure with `ansi.StringWidth`, and `wrapText` (`render.go`) still *wraps* with `ansi.Wrap` even
@@ -633,15 +634,32 @@ stays possible is a popup column landing a cell off on a row carrying VARIATION 
 this up once that plan is archived — it is a rename per site (`ansi.X` → `th.measure.X`), plus
 threading `th` into `truncateToWidth`.
 
-**`inputContentRows` is an unfaithful widget mirror** (`render.go`). It sizes the prompt box to the
-rows it thinks the textarea drew, and it is measurably wrong: against a real textarea's
-`LineInfo.Height` it says three rows for `"hello world"` at width 5 where the widget draws four,
-two for `"a b  c"` at 3 where the widget draws three, four for `"a-b-c-d"` at 3 where the widget
-draws three, and it differs on ~41% of 4000 random prompt-shaped inputs — under-counting, which is
-the box-one-row-short failure its own docstring describes. `Σ len(wrapRowStarts(line, w))` is the
-drop-in replacement (that mirror matches the widget on every non-tab case tried), and it is a
-box-height change rather than a measurement fix, so it wants its own tests. Both mirrors are still
-wrong on tabs, which the widget expands.
+**~~`inputContentRows` is an unfaithful widget mirror~~ — FIXED 2026-07-31** (`render.go`). It sized
+the prompt box to the rows it *thought* the textarea drew, and it was measurably wrong: against a
+real textarea's `LineInfo.Height` it said three rows for `"hello world"` at width 5 where the widget
+draws four, two for `"a b  c"` at 3 where the widget draws three, four for `"a-b-c-d"` at 3 where
+the widget draws three, and it differed on ~41% of 4000 random prompt-shaped inputs — under-counting,
+which is the box-one-row-short failure its own docstring describes. It is now
+`Σ len(wrapRowStarts(line, w))`, so the box's height and the rows the accent pass paints on come off
+one ruler instead of two derivations of the same wrap.
+`TestInputContentRowsMirrorsTheWidget` pins it to the
+widget itself — `DynamicHeight` makes a real textarea publish its own `totalVisualLines` as its
+height, which is the whole-value counterpart of the per-line `LineInfo.Height` oracle
+`wrapRowStarts` is pinned to — over the three cases above plus 2100 generated drafts.
+
+NOTES (2026-07-31): **no clamping adjustment was needed** for the taller counts the fix can now
+return. `promptEditor.rows` already holds the count to `[minInputRows, maxInputRows]` and `layout()`
+sizes the viewport from the *clamped* box height, so a larger raw count only means the box reaches
+its 10-row cap sooner and the widget scrolls internally from there;
+`TestPromptEditorRowsClampsTheWidgetCount` pins that the editor's height is exactly the clamp of the
+unclamped count. Two stale test comments claiming `inputContentRows` deliberately disagrees with the
+widget (`prompteditor_test.go`'s `wrappedRowsOf`, `skill_test.go`'s wrapped-first-line premise) were
+corrected in the same change — both oracles still ask bubbles rather than the mirror, which is now
+the reason rather than the disagreement.
+
+**What is left of this entry:** both mirrors are still wrong on **tabs**, which the widget's input
+sanitizer expands and neither mirror does. Fixing it means expanding tabs the same way before
+measuring, in `wrapRowStarts` (which both mirrors then inherit).
 
 **`hangingPrefixes` can draw three cells at block width 1–2** (`render.go`). It floors its wrap
 width at 1 column and then prepends a two-column marker, so a bullet list in a two-column block
