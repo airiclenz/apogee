@@ -852,6 +852,34 @@ func TestModelPickerAlignsTheProfileColumns(t *testing.T) {
 	}
 }
 
+// A launcher-supplied address is untrusted text and the port cell is escape-stripped like every
+// other cell. net.SplitHostPort validates an address's SHAPE, not its bytes — it rejects "[" and "]"
+// but passes an ESC byte straight through — and the popup module truncates ANSI-preserving without
+// stripping anything, so an unstripped "\x1bc" (RIS, a full terminal reset) hidden in a profile's
+// address would be painted for real. Stripped, the rest of it stays as inert literal text.
+func TestModelPickerEscapeStripsTheProfilePort(t *testing.T) {
+	fake := newLauncher()
+	fake.profiles = []LaunchProfileChoice{
+		{Name: "alpha", Backend: "llamacpp", Addr: "1.2.3.4:\x1bc9999", ContextWindow: 32768},
+	}
+	m := seededLoad(t, fake)
+
+	m, _ = typeCommand(t, m, "/model")
+
+	rows := m.pickerRows()
+	if len(rows) != 1 {
+		t.Fatalf("rows = %v, want the one offered profile", rows)
+	}
+	for i, cell := range rows[0] {
+		if strings.ContainsRune(cell, 0x1b) {
+			t.Errorf("cell %d = %q carries a raw ESC into the pane", i, cell)
+		}
+	}
+	if got, want := rows[0][3], "(:c9999)"; got != want {
+		t.Errorf("port cell = %q, want %q", got, want)
+	}
+}
+
 // The profile this session is ALREADY served by is not offered: the launcher attributes a running
 // instance to it at the very address the session is talking to, so loading it would switch nothing.
 // A profile running SOMEWHERE ELSE is exactly the switch this verb is for and keeps its row, port

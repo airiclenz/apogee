@@ -123,7 +123,7 @@ starts at the same column.
 
 **Commit:** `feat(tui): align command and skill columns in the slash menus`
 
-## 3. Pickers emit cells
+## 3. Pickers emit cells — ✅ DONE (2026-07-31)
 
 Depends on item 1.
 
@@ -131,6 +131,13 @@ NOTES (2026-07-31): `currentRowSuffix`/`runningRowSuffix` were renamed to `curre
 and lost their leading space (`" · current"` → `"· current"`). The schema the item mandates makes each of
 them a cell rather than a suffix, and the space that separated them is the popup module's gutter now, so a
 constant still named `...Suffix` would have described the opposite of what it holds.
+
+NOTES (2026-07-31): follow-up fix after review — the first pass built the port cell as
+`"(" + elsewherePort(…) + ")"` with no `stripEscapes`, where the pre-item code stripped the whole
+concatenated label. `net.SplitHostPort` rejects `[`/`]` but passes ESC through, so an `Addr` of
+`"1.2.3.4:\x1bc9999"` sent a live RIS reset to the pane (`popup.go` strips nothing and its truncation is
+ANSI-preserving). The port cell is stripped like the name and backend cells now, covered by
+`TestModelPickerEscapeStripsTheProfilePort`.
 
 NOTES (2026-07-31): `TestModelPickerListsTheLaunchProfiles` also needed its `plain(m.View())` substrings
 updated (`"alpha — llamacpp"` → `"alpha  — llamacpp"`, `"beta — ollama"` → `"beta   — ollama"`): "beta" is

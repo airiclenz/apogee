@@ -414,6 +414,12 @@ func profileNameList(profiles []LaunchProfileChoice) string {
 // it sideways and the pane reads as a table. Each separator leads the cell it introduces, so the
 // "—", the "·" and the "(" line up down the pane too, and a tier NO offered profile states collapses
 // away entirely (layoutPopupRow).
+//
+// EVERY cell built from the launcher's text is escape-stripped here — the name, the backend and the
+// port alike. The port needs it as much as the other two: net.SplitHostPort rejects "[" and "]" but
+// passes an ESC byte straight through, so an address like "1.2.3.4:\x1bc9999" would otherwise carry a
+// live terminal reset into the pane, which the popup module (ANSI-preserving truncation, no strip of
+// its own) would faithfully paint.
 func (m Model) launchProfileRows() []popupRow {
 	here := sessionAddr(m.opts.Endpoint)
 	rows := make([]popupRow, 0, len(m.picker.profiles))
@@ -426,7 +432,7 @@ func (m Model) launchProfileRows() []popupRow {
 			window = "· " + tokens
 		}
 		if elsewhere := elsewherePort(choice.Addr, here); elsewhere != "" {
-			port = "(" + elsewhere + ")"
+			port = "(" + stripEscapes(elsewhere) + ")"
 		}
 		if choice.Running {
 			running = runningRowCell
@@ -451,6 +457,9 @@ func sessionAddr(endpoint string) string {
 // elsewherePort is the "(:8081)" a row earns when the profile would serve at an address other than
 // the session's. An address the launcher could not resolve carries no marker: there is nothing
 // truthful to show, and ":0" would read as a fact.
+//
+// What it returns is still the LAUNCHER's text and is not sanitized: net.SplitHostPort validates the
+// shape of an address, not its bytes. The caller escape-strips the cell it builds from this.
 func elsewherePort(addr, here string) string {
 	if addr == "" || addr == here {
 		return ""
