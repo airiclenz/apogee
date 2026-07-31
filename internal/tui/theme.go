@@ -93,6 +93,13 @@ const bodyRightGutter = 1
 // theme bundles the reusable styles. They are intentionally spare — a few colour and weight
 // cues — so the transcript stays legible under any terminal profile.
 type theme struct {
+	// measure is the TUI's display-width authority (width.go): the one answer to "how many
+	// terminal columns does this occupy", following whatever measure the painter itself uses. It
+	// rides on the theme because the theme is already handed to every free renderer function, so
+	// the layout code reaches its measure exactly where it reaches its styles — and because a
+	// widthAuthority is a plain value, the theme stays as copy-safe as it was (ADR 0011).
+	measure widthAuthority
+
 	userBlock    lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
 	toolHeader   lipgloss.Style // the ✦ Label target header
 	toolLabel    lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
@@ -144,6 +151,9 @@ type theme struct {
 // that divider meets the box — those rules are composed by hand in footerView.
 func newTheme() theme {
 	return theme{
+		// The painter's own starting measure. It moves only when the terminal tells the program
+		// the painter moved (Update's tea.ModeReportMsg case).
+		measure:    newWidthAuthority(),
 		userBlock:  lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
 		toolHeader: lipgloss.NewStyle(),
 		toolLabel:  lipgloss.NewStyle().Bold(true).Foreground(colCode),

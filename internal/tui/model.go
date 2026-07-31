@@ -357,6 +357,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 
+	case tea.ModeReportMsg:
+		// The terminal answered one of the mode queries bubbletea sends at start-up. Exactly one
+		// of them concerns the layout: mode 2027 (Unicode core). bubbletea acts on that answer by
+		// switching the PAINTER to ansi.GraphemeWidth and then passes the same message on to
+		// Update (bubbletea/v2@v2.0.7/tea.go:786-798), so this is the only place apogee can learn
+		// which measure its own output is about to be painted in. The width authority follows it —
+		// measuring in a method the painter did not choose is precisely the defect it exists to
+		// close (width.go). Nothing else in the program reads this message; before the authority
+		// there was no case for it and it fell through to the input widget, which ignores it.
+		before := m.th.measure
+		m.th.measure = m.th.measure.observe(msg)
+		if m.th.measure != before && m.ready {
+			m.layout() // the measure moved: re-wrap and repaint everything against the new one
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 

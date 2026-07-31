@@ -166,9 +166,42 @@ NOTES line so item 3 can be checked against it.
 
 **Commit:** `test(tui): add a painted-cell harness and pin the VS16 width drift`
 
-## 2. Choose and introduce the width authority
+## 2. Choose and introduce the width authority — ✅ DONE (2026-07-31)
 
 Depends on item 1.
+
+NOTES (2026-07-31): OWNER'S DECISION — **(a) mirror the painter via the mode-2027 capability**. The
+authority follows whatever measurement method the painter actually uses: mode 2027 confirmed →
+`ansi.GraphemeWidth`, otherwise → `ansi.WcWidth`. Measurement must always match what gets painted.
+(b) normalization is therefore NOT needed. Carry this into item 7's ADR.
+
+NOTES (2026-07-31): OBSERVABILITY ANSWERED — the signal IS observable. `bubbletea/v2@v2.0.7`
+`tea.go:786-798` handles `ModeReportMsg` in the eventLoop's internal switch WITHOUT a `continue`
+(unlike `BatchMsg`/`sequenceMsg`), so the same message falls through to `model.Update(msg)` at
+`tea.go:871` — after the renderer's method was set and before `p.render(model)`, so there is no
+frame of mismatch. No `tea.With…` option and no renderer read-back is needed.
+
+NOTES (2026-07-31): DEVIATION — the item says this one "converts no call sites" and that the diff
+"shows only additions plus the `theme` field", but landing (a) also required the four-line
+`case tea.ModeReportMsg:` in `Model.Update` (`model.go`) that folds the capability into the
+authority and re-lays out when it moves. Without it (a) is inert — the authority would never
+mirror anything and would degenerate to "always WcWidth", which the item calls wrong. No
+measurement call site was converted; items 3–5 still own the conversion. The message previously
+fell through to `default:` and into the textarea, which has no case for it (`bubbles/v2@v2.1.0`
+has zero `ModeReportMsg` hits), so nothing was taken away from another consumer.
+
+NOTES (2026-07-31): DEVIATION — the operations mirror `ansi.Method`'s signatures exactly rather
+than the item's `Wrap(string, int) string`: `Wrap`/`Wordwrap` keep the `breakpoints` argument and
+`Hardwrap` keeps `preserveSpace`. That makes each conversion in items 3–6 a rename rather than a
+rewrite and keeps the seam a faithful stand-in for the library. Beyond the item's "at minimum" set
+(`Width`, `Truncate`, `Cut`, `Wrap`) the authority also carries `Wordwrap` and `Hardwrap` — both
+are live production measurement sites (`render.go:646`, `markdown.go:147`) — plus `Method()`, which
+items 3–4 need to paint a test frame in the same measure the layout used.
+
+NOTES (2026-07-31): the `theme` field is named `measure` (`th.measure.Width(s)`), not `width`,
+which would have read `th.width.Width(s)` at ~35 call sites. `internal/tui/doc.go`'s package
+narration gained a clause for `width.go` because that paragraph states it "names every file" in
+the package.
 
 **Design call (stop and ask the owner before implementing this item).** Findings establish
 that apogee measures in GraphemeWidth and, on any terminal that does not answer mode 2027,
