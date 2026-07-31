@@ -53,9 +53,10 @@ type Decision struct {
 func (d Decision) Triggered() bool { return d.Tier != TierNone }
 
 // Rule is one dangerous-action pattern. The pattern is matched against the call's
-// whitespace-normalized inspectable text (command strings + path arguments). Matching is
-// deliberately narrow literal/regex — there is no obfuscation-chasing (this is a
-// footgun-guard catching obvious mistakes, NOT an adversary boundary, ADR 0012).
+// whitespace-normalized inspectable text — the tool name, its target paths and its command
+// lines, but NOT the payload a write carries (see payloadKeys). Matching is deliberately
+// narrow literal/regex — there is no obfuscation-chasing (this is a footgun-guard catching
+// obvious mistakes, NOT an adversary boundary, ADR 0012).
 type Rule struct {
 	// ID is the stable identifier used by the config merge to remove a rule (global
 	// config may remove by ID). It must be non-empty and unique within a ruleset.
@@ -109,9 +110,10 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 }
 
 // Inspect reports the guard's verdict for call. It extracts the call's inspectable text
-// (every string value in its JSON arguments, plus the tool name), normalizes it, and
-// returns the strictest matching rule's Decision (TierNone when nothing matches). It
-// never errors and never executes anything — pure inspection.
+// (the tool name plus every string value in its JSON arguments except the payload-bearing
+// ones — payloadKeys), normalizes it, and returns the strictest matching rule's Decision
+// (TierNone when nothing matches). It never errors and never executes anything — pure
+// inspection.
 func (g *DangerousActionGuard) Inspect(call domain.ToolCall) Decision {
 	text := normalize(inspectableText(call))
 	for _, r := range g.rules {
@@ -132,10 +134,52 @@ func (g *DangerousActionGuard) Rules() []Rule {
 	return out
 }
 
+// payloadKeys are the argument keys whose value is inert TEXT the tool stores, transmits or
+// searches for — a file body, a replacement string, a search pattern, a commit message —
+// rather than something the host will act on. Their values are excluded from the
+// inspectable text.
+//
+// The rules describe ACTIONS, and an action is the tool plus its target path, command line
+// or code — never the payload it carries. Matching payload text made the guard fire on
+// documents that merely MENTION a guarded literal: writing this repo's own ADR 0012 (it
+// names ~/.ssh) was hard-refused with no per-call override, and grepping for that literal
+// was refused as a write. That is precision-over-recall inverted — the near-miss failure
+// mode ADR 0012 forbids.
+//
+// This is a DENY-list, not an allow-list: an unrecognized key — an MCP tool's arbitrary
+// argument — stays inspected, so recall narrows only for keys deliberately classified here.
+// The keys that decide what the host does are deliberately absent: `command`, `code`,
+// `path`, `url` and `task` are all still inspected, so a shell heredoc writing to ~/.ssh
+// still matches (the heredoc lives in `command`).
+var payloadKeys = map[string]bool{
+	"content":    true, // file_edit: the body written
+	"newcontent": true, // diff: the proposed body
+	"oldtext":    true, // find_replace: the text searched for
+	"newtext":    true, // find_replace: the text swapped in
+	"pattern":    true, // grep: the search regex
+	"message":    true, // git: the commit message
+	"query":      true, // web_search: the search terms
+	"question":   true, // ask_user: the prompt shown
+	"choices":    true, // ask_user: the answers offered
+	"title":      true, // present_document: the display heading
+	"body":       true, // http_request: the request payload (its `url` stays inspected)
+}
+
+// keyPunctuation strips the separators that distinguish spellings of one argument name.
+var keyPunctuation = strings.NewReplacer("_", "", "-", "")
+
+// isPayloadKey reports whether an argument key carries payload text rather than an action.
+// The key is folded to lower case with separators removed first, so `newContent`,
+// `new_content` and `new-content` all resolve to the same payloadKeys entry.
+func isPayloadKey(key string) bool {
+	return payloadKeys[keyPunctuation.Replace(strings.ToLower(key))]
+}
+
 // inspectableText pulls the strings the guard matches against out of a tool call: the
-// tool name and every string leaf in the JSON arguments (command lines, paths, scripts).
-// A non-object / malformed argument payload degrades to the raw argument bytes, so a
-// guard rule still sees the text even when the shape is unexpected.
+// tool name and every string leaf in the JSON arguments (command lines, paths, scripts)
+// except the payload-bearing ones (isPayloadKey). A non-object / malformed argument
+// payload degrades to the raw argument bytes, so a guard rule still sees the text even
+// when the shape is unexpected.
 func inspectableText(call domain.ToolCall) string {
 	var b strings.Builder
 	b.WriteString(call.Tool)
@@ -150,9 +194,11 @@ func inspectableText(call domain.ToolCall) string {
 	return b.String()
 }
 
-// collectStrings walks a decoded JSON value appending every string leaf (space-joined)
-// so the guard inspects command lines and paths regardless of which argument key carries
-// them.
+// collectStrings walks a decoded JSON value appending every string leaf (space-joined) so
+// the guard inspects command lines and paths regardless of which argument key carries them.
+// A payload-bearing key's value is skipped whole, at any depth — that covers a nested
+// payload such as a find_replace `replacements[].newText`, whose enclosing array stays
+// inspected so any future action-bearing sibling key is still seen.
 func collectStrings(v any, b *strings.Builder) {
 	switch t := v.(type) {
 	case string:
@@ -163,7 +209,10 @@ func collectStrings(v any, b *strings.Builder) {
 			collectStrings(e, b)
 		}
 	case map[string]any:
-		for _, e := range t {
+		for k, e := range t {
+			if isPayloadKey(k) {
+				continue
+			}
 			collectStrings(e, b)
 		}
 	}

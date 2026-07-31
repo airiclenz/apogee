@@ -554,6 +554,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The dangerous-action guard no longer refuses a file because of what the file *says*.** The
+  guard matched its rules against every string in a tool call's arguments — the body a write
+  carries included — so writing a document that merely *mentioned* a guarded path was refused as
+  if it were a write to that path: saving a note quoting `~/.ssh` came back as *"refused by the
+  dangerous-action guard: write or delete under the SSH key directory (~/.ssh)"*, and because
+  that rule is Tier-1 hard-refuse there was no per-call override to get past it. The literals sit
+  in Apogee's own docs (`CONTEXT.md`, ADR 0012, `TODO.md`, this changelog), so the guard had made
+  the project's security documentation unwritable — and a read-only `grep` for the same literal
+  was refused as a write too. Rules now match the call's **action** — the tool, its target paths,
+  its command lines and its code — while payload-bearing arguments (a file body, a replacement
+  string, a search pattern, a commit message, a request body) are excluded from the inspected
+  text. The exclusion is a deny-list over keys Apogee's own tools declare, so an unrecognized
+  argument from an MCP tool stays inspected, and every key that decides what the host actually
+  does still is: a shell heredoc writing to `~/.ssh` matches as before, because the heredoc lives
+  in the command.
 - **`make install` no longer reports success after putting the binary somewhere your shell cannot
   see it.** On a machine where no candidate directory was both on `PATH` and writable without
   `sudo` — the ordinary macOS case, where `/usr/local/bin` belongs to root and neither

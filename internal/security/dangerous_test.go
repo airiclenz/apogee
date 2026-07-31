@@ -19,6 +19,13 @@ func writeCall(path string) domain.ToolCall {
 	return domain.ToolCall{ID: "c1", Tool: "write_file", Arguments: args}
 }
 
+// argCall builds a tool call from arbitrary named arguments, for the cases that turn on
+// WHICH key carries the text rather than on the text itself.
+func argCall(tool string, args map[string]any) domain.ToolCall {
+	raw, _ := json.Marshal(args)
+	return domain.ToolCall{ID: "c1", Tool: tool, Arguments: raw}
+}
+
 func TestDangerousActionGuard_Tier1HardRefuse(t *testing.T) {
 	t.Parallel()
 	g := DefaultDangerousActionGuard()
@@ -113,6 +120,126 @@ func TestDangerousActionGuard_PrecisionNearMissesNotBlocked(t *testing.T) {
 			d := g.Inspect(tc.call)
 			if d.Triggered() {
 				t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+			}
+		})
+	}
+}
+
+func TestDangerousActionGuard_PayloadTextNotInspected(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	// A payload is not an action: text a tool merely writes, transmits or searches for
+	// must never fire a rule, however dangerous the literal it quotes. Documenting the
+	// guard's own ruleset — this repo's ADR 0012 and CONTEXT.md both name ~/.ssh — is the
+	// case that first hit it, and a hard-refuse has no per-call override to escape with.
+	cases := []struct {
+		name string
+		call domain.ToolCall
+	}{
+		{"write a doc quoting ~/.ssh", argCall("write_file", map[string]any{
+			"path":    "docs/adr/0012-confinement.md",
+			"content": "Tier 1 hard-refuses writes under `~/.ssh` and to `~/.bashrc`.",
+		})},
+		{"write a doc quoting rm -rf /etc", argCall("write_file", map[string]any{
+			"path":    "CHANGELOG.md",
+			"content": "The guard refuses `rm -rf /etc` outright.",
+		})},
+		{"grep for the ~/.ssh literal", argCall("grep", map[string]any{
+			"pattern": `~/\.ssh`,
+			"path":    "docs",
+		})},
+		{"commit message naming ~/.ssh", argCall("git", map[string]any{
+			"action":  "commit",
+			"message": "fix(security): stop refusing writes that mention ~/.ssh",
+		})},
+		{"find_replace payload naming .bashrc", argCall("find_replace", map[string]any{
+			"path":    "internal/security/rules.go",
+			"oldText": "~/.bashrc",
+			"newText": "~/.zshrc",
+		})},
+		{"nested replacements payload", argCall("find_replace", map[string]any{
+			"path": "docs/security.md",
+			"replacements": []any{
+				map[string]any{"oldText": "old", "newText": "writes under ~/.ssh are refused"},
+			},
+		})},
+		{"web search about ~/.ssh", argCall("web_search", map[string]any{
+			"query": "how to configure ~/.ssh/config on macOS",
+		})},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call)
+
+			if d.Triggered() {
+				t.Fatalf("Inspect(%q) wrongly triggered on payload text: tier=%v rule=%q reason=%q",
+					tc.name, d.Tier, d.RuleID, d.Reason)
+			}
+		})
+	}
+}
+
+func TestDangerousActionGuard_ActionKeysStillInspected(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	// The payload exclusion is a deny-list over keys that carry text, not a hole in the
+	// floor: every key that decides what the host DOES stays inspected, and so does any
+	// key the list does not recognize.
+	cases := []struct {
+		name string
+		call domain.ToolCall
+	}{
+		{"path still inspected next to a benign payload", argCall("write_file", map[string]any{
+			"path":    "~/.ssh/authorized_keys",
+			"content": "a harmless-looking line",
+		})},
+		{"heredoc in a command still inspected", argCall("terminal", map[string]any{
+			"command": "cat > ~/.ssh/authorized_keys <<EOF\nkey\nEOF",
+		})},
+		{"executable code still inspected", argCall("python_exec", map[string]any{
+			"code": `import os; os.system("rm -rf /etc")`,
+		})},
+		{"unrecognized key still inspected", argCall("some_mcp_tool", map[string]any{
+			"mystery_argument": "rm -rf /",
+		})},
+		{"payload key does not shield a sibling path", argCall("find_replace", map[string]any{
+			"path":    "/root/.ssh/id_rsa",
+			"newText": "harmless",
+		})},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call)
+
+			if d.Tier != TierHardRefuse {
+				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (the floor must still fire)", tc.name, d.Tier)
+			}
+		})
+	}
+}
+
+func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	// One argument, several spellings: the key fold means a model writing new_content or
+	// NewContent gets the same exclusion as the declared newContent.
+	for _, key := range []string{"newContent", "new_content", "new-content", "NEWCONTENT"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}))
+
+			if d.Triggered() {
+				t.Fatalf("key %q was inspected as an action: tier=%v rule=%q", key, d.Tier, d.RuleID)
 			}
 		})
 	}

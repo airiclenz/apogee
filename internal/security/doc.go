@@ -22,7 +22,10 @@
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
 //     floor, two tiers (hard-refuse / force-approval), narrow precision-over-recall
 //     literal/regex matching, with config-merge semantics (global may add OR remove,
-//     project may only add — MergeDangerousRules).
+//     project may only add — MergeDangerousRules). It matches a call's ACTION text —
+//     the tool, its target paths, its command lines and code — and never the payload a
+//     write carries, so a document that merely quotes a guarded path is not an action
+//     (payloadKeys in dangerous.go).
 //   - The circuit-breaker (CircuitBreaker): halts a runaway loop of identical failing
 //     calls, surfacing an ErrorEvent rather than spinning.
 //   - The audit record (AuditLog): an append-only call / decision / result trail.

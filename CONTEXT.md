@@ -331,7 +331,10 @@ catastrophic *mistakes* before execution, in **every** mode independent of Confi
 lives in `internal/security`, P3.6). Two tiers: **hard-refuse** (`rm -rf` of a root/home/system
 path, fork bombs, writes to `~/.ssh`/credential/persistence files — no per-call override) and
 **force-approval** (`curl | bash`-class — sometimes a legit installer, so a speed-bump that forces
-the Approver even in Auto). It is **tighten-only** and trivially bypassable by anything determined,
+the Approver even in Auto). Rules match the call's **action text** — the tool, its target paths, its
+command lines and code — and never the **payload** a call carries (a file body, a replacement string,
+a search pattern, a commit message), so writing or grepping a document that merely *quotes* `~/.ssh`
+is not an action. It is **tighten-only** and trivially bypassable by anything determined,
 so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on; the global
 config may add *or* remove entries (it is the user's machine), a project config may only *add*.
 _Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is
