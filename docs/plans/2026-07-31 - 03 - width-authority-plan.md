@@ -358,8 +358,9 @@ neighbour. The reasoning is now stated in `pointTranscriptRow`'s doc comment, so
 NOTES (2026-07-31): DEFECT IN THE AUTHORITY, fixed here because item 4 cannot land on top of it (item 2 is
 already ✅, so this is its territory). `x/ansi@v0.11.7`'s `cut` binds its LEFT truncation to `TruncateWc` —
 a *right*-truncation — on the WcWidth branch (`truncate.go:35-39`; the grapheme branch correctly uses
-`TruncateLeft`), so `ansi.Method.Cut(s, left, right)` under WcWidth returns the first `right` columns and
-drops `left` on the floor. WcWidth is the painter's DEFAULT and a mouse selection is exactly a cut with a
+`TruncateLeft`), so `ansi.Method.Cut(s, left, right)` under WcWidth spends `left` as a *width* rather than
+as an offset and returns the first `left` columns: `Cut("abcdef", 2, 5)` hands back `"ab"` where the span is
+`"cde"`. WcWidth is the painter's DEFAULT and a mouse selection is exactly a cut with a
 non-zero left, so every terminal that does not answer mode 2027 would have copied from the wrong end of the
 line. `widthAuthority.Cut` now composes `Truncate` + `TruncateLeft` itself (`width.go`), with
 `TestWidthAuthorityCutsFromTheLeft` pinning it and a comment naming the upstream defect so it can go back to

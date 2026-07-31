@@ -82,8 +82,9 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
 4. **`Cut` composes its two truncations itself** rather than delegating. `x/ansi@v0.11.7`'s `cut`
    binds the LEFT truncation of the wcwidth branch to `TruncateWc` — a *right*-truncation
    (`truncate.go:35-39`; the grapheme branch correctly uses `TruncateLeft`) — so
-   `ansi.Method.Cut(s, left, right)` under wcwidth returns the first `right` columns and drops
-   `left` on the floor. Wcwidth is the painter's default and a selection is exactly a cut with a
+   `ansi.Method.Cut(s, left, right)` under wcwidth spends `left` as a *width* rather than as an
+   offset and returns the first `left` columns: `Cut("abcdef", 2, 5)` hands back `"ab"` where the
+   span is `"cde"`. Wcwidth is the painter's default and a selection is exactly a cut with a
    non-zero left, so every terminal that does not answer mode 2027 would have copied from the
    wrong end of the line. `TestWidthAuthorityCutsFromTheLeft` pins the correct behaviour; the
    delegation can return after a dependency bump fixes it upstream.

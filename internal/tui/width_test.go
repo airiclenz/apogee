@@ -198,8 +198,9 @@ func TestWidthAuthorityMeasuresVS16TheWayItIsPainted(t *testing.T) {
 // A cut with a non-zero LEFT is what a mouse selection is, and it is the one operation the
 // authority cannot delegate to ansi.Method: on the WcWidth branch — the painter's default —
 // x/ansi@v0.11.7 binds cut's left-truncation to TruncateWc rather than TruncateLeftWc, so the
-// library's own Cut ignores left entirely and hands back the first `right` columns. The parity
-// test above cannot see it: every case there cuts from column 0.
+// library's own Cut spends left as a width rather than as an offset and hands back the first
+// `left` columns — Cut("abcdef", 2, 5) is "ab", not "cde". The parity test above cannot see it:
+// every case there cuts from column 0.
 func TestWidthAuthorityCutsFromTheLeft(t *testing.T) {
 	t.Parallel()
 
