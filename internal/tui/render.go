@@ -555,7 +555,7 @@ func hangingWrap(th theme, style lipgloss.Style, marker, text string, width int)
 func hangingPrefixes(th theme, marker, text string, width int) []string {
 	mw := th.measure.Width(marker)
 	indent := strings.Repeat(" ", mw)
-	lines := wrapText(text, max(1, width-mw))
+	lines := wrapText(th, text, max(1, width-mw))
 	out := make([]string, len(lines))
 	for i, ln := range lines {
 		if i == 0 {
@@ -570,11 +570,38 @@ func hangingPrefixes(th theme, marker, text string, width int) []string {
 // wrapText word-wraps text to limit columns, hard-breaking any word longer than the limit
 // and preserving the text's own newlines. An empty string yields a single empty line so a
 // just-opened assistant buffer still renders its marker.
-func wrapText(text string, limit int) []string {
+//
+// No line it returns is wider than limit in the width authority's measure — layout.md's absolute
+// cap, enforced here rather than assumed. The upstream wrap does not hold it on its own: x/ansi's
+// breakpoint branch (x/ansi@v0.11.7/wrap.go:406-419) lacks the full-line checks its default branch
+// has, so a run of breakpoints keeps growing a word onto an already-full line —
+// ansi.Wrap("| --- | --- | --- |", 3, "") comes back with a five-cell first line, and
+// ansi.Wrap("----", 3, "") with a four-cell one. Every line that comes back over the limit is
+// therefore hard-broken down to it, which is also what makes the docstring's "hard-breaking any
+// word longer than the limit" true rather than aspirational. The one thing no break can divide is
+// a single grapheme wider than the limit — a CJK glyph at limit 1 — and that keeps a line to
+// itself.
+func wrapText(th theme, text string, limit int) []string {
 	if limit < 1 {
 		limit = 1
 	}
-	return strings.Split(ansi.Wrap(text, limit, ""), "\n")
+	wrapped := strings.Split(ansi.Wrap(text, limit, ""), "\n")
+	out := make([]string, 0, len(wrapped))
+	for _, ln := range wrapped {
+		if th.measure.Width(ln) <= limit {
+			out = append(out, ln)
+			continue
+		}
+		// preserveSpace keeps this pass purely additive — it inserts breaks and drops nothing, so
+		// a segment's own leading indentation survives the cap. The break the hard wrap opens
+		// ahead of an over-wide leading grapheme would otherwise surface as a blank row.
+		segs := strings.Split(th.measure.Hardwrap(ln, limit, true), "\n")
+		if len(segs) > 1 && segs[0] == "" {
+			segs = segs[1:]
+		}
+		out = append(out, segs...)
+	}
+	return out
 }
 
 // railWidth is the column cost of one sub-agent rail gutter ("│ " — the rail glyph plus one

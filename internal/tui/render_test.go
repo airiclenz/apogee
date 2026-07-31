@@ -69,19 +69,106 @@ func TestRailedWidthFloors(t *testing.T) {
 }
 
 // A Depth > 0 block renders at a tiny and a zero width without panicking (the acceptance's
-// "reflow at small sizes doesn't panic"); the framed text is still produced.
+// "reflow at small sizes doesn't panic"), the framed text is still produced, and — the part that
+// makes this more than a smoke test — every line it draws obeys layout.md's absolute cap. The cap
+// has a floor: a Depth-2 block cannot be drawn in fewer columns than its two rail gutters, its
+// marker and one column of text, so below that the bound is the floor rather than the width. The
+// fixture's hyphen ("sub-agent") is the point — it is exactly the breakpoint run the wrapper used
+// to grow past the limit.
 func TestSubAgentReflowAtSmallWidths(t *testing.T) {
-	for _, width := range []int{0, 1, 2, 3, 6} {
+	th := newTheme()
+	const depth = 2
+	floor := depth*railWidth + th.measure.Width(glyphAssistant+" ") + 1
+
+	for _, width := range []int{0, 1, 2, 3, 6, 12, 40} {
 		tr := feed(domain.MessageEvent{
-			EventBase: domain.EventBase{Depth: 2},
+			EventBase: domain.EventBase{Depth: depth},
 			Text:      "a deeply nested sub-agent message that must wrap hard",
 		})
-		lines := tr.renderLines(newTheme(), width) // must not panic at any width
+		lines := tr.renderLines(th, width) // must not panic at any width
 		if len(lines) == 0 {
 			t.Errorf("width %d produced no lines", width)
 		}
+		bound := max(width, floor)
+		for i, ln := range lines {
+			if w := th.measure.Width(ln); w > bound {
+				t.Errorf("width %d: line %d %q is %d cells wide, over the %d cap", width, i, strip(ln), w, bound)
+			}
+		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The absolute width cap (layout.md:159-160)
+// ----------------------------------------------------------------------------
+
+// wrapText holds the cap itself rather than trusting the wrap it delegates to. x/ansi's
+// breakpoint branch (x/ansi@v0.11.7/wrap.go:406-419) has neither of the already-full-line checks
+// its default branch has, so a run of the wrapper's own breakpoints kept growing a word onto a
+// full line: ansi.Wrap("| --- | --- | --- |", 3, "") returned a five-cell first line, and the
+// same input at limit 8 an eleven-cell one. That input is not exotic — a markdown delimiter row
+// reaches the transcript verbatim whenever a table is too narrow to lay out, and any hyphenated
+// word carries the same run in miniature.
+//
+// The cap is measured in the width authority's measure, since that is the measure the frame is
+// painted in, so the whole table runs under both of them.
+func TestWrapTextHoldsTheWidthCap(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, in string }{
+		{"delimiter row", "| --- | --- | --- |"},
+		{"hyphen run", "----"},
+		{"pipe row", "| alpha | beta | gamma |"},
+		{"hyphenated prose", "a deeply nested sub-agent message that must wrap hard"},
+		{"mixed pipe and hyphen runs", "|-|--|---|-- a-b-c |"},
+		{"leading indent", "    indented -- text"},
+		{"cjk", "日本語のテキスト"},
+		{"vs16", "a " + vs16Warning + " b " + strings.Repeat(vs16Warning, 3) + " c"},
+		{"cjk and vs16", "警告 " + vs16Warning + " 日本語-テキスト | " + vs16Warning},
+		{"empty", ""},
+	}
+
+	for _, pm := range paintMethods {
+		for _, c := range cases {
+			for limit := 1; limit <= 8; limit++ {
+				t.Run(pm.name+"/"+c.name+"/limit "+strconv.Itoa(limit), func(t *testing.T) {
+					t.Parallel()
+					th := newTheme()
+					th.measure = widthAuthority{method: pm.method}
+
+					lines := wrapText(th, c.in, limit)
+					if len(lines) == 0 {
+						t.Fatalf("wrapText returned no lines at all")
+					}
+					for i, ln := range lines {
+						w := th.measure.Width(ln)
+						if w <= limit {
+							continue
+						}
+						// The one thing a break cannot divide is a single grapheme wider than the
+						// limit — a CJK glyph at limit 1 — and it gets a line to itself.
+						if cluster, _ := ansi.FirstGraphemeCluster(ln, pm.method); cluster == ln {
+							continue
+						}
+						t.Errorf("line %d %q is %d cells wide, over the %d cap: %q", i, ln, w, limit, lines)
+					}
+					// Capping moves where the lines break and nothing else: every non-space
+					// character the wrap produced is still there, in order. (A break may swallow
+					// the space it happens at, which is the wrapper's own behaviour.)
+					capped := withoutSpaces(strings.Join(lines, ""))
+					uncapped := withoutSpaces(strings.ReplaceAll(ansi.Wrap(c.in, limit, ""), "\n", ""))
+					if capped != uncapped {
+						t.Errorf("capping changed the content to %q, want the wrap's own %q", capped, uncapped)
+					}
+				})
+			}
+		}
+	}
+}
+
+// withoutSpaces drops every space from s — the part of a wrapped line that must survive a
+// re-break, since a break may consume the space it falls on.
+func withoutSpaces(s string) string { return strings.ReplaceAll(s, " ", "") }
 
 // ----------------------------------------------------------------------------
 // The sub-agent rail through the inter-block spacers

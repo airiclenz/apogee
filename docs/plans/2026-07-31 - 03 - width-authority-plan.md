@@ -473,7 +473,38 @@ passes; `make check` passes.
 
 **Commit:** `fix(tui): mirror the textarea's own width measure in the caret math`
 
-## 6. Hold the absolute width cap at tiny widths
+## 6. Hold the absolute width cap at tiny widths — ✅ DONE (2026-07-31)
+
+NOTES (2026-07-31): DEVIATION — `wrapText` now takes `th theme` first, so it can measure with the
+authority as this item requires; that touches `popup.go:245`, a file plan `2026-07-31 - 01` still owns
+(its items 3–5 carry no ✅). It is a call-site rename, not one of the popup MEASUREMENT conversions
+item 3 deferred — `popupBodyLines` already had `th` — and `popupBodyLines` is in none of that plan's
+outstanding items. Item 3's NOTES gave the parameter as its reason for leaving `wrapText` on a
+hard-wired GraphemeWidth; that reason is spent, but the WRAP itself still calls `ansi.Wrap`, because
+this item's text converts only the cap enforcement ("any returned line **still** wider than the
+limit"). The follow-up item item 3 named — `wrapText`'s wrap together with `truncateToWidth` — stands.
+
+NOTES (2026-07-31): the defect is wider than "at limits ≤ 3". The breakpoint branch has no
+already-full-line check at ALL, so it grows a word onto a full line at any limit:
+`ansi.Wrap("| --- | --- | --- |", 8, "")` returns an eleven-cell first line, and the single hyphen in
+"sub-agent" trips it at width 12 in `TestSubAgentReflowAtSmallWidths`. The fix is limit-agnostic for
+the same reason.
+
+NOTES (2026-07-31): the one thing the cap cannot hold is a single grapheme wider than the limit — a
+CJK glyph at limit 1 — which no break can divide; it gets a line to itself, and
+`TestWrapTextHoldsTheWidthCap` allows exactly that case (`ansi.FirstGraphemeCluster(ln) == ln`) and
+nothing else. The enforcement pass hard-wraps with `preserveSpace: true` so it only INSERTS breaks —
+a line's own indentation survives — and the test pins that by comparing its non-space content against
+the plain wrap's. The blank row the hard wrap opens ahead of an over-wide leading grapheme is dropped.
+
+NOTES (2026-07-31): all three assertions fail against the pre-change code, as the item requires.
+`TestTableUnfittableFallsBack` (its 486-487 wording rewritten, and its `---` match now made across the
+breaks the wrapper takes at these widths, plus a real width bound): `width 1: fallback line "| --- |"
+is 7 cells wide`. `TestSubAgentReflowAtSmallWidths`: `width 6: line 14 "│ │   -agent" is 12 cells
+wide, over the 7 cap` — its bound is `max(width, floor)`, floor = two rail gutters + the ✦ marker +
+one column, because below 7 columns it is the MARKER, not the wrapper, that cannot fit (widths 12 and
+40 were added to exercise the un-floored bound). `TestWrapTextHoldsTheWidthCap`: `line 0 "| --- |" is
+7 cells wide, over the 1 cap`.
 
 **What:** `wrapText` (`internal/tui/render.go:570-578`) returns lines wider than its limit
 for pipe/hyphen token lines at limits ≤ 3, violating `layout.md:159-160`. Findings locates

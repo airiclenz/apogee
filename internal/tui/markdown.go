@@ -111,14 +111,14 @@ func collapseBlankRuns(lines []string) []string {
 // renderParagraphLine styles one ordinary line's inline spans and word-wraps it to width,
 // preserving the line's own break. A blank line stays blank (one empty line).
 func renderParagraphLine(th theme, line string, width int) []string {
-	return wrapText(renderInline(th, line), width)
+	return wrapText(th, renderInline(th, line), width)
 }
 
 // renderHeadingLine renders a heading: its text bold white, word-wrapped to width. Inline markup
 // inside a heading is not re-parsed — headings rarely carry it, and a nested span's reset would
 // cut the heading's own SGR run short.
 func renderHeadingLine(th theme, text string, width int) []string {
-	wrapped := wrapText(text, width)
+	wrapped := wrapText(th, text, width)
 	out := make([]string, len(wrapped))
 	for i, seg := range wrapped {
 		out[i] = th.mdHeading.Render(seg)

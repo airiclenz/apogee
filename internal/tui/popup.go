@@ -242,7 +242,7 @@ func singleCellRows(labels []string) []popupRow {
 func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lipgloss.Style) []string {
 	var wrapped []string
 	for _, seg := range strings.Split(body, "\n") {
-		wrapped = append(wrapped, wrapText(seg, inner)...)
+		wrapped = append(wrapped, wrapText(th, seg, inner)...)
 	}
 
 	marker := ""

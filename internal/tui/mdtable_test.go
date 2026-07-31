@@ -482,20 +482,28 @@ func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
 }
 
 // Below that floor the block is not a table at all: it falls back to the plain paragraphs it
-// rendered before tables existed, delimiter row and pipes visible. (Those paragraphs wrap exactly
-// as they always have — wrapText leaves a line of one- and three-cell tokens over-wide at width 3,
-// which is the pre-existing behaviour of the wrapper and not the table path's to change.)
+// rendered before tables existed, delimiter row and pipes visible — and those paragraphs stay
+// inside the width like every other line the TUI draws. At these widths a row of one- and
+// three-cell tokens no longer fits on one line, so the delimiter's dashes are matched across the
+// breaks the wrapper makes rather than as one run (they are still all there, in order: wrapText
+// caps the line without dropping anything — TestWrapTextHoldsTheWidthCap).
 func TestTableUnfittableFallsBack(t *testing.T) {
 	th := newTheme()
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
 	for _, width := range []int{1, 3, 6} {
-		got := strings.Join(visible(renderMarkdownBody(th, source, width)), "\n")
+		lines := visible(renderMarkdownBody(th, source, width))
+		got := strings.Join(lines, "\n")
 		if strings.Contains(got, "─") {
 			t.Errorf("width %d: block drew a rule; want the plain-paragraph fallback:\n%s", width, got)
 		}
-		if !strings.Contains(got, "---") {
+		if !strings.Contains(strings.Join(lines, ""), "---") {
 			t.Errorf("width %d: delimiter row was consumed; want it left as source text:\n%s", width, got)
+		}
+		for _, ln := range lines {
+			if w := th.measure.Width(ln); w > width {
+				t.Errorf("width %d: fallback line %q is %d cells wide, over the cap", width, ln, w)
+			}
 		}
 	}
 }
