@@ -82,7 +82,7 @@
    maintenance nicety must never nag). Bare `/rename` failures get a quiet note
    suggesting `/rename <name>`.
 
-## 1. ADR 0022 addendum and TODO.md non-goal removal
+## 1. ADR 0022 addendum and TODO.md non-goal removal — ✅ DONE (2026-07-31)
 
 **What:** Add a dated (2026-07-31) addendum to `docs/adr/0022-sessions-persist-per-turn-
 as-dual-representation-records.md` under its Considered-options section: the v1

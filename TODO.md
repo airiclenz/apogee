@@ -139,9 +139,9 @@ out of scope in the plan and left for later — neither is a live gap.
   resumed-elsewhere detection) is the follow-on if that narrow case ever bites.
 
 Explicitly **not** deferred (deliberate non-goals, so they are not re-opened as gaps):
-LLM-generated titles, session search, session export, sub-agent session persistence, and
-serializing mode/approvals/confinement/MCP into the record (the last per ADR 0008). The bench
-keeps composing `Snapshot`/`Encode` directly (ADR 0001) — no bench-side session-store TODO.
+session search, session export, sub-agent session persistence, and serializing
+mode/approvals/confinement/MCP into the record (the last per ADR 0008). The bench keeps composing
+`Snapshot`/`Encode` directly (ADR 0001) — no bench-side session-store TODO.
 
 ---
 
