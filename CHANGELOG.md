@@ -419,6 +419,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The `/` menu now reads alphabetically.** The command dropdown used to list its rows in the order
+  the table happened to declare them, which was neither the order they were added nor one you could
+  predict; the rows now run `clear` … `version`, so a command is found where its name says it is.
+  The order lives in the table itself rather than in a sort at render time — the table is the
+  registry, and display order is one of the things it declares — and a test pins it, so a row added
+  out of place fails loudly instead of quietly landing at the bottom. Nothing about what the
+  commands do, or which of them stay available while the model runs, changes.
+
 - **The status line's right slot now ends two columns short of the window edge.** Whatever occupies
   that slot — the context-usage gauge, `esc stop` while a turn runs, `enter dismiss` after an error,
   the primed-`ctrl+c` hint, the mouse-copy flash — used to be justified hard against the last
@@ -554,16 +562,6 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
-- **The sub-agent rail is continuous now, and it is orange.** The `│` line marking a sub-agent's
-  work down the left of the chat broke at every blank row — and since each block is separated by
-  one, the rail came out as disconnected stubs rather than one frame around the run. The separating
-  row now carries the rail too, drawn as deep as both of the blocks it sits between, so a run reads
-  as a single vertical-ruled section from its `⤷ sub-agent` label to its last line. The same rule
-  keeps runs apart: the row above a second sub-agent call is bare, because that call's own block
-  sits at the parent's level, so two sub-agent calls in a row are never joined into one. The rail
-  and its `⤷` label are painted in the tool header's orange instead of dim grey — one tone for the
-  whole sub-agent frame, matching the `✦` markers it encloses. A transcript with no sub-agent in it
-  renders exactly as before, byte for byte.
 - **The dangerous-action guard no longer refuses a file because of what the file *says*.** The
   guard matched its rules against every string in a tool call's arguments — the body a write
   carries included — so writing a document that merely *mentioned* a guarded path was refused as
@@ -625,6 +623,23 @@ point is a **minor** bump, not a breaking change.
   a *found but not loaded* section naming each skill, why it was refused, and the file to go and
   fix. Dropping the load error is now lossless, which is what makes the soft-skip behaviour safe to
   keep.
+
+- **A launcher that binds `0.0.0.0` is now recognised as the server your session is already on.**
+  A wildcard bind and a loopback dial are two spellings of one server, but three places compared
+  them as plain strings, so on a launcher configured that way — the common local setup — the whole
+  surface misread its own machine: `/unload-model` and `/stop-server` refused every session that had
+  not itself performed a load, a load onto the profile already serving fired the *moved* fold and
+  re-pointed the wire and re-announced the seed for a move that changed nothing, and a genuine load
+  onto a wildcard-bound profile handed the session `http://0.0.0.0:<port>` as its endpoint —
+  an address to listen on, not one to reach, and on Windows not connectable at all. One predicate
+  now decides both compares: equal spellings, or equal ports with an unspecified launcher host and
+  an endpoint host this machine answers as. A wildcard bind is not a claim on the LAN, so a peer
+  address, a name this side cannot resolve, and a second port each still name two servers. The
+  address a session is *moved to* takes the spelling this machine dials — a wildcard becomes the
+  loopback of its own family, an explicitly configured host is handed over exactly as it stands —
+  which is the same projection the picker's rows already carry, so the endpoint and the profile row
+  naming it agree after a move as they did before one. `/unload-model` and `/stop-server` still
+  address the launcher in the launcher's own spelling: matching is normalised, addressing is not.
 
 - **A model the session moved to is no longer yanked back to the one `config.yaml` named.** The
   discovery hint — which of the models a multi-model server serves apogee means — was fixed at
@@ -972,6 +987,21 @@ point is a **minor** bump, not a breaking change.
   embeds a URL is a transport error whose URL is dropped wholesale before redaction, so no key
   leaked; the gap is closed ahead of any error shape that would make it real. Failure messages
   still name the host exactly as the caller spelled it, and no message wording changes.
+
+## [0.10.4] — 2026-07-31
+
+### Fixed
+
+- **The sub-agent rail is continuous now, and it is orange.** The `│` line marking a sub-agent's
+  work down the left of the chat broke at every blank row — and since each block is separated by
+  one, the rail came out as disconnected stubs rather than one frame around the run. The separating
+  row now carries the rail too, drawn as deep as both of the blocks it sits between, so a run reads
+  as a single vertical-ruled section from its `⤷ sub-agent` label to its last line. The same rule
+  keeps runs apart: the row above a second sub-agent call is bare, because that call's own block
+  sits at the parent's level, so two sub-agent calls in a row are never joined into one. The rail
+  and its `⤷` label are painted in the tool header's orange instead of dim grey — one tone for the
+  whole sub-agent frame, matching the `✦` markers it encloses. A transcript with no sub-agent in it
+  renders exactly as before, byte for byte.
 
 ## [0.9.4] — 2026-07-28
 
