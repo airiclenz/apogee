@@ -30,16 +30,41 @@ import (
 // able to answer "which server is this session on RIGHT NOW". A profile load asks exactly that, to decide
 // whether the profile it just activated is already the session's server or somewhere else (ADR 0029
 // D2) — and the launch-time `endpoint:` is the wrong answer the moment a `/server` switch has moved.
+//
+// The key and the bound model ride along for the same reason, and answer the same question one step
+// further: an out-of-band call the composition root makes on the session's behalf — the session
+// naming completion (title.go) is the only one — has to be built against the Upstream the session is
+// on now, with the model it is now bound to and the credential that server takes. Keeping all three
+// in the one place a switch already moves is what stops a second, quietly divergent notion of "the
+// current Upstream" from growing beside this one.
 type upstreamHolder struct {
 	mu       sync.Mutex
 	endpoint string
+	apiKey   string
+	model    string
 	monitor  *heartbeat.Monitor
 }
 
-// newUpstreamHolder seeds the holder with the Monitor for the server this session STARTS on, and the
-// endpoint that Monitor observes.
-func newUpstreamHolder(endpoint string, monitor *heartbeat.Monitor) *upstreamHolder {
-	return &upstreamHolder{endpoint: endpoint, monitor: monitor}
+// upstreamBinding is everything a fresh call to this session's Upstream must be built from: where it
+// is, which model it is bound to, and the key that opens it. It is a snapshot taken under the
+// holder's lock and never a live view, so a caller cannot read an endpoint from before a switch
+// against a key from after it.
+//
+// Model is empty when nothing is bound — a cold start before the first beat, or the gap a switch
+// opens (the switch UNBINDS the model, the same clearing the session record's stamped model takes).
+// A request built on an empty model leaves the field to the server, which is the honest reading of
+// "we do not yet know what this server is serving".
+type upstreamBinding struct {
+	Endpoint string
+	Model    string
+	APIKey   string
+}
+
+// newUpstreamHolder seeds the holder with the Monitor for the server this session STARTS on, plus
+// the launch-time binding that Monitor observes: the endpoint, the resolved key, and the configured
+// `model:` pin (empty on a cold start, where the first beat binds one).
+func newUpstreamHolder(endpoint, apiKey, model string, monitor *heartbeat.Monitor) *upstreamHolder {
+	return &upstreamHolder{endpoint: endpoint, apiKey: apiKey, model: model, monitor: monitor}
 }
 
 // Beat observes whichever Upstream is current when the beat starts. It is the value wired into
@@ -49,22 +74,35 @@ func (h *upstreamHolder) Beat(ctx context.Context) heartbeat.Beat {
 	return h.current().Beat(ctx)
 }
 
-// SetModel moves the current Monitor's discovery hint — the composition root's rebind closure calls
-// it whenever a rebind commits, so discovery keeps resolving the model the session actually runs
-// (heartbeat.Monitor.SetModel). A hint stated against a Monitor that has since been retired is
-// harmless: it dies with that Monitor, and the new server's own hint came in with it.
+// SetModel moves the current Monitor's discovery hint AND records the model as bound — the
+// composition root's rebind closure calls it whenever a rebind commits, so discovery keeps resolving
+// the model the session actually runs (heartbeat.Monitor.SetModel) and an out-of-band call built
+// from Binding names that same model. The hint and the binding are one value here because a rebind
+// is precisely the moment the two become the same fact. A hint stated against a Monitor that has
+// since been retired is harmless: it dies with that Monitor, and the new server's own hint came in
+// with it.
 func (h *upstreamHolder) SetModel(model string) {
-	h.current().SetModel(model)
+	h.mu.Lock()
+	h.model = model
+	monitor := h.monitor
+	h.mu.Unlock()
+	monitor.SetModel(model)
 }
 
-// Swap makes monitor — observing endpoint — the one subsequent beats observe. It is called once a
-// switch has already COMMITTED in the engine (Agent.SwitchUpstream), so there is no failure to
-// unwind: from the next beat on, the display observes the server the wire is actually pointed at.
-// The two fields move together under one lock, so no reader can see a Monitor paired with the
-// endpoint it is not observing.
-func (h *upstreamHolder) Swap(endpoint string, monitor *heartbeat.Monitor) {
+// Swap makes monitor — observing endpoint with apiKey — the one subsequent beats observe. It is
+// called once a switch has already COMMITTED in the engine (Agent.SwitchUpstream), so there is no
+// failure to unwind: from the next beat on, the display observes the server the wire is actually
+// pointed at. The fields move together under one lock, so no reader can see a Monitor paired with
+// the endpoint it is not observing, or an endpoint paired with another server's key.
+//
+// The bound model is CLEARED, for the same reason the session record's stamped model is: a switch
+// unbinds the model, and until the new server's first beat rebinds one, claiming the old server's
+// model would be a claim about a server this session no longer talks to.
+func (h *upstreamHolder) Swap(endpoint, apiKey string, monitor *heartbeat.Monitor) {
 	h.mu.Lock()
 	h.endpoint = endpoint
+	h.apiKey = apiKey
+	h.model = ""
 	h.monitor = monitor
 	h.mu.Unlock()
 }
@@ -76,6 +114,15 @@ func (h *upstreamHolder) Endpoint() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.endpoint
+}
+
+// Binding snapshots the current Upstream binding for a caller that must BUILD a client rather than
+// observe one — today the session-naming call in title.go, which constructs a fresh provider.Client
+// per call precisely so it follows a `/server` switch and a rebind without a seam of its own.
+func (h *upstreamHolder) Binding() upstreamBinding {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return upstreamBinding{Endpoint: h.endpoint, Model: h.model, APIKey: h.apiKey}
 }
 
 // current reads the live Monitor under the mutex and hands it back, so callers hold the lock for a
@@ -134,7 +181,7 @@ func (m sessionMover) move(endpoint, alias, hint, apiKey string) (tui.ServerSwit
 	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{Endpoint: endpoint, APIKey: apiKey}); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	m.holder.Swap(endpoint, heartbeat.NewMonitor(endpoint, hint, apiKey))
+	m.holder.Swap(endpoint, apiKey, heartbeat.NewMonitor(endpoint, hint, apiKey))
 	m.host.SetModel("")
 	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the
 	// `context-window:` pin — which is GLOBAL and therefore survives a move, so the renderer still

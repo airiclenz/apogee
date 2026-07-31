@@ -242,6 +242,32 @@ type Options struct {
 	// while the "is it safe to snapshot" decision stays with the Model that owns the Engine.
 	Sessions SessionHost
 
+	// GenerateTitle names a new Session record from the text of its first prompt — the cosmetic,
+	// out-of-band naming completion (ADR 0022 addendum, 2026-07-31). It is NOT a Turn and NOT a
+	// Mechanism: it never goes through the Engine (whose single-goroutine contract it would
+	// otherwise break, ADR 0011), fires at no Hook point, emits no Token/Usage event, never enters
+	// the transcript, and nothing in the conversation depends on its result. The binary backs it
+	// with its own provider.Client over the server and model this session is bound to AT CALL TIME,
+	// so a `/server` switch or a rebind carries the naming call with it; the renderer owns only
+	// WHEN it fires and whether the answer is applied.
+	//
+	// It returns the model's RAW reply — cleaning it up is title.Sanitize's job, kept on this side
+	// of the seam so a generated title and a manual `/rename <text>` pass through one pipeline and
+	// can never disagree about what a title may contain.
+	//
+	// nil ⇒ naming is unwired, exactly as a nil Sessions is: the automatic call never fires and a
+	// bare `/rename` reports that generation is unavailable. Never an error. It is a func rather
+	// than an interface for the same reason SaveHostAcknowledgement is: the TUI needs one call, not
+	// a type.
+	GenerateTitle func(ctx context.Context, firstUserText string) (string, error)
+
+	// AutoTitle gates only the AUTOMATIC naming call — the `auto-title:` config key, default true.
+	// False leaves GenerateTitle wired, so a bare `/rename` still regenerates on demand: the toggle
+	// answers "name my sessions for me", not "may apogee ever ask for a title". The zero value,
+	// false, is therefore what hand-built test Options get: no session names itself unless the
+	// binary said so.
+	AutoTitle bool
+
 	// Heartbeat is one observation of the Upstream: is the server reachable, which model is it
 	// serving, in which context window, and what else does it advertise (internal/heartbeat). The
 	// binary backs it with a live heartbeat.Monitor; the TUI owns only the CADENCE and the

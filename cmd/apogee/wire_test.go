@@ -1217,7 +1217,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	t.Helper()
 	agent := &fakeSwitcher{}
 	host := &fakeStamper{}
-	holder := newUpstreamHolder(endpoint, heartbeat.NewMonitor(endpoint, "", ""))
+	holder := newUpstreamHolder(endpoint, "", "", heartbeat.NewMonitor(endpoint, "", ""))
 	wiring := launcherWiring{
 		sessionMover: sessionMover{agent: agent, holder: holder, host: host, pinnedWindow: 16384},
 		ops:          ops,

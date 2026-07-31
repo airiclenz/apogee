@@ -316,7 +316,8 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// alike) and a `/server` switch replaces the whole thing. The holder is what keeps that a
 	// composition-root move: Options.Heartbeat below is wired to holder.Beat, one signature for the
 	// life of the session, and the renderer never learns which Monitor answered.
-	holder := newUpstreamHolder(opts.endpoint, heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey))
+	holder := newUpstreamHolder(opts.endpoint, opts.apiKey, opts.model,
+		heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey))
 
 	// The servers this session can be moved to: the `servers:` entries plus — unless one of them
 	// already names it — the endpoint it started on, so the way back is always offered. The
@@ -399,6 +400,13 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		stopServerSeam = wiring.stop
 	}
 
+	// The session-naming seam (ADR 0022 addendum): one out-of-band completion, built per call from
+	// whatever server and model the session is bound to at that moment — so a `/server` switch or a
+	// rebind carries the naming call with it, and neither needs a seam of its own. It is wired
+	// unconditionally: `auto-title:` gates only the AUTOMATIC firing (below), while a bare `/rename`
+	// regenerates on demand even with the toggle off (Ratified design 7).
+	titles := newTitleWiring(holder.Binding, roots.workspace)
+
 	// The prompt caret's shape. applyConfig already refused a name this build does not know, so the
 	// error here cannot fire; ignoring it keeps the parse a single expression, and ParseCursorShape
 	// answers an unknown name with the default anyway — a caret is drawn either way.
@@ -479,6 +487,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// payload for a --resume/--continue start (nil on a fresh start), so newModel repaints the
 		// stored scrollback beneath the start-up box and relights the gauge.
 		Sessions: host,
+		// The naming half of the same records: the seam that turns a first prompt into a title, and
+		// the `auto-title:` key that says whether a new session names itself without being asked.
+		// The seam is wired either way — the key is a preference about automatism, not a ban on the
+		// call — so `/rename` regenerates on demand regardless.
+		GenerateTitle: titles.generate,
+		AutoTitle:     opts.autoTitle,
 		// agent.InExchange() reads the resumed Agent's open-Exchange state (false on a fresh start,
 		// or a cleanly-closed resume; true only when the stored snapshot died mid-task), so newModel
 		// appends the interrupted note and /continue picks the work back up.

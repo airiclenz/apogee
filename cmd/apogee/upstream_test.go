@@ -43,7 +43,7 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	first := upstreamServer(t, "model-a", 4096)
 	second := upstreamServer(t, "model-b", 8192)
 
-	holder := newUpstreamHolder(first.URL, heartbeat.NewMonitor(first.URL, "", ""))
+	holder := newUpstreamHolder(first.URL, "key-a", "model-a", heartbeat.NewMonitor(first.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
 		t.Fatalf("first beat = %+v; want a reachable model-a from the seeded Monitor", beat)
@@ -51,8 +51,14 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	if got := holder.Endpoint(); got != first.URL {
 		t.Errorf("Endpoint before the swap = %q; want the seeded %q", got, first.URL)
 	}
+	// The launch-time binding an out-of-band call (the session naming completion) would be built
+	// from: the endpoint, the configured `model:` pin, and the resolved key.
+	want := upstreamBinding{Endpoint: first.URL, Model: "model-a", APIKey: "key-a"}
+	if got := holder.Binding(); got != want {
+		t.Errorf("Binding before the swap = %+v; want the seeded %+v", got, want)
+	}
 
-	holder.Swap(second.URL, heartbeat.NewMonitor(second.URL, "", ""))
+	holder.Swap(second.URL, "key-b", heartbeat.NewMonitor(second.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-b" {
 		t.Errorf("beat after Swap = %+v; want a reachable model-b — the holder still observes the old server", beat)
@@ -62,12 +68,23 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	if got := holder.Endpoint(); got != second.URL {
 		t.Errorf("Endpoint after the swap = %q; want %q", got, second.URL)
 	}
+	// The key follows the server, and the bound model is CLEARED: a switch unbinds the model, so a
+	// call built from this binding names none until the new server's first beat rebinds one — the
+	// same clearing the session record's stamped model takes.
+	want = upstreamBinding{Endpoint: second.URL, Model: "", APIKey: "key-b"}
+	if got := holder.Binding(); got != want {
+		t.Errorf("Binding after the swap = %+v; want %+v", got, want)
+	}
 	// The hint moves through the holder too (the rebind closure's line), and lands on the CURRENT
 	// Monitor: a hint for a model the swapped-in server does not serve simply falls back, which is
 	// the pre-existing "the pin is a hint, not a claim" posture rather than a failure.
 	holder.SetModel("model-b")
 	if beat := holder.Beat(context.Background()); beat.ActiveModel != "model-b" {
 		t.Errorf("beat after SetModel = %+v; want model-b", beat)
+	}
+	// A rebind is the moment the hint and the binding become one fact, so the same call records both.
+	if got := holder.Binding().Model; got != "model-b" {
+		t.Errorf("bound model after SetModel = %q; want model-b — a rebind did not reach the binding", got)
 	}
 }
 

@@ -163,9 +163,17 @@ cmd/apogee/defaults/config.yaml` hits the new banner; `make check` passes.
 
 **Commit:** `feat(config): auto-title toggle, default on`
 
-## 4. Composition root: GenerateTitle seam on tui.Options
+## 4. Composition root: GenerateTitle seam on tui.Options — ✅ DONE (2026-07-31)
 
 Depends on items 2 and 3.
+
+NOTES (2026-07-31): building the client from the *current* binding needed one thing the composition root
+kept nowhere readable — the session's api key and its BOUND model (`upstreamHolder` held only the endpoint
+and the Monitor). Rather than grow a second, quietly divergent notion of "the current Upstream", the holder
+was extended to own all three (`Binding()`, `Swap(endpoint, apiKey, monitor)`, and `SetModel` now recording
+as well as forwarding the hint), so `cmd/apogee/upstream.go` and its two test call sites are touched
+alongside `wire.go` and the new `title.go`. A server switch CLEARS the bound model, mirroring what the same
+move already does to the session record's stamped model.
 
 **What:** In `internal/tui/tui.go`: add to `Options` — `GenerateTitle func(ctx
 context.Context, firstUserText string) (string, error)` (nil-able, documented degrade
