@@ -116,7 +116,26 @@ GraphemeWidth, which is the measure under suspicion. **No test in the repo rende
 ultraviolet.** That is why item 1 comes first: without a painted-cell harness, a fix to any
 of the three symptoms cannot be shown to work, and a green suite proves nothing.
 
-## 1. A frame-level paint harness — assert what the terminal shows
+## 1. A frame-level paint harness — assert what the terminal shows — ✅ DONE (2026-07-31)
+
+NOTES (2026-07-31): `paintedWidth` takes the width method as a second argument —
+`paintedWidth(row string, method ansi.Method) int`, not the item's one-argument form. A painted
+width is only meaningful against the measure it was painted with, so a helper that fixed one
+method would re-introduce the silent assumption this plan exists to remove. Two additional
+package-local helpers came with it, both used by the item's own tests and by items 3–4:
+`paintedColumn(row, glyph string, method ansi.Method) int` (the screen coordinate a glyph is
+painted in — the space a mouse click is reported in) and `paintTestModel`/`transcriptPaintRows`
+fixtures. `paintFrame` is exactly as specified.
+
+NOTES (2026-07-31): RECORDED DRIFT for item 3 to check against — at window 80×24 with a
+40-paragraph transcript, an `⚠️` (U+26A0 U+FE0F) row on screen and the scroll bar showing a thumb:
+painted under `ansi.WcWidth` every ASCII transcript row paints its `│`/`█` in **column 79**, while
+the `⚠️` row paints its bar in **column 78** — exactly one column left. Painted under
+`ansi.GraphemeWidth` all rows agree on column 79. Item 3's inverted test must show column 79 on
+every row under BOTH methods.
+
+NOTES (2026-07-31): `go.mod` — `github.com/charmbracelet/ultraviolet` moved from the indirect
+block to the direct one (`go mod tidy`), because the harness imports it. No version changed.
 
 **What:** Add a test-only harness that renders a `Model` the way bubbletea does and returns
 the painted cell grid, so tests can assert painted columns instead of measured ones. New
