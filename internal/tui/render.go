@@ -611,8 +611,9 @@ func railSpacer(th theme, depth int) string {
 // railLines frames a Depth-level block: it prepends one styled "│ " rail gutter per nesting
 // level to each physical line, so a sub-agent's nested block reads as a vertical-ruled
 // sub-section (P3.14). Depth 0 is the common case and returns the lines untouched, so the
-// flat top-level transcript renders exactly as before. The rail is styled (dim) and sits
-// left of any per-line background (e.g. the user block's), matching the marker hanging indent.
+// flat top-level transcript renders exactly as before. The rail is styled in the subRail role's
+// tool-header orange and sits left of any per-line background (e.g. the user block's), matching
+// the marker hanging indent.
 func railLines(th theme, lines []string, depth int) []string {
 	if depth <= 0 {
 		return lines

@@ -87,7 +87,12 @@ helpers and the golden style of `TestRenderGroupsInsideSubAgent`, ~line 161):
 
 **Commit:** `fix(tui): keep the sub-agent rail continuous through spacer lines`
 
-## 2. Paint the rail in the tool-header orange
+## 2. Paint the rail in the tool-header orange — ✅ DONE (2026-07-31)
+
+NOTES (2026-07-31): per the user's decision at dispatch, one comment beyond the item's literal
+text was refreshed alongside theme.go's: `railLines`' doc comment in `internal/tui/render.go`
+(~line 613) still described the rail as styled "(dim)", so it now names the tool-header orange.
+No other file outside the item's scope was touched.
 
 **What:** In `internal/tui/theme.go` (~line 148) change the `subRail` role's foreground
 from `colFaint` to `colCode` — the `#f0883e` orange the tool header's `toolLabel`

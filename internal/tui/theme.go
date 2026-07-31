@@ -96,7 +96,7 @@ type theme struct {
 	toolHeader   lipgloss.Style // the ✦ Label target header
 	toolLabel    lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
 	toolDetail   lipgloss.Style // the ┝/┕ branch detail lines (dim)
-	subRail      lipgloss.Style // the │ rail framing a sub-agent (Depth > 0) block (dim)
+	subRail      lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (the toolLabel orange — one tone for the whole sub-agent frame)
 	skillChip    lipgloss.Style // an invoked-skill chip on a sent user block (white on violet)
 	skillToken   lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
 	fileToken    lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (blue on the box's black)
@@ -145,7 +145,7 @@ func newTheme() theme {
 		toolHeader: lipgloss.NewStyle(),
 		toolLabel:  lipgloss.NewStyle().Bold(true).Foreground(colCode),
 		toolDetail: lipgloss.NewStyle().Foreground(colFaint),
-		subRail:    lipgloss.NewStyle().Foreground(colFaint),
+		subRail:    lipgloss.NewStyle().Foreground(colCode),
 		skillChip:  lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
 		// The two inline token accents invert the chip: the colour moves to the FOREGROUND and the
 		// background stays the box's own black, so an accented token reads as one word of the
