@@ -414,10 +414,11 @@ does not cancel an actuation, because the launcher's own cancel is `/stop-server
 returns.
 
 **The box never goes dead while the model works.** Every region stays open. A command that needs a
-quiescent engine is not hidden — its row renders with a trailing `— idle only` tag in the pane's
-faint unselected style, and accepting it anyway prints the note and leaves the draft exactly as it
-was. The verbs that only report (`/version`, `/skills`, `/confine` with no arguments) run there
-and then.
+quiescent engine is not hidden — its row fills the menu's `— idle only` column in the pane's faint
+unselected style, and accepting it anyway prints the note and leaves the draft exactly as it was.
+The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
+cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
+verbs that only report (`/version`, `/skills`, `/confine` with no arguments) run there and then.
 
 **Tokens light up when they resolve.** Inside the box a `/token` is painted in the skill violet
 only when it names a skill in the catalog, and an `@path` in the reference blue only when the path
