@@ -62,10 +62,13 @@
 6. **Title contract.** Task description only, roughly 3–8 words; workspace basename and
    date are model *context*, never title text (the browser row already shows time and
    workspace). Sanitizer (single pipeline for generated *and* manual titles): strip a
-   leading `<think>…</think>` block, take the first non-empty line, strip ANSI/control
-   escapes, surrounding quotes/backticks and a leading `Title:` label, collapse inner
-   whitespace, trim a trailing period, word-boundary truncate to ≤50 runes with `…`
-   (same caps as the heuristic). An empty result after sanitizing = failure.
+   leading `<think>…</think>` block, take the first non-empty line — treating code-fence
+   marker lines (` ``` ` with an optional language tag) as noise, since small models wrap
+   output in fences even when told not to — strip ANSI/control escapes, surrounding
+   quotes/backticks, a leading comment/heading marker (`//`, `#`) and a leading
+   case-insensitive `Title:` label, collapse inner whitespace, trim a trailing period,
+   word-boundary truncate to ≤50 runes with `…` (same caps as the heuristic). An empty
+   result after sanitizing = failure.
 7. **Config.** Flat `auto-title: *bool` in the config file only (no flag, no env), nil ⇒
    **true**. The toggle gates only the *automatic* firing; the seam stays wired so bare
    `/rename` regenerates on demand even with `auto-title: false`.
@@ -105,7 +108,7 @@ list — session search, session export, and sub-agent session persistence stay.
 **What:** New package `internal/title` with two pure, dependency-light pieces. (a)
 `Prompt(firstPrompt, workspaceBase string, date time.Time)` returning the messages for
 the naming completion: a short system prompt ("you name coding sessions; reply with the
-title only, 3–8 words, no quotes"), and a user message carrying the workspace basename,
+title only, one line, 3–8 words, no quotes"), and a user message carrying the workspace basename,
 the date, and the first prompt truncated to a bounded excerpt (~1500 runes) — context
 only, per Ratified design 6. Return whatever message/request type the provider layer
 consumes (mirror what `internal/agent/compact.go`'s completer builds); include the
@@ -118,10 +121,13 @@ first Save.
 
 **Tests:** `internal/title/title_test.go` — prompt: excerpt cap honored, workspace/date
 present, instruction present. Sanitizer table: leading `<think>…</think>` stripped;
-multiline reply → first non-empty line; ANSI/control escapes stripped; surrounding
-quotes/backticks stripped; leading `Title:` label stripped (case-insensitive); trailing
-period trimmed; inner whitespace collapsed; 50-rune word-boundary truncation with `…`;
-CJK/multibyte runes counted as runes; all-noise input → ok=false.
+multiline reply → first non-empty line; code-fenced reply → fence marker lines (bare
+` ``` ` and ` ```lang `) skipped as noise, inner line taken; reply that is only a fence
+pair → ok=false; ANSI/control escapes stripped; surrounding quotes/backticks stripped;
+leading `Title:` label stripped (case-insensitive); leading comment/heading marker
+stripped (`// title: X`, `# X`); trailing period trimmed; inner whitespace collapsed;
+50-rune word-boundary truncation with `…`; CJK/multibyte runes counted as runes;
+all-noise input → ok=false.
 
 **Acceptance:** `go test ./internal/title/` passes; `make check` passes.
 
