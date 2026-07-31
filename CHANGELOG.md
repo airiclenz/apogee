@@ -20,7 +20,9 @@ point is a **minor** bump, not a breaking change.
   alignment markers honoured (`:--` left, `--:` right, `:-:` centred). Cells are rendered as inline
   markdown first, so `**bold**` and `` `code` `` inside a cell style exactly as they do in a
   paragraph, and it is that rendered width — not the source width — that sets the column, so markup
-  characters and colour escapes never push one open.
+  characters and colour escapes never push one open. Every line of the block — header, rule and
+  rows alike — ends in the same column, so the table shows one straight edge to the scroll-bar
+  gutter beside it and a drag selection addresses the same columns the eye does.
   - **It never overflows the chat.** Where the columns plus their gutters do not fit, the widest
     column is shrunk until they do and an over-wide cell is cut with a `…` tail; where even
     single-cell columns cannot fit, the block falls back to the plain paragraphs it rendered as

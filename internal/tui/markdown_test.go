@@ -233,6 +233,17 @@ func visible(lines []string) []string {
 	return out
 }
 
+// visibleTrimmed is visible with each line's trailing blanks dropped — the form to compare a
+// block against text quoted from a doc, where a run of spaces at a line's end cannot be written
+// down. It is only ever the right comparison where a separate assertion pins the widths.
+func visibleTrimmed(lines []string) []string {
+	out := visible(lines)
+	for i, ln := range out {
+		out[i] = strings.TrimRight(ln, " ")
+	}
+	return out
+}
+
 // Plain text with no markup is returned byte-identical (the no-regression property that keeps
 // existing assistant-text assertions green). A pipe that is not part of a table — no delimiter
 // row under it — is plain text like any other character.

@@ -243,7 +243,10 @@ func TestTableMatchBlockOutOfRange(t *testing.T) {
 // either way.
 
 // The worked example in layout.md's "Markdown tables in assistant text", rendered at the width
-// that section states — the spec of record, asserted line for line.
+// that section states — the spec of record, asserted line for line. The comparison drops each
+// line's trailing blanks because the doc's fenced block cannot show them: a row IS padded out to
+// the table's width (TestTableRowsShareOneWidth pins that), and those blanks are invisible in
+// print. Everything a reader can see in the example is pinned here exactly.
 func TestTableRendersLayoutExample(t *testing.T) {
 	th := newTheme()
 	source := strings.Join([]string{
@@ -259,11 +262,42 @@ func TestTableRendersLayoutExample(t *testing.T) {
 		"Run            3  go test ./...",
 	}
 
-	got := renderMarkdownBody(th, source, 34)
+	got := visibleTrimmed(renderMarkdownBody(th, source, 34))
 
-	if !reflect.DeepEqual(visible(got), want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("table render mismatch:\n--- got ---\n%s\n--- want ---\n%s",
-			strings.Join(visible(got), "\n"), strings.Join(want, "\n"))
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// Every line of a table is the same display width — header, rule and every body row — so the
+// block presents one straight right edge to whatever sits beside it. It is the invariant the
+// transcript's right-hand chrome is measured against: the scroll-bar gutter beside a short row
+// would read as the bar stepping inward, and the mouse addresses columns the row no longer holds
+// (mouse.go). The regression it guards is a body row whose last cell is narrower than its column —
+// here the "Status" header is two cells wider than every value under it, which is exactly the
+// two-column step the shape reported against the first table release.
+func TestTableRowsShareOneWidth(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| File | Description of the change that was made | Status |",
+		"| --- | --- | --- |",
+		"| internal/tui/markdown.go | dispatch the table matcher before lists | done |",
+		"| internal/tui/mdtable.go | the parser and the renderer both live here | done |",
+		"| layout.md | spec the block | fail |",
+	}, "\n")
+	const width = 76 // narrower than the table's natural width, so it is fitted to exactly this
+
+	got := renderMarkdownBody(th, source, width)
+
+	if len(got) != 5 {
+		t.Fatalf("got %d lines, want 5 (header, rule, three rows): %#v", len(got), visible(got))
+	}
+	for i, ln := range got {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("line %d is %d cells wide, want %d (every table line ends in the same column): %q",
+				i, w, width, strip(ln))
+		}
 	}
 }
 
@@ -312,8 +346,9 @@ func TestTableAlignsColumns(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %#v; want three lines", got)
 	}
-	// Columns are 4, 5 and 3 cells wide, so the row is "x…  " + "    y" + "  " + " z ".
-	if want := "x         y   z"; got[2] != want {
+	// Columns are 4, 5 and 3 cells wide, so the row is "x   " + "  " + "    y" + "  " + " z " —
+	// the centred cell's own trailing space included, since a row is padded out to the table.
+	if want := "x         y   z "; got[2] != want {
 		t.Errorf("row = %q; want %q (left, right, centred)", got[2], want)
 	}
 	if want := "left  right  mid"; got[0] != want {
@@ -328,8 +363,8 @@ func TestTableCentreOddRemainder(t *testing.T) {
 
 	got := visible(renderMarkdownBody(th, source, 20))
 
-	if want := " ab"; got[2] != want {
-		t.Errorf("centred row = %q; want %q (one space left, the odd one right and trimmed)", got[2], want)
+	if want := " ab "; got[2] != want {
+		t.Errorf("centred row = %q; want %q (one space left, the odd one right)", got[2], want)
 	}
 }
 

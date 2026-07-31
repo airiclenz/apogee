@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	lipgloss "charm.land/lipgloss/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -288,6 +290,33 @@ func TestTranscriptRendersMarkdownTable(t *testing.T) {
 	}, "\n")
 	if got := plainRender(tr); got != want {
 		t.Errorf("table block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// A table wide enough to be fitted to the body column reaches that column's last cell on EVERY
+// line — marker gutter included. This is the property the transcript's right-hand chrome is laid
+// out against: the block is rendered to the same width the rest of the body wraps to, so the free
+// column beside the scroll-bar gutter is the same beside a table row as beside the rule above it
+// (model.go's transcriptWidth / bodyRightGutter, layout.md).
+func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
+	const width = 60
+	tr := feed(domain.MessageEvent{Text: strings.Join([]string{
+		"| File | Description of the change that was made | Status |",
+		"| --- | --- | --- |",
+		"| internal/tui/mdtable.go | the parser and the renderer | done |",
+		"| layout.md | spec the block | fail |",
+	}, "\n")})
+
+	lines := tr.renderLines(newTheme(), width)
+
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4 (header, rule, two rows): %#v", len(lines), visible(lines))
+	}
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("table line %d is %d cells wide, want the full body column of %d: %q",
+				i, w, width, strip(ln))
+		}
 	}
 }
 

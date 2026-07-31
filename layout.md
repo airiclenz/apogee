@@ -137,7 +137,11 @@ nothing else, sitting in the same body column the rest of the answer sits in. Ev
 to the widest cell in its column and columns are separated by exactly **two spaces**. Each cell is
 rendered as inline markdown first, so `**bold**` and `` `code` `` inside a cell style the way they
 do in a paragraph, and it is that *rendered* width that sets the column — never the source width,
-so markup characters and the bytes of a colour escape never push a column open.
+so markup characters and the bytes of a colour escape never push a column open. The **last** column
+is padded like every other one, so every line of a table — header, rule and body rows alike — ends
+in the same column and the block shows one straight right edge to whatever sits beside it. A row
+that stopped at its last word instead would leave a wider gap to the scroll-bar gutter than the rule
+above it does, which reads as the bar stepping inward beside the body.
 
 **The header and its rule.** The header row's cells are bold, the same weight `**bold**` earns
 anywhere else. The delimiter row renders as a run of `─` per column, each as wide as the column it
@@ -185,6 +189,9 @@ Tool       Calls      Notes
 Read File     12      fast
 Run            3  go test ./...
 ```
+
+Two of those four lines carry trailing blanks out to the rule's last column — the padding of the
+centred `Notes` column, which print cannot show. All four are 31 columns wide.
 
 ---
 

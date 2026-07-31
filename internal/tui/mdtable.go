@@ -318,9 +318,13 @@ func fitColumns(widths []int, budget int) bool {
 
 // layoutTableRow lays one row's rendered cells into the fitted column widths: a cell wider than
 // its column is cut ANSI-aware with a … tail, the rest are padded on the side their column names,
-// and the columns are joined by the gutter. The row's trailing padding is dropped — the last
-// column has nothing to line up against, and a line ending in spaces is whitespace a drag
-// selection would pick up.
+// and the columns are joined by the gutter. The last column is padded like every other one, so
+// EVERY line of a table — header, rule and body rows alike — is exactly the table's width. That
+// straight right edge is load-bearing, not cosmetic: a short line leaves the transcript's right
+// gutter wider beside that row than beside the rule above it, which reads as the scroll bar
+// stepping inward beside the body, and it ends the row's selectable cells early where the mouse
+// still addresses the full width (mouse.go). The trailing blanks cost the copied text nothing —
+// transcriptSelectionText trims each line it cuts.
 func layoutTableRow(cells []string, widths []int, align []mdAlign) string {
 	var b strings.Builder
 	for i, w := range widths {
@@ -337,7 +341,7 @@ func layoutTableRow(cells []string, widths []int, align []mdAlign) string {
 		}
 		b.WriteString(padTableCell(cell, w, a))
 	}
-	return strings.TrimRight(b.String(), " ")
+	return b.String()
 }
 
 // padTableCell fits one rendered cell to its column: truncated with a … when it is too wide, then

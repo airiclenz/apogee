@@ -154,6 +154,19 @@ tokens (`| --- | --- |`) over-wide there — pre-existing wrapper behaviour, unt
 the no-overflow assertion covers every width where a table is actually drawn (8 and up, down to one
 cell per column) and the narrow case asserts the fallback is taken.
 
+**NOTES (2026-07-31, follow-up):** deviation (b) above is **reverted** — it was the defect the owner
+reported next to a full-width table (the scroll bar reading two columns inward beside the body, and
+the body's selectable cells ending two columns early). The trim shortens exactly those rows whose last
+cell is narrower than its column, so a table whose last column is headed by a word two cells wider than
+every value under it — the reported shape — renders its header and rule at the full body width and
+every body row two cells short of it, while a table that does not span the chat hides the raggedness in
+the empty space to its right. `layoutTableRow` now pads the last column like every other one, so all of
+a table's lines end in the same column; the deviation's stated reason (a trailing blank a drag selection
+would pick up) is already handled where it belongs — `transcriptSelectionText` (mouse.go) trims every
+line it cuts. `layout.md` states the invariant and notes that its worked example's trailing blanks
+cannot be shown in print; `TestTableRendersLayoutExample` keeps pinning that example's visible text and
+the new `TestTableRowsShareOneWidth` / `TestTranscriptTableFillsTheBodyColumn` pin the widths.
+
 **What:** In `mdtable.go`, add the renderer implementing Decisions 4–8: per-cell
 `renderInline`, `th.mdBold` header, column measurement via `lipgloss.Width` on rendered
 cells, alignment padding, two-space gutters, the `─` rule line, the shrink-widest /
