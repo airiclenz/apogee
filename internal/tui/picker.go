@@ -582,7 +582,7 @@ func (m Model) renderPicker() string {
 	}
 	return renderPopup(m.th, popupSpec{
 		title:    m.pickerTitle(),
-		rows:     rows,
+		rows:     singleCellRows(rows),
 		selected: selected,
 		hint:     pickerHint,
 		maxRows:  maxPickerRows,

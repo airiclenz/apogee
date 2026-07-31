@@ -643,29 +643,16 @@ func (m Model) renderAutocomplete() string {
 	if !ac.active || len(ac.items) == 0 {
 		return ""
 	}
-	rows := make([]string, len(ac.items))
+	labels := make([]string, len(ac.items))
 	for i, it := range ac.items {
-		rows[i] = it.label
+		labels[i] = it.label
 	}
 	spec := popupSpec{
 		title:    autocompleteTitle(ac.kind),
-		rows:     rows,
+		rows:     singleCellRows(labels),
 		selected: ac.selected,
 		hint:     autocompleteHint,
 		maxRows:  maxAutocompleteItems,
 	}
 	return renderPopup(m.th, spec, m.width)
-}
-
-// truncateLabel clips s to at most width display runes, ending in an ellipsis when it had to
-// cut — so a long file path never overflows the terminal and breaks the overlay's layout.
-func truncateLabel(s string, width int) string {
-	if width <= 1 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= width {
-		return s
-	}
-	return string(r[:width-1]) + "…"
 }

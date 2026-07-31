@@ -47,7 +47,17 @@
 6. A single-cell row renders exactly as today — file suggestions, ask prompt, approval
    prompt, and popup `body` text are unaffected.
 
-## 1. Popup core: cell-based rows with a column-alignment engine
+## 1. Popup core: cell-based rows with a column-alignment engine — ✅ DONE (2026-07-31)
+
+NOTES (2026-07-31): the display-width truncator moved to `popup.go` under the name
+`truncateToWidth` rather than keeping `truncateLabel` — the popup's rows are no longer "labels" and
+all five call sites are inside `popup.go`; no caller outside the module used it.
+NOTES (2026-07-31): the listed existing invariants pass with their assertions untouched, but their
+`popupSpec` literals in `popup_test.go` had to change from `rows: []string{…}` to
+`rows: singleCellRows([]string{…})` — the field's type changed, so the literals could not compile
+unmodified. `TestRenderPopupWideRuneRowFitsTheWidth` asserts the physical line count as well as the
+line width: lipgloss's width clamp WRAPS an over-wide row, so a width-only assertion did not fail
+against the old rune-count truncation (verified by reverting the truncator).
 
 **What:** In `internal/tui/popup.go`: add `type popupRow []string`; change
 `popupSpec.rows` from `[]string` to `[]popupRow`; implement the Column contract

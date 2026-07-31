@@ -2775,7 +2775,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 		title:       "the assistant is asking:",
 		body:        stripEscapes(req.Question),
 		maxBodyRows: maxBodyRows,
-		rows:        stripEscapesAll(req.Choices),
+		rows:        singleCellRows(stripEscapesAll(req.Choices)),
 		selected:    selected,
 		hint:        hint,
 		maxRows:     rowsShown,

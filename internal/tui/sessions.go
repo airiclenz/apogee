@@ -373,10 +373,10 @@ func (m Model) renderSessionBrowser() string {
 		maxRows: maxSessionRows,
 	}
 	if len(b.visible(m.opts.Workspace)) == 0 {
-		spec.rows = []string{"no sessions in this workspace — press a to see all"}
+		spec.rows = singleCellRows([]string{"no sessions in this workspace — press a to see all"})
 		spec.selected = -1
 	} else {
-		spec.rows = sessionRows(b, m.opts.Workspace, time.Now())
+		spec.rows = singleCellRows(sessionRows(b, m.opts.Workspace, time.Now()))
 		spec.selected = b.selected
 	}
 	return renderPopup(m.th, spec, m.width)

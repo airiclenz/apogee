@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // popupLines splits a rendered popup into its physical (newline-separated) lines. ANSI escapes
@@ -30,7 +31,7 @@ func TestRenderPopupLinesAreExactWidth(t *testing.T) {
 	th := newTheme()
 	base := popupSpec{
 		title:    "saved sessions  (this workspace)",
-		rows:     []string{"first row", "second row", "third row"},
+		rows:     singleCellRows([]string{"first row", "second row", "third row"}),
 		selected: 1,
 		hint:     "esc close",
 		maxRows:  8,
@@ -65,10 +66,10 @@ func TestRenderPopupLinesAreExactWidth(t *testing.T) {
 func TestRenderPopupIsFullyBlackFilled(t *testing.T) {
 	th := newTheme()
 	spec := popupSpec{
-		title:    "saved sessions",                                       // shorter than the box
-		rows:     []string{"x", "a much wider row label goes here", "y"}, // mix of short + wide
-		selected: 1,                                                      // the wide row is the dark-gray highlight bar
-		hint:     "esc close",                                            // shorter than the box
+		title:    "saved sessions",                                                       // shorter than the box
+		rows:     singleCellRows([]string{"x", "a much wider row label goes here", "y"}), // mix of short + wide
+		selected: 1,                                                                      // the wide row is the dark-gray highlight bar
+		hint:     "esc close",                                                            // shorter than the box
 		maxRows:  8,
 	}
 	for _, width := range []int{40, 60, 98} {
@@ -142,7 +143,7 @@ func TestRenderPopupLongRowDoesNotWrap(t *testing.T) {
 	th := newTheme()
 	spec := popupSpec{
 		title:    "commands",
-		rows:     []string{"short", strings.Repeat("verylongtoken ", 12), "also short"},
+		rows:     singleCellRows([]string{"short", strings.Repeat("verylongtoken ", 12), "also short"}),
 		selected: 1,
 		hint:     "esc dismiss",
 		maxRows:  8,
@@ -167,7 +168,7 @@ func TestRenderPopupSelectedRowHighlight(t *testing.T) {
 	th := newTheme()
 	spec := popupSpec{
 		title:    "files",
-		rows:     []string{"one.go", "two.go", "three.go"},
+		rows:     singleCellRows([]string{"one.go", "two.go", "three.go"}),
 		selected: 2,
 		hint:     "esc dismiss",
 		maxRows:  8,
@@ -190,7 +191,7 @@ func TestRenderPopupNoSelection(t *testing.T) {
 	th := newTheme()
 	spec := popupSpec{
 		title:    "skills",
-		rows:     []string{"alpha", "beta", "gamma"},
+		rows:     singleCellRows([]string{"alpha", "beta", "gamma"}),
 		selected: -1,
 		hint:     "esc dismiss",
 		maxRows:  8,
@@ -213,7 +214,7 @@ func TestRenderPopupEmptyTitleAndHintDropRows(t *testing.T) {
 	th := newTheme()
 	full := popupSpec{
 		title:    "saved sessions",
-		rows:     []string{"row one", "row two"},
+		rows:     singleCellRows([]string{"row one", "row two"}),
 		selected: 0,
 		hint:     "esc close",
 		maxRows:  8,
@@ -365,7 +366,7 @@ func TestRenderPopupBodyComposition(t *testing.T) {
 	spec := popupSpec{
 		title:    "the assistant is asking:",
 		body:     "one line of body",
-		rows:     []string{"yes", strings.Repeat("verylongword ", 12)},
+		rows:     singleCellRows([]string{"yes", strings.Repeat("verylongword ", 12)}),
 		selected: 0,
 		hint:     "esc cancel",
 		maxRows:  8,
@@ -451,7 +452,7 @@ func TestRenderPopupDegenerateWidth(t *testing.T) {
 	frame := th.popupBorder.GetHorizontalFrameSize()
 	spec := popupSpec{
 		title:    "saved sessions",
-		rows:     []string{"a row that is far wider than the tiny width"},
+		rows:     singleCellRows([]string{"a row that is far wider than the tiny width"}),
 		selected: 0,
 		hint:     "esc close",
 		maxRows:  8,
@@ -462,6 +463,193 @@ func TestRenderPopupDegenerateWidth(t *testing.T) {
 			if w := lipgloss.Width(ln); w > width {
 				t.Errorf("width %d: line %d is %d cells, exceeds the window width: %q", width, i, w, strip(ln))
 			}
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The column contract
+// ----------------------------------------------------------------------------
+
+// popupCellOffset is the DISPLAY column a cell's text starts at within a composed row — the measure
+// every alignment assertion below is written in, because a column is aligned when its cells start
+// at the same display offset, not at the same byte or rune index.
+func popupCellOffset(t *testing.T, line, cell string) int {
+	t.Helper()
+	i := strings.Index(line, cell)
+	if i < 0 {
+		t.Fatalf("line %q does not contain the cell %q", line, cell)
+	}
+	return ansi.StringWidth(line[:i])
+}
+
+// The cells of a multi-cell spec lay out as columns: whatever the width of the first cell on a
+// row, every row's second cell starts at the same display column — the widest first cell plus the
+// two-space gutter.
+func TestPopupColumnsShareOneOffset(t *testing.T) {
+	rows := []popupRow{
+		{"alpha", "— llamacpp"},
+		{"a-much-longer-profile", "— mlx"},
+		{"b", "— vllm"},
+	}
+	lines := layoutPopupRows(rows)
+	want := ansi.StringWidth("a-much-longer-profile") + len(popupGutter)
+	for i, ln := range lines {
+		if got := popupCellOffset(t, ln, "—"); got != want {
+			t.Errorf("row %d starts its second column at %d, want %d: %q", i, got, want, ln)
+		}
+	}
+}
+
+// Column widths are measured over ALL rows of the spec, not just the ones the scroll window shows:
+// a wide row scrolled out of view still holds its column open, so the alignment cannot shift
+// sideways as the selection moves down a long list.
+func TestRenderPopupColumnWidthsSpanOffWindowRows(t *testing.T) {
+	th := newTheme()
+	const longest = "a-very-long-profile-name"
+	spec := popupSpec{
+		rows: []popupRow{
+			{"a", "— one"},
+			{"b", "— two"},
+			{longest, "— three"}, // outside the two-row window, still the widest first column
+		},
+		selected: 0,
+		maxRows:  2,
+	}
+	lines := popupLines(strip(renderPopup(th, spec, 60)))
+	if len(lines) != 2+2 { // the two borders + the two windowed rows
+		t.Fatalf("popup shows %d physical lines, want 4:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if strings.Contains(strings.Join(lines, "\n"), longest) {
+		t.Fatalf("the wide row was inside the window — test premise broken:\n%s", strings.Join(lines, "\n"))
+	}
+
+	const marker = 2                                          // the module's 2-cell selection marker
+	leftChrome := th.popupBorder.GetHorizontalFrameSize() / 2 // the left border rune + its padding cell
+	want := leftChrome + marker + ansi.StringWidth(longest) + len(popupGutter)
+	for i, ln := range lines[1:3] {
+		if got := popupCellOffset(t, ln, "—"); got != want {
+			t.Errorf("windowed row %d starts its second column at %d, want %d (the off-window row's width): %q",
+				i, got, want, ln)
+		}
+	}
+}
+
+// An absent optional tier is an empty cell, and an empty cell in a column another row DID fill
+// still pads — so the columns after the gap stay aligned rather than sliding left on that row.
+func TestPopupAbsentCellKeepsLaterColumnsAligned(t *testing.T) {
+	rows := []popupRow{
+		{"alpha", "— llamacpp", "· running"},
+		{"beta", "", "· running"}, // no backend tier on this row
+	}
+	lines := layoutPopupRows(rows)
+	want := ansi.StringWidth("alpha") + len(popupGutter) + ansi.StringWidth("— llamacpp") + len(popupGutter)
+	for i, ln := range lines {
+		if got := popupCellOffset(t, ln, "· running"); got != want {
+			t.Errorf("row %d starts its third column at %d, want %d: %q", i, got, want, ln)
+		}
+	}
+}
+
+// A column empty in EVERY row collapses: it contributes neither width nor gutter, so a schema tier
+// no row filled costs the pane nothing and lays out exactly as if the tier were not in the schema.
+func TestPopupEmptyColumnCollapses(t *testing.T) {
+	withTier := layoutPopupRows([]popupRow{
+		{"a", "", "· x"},
+		{"bb", "", "· y"},
+	})
+	want := []string{"a   · x", "bb  · y"} // first column 2 wide + the 2-space gutter, no empty column
+	for i, ln := range withTier {
+		if ln != want[i] {
+			t.Errorf("row %d = %q, want %q (the empty column must collapse)", i, ln, want[i])
+		}
+	}
+
+	withoutTier := layoutPopupRows([]popupRow{{"a", "· x"}, {"bb", "· y"}})
+	for i, ln := range withoutTier {
+		if ln != withTier[i] {
+			t.Errorf("row %d lays out as %q with the empty column and %q without it", i, withTier[i], ln)
+		}
+	}
+}
+
+// Column widths are DISPLAY widths, not rune counts: a three-glyph CJK cell is six terminal cells
+// wide, exactly as wide as a six-character ASCII cell, so both rows start their next column at the
+// same offset. Counting runes would measure the CJK cell at 3 and skew the whole column.
+func TestPopupColumnsMeasureDisplayWidth(t *testing.T) {
+	rows := []popupRow{
+		{"日本語", "· three wide glyphs"}, // 3 runes, 6 display cells
+		{"abcdef", "· six narrow runes"},
+	}
+	lines := layoutPopupRows(rows)
+	want := 6 + len(popupGutter)
+	for i, ln := range lines {
+		if got := popupCellOffset(t, ln, "·"); got != want {
+			t.Errorf("row %d starts its second column at %d display cells, want %d: %q", i, got, want, ln)
+		}
+	}
+}
+
+// A row of wide runes is truncated by DISPLAY width: it stays on ONE physical line, exactly the
+// box width, at every terminal size. The rune-count truncation this replaced measured a 30-glyph
+// CJK row as 30 cells when it paints 60, so it left the row over-wide and the pane's own width
+// clamp wrapped it onto extra lines — the same failure TestRenderPopupLongRowDoesNotWrap guards
+// for ASCII.
+func TestRenderPopupWideRuneRowFitsTheWidth(t *testing.T) {
+	th := newTheme()
+	spec := popupSpec{
+		title:    "モデル",
+		rows:     []popupRow{{strings.Repeat("日", 30), "· 32k"}, {"ascii-model", "· 8k"}},
+		selected: 0,
+		hint:     "esc dismiss",
+		maxRows:  8,
+	}
+	wantLines := 2 + 1 + len(spec.rows) + 1 // borders + title + rows + hint
+	for _, width := range []int{20, 33, 60} {
+		lines := popupLines(renderPopup(th, spec, width))
+		if len(lines) != wantLines {
+			t.Errorf("width %d: popup has %d physical lines, want %d (a wide-rune row must truncate, not wrap):\n%s",
+				width, len(lines), wantLines, strip(renderPopup(th, spec, width)))
+		}
+		for i, ln := range lines {
+			if w := lipgloss.Width(ln); w != width {
+				t.Errorf("width %d: line %d is %d cells, want %d: %q", width, i, w, width, strip(ln))
+			}
+		}
+	}
+}
+
+// popupSingleCellGolden is a single-cell popup as the pre-column renderer (rows of plain strings)
+// painted it, captured before the column engine landed. ANSI is stripped so the golden pins the
+// layout rather than the colour profile of the machine running the test.
+const popupSingleCellGolden = `╭──────────────────────────────────────╮
+│ commands and skills                  │
+│   /model                             │
+│ ❯ /sessions                          │
+│   /help                              │
+│ esc dismiss                          │
+╰──────────────────────────────────────╯`
+
+// A single-cell spec renders exactly as it did before the popup grew columns: no gutter, no
+// padding, no drift — the composed row is the label verbatim (contract 6), and the whole pane is
+// byte-for-byte the pre-column golden.
+func TestRenderPopupSingleCellRowsAreUnchanged(t *testing.T) {
+	th := newTheme()
+	labels := []string{"/model", "/sessions", "/help"}
+	spec := popupSpec{
+		title:    "commands and skills",
+		rows:     singleCellRows(labels),
+		selected: 1,
+		hint:     "esc dismiss",
+		maxRows:  8,
+	}
+	if got := strip(renderPopup(th, spec, 40)); got != popupSingleCellGolden {
+		t.Errorf("single-cell popup drifted from the pre-column rendering:\ngot:\n%s\n\nwant:\n%s",
+			got, popupSingleCellGolden)
+	}
+	for i, ln := range layoutPopupRows(singleCellRows(labels)) {
+		if ln != labels[i] {
+			t.Errorf("single-cell row %d composed to %q, want the label verbatim %q", i, ln, labels[i])
 		}
 	}
 }
