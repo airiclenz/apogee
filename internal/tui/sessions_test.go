@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
@@ -453,21 +455,96 @@ func TestRelativeTime(t *testing.T) {
 	}
 }
 
-func TestSessionRowLabel(t *testing.T) {
+func TestSessionRowCells(t *testing.T) {
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	meta := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/home/me/proj"}
 
-	// Same-workspace row in the current view: no workspace suffix.
-	if got := sessionRowLabel(meta, "/home/me/proj", false, now); got != "a task · 5m ago · 3 msgs" {
-		t.Errorf("current-view label = %q", got)
+	// Same-workspace row in the current view: three cells, each separator leading its own cell.
+	want := popupRow{"a task", "· 5m ago", "· 3 msgs"}
+	if got := sessionRowCells(meta, "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("current-view cells = %v, want %v", got, want)
 	}
-	// Foreign row in the all view: the workspace base is appended.
-	if got := sessionRowLabel(meta, "/home/me/other", true, now); got != "a task · 5m ago · 3 msgs · proj" {
-		t.Errorf("foreign all-view label = %q, want the workspace base appended", got)
+	// Foreign row in the all view: the workspace base qualifies the TITLE, inside the title cell, so
+	// the time and count columns stay where every other row put them.
+	want = popupRow{"a task · proj", "· 5m ago", "· 3 msgs"}
+	if got := sessionRowCells(meta, "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("foreign all-view cells = %v, want the workspace base inside the title cell (%v)", got, want)
 	}
 	// A legacy record with no workspace reads a friendly base rather than filepath.Base's ".".
 	legacy := session.Meta{Title: "old", UpdatedAt: now.Add(-time.Hour), UserMsgs: 1}
-	if got := sessionRowLabel(legacy, "/home/me/proj", true, now); got != "old · 1h ago · 1 msg · unknown workspace" {
-		t.Errorf("legacy all-view label = %q", got)
+	want = popupRow{"old · unknown workspace", "· 1h ago", "· 1 msg"}
+	if got := sessionRowCells(legacy, "/home/me/proj", true, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("legacy all-view cells = %v, want %v", got, want)
+	}
+}
+
+// Titles of different lengths do not stagger the facts beside them: every row starts its relative
+// time at one shared display column and its message count at another, so the browser reads as a
+// table rather than as a ragged list.
+func TestSessionRowsAlignTheColumns(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	b := sessionBrowser{ // nothing armed, so every row is its plain three cells
+		open: true,
+		metas: []session.Meta{
+			{Title: "a much longer session title", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/a"},
+			{Title: "short", UpdatedAt: now.Add(-2 * time.Hour), UserMsgs: 1, Workspace: "/ws/a"},
+		},
+	}
+
+	lines := layoutPopupRows(sessionRows(b, "/ws/a", now))
+	if len(lines) != 2 {
+		t.Fatalf("rows = %v, want one per visible session", lines)
+	}
+	// The first "· " on a line opens the time cell (no title here carries one). The counts differ per
+	// row — "3 msgs" against "1 msg" — so each is looked for whole; a short one is padded, not shifted.
+	wantTime := ansi.StringWidth("a much longer session title") + len(popupGutter)
+	wantCount := wantTime + ansi.StringWidth("· 2h ago") + len(popupGutter)
+	counts := []string{"· 3 msgs", "· 1 msg"}
+	for i, ln := range lines {
+		if got := popupCellOffset(t, ln, "· "); got != wantTime {
+			t.Errorf("row %d starts its time column at %d, want %d: %q", i, got, wantTime, ln)
+		}
+		if got := popupCellOffset(t, ln, counts[i]); got != wantCount {
+			t.Errorf("row %d starts its count column at %d, want %d: %q", i, got, wantCount, ln)
+		}
+	}
+}
+
+// An armed delete confirm is a CELL past the counts, not a suffix on the last one: it lands in its
+// own column and leaves the three columns before it exactly where they were unarmed.
+func TestSessionRowsConfirmIsItsOwnCell(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	b := sessionBrowser{
+		open:  true,
+		metas: []session.Meta{{Title: "doomed", UpdatedAt: now, UserMsgs: 1, Workspace: "/ws/a"}},
+	}
+
+	unarmed := sessionRows(b, "/ws/a", now)
+	b.confirming = true
+	armed := sessionRows(b, "/ws/a", now)
+
+	if len(armed) != 1 || len(armed[0]) != 4 || armed[0][3] != deleteConfirmCell {
+		t.Fatalf("armed row = %v, want the confirm as a fourth cell", armed)
+	}
+	if !reflect.DeepEqual(popupRow(armed[0][:3]), unarmed[0]) {
+		t.Errorf("arming the confirm changed the row's own cells: %v, want %v", armed[0][:3], unarmed[0])
+	}
+}
+
+// An armed rename replaces the whole row with the single cell holding the edit buffer — the row
+// stops describing a session, so it keeps none of its columns.
+func TestSessionRowsRenameIsOneCell(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	b := sessionBrowser{
+		open:      true,
+		renaming:  true,
+		renameBuf: "new title",
+		metas:     []session.Meta{{Title: "old title", UpdatedAt: now, UserMsgs: 1, Workspace: "/ws/a"}},
+	}
+
+	rows := sessionRows(b, "/ws/a", now)
+	want := popupRow{"rename: new title▏"}
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], want) {
+		t.Errorf("renaming row = %v, want %v", rows, want)
 	}
 }

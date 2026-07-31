@@ -160,9 +160,24 @@ passes; `make check` passes.
 
 **Commit:** `feat(tui): align picker rows into columns`
 
-## 4. Session browser emits cells
+## 4. Session browser emits cells — ✅ DONE (2026-07-31)
 
 Depends on item 1.
+
+NOTES (2026-07-31): `sessionRowLabel` was renamed to `sessionRowCells` (and its test to
+`TestSessionRowCells`) — it returns a `popupRow` now, and a name ending in "Label" would describe the
+concatenated string the item retires; same precedent as item 3's `...Suffix` → `...Cell` rename.
+
+NOTES (2026-07-31): the armed delete confirm is a FOURTH cell (`deleteConfirmCell`, `"delete? y/n"`,
+its own new constant) rather than the `"   delete? y/n"` suffix on the composed label. The item's
+three-cell schema covers the plain row; gluing the confirm onto the counts cell would have stretched
+the count column while a delete was armed, and the confirm column collapses away whenever nothing is
+armed. Its gutter is the module's two spaces, where the old suffix used three.
+
+NOTES (2026-07-31): the item's "workspace base inside the title cell" MOVES that qualifier in the
+rendered row — `"a task · 5m ago · 3 msgs · proj"` becomes `"a task · proj  · 5m ago  · 3 msgs"` —
+so the assertion at `sessions_test.go:466` (which the item cites for the old trailing form) was
+rewritten to the new cells rather than kept.
 
 **What:** In `internal/tui/sessions.go`: `sessionRows` (`:390`) / `sessionRowLabel`
 (`:408`) → `["Title", "· relative time", "· N msgs"]`. The all-workspaces variant keeps

@@ -47,6 +47,12 @@ const maxSessionRows = 8
 // sessionBrowserHint is the one-line key legend shown at the foot of the overlay.
 const sessionBrowserHint = "↑/↓ select · ⏎ resume · r rename · d delete · a this/all · esc close"
 
+// deleteConfirmCell is the inline "delete? y/n" an armed delete puts on the selected row (sessionRows)
+// — a CELL of its own past the message counts rather than a suffix glued to the last one, so arming
+// the confirm cannot stretch the count column, and the column it sits in collapses away entirely
+// while nothing is armed.
+const deleteConfirmCell = "delete? y/n"
+
 // interruptedNote is the transcript note appended when a resumed session was interrupted
 // mid-task (the engine reports InExchange after the restore). It tells the human how to pick the
 // work back up; the step-only /continue drive that actually resumes it is item 8's work.
@@ -354,10 +360,11 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // renderSessionBrowser paints the /sessions overlay through the shared popup module (renderPopup):
 // a titled, bordered pane spanning the full window width (m.width, flush with the input box below)
 // holding the session rows and a key legend, the selected row highlighted. Row composition —
-// including the inline delete-confirm or rename-edit decoration — stays caller-side in sessionRows,
-// while the module owns the marker, highlight, truncation, and scroll windowing. An empty view is a
-// single unselectable note row. It returns "" when the browser is closed, so View treats it like
-// the approval-prompt slot.
+// which facts each row states, in which cells, including the inline delete-confirm or rename-edit
+// decoration — stays caller-side in sessionRows, while the module owns the marker, highlight,
+// column alignment, truncation, and scroll windowing. An empty view is a single unselectable note
+// row, which has nothing to align and so stays one cell. It returns "" when the browser is closed,
+// so View treats it like the approval-prompt slot.
 func (m Model) renderSessionBrowser() string {
 	b := m.sessionBrowser
 	if !b.open {
@@ -376,46 +383,53 @@ func (m Model) renderSessionBrowser() string {
 		spec.rows = singleCellRows([]string{"no sessions in this workspace — press a to see all"})
 		spec.selected = -1
 	} else {
-		spec.rows = singleCellRows(sessionRows(b, m.opts.Workspace, time.Now()))
+		spec.rows = sessionRows(b, m.opts.Workspace, time.Now())
 		spec.selected = b.selected
 	}
 	return renderPopup(m.th, spec, m.width)
 }
 
-// sessionRows composes the FULL filtered row list the popup module paints: the plain
-// sessionRowLabel ("title · relative · N msgs") for every visible session, newest first. On the
-// selected row an armed rename replaces the label with the edit buffer and an armed delete appends
-// the "delete? y/n" confirm; every other row is its plain label. The module adds the marker,
-// highlight, and truncation.
-func sessionRows(b sessionBrowser, workspace string, now time.Time) []string {
+// sessionRows composes the FULL filtered row list the popup module paints: sessionRowCells for
+// every visible session, newest first. On the selected row an armed rename replaces the whole row
+// with a single cell holding the edit buffer — an edit is prose being typed, not a session being
+// described, so it has no columns to keep — and an armed delete adds the confirm as a fourth cell;
+// every other row is its plain cells. The module adds the marker, the highlight, the column
+// padding, and the truncation.
+func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 	visible := b.visible(workspace)
-	rows := make([]string, 0, len(visible))
+	rows := make([]popupRow, 0, len(visible))
 	for i, meta := range visible {
-		label := sessionRowLabel(meta, workspace, b.allWorkspaces, now)
+		row := sessionRowCells(meta, workspace, b.allWorkspaces, now)
 		switch {
 		case i == b.selected && b.renaming:
-			label = "rename: " + b.renameBuf + "▏"
+			row = popupRow{"rename: " + b.renameBuf + "▏"}
 		case i == b.selected && b.confirming:
-			label += "   delete? y/n"
+			row = append(row, deleteConfirmCell)
 		}
-		rows = append(rows, label)
+		rows = append(rows, row)
 	}
 	return rows
 }
 
-// sessionRowLabel is one row's plain text: "title · relative time · N msgs", with "· <workspace
-// base>" appended for a foreign-workspace row in the all-workspaces view (so the human can tell
-// which project a session belongs to).
-func sessionRowLabel(meta session.Meta, currentWorkspace string, all bool, now time.Time) string {
-	label := strings.Join([]string{
-		meta.Title,
-		relativeTime(meta.UpdatedAt, now),
-		msgsLabel(meta.UserMsgs),
-	}, " · ")
+// sessionRowCells is one row's three cells — ["title", "· relative time", "· N msgs"] — rather than
+// one concatenated label, so the times start at one column down the pane and the counts at another,
+// whatever the titles beside them measure and however the list scrolls. Each separator leads the
+// cell it introduces, so the "·" glyphs line up as well as the words after them.
+//
+// In the all-workspaces view a foreign session's workspace base joins the TITLE cell instead of
+// claiming a tier of its own: it says WHICH "fix the parser" this is, so it belongs with the title
+// it qualifies, and a fourth column carrying it would push the two facts every row states out of
+// line behind an optional one only some rows fill.
+func sessionRowCells(meta session.Meta, currentWorkspace string, all bool, now time.Time) popupRow {
+	title := meta.Title
 	if all && meta.Workspace != currentWorkspace {
-		label += " · " + workspaceBase(meta.Workspace)
+		title += " · " + workspaceBase(meta.Workspace)
 	}
-	return label
+	return popupRow{
+		title,
+		"· " + relativeTime(meta.UpdatedAt, now),
+		"· " + msgsLabel(meta.UserMsgs),
+	}
 }
 
 // msgsLabel renders the user-message count, singularising "1 msg".
