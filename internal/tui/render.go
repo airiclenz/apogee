@@ -662,8 +662,15 @@ func railLines(th theme, lines []string, depth int) []string {
 // word-then-hard wrapped like the widget; a line whose final wrapped segment exactly fills the
 // width gains one extra row, because the textarea's wrap reserves a trailing row there (its
 // `>= width` branch) so the caret has somewhere to sit past a full line. Under-counting that row
-// leaves the box one row too short at a width-fill boundary — the source of the scroll artifact
-// the layout re-seat then can no longer reach (ISSUES #2). An empty value is one row.
+// leaves the box one row too short at a width-fill boundary — the source of the prompt-box scroll
+// artifact the layout re-seat then can no longer reach (fixed in a7afbf1; its regression is
+// [TestPromptScrollClampedWhileGrowing]). An empty value is one row.
+//
+// KNOWN DIVERGENCE: this mirror is not yet a faithful one. Measured against a real textarea's
+// LineInfo.Height it under-counts on ordinary inputs ("hello world" at width 5 is four widget rows
+// and this says three) and disagrees on roughly 41% of random prompt-shaped values; both mirrors
+// are also wrong on tabs, which the widget expands. See TODO.md, "The TUI width authority — what
+// it did not convert".
 //
 // WIDGET MIRROR — deliberately NOT the width authority. This is one of the package's mirrors of a
 // third-party widget's internal math, and a mirror's oracle is the widget, never apogee's

@@ -589,6 +589,48 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Emoji no longer shift the chat out from under the scroll bar, the pointer or the caret.** A
+  line carrying `⚠️` — any emoji that ends in the invisible VARIATION SELECTOR-16 — was measured
+  as two columns by the layout code and painted as one by the terminal, and everything downstream
+  inherited that one-cell lie. The TUI now has a **single width authority** that measures in
+  whichever of the two measures the terminal is actually painting in: it starts where the painter
+  starts and follows it to the grapheme measure the moment the terminal announces mode 2027, so
+  what apogee counts and what you see are the same number on a modern terminal and on Apple
+  Terminal alike. Three visible defects close with it:
+  - **The scroll bar stays in its column.** A row with such an emoji dropped its `│`/`█` one
+    column left of every other row's, so the bar came out with a notch in it beside exactly the
+    lines that had emoji in them. Every row now composes to the same painted width — the frame is
+    squared in the painted measure rather than by lipgloss's own padding — and the bar draws one
+    straight line down the edge.
+  - **A drag copies the text you highlighted.** The terminal reports a *painted* column; the
+    selection was cut and measured in the other measure, so on a row like `❯ danger ⚠️ zebra` a
+    drag onto `zebra` could copy `" zebr"` — the neighbouring glyph — and paint a highlight one
+    cell wider than the text it stood for. Pointer, highlight and clipboard now address the same
+    cells.
+  - **The prompt caret lands under the glyph you clicked.** This completes the v1.1.0 `caretTo`
+    fix, whose entry claimed it used "the same width the widget's own cursor math uses" — it did
+    not: it accumulated width *per rune*, while the text widget wraps and positions its cursor
+    over whole grapheme clusters. Clicking after an emoji put the caret one glyph past the
+    pointer, and a wrapped line of them could paint an inline accent a row too high. Both mirrors
+    of the widget's math now measure with the widget's own function.
+
+  Everything else is byte-identical: every marker glyph the TUI draws (`✦ ❯ ┝ ┕ │ ⤷ • ▤ ⧖ ─ ▔ █`)
+  measures one cell in both measures, so a transcript without emoji renders exactly as before. The
+  decision, the two upstream defects worked around on the way, and the deliberate prompt-box
+  exception are recorded in
+  [ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md).
+
+- **Text stays inside the chat on very narrow layouts.** `layout.md` promises that no rendered
+  line ever exceeds the width its block was given; a line of pipes or hyphens broke that promise
+  at any width — the wrapper grows a word onto an already-full line when the break is a
+  breakpoint rather than a space, so `| --- | --- | --- |` came back eleven cells wide at a limit
+  of eight, and a hyphenated word like "sub-agent" did it at twelve. Visible where the usable
+  width gets small: deeply nested sub-agent blocks (each level spends two columns on its rail),
+  a table falling back to plain paragraphs, and genuinely narrow terminals — the over-long line
+  spilled past the scroll-bar gutter. Wrapped lines are now re-broken to the limit whatever the
+  wrapper returns, with the one exception nothing can divide: a single glyph wider than the whole
+  limit gets a line of its own.
+
 - **The dangerous-action guard no longer refuses a file because of what the file *says*.** The
   guard matched its rules against every string in a tool call's arguments — the body a write
   carries included — so writing a document that merely *mentioned* a guarded path was refused as
@@ -3122,6 +3164,12 @@ feature-parity track. See
   now converts the cell column to a rune offset by walking the visual sub-line's runes and
   accumulating `runewidth` (the same width the widget's own cursor math uses), clamped by
   rune count;
+  **[Correction, 2026-07-31]** the parenthetical is wrong and the fix was therefore partial:
+  the textarea measures whole **grapheme clusters** with `uniseg.StringWidth`, not runes with
+  `runewidth`, so a cluster carrying VARIATION SELECTOR-16 (`⚠️`) still left the caret one glyph
+  past the pointer. Corrected under Unreleased → Fixed, "Emoji no longer shift the chat out from
+  under the scroll bar, the pointer or the caret"; the rule is in
+  [ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md);
   (b) bracketed paste (default-on in bubbletea v2) fell into `Update`'s `default:` case,
   so the textarea inserted the text but skipped the post-edit refresh — a multi-line paste
   rendered unwrapped until the next keypress, the autocomplete overlay went stale, and a

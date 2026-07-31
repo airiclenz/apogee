@@ -615,6 +615,42 @@ moment to give `ConfineWritablePaths` its first writer.
 
 ---
 
+## The TUI width authority — what it did not convert
+
+**Status:** parked 2026-07-31, the residue of the *width authority* plan (`2026-07-31 - 03`, under
+`docs/plans/`, archived on completion) —
+[ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md). Nothing
+here breaks the absolute width cap; each is a place the package still measures in a measure the
+painter may not be using, or mirrors a widget imperfectly.
+
+**The four sites the plan could not touch.** `popup.go:185, 212, 293` and `interject.go:393` still
+measure with `ansi.StringWidth`, and `wrapText` (`render.go`) still *wraps* with `ansi.Wrap` even
+though its cap enforcement measures with the authority; `truncateToWidth` (`popup.go`) is the same
+case. All of them were left because plan `2026-07-31 - 01 - popup-column-alignment-plan.md` owns
+those files while it is live, and `wrapText`'s other caller is `popup.go:245`. A grapheme-width
+wrap or clip never paints *wider* than its limit under wcwidth, so the cap holds regardless; what
+stays possible is a popup column landing a cell off on a row carrying VARIATION SELECTOR-16. Pick
+this up once that plan is archived — it is a rename per site (`ansi.X` → `th.measure.X`), plus
+threading `th` into `truncateToWidth`.
+
+**`inputContentRows` is an unfaithful widget mirror** (`render.go`). It sizes the prompt box to the
+rows it thinks the textarea drew, and it is measurably wrong: against a real textarea's
+`LineInfo.Height` it says three rows for `"hello world"` at width 5 where the widget draws four,
+two for `"a b  c"` at 3 where the widget draws three, four for `"a-b-c-d"` at 3 where the widget
+draws three, and it differs on ~41% of 4000 random prompt-shaped inputs — under-counting, which is
+the box-one-row-short failure its own docstring describes. `Σ len(wrapRowStarts(line, w))` is the
+drop-in replacement (that mirror matches the widget on every non-tab case tried), and it is a
+box-height change rather than a measurement fix, so it wants its own tests. Both mirrors are still
+wrong on tabs, which the widget expands.
+
+**`hangingPrefixes` can draw three cells at block width 1–2** (`render.go`). It floors its wrap
+width at 1 column and then prepends a two-column marker, so a bullet list in a two-column block
+produces three-cell lines. Pre-existing and untouched by the width work; a real fix has to decide
+what a marker means when the block cannot hold it, which is a `layout.md` question, not a
+measurement one.
+
+---
+
 ## Closed entries — the one-line trail
 
 Full records live in the named docs; a line here keeps the deferral trail deliberate and carries

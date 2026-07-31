@@ -537,9 +537,53 @@ expectation updated to the now-bounded behaviour.
 
 **Commit:** `fix(tui): keep wrapped lines within the width cap at tiny widths`
 
-## 7. ADR, docs and ticket closeout
+## 7. ADR, docs and ticket closeout — ✅ DONE (2026-07-31)
 
 Depends on items 1–6.
+
+NOTES (2026-07-31): the ADR is `docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md`
+(0030 was free). It records owner decision (a) and why, the two-measure background, the one-authority
+rule, and item 5's widget-mirror exception — plus the four decisions that are only visible in the code
+and would otherwise be re-litigated: the `Cut` and `wrapText` workarounds for the two `x/ansi@v0.11.7`
+defects (each revertable after a bump), the squared frame replacing lipgloss's joins, and painted cells
+as the standard of proof.
+
+NOTES (2026-07-31): DEVIATION — **no term was added to `CONTEXT.md`**; the concept map does not warrant
+it. Its 90 glossary terms are the agent domain (Mechanisms, Steps, Turns, Sessions, tools, confinement)
+and it carries **no** TUI presentation vocabulary at all — no Transcript, Scrollback, Footer or Block
+entry to sit beside. The TUI's own language lives in `layout.md` and `internal/tui/doc.go`, and both now
+carry the width authority.
+
+NOTES (2026-07-31): DEVIATION — `layout.md` gained a short **new section** ("What 'width' means everywhere
+below", after the sketch) as well as the two amendments the item names. Both `:139` and `:159-160` had to
+name the same measure, and stating it once — with the mode-2027 mechanism and the prompt-box exception —
+lets each line point at it instead of carrying its own half-explanation. The amendment stays on the width
+question; the popup row grammar is untouched.
+
+NOTES (2026-07-31): DEVIATION (scope) — a `TODO.md` section ("The TUI width authority — what it did not
+convert") was added, which the item does not name. It is where this plan's accumulated residues become
+findable rather than living only in NOTES lines a reader would have to know to look for: the four sites
+item 3 deferred to plan `2026-07-31 - 01` plus `wrapText`'s own `ansi.Wrap` and `truncateToWidth`
+(item 6's NOTES), `inputContentRows`' 41% divergence from the widget (item 5's NOTES), and the
+pre-existing `hangingPrefixes` floor. ADR 0030's Consequences names the first group; TODO.md holds all
+three with the fix each one wants.
+
+NOTES (2026-07-31): OPEN QUESTION FOR THE OWNER — **the two defects were NOT filed in `ISSUES.md`**, and
+the item allows either. Two things argued against filing: the convention commit the item names
+(`bf527ed`) closes an entry by **deleting** it, and the file today holds only open, owner-voiced rows —
+no `[x]` row survives in it — so filing-then-deleting is a no-op and filing a new `[x]` row would
+reintroduce a form the file was cleaned of (the older in-place style is `8084ec4`). The record lands in
+the CHANGELOG's Unreleased → Fixed and in ADR 0030 instead. Say the word and both entries go in.
+
+NOTES (2026-07-31): the stale `ISSUES #2` pointer at `internal/tui/render.go` (now in
+`inputContentRows`' docstring) named a number that no longer resolves: `ISSUES.md`'s entries have never
+carried numbers — `#2` was positional — and the entry it meant was closed in `8084ec4` and later dropped
+from the file, so today the second row is a different issue entirely. It now names the fix commit
+(`a7afbf1`) and the regression test that pins it. The same docstring gained a KNOWN DIVERGENCE
+paragraph, because item 5's NOTES proved the function under-counts in exactly the way the sentence above
+it warns about; it points at the TODO entry. Other `ISSUES #N` pointers in the package (`model.go`,
+`prompteditor.go`, `autocomplete.go` and several tests) are stale the same way and were left — this item
+names only `render.go`.
 
 **What:** Write the ADR that settles the question — next free number in `docs/adr/`
 (0030 at the time of writing; check). It records the strategy chosen in item 2 and why,

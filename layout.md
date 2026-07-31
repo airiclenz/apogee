@@ -60,6 +60,27 @@
 
 ---
 
+## What "width" means everywhere below
+
+**Every width in this document is the width the terminal actually paints.** "How many columns
+does this string occupy" has two answers and they disagree: the grapheme-cluster measure counts
+`⚠️` (an emoji carrying VARIATION SELECTOR-16) as two cells, the older wcwidth measure counts it
+as one, and which of the two a terminal paints in is a capability it either announces at start-up
+(mode 2027, "Unicode core") or never mentions. Apogee measures in whichever one its own painter
+is using — the TUI's single **width authority**, which starts at wcwidth and follows the painter
+to the grapheme measure the moment the terminal says so
+([ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md),
+`internal/tui/width.go`). So every rule below that says *width*, *column*, *wraps at* or *is
+padded to* is stated in cells the terminal really shows — never in cells a library computed off
+to one side.
+
+**The prompt box is the one exception, on purpose.** The caret mirrors and the box's own height
+mirror a third-party widget's internal wrap, and a mirror's oracle is the widget: they measure
+the way that widget measures, whatever the painter chose. That is what makes the caret land under
+the glyph the pointer is on.
+
+---
+
 ## The rules behind the tool-call sketch
 
 **The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a
@@ -136,7 +157,8 @@ line with no header above it is not a table and keeps whatever it renders as tod
 nothing else, sitting in the same body column the rest of the answer sits in. Every cell is padded
 to the widest cell in its column and columns are separated by exactly **two spaces**. Each cell is
 rendered as inline markdown first, so `**bold**` and `` `code` `` inside a cell style the way they
-do in a paragraph, and it is that *rendered* width that sets the column — never the source width,
+do in a paragraph, and it is that *rendered* width — the painted width, measured by the
+width authority like every width in this document — that sets the column, never the source width,
 so markup characters and the bytes of a colour escape never push a column open. The **last** column
 is padded like every other one, so every line of a table — header, rule and body rows alike — ends
 in the same column and the block shows one straight right edge to whatever sits beside it. A row
@@ -157,10 +179,13 @@ padded out with empty ones and a row with more loses the excess: the column coun
 to set.
 
 **The width cap is absolute.** No rendered line ever exceeds the width the block was given, a table
-no more than anything else. Where the natural column widths plus their gutters do not fit, the
-widest column is shrunk one cell at a time — the leftmost of them where two are equally wide, so
-the outcome is the same every repaint — until the table fits, and a cell too wide for the column it
-lands in is cut with a `…` tail. If the table cannot fit even with every column down to a single
+no more than anything else — and it is the **painted** width that is capped, so the cap holds on a
+line carrying emoji or CJK on any terminal, not merely in the measure the layout computed with. The
+only thing that may cross it is a single grapheme wider than the whole limit, which no break can
+divide; it takes a line to itself. Where the natural column widths plus their gutters do not fit,
+the widest column is shrunk one cell at a time — the leftmost of them where two are equally wide,
+so the outcome is the same every repaint — until the table fits, and a cell too wide for the column
+it lands in is cut with a `…` tail. If the table cannot fit even with every column down to a single
 cell, it is not drawn as a table at all: the block falls back to the plain paragraphs it would have
 been before, which is always readable and never overflows.
 
