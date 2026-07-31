@@ -340,6 +340,17 @@ can be scanned without knowing the table behind it, and every verb the parser kn
 `/stop-server` and `/unload-model` included. Those two act on the session's own server and say so
 in their names, and a verb the human cannot discover is a verb they will not find.
 
+**Its rows are columns, not sentences.** A dropdown row is not one concatenated string. The name
+and its one-line summary render as **vertically aligned columns**, each padded to the widest cell in
+it, so every summary in the pane starts at the same screen column however long the verbs and skill
+names beside them run — and in the merged `/` menu a skill's description is aligned against the
+command summaries above it, so the two kinds read as one table rather than two lists stacked. The
+busy-state `— idle only` tag is a column of its own after the summary, and it costs the pane
+nothing while the engine is idle, because a column no row fills collapses away. `@`'s file rows
+have one field and so no columns to align: they render exactly as they always did. The full rule
+is the **Column contract** under "One overlay for 'which one?'" below, which governs every pop-up
+pane alike — this dropdown, the pickers, and the `/sessions` browser.
+
 **It follows the caret, not the end of the line.** The token being completed is the word the caret
 stands in or immediately after — so a draft already in the box does not shut the menu out, and
 going back to fix a misspelled skill id mid-message offers exactly the same menu the end of the
@@ -357,13 +368,15 @@ own `/id ` token into the text.
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight, `↑/↓
 select · ⏎ switch · esc close` under it, at most eight rows with a window scrolling around the
 selection. It is modal — while it is open every key belongs to it. `/server` lists the servers
-`config.yaml` names plus the one this session started on (`name — endpoint`), and the row the
-session is on carries a faint `· current` — picking it says so instead of switching. `/model` has
+`config.yaml` names plus the one this session started on, in three columns — `name`, `— endpoint`,
+`· current` — and the row the session is on is the one that fills the third, faintly; picking it
+says so instead of switching. `/model` has
 two offerings and lists whichever one this host can answer from: with llama-launcher configured,
-the Launch profiles its config defines, in the launcher's own order (`name — backend · 32k (:8080)
-· running`, where the port shows only for a profile that does not live where this session is
-pointed and `· running` marks one that is live right now); without it, what the server currently
-advertises (`model — 32k`), refreshed in place if a heartbeat lands underneath it. Either way what
+the Launch profiles its config defines, in the launcher's own order, in five columns — `name`,
+`— backend`, `· 32k`, `(:8080)`, `· running` — where the port shows only for a profile that does
+not live where this session is pointed and `· running` marks one that is live right now; without
+it, what the server currently advertises, in two columns — `model`, `— 32k` — refreshed in place
+if a heartbeat lands underneath it. Either way what
 the session is ALREADY on is not among the rows — there is no `· current` mark to pick, because
 there is no row that would switch nothing, which is what makes the hint's `⏎ switch` true of every
 row. Given an argument (`/model <name>`, `/server <name>`) the verb acts straight away and no pane
@@ -371,6 +384,25 @@ opens at all. When there is nothing to
 pick — no monitor, an unreachable server, nothing advertised yet, nothing but the model already
 bound, no `servers:` block, no launcher config where one was named, no profiles in it, only the
 profile already loaded — the answer is one honest line in the transcript and no empty pane.
+
+**The Column contract.** Every one of those grammars is a row of **cells**, and the pop-up module —
+not the code that produced the row — owns the alignment, alongside its marker, highlight, windowing
+and truncation. A column is as wide as its widest cell measured in painted display cells (the width
+authority again, so CJK and emoji count for what they occupy on screen, not for their runes), and it
+is measured over **all** of the pane's rows rather than the eight in the window, so the columns never
+shift under the eye while the selection scrolls. Adjacent columns are separated by a **two-space**
+gutter — the same minimum gap a markdown table keeps. Each separator glyph leads the cell it
+introduces rather than trailing the one before it — `— backend`, `· 32k`, `(:8080)` — so the `—`, the
+`·` and the `(` line up down the pane as well as the words after them. Every pop-up kind has a
+**fixed schema**: a tier a row does not state is an *empty cell*, which pads like any other, so an
+unstated context window or a nameless backend cannot slide the tiers after it sideways; and a column
+**no** row in the pane fills collapses away entirely, costing it neither width nor gutter. The
+composed line is right-trimmed and then goes through the pane's ordinary pipeline — the two-cell
+selection marker in front, the highlight bar across it, truncation to the inner width with a trailing
+`…`. That truncation is **whole-row**, never column by column, so a narrow terminal loses the
+rightmost tiers rather than scrambling the alignment of the ones still on screen. A row with a single
+cell has no columns to align and renders exactly as it did before columns existed: `@`'s file
+suggestions, an armed rename buffer in the `/sessions` browser, and the ask and approval prompts.
 
 **`/model`'s launcher accept is the one that does not finish on the spot.** Picking a Launch profile
 takes the actuation latch and hands the pane's decision to a blocking launcher verb: the overlay

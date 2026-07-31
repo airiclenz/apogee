@@ -192,7 +192,7 @@ passes.
 
 **Commit:** `feat(tui): align session browser rows into columns`
 
-## 5. Docs and ticket closeout
+## 5. Docs and ticket closeout — ✅ DONE (2026-07-31)
 
 Depends on items 1–4.
 

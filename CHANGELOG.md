@@ -589,6 +589,33 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Pop-up rows line up in columns now.** Every overlay pane built its rows by gluing their fields
+  into one string — `name — endpoint`, `Skill Name  what it does`, `a task · 5m ago · 3 msgs` — so
+  the second and third tiers landed wherever the first happened to end and each pane read as a
+  ragged list rather than a table. A row is a list of **cells** now, and the pop-up module lays them
+  out as vertically aligned **columns**: each column as wide as its widest cell, adjacent columns
+  two spaces apart, so summaries, endpoints, backends, context windows, timestamps and message
+  counts each start at one shared screen column. It holds across every pane — the `/` command and
+  skill menu (where a skill's description is aligned against the command summaries, so the merged
+  menu reads as one table), the `/skill` picker, `/model` in both of its offerings, `/server`, and
+  the `/sessions` browser.
+  - **The columns do not move while you scroll.** Widths are measured over *all* of a pane's rows,
+    not just the eight in the window, so bringing a long row into view never shifts the columns
+    already on screen. They are measured in painted display cells too, by the same width authority
+    the rest of the TUI uses, so a CJK or emoji cell claims what it actually occupies.
+  - **A missing tier leaves a gap, not a shift.** Each pane has a fixed column schema and an absent
+    tier is an empty cell that pads like any other, so a profile with no stated context window or a
+    server with no `· current` mark cannot slide the tiers after it sideways — while a column *no*
+    row fills collapses away entirely and costs the pane nothing. Separators lead the cell they
+    introduce (`— llamacpp`, `· 32k`, `(:8080)`), so the separator glyphs line up as well as the
+    words after them.
+  - **Nothing that was one field changed.** `@` file suggestions, an armed rename buffer, the ask
+    prompt and the approval prompt are single-cell rows and render byte for byte as before.
+    Truncation is still whole-row — a narrow terminal drops the rightmost tiers with a trailing `…`
+    rather than scrambling the alignment of what is left — and it is display-width aware now, so a
+    row of wide runes is cut at the pane's edge instead of overflowing it. The visual contract is
+    specced in `layout.md` (the Column contract, under "One overlay for 'which one?'").
+
 - **Emoji no longer shift the chat out from under the scroll bar, the pointer or the caret.** A
   line carrying `⚠️` — any emoji that ends in the invisible VARIATION SELECTOR-16 — was measured
   as two columns by the layout code and painted as one by the terminal, and everything downstream
