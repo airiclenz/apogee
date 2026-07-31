@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/heartbeat"
 )
@@ -97,12 +98,15 @@ func TestModelPickerListsTheOffering(t *testing.T) {
 			t.Errorf("the pane is missing %q:\n%s", want, got)
 		}
 	}
+	want := []popupRow{{"other-model", "— 16k"}}
 	rows := m.pickerRows()
-	if len(rows) != 1 || !strings.HasPrefix(rows[0], "other-model") {
-		t.Fatalf("rows = %v, want only the advertised models the session is NOT bound to", rows)
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("rows = %v, want %v — only the advertised models the session is NOT bound to", rows, want)
 	}
-	if strings.Contains(rows[0], currentRowSuffix) {
-		t.Errorf("rows[0] = %q, want no current marker in an offering that excludes the current row", rows[0])
+	for _, cell := range rows[0] {
+		if strings.Contains(cell, "current") {
+			t.Errorf("rows[0] = %v, want no current marker in an offering that excludes the current row", rows[0])
+		}
 	}
 }
 
@@ -479,11 +483,12 @@ func TestServerPickerListsTheConfiguredServers(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("rows = %v, want one per configured server", rows)
 	}
-	if !strings.HasSuffix(rows[0], currentRowSuffix) {
-		t.Errorf("rows[0] = %q, want the current server marked %q", rows[0], currentRowSuffix)
+	const markCell = 2 // ["name", "— endpoint", "· current"]
+	if got := rows[0][markCell]; got != currentRowCell {
+		t.Errorf("rows[0] mark cell = %q, want the current server marked %q", got, currentRowCell)
 	}
-	if strings.HasSuffix(rows[1], currentRowSuffix) {
-		t.Errorf("rows[1] = %q, want no current marker on a server the session is not on", rows[1])
+	if got := rows[1][markCell]; got != "" {
+		t.Errorf("rows[1] mark cell = %q, want an empty cell on a server the session is not on", got)
 	}
 }
 
@@ -804,14 +809,45 @@ func TestModelPickerListsTheLaunchProfiles(t *testing.T) {
 	if got := fake.listCount(); got != 1 {
 		t.Errorf("the profile list was read %d times, want exactly one fresh read at open", got)
 	}
-	want := []string{"alpha — llamacpp · 32k", "beta — ollama · 8k (:8081) · running"}
+	// The five-column schema: name, backend, window, elsewhere-port, running mark — an absent tier
+	// (alpha serves this session's own address and is not running) is an empty cell, not a short row.
+	want := []popupRow{
+		{"alpha", "— llamacpp", "· 32k", "", ""},
+		{"beta", "— ollama", "· 8k", "(:8081)", "· running"},
+	}
 	if got := m.pickerRows(); !reflect.DeepEqual(got, want) {
 		t.Errorf("rows = %v, want %v", got, want)
 	}
 	got := plain(m.View())
-	for _, want := range []string{loadPickerTitle, "alpha — llamacpp", "beta — ollama", pickerHint} {
+	// "alpha" is one cell wider than "beta", so the pane pads "beta" out to it: the backends land in
+	// one column, which is the whole point of the cell schema.
+	for _, want := range []string{loadPickerTitle, "alpha  — llamacpp", "beta   — ollama", pickerHint} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the pane is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// Names of different lengths do not stagger the facts beside them: every row starts its backend cell
+// at one shared display column, so the offering reads as a table rather than as a ragged list.
+func TestModelPickerAlignsTheProfileColumns(t *testing.T) {
+	fake := newLauncher()
+	fake.profiles = []LaunchProfileChoice{
+		{Name: "a-much-longer-profile", Backend: "llamacpp", ContextWindow: 32768},
+		{Name: "b", Backend: "mlx", ContextWindow: 8192},
+	}
+	m := seededLoad(t, fake)
+
+	m, _ = typeCommand(t, m, "/model")
+
+	lines := layoutPopupRows(m.pickerRows())
+	if len(lines) != 2 {
+		t.Fatalf("rows = %v, want one per offered profile", lines)
+	}
+	want := ansi.StringWidth("a-much-longer-profile") + len(popupGutter)
+	for i, ln := range lines {
+		if got := popupCellOffset(t, ln, "—"); got != want {
+			t.Errorf("row %d starts its backend column at %d, want %d: %q", i, got, want, ln)
 		}
 	}
 }
@@ -833,7 +869,7 @@ func TestModelPickerExcludesTheLoadedProfile(t *testing.T) {
 	if !m.picker.open {
 		t.Fatal("the picker did not open; one profile is still switchable")
 	}
-	want := []string{"beta — ollama · 8k (:8081) · running"}
+	want := []popupRow{{"beta", "— ollama", "· 8k", "(:8081)", "· running"}}
 	if got := m.pickerRows(); !reflect.DeepEqual(got, want) {
 		t.Errorf("rows = %v, want %v — the profile serving this session is not a choice", got, want)
 	}
@@ -871,7 +907,7 @@ func TestModelPickerReadsTheProfilesFreshOnEveryOpen(t *testing.T) {
 	if got := fake.listCount(); got != 2 {
 		t.Errorf("the profile list was read %d times, want one read per open", got)
 	}
-	if got := m.pickerRows(); len(got) != 3 || !strings.HasPrefix(got[2], "gamma") {
+	if got := m.pickerRows(); len(got) != 3 || got[2][0] != "gamma" {
 		t.Errorf("rows = %v, want the profile added since the last open", got)
 	}
 }

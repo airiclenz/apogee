@@ -90,14 +90,16 @@ const maxPickerRows = 8
 // pickerHint is the one-line key legend shown at the foot of the overlay.
 const pickerHint = "↑/↓ select · ⏎ switch · esc close"
 
-// currentRowSuffix marks the server row the session is already on. It is plain text, not styling:
+// currentRowCell marks the server row the session is already on. It is plain text, not styling:
 // the popup module takes rows escape-stripped and styles them whole (faint, or the highlight bar on
-// the selection), so a per-fragment style could not survive its truncation.
+// the selection), so a per-fragment style could not survive its truncation. It is a CELL of its own
+// in /server's column schema rather than a suffix on the endpoint, so the "·" of every marked row
+// lands in one column; the space that used to separate it is the popup module's gutter now.
 //
 // It is /server's alone. /model does not mark what the session is bound to — it does not OFFER it
 // (offeredModels, offerableProfiles), because a row that switches nothing is not a choice; a server
 // list is read to see where the session is as much as to move it, so there the mark stays.
-const currentRowSuffix = " · current"
+const currentRowCell = "· current"
 
 // modelUsage and serverUsage are the one-line grammars a mistyped verb earns, so surplus arguments
 // teach the two working forms instead of vanishing (the confineUsage posture). /model names both of
@@ -299,11 +301,11 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 // differs from the session's.
 const loadPickerTitle = "switch model — llama-launcher"
 
-// runningRowSuffix marks a profile discovery attributes to a live instance right now — the
-// currentRowSuffix posture (plain text, because the popup module styles rows whole), for a fact that
-// is about the world rather than about this session: a running profile is not necessarily the one
-// this session is talking to.
-const runningRowSuffix = " · running"
+// runningRowCell marks a profile discovery attributes to a live instance right now — the
+// currentRowCell posture (a plain-text cell of its own, because the popup module styles rows whole
+// and aligns them by column), for a fact that is about the world rather than about this session: a
+// running profile is not necessarily the one this session is talking to.
+const runningRowCell = "· running"
 
 // noProfilesNote is what a launcher config with nothing in it earns. It names no path, deliberately:
 // where the launcher's config lives is the composition root's knowledge (ADR 0029 D1/D4), and a
@@ -405,24 +407,31 @@ func profileNameList(profiles []LaunchProfileChoice) string {
 // The port is shown only for a profile that lives somewhere else, because that is the moment it
 // matters: loading it will move the session. A profile on the session's own server needs no address —
 // it is the address the footer is already showing.
-func (m Model) launchProfileRows() []string {
+//
+// Those five facts are five CELLS in a fixed schema — ["name", "— backend", "· 32k", "(:8080)",
+// "· running"] — rather than one concatenated label: a tier a profile does not state is an empty
+// cell, which still pads, so a nameless backend or an unstated window cannot slide the columns after
+// it sideways and the pane reads as a table. Each separator leads the cell it introduces, so the
+// "—", the "·" and the "(" line up down the pane too, and a tier NO offered profile states collapses
+// away entirely (layoutPopupRow).
+func (m Model) launchProfileRows() []popupRow {
 	here := sessionAddr(m.opts.Endpoint)
-	rows := make([]string, 0, len(m.picker.profiles))
+	rows := make([]popupRow, 0, len(m.picker.profiles))
 	for _, choice := range m.picker.profiles {
-		label := choice.Name
+		backend, window, port, running := "", "", "", ""
 		if choice.Backend != "" {
-			label += " — " + choice.Backend
+			backend = "— " + stripEscapes(choice.Backend)
 		}
-		if window := formatTokens(choice.ContextWindow); window != "" {
-			label += " · " + window
+		if tokens := formatTokens(choice.ContextWindow); tokens != "" {
+			window = "· " + tokens
 		}
-		if port := elsewherePort(choice.Addr, here); port != "" {
-			label += " (" + port + ")"
+		if elsewhere := elsewherePort(choice.Addr, here); elsewhere != "" {
+			port = "(" + elsewhere + ")"
 		}
 		if choice.Running {
-			label += runningRowSuffix
+			running = runningRowCell
 		}
-		rows = append(rows, stripEscapes(label))
+		rows = append(rows, popupRow{stripEscapes(choice.Name), backend, window, port, running})
 	}
 	return rows
 }
@@ -582,7 +591,7 @@ func (m Model) renderPicker() string {
 	}
 	return renderPopup(m.th, popupSpec{
 		title:    m.pickerTitle(),
-		rows:     singleCellRows(rows),
+		rows:     rows,
 		selected: selected,
 		hint:     pickerHint,
 		maxRows:  maxPickerRows,
@@ -605,11 +614,12 @@ func (m Model) pickerTitle() string {
 	return ""
 }
 
-// pickerRows composes the FULL row list the popup module paints, by kind. The module adds the
-// marker, the highlight, the truncation and the scroll windowing; rows arrive plain and
-// escape-stripped, as its contract requires — a model id is the SERVER's text, so it is sanitized
-// here rather than trusted.
-func (m Model) pickerRows() []string {
+// pickerRows composes the FULL row list the popup module paints, by kind. Each kind emits its own
+// fixed column schema and the module owns the alignment, along with the marker, the highlight, the
+// truncation and the scroll windowing; cells arrive plain and escape-stripped, as its contract
+// requires — a model id is the SERVER's text and a profile name the LAUNCHER's, so both are
+// sanitized here rather than trusted.
+func (m Model) pickerRows() []popupRow {
 	switch m.picker.kind {
 	case pickerModel:
 		return m.modelRows()
@@ -624,16 +634,19 @@ func (m Model) pickerRows() []string {
 // modelRows is one row per OFFERED model (offeredModels — everything advertised but the binding this
 // session already has): the id as the footer renders it (displayModel, so the pane and the chrome
 // beside it can never name the same model two different ways), and its context window when the
-// server named one. No row needs a "· current" mark, because the current one is not among them.
-func (m Model) modelRows() []string {
+// server named one. Two cells — ["model", "— 32k"] — so the windows line up in one column however
+// long the ids beside them run, and a model whose window the server did not state leaves an empty
+// cell rather than a short row. No row needs a "· current" mark, because the current one is not
+// among them.
+func (m Model) modelRows() []popupRow {
 	offering := m.offeredModels()
-	rows := make([]string, 0, len(offering))
+	rows := make([]popupRow, 0, len(offering))
 	for _, offered := range offering {
-		label := displayModel(offered.ID)
-		if window := formatTokens(offered.ContextWindow); window != "" {
-			label += " — " + window
+		window := ""
+		if tokens := formatTokens(offered.ContextWindow); tokens != "" {
+			window = "— " + tokens
 		}
-		rows = append(rows, stripEscapes(label))
+		rows = append(rows, popupRow{stripEscapes(displayModel(offered.ID)), window})
 	}
 	return rows
 }
@@ -642,14 +655,19 @@ func (m Model) modelRows() []string {
 // argument and the footer alias afterwards) with the endpoint it stands for spelled out beside it,
 // and the "· current" mark on the server this session is on. The endpoint is shown rather than
 // hidden behind the alias because a switch is exactly the moment a name is worth resolving to a URL.
-func (m Model) serverRows() []string {
-	rows := make([]string, 0, len(m.opts.Servers))
+// Three cells — ["name", "— endpoint", "· current"] — so the endpoints start at one column whatever
+// the aliases measure; the mark is an empty cell on every server but one, and when the session is on
+// none of them that third column collapses away.
+func (m Model) serverRows() []popupRow {
+	rows := make([]popupRow, 0, len(m.opts.Servers))
 	for _, choice := range m.opts.Servers {
-		label := choice.Name + " — " + choice.Endpoint
+		current := ""
 		if choice.Endpoint == m.opts.Endpoint {
-			label += currentRowSuffix
+			current = currentRowCell
 		}
-		rows = append(rows, stripEscapes(label))
+		rows = append(rows, popupRow{
+			stripEscapes(choice.Name), "— " + stripEscapes(choice.Endpoint), current,
+		})
 	}
 	return rows
 }

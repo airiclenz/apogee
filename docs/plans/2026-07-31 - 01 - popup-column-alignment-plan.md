@@ -127,6 +127,15 @@ starts at the same column.
 
 Depends on item 1.
 
+NOTES (2026-07-31): `currentRowSuffix`/`runningRowSuffix` were renamed to `currentRowCell`/`runningRowCell`
+and lost their leading space (`" · current"` → `"· current"`). The schema the item mandates makes each of
+them a cell rather than a suffix, and the space that separated them is the popup module's gutter now, so a
+constant still named `...Suffix` would have described the opposite of what it holds.
+
+NOTES (2026-07-31): `TestModelPickerListsTheLaunchProfiles` also needed its `plain(m.View())` substrings
+updated (`"alpha — llamacpp"` → `"alpha  — llamacpp"`, `"beta — ollama"` → `"beta   — ollama"`): "beta" is
+now padded out to "alpha"'s column width, so the un-padded strings no longer appear in the rendered pane.
+
 **What:** In `internal/tui/picker.go`: `modelRows` (`:628`) → `["model", "— 32k"]`;
 `serverRows` (`:644`) → `["name", "— endpoint", "· current"]` (last cell empty for
 non-current rows); `launchProfileRows` (`:407`) → fixed five-column schema `["name",
