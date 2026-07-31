@@ -478,6 +478,57 @@ func TestSessionRowCells(t *testing.T) {
 	}
 }
 
+// A stored title is untrusted DISK input — List() hands the browser whatever bytes are in the
+// session file, and no codec sanitizes a Meta on the way back in — so every cell the browser builds
+// from one is escape-stripped, exactly as the pickers strip the launcher's text. A title carrying
+// "\x1bc" would otherwise reach the terminal as a live RIS (a full reset), the popup module
+// stripping nothing and truncating ANSI-preservingly; it would also lie to the column math, an ESC
+// byte taking string length but no display cell. The all-workspaces view's workspace base comes off
+// the same untrusted record, so it is stripped with it.
+func TestSessionRowCellsStripEscapes(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	b := sessionBrowser{
+		open:          true,
+		allWorkspaces: true,
+		metas: []session.Meta{
+			{Title: "reset \x1bc me", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/\x1bcother"},
+		},
+	}
+
+	rows := sessionRows(b, "/ws/a", now)
+	want := []popupRow{{"reset c me · cother", "· 5m ago", "· 3 msgs"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows = %v, want the ESC bytes gone from the title cell (%v)", rows, want)
+	}
+	// The laid-out line is what the pane paints, before any styling of its own: no ESC survives into
+	// it from any cell.
+	for i, ln := range layoutPopupRows(rows) {
+		if strings.ContainsRune(ln, 0x1b) {
+			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
+		}
+	}
+}
+
+// The inline rename edit is seeded from a stored title, so the seed is stripped on the way INTO the
+// buffer: the rename row paints that buffer verbatim, and an ESC that vanished only at commit would
+// show the human one title while saving another.
+func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", "reset \x1bc me", "/ws/a", time.Now(), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m)
+
+	m = step(t, m, keyRune('r'))
+	if got, want := m.sessionBrowser.renameBuf, "reset c me"; got != want {
+		t.Errorf("rename buffer = %q, want the seed escape-stripped (%q)", got, want)
+	}
+	for i, ln := range layoutPopupRows(sessionRows(m.sessionBrowser, m.opts.Workspace, time.Now())) {
+		if strings.ContainsRune(ln, 0x1b) {
+			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
+		}
+	}
+}
+
 // Titles of different lengths do not stagger the facts beside them: every row starts its relative
 // time at one shared display column and its message count at another, so the browser reads as a
 // table rather than as a ragged list.

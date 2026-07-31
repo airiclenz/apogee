@@ -197,7 +197,10 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if n > 0 {
 			m.sessionBrowser.renaming = true
-			m.sessionBrowser.renameBuf = visible[m.sessionBrowser.selected].Title
+			// The seed is a stored title, so it is escape-stripped on the way INTO the buffer: the
+			// rename row paints the buffer verbatim, and the commit below strips anyway — seeding it
+			// clean keeps what is being edited equal to what will be saved.
+			m.sessionBrowser.renameBuf = stripEscapes(visible[m.sessionBrowser.selected].Title)
 		}
 		return m, nil
 	case "enter":
@@ -420,10 +423,18 @@ func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 // claiming a tier of its own: it says WHICH "fix the parser" this is, so it belongs with the title
 // it qualifies, and a fourth column carrying it would push the two facts every row states out of
 // line behind an optional one only some rows fill.
+//
+// Both facts the Meta supplies — the title and the workspace path behind its base — are escape-
+// stripped here, exactly as the pickers strip every cell they build from launcher text
+// (launchProfileRows). A Meta is untrusted DISK input: List() reads session files that no codec has
+// sanitized (transcriptcodec strips the record's transcript on the way back in, never its Meta), so
+// a title carrying "\x1bc" would otherwise reach the pane as a live RIS terminal reset — the popup
+// module strips nothing and truncates ANSI-preservingly — and would also lie to the column math,
+// since an ESC byte occupies no display cell but does occupy the string.
 func sessionRowCells(meta session.Meta, currentWorkspace string, all bool, now time.Time) popupRow {
-	title := meta.Title
+	title := stripEscapes(meta.Title)
 	if all && meta.Workspace != currentWorkspace {
-		title += " · " + workspaceBase(meta.Workspace)
+		title += " · " + stripEscapes(workspaceBase(meta.Workspace))
 	}
 	return popupRow{
 		title,
