@@ -243,7 +243,8 @@ func TestKeypressClearsSelection(t *testing.T) {
 // characters — only styling changes.
 func TestShadeCellsPreservesGlyphs(t *testing.T) {
 	const line = "hello world"
-	out := shadeCells(line, 2, 5, newTestModel(t).th.selection)
+	th := newTestModel(t).th
+	out := shadeCells(th.measure, line, 2, 5, th.selection)
 	if got := ansi.Strip(out); got != line {
 		t.Fatalf("shadeCells changed the glyphs: %q, want %q", got, line)
 	}
@@ -523,6 +524,10 @@ func TestTranscriptSelectionText(t *testing.T) {
 		"",                                  // a blank between-blocks line
 		"tail",
 	}
+	// Every glyph in the fixtures measures the same under both width methods, so the extraction
+	// math is the only thing under test here; the case the two measures disagree about has its
+	// own painted test (TestTranscriptClickSelectsThePaintedGlyph).
+	measure := newWidthAuthority()
 	cases := []struct {
 		name string
 		a, b contentCell
@@ -538,7 +543,7 @@ func TestTranscriptSelectionText(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := transcriptSelectionText(lines, c.a, c.b)
+			got := transcriptSelectionText(measure, lines, c.a, c.b)
 			if got != c.want {
 				t.Fatalf("transcriptSelectionText(%+v,%+v) = %q, want %q", c.a, c.b, got, c.want)
 			}
@@ -560,7 +565,7 @@ func TestTranscriptDragSelectsAndCopies(t *testing.T) {
 	if !m.transcriptSel.active {
 		t.Fatal("a transcript drag did not arm a selection")
 	}
-	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 	if want := glyphUser + " hello world"; got != want {
 		t.Fatalf("selected text = %q, want %q (the rendered user block, pad trimmed)", got, want)
 	}
@@ -625,6 +630,106 @@ func TestTranscriptSelectionSurvivesWheelScroll(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The pointer, the highlight and the clipboard agree — in PAINTED columns (mouse.go, width.go)
+// ----------------------------------------------------------------------------
+//
+// A mouse report names a painted cell. Everything the selection does with that number — cutting
+// the copied text, shading the highlight — has to speak the same measure, which is the width
+// authority's whole job (width.go). These two tests assert that at the painted layer, on the one
+// grapheme the two measures disagree about, under both of them.
+
+// vs16TranscriptRow builds a model whose transcript carries a ⚠️ row, moves its width authority to
+// method (the state the real program is in once the terminal has answered mode 2027, or has not),
+// and returns it with the painted row that carries the grapheme and the painted column target
+// starts at on it. Locating the column by PAINT rather than by counting runes is the point: it is
+// the coordinate the terminal would report for a click on that word.
+func vs16TranscriptRow(t *testing.T, method ansi.Method, target string) (m Model, row, col int) {
+	t.Helper()
+	m = paintedAs(t, modelWithTranscript(t, "danger "+vs16Warning+" "+target), method)
+	for y, painted := range transcriptPaintRows(t, m, method) {
+		if !strings.Contains(painted, vs16Warning) {
+			continue
+		}
+		col = paintedColumn(painted, target, method)
+		if col < 0 {
+			t.Fatalf("painted row %d carries the ⚠️ but not %q: %q", y, target, painted)
+		}
+		return m, y, col
+	}
+	t.Fatal("no painted transcript row carries the ⚠️ — the fixture no longer exercises the drift")
+	return m, 0, 0
+}
+
+// TestTranscriptClickSelectsThePaintedGlyph is symptom 2's regression: a click at painted column n
+// selects the glyph the terminal painted at column n, on a row carrying the disputed grapheme.
+//
+// Before the authority the cut ran in GraphemeWidth whatever the painter was doing, so on a
+// WcWidth painter — every terminal that does not answer mode 2027 — the ⚠️ ate a column the
+// terminal never drew, and every column past it named the glyph one cell to its left.
+func TestTranscriptClickSelectsThePaintedGlyph(t *testing.T) {
+	const target = "zebra" // one occurrence on the row, so the painted column is unambiguous
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m, row, col := vs16TranscriptRow(t, tc.method, target)
+
+			m = step(t, m, leftClick(col, row))
+			m = step(t, m, leftDrag(col+paintedWidth(target, tc.method), row))
+
+			got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			if got != target {
+				t.Fatalf("a drag from painted column %d copied %q, want the %q painted there", col, got, target)
+			}
+		})
+	}
+}
+
+// TestTranscriptHighlightExtentMatchesTheCopy is the third party to the agreement: what the human
+// SEES selected is exactly what the clipboard took. Both are measured against the span the drag
+// described in painted columns, so a highlight that shaded a cell more or less than the copy — the
+// old failure mode, where highlight and clipboard agreed with each other and disagreed with the
+// pointer — fails here.
+func TestTranscriptHighlightExtentMatchesTheCopy(t *testing.T) {
+	const target = "zebra"
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m, row, col := vs16TranscriptRow(t, tc.method, target)
+			end := col + paintedWidth(target, tc.method) // drag the whole row up to the target's end
+
+			m = step(t, m, leftClick(0, row))
+			m = step(t, m, leftDrag(end, row))
+
+			text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			if got := m.th.measure.Width(text); got != end {
+				t.Errorf("the copied text paints %d columns, want the %d the drag covered: %q", got, end, text)
+			}
+			if got := m.th.measure.Width(shadedRun(t, m.View().Content)); got != end {
+				t.Errorf("the highlight paints %d columns, want the %d the drag covered", got, end)
+			}
+		})
+	}
+}
+
+// shadedRun returns the glyphs the selection style covers in a rendered frame: the run between the
+// SGR sequence that carries selectionBg and the reset that closes it. shadeCells strips the span it
+// re-renders, so the run holds no escapes of its own and its width is the highlight's painted extent.
+func shadedRun(t *testing.T, frame string) string {
+	t.Helper()
+	i := strings.Index(frame, selectionBg)
+	if i < 0 {
+		t.Fatal("the frame carries no selection highlight")
+	}
+	open := strings.IndexByte(frame[i:], 'm') // the terminator of the SGR that opens the run
+	if open < 0 {
+		t.Fatalf("unterminated SGR sequence at the highlight: %q", frame[i:min(i+32, len(frame))])
+	}
+	run := frame[i+open+1:]
+	if end := strings.IndexByte(run, '\x1b'); end >= 0 {
+		run = run[:end]
+	}
+	return run
+}
+
+// ----------------------------------------------------------------------------
 // Keep-if-unchanged: a transcript selection survives the stream (mouse.go, refreshViewport)
 // ----------------------------------------------------------------------------
 
@@ -673,7 +778,7 @@ func TestTranscriptSelectionSurvivesStreamAppend(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("release of the kept selection should return a copy Cmd, got nil")
 	}
-	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 	if want := glyphUser + " hello world"; got != want {
 		t.Fatalf("copied %q, want %q — a kept selection must copy what is on screen", got, want)
 	}
@@ -729,7 +834,7 @@ func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("release after a surviving drag should return a copy Cmd, got nil")
 	}
-	got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 	if want := glyphUser + " hello world"; got != want {
 		t.Fatalf("copied %q, want %q", got, want)
 	}
@@ -957,7 +1062,7 @@ func TestTranscriptDragCopiesInEveryState(t *testing.T) {
 			if !m.transcriptSel.active {
 				t.Fatal("a transcript drag armed no selection")
 			}
-			got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 			if want := glyphUser + " hello world"; got != want {
 				t.Fatalf("selected text = %q, want %q", got, want)
 			}
@@ -1043,7 +1148,7 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 			w := m.viewport.Width()
 			m = step(t, m, leftClick(0, 0))
 			m = step(t, m, leftDrag(w, 0))
-			got := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+			got := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 			if !strings.Contains(got, "HEADERPROMPT") {
 				t.Fatalf("selecting the sticky-header row copied %q, want it to contain the prompt text", got)
 			}

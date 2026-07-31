@@ -104,8 +104,24 @@ func (w widthAuthority) Truncate(s string, length int, tail string) string {
 
 // Cut returns the columns [left, right) of s, keeping the styling of the parts it slices
 // through intact. It replaces ansi.Cut.
+//
+// It composes the two truncations itself rather than calling ansi.Method.Cut, which is the one
+// operation here that cannot be delegated: x/ansi@v0.11.7's cut binds its LEFT truncation to
+// TruncateWc — a right-truncation — on the WcWidth branch (truncate.go:35-39, where the grapheme
+// branch correctly uses TruncateLeft), so ansi.Method.Cut(s, left, right) under WcWidth returns
+// the first `right` columns and drops `left` on the floor. WcWidth is the painter's DEFAULT, and a
+// mouse selection is exactly a cut with a non-zero left, so the mistake would land on every
+// terminal that does not answer mode 2027. TestWidthAuthorityCutsFromTheLeft pins the correct
+// behaviour; if a dependency bump fixes it upstream, this can go back to delegating.
 func (w widthAuthority) Cut(s string, left, right int) string {
-	return w.method.Cut(s, left, right)
+	if right <= left {
+		return ""
+	}
+	cut := w.method.Truncate(s, right, "")
+	if left <= 0 {
+		return cut
+	}
+	return w.method.TruncateLeft(cut, left, "")
 }
 
 // Wrap wraps s to limit columns, breaking at spaces and at breakpoints and hard-breaking a word

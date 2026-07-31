@@ -343,9 +343,45 @@ explicitly justifies leaving.
 
 **Commit:** `fix(tui): measure the render path with one width authority`
 
-## 4. Fix the mouse column mapping
+## 4. Fix the mouse column mapping — ✅ DONE (2026-07-31)
 
 Depends on item 3.
+
+NOTES (2026-07-31): DEVIATION — `pointTranscriptRow` converts NOTHING, because under item 2's decision
+(a) the conversion is the IDENTITY. The authority measures the way the painter paints, so the terminal's
+painted column already indexes the rendered line in the authority's space, and the transcript body starts
+at screen column 0. What actually closes symptom 2 is routing the CUTS through the authority — measure a
+line in one method and slice it in another and the pointer names one glyph while the clipboard takes its
+neighbour. The reasoning is now stated in `pointTranscriptRow`'s doc comment, so a later move to strategy
+(b) or (c) sees that it depends on the authority mirroring the painter.
+
+NOTES (2026-07-31): DEFECT IN THE AUTHORITY, fixed here because item 4 cannot land on top of it (item 2 is
+already ✅, so this is its territory). `x/ansi@v0.11.7`'s `cut` binds its LEFT truncation to `TruncateWc` —
+a *right*-truncation — on the WcWidth branch (`truncate.go:35-39`; the grapheme branch correctly uses
+`TruncateLeft`), so `ansi.Method.Cut(s, left, right)` under WcWidth returns the first `right` columns and
+drops `left` on the floor. WcWidth is the painter's DEFAULT and a mouse selection is exactly a cut with a
+non-zero left, so every terminal that does not answer mode 2027 would have copied from the wrong end of the
+line. `widthAuthority.Cut` now composes `Truncate` + `TruncateLeft` itself (`width.go`), with
+`TestWidthAuthorityCutsFromTheLeft` pinning it and a comment naming the upstream defect so it can go back to
+delegating after a dependency bump. Item 2's parity test could not see it: every case there cuts from
+column 0.
+
+NOTES (2026-07-31): DEVIATION — `mouse.go:249` (`runeOffsetOf`) is deliberately NOT converted. It is
+`utf8.RuneCountInString` over a byte prefix — the byte↔rune bridge between the chat mini-language and the
+textarea's rune-counted cursor — and there is no display column at either end of it. Findings groups it with
+the measurement sites by library, not by role. It now says so in a comment.
+
+NOTES (2026-07-31): SCOPE — `shadeCells` is shared with `accentTokens` (`inputaccent.go:122`), which now
+passes the authority too: the cells being re-styled are cells the terminal already painted, so the slice must
+be the painter's whoever the caller is. That call's COLUMNS still come from the per-rune widget mirror
+(`runesWidth`) that item 5 owns, and `inputaccent.go:116` stays on `lipgloss.Width` for the same reason
+(Findings assigns it to the mirror group). The two agree on the VS16 case under WcWidth and disagree under
+GraphemeWidth exactly as they did before this item, so nothing regressed — but item 5 should reconcile them:
+a mirror's wrap ROWS are the widget's, while its columns WITHIN a row are the painter's.
+
+NOTES (2026-07-31): both new tests fail against the pre-change code. At 80×24 the ⚠️ row paints as
+`❯ danger ⚠️ zebra`; a drag from painted column 11 — the `z` under WcWidth — copied `" zebr"`, the
+neighbouring glyph, and the highlight measured 16 columns against a 15-column painted span.
 
 **What:** Close symptom 2. `pointTranscriptRow` (`mouse.go:159-172`) takes the terminal's
 reported column as a content cell index; the terminal reports **painted** cells. Convert

@@ -119,7 +119,12 @@ func (m Model) accentTokens(view string) string {
 			if c1 <= c0 {
 				continue
 			}
-			lines[r] = shadeCells(lines[r], c0, c1, style)
+			// The slice is in the painter's measure (shadeCells, width.go) because the cells
+			// being re-styled are cells the terminal already painted. The COLUMNS reaching it
+			// still come from the widget mirror below (runesWidth), which measures per rune —
+			// the mirror's own oracle is the widget, and reconciling the two is the caret
+			// mirrors' item, not this pass's.
+			lines[r] = shadeCells(m.th.measure, lines[r], c0, c1, style)
 		}
 	}
 	return strings.Join(lines, "\n")

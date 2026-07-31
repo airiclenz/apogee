@@ -195,6 +195,38 @@ func TestWidthAuthorityMeasuresVS16TheWayItIsPainted(t *testing.T) {
 	}
 }
 
+// A cut with a non-zero LEFT is what a mouse selection is, and it is the one operation the
+// authority cannot delegate to ansi.Method: on the WcWidth branch — the painter's default —
+// x/ansi@v0.11.7 binds cut's left-truncation to TruncateWc rather than TruncateLeftWc, so the
+// library's own Cut ignores left entirely and hands back the first `right` columns. The parity
+// test above cannot see it: every case there cuts from column 0.
+func TestWidthAuthorityCutsFromTheLeft(t *testing.T) {
+	t.Parallel()
+
+	const line = "abcdef"
+	for _, w := range []widthAuthority{newWidthAuthority(), {method: ansi.GraphemeWidth}} {
+		if got, want := w.Cut(line, 2, 5), "cde"; got != want {
+			t.Errorf("%v Cut(%q, 2, 5) = %q, want %q", w.Method(), line, got, want)
+		}
+		if got, want := w.Cut(line, 4, 99), "ef"; got != want {
+			t.Errorf("%v Cut(%q, 4, 99) = %q, want the rest of the line %q", w.Method(), line, got, want)
+		}
+		if got := w.Cut(line, 3, 3); got != "" {
+			t.Errorf("%v Cut(%q, 3, 3) = %q, want the empty span", w.Method(), line, got)
+		}
+	}
+
+	// And on the grapheme the two measures disagree about: a click past the ⚠️ names the glyph
+	// after it in the measure that is actually being painted, one column apart in the two.
+	const vs16 = "a" + vs16Warning + "bc"
+	if got, want := newWidthAuthority().Cut(vs16, 2, 3), "b"; got != want {
+		t.Errorf("WcWidth Cut(%q, 2, 3) = %q, want %q — the ⚠️ paints one column there", vs16, got, want)
+	}
+	if got, want := (widthAuthority{method: ansi.GraphemeWidth}).Cut(vs16, 3, 4), "b"; got != want {
+		t.Errorf("GraphemeWidth Cut(%q, 3, 4) = %q, want %q — the ⚠️ paints two columns there", vs16, got, want)
+	}
+}
+
 // The authority hangs on the theme, which hangs on the Model, and the Model is copied by value on
 // every Update (ADR 0011; doc.go). So it must be a value all the way down: no pointer, no slice,
 // no map, no channel, nothing whose copy shares state with its original. This mirrors

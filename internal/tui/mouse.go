@@ -156,6 +156,15 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 // nothing. contentLineAt (model.go) resolves the row, folding in both the scroll offset and the
 // sticky-header overlay — so a click on a header row names the prompt line drawn there rather
 // than the reply line hidden beneath it, and the mapping holds at any scroll position.
+//
+// The column needs no conversion, and that is a CONSEQUENCE, not a coincidence. The terminal
+// reports x as a PAINTED cell index — the column the glyph under the pointer occupies on screen —
+// while the returned col indexes the rendered line by display cell for the cuts downstream
+// (transcriptSelectionText, shadeCells). Those two spaces coincide exactly while the display-width
+// authority measures the way the painter paints (width.go), which is the whole of what makes it an
+// authority; the transcript body starts at screen column 0, so the identity holds outright. It is
+// the CUTS that have to speak the authority — measure the line in one method and slice it in
+// another and the pointer names one glyph while the clipboard takes its neighbour.
 func (m Model) pointTranscriptRow(x, y int) (line, col int, ok bool) {
 	w, h := m.viewport.Width(), m.viewport.Height()
 	if h < 1 || y < 0 || y >= h {
@@ -245,6 +254,9 @@ func offsetToLineCol(value string, off int) (row, col int) {
 // slices the value by byte (command.go, autocomplete.go — its tokens are delimited by ASCII
 // whitespace, so byte offsets are the natural currency there), while the textarea counts its cursor
 // in runes. A byte offset past the end clamps to the end.
+//
+// The count is RUNES, not columns: neither end of the bridge is a display width, so the width
+// authority has no part in it and converting it to one would be a defect.
 func runeOffsetOf(value string, byteOff int) int {
 	return utf8.RuneCountInString(value[:clampInt(byteOff, 0, len(value))])
 }
@@ -364,7 +376,7 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 			m.transcriptSel.active = false
 			return m, nil
 		}
-		text := transcriptSelectionText(m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+		text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 		if strings.TrimSpace(text) == "" {
 			m.transcriptSel.active = false // a drag over blank pad copies nothing
 			return m, nil
@@ -411,7 +423,7 @@ func (m Model) highlightInput(view string) string {
 		if absRow < top.row || absRow > bot.row {
 			continue
 		}
-		c0, c1 := 0, lipgloss.Width(lines[r])
+		c0, c1 := 0, m.th.measure.Width(lines[r])
 		if absRow == top.row {
 			c0 = top.col
 		}
@@ -421,32 +433,41 @@ func (m Model) highlightInput(view string) string {
 		if c1 <= c0 {
 			continue
 		}
-		lines[r] = shadeCells(lines[r], c0, c1, m.th.selection)
+		lines[r] = shadeCells(m.th.measure, lines[r], c0, c1, m.th.selection)
 	}
 	return strings.Join(lines, "\n")
 }
 
 // shadeCells re-renders the display columns [c0,c1) of an ANSI line under style. The flanking
-// parts keep their original styling (ansi.Cut slices by display cell without breaking escape
+// parts keep their original styling (the cut slices by display cell without breaking escape
 // codes); the selected span is stripped and re-rendered so the selection colours win. The
 // prompt text is single-styled, so a stripped span loses nothing there — the caret is not part of
 // the rendered content at all: the terminal draws the real cursor over the frame (steadyCursor).
-func shadeCells(line string, c0, c1 int, style lipgloss.Style) string {
-	w := lipgloss.Width(line)
-	left := ansi.Cut(line, 0, c0)
-	mid := ansi.Cut(line, c0, c1)
-	right := ansi.Cut(line, c1, w)
+//
+// It slices through the width authority (width.go) rather than the package-level ansi.Cut, which
+// is hard-wired to GraphemeWidth. c0/c1 are painted columns — a mouse report's own space, or a
+// token's cells on a row the widget already drew — so a cut in any measure but the painter's
+// shades a different run of cells than the one that is on screen there.
+func shadeCells(measure widthAuthority, line string, c0, c1 int, style lipgloss.Style) string {
+	w := measure.Width(line)
+	left := measure.Cut(line, 0, c0)
+	mid := measure.Cut(line, c0, c1)
+	right := measure.Cut(line, c1, w)
 	return left + style.Render(ansi.Strip(mid)) + right
 }
 
 // transcriptSelectionText extracts the plain text under a content-coordinate span from the
 // cached rendered lines — the "copy what you see" slice. It normalises the span to reading order,
-// then for each spanned line cuts the display-cell range [c0,c1) with ansi.Cut (cell-accurate and
-// escape-safe), strips the styling, and trims the block's trailing pad; the lines join with '\n'.
-// The first and last lines cut to the span's own columns; the lines between take the whole width.
-// Markers, rail gutters, and soft-wrap breaks are copied verbatim — the accepted terminal-native
-// semantics of a screen-space selection (D4).
-func transcriptSelectionText(lines []string, a, b contentCell) string {
+// then for each spanned line cuts the display-cell range [c0,c1) with the width authority
+// (cell-accurate and escape-safe), strips the styling, and trims the block's trailing pad; the
+// lines join with '\n'. The first and last lines cut to the span's own columns; the lines between
+// take the whole width. Markers, rail gutters, and soft-wrap breaks are copied verbatim — the
+// accepted terminal-native semantics of a screen-space selection (D4).
+//
+// The measure is the authority's (width.go) rather than ansi.Cut's hard-wired GraphemeWidth
+// because the columns came from a mouse report, which counts PAINTED cells: cutting in the measure
+// the terminal paints in is what makes the clipboard hold the glyphs the pointer ran over.
+func transcriptSelectionText(measure widthAuthority, lines []string, a, b contentCell) string {
 	top, bot := a, b
 	if bot.line < top.line || (bot.line == top.line && bot.col < top.col) {
 		top, bot = bot, top // normalise to reading order
@@ -457,7 +478,7 @@ func transcriptSelectionText(lines []string, a, b contentCell) string {
 			continue
 		}
 		line := lines[row]
-		c0, c1 := 0, lipgloss.Width(line)
+		c0, c1 := 0, measure.Width(line)
 		if row == top.line {
 			c0 = top.col
 		}
@@ -468,7 +489,7 @@ func transcriptSelectionText(lines []string, a, b contentCell) string {
 			out = append(out, "") // an empty or fully-clipped row is a blank line in the copy
 			continue
 		}
-		out = append(out, strings.TrimRight(ansi.Strip(ansi.Cut(line, c0, c1)), " "))
+		out = append(out, strings.TrimRight(ansi.Strip(measure.Cut(line, c0, c1)), " "))
 	}
 	return strings.Join(out, "\n")
 }
@@ -494,7 +515,7 @@ func (m Model) highlightTranscript(view string) string {
 		if absRow < top.line || absRow > bot.line {
 			continue
 		}
-		c0, c1 := 0, lipgloss.Width(lines[r])
+		c0, c1 := 0, m.th.measure.Width(lines[r])
 		if absRow == top.line {
 			c0 = top.col
 		}
@@ -504,7 +525,7 @@ func (m Model) highlightTranscript(view string) string {
 		if c1 <= c0 {
 			continue
 		}
-		lines[r] = shadeCells(lines[r], c0, c1, m.th.selection)
+		lines[r] = shadeCells(m.th.measure, lines[r], c0, c1, m.th.selection)
 	}
 	return strings.Join(lines, "\n")
 }
