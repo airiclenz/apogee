@@ -292,14 +292,15 @@ func TestEmptyMessageRendersOneLine(t *testing.T) {
 }
 
 func TestWithMarker(t *testing.T) {
-	got := withMarker(glyphAssistant+" ", []string{"first", "second"})
+	th := newTheme()
+	got := withMarker(th, glyphAssistant+" ", []string{"first", "second"})
 	if got[0] != glyphAssistant+" first" {
 		t.Errorf("line 0 = %q; want the marker prepended", got[0])
 	}
 	if got[1] != "  second" {
 		t.Errorf("line 1 = %q; want a two-column hanging indent", got[1])
 	}
-	if one := withMarker(glyphAssistant+" ", nil); len(one) != 1 || one[0] != glyphAssistant+" " {
+	if one := withMarker(th, glyphAssistant+" ", nil); len(one) != 1 || one[0] != glyphAssistant+" " {
 		t.Errorf("empty body = %#v; want a single marker-only line", one)
 	}
 }

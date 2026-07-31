@@ -12,7 +12,6 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
@@ -2132,7 +2131,7 @@ func (m Model) View() tea.View {
 	// overlay is shown), so the two columns line up row-for-row.
 	body := m.applyStickyHeader(m.viewport.View())
 	body = m.highlightTranscript(body) // overlay any transcript drag-selection on the composed rows
-	body = lipgloss.JoinHorizontal(lipgloss.Top, body, m.renderScrollbar(m.viewport.Height()))
+	body = m.joinScrollbar(body, m.renderScrollbar(m.viewport.Height()))
 	rows := []string{body}
 	if prompt != "" {
 		rows = append(rows, prompt)
@@ -2160,7 +2159,7 @@ func (m Model) View() tea.View {
 	}
 	rows = append(rows, m.inputView(), m.footerView())
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	v := tea.NewView(m.joinFrame(rows))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // enable wheel scrolling (Update routes MouseWheelMsg)
 	v.Cursor = m.promptCursor()
@@ -2291,8 +2290,74 @@ func (m Model) renderScrollbar(h int) string {
 	return strings.Join(rows, "\n")
 }
 
+// squareLine makes one composed line occupy exactly w columns WHEN PAINTED: short lines are padded
+// with blanks, and a line that would run past w is cut (ANSI-aware, no ellipsis — a cut here means
+// something upstream broke the cap, and adding a … would only spend another column).
+//
+// It measures with the width authority (width.go) rather than lipgloss.Width, and that is the whole
+// reason it exists. Every squaring primitive the charm stack offers — lipgloss.JoinVertical and
+// JoinHorizontal, Style.Width, the viewport's own Width() padding
+// (bubbles/v2@v2.1.0/viewport/viewport.go:743-746) — pads to a width measured in ansi.GraphemeWidth,
+// which is not the measure the terminal paints in unless it answered mode 2027. A row carrying a
+// VS16 grapheme is padded one cell short of where it paints, and everything the layout hangs off
+// that row's right edge moves with it.
+func squareLine(measure widthAuthority, s string, w int) string {
+	over := measure.Width(s) - w
+	if over > 0 {
+		return measure.Truncate(s, w, "")
+	}
+	return s + strings.Repeat(" ", -over)
+}
+
+// joinScrollbar hangs the scroll-bar gutter off the right edge of the transcript body: every body
+// row is squared to the viewport's width first (squareLine), then its bar cell is appended.
+//
+// It stands in for the lipgloss.JoinHorizontal this used to be. JoinHorizontal pads each block's
+// rows to that block's widest row in GraphemeWidth, so on a terminal painting in WcWidth the ⚠️ row
+// reached the gutter a column short and dropped its │/█ one column left of every other row's. Doing
+// the padding here, in the painter's measure, is what makes the bar a straight column.
+func (m Model) joinScrollbar(body, bar string) string {
+	if bar == "" {
+		return body
+	}
+	rows := strings.Split(body, "\n")
+	barRows := strings.Split(bar, "\n")
+	if n := len(barRows); n > len(rows) {
+		rows = append(rows, make([]string, n-len(rows))...) // a bar taller than the body keeps its cells
+	}
+	w := max(0, m.viewport.Width())
+	for i, row := range rows {
+		row = squareLine(m.th.measure, row, w)
+		if i < len(barRows) {
+			row += barRows[i]
+		}
+		rows[i] = row
+	}
+	return strings.Join(rows, "\n")
+}
+
+// joinFrame stacks the frame's blocks into the one string the View hands bubbletea, squaring every
+// physical line to the window width in the painter's measure.
+//
+// It stands in for the lipgloss.JoinVertical this used to be, for the same reason joinScrollbar
+// stands in for JoinHorizontal: JoinVertical left-aligns by padding every row out to the widest row
+// it was given, measured in GraphemeWidth. That is the window width right up until one block
+// measures wider than the window in that measure — which is exactly what a frame squared for a
+// WcWidth painter does — and then the pad it applies to EVERY OTHER row pushes the whole frame past
+// the terminal's last column. Squaring to m.width instead makes layout.md's absolute width cap hold
+// at the layer the terminal actually reads, whichever measure that is.
+func (m Model) joinFrame(blocks []string) string {
+	lines := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		for _, ln := range strings.Split(block, "\n") {
+			lines = append(lines, squareLine(m.th.measure, ln, m.width))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // inputView renders the textarea inside the rounded, dark-gray, black-bg border (no bottom
-// edge — the footer's top rule is the shared divider). lipgloss.Width sets the box's total
+// edge — the footer's top rule is the shared divider). The style's Width sets the box's total
 // width including the border and padding, so the box always spans the window and the footer
 // below it aligns. The ▔ top-edge hairline that caps the bottom chrome is a separate row above
 // the status line (topRule), not part of this box, so the status line reads as sitting directly
@@ -2352,11 +2417,11 @@ func (m Model) footerContent(w int) string {
 	field := w - 2 // content columns between the two │ borders (footerView guards w >= 3)
 
 	// One-column margins inside the borders; a black-bg gap justifies the mode marker right.
-	gap := field - 2 - lipgloss.Width(info) - lipgloss.Width(offline) - lipgloss.Width(mode)
+	gap := field - 2 - m.th.measure.Width(info) - m.th.measure.Width(offline) - m.th.measure.Width(mode)
 	if gap < 1 {
 		// Too narrow for both segments: keep the left info, truncate to the field, pad black.
-		body := ansi.Truncate(" "+info+offline, field, "…")
-		body += strings.Repeat(" ", max(0, field-lipgloss.Width(body)))
+		body := m.th.measure.Truncate(" "+info+offline, field, "…")
+		body += strings.Repeat(" ", max(0, field-m.th.measure.Width(body)))
 		return bar + m.th.footerText.Render(body) + bar
 	}
 	left := m.th.footerText.Render(" " + info)
@@ -2541,9 +2606,9 @@ func (m Model) statusLine() string {
 	if right != "" {
 		right += m.th.statusBar.Render(bodyIndent)
 	}
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	gap := m.width - m.th.measure.Width(left) - m.th.measure.Width(right)
 	if gap < 1 {
-		return ansi.Truncate(left, max(0, m.width), "")
+		return m.th.measure.Truncate(left, max(0, m.width), "")
 	}
 	return left + m.th.statusBar.Render(strings.Repeat(" ", gap)) + right
 }

@@ -256,9 +256,54 @@ passes; `git diff --stat` for this item shows only additions plus the `theme` fi
 
 **Commit:** `feat(tui): add a single display-width authority`
 
-## 3. Route the render path through the authority
+## 3. Route the render path through the authority — ✅ DONE (2026-07-31)
 
 Depends on item 2.
+
+NOTES (2026-07-31): COORDINATION — plan `2026-07-31 - 01` is **not archived** (its items 3–5 carry no
+✅), so its four files are left alone per this item's own instruction: `popup.go:185, 212, 293` and
+`interject.go:393` (gated on the archived branch) are NOT converted here and need a follow-up item.
+`popup.go` is also why `wrapText` (`render.go:577`, `ansi.Wrap`) keeps its signature and its
+hard-wired GraphemeWidth: giving it the authority means a parameter, and `popup.go:245` is its other
+caller. Leaving it is safe for the cap — a GraphemeWidth wrap never paints wider than its limit under
+WcWidth — and the follow-up item should take it together with `truncateToWidth`.
+
+NOTES (2026-07-31): DEVIATION — two of the listed sites are deliberately NOT converted, and the
+acceptance grep's "sites this item's NOTES line explicitly justifies leaving" is exactly them.
+`render.go:649` (`inputContentRows`) and `render.go:685` (`wrappedOffset`) are **widget mirrors**, and
+item 5's rule governs them: a mirror's oracle is the widget, never the painter. The textarea wraps
+with `uniseg.StringWidth` (`bubbles/v2@v2.1.0/textarea/textarea.go:1805-1852`) and the viewport
+soft-wraps with `ansi.StringWidth` (`viewport/viewport.go:284, 415`) — both grapheme-clustered, and
+neither moves when the painter does. Measuring them in the authority would size the input box and the
+sticky-header pad to something no widget ever draws. Both sites now carry a WIDGET MIRROR comment
+naming their oracle. `inputContentRows` is a third mirror alongside item 5's two; item 5 should adopt
+it when it makes the mirrors measure exactly the way the widget does.
+
+NOTES (2026-07-31): DEVIATION (scope) — closing symptom 1 took a second join, not just the one the
+item names. Squaring the transcript rows in the authority's measure makes their *GraphemeWidth* vary,
+and the frame's outer `lipgloss.JoinVertical` left-aligns by padding every row to the widest row it
+was given **in GraphemeWidth** — so the fix to the bar column pushed all 24 rows to 105 columns on an
+80-column window, and the item's own painted cap test failed. `View` now composes through
+`Model.joinFrame`, the vertical counterpart of `joinScrollbar`; both go through one `squareLine`
+primitive (pad, or ANSI-aware cut, to exactly N columns in the authority's measure). This is what
+makes `layout.md:159-160`'s absolute cap hold at the painted layer.
+
+NOTES (2026-07-31): the ANSI operations that CONSUME a converted measurement were converted with it —
+`ansi.Truncate` at `render.go:197`, `mdtable.go:353`, `model.go` footer/status, and the `ansi.Hardwrap`
+at `markdown.go:147` that item 2's NOTES already names as a live site. A width measured in one method
+and cut in another is the same defect one step later. Signatures threaded to reach the authority:
+`hangingWrap`, `hangingPrefixes`, `withMarker`, `startupLabelWidth`, `startupInfoWidth`,
+`tableColumnWidths`, `layoutTableRow`, `padTableCell` all now take `th theme` first (the exceptions
+Findings predicted). `markdown.go` and `mdtable.go` no longer import `lipgloss` or `ansi` at all.
+
+NOTES (2026-07-31): the inverted test is `TestPaintedScrollbarHoldsOneColumn`, and it paints each
+frame in the measure the model's own authority is on (new `paintedAs` harness helper, which feeds the
+model the `tea.ModeReportMsg` bubbletea feeds it). Painting a WcWidth-composed frame with a
+GraphemeWidth painter is the mismatch the authority exists to prevent, not a case it must survive.
+Checked against item 1's recorded drift: at 80×24 the bar now paints in **column 79 on every row,
+the `⚠️` row included, under both methods** (it was 78 on that row under WcWidth). No existing
+width-pinning test needed its expectation changed — every glyph the package uses as a marker
+(`✦ ❯ ┝ ┕ │ ⤷ • ▤ ⧖ ─ ▔ █`) measures 1 in both methods, so nothing but the VS16 case moves.
 
 **Coordination note (check before starting).** Plan `2026-07-31 - 01 - popup-column-alignment-plan.md`
 is live and owns `popup.go`, `autocomplete.go`, `picker.go` and `sessions.go`; at the time

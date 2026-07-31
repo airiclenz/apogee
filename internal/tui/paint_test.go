@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
@@ -95,6 +96,33 @@ func paintTestModel(t *testing.T, tail ...string) Model {
 	return step(t, m, eventMsg{Event: domain.MessageEvent{Text: b.String()}})
 }
 
+// paintedAs returns m with its width authority moved to method — the state the real program is in
+// once the terminal has answered mode 2027, or has not. The authority MIRRORS the painter
+// (width.go), so a frame is only ever composed and painted in ONE measure; a test that wants the
+// GraphemeWidth painter therefore has to hand the model the same report bubbletea hands it, rather
+// than paint a WcWidth-composed frame with the other measure — which is the mismatch the authority
+// exists to prevent, not a case it has to survive.
+func paintedAs(t *testing.T, m Model, method ansi.Method) Model {
+	t.Helper()
+	if method == ansi.GraphemeWidth {
+		m = step(t, m, tea.ModeReportMsg{Mode: ansi.ModeUnicodeCore, Value: ansi.ModeSet})
+	}
+	if got := m.th.measure.Method(); got != method {
+		t.Fatalf("model measures with %v, want the painter's %v", got, method)
+	}
+	return m
+}
+
+// paintMethods is the pair every painted assertion runs against: the measure a terminal that never
+// answers mode 2027 paints in, and the one bubbletea switches to when a terminal does.
+var paintMethods = []struct {
+	name   string
+	method ansi.Method
+}{
+	{"WcWidth — the painter's default", ansi.WcWidth},
+	{"GraphemeWidth — the terminal answered mode 2027", ansi.GraphemeWidth},
+}
+
 // transcriptPaintRows returns the painted rows the transcript viewport owns — the scroll-bar
 // gutter included, the bottom chrome excluded.
 func transcriptPaintRows(t *testing.T, m Model, method ansi.Method) []string {
@@ -131,70 +159,73 @@ func TestPaintFrameMatchesTheViewOnASCII(t *testing.T) {
 // trimRight drops the trailing blanks a painted row never shows.
 func trimRight(s string) string { return strings.TrimRight(s, " ") }
 
-// CHARACTERIZATION TEST — it pins a BUG, not an invariant. Item 3 of
-// "docs/plans/2026-07-31 - 03 - width-authority-plan.md" fixes the drift and inverts this test
-// into the invariant "the bar lands in the same painted column on every row, under both
-// methods"; until then this is the failing behaviour held still so the fix can be shown to work.
+// THE INVARIANT — this is the inverted form of the characterization test item 1 left here (it
+// pinned the bar drifting one column left on the ⚠️ row under WcWidth). The scroll bar is a
+// straight column: every transcript row paints its │/█ in the window's last column, the ⚠️ row
+// included, whichever measure the painter is using.
 //
-// The scroll bar's column is set by the lipgloss.JoinHorizontal at model.go:2119, which pads
-// each transcript row to the viewport width in GraphemeWidth. A terminal that has not answered
-// mode 2027 paints in WcWidth, advances one column short over the ⚠️ cluster, and drops that
-// row's bar glyph one column to the left of every other row's.
-func TestPaintedScrollbarDriftsOnVS16_CharacterizesBug(t *testing.T) {
-	m := paintTestModel(t, "danger "+vs16Warning+" here", "a plain ascii tail paragraph")
+// What used to break it was the join, not the bar: lipgloss.JoinHorizontal padded each transcript
+// row to the block's GraphemeWidth, so on a WcWidth painter the ⚠️ row arrived at the gutter a
+// column short. joinScrollbar (model.go) squares every row off in the authority's measure instead,
+// which is by construction the measure the frame is painted in.
+func TestPaintedScrollbarHoldsOneColumn(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := paintedAs(t, paintTestModel(t, "danger "+vs16Warning+" here", "a plain ascii tail paragraph"), tc.method)
 
-	barColumns := func(method ansi.Method) (vs16 int, others map[int]int) {
-		t.Helper()
-		others = map[int]int{}
-		vs16 = -1
-		for _, row := range transcriptPaintRows(t, m, method) {
-			col := paintedColumn(row, "│", method)
-			if col < 0 {
-				col = paintedColumn(row, "█", method) // the thumb rows carry the other glyph
+			columns := map[int]int{}
+			sawVS16 := false
+			for _, row := range transcriptPaintRows(t, m, tc.method) {
+				col := paintedColumn(row, "│", tc.method)
+				if col < 0 {
+					col = paintedColumn(row, "█", tc.method) // the thumb rows carry the other glyph
+				}
+				if col < 0 {
+					t.Fatalf("no scroll-bar glyph on painted row %q", row)
+				}
+				columns[col]++
+				sawVS16 = sawVS16 || strings.Contains(row, vs16Warning)
 			}
-			if col < 0 {
-				t.Fatalf("method %v: no scroll-bar glyph on painted row %q", method, row)
+			if !sawVS16 {
+				t.Fatal("the ⚠️ row is not on screen — the fixture no longer exercises the drift")
 			}
-			if strings.Contains(row, vs16Warning) {
-				vs16 = col
-				continue
+			if len(columns) != 1 {
+				t.Fatalf("the scroll bar is painted in %d different columns, want exactly one: %v", len(columns), columns)
 			}
-			others[col]++
-		}
-		if vs16 < 0 {
-			t.Fatalf("method %v: the ⚠️ row is not on screen", method)
-		}
-		if len(others) != 1 {
-			t.Fatalf("method %v: the ascii rows disagree about the bar column: %v", method, others)
-		}
-		return vs16, others
+			for col := range columns {
+				if want := m.width - 1; col != want {
+					t.Errorf("the scroll bar paints in column %d, want the window's last column %d", col, want)
+				}
+			}
+		})
 	}
+}
 
-	t.Run("WcWidth drifts one column left", func(t *testing.T) {
-		vs16, others := barColumns(ansi.WcWidth)
+// The absolute width cap of layout.md ("no rendered line ever exceeds the width the block was
+// given"), asserted in the measure the frame is PAINTED in rather than the one it happened to be
+// measured in — which is the whole of what this plan changes.
+//
+// The composed rows are the oracle, not paintFrame's grid: the screen buffer is exactly m.width
+// cells wide, so it can only ever show a cap violation as silently lost content. Measuring the
+// row the Model hands bubbletea, with the painter's own method, catches the overrun itself.
+func TestComposedFrameHoldsTheWidthCapWhenPainted(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := paintedAs(t, paintTestModel(t,
+				"a plain ascii tail paragraph",
+				"日本語のテキストと ascii が混ざった段落",
+				"danger "+vs16Warning+" here, and "+vs16Warning+vs16Warning+" twice more",
+				strings.Repeat("⚠️ ", 60), // a paragraph that has to wrap on the disputed grapheme
+			), tc.method)
 
-		var ascii int
-		for col := range others {
-			ascii = col
-		}
-		if want := ascii - 1; vs16 != want {
-			t.Errorf("⚠️ row paints its scroll bar in column %d; the recorded bug is column %d, "+
-				"one left of the ascii rows' %d (has item 3 landed? invert this test)", vs16, want, ascii)
-		}
-	})
-
-	t.Run("GraphemeWidth does not", func(t *testing.T) {
-		vs16, others := barColumns(ansi.GraphemeWidth)
-
-		var ascii int
-		for col := range others {
-			ascii = col
-		}
-		if vs16 != ascii {
-			t.Errorf("⚠️ row paints its scroll bar in column %d, want %d — under the measure the "+
-				"layout code itself uses the bar is not supposed to drift", vs16, ascii)
-		}
-	})
+			for i, row := range strings.Split(m.View().Content, "\n") {
+				if w := paintedWidth(row, tc.method); w > m.width {
+					t.Errorf("composed row %d paints %d columns wide, past the %d-column window: %q",
+						i, w, m.width, row)
+				}
+			}
+		})
+	}
 }
 
 // The two measures in play, pinned side by side. apogee's whole layout side measures in

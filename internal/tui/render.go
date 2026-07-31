@@ -127,16 +127,16 @@ func renderEntryLines(th theme, e entry, width int) []string {
 		return railLines(th, renderUserBlock(th, glyphInterject+" ", e.text, e.skills, inner), e.depth)
 	case entryAssistant:
 		marker := glyphAssistant + " "
-		body := renderMarkdownBody(th, e.text, inner-lipgloss.Width(marker))
-		return railLines(th, withMarker(marker, body), e.depth)
+		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
+		return railLines(th, withMarker(th, marker, body), e.depth)
 	case entryToolCall:
 		return railLines(th, renderToolBlock(th, []toolView{e.tool}, inner), e.depth)
 	case entryToolResult:
 		return railLines(th, renderOrphanResult(th, e.text, inner), e.depth)
 	case entryError:
-		return railLines(th, hangingWrap(th.errorText, glyphAssistant+" ", e.text, inner), e.depth)
+		return railLines(th, hangingWrap(th, th.errorText, glyphAssistant+" ", e.text, inner), e.depth)
 	case entryNote:
-		return railLines(th, hangingWrap(th.noteText, "· ", e.text, inner), e.depth)
+		return railLines(th, hangingWrap(th, th.noteText, "· ", e.text, inner), e.depth)
 	case entryPresented:
 		return railLines(th, renderPresentedBlock(th, e.presented, inner), e.depth)
 	case entryStartup:
@@ -151,7 +151,7 @@ func renderEntryLines(th theme, e entry, width int) []string {
 // sits inside the same rail as the block it announces.
 func renderSubAgentLabel(th theme, depth, width int) []string {
 	inner := railedWidth(width, depth)
-	body := hangingWrap(th.subRail, glyphSubLabel+" ", subAgentLabel, inner)
+	body := hangingWrap(th, th.subRail, glyphSubLabel+" ", subAgentLabel, inner)
 	return railLines(th, body, depth)
 }
 
@@ -167,7 +167,7 @@ func renderSubAgentLabel(th theme, depth, width int) []string {
 func renderUserBlock(th theme, marker, text string, skills []string, width int) []string {
 	var out []string
 	if text != "" {
-		for _, ln := range hangingPrefixes(marker, text, width) {
+		for _, ln := range hangingPrefixes(th, marker, text, width) {
 			out = append(out, th.userBlock.Width(width).Render(ln))
 		}
 	}
@@ -193,10 +193,10 @@ func renderUserChipRow(th theme, marker string, skills []string, width int) stri
 	}
 	lead := th.userBlock.Render(marker)
 	body := strings.Join(chips, " ")
-	if avail := width - lipgloss.Width(lead); lipgloss.Width(body) > avail {
-		body = ansi.Truncate(body, max(0, avail), "…")
+	if avail := width - th.measure.Width(lead); th.measure.Width(body) > avail {
+		body = th.measure.Truncate(body, max(0, avail), "…")
 	}
-	pad := th.userBlock.Render(strings.Repeat(" ", max(0, width-lipgloss.Width(lead)-lipgloss.Width(body))))
+	pad := th.userBlock.Render(strings.Repeat(" ", max(0, width-th.measure.Width(lead)-th.measure.Width(body))))
 	return lead + body + pad
 }
 
@@ -229,7 +229,7 @@ func renderPresentedBlock(th theme, v presentedView, width int) []string {
 
 	var out []string
 	if v.Title != "" {
-		out = append(out, hangingWrap(th.presentTitle, marker, v.Title, width)...)
+		out = append(out, hangingWrap(th, th.presentTitle, marker, v.Title, width)...)
 		out = append(out, bodyIndent+v.Path)
 	} else {
 		out = append(out, th.presentTitle.Render(marker)+v.Path)
@@ -237,7 +237,7 @@ func renderPresentedBlock(th theme, v presentedView, width int) []string {
 	if v.Location != "" {
 		out = append(out, bodyIndent+v.Location)
 	}
-	return append(out, hangingWrap(th.noteText, bodyIndent, presentedStatus(v), width)...)
+	return append(out, hangingWrap(th, th.noteText, bodyIndent, presentedStatus(v), width)...)
 }
 
 // startupWideMinGap is the smallest gap, in columns, the wide start-up layout keeps between the logo
@@ -282,10 +282,10 @@ func renderStartupBox(th theme, v startupView, width int) []string {
 	logo := strings.Split(v.Logo, "\n")
 	logoW := 0
 	for _, ln := range logo {
-		logoW = max(logoW, lipgloss.Width(ln))
+		logoW = max(logoW, th.measure.Width(ln))
 	}
-	labelW := startupLabelWidth(rows)
-	infoW := startupInfoWidth(rows, labelW)
+	labelW := startupLabelWidth(th, rows)
+	infoW := startupInfoWidth(th, rows, labelW)
 
 	if inner >= logoW+startupWideMinGap+infoW {
 		return renderStartupWide(th, logo, rows, labelW, infoW, width, inner)
@@ -309,7 +309,7 @@ func renderStartupWide(th theme, logo []string, rows []startupInfoRow, labelW, i
 		if i < len(logo) {
 			logoLine = logo[i]
 		}
-		line := logoLine + strings.Repeat(" ", max(0, left-lipgloss.Width(logoLine)))
+		line := logoLine + strings.Repeat(" ", max(0, left-th.measure.Width(logoLine)))
 		if i < len(rows) {
 			line += startupInfoLine(th, rows[i], labelW)
 		}
@@ -326,7 +326,7 @@ func renderStartupStacked(th theme, v startupView, width int) []string {
 	content = append(content, "") // one blank line between the logo and the info rows
 
 	rows := []startupInfoRow{{"host", v.Host}, {"model", v.Model}, {"version", v.Version}}
-	labelW := startupLabelWidth(rows)
+	labelW := startupLabelWidth(th, rows)
 	for _, r := range rows {
 		content = append(content, startupInfoLine(th, r, labelW))
 	}
@@ -336,15 +336,15 @@ func renderStartupStacked(th theme, v startupView, width int) []string {
 // startupInfoLine renders one info row — the dim label padded to the block's label column, two
 // spaces, then the plain value — shared by both start-up layouts so their rows never drift.
 func startupInfoLine(th theme, r startupInfoRow, labelW int) string {
-	padded := r.label + strings.Repeat(" ", max(0, labelW-lipgloss.Width(r.label)))
+	padded := r.label + strings.Repeat(" ", max(0, labelW-th.measure.Width(r.label)))
 	return th.noteText.Render(padded) + "  " + r.value
 }
 
 // startupLabelWidth is the widest label among the info rows — the column every value aligns past.
-func startupLabelWidth(rows []startupInfoRow) int {
+func startupLabelWidth(th theme, rows []startupInfoRow) int {
 	w := 0
 	for _, r := range rows {
-		w = max(w, lipgloss.Width(r.label))
+		w = max(w, th.measure.Width(r.label))
 	}
 	return w
 }
@@ -352,10 +352,10 @@ func startupLabelWidth(rows []startupInfoRow) int {
 // startupInfoWidth is the info block's rendered width: the widest label-padded row (labelW, two
 // spaces, then the value). It is the block the wide layout right-aligns and the term the width
 // switch measures against.
-func startupInfoWidth(rows []startupInfoRow, labelW int) int {
+func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 	w := 0
 	for _, r := range rows {
-		w = max(w, labelW+2+lipgloss.Width(r.value))
+		w = max(w, labelW+2+th.measure.Width(r.value))
 	}
 	return w
 }
@@ -368,21 +368,21 @@ func startupInfoWidth(rows []startupInfoRow, labelW int) int {
 // and renderEntryLines apply the rail) — width is already the railed inner column.
 //
 // The label is styled (bold orange) before the header is wrapped — the markdown.go posture:
-// ansi.Wrap is SGR-aware and lipgloss.Width strips ANSI, so baking the style into the text
+// ansi.Wrap is SGR-aware and the width authority strips ANSI, so baking the style into the text
 // leaves the soft-wrap and sticky-offset arithmetic untouched.
 //
 // Targets are padded to the block's widest so the detail column lines up; widths are display
-// cells (lipgloss.Width), so a multi-byte path pads correctly. A block of one pads to itself,
+// cells (th.measure, width.go), so a multi-byte path pads correctly. A block of one pads to itself,
 // which is no padding at all. An empty slice renders nothing — every caller passes at least one
 // view, and a renderer on the repaint path must not be the thing that panics if one ever does not.
 func renderToolBlock(th theme, views []toolView, width int) []string {
 	if len(views) == 0 {
 		return nil
 	}
-	out := hangingWrap(th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width)
+	out := hangingWrap(th, th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width)
 	column := 0
 	for _, tv := range views {
-		column = max(column, lipgloss.Width(tv.Target))
+		column = max(column, th.measure.Width(tv.Target))
 	}
 	for i, tv := range views {
 		out = append(out, renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width)...)
@@ -414,12 +414,12 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	}
 	text, style := tv.Target, th.toolDetail
 	if tv.Summary.Text != "" {
-		pad := strings.Repeat(" ", max(0, column-lipgloss.Width(tv.Target)))
+		pad := strings.Repeat(" ", max(0, column-th.measure.Width(tv.Target)))
 		text += pad + " " + tv.Summary.Text
 		style = detailStyle(th, tv.Summary.Kind)
 	}
-	out := hangingWrap(style, marker, text, width)
-	return append(out, renderSubDetails(th, tv.Details, lipgloss.Width(marker), width)...)
+	out := hangingWrap(th, style, marker, text, width)
+	return append(out, renderSubDetails(th, tv.Details, th.measure.Width(marker), width)...)
 }
 
 // branchDetails is what a targetless call hangs off its header: the body, plus the summary as
@@ -452,7 +452,7 @@ func renderSubDetails(th theme, details []detailLine, indent, width int) []strin
 	pad := strings.Repeat(" ", indent)
 	out := make([]string, 0, len(details))
 	for _, d := range details {
-		out = append(out, hangingWrap(detailStyle(th, d.Kind), pad, d.Text, width)...)
+		out = append(out, hangingWrap(th, detailStyle(th, d.Kind), pad, d.Text, width)...)
 	}
 	return out
 }
@@ -512,7 +512,7 @@ func renderOrphanResult(th theme, text string, width int) []string {
 func renderDetails(th theme, details []detailLine, width int) []string {
 	var out []string
 	for i, d := range details {
-		out = append(out, hangingWrap(detailStyle(th, d.Kind), branchMarker(i == len(details)-1), d.Text, width)...)
+		out = append(out, hangingWrap(th, detailStyle(th, d.Kind), branchMarker(i == len(details)-1), d.Text, width)...)
 	}
 	return out
 }
@@ -539,8 +539,8 @@ func detailStyle(th theme, kind detailKind) lipgloss.Style {
 // a wrapped block stays aligned under its marker (the ✦/┝ hanging indent of layout.md). The
 // style colours the whole line; widths are ANSI-agnostic, so styling never perturbs the
 // soft-wrap arithmetic.
-func hangingWrap(style lipgloss.Style, marker, text string, width int) []string {
-	prefixed := hangingPrefixes(marker, text, width)
+func hangingWrap(th theme, style lipgloss.Style, marker, text string, width int) []string {
+	prefixed := hangingPrefixes(th, marker, text, width)
 	out := make([]string, len(prefixed))
 	for i, ln := range prefixed {
 		out[i] = style.Render(ln)
@@ -552,8 +552,8 @@ func hangingWrap(style lipgloss.Style, marker, text string, width int) []string 
 // the first line and a matching blank indent to the rest, returning the unstyled lines. It is
 // shared by the styled hanging wrap and the user block (which then pads each line to a
 // full-width background).
-func hangingPrefixes(marker, text string, width int) []string {
-	mw := lipgloss.Width(marker)
+func hangingPrefixes(th theme, marker, text string, width int) []string {
+	mw := th.measure.Width(marker)
 	indent := strings.Repeat(" ", mw)
 	lines := wrapText(text, max(1, width-mw))
 	out := make([]string, len(lines))
@@ -637,6 +637,14 @@ func railLines(th theme, lines []string, depth int) []string {
 // `>= width` branch) so the caret has somewhere to sit past a full line. Under-counting that row
 // leaves the box one row too short at a width-fill boundary — the source of the scroll artifact
 // the layout re-seat then can no longer reach (ISSUES #2). An empty value is one row.
+//
+// WIDGET MIRROR — deliberately NOT the width authority. This is one of the package's mirrors of a
+// third-party widget's internal math, and a mirror's oracle is the widget, never apogee's
+// painter-facing measure (width.go): the textarea wraps with uniseg.StringWidth
+// (bubbles/v2@v2.1.0/textarea/textarea.go:1805-1852), which is grapheme-clustered like
+// ansi.StringWidth here and unlike ansi.WcWidth. Measuring the box in the painter's measure would
+// size it to something the widget never draws. The same rule governs wrappedOffset below (the
+// viewport's mirror) and the caret mirrors in inputaccent.go / mouse.go.
 func inputContentRows(value string, innerWidth int) int {
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -676,6 +684,11 @@ func clampInt(n, lo, hi int) int {
 // physical line occupies max(1, ceil(width/vpWidth)) rows. This holds only while the viewport
 // has no border or gutter (maxWidth == Width, the current wiring);
 // TestWrappedOffsetMatchesViewport guards the equality against drift.
+//
+// WIDGET MIRROR — deliberately NOT the width authority, for the reason inputContentRows states:
+// the viewport soft-wraps its own stored lines with ansi.StringWidth
+// (bubbles/v2@v2.1.0/viewport/viewport.go:284, 415), so the row count that puts the prompt on the
+// top row has to be counted in the viewport's measure and not in the painter's.
 func wrappedOffset(linesAbove []string, vpWidth int) int {
 	if vpWidth < 1 {
 		vpWidth = 1

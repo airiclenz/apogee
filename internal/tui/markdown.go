@@ -2,9 +2,6 @@ package tui
 
 import (
 	"strings"
-
-	lipgloss "charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -20,10 +17,10 @@ import (
 // toolpresent.go's posture; render.go owns the marker and depth framing.
 //
 // Two properties keep it safe inside the existing line-oriented renderer. The styling is baked
-// into the text as ANSI before wrapping, and ansi.Wrap/Hardwrap are SGR-aware (they re-emit a
+// into the text as ANSI before wrapping, and the wrap helpers are SGR-aware (they re-emit a
 // style across a soft-wrap boundary), so word-wrap arithmetic is unperturbed (render.go:204);
-// and lipgloss.Width strips ANSI, so the sticky-header scroll math (wrappedOffset) still measures
-// visible columns. Unterminated markup (a ` or ** or fence still streaming in) degrades to
+// and every width measure here strips ANSI, so the sticky-header scroll math (wrappedOffset) still
+// measures visible columns. Unterminated markup (a ` or ** or fence still streaming in) degrades to
 // literal text, so a partially-streamed message never leaks an escape or breaks the layout.
 
 // renderMarkdownBody renders an assistant message's markdown into styled physical lines at the
@@ -133,7 +130,7 @@ func renderHeadingLine(th theme, text string, width int) []string {
 // inline-styled item text, word-wrapped with a hanging indent so continuation lines align under
 // the text (hangingPrefixes leaves the marker unstyled and is ANSI-aware for the styled text).
 func renderListItem(th theme, li listItem, width int) []string {
-	return hangingPrefixes(li.indent+li.marker, renderInline(th, li.text), width)
+	return hangingPrefixes(th, li.indent+li.marker, renderInline(th, li.text), width)
 }
 
 // renderCodeBlock renders a fenced code block's body: each source line indented two columns and
@@ -144,7 +141,7 @@ func renderCodeBlock(th theme, code []string, width int) []string {
 	cw := max(1, width-len(indent))
 	var out []string
 	for _, cl := range code {
-		for _, seg := range strings.Split(ansi.Hardwrap(cl, cw, true), "\n") {
+		for _, seg := range strings.Split(th.measure.Hardwrap(cl, cw, true), "\n") {
 			out = append(out, indent+th.mdCodeBlock.Render(seg))
 		}
 	}
@@ -186,11 +183,11 @@ func renderInline(th theme, s string) string {
 // first line and a same-width blank indent leads the rest, so a multi-line assistant body stays
 // aligned under its ✦ marker (the hanging indent of layout.md). It is hangingPrefixes for lines
 // that are already wrapped and styled.
-func withMarker(marker string, lines []string) []string {
+func withMarker(th theme, marker string, lines []string) []string {
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
-	indent := strings.Repeat(" ", lipgloss.Width(marker))
+	indent := strings.Repeat(" ", th.measure.Width(marker))
 	out := make([]string, len(lines))
 	for i, ln := range lines {
 		if i == 0 {

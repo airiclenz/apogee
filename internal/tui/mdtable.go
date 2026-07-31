@@ -2,9 +2,6 @@ package tui
 
 import (
 	"strings"
-
-	lipgloss "charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -202,7 +199,7 @@ func hasUnescapedPipe(s string) bool {
 // A table is drawn borderless — columns of text and two spaces of gutter, with one dim rule
 // running unbroken under the header and no verticals anywhere — so it sits in the body column
 // like any other paragraph rather than a boxed object dropped into the transcript. Every width is a
-// display width (lipgloss.Width over the rendered, ANSI-carrying cell), never a byte count: the
+// display width (th.measure over the rendered, ANSI-carrying cell — width.go), never a byte count: the
 // cells are styled before they are measured, so markup characters and escape bytes can never
 // push a column open. One row is one physical line, which is what the line-oriented renderer
 // above this file requires (render.go), so an over-wide cell is cut with a … rather than wrapped.
@@ -234,16 +231,16 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 		rows[i] = cells
 	}
 
-	widths := tableColumnWidths(header, rows)
+	widths := tableColumnWidths(th, header, rows)
 	if !fitColumns(widths, width-len(tableGutter)*(len(widths)-1)) {
 		return nil, false
 	}
 
 	out := make([]string, 0, len(rows)+2)
-	out = append(out, layoutTableRow(header, widths, tbl.align))
+	out = append(out, layoutTableRow(th, header, widths, tbl.align))
 	out = append(out, tableRuleRow(th, widths))
 	for _, row := range rows {
-		out = append(out, layoutTableRow(row, widths, tbl.align))
+		out = append(out, layoutTableRow(th, row, widths, tbl.align))
 	}
 	return out, true
 }
@@ -251,17 +248,17 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 // tableColumnWidths measures each column's natural width: the widest rendered cell in it, header
 // included, floored at one cell so a column of nothing but empty cells still holds a place
 // between its gutters instead of running them together.
-func tableColumnWidths(header []string, rows [][]string) []int {
+func tableColumnWidths(th theme, header []string, rows [][]string) []int {
 	widths := make([]int, len(header))
 	for i, cell := range header {
-		widths[i] = max(1, lipgloss.Width(cell))
+		widths[i] = max(1, th.measure.Width(cell))
 	}
 	for _, row := range rows {
 		for i, cell := range row {
 			if i >= len(widths) {
 				break
 			}
-			widths[i] = max(widths[i], lipgloss.Width(cell))
+			widths[i] = max(widths[i], th.measure.Width(cell))
 		}
 	}
 	return widths
@@ -325,7 +322,7 @@ func fitColumns(widths []int, budget int) bool {
 // stepping inward beside the body, and it ends the row's selectable cells early where the mouse
 // still addresses the full width (mouse.go). The trailing blanks cost the copied text nothing —
 // transcriptSelectionText trims each line it cuts.
-func layoutTableRow(cells []string, widths []int, align []mdAlign) string {
+func layoutTableRow(th theme, cells []string, widths []int, align []mdAlign) string {
 	var b strings.Builder
 	for i, w := range widths {
 		if i > 0 {
@@ -339,7 +336,7 @@ func layoutTableRow(cells []string, widths []int, align []mdAlign) string {
 		if i < len(align) {
 			a = align[i]
 		}
-		b.WriteString(padTableCell(cell, w, a))
+		b.WriteString(padTableCell(th, cell, w, a))
 	}
 	return b.String()
 }
@@ -348,11 +345,11 @@ func layoutTableRow(cells []string, widths []int, align []mdAlign) string {
 // padded to the column with the spaces its alignment asks for — on the right for a left-aligned
 // cell, on the left for a right-aligned one, split for a centred one with the odd cell going to
 // its right (layout.md).
-func padTableCell(cell string, width int, align mdAlign) string {
-	if lipgloss.Width(cell) > width {
-		cell = ansi.Truncate(cell, width, "…")
+func padTableCell(th theme, cell string, width int, align mdAlign) string {
+	if th.measure.Width(cell) > width {
+		cell = th.measure.Truncate(cell, width, "…")
 	}
-	pad := width - lipgloss.Width(cell)
+	pad := width - th.measure.Width(cell)
 	if pad <= 0 {
 		return cell
 	}
