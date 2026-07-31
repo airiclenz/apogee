@@ -56,36 +56,36 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}{
 		{
 			name: "all empty → defaults",
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "file fills every field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan"), bypass: boolptr(true)},
-			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "env beats file, file fills the rest",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file")},
 			env:  layer{endpoint: strptr("http://env")},
-			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "flag beats env beats file, per field",
 			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan")},
 			env:  layer{endpoint: strptr("http://env"), model: strptr("m-env")},
 			flag: layer{endpoint: strptr("http://flag")},
-			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "explicit false in a higher layer overrides true below it",
 			file: layer{bypass: boolptr(true)},
 			flag: layer{bypass: boolptr(false)},
-			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "api-key comes from the file when the environment sets none",
 			file: fileConfig{APIKey: "file-secret"}.layer(),
-			want: settings{mode: "ask-before", apiKey: "file-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", apiKey: "file-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			// The key is settable by the file and by the environment, and by nothing else: even
@@ -96,101 +96,117 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			file: fileConfig{APIKey: "file-secret"}.layer(),
 			env:  layer{apiKey: strptr("env-secret")},
 			flag: flagLayer(options{apiKey: "flag-secret"}, func(name string) bool { return name == "api-key" }),
-			want: settings{mode: "ask-before", apiKey: "env-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", apiKey: "env-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "confine-to-workspace is file-only and defaults true",
 			file: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "use-project-skills is file-only and defaults true",
 			file: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "use-project-skills is NOT set by env or flag (file-only)",
 			env:  layer{useProjectSkills: boolptr(false)},
 			flag: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "auto-compact is file-only and defaults true",
 			file: layer{autoCompact: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: false, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: false, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "auto-compact is NOT set by env or flag (file-only)",
 			env:  layer{autoCompact: boolptr(false)},
 			flag: layer{autoCompact: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+		},
+		{
+			name: "auto-title is file-only and defaults true",
+			file: layer{autoTitle: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: false, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+		},
+		{
+			name: "an explicit auto-title: true resolves to the same value as an absent key",
+			file: layer{autoTitle: boolptr(true)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+		},
+		{
+			name: "auto-title is NOT set by env or flag (file-only)",
+			env:  layer{autoTitle: boolptr(false)},
+			flag: layer{autoTitle: boolptr(false)},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "context-window is file-only (default 0 ⇒ discover)",
 			file: layer{contextWindow: intptr(65536)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, contextWindow: 65536},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, contextWindow: 65536},
 		},
 		{
 			name: "context-window is NOT set by env or flag (file-only)",
 			env:  layer{contextWindow: intptr(65536)},
 			flag: layer{contextWindow: intptr(65536)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "confine-to-workspace is NOT loosenable by env or flag (global-config-only)",
 			env:  layer{confineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
 			flag: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "a matching unconfined-hosts entry resolves confine-to-workspace to false",
 			file: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault,
+			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault,
 				unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
 		},
 		{
 			name: "unconfined-hosts is NOT settable by env or flag (global-config-only)",
 			env:  layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
 			flag: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "web-search endpoint is file-only (default empty)",
 			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, webSearchEndpoint: "https://search.example.com"},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, webSearchEndpoint: "https://search.example.com"},
 		},
 		{
 			name: "mcp servers are file-only (default empty)",
 			file: layer{mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
 		},
 		{
 			name: "mcp servers are NOT settable by env or flag (file-only)",
 			env:  layer{mcpServers: []mcp.ServerConfig{{Name: "fromenv"}}},
 			flag: layer{mcpServers: []mcp.ServerConfig{{Name: "fromflag"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "servers are file-only (default empty)",
 			file: layer{servers: []serverEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, servers: []serverEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, servers: []serverEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
 		},
 		{
 			name: "servers are NOT settable by env or flag (file-only)",
 			env:  layer{servers: []serverEntry{{Name: "fromenv", Endpoint: "http://env:1111"}}},
 			flag: layer{servers: []serverEntry{{Name: "fromflag", Endpoint: "http://flag:1111"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "llama-launcher is file-only (default empty ⇒ auto-detect at the root)",
 			file: fileConfig{LlamaLauncher: "off"}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, llamaLauncher: "off"},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, llamaLauncher: "off"},
 		},
 		{
 			name: "llama-launcher is NOT settable by env or flag (file-only)",
 			env:  layer{llamaLauncher: strptr("/from/env.yaml")},
 			flag: layer{llamaLauncher: strptr("/from/flag.yaml")},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "model profile is file-only (default zero)",
@@ -198,7 +214,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 				ToolCallFormat: apogee.FormatMarkdownFenced,
 				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, profile: apogee.ModelProfile{
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, profile: apogee.ModelProfile{
 				ToolCallFormat: apogee.FormatMarkdownFenced,
 				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
@@ -207,68 +223,68 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "model profile is NOT settable by env or flag (file-only)",
 			env:  layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatCustomRegex}},
 			flag: layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "mechanisms are file-only (default empty)",
 			file: layer{mechanisms: map[string]bool{"validate": true, "syntax": false}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mechanisms: map[string]bool{"validate": true, "syntax": false}},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mechanisms: map[string]bool{"validate": true, "syntax": false}},
 		},
 		{
 			name: "mechanisms are NOT settable by env or flag (file-only)",
 			env:  layer{mechanisms: map[string]bool{"fromenv": true}},
 			flag: layer{mechanisms: map[string]bool{"fromflag": true}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "the present block is file-only (all four keys)",
 			file: layer{present: &presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "10.0.0.2"}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault,
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault,
 				present: presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "10.0.0.2"}, ui: wantUIDefault},
 		},
 		{
 			name: "present is NOT settable by env or flag (file-only ⇒ auto-open stays on)",
 			env:  layer{present: &presentSettings{autoOpen: false, port: 1}},
 			flag: layer{present: &presentSettings{autoOpen: false, port: 2}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "the ui block is file-only (both keys)",
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false)}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
 				ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false}},
 		},
 		{
 			// The two keys are independent: naming a style says nothing about the colour loop.
 			name: "ui with only spinner: set → the colour loop stays at its default",
 			file: fileConfig{UI: &uiConfig{Spinner: "classic"}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
 				ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true}},
 		},
 		{
 			// …and the other way round: turning the loop off does not change which style paints.
 			name: "ui with only spinner-color: false → the style stays at its default",
 			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
 				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false}},
 		},
 		{
 			name: "ui is NOT settable by env or flag (file-only ⇒ the defaults hold)",
 			env:  layer{ui: &uiSettings{spinner: tui.SpinnerClassic}},
 			flag: layer{ui: &uiSettings{spinner: tui.SpinnerGlitter}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "a context-files block replaces the default name list whole",
 			file: fileConfig{ContextFiles: &contextFilesConfig{Names: []string{"CONVENTIONS.md", "AGENTS.md"}}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault,
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault,
 				contextFiles: contextFilesSettings{enable: true, names: []string{"CONVENTIONS.md", "AGENTS.md"}}},
 		},
 		{
 			name: "context-files is NOT settable by env or flag (file-only ⇒ the defaults hold)",
 			env:  layer{contextFiles: &contextFilesSettings{enable: true, names: []string{"from-env.md"}}},
 			flag: layer{contextFiles: &contextFilesSettings{enable: false}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 	}
 	for _, tt := range tests {
@@ -580,6 +596,42 @@ func TestApplyConfigAutoCompactOptOut(t *testing.T) {
 	}
 	if opts.autoCompact {
 		t.Error("opts.autoCompact = true; want the file's explicit false to opt out")
+	}
+}
+
+// The auto-title config block parses into opts.autoTitle: a file-only, default-TRUE key, so the
+// automatic session-naming call runs unless a config explicitly opts out. The seeded template is
+// in the table because it is what a first run actually resolves — the key ships commented, so it
+// must land on the same default as an empty file.
+func TestApplyConfigAutoTitle(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileYAML string
+		want     bool
+	}{
+		{name: "absent key ⇒ the default", want: true},
+		{name: "an explicit false opts out", fileYAML: "auto-title: false\n", want: false},
+		{name: "an explicit true is the default, said out loud", fileYAML: "auto-title: true\n", want: true},
+		{name: "the seeded template resolves the default", fileYAML: string(defaultConfigYAML), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if tt.fileYAML != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.fileYAML), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+			opts := options{configDir: home}
+			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if opts.autoTitle != tt.want {
+				t.Errorf("opts.autoTitle = %v; want %v", opts.autoTitle, tt.want)
+			}
+		})
 	}
 }
 

@@ -99,6 +99,14 @@ type settings struct {
 	// is unaffected by it (that always folds on request).
 	autoCompact bool
 
+	// autoTitle gates the AUTOMATIC session-naming call — the cosmetic out-of-band completion that
+	// names a new Session record from its first prompt. File-only, default TRUE. It is cosmetic, not
+	// structural: nothing breaks when it is off (the heuristic title stamped at the first Save
+	// stands), which is why it can be turned off at all. It gates only the automatic firing — the
+	// generator stays wired either way, so `/rename` still regenerates on demand under
+	// `auto-title: false`.
+	autoTitle bool
+
 	// contextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env,
 	// like autoCompact) and default 0 ⇒ unpinned, so the window is whatever the ten-second
 	// heartbeat observes, live, and follows a model switch with it; a positive value is never
@@ -454,6 +462,11 @@ type layer struct {
 	// distinguishable from an absent key (which keeps the default true).
 	autoCompact *bool
 
+	// autoTitle is set only by the FILE layer (the automatic session-naming call is config'd,
+	// default-on, with no flag/env — like autoCompact above). A pointer so an explicit
+	// `auto-title: false` is distinguishable from an absent key (which keeps the default true).
+	autoTitle *bool
+
 	// contextWindow is set only by the FILE layer (the window pin is config'd, no flag/env — like
 	// autoCompact). A nil pointer means the source pins no window, so resolution leaves it 0 and
 	// the heartbeat's live observation stands; only a positive `context-window:` projects to a
@@ -526,7 +539,7 @@ type layer struct {
 // surface established: a data defect degrades, it never blocks startup).
 func resolveSettings(file, env, flag layer, hostID string) (settings, []string) {
 	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true,
-		validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: defaultUISettings(),
+		autoTitle: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: defaultUISettings(),
 		contextFiles: defaultContextFilesSettings()}
 	// file-only (ADR 0012 + its 2026-07-21 amendment); env/flag never carry either, so the
 	// invocation environment can neither flip the flag nor name a host.
@@ -541,6 +554,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	}
 	if file.autoCompact != nil {
 		s.autoCompact = *file.autoCompact
+	}
+	if file.autoTitle != nil {
+		s.autoTitle = *file.autoTitle
 	}
 	if file.contextWindow != nil {
 		s.contextWindow = *file.contextWindow
@@ -709,6 +725,13 @@ type fileConfig struct {
 	// so an explicit `auto-compact: false` is distinguishable from an absent key (default true).
 	// Compaction is structural (it stays on under Bypass), so this is the only way to turn it off.
 	AutoCompact *bool `yaml:"auto-compact"`
+	// AutoTitle gates the AUTOMATIC session-naming call: on the first prompt of a new session an
+	// out-of-band completion names the Session record from that prompt, applied through the same
+	// Rename path the session browser uses. File-only (no flag/env), and a pointer so an explicit
+	// `auto-title: false` is distinguishable from an absent key (default true). Unlike auto-compact
+	// this one is cosmetic — with it off the heuristic title stands and `/rename` still regenerates
+	// on demand, because the key gates only the automatic firing, not the generator.
+	AutoTitle *bool `yaml:"auto-title"`
 	// ContextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env),
 	// like auto-compact. Absent or ≤ 0 ⇒ unpinned, so the window follows what the ten-second
 	// heartbeat observes, live, across a model switch; a positive value is never overridden by a
@@ -1095,6 +1118,9 @@ func (fc fileConfig) layer() layer {
 	if fc.AutoCompact != nil {
 		l.autoCompact = fc.AutoCompact
 	}
+	if fc.AutoTitle != nil {
+		l.autoTitle = fc.AutoTitle
+	}
 	if fc.ContextWindow > 0 {
 		l.contextWindow = &fc.ContextWindow
 	}
@@ -1331,6 +1357,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.webSearchEndpoint = s.webSearchEndpoint
 	opts.useProjectSkills = s.useProjectSkills
 	opts.autoCompact = s.autoCompact
+	opts.autoTitle = s.autoTitle
 	opts.contextWindow = s.contextWindow
 	opts.mcpServers = s.mcpServers
 	opts.profile = s.profile

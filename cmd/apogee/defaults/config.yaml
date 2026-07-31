@@ -294,6 +294,19 @@ system-prompt-text: |
 # auto-compact: true
 
 # =============================================================================
+# Name new sessions from their first prompt. On the first thing you say in a fresh session, apogee
+# sends one small extra completion — the prompt, your workspace name and the date — and uses the
+# reply as that session's title, so the session browser lists "fix the escape handling in the
+# picker" instead of the first few words of what you typed. The call goes to the SAME server and
+# model the session is already using; on a single-slot server it simply queues behind your first
+# response and runs in the gap before your next message. It is cosmetic, never structural: it costs
+# one short request per session, it never appears in the transcript or the context gauge, and if it
+# fails the title apogee derived from your prompt stays. Turning it off stops only the AUTOMATIC
+# naming — /rename still sets a title by hand, and bare /rename still asks the model for one.
+# Config-file only (no flag or env). Default: true.
+# auto-title: false
+
+# =============================================================================
 # The model's context window in tokens. This one IS a pin: the ten-second heartbeat never overrides
 # it, so a model switch still rebinds but the window stays exactly what you set here. Leave it unset
 # to discover the window from the server, live — including when the server switches models. Set it

@@ -142,7 +142,7 @@ all-noise input → ok=false.
 
 **Commit:** `feat(title): session-title prompt builder and sanitizer`
 
-## 3. Config: auto-title toggle, default on
+## 3. Config: auto-title toggle, default on — ✅ DONE (2026-07-31)
 
 **What:** In `cmd/apogee/config.go`: add `AutoTitle *bool \`yaml:"auto-title"\`` to
 `fileConfig` (precedent: `AutoCompact`, config.go:711) and `autoTitle bool` to

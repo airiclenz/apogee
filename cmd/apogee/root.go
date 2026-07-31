@@ -85,6 +85,13 @@ type options struct {
 	// apogee.Config.Context.CompactionEnabled.
 	autoCompact bool
 
+	// autoTitle gates the automatic session-naming call — the cosmetic out-of-band completion that
+	// names a new Session record from its first prompt (default true), loaded from the config file
+	// only. applyConfig sets it from settings; runRoot folds it into tui.Options.AutoTitle. It gates
+	// only the AUTOMATIC firing: the GenerateTitle seam stays wired either way, so /rename can still
+	// regenerate a title on demand when this is false.
+	autoTitle bool
+
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), loaded from
 	// the config file only (default-empty ⇒ MCP dormant). applyConfig sets it from settings.
 	mcpServers []mcp.ServerConfig
