@@ -123,6 +123,71 @@ is what keeps them from reading as one run.
 
 ---
 
+## Markdown tables in assistant text
+
+**When a table is a table.** A pipe table in an answer renders as a table only once its delimiter
+row has landed: a line carrying at least one unescaped `|`, immediately followed by a row built
+only from `-`, `:`, spaces and pipes, with at least one `-` per cell and the same cell count as the
+line above it. Leading and trailing pipes are optional, `\|` is a literal pipe inside a cell, and
+the block ends at the first blank line or the first line with no pipe in it. A delimiter-shaped
+line with no header above it is not a table and keeps whatever it renders as today.
+
+**It is borderless.** No verticals, no outer frame, no corners — a table is columns of text and
+nothing else, sitting in the same body column the rest of the answer sits in. Every cell is padded
+to the widest cell in its column and columns are separated by exactly **two spaces**. Each cell is
+rendered as inline markdown first, so `**bold**` and `` `code` `` inside a cell style the way they
+do in a paragraph, and it is that *rendered* width that sets the column — never the source width,
+so markup characters and the bytes of a colour escape never push a column open.
+
+**The header and its rule.** The header row's cells are bold, the same weight `**bold**` earns
+anywhere else. The delimiter row renders as a run of `─` per column, each as wide as the column it
+belongs to, with the two-space gutters left bare — so it reads as one ruled line under each column
+rather than a border drawn around the table.
+
+**Alignment is the delimiter row's word.** `:--` left, `--:` right, `:-:` centred, a plain `---`
+left; every cell is padded on the side its column names, header cells included. A centred cell with
+an odd remainder takes the extra space on its right. A row with fewer cells than the header is
+padded out with empty ones and a row with more loses the excess: the column count is the header's
+to set.
+
+**The width cap is absolute.** No rendered line ever exceeds the width the block was given, a table
+no more than anything else. Where the natural column widths plus their gutters do not fit, the
+widest column is shrunk one cell at a time — the leftmost of them where two are equally wide, so
+the outcome is the same every repaint — until the table fits, and a cell too wide for the column it
+lands in is cut with a `…` tail. If the table cannot fit even with every column down to a single
+cell, it is not drawn as a table at all: the block falls back to the plain paragraphs it would have
+been before, which is always readable and never overflows.
+
+**One row is one line.** No cell wraps; a row is exactly one physical line however much it carries.
+Overflow is the `…` above, never a second row.
+
+**A partial table is plain text.** While a table streams in, everything before the delimiter row is
+ordinary paragraphs — the contract every other half-typed construct keeps — and the block snaps
+into a table on the row that completes it. Columns go on measuring themselves against the rows that
+have arrived, so a table may widen a column as it streams; that reflow is expected and costs
+nothing but a repaint.
+
+**Before and after.** What the model emits:
+
+```
+| Tool | Calls | Notes |
+|:--|--:|:-:|
+| Read File | 12 | fast |
+| Run | 3 | `go test ./...` |
+```
+
+and what the transcript draws for it at 34 columns of body width — `Tool` left, `Calls` right,
+`Notes` centred, the header bold, `go test ./...` styled as inline code with its backticks gone:
+
+```
+Tool       Calls      Notes
+─────────  ─────  ─────────────
+Read File     12      fast
+Run            3  go test ./...
+```
+
+---
+
 ## The status line's spinner
 
 **Which animation.** The two braille cells opening the running status line above are the `snake`

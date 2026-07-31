@@ -78,7 +78,14 @@ is a spare, dependency-free table renderer in the same posture as the rest of
    receives an already-railed, already-marker-reduced width; the table renderer never
    re-applies indent.
 
-## 1. Amend `layout.md` — the table block spec
+## 1. Amend `layout.md` — the table block spec — ✅ DONE (2026-07-31)
+
+**NOTES (2026-07-31):** `layout.md` has no "assistant block" section to nest under (every part is a
+top-level `##`), so the spec landed as its own `## Markdown tables in assistant text` section placed
+after the tool-call-sketch rules and before the chrome sections — i.e. in the transcript-body part of
+the doc. Two details Decisions 4–6 left open were pinned so item 3 has an unambiguous authority: a
+centred cell with an odd remainder takes the extra space on its **right**, and where two columns are
+equally wide the **leftmost** shrinks first under the width cap.
 
 **What:** Add a "Markdown tables" subsection to the assistant-block part of `layout.md`
 stating the visual contract of Decisions 4–8 in the spec's own prose style: borderless
