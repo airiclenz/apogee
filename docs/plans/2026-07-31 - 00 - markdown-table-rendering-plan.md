@@ -104,9 +104,16 @@ written against a sketch that contradicts it.
 
 **Commit:** `docs(layout): spec markdown table rendering in the transcript`
 
-## 2. Table detection and parsing — pure parser in `mdtable.go`
+## 2. Table detection and parsing — pure parser in `mdtable.go` — ✅ DONE (2026-07-31)
 
 Depends on item 1.
+
+**NOTES (2026-07-31):** the item names the block scanner and the parser separately; they landed as one
+entry point, `matchTableBlock(lines, start) (mdTable, int, bool)`, because detection *is* parsing the
+header and delimiter — splitting them would re-split both rows on every candidate line of every
+streamed token (Decision 2's cost constraint). The pieces are still separate testable functions
+underneath (`parseDelimiterRow`, `delimiterCellAlign`, `splitTableRow`, `fitRow`, `hasUnescapedPipe`),
+and the parsed table is the `mdTable` value `matchTableBlock` returns (header, align, rows).
 
 **What:** Create `internal/tui/mdtable.go` with unexported pure functions implementing
 Decisions 2–3: a delimiter-row validator; a block scanner that, given the line slice and
