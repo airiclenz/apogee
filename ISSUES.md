@@ -14,3 +14,8 @@ X: Executed
 I'd also like to have the sub agent line in orange (same color as tool headers)
 
 - [ ] we need a possibility to klick on tool calls to see al the details /e.g. "+22 more line" extend to show the lines. This should be a global module that can be re-used for all tools including sub-agents (e.g. all below and including `⤷ sub-agent` is collapsed). It should also by defualt display the tool name, a summary about the tool (like now) and maybe even an in-progress indicator (the very left bullet point as a blinking star). The summary will be more complex for complex tools like sub-agents which could include many tool calls in itself (cascading). This will need deeper grilling / planning.  
+
+- [ ] sent prompts with skills should not look like this: 
+  ❯ /refocus on everything
+    ✦ Refocus
+  The skill(s) should be in-line with the text and simply color marked. I don't want additional skill tags like `✦ Refocus` in this example
