@@ -63,6 +63,17 @@ type Model struct {
 	// value-copied Model like autocompleteState (ADR 0011). It is driven only at idle.
 	sessionBrowser sessionBrowser
 
+	// Automatic session naming (autotitle.go; ADR 0022 addendum). autoTitleFired latches the one
+	// cosmetic naming call a Session record gets — set when it fires, and set UP FRONT on a resumed
+	// record, which already has a name. titleTouched records that a human named this session, which
+	// drops a late-landing automatic title (never clobber). pendingTitle stashes a title that
+	// resolved before the first Save minted an id to rename, applied at that save's completion.
+	// Three plain values, safe in the value-copied Model (ADR 0011); startNewSession resets all
+	// three, so the session /clear opens names itself afresh.
+	autoTitleFired bool
+	titleTouched   bool
+	pendingTitle   string
+
 	// actuation is the launcher latch (actuation.go, ADR 0029 D5): which blocking launcher verb is
 	// in flight, on what, and the channel its narration is pumped back through. Its zero value is
 	// "nothing in flight", and everything on it is a plain value or a channel — a reference header —
@@ -239,6 +250,10 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	if r == nil {
 		return
 	}
+	// A resumed record already HAS a name — possibly one the human chose — so the automatic naming
+	// call is latched off for the life of this session (Ratified design 5). A bare /rename still
+	// regenerates on demand: the toggle answers "name my sessions for me", not "never ask".
+	m.autoTitleFired = true
 	m.ctxUsed = r.CtxUsed // relight the gauge near the session's last observed fill
 	entries, err := decodeTranscript(r.Transcript)
 	if err != nil || len(entries) == 0 {
@@ -528,6 +543,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// An async save returned. Clear the single-flight flag, note the ok↔fail transition once,
 		// and dispatch any save that coalesced while this one ran (saveComplete).
 		return m, m.saveComplete(msg.Err)
+
+	case autoTitleMsg:
+		// The out-of-band naming call returned (autotitle.go). Rename the Session record to what it
+		// produced, or drop it silently — a failed call, an unusable reply, and a session the human
+		// has since named themselves all leave the heuristic title standing. Nothing else moves: the
+		// title is not a Turn, so no transcript entry, no event, and no gauge answers to it.
+		return m, m.foldAutoTitle(msg)
 
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
@@ -891,8 +913,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.promptEditor.reset() // empties the textarea and closes the overlay
 	m.detached = false     // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
 	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs))
+	// The first prompt of a fresh Session record also NAMES it: one cosmetic out-of-band completion
+	// fired here, in parallel with the Exchange this prompt starts, so a single-slot server answers
+	// it between Turns 1 and 2 (autotitle.go). It drives no engine and enters no transcript — it
+	// simply rides along in the batch below, and is nil whenever nothing should fire.
+	nameCmd := m.maybeAutoTitle(in.Text)
 	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
-	return m.launchExchange(in)
+	next, cmd := m.launchExchange(in)
+	return next, tea.Batch(cmd, nameCmd)
 }
 
 // refuseUnknownSlash answers the sole-token typo guard (parseInput's kindUnknownSlash): a note
@@ -1043,6 +1071,12 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.tokPerSec = 0    // …the same reason compactDoneMsg zeroes them on a fold
 	m.genStart = time.Time{}
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
+	// The Rotate above opened a fresh Session record, and a fresh record names itself: unlatch the
+	// naming call, forget that the CLOSED session was named by hand, and drop any title still
+	// waiting for an id — it was stashed for the session that just went into history.
+	m.autoTitleFired = false
+	m.titleTouched = false
+	m.pendingTitle = ""
 	m.layout()
 	return m, nil
 }
@@ -1455,8 +1489,13 @@ func (m Model) saveCmd(p savePayload) tea.Cmd {
 
 // saveComplete folds a finished save: it clears the in-flight flag, notes the ok↔fail transition
 // exactly once (on the ok→fail edge and the fail→ok recovery edge, then swallows the error — a
-// save failure must never interrupt the conversation), and dispatches any payload that coalesced
-// while the save ran (latest-wins single-flight).
+// save failure must never interrupt the conversation), applies any session title that was waiting
+// for this record to exist, and dispatches any payload that coalesced while the save ran
+// (latest-wins single-flight).
+//
+// The title flush hangs off a SUCCESSFUL save because that is the moment the record is first on
+// disk with an id: the naming call (autotitle.go) routinely answers before the first save-complete,
+// and Rename — the only writer of a stored title — needs a stored record to rewrite.
 func (m *Model) saveComplete(err error) tea.Cmd {
 	m.saveBusy = false
 	switch {
@@ -1469,12 +1508,16 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 		m.transcript.addNote("session saving recovered")
 		m.refreshViewport()
 	}
+	var cmds []tea.Cmd
+	if err == nil {
+		cmds = append(cmds, m.flushPendingTitle())
+	}
 	if m.pendingSave != nil {
 		p := *m.pendingSave
 		m.pendingSave = nil
-		return m.scheduleSave(p)
+		cmds = append(cmds, m.scheduleSave(p))
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 // sessionTitleMax is the longest a derived session title runs before word-boundary truncation

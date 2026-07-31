@@ -381,7 +381,12 @@
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
 // resolve-gated inline accents the prompt box paints its
 // /skill and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
-// versioned wire form inside a saved session record; sessions.go the /sessions history browser,
+// versioned wire form inside a saved session record; sessions.go the /sessions history browser;
+// autotitle.go the state machine behind a session's NAME — one cosmetic out-of-band completion
+// ([Options.GenerateTitle]) fired at the first prompt's submit, in parallel with the Exchange it
+// starts, which never reaches the Engine (ADR 0011), is not a Turn, enters no transcript, applies
+// through Rename (the only writer of a stored title) or waits for the id that first Save mints, and
+// is dropped without a word whenever it fails or a human has named the session first;
 // picker.go the modal single-select overlay behind /model and /server, and
 // popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go

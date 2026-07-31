@@ -258,6 +258,10 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if len(visible) == 0 || title == "" {
 			return m, nil
 		}
+		// A human just named a session, so a naming call still in flight must not overwrite what
+		// they typed when it lands (autotitle.go, Ratified design 5). The flag is set on the
+		// COMMIT, not on arming the edit: an abandoned rename changed nothing.
+		m.titleTouched = true
 		return m, m.renameSession(visible[m.sessionBrowser.selected].ID, title)
 	case "backspace":
 		r := []rune(m.sessionBrowser.renameBuf)
@@ -291,6 +295,23 @@ func (m Model) renameSession(id, title string) tea.Cmd {
 		_ = sessions.Rename(id, title) // best-effort: a rename failure leaves the old title on the re-list
 		metas, err := sessions.List()
 		return sessionListMsg{metas: metas, err: err}
+	}
+}
+
+// setSessionTitle is renameSession's QUIET twin: it sets id's title off the Update loop and reports
+// nothing back. It is the apply path for a title the model generated (autotitle.go), where the
+// re-list would be actively wrong — foldSessionList opens the overlay over every list it folds, so
+// reusing renameSession would make the /sessions browser appear unbidden partway through the first
+// answer. Nothing is displayed either way: a title surfaces in the browser the next time it is
+// opened, and in the resume note, and nowhere else.
+//
+// The rename is best-effort for the same reason the naming call is silent — the record already
+// carries a usable heuristic title, so a failure costs the session nothing.
+func (m Model) setSessionTitle(id, title string) tea.Cmd {
+	sessions := m.sessions
+	return func() tea.Msg {
+		_ = sessions.Rename(id, title)
+		return nil
 	}
 }
 
@@ -330,6 +351,11 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if m.sessions != nil {
 		m.sessions.Activate(msg.rec.Meta)
 	}
+	// Saves now target a record that already HAS a name, so the automatic naming call is latched off
+	// for the rest of this session exactly as it is for a --resume start (replayResumed), and a title
+	// still waiting for an id is dropped: it was stashed for the session this restore just replaced.
+	m.autoTitleFired = true
+	m.pendingTitle = ""
 	title := msg.rec.Meta.Title
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))

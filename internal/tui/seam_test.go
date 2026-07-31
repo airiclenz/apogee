@@ -346,6 +346,7 @@ type savedCall struct {
 type fakeSessionHost struct {
 	mu       sync.Mutex
 	saves    []savedCall
+	renames  []renameCall // every Rename asked for, in order (the browser's `r` and generated titles)
 	rotates  int
 	activeID string
 	minted   int   // ids handed out so far, so a rotated session gets a distinct one
@@ -433,11 +434,26 @@ func (h *fakeSessionHost) Delete(id string) error {
 func (h *fakeSessionHost) Rename(id, title string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.renames = append(h.renames, renameCall{id: id, title: title})
 	if rec, ok := h.stored[id]; ok {
 		rec.Meta.Title = title
 		h.stored[id] = rec
 	}
 	return nil
+}
+
+// renameCall is one title the host was asked to store. It is recorded whether or not a matching
+// record was seeded, so a naming test can prove WHAT was renamed to what without a store.
+type renameCall struct {
+	id    string
+	title string
+}
+
+// renamedTitles returns a copy of the recorded Renames in order.
+func (h *fakeSessionHost) renamedTitles() []renameCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]renameCall(nil), h.renames...)
 }
 
 func (h *fakeSessionHost) ActiveID() string {

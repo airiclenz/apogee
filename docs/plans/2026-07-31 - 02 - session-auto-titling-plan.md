@@ -197,9 +197,22 @@ canned prompt and asserts `title.Sanitize` accepts it.
 
 **Commit:** `feat(tui): GenerateTitle seam wired to an out-of-band title client`
 
-## 5. TUI: automatic naming state machine
+## 5. TUI: automatic naming state machine — ✅ DONE (2026-07-31)
 
 Depends on item 4.
+
+NOTES (2026-07-31): three departures from the item's literal text, all in the direction the Ratified
+design points. (a) The apply path does NOT reuse `m.renameSession`: that Cmd re-lists, and
+`foldSessionList` opens the /sessions overlay over every list it folds, so a generated title would pop
+the browser open mid-answer — against the plan's own "no new UI chrome" scope. A quiet twin,
+`setSessionTitle` (sessions.go, beside `renameSession`), renames off the loop and reports nothing.
+(b) `resumeLoaded` — the `/sessions` browser's resume — also latches `autoTitleFired` and drops
+`pendingTitle`; the item names only the `ResumedSession` replay, but Ratified design 5 says auto-naming
+never fires on a resumed session, and without this a fresh launch that resumes an old record before its
+first prompt would rename that record. (c) `maybeAutoTitle` also requires a wired `SessionHost`: with no
+persistence there is no Session record to name, so the call would spend a queue slot on a result with
+nowhere to go. Also: `internal/tui/doc.go`'s file-by-file narration gained the new file, since it claims
+to name every file in the package.
 
 **What:** In `internal/tui` (model.go + a focused new file if cleaner): on user-prompt
 submit, when `opts.AutoTitle && opts.GenerateTitle != nil` and this is the first prompt
