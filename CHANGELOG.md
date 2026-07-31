@@ -554,6 +554,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The sub-agent rail is continuous now, and it is orange.** The `│` line marking a sub-agent's
+  work down the left of the chat broke at every blank row — and since each block is separated by
+  one, the rail came out as disconnected stubs rather than one frame around the run. The separating
+  row now carries the rail too, drawn as deep as both of the blocks it sits between, so a run reads
+  as a single vertical-ruled section from its `⤷ sub-agent` label to its last line. The same rule
+  keeps runs apart: the row above a second sub-agent call is bare, because that call's own block
+  sits at the parent's level, so two sub-agent calls in a row are never joined into one. The rail
+  and its `⤷` label are painted in the tool header's orange instead of dim grey — one tone for the
+  whole sub-agent frame, matching the `✦` markers it encloses. A transcript with no sub-agent in it
+  renders exactly as before, byte for byte.
 - **The dangerous-action guard no longer refuses a file because of what the file *says*.** The
   guard matched its rules against every string in a tool call's arguments — the body a write
   carries included — so writing a document that merely *mentioned* a guarded path was refused as

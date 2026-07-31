@@ -112,7 +112,7 @@ unstyled) — loose equality against the theme's own render, no lipgloss byte-go
 
 **Commit:** `feat(tui): paint the sub-agent rail and label in the tool-header orange`
 
-## 3. Document the rail rule and close the issue
+## 3. Document the rail rule and close the issue — ✅ DONE (2026-07-31)
 
 Depends on items 1 and 2. This is the single owning item for every cross-cutting prose
 amendment — no other item edits these files.

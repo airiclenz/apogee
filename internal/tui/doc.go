@@ -38,6 +38,16 @@
 // to a deeper level. The framing lives entirely in render.go (the value-copied Model holds no new
 // state — the run boundary is derived from each entry's depth inside [transcript.renderView]), so
 // the flat Depth==0 transcript renders byte-for-byte as before (ADR 0011 still holds — render only).
+// The frame is CONTINUOUS across the one blank row layout.md puts between blocks: that separator is
+// itself railed, at the JOIN — the min — of the depths of the two blocks it sits between
+// ([railSpacer], fed by a per-appended-block depth rather than the loop's per-entry one, since the ⤷
+// labels are blocks with depths of their own). The min rule is the whole run-boundary logic: inside
+// a run every join is ≥ 1 so the rail never breaks, a climb-out keeps only the rails both sides
+// reach, and two consecutive sub_agent calls are never joined, because the second call's own
+// tool-call block sits at the PARENT's depth — the join dips there, the spacer goes bare, and the
+// descent logic opens a fresh ⤷ label for the second run. The whole frame — rail and label alike —
+// is one style role (theme's subRail) in the tool-header orange (colCode), coherent with the orange
+// ✦ tool markers.
 //
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):
