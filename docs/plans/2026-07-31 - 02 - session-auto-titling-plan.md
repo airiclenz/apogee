@@ -284,7 +284,7 @@ command table; `make check` passes.
 
 **Commit:** `feat(tui): /rename sets or regenerates the session title`
 
-## 7. Changelog
+## 7. Changelog — ✅ DONE (2026-07-31)
 
 Depends on items 1–6.
 

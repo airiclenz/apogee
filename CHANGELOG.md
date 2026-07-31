@@ -10,6 +10,46 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A new session names itself from your first prompt — and `/rename` sets or re-asks for a name.**
+  A saved session was listed under the first line you typed, cut at 50 characters, so the
+  `/sessions` browser read as a wall of half-sentences. Now the first thing you say in a fresh
+  session also goes out as one small extra completion — that prompt, your workspace name and the
+  date — and the reply becomes the session's title, so the browser lists `fix the escape handling in
+  the session picker` instead of `hey, could you take a look at why the escape se…`. The naming call
+  goes to the **same server and the same model the session is already on**, so there is nothing new
+  to configure and no second endpoint to point anywhere.
+  - **It costs one short request and nothing else.** The call is cosmetic, never structural: it is
+    not a Turn, it fires at no hook point, it never shapes what the model is actually answering, it
+    never reaches the transcript and it never moves the context gauge. It goes out **in parallel
+    with your first message**, so on a single-slot server it queues behind that answer and lands in
+    the gap before you say the next thing — the point in a session where the context is smallest and
+    an eviction costs least. If the call fails, or the reply has nothing usable in it, the title
+    apogee derived from your prompt simply stands and **nothing is said**: a maintenance nicety must
+    never nag.
+  - **`/rename` is the manual half.** `/rename <name>` sets the title outright; bare `/rename` asks
+    the model for one. Unlike the automatic call this verb always speaks — every outcome, refusals
+    included, lands as a transcript note, because a command you typed that quietly did nothing is a
+    bug in the interface. A name **you** set is never overwritten by an automatic title that arrives
+    late, and naming a session *before* it has said anything works too: the title waits for the
+    record and is applied the moment one exists, overriding the derived name. Bare `/rename` is an
+    explicit request, so its answer applies even over a name you set a moment ago — and it still
+    works when automatic naming is switched off.
+  - **One sanitizer, for the model's reply and for what you type.** A leading `<think>…</think>`
+    block is stripped, the first real line is taken (code-fence lines a small model wraps its answer
+    in count as noise, not content), and ANSI and control escapes, surrounding quotes or backticks, a
+    leading `//` or `#` marker and a leading `Title:` label all come off; inner whitespace collapses,
+    a trailing period goes, and the result is word-boundary truncated to 50 runes — the same cap the
+    derived title always used. Nothing left after that counts as a failure and is handled as above,
+    which is also why a pasted name cannot smuggle an escape sequence past what a model's reply
+    could not.
+  - **One new file-only key, `auto-title:`, default on.** `auto-title: false` stops the automatic
+    call firing and nothing else — `/rename` keeps both of its forms, bare included. Automatic naming
+    happens once per new session record, including after `/clear` and `/new`, and never on a session
+    you resumed, which already has a name.
+
+  See the 2026-07-31 addendum to
+  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
+
 - **Markdown tables in an answer now render as a table.** A pipe table the model emitted used to
   fall through to the plain-paragraph path: every row was word-wrapped on its own, the columns
   lined up only as far as the model's own source padding happened to carry them, the `|---|:---:|`
