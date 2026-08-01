@@ -138,7 +138,11 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 			return err
 		}
 		if err := registry.Add(m); err != nil {
-			return fmt.Errorf("apogee: enable mechanism %q: %w", id, err)
+			// Add's three rejections already carry the "apogee: " prefix the house convention puts on a
+			// returned error, so the enable-path context is appended rather than prefixed — wrapping
+			// would print the prefix twice (cmd/apogee/main.go prints a returned error verbatim). Same
+			// shape as the ErrUnknownMechanism wrap in internal/mechanisms: the prefixed error leads.
+			return fmt.Errorf("%w — while enabling mechanism %q", err, id)
 		}
 	}
 	return nil

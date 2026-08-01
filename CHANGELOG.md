@@ -654,6 +654,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A mechanism that cannot be enabled no longer reports itself as `apogee: apogee: …`.** When a
+  mechanism named for arming collides with one already in the registry — the same ID twice, or an ID
+  a host had pre-registered itself — construction fails loudly, as it should. But the failure wrapped
+  the registry's own rejection in a *second* `apogee: ` prefix, because by house convention a returned
+  error already carries one, so the printed line read `apogee: enable mechanism "validate": apogee:
+  mechanism ID "validate" is already registered`. It now leads with the registry's prefixed rejection
+  and appends the context, reading `apogee: mechanism ID "validate" is already registered — while
+  enabling mechanism "validate"`. Which failures refuse construction is unchanged; only the wording is.
+
 - **A library store that could not be read no longer reports itself as `apogee: apogee: …`.** When
   `library.json` is corrupt or unreadable, apogee degrades to an empty store and says so on stderr
   rather than blocking startup — but the notice wrapped the store's error in a *second* `apogee: `

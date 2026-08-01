@@ -83,6 +83,33 @@ func TestEnableMechanisms_DuplicateIDRejected(t *testing.T) {
 	}
 }
 
+// TestEnableMechanisms_MergeRejectionCarriesOnePrefix: the merge-time rejection is RETURNED to the
+// host, and cmd/apogee/main.go prints a returned error verbatim — so it has to read as ONE
+// "apogee: "-prefixed line. registry.Add's three rejections already arrive prefixed (house
+// convention for a returned error), so the enable-path context is appended rather than wrapping them
+// in a second prefix ("apogee: enable mechanism "validate": apogee: mechanism ID "validate" is
+// already registered").
+func TestEnableMechanisms_MergeRejectionCarriesOnePrefix(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.EnableMechanisms = []domain.MechanismID{"validate", "validate"}
+
+	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	if err == nil {
+		t.Fatal("newAgent accepted a doubled EnableMechanisms entry; want the already-registered rejection")
+	}
+
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "apogee: ") {
+		t.Errorf("newAgent err = %q; want it to start with %q", msg, "apogee: ")
+	}
+	if got := strings.Count(msg, "apogee: "); got != 1 {
+		t.Errorf("newAgent err = %q; want exactly one %q prefix, got %d", msg, "apogee: ", got)
+	}
+	if !strings.Contains(msg, `"validate"`) {
+		t.Errorf("newAgent err = %q; want it to name the mechanism that failed", msg)
+	}
+}
+
 // TestEnableMechanisms_MergesWithProvidedExperimentalHook: an EnableMechanisms list plus a
 // Config.Mechanisms carrying an experimental hook leaves BOTH live — the catalogued Mechanism is
 // merged INTO the provided registry, not replacing it (locked decision 2).
