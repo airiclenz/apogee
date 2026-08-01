@@ -654,6 +654,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A repo's own dangerous-action rules can no longer cancel one of apogee's.** The rules that
+  hard-refuse an `rm -rf /` or make a `sudo …` stop for your approval ship with apogee, and a
+  project config is only ever allowed to *tighten* them — it can add a rule, never remove or
+  loosen one, so cloning a repo cannot lower the floor apogee runs at. Reusing a shipped rule's id
+  at a **stricter** tier slipped through that: it was treated as an in-place upgrade, so the
+  replacement's pattern took the shipped one's place. A repo could therefore redefine
+  `sudo-escalation` as "hard-refuse" over a pattern matching nothing and `sudo` would stop being
+  noticed at all — dressing the removal of a rule up as a tightening of it. A stricter same-id
+  project rule is now kept **beside** the shipped one instead of over it: the shipped pattern goes
+  on matching everything it always did, and a call the project's own pattern also matches is
+  reported at the project's stricter tier — tightening that can only add severity, never subtract
+  coverage. Equal-or-looser same-id rules are still dropped, as before. Nothing changes in a run
+  today: the project/global rule merge has no config surface yet, and this lands ahead of the one
+  parked in `TODO.md`.
+
 - **On Windows, confining a workspace no longer reaches outside it through hard links.** The
   Windows fence works by marking the files in your workspace low-integrity for the duration of the
   run, and the pass that does it skipped symlinks precisely so it could never touch something

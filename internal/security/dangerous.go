@@ -59,7 +59,9 @@ func (d Decision) Triggered() bool { return d.Tier != TierNone }
 // obvious mistakes, NOT an adversary boundary, ADR 0012).
 type Rule struct {
 	// ID is the stable identifier used by the config merge to remove a rule (global
-	// config may remove by ID). It must be non-empty and unique within a ruleset.
+	// config may remove by ID). It must be non-empty, and is unique within a ruleset
+	// except for the one case MergeDangerousRules creates deliberately: a tighten-only
+	// project add coexisting with the shipped rule whose tier it promoted.
 	ID string
 	// Pattern is a Go regexp matched against the normalized inspectable text. The text
 	// is whitespace-collapsed and lower-cased before matching, so a Pattern should be

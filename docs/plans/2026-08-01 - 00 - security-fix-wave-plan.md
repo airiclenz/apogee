@@ -442,7 +442,15 @@ table test plus a clean cross-compile.
 
 **Commit:** `fix(platform): never label hard-linked files in the low-integrity walk`
 
-## 14. A project rule add can no longer dissolve a shipped rule
+## 14. A project rule add can no longer dissolve a shipped rule — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): `TestMergeDangerousRules_ProjectAddTightensInPlace` is RENAMED to
+`…_ProjectAddTightensAlongside` — its old name asserts the semantics this item removes, and
+the item's `-run 'MergeDangerousRules'` acceptance still selects it. Two doc corrections the
+new contract forces are included: `Rule.ID`'s "unique within a ruleset" claim in
+`dangerous.go` (a project tighten now coexists) and the same-ID sentence in
+`docs/design/technical-design.md:201`. `internal/security/doc.go` and TODO.md L1 stay correct
+as written.
 
 **What:** Audit "High — The tighten-only project rule merge can be dissolved by tier
 promotion". `internal/security/rules.go:147` (`MergeDangerousRules`): a same-ID project add

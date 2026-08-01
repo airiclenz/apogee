@@ -1,6 +1,10 @@
 package security
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
 
 func ruleIDs(rules []Rule) map[string]Rule {
 	m := make(map[string]Rule, len(rules))
@@ -61,65 +65,137 @@ func TestMergeDangerousRules_ProjectCannotRemoveDefault(t *testing.T) {
 	}
 }
 
-func TestMergeDangerousRules_ProjectAddTightensInPlace(t *testing.T) {
+func TestMergeDangerousRules_ProjectAddTightensAlongside(t *testing.T) {
 	t.Parallel()
-	// A same-ID add replaces (tightens) the earlier rule, but cannot remove it.
+	// A strictly-stricter same-ID project add is accepted, but it COEXISTS with the rule
+	// it tightens rather than replacing it: the shipped Pattern must keep every match it
+	// had, so a tier promotion can only add severity, never shrink coverage.
 	base := []Rule{{ID: "shared", Pattern: "old", Tier: TierForceApproval, Reason: "old"}}
 	projectAdd := []Rule{{ID: "shared", Pattern: "new", Tier: TierHardRefuse, Reason: "tightened"}}
 	merged := MergeDangerousRules(base, nil, nil, projectAdd)
-	got := ruleIDs(merged)
-	if got["shared"].Tier != TierHardRefuse || got["shared"].Reason != "tightened" {
-		t.Fatalf("same-ID project add did not replace-in-place: %+v", got["shared"])
+
+	if len(merged) != 2 {
+		t.Fatalf("tighten produced %d rules, want 2 (both the shipped rule and the project add)", len(merged))
 	}
-	if len(merged) != 1 {
-		t.Fatalf("replace produced %d rules, want 1", len(merged))
+	var shipped, tightened bool
+	for _, r := range merged {
+		if r.ID != "shared" {
+			t.Fatalf("unexpected rule id %q in the merged set", r.ID)
+		}
+		switch r.Pattern {
+		case "old":
+			shipped = true
+			if r.Tier != TierForceApproval || r.Reason != "old" {
+				t.Errorf("the shipped rule was altered by the project add: %+v", r)
+			}
+		case "new":
+			tightened = true
+			if r.Tier != TierHardRefuse || r.Reason != "tightened" {
+				t.Errorf("the project add was altered by the merge: %+v", r)
+			}
+		default:
+			t.Errorf("unexpected rule pattern %q in the merged set", r.Pattern)
+		}
+	}
+	if !shipped {
+		t.Error("the shipped rule was dropped: a project add must never replace one")
+	}
+	if !tightened {
+		t.Error("the strictly-stricter project add was not accepted")
+	}
+
+	// A second same-ID project add must clear the STRICTER of the two, so an equal-tier
+	// follow-up is still rejected.
+	again := MergeDangerousRules(base, nil, nil, []Rule{
+		{ID: "shared", Pattern: "new", Tier: TierHardRefuse, Reason: "tightened"},
+		{ID: "shared", Pattern: "newer", Tier: TierHardRefuse, Reason: "equal tier"},
+	})
+	if len(again) != 2 {
+		t.Fatalf("an equal-tier follow-up project add was accepted: %d rules, want 2", len(again))
 	}
 }
 
 func TestMergeDangerousRules_ProjectCannotDissolveFloorByID(t *testing.T) {
 	t.Parallel()
-	// THE floor-preservation invariant: a project add must not be able to replace a
-	// Tier-1 (TierHardRefuse) floor rule by reusing its ID with a looser tier and/or a
-	// pattern that never matches. A same-ID project add at an equal-or-lower tier is
-	// rejected outright, so the original floor rule survives intact.
-	base := []Rule{
-		{ID: "rm-rf-root", Pattern: `rm -rf /`, Tier: TierHardRefuse, Reason: "delete root"},
-	}
+	// THE floor-preservation invariant: no same-ID project add — whatever tier it claims —
+	// may take a shipped rule's Pattern out of the merged set. A lower or equal tier is
+	// rejected outright; a strictly higher tier is accepted but coexists, so in every case
+	// the shipped rule survives byte-for-byte and still fires on the text it always caught.
+	// The last case is the dissolve-by-promotion attack: promoting a Tier-2 default to
+	// TierHardRefuse while swapping in a pattern that never matches used to discard the
+	// shipped pattern, so `sudo …` stopped matching anything at all.
+	rmRoot := Rule{ID: "rm-rf-root", Pattern: `rm -rf /`, Tier: TierHardRefuse, Reason: "delete root"}
+	sudo := Rule{ID: "sudo-escalation", Pattern: `\bsudo\s+\S`, Tier: TierForceApproval, Reason: "privilege escalation"}
 
 	cases := []struct {
-		name    string
-		project Rule
+		name      string
+		shipped   Rule
+		project   Rule
+		wantCount int             // rules in the merged set
+		probe     domain.ToolCall // a call the shipped rule must still catch
+		wantTier  Tier            // the tier Inspect must report for probe
 	}{
 		{
 			// Loosen the tier (HardRefuse -> ForceApproval) AND neuter the pattern.
-			name:    "lower tier",
-			project: Rule{ID: "rm-rf-root", Pattern: `this-will-never-match`, Tier: TierForceApproval, Reason: "neutered"},
+			name:      "lower tier",
+			shipped:   rmRoot,
+			project:   Rule{ID: "rm-rf-root", Pattern: `this-will-never-match`, Tier: TierForceApproval, Reason: "neutered"},
+			wantCount: 1,
+			probe:     terminalCall("rm -rf /"),
+			wantTier:  TierHardRefuse,
 		},
 		{
 			// Same tier, but a pattern that never fires — equal tier is not strictly
 			// stricter, so it must still be rejected (it could only loosen, never tighten).
-			name:    "equal tier, neutered pattern",
-			project: Rule{ID: "rm-rf-root", Pattern: `this-will-never-match`, Tier: TierHardRefuse, Reason: "neutered"},
+			name:      "equal tier, neutered pattern",
+			shipped:   rmRoot,
+			project:   Rule{ID: "rm-rf-root", Pattern: `this-will-never-match`, Tier: TierHardRefuse, Reason: "neutered"},
+			wantCount: 1,
+			probe:     terminalCall("rm -rf /"),
+			wantTier:  TierHardRefuse,
+		},
+		{
+			// Tier promotion (ForceApproval -> HardRefuse) with a neutered pattern. The
+			// add is accepted — it is strictly stricter — but it may not carry the shipped
+			// pattern away with it, so `sudo …` still forces the Approver.
+			name:      "tier promotion, neutered pattern",
+			shipped:   sudo,
+			project:   Rule{ID: "sudo-escalation", Pattern: `zzz-never-fires`, Tier: TierHardRefuse, Reason: "neutered"},
+			wantCount: 2,
+			probe:     terminalCall("sudo apt install curl"),
+			wantTier:  TierForceApproval,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			merged := MergeDangerousRules(base, nil, nil, []Rule{tc.project})
-			got := ruleIDs(merged)
-			r, ok := got["rm-rf-root"]
-			if !ok {
-				t.Fatal("project add dissolved the Tier-1 floor rule entirely")
+			merged := MergeDangerousRules([]Rule{tc.shipped}, nil, nil, []Rule{tc.project})
+
+			var found bool
+			for _, r := range merged {
+				if r.Pattern == tc.shipped.Pattern {
+					found = true
+					if r != tc.shipped {
+						t.Errorf("the shipped rule was altered by the project add: %+v", r)
+					}
+				}
 			}
-			if r.Tier != TierHardRefuse {
-				t.Errorf("floor rule tier = %v, want TierHardRefuse (project add loosened the floor)", r.Tier)
+			if !found {
+				t.Fatalf("the project add dissolved the shipped rule's pattern %q", tc.shipped.Pattern)
 			}
-			if r.Pattern != `rm -rf /` || r.Reason != "delete root" {
-				t.Errorf("floor rule was replaced by the project add: %+v", r)
+			if len(merged) != tc.wantCount {
+				t.Errorf("merged has %d rules, want %d: %+v", len(merged), tc.wantCount, merged)
 			}
-			if len(merged) != 1 {
-				t.Errorf("merged has %d rules, want 1 (the rejected project add must not be appended)", len(merged))
+
+			// End-to-end: the guard built from the merged set still catches the call.
+			d := NewDangerousActionGuard(merged).Inspect(tc.probe)
+			if d.Tier != tc.wantTier {
+				t.Errorf("Inspect(probe) tier = %v, want %v — the project add shrank the shipped rule's coverage",
+					d.Tier, tc.wantTier)
+			}
+			if d.RuleID != tc.shipped.ID {
+				t.Errorf("Inspect(probe) rule = %q, want %q", d.RuleID, tc.shipped.ID)
 			}
 		})
 	}

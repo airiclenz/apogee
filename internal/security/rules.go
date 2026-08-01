@@ -106,29 +106,40 @@ func DefaultDangerousRules() []Rule {
 //   - A GLOBAL add with an existing ID REPLACES the earlier rule outright — it is the
 //     user's own machine, so the global config is fully trusted to redefine a rule (it
 //     may already remove one).
-//   - A PROJECT add is TIGHTEN-ONLY. It may introduce a brand-new rule, but a same-ID
-//     project add is accepted only if it is STRICTLY STRICTER than the rule it would
-//     shadow (a higher Tier — e.g. promoting a TierForceApproval default to
-//     TierHardRefuse). A same-ID project add at an equal-or-lower tier is REJECTED
-//     (dropped), so a hostile or careless repo cannot replace-by-ID to dissolve or loosen
-//     a Tier-1 floor rule (e.g. redefining "rm-rf-root-home-system" with a pattern that
-//     never matches). This is the floor a project must not be able to lower.
+//   - A PROJECT add is TIGHTEN-ONLY and NEVER replaces. It may introduce a brand-new
+//     rule, and a same-ID project add is accepted only if it is STRICTLY STRICTER than
+//     the rule it would shadow (a higher Tier — e.g. promoting a TierForceApproval
+//     default to TierHardRefuse); such an add then COEXISTS with the rule it tightens
+//     instead of overwriting it. A same-ID project add at an equal-or-lower tier is
+//     REJECTED (dropped). Together these close both halves of the replace-by-ID attack: a
+//     repo can neither loosen a rule by reusing its ID at a lower tier, nor dissolve one
+//     by reusing its ID at a HIGHER tier while swapping in a pattern that never fires
+//     (redefining "sudo-escalation" as TierHardRefuse over "zzz-never-fires" used to
+//     discard the shipped pattern and stop matching sudo altogether). Coexistence is
+//     safe because Inspect reports the STRICTEST matching rule: the shipped pattern keeps
+//     every match it had, and a call the project's pattern also matches is reported at
+//     the project's higher tier. This is the floor a project must not be able to lower.
 //
-// The merged slice is returned; pass it to NewDangerousActionGuard.
+// The merged slice is returned; pass it to NewDangerousActionGuard. It may therefore hold
+// more than one rule with a given ID — only ever a project tighten sitting beside the rule
+// it tightened, never a base or global duplicate.
 func MergeDangerousRules(base, globalAdd []Rule, globalRemove []string, projectAdd []Rule) []Rule {
 	removed := make(map[string]bool, len(globalRemove))
 	for _, id := range globalRemove {
 		removed[id] = true
 	}
 
-	byID := make(map[string]int) // id -> index in out, for replace-on-duplicate
+	// byID maps an id to the index in out of the STRICTEST rule seen so far under it — the
+	// replace target for a trusted source, and the bar a project add must clear.
+	byID := make(map[string]int)
 	out := make([]Rule, 0, len(base)+len(globalAdd)+len(projectAdd))
 
 	// add merges rules from one source. honorRemove drops globally-removed IDs (base only);
-	// tightenOnly governs same-ID collisions: when true (project adds), a same-ID rule
-	// replaces an existing one ONLY if it is strictly stricter (higher Tier), and is
-	// otherwise dropped — a project can never loosen or dissolve an existing rule. When
-	// false (base/global), a same-ID rule replaces in place (the trusted-source path).
+	// tightenOnly governs same-ID collisions: when true (project adds), a same-ID rule is
+	// APPENDED beside the rule it shadows ONLY if it is strictly stricter (higher Tier), and
+	// is otherwise dropped — a project can never loosen, replace or dissolve an existing
+	// rule, only add severity on top of one. When false (base/global), a same-ID rule
+	// replaces in place (the trusted-source path).
 	add := func(rules []Rule, honorRemove, tightenOnly bool) {
 		for _, r := range rules {
 			if r.ID == "" {
@@ -138,14 +149,22 @@ func MergeDangerousRules(base, globalAdd []Rule, globalRemove []string, projectA
 				continue
 			}
 			if idx, ok := byID[r.ID]; ok {
-				if tightenOnly && r.Tier <= out[idx].Tier {
-					// A project add may only TIGHTEN: reject a same-ID rule that is not
-					// strictly stricter than the rule it would shadow, so it cannot
-					// dissolve or loosen a floor rule by reusing its ID.
+				if !tightenOnly {
+					out[idx] = r // a trusted source redefines the rule in place
 					continue
 				}
-				out[idx] = r // replace an earlier same-ID rule (tighten in place)
-				continue
+				if r.Tier <= out[idx].Tier {
+					// A project add may only TIGHTEN: reject a same-ID rule that is not
+					// strictly stricter than the rule it would shadow, so it cannot
+					// loosen a floor rule by reusing its ID.
+					continue
+				}
+				// Strictly stricter: KEEP BOTH. Overwriting here would let a project
+				// discard the shipped Pattern under cover of a tier promotion — the
+				// dissolve-by-promotion hole. Inspect reports the strictest matching rule,
+				// so coexistence adds the project's severity without shrinking the shipped
+				// rule's coverage. The id now resolves to the stricter of the two, so a
+				// further same-ID project add must clear THAT bar.
 			}
 			byID[r.ID] = len(out)
 			out = append(out, r)
