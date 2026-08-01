@@ -92,7 +92,7 @@ Independent of items 1–2.
 
 **Commit:** `fix(agent): normalize restored conversations to zero leading system messages`
 
-## 4. Documentation and issue closure
+## 4. Documentation and issue closure — ✅ DONE (2026-08-01)
 
 Depends on items 1–3. This item owns every cross-cutting doc amendment; no other item touches these files.
 

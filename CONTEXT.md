@@ -64,7 +64,12 @@ A **Session** is one conversation the engine holds — the versioned `domain.Ses
 Session is *persisted*: the on-disk `session.Record` wrapper (`internal/session`) around **two
 opaque payloads** — the untouched engine Session **and** the TUI's own versioned **transcript
 blob** (the scrollback: user/assistant text, tool cards, notes, sub-agent `Depth`) — plus
-browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). The
+browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). Not
+every scrollback entry is persisted: an **ephemeral** entry is display-only — rendered exactly
+like its kind, skipped by the encoder — because it is *re-derived* at each startup or resume
+rather than earned by the conversation. Today those are the start-up box, the `resumed: <title>`
+notice (with its no-scrollback degrade variant and the interrupted-mid-exchange note) and the
+`context: …` notice; persisting any of them would append a fresh copy on every resume. The
 record is saved **per-Turn** (at each quiescent boundary, so a crash loses at most one Turn),
 listed and resumed from inside the TUI through the `/sessions` **browser**, and replayed on
 resume so the view repaints instead of showing a bare box over a remembering engine. Each of the

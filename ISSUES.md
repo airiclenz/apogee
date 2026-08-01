@@ -13,6 +13,7 @@ X: Executed
     ✦ Refocus
   The skill(s) should be in-line with the text and simply color marked. I don't want additional skill tags like `✦ Refocus` in this example
 
-- [ ] when resuming a session, the message "resumed: session-name" should not end up saved in the session history. Also, resumes session should not receive the systme prompt again.
+- [x] when resuming a session, the message "resumed: session-name" should not end up saved in the session history. Also, resumes session should not receive the systme prompt again.
+  Resolved: resume/context notices are now ephemeral transcript entries (shown, never encoded into the record), and `restoreState` drops any leading system messages a legacy snapshot carried, so the wire holds exactly one.
 
 - [ ] `/skill` wears the `— idle only` tag in the "/" menu while the model works, but picking it there works anyway — the tag is wrong. `commandSuggestions` (internal/tui/autocomplete.go) tags every row whose `commandSpec.whileRunning` is false, and `/skill` is declared `menuOnly: true` with no such flag (internal/tui/command.go); `acceptAutocomplete` then completes any `takesArgs`/`menuOnly` verb to `/skill ` and chains straight into the skill picker, never reaching the idle-only refusal (`refuseIdleOnlyCommand`). So the tag contradicts both the actual behaviour and README's own command table, which lists `/skill` as usable while the model works. Predates the popup-alignment work — the tag arrived with 72de7dd. The fix is a semantics call: either give `/skill` `whileRunning: true`, or stop tagging `menuOnly` verbs at all (which would also cover any future verb in that position).
