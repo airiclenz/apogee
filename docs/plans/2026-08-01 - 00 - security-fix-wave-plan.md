@@ -78,7 +78,13 @@ server-grain key too: a forced prompt on one server tool must not pre-clear its 
 
 **Commit:** `fix(security): a forced approval never writes the allow-for-session cache`
 
-## 3. Terminate the ref position in `git_branch` switch/create
+## 3. Terminate the ref position in `git_branch` switch/create — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): `create` emits the trailing `--` unconditionally, not only when
+`start_point` is set, so both create shapes share one argv discipline (`checkout -b <name> --`
+and `checkout -b <name> <start-point> --`); git 2.43 accepts both, verified by probe, and the
+argv table test pins all three forms. Slightly wider than the item's literal "the `create`
+start-point argument", never narrower.
 
 **What:** Audit "High — `git_branch switch` omits `--`…". `internal/tools/git.go:223`
 (`buildBranchArgs`): emit `checkout <name> --` so git can never resolve a non-ref,

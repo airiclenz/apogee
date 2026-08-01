@@ -212,15 +212,23 @@ func buildBranchArgs(args gitBranchArgs) (gitArgs []string, errMsg string) {
 		return nil, "start_point may not begin with '-'"
 	}
 
+	// Terminate the ref position with "--" on the two checkout forms. looksLikeOption closes
+	// the option-flag class; this closes the ref-vs-pathspec one: `git checkout <name>` with a
+	// name that is not a ref but IS a tracked path is a pathspec checkout, which silently
+	// restores those files from the index and destroys uncommitted work while reporting
+	// success. A model asking to switch to a branch that does not exist but shares a name with
+	// a directory ("docs", "tests") is a routine mistake, and the human approving "switch
+	// branch" is not approving a working-tree revert. With "--" the same call fails loudly
+	// ("fatal: invalid reference: docs") and the edit survives.
 	switch action {
 	case "create":
 		out := []string{"checkout", "-b", args.Name}
 		if args.StartPoint != "" {
 			out = append(out, args.StartPoint)
 		}
-		return out, ""
+		return append(out, "--"), ""
 	case "switch":
-		return []string{"checkout", args.Name}, ""
+		return []string{"checkout", args.Name, "--"}, ""
 	case "list":
 		return []string{"branch", "-a", "--format=%(refname:short) %(HEAD)"}, ""
 	case "delete":

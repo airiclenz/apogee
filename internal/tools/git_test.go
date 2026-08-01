@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -222,6 +223,105 @@ func TestGitBranch_RejectsOptionLikeArgs(t *testing.T) {
 				t.Errorf("args %s: result = %q, want %q", tc.args, res.Content, tc.wantMsg)
 			}
 		})
+	}
+}
+
+// TestBuildBranchArgs_TerminatesRefPosition pins the exact argv for the two checkout forms:
+// both end in "--", so git can never read a non-ref, path-shaped name (or start-point) as a
+// pathspec and revert tracked files. Dropping the terminator reopens that class.
+func TestBuildBranchArgs_TerminatesRefPosition(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args gitBranchArgs
+		want []string
+	}{
+		{
+			name: "switch",
+			args: gitBranchArgs{Action: "switch", Name: "docs"},
+			want: []string{"checkout", "docs", "--"},
+		},
+		{
+			name: "create without start point",
+			args: gitBranchArgs{Action: "create", Name: "feature"},
+			want: []string{"checkout", "-b", "feature", "--"},
+		},
+		{
+			name: "create with start point",
+			args: gitBranchArgs{Action: "create", Name: "feature", StartPoint: "docs"},
+			want: []string{"checkout", "-b", "feature", "docs", "--"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, errMsg := buildBranchArgs(tc.args)
+			if errMsg != "" {
+				t.Fatalf("buildBranchArgs(%+v) rejected: %s", tc.args, errMsg)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("argv = %q, want %q", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("argv = %q, want %q", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestGitBranch_SwitchToPathShapedNameKeepsEdits is the behavioural half: switching to a
+// branch that does not exist but names a tracked directory must fail, not silently restore
+// that directory from the index. Without the "--" terminator git reports "Updated 1 path from
+// the index" with exit 0, the tool reports success, and the uncommitted edit is gone with no
+// undo — the user was never told.
+func TestGitBranch_SwitchToPathShapedNameKeepsEdits(t *testing.T) {
+	root := gitRepo(t)
+	gitPath, _ := exec.LookPath("git")
+	runIn := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitPath, args...)
+		cmd.Dir = root
+		cmd.Env = append(safeGitEnv(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// A committed docs/notes.md, so "docs" is a tracked path but not a ref.
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	if err := writeFileForTest(root, "docs/notes.md", "committed\n"); err != nil {
+		t.Fatalf("seed docs/notes.md: %v", err)
+	}
+	runIn("add", "docs/notes.md")
+	runIn("commit", "-m", "add notes")
+
+	const edit = "uncommitted work that must survive\n"
+	if err := writeFileForTest(root, "docs/notes.md", edit); err != nil {
+		t.Fatalf("edit docs/notes.md: %v", err)
+	}
+
+	res, err := NewGitBranch(root).Execute(context.Background(), branchCall("c1", `{"action":"switch","name":"docs"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("switching to non-existent branch 'docs' reported success (%q); it must fail, not check out the path", res.Content)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "docs", "notes.md"))
+	if err != nil {
+		t.Fatalf("read back docs/notes.md: %v", err)
+	}
+	if string(got) != edit {
+		t.Errorf("docs/notes.md = %q, want the uncommitted edit %q to survive byte-identical", got, edit)
 	}
 }
 

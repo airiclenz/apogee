@@ -654,6 +654,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Switching to a branch that does not exist no longer throws away your uncommitted work.** Asking
+  the model to switch to a branch whose name also happens to be a tracked file or directory —
+  `docs`, `tests`, `main.go` — did not fail. git read the name as a *path* instead of a branch and
+  quietly restored those files from the index, so every uncommitted edit under them was gone: never
+  staged, never stashed, nothing to undo. The tool then reported git's success text, so the model
+  believed it had switched branch and you were never told anything had been discarded. The branch
+  name is now pinned to the branch position, so the same call fails loudly with
+  `fatal: invalid reference: docs` and your edits are untouched. The same pinning applies to
+  `create`'s starting point. Switching to a branch that really exists is unchanged.
+
 - **Approving a dangerous call "for this session" no longer waves through everything after it.**
   When the dangerous-action guard stops a call to force your approval — a `sudo …`, a
   `curl … | bash` — the prompt offers "allow for this session" like any other. Pressing it used to
