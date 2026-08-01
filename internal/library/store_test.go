@@ -3,8 +3,10 @@ package library
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -210,6 +212,130 @@ func TestStoreWritesStayInsideInjectedDir(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != storeFileName {
 		t.Errorf("injected dir contents = %v; want only %q", names(entries), storeFileName)
+	}
+}
+
+// persist publishes the store by renaming a temp file over it, so a crash mid-write can never
+// truncate library.json. The observable contract: repeated persists leave no temp file behind
+// (the injected dir holds exactly the store file) and the store still round-trips through disk.
+func TestStorePersistLeavesNoTempFile(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "library")
+	fp := highFP("sha256:atomic")
+
+	st := NewStore(dir)
+	id := st.Record(fp, CategoryCorrection, []string{"read_file"}, "read the file first")
+	st.Record(fp, CategoryCorrection, []string{"read_file"}, "read the file first")
+	st.RecordSuccess(id) // a second persist path — it must not strand a temp file either
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read store dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != storeFileName {
+		t.Errorf("store dir contents = %v; want only %q (a temp file survived the rename)", names(entries), storeFileName)
+	}
+
+	reloaded := NewStore(dir)
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("Load after atomic persist: %v", err)
+	}
+	got := reloaded.All()
+	if len(got) != 1 || got[0].ID != id || got[0].Content != "read the file first" {
+		t.Errorf("reloaded store = %+v; want the single recorded entry %q", got, id)
+	}
+}
+
+// persist replaces the store file rather than truncating it in place: a descriptor opened on the
+// previous store still reads the complete previous contents after a persist. This is what makes a
+// crash mid-write survivable — an in-place rewrite would leave a reader (or the next Load) staring
+// at a truncated file. Rename-over-an-open-file is a POSIX guarantee; Windows refuses it, so the
+// descriptor half of the assertion only runs off Windows.
+func TestStorePersistReplacesRatherThanTruncates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("rename over a file held open is not permitted on Windows")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	fp := highFP("sha256:replace")
+
+	st := NewStore(dir)
+	id := st.Record(fp, CategoryCorrection, []string{"read_file"}, "first content")
+	before, err := os.ReadFile(filepath.Join(dir, storeFileName))
+	if err != nil {
+		t.Fatalf("read the persisted store: %v", err)
+	}
+
+	held, err := os.Open(filepath.Join(dir, storeFileName))
+	if err != nil {
+		t.Fatalf("open the persisted store: %v", err)
+	}
+	defer func() { _ = held.Close() }()
+
+	st.Record(fp, CategoryCorrection, []string{"read_file"}, "second content") // reinforces id, persists again
+
+	fromHeld, err := io.ReadAll(held)
+	if err != nil {
+		t.Fatalf("read the held descriptor: %v", err)
+	}
+	if string(fromHeld) != string(before) {
+		t.Errorf("the previous store file was rewritten in place; a crash mid-write could truncate it\nheld = %q\nwant = %q", fromHeld, before)
+	}
+
+	reloaded := NewStore(dir)
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("Load after the replacing persist: %v", err)
+	}
+	if got := reloaded.All(); len(got) != 1 || got[0].ID != id || got[0].Content != "second content" {
+		t.Errorf("reloaded store = %+v; want the updated entry %q", got, id)
+	}
+}
+
+// A temp file a hard kill stranded mid-persist is inert: Load reads storeFileName only, so the
+// stale file is neither mistaken for the store nor able to corrupt what loads, and the next
+// persist still publishes cleanly over the real store.
+func TestStoreLoadIgnoresStalePersistTempFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fp := highFP("sha256:stale-temp")
+
+	st := NewStore(dir)
+	id := st.Record(fp, CategoryCorrection, []string{"read_file"}, "the real entry")
+	st.Record(fp, CategoryCorrection, []string{"read_file"}, "the real entry")
+
+	// Plant a stale temp file holding a decodable but bogus store, as a crash mid-rename would.
+	bogus, err := json.Marshal(persisted{Version: StoreVersion, Entries: []*Entry{{
+		ID: "bogus", ModelLabel: fp.Label, Category: CategoryCorrection,
+		Content: "the stale entry", Observations: 9, CreatedAt: time.Now(), LastUsed: time.Now(), TTLHours: defaultTTLHours,
+	}}})
+	if err != nil {
+		t.Fatalf("marshal bogus store: %v", err)
+	}
+	stalePath := filepath.Join(dir, ".apogee-library-stale.tmp")
+	if err := os.WriteFile(stalePath, bogus, 0o600); err != nil {
+		t.Fatalf("plant stale temp file: %v", err)
+	}
+
+	reloaded := NewStore(dir)
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("Load with a stale temp file present: %v", err)
+	}
+	got := reloaded.All()
+	if len(got) != 1 || got[0].ID != id || got[0].Content != "the real entry" {
+		t.Fatalf("loaded store = %+v; want only the real entry %q — the stale temp file was read", got, id)
+	}
+
+	// A further persist still publishes over the store and leaves the stranded file alone.
+	reloaded.RecordSuccess(id)
+	if _, err := os.Stat(stalePath); err != nil {
+		t.Errorf("persist should not disturb an unrelated temp file: %v", err)
+	}
+	again := NewStore(dir)
+	if err := again.Load(); err != nil {
+		t.Fatalf("Load after the follow-up persist: %v", err)
+	}
+	if got := again.All(); len(got) != 1 || got[0].Successes != 1 {
+		t.Errorf("reloaded store = %+v; want the real entry with 1 success", got)
 	}
 }
 

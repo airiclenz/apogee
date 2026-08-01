@@ -30,6 +30,11 @@ const StoreVersion = 1
 const (
 	storeFileName = "library.json"
 
+	// tempFilePattern names the transient file persist renames over the store. The dot prefix
+	// and .tmp suffix keep it visibly distinct from storeFileName, which is the only name Load
+	// ever reads — so a temp file a crash stranded is never mistaken for the store.
+	tempFilePattern = ".apogee-library-*.tmp"
+
 	// dirPerm and filePerm scope the Library to the owner: learned per-model observations are
 	// a private record, so neither the directory nor the file is group/world readable (the
 	// same posture as internal/session).
@@ -282,9 +287,41 @@ func (s *Store) persist() {
 		fmt.Fprintf(os.Stderr, "apogee: encode library store: %v\n", err)
 		return
 	}
-	if err := os.WriteFile(s.storePath(), data, filePerm); err != nil {
-		fmt.Fprintf(os.Stderr, "apogee: write library store %q: %v\n", s.storePath(), err)
+	if err := atomicWrite(s.storePath(), data); err != nil {
+		fmt.Fprintf(os.Stderr, "apogee: %v\n", err)
 	}
+}
+
+// atomicWrite writes data to a temp file in path's directory and renames it into place, so a
+// crash mid-write can never truncate the store and silently degrade the next Load to empty
+// (persist rewrites the whole store on every Record). It mirrors internal/session's writer.
+// The temp file is removed on every failure path and never survives a successful rename;
+// Load only ever reads storeFileName, so a temp file a hard kill left behind is inert.
+func atomicWrite(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, tempFilePattern)
+	if err != nil {
+		return fmt.Errorf("apogee: create temp library store in %q: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	// Remove the temp file on every path except a successful rename (where it no longer
+	// exists, so Remove is a harmless no-op).
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(filePerm); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("apogee: chmod temp library store %q: %w", tmpName, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("apogee: write temp library store %q: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("apogee: close temp library store %q: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("apogee: rename library store into %q: %w", path, err)
+	}
+	return nil
 }
 
 // findMatch returns the entry with the same fingerprint label, category, and tag set, or nil.

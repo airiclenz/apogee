@@ -654,6 +654,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A crash can no longer wipe what apogee has learned about your model.** The Library — the
+  per-model record of corrections and behavioural observations built up across sessions — was
+  rewritten whole, in place, on every single observation. Losing power or killing the process during
+  one of those writes left a half-written `library.json`, and the next start quietly read it as an
+  *empty* Library: not just the observation in flight, everything ever learned, with no error beyond
+  a line on stderr. The store is now written to a temporary file beside it and renamed into place,
+  the same way session records are saved, so the file on disk is only ever a complete one — an
+  interrupted write leaves the previous Library exactly as it was.
+
 - **Switching to a branch that does not exist no longer throws away your uncommitted work.** Asking
   the model to switch to a branch whose name also happens to be a tracked file or directory —
   `docs`, `tests`, `main.go` — did not fail. git read the name as a *path* instead of a branch and

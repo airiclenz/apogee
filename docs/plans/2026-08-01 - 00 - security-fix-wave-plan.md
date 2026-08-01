@@ -101,7 +101,14 @@ survives byte-identical (the audit's probe showed it silently reverted).
 
 **Commit:** `fix(tools): terminate the ref position in git_branch switch and create with --`
 
-## 4. Persist the Library store atomically
+## 4. Persist the Library store atomically — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): the item's two listed tests both pass against the old in-place
+`os.WriteFile` (it strands no temp file either), so a third test was added that actually
+regresses the fix: a descriptor held open on the previous store still reads the complete
+previous bytes after a persist (rename-replaces vs truncate-in-place; skipped on Windows,
+which refuses rename over an open file). Additive — the two listed tests are present as
+written.
 
 **What:** Audit "Medium — The Library store rewrites itself in place…".
 `internal/library/store.go:285` (`persist`): write to a temp file in the store's directory
