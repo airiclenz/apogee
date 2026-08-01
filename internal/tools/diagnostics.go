@@ -111,7 +111,7 @@ func (t *Diagnostics) Execute(ctx context.Context, call domain.ToolCall) (domain
 
 	switch detectLanguage(abs) {
 	case langGo:
-		return t.diagnoseGo(ctx, call.ID, abs, args.runVet())
+		return t.diagnoseGo(ctx, call.ID, args.Path, abs, args.runVet())
 	default:
 		// An unsupported language is graceful degradation (§3a): a clear "no
 		// diagnostics available", not an error and not a hard dependency.
@@ -126,12 +126,24 @@ func (a diagnosticsArgs) runVet() bool { return a.Vet == nil || *a.Vet }
 // diagnoseGo runs the Go diagnostics: the always-available in-process syntax check
 // (go/parser) and, when requested and the toolchain is present, go vet on the
 // file's package. A syntax error or a vet finding produces an error result the
-// model can react to; a clean file produces a success result. The Go error return
-// is reserved for ctx cancellation (so the loop rolls the Turn back, ADR 0007).
-func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, abs string, runVet bool) (domain.ToolResult, error) {
+// model can react to; a clean file produces a success result. name is the path the
+// model asked for (what an "absent file" message names), abs its resolved form. The Go
+// error return is reserved for ctx cancellation (so the loop rolls the Turn back, ADR 0007).
+func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, runVet bool) (domain.ToolResult, error) {
+	// The source is read ONCE, through the workspace fence (os.Root-pinned), and the BYTES
+	// are handed to the parser below: parsing by path would re-walk that path, following a
+	// component swapped to point outside the workspace after resolveInRoot checked it. A
+	// refusal is reported as a refusal, never as an absent file. No size bound is added —
+	// go/parser read the whole file before this fence too, and a cap would stop a large but
+	// legitimate source file from being diagnosable at all.
+	src, err := safeReadFile(workspaceRelative(abs, t.root), t.root)
+	if err != nil {
+		return errorResult(callID, escapeOrMessage(err, "file not found: "+name)), nil
+	}
+
 	// In-process syntax check — never needs an external program, so a Go syntax
 	// error is reported even with no `go` on PATH.
-	if syntax := goSyntaxDiagnostics(abs); syntax != "" {
+	if syntax := goSyntaxDiagnostics(abs, src); syntax != "" {
 		// A file that does not parse cannot be vetted; stop here with the syntax
 		// findings (go vet would only repeat the parse failure).
 		return errorResult(callID, syntax), nil
@@ -161,14 +173,15 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, abs string, runVet
 	return okResult(callID, cleanGoMessage(abs)), nil
 }
 
-// goSyntaxDiagnostics parses the Go file in-process and returns the formatted
-// syntax errors, or "" when the file parses cleanly. parser.AllErrors surfaces all
-// syntax errors in one pass (not just the first) so the model sees the whole list.
-// A read error (e.g. the file vanished) is reported as a diagnostic, not a Go error
-// — this tool never fails the Turn for a tool-level problem.
-func goSyntaxDiagnostics(abs string) string {
+// goSyntaxDiagnostics parses src in-process and returns the formatted syntax errors, or ""
+// when it parses cleanly. src is the file's already-read content — the caller read it
+// through the workspace fence, and passing the bytes rather than the path is what keeps
+// the parser from re-walking (and re-following) that path. abs names the file only for the
+// positions in the reported diagnostics. parser.AllErrors surfaces all syntax errors in one
+// pass (not just the first) so the model sees the whole list.
+func goSyntaxDiagnostics(abs string, src []byte) string {
 	fset := token.NewFileSet()
-	_, err := parser.ParseFile(fset, abs, nil, parser.ParseComments|parser.AllErrors)
+	_, err := parser.ParseFile(fset, abs, src, parser.ParseComments|parser.AllErrors)
 	if err == nil {
 		return ""
 	}

@@ -3,12 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/security"
 )
 
 var presentDocumentSpec = toolSpec{
@@ -96,15 +93,20 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	info, err := os.Stat(path)
+	// The existence-and-kind check runs on a descriptor opened THROUGH the fence, named by
+	// the workspace-relative form of the resolved path: a plain os.Stat on the resolved
+	// string re-walks it and would follow a component swapped to point outside the workspace
+	// after resolveInRoot checked it. Re-fencing what the PRESENTER later opens is the
+	// document server's own business (the per-request fence), not this tool's.
+	display := workspaceRelative(path, t.root)
+	info, err := statInRoot(display, t.root)
 	if err != nil {
-		return errorResult(call.ID, "file not found: "+args.Path), nil
+		return errorResult(call.ID, escapeOrMessage(err, "file not found: "+args.Path)), nil
 	}
 	if !info.Mode().IsRegular() {
 		return errorResult(call.ID, "not a file: "+args.Path), nil
 	}
 
-	display := workspaceRelative(path, t.root)
 	outcome, err := t.presenter.Present(ctx, domain.PresentRequest{
 		Path:        path,
 		DisplayPath: display,
@@ -134,20 +136,6 @@ func renderPresented(display string, outcome domain.PresentOutcome) string {
 		}
 	}
 	return "Presented " + display + ": the path is shown in the transcript for the user to open."
-}
-
-// workspaceRelative renders an already-resolved absolute path in its workspace-relative form —
-// the short text the transcript carries for the terminal to linkify. It measures against the
-// SYMLINK-RESOLVED root because resolveInRoot returns a real path: on a box where the root is
-// reached through a symlink (macOS /tmp) a plain Rel against the configured root would answer
-// with a "../.."-laden path. Anything that still will not relativise falls back to the
-// absolute path, which is longer but never wrong.
-func workspaceRelative(path, root string) string {
-	rel, err := filepath.Rel(security.EvalRealPath(filepath.Clean(root)), path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return path
-	}
-	return rel
 }
 
 var (

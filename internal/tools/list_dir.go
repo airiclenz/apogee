@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -67,8 +68,17 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
+	// The walk enumerates NAMES and opens every directory through the fence, so the resolved
+	// absolute path is only ever used to derive the workspace-relative name it starts from.
+	rel := workspaceRelative(dir, t.root)
 
-	info, err := os.Stat(dir)
+	handle, err := safeOpen(rel, t.root)
+	if err != nil {
+		return errorResult(call.ID, escapeOrMessage(err, "directory not found: "+args.Path)), nil
+	}
+	defer handle.Close()
+
+	info, err := handle.Stat()
 	if err != nil {
 		return errorResult(call.ID, "directory not found: "+args.Path), nil
 	}
@@ -84,7 +94,7 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		maxDepth = maxDirDepthLimit
 	}
 
-	entries, err := collectEntries(ctx, dir, args.Recursive, maxDepth, 0)
+	entries, err := t.collectEntries(ctx, handle, rel, args.Recursive, maxDepth, 0)
 	if err != nil {
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
@@ -93,18 +103,24 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	return okSummary(call.ID, text, listed), nil
 }
 
-// collectEntries walks dir to the given depth, returning indented entry names. It
-// stops at maxDirEntries and checks ctx between directories so a large tree honours
-// cancellation.
-func collectEntries(ctx context.Context, dir string, recursive bool, maxDepth, depth int) ([]string, error) {
+// collectEntries walks the already-opened directory dir to the given depth, returning
+// indented entry names. rel is dir's workspace-relative name, which is how each
+// subdirectory is re-opened — through the fence, never by an absolute path this walk handed
+// itself. It stops at maxDirEntries and checks ctx between directories so a large tree
+// honours cancellation.
+func (t *ListDir) collectEntries(ctx context.Context, dir *os.File, rel string, recursive bool, maxDepth, depth int) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	items, err := os.ReadDir(dir)
+	items, err := dir.ReadDir(-1)
 	if err != nil {
 		return nil, nil // an unreadable subdirectory is silently skipped, as in the oracle
 	}
+	// A directory HANDLE yields entries in filesystem order; os.ReadDir — how this walk read
+	// a directory before it opened through the fence — sorts them by name, and that order is
+	// part of what the tool reports.
+	slices.SortFunc(items, func(a, b os.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 
 	entries := make([]string, 0, len(items))
 	indent := strings.Repeat("  ", depth)
@@ -120,7 +136,7 @@ func collectEntries(ctx context.Context, dir string, recursive bool, maxDepth, d
 		if item.IsDir() {
 			entries = append(entries, indent+name+"/")
 			if recursive && depth+1 < maxDepth {
-				children, err := collectEntries(ctx, filepath.Join(dir, name), recursive, maxDepth, depth+1)
+				children, err := t.collectSubdir(ctx, filepath.Join(rel, name), recursive, maxDepth, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -131,6 +147,20 @@ func collectEntries(ctx context.Context, dir string, recursive bool, maxDepth, d
 		}
 	}
 	return entries, nil
+}
+
+// collectSubdir opens the subdirectory named by the workspace-relative rel THROUGH the
+// fence and collects its entries. A subdirectory the fence refuses — one that became a
+// symlink out of the workspace after the walk named it — is skipped exactly like an
+// unreadable one: list_dir has always reported what it can read, so an entry it cannot read
+// is silently absent rather than an error.
+func (t *ListDir) collectSubdir(ctx context.Context, rel string, recursive bool, maxDepth, depth int) ([]string, error) {
+	sub, err := safeOpen(rel, t.root)
+	if err != nil {
+		return nil, nil
+	}
+	defer sub.Close()
+	return t.collectEntries(ctx, sub, rel, recursive, maxDepth, depth)
 }
 
 // renderEntries paginates from offset and prepends a header naming the total count. It

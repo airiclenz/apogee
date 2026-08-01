@@ -102,6 +102,68 @@ func TestDiagnostics_PathEscapeRejected(t *testing.T) {
 	}
 }
 
+// TestDiagnostics_RefusesEscapingSymlink pins the workspace fence on the bytes diagnostics
+// actually PARSES. A clone can ship `main.go -> ~/.ssh/id_rsa`, and a syntax diagnostic
+// quotes the offending source line back to the model, so an unfenced parse is a read of the
+// target's content. The refusal must also stay a refusal in the wording — reported as
+// "not found" it would read as an absent file and invite a retry.
+//
+// Like the sibling tools, this is a boundary pin: resolveInRoot already refuses the escape,
+// and the fix closes the check-then-use gap behind it by reading the source through the
+// pinned root once and handing the BYTES to go/parser instead of the path.
+func TestDiagnostics_RefusesEscapingSymlink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	outside := t.TempDir()
+	// Broken on purpose: a syntax error is what would quote the outside file's own source
+	// line back into the result.
+	writeGoFile(t, outside, "secret.go", "package secret\n\nfunc Secret() {\n\tapiKey :=\n}\n")
+	writeGoFile(t, dir, "clean.go", "package clean\n\nfunc Clean() {}\n")
+	if err := os.Symlink(filepath.Join(outside, "secret.go"), filepath.Join(dir, "escape.go")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	// A RELATIVE in-workspace symlink must still be diagnosed: the fence narrows what leaves
+	// the workspace, never what stays inside it.
+	if err := os.Symlink("clean.go", filepath.Join(dir, "link.go")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	d := NewDiagnostics(dir)
+
+	t.Run("escaping symlink", func(t *testing.T) {
+		t.Parallel()
+
+		res, err := d.Execute(context.Background(), diagnosticsCallNoVet("c1", "escape.go"))
+		if err != nil {
+			t.Fatalf("Execute err = %v, want nil", err)
+		}
+		if !res.IsError {
+			t.Fatalf("IsError = false, want true: a source file outside the workspace was parsed (%q)", res.Content)
+		}
+		if !strings.Contains(res.Content, "outside the workspace") {
+			t.Errorf("content %q does not carry the path-escape message", res.Content)
+		}
+		if strings.Contains(res.Content, "apiKey") {
+			t.Errorf("content quoted the source outside the workspace: %q", res.Content)
+		}
+	})
+
+	t.Run("in-workspace symlink still diagnosed", func(t *testing.T) {
+		t.Parallel()
+
+		res, err := d.Execute(context.Background(), diagnosticsCallNoVet("c2", "link.go"))
+		if err != nil {
+			t.Fatalf("Execute err = %v, want nil", err)
+		}
+		if res.IsError {
+			t.Fatalf("an in-workspace symlink stopped being diagnosed: %q", res.Content)
+		}
+		if !strings.Contains(res.Content, "clean.go") {
+			t.Errorf("result = %q, want it to name the resolved file", res.Content)
+		}
+	})
+}
+
 func TestDiagnostics_UnsupportedLanguageDegradesGracefully(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

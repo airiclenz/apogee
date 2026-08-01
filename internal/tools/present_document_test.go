@@ -283,6 +283,73 @@ func TestPresentDocument_PathEscapeIsResultError(t *testing.T) {
 	}
 }
 
+// TestPresentDocument_RefusesEscapingSymlink pins the workspace fence on the file
+// present_document actually OPENS, not just on the path argument it was given. The tool is
+// ReadOnly(), so it runs unapproved in every mode, Plan included, and what it confirms to
+// exist is what the host is then asked to open on the user's machine.
+//
+// Both cases are boundary pins rather than new behaviour: the escape is already refused by
+// resolveInRoot, and the fix closes the check-then-use gap BEHIND it — the existence check is
+// now an fstat of a descriptor opened through the pinned root instead of an os.Stat that
+// re-walks the resolved string. The test fails if either half is ever dropped.
+func TestPresentDocument_RefusesEscapingSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := presentWorkspace(t)
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "config.yaml"), []byte("api-key: SUPERSECRET"), 0o600); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "config.yaml"), filepath.Join(root, "escape.html")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	// A RELATIVE in-workspace symlink must still present: the fence narrows what leaves the
+	// workspace, never what stays inside it.
+	if err := os.Symlink("report.html", filepath.Join(root, "link.html")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	t.Run("escaping symlink", func(t *testing.T) {
+		t.Parallel()
+
+		presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentOpened}}
+		res, err := NewPresentDocument(root, presenter).
+			Execute(context.Background(), presentCall(t, map[string]string{"path": "escape.html"}))
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		if !res.IsError {
+			t.Fatalf("IsError = false, want true: a symlink out of the workspace was presented (%q)", res.Content)
+		}
+		if !strings.Contains(res.Content, "outside the workspace") {
+			t.Errorf("content %q does not carry the path-escape message", res.Content)
+		}
+		if presenter.calls != 0 {
+			t.Errorf("the Presenter was consulted %d times for a file outside the workspace, want 0", presenter.calls)
+		}
+	})
+
+	t.Run("in-workspace symlink still presents", func(t *testing.T) {
+		t.Parallel()
+
+		presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentOpened}}
+		res, err := NewPresentDocument(root, presenter).
+			Execute(context.Background(), presentCall(t, map[string]string{"path": "link.html"}))
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("an in-workspace symlink stopped presenting: %q", res.Content)
+		}
+		if presenter.calls != 1 {
+			t.Fatalf("the Presenter was consulted %d times, want 1", presenter.calls)
+		}
+		if presenter.seen.DisplayPath != "report.html" {
+			t.Errorf("DisplayPath = %q, want the resolved %q", presenter.seen.DisplayPath, "report.html")
+		}
+	})
+}
+
 func TestPresentDocument_PresenterErrorDegradesToShownNotAnError(t *testing.T) {
 	t.Parallel()
 

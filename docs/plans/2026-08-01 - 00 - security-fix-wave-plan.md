@@ -209,7 +209,25 @@ in-workspace symlink to an in-workspace file still matches.
 
 **Commit:** `fix(tools): grep opens walked files through the workspace fence`
 
-## 8. Pin `present_document`, `diagnostics` and `list_dir` to the root
+## 8. Pin `present_document`, `diagnostics` and `list_dir` to the root — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): all three refusal tests are BOUNDARY PINS, not pre-change failures —
+verified by running them against the reverted sources, where all six subtests pass. Unlike
+`grep`'s walk, every one of these three tools reaches its I/O through `resolveInRoot`, which
+already refuses a static escaping symlink; what this item closes is the check-then-use gap
+BEHIND that check (stat / `os.ReadDir` / parse-by-filename each re-walk the resolved string),
+and that race has no deterministic test without an injection seam the item does not ask for.
+Same shape item 7 recorded for its single-file half; the tests fail if either half is dropped.
+Three consequences worth naming: (a) each tool opens by the workspace-relative form of the
+ALREADY-RESOLVED path, so item 7's absolute-symlink narrowing does NOT recur here — an
+in-workspace absolute symlink still presents/diagnoses/lists; (b) `list_dir` now sorts each
+directory's entries by name explicitly, because a directory HANDLE yields filesystem order
+where `os.ReadDir` sorted, and that order is pinned output (`TestListDir_Execute_ReportsEntryCounts`);
+(c) `diagnostics` reports an unreadable Go file as `file not found: <path>` instead of
+go/parser's `open <abs>: no such file or directory`. Shared helpers `statInRoot`,
+`escapeOrMessage` and `workspaceRelative` (the last MOVED out of `present_document.go`) live in
+`internal/tools/path_safety.go`; `readFileErrorMessage` now delegates to `escapeOrMessage`,
+semantics identical.
 
 **What:** The audit's sweep list minus `grep` (item 7) and `view_diff` (item 9): close the
 same check-then-use gap in `internal/tools/present_document.go:95-108`,

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -49,6 +51,37 @@ func safeReadFile(input, root string) ([]byte, error) {
 // regardless of any rename after. The caller owns Close and any size policy.
 func safeOpen(input, root string) (*os.File, error) {
 	return security.SafeOpen(root, input)
+}
+
+// statInRoot stats path within root through ONE pinned descriptor: the file is opened
+// through the workspace fence (os.Root-pinned) and the FileInfo is an fstat of THAT
+// descriptor, so what is described is what was opened. It replaces the resolveInRoot +
+// os.Stat pair, whose second half re-walked the path string and would follow a component
+// swapped to point outside the workspace after the check passed (the H1 check-then-use gap).
+// A directory opens successfully and is reported by its FileInfo, so each caller keeps its
+// own "not a file" / "not a directory" wording.
+func statInRoot(path, root string) (os.FileInfo, error) {
+	f, err := safeOpen(path, root)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Stat()
+}
+
+// workspaceRelative renders an already-resolved absolute path in its workspace-relative
+// form — the short name a tool both DISPLAYS and OPENS the file by. It measures against the
+// SYMLINK-RESOLVED root because resolveInRoot returns a real path: on a box where the root is
+// reached through a symlink (macOS /tmp) a plain Rel against the configured root would answer
+// with a "../.."-laden path. Anything that still will not relativise falls back to the
+// absolute path, which is longer but never wrong — and which a fenced open then accepts only
+// if it is genuinely inside the root, the safe direction.
+func workspaceRelative(path, root string) string {
+	rel, err := filepath.Rel(security.EvalRealPath(filepath.Clean(root)), path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+	return rel
 }
 
 // readWorkspaceFileBounded reads path within root through ONE pinned handle: open through
@@ -111,8 +144,17 @@ func readAllBounded(r io.Reader, max int64) (data []byte, within bool, err error
 // hide the refusal), while any other read error (a genuinely missing file) keeps the
 // "file not found" phrasing the write tools used before the H1 fix.
 func readFileErrorMessage(err error, path string) string {
+	return escapeOrMessage(err, "file not found: "+path)
+}
+
+// escapeOrMessage renders a fenced-I/O failure for the model: a refusal by the workspace
+// fence surfaces the uniform escape message, NEVER disguised as absence — a refusal reported
+// as "not found" reads to the model as a missing file and invites a retry, hiding the one
+// thing the host wants said out loud. Any other error keeps the caller's own phrasing for an
+// absent path, which differs per tool ("file not found", "directory not found").
+func escapeOrMessage(err error, absent string) string {
 	if errors.Is(err, ErrPathEscape) {
 		return err.Error()
 	}
-	return "file not found: " + path
+	return absent
 }

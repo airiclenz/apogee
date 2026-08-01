@@ -654,6 +654,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`present_document`, `diagnostics` and `list_dir` now do their file I/O through the workspace
+  fence, not just their path check.** All three checked the path you gave them against the workspace
+  boundary and then acted on the *resolved string* — a plain stat, a plain directory read, a parse
+  by filename. Each of those re-walks the path from scratch, so a component swapped to point outside
+  the workspace between the check and the act was followed rather than refused: the narrow window
+  the read and write tools had already closed, left open in the three tools the earlier sweep did
+  not reach. All three are read-only, so they run without asking in *every* mode, Plan included.
+  Each now opens through a pinned workspace root and works from that one handle — `present_document`
+  confirms the document exists by an fstat of the descriptor it opened, `list_dir` walks by name and
+  opens every subdirectory through the fence, and `diagnostics` reads the source once and hands the
+  *bytes* to the Go parser instead of the filename. What you see is unchanged: the same listings in
+  the same order, the same diagnostics, the same presented paths, and a link that stays inside your
+  workspace is still followed exactly as before. A refusal now always says the path is outside the
+  workspace rather than reporting the file as missing, so a blocked read can never be mistaken for
+  an absent one.
+
 - **`grep` no longer reads through a symlink that leaves your workspace.** Only the `path` argument
   you handed `grep` was checked against the workspace boundary — the files the search itself walked
   onto were opened by name, following any symlink it found. git stores symlinks verbatim, so a
