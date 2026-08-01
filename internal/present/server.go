@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // tokenBytes is the size of a capability token before hex encoding: 16 bytes of crypto/rand,
@@ -34,6 +36,26 @@ const docPathPrefix = "/d/"
 // server is reachable from whatever can route to this box, so a connection that opens and then
 // says nothing must not be able to hold a server goroutine open indefinitely.
 const readHeaderTimeout = 10 * time.Second
+
+// writeTimeout bounds how long one response may take to write. It is generous — a PDF fetched
+// over a slow link is the case rung 2 exists for — but it is finite: without it a peer that
+// stops reading mid-response pins the connection, and its goroutine, forever.
+const writeTimeout = 2 * time.Minute
+
+// idleTimeout bounds how long a keep-alive connection may sit between requests. Go falls back to
+// ReadTimeout when this is zero and to no timeout at all when that is zero too, which is what the
+// server used to do: a peer could complete one request and then hold the connection open for the
+// life of the process. A served document is a handful of fetches, so a minute of idleness is
+// slack, not a limit anyone reaches.
+const idleTimeout = 60 * time.Second
+
+// maxConnections caps how many connections the doc server holds at once. The listener is bound to
+// every interface and answers unauthenticated peers (a wrong token is still a served 404), so
+// without a cap anything that can route here can open connections until this process runs out of
+// file descriptors — which breaks the AGENT's own file and network operations, not just the
+// presentation. 32 is far above what a browser fetching one document opens (six or so per host)
+// and far below any descriptor budget.
+const maxConnections = 32
 
 // errClosed is returned by Serve after Close: the doc server's lifetime is the app's (ADR 0019 §1
 // — nothing live crosses the quiescent boundary), so a presentation arriving during or after
@@ -56,7 +78,12 @@ var errClosed = errors.New("present: doc server is closed")
 //
 // The file is RE-READ FROM DISK PER REQUEST rather than captured at Serve time, so re-presenting a
 // document after editing it shows the new content, and a document deleted since is a 404 rather
-// than a stale copy the server kept.
+// than a stale copy the server kept. That re-read goes THROUGH THE WORKSPACE FENCE every time
+// (security.SafeOpen, pinned at Root): a grant is a (root, workspace-relative name) pair, never a
+// resolved path string, so a document replaced after the grant by a symlink pointing out of the
+// workspace — `ln -s ~/.apogee/config.yaml report.html`, a write the fence permits because it
+// bounds where a file is written and not what a link inside it names — is refused on the next
+// request instead of handing the target to whoever holds the token.
 //
 // The listener starts LAZILY on the first Serve — an Apogee session that never presents a served
 // document never opens a port — and is closed by Close on app shutdown. It binds every interface
@@ -64,7 +91,9 @@ var errClosed = errors.New("present: doc server is closed")
 // process can bind selectively without guessing, and the advertised address is a separate question
 // answered by AdvertiseHost.
 //
-// The zero value is usable: an ephemeral port, and a URL advertising loopback (honest, if usually
+// Root is the one field with no usable zero: a server with no workspace to fence its grants to
+// serves nothing, because a grant it cannot re-check is one it cannot honour safely. Everything
+// else defaults sensibly — an ephemeral port, and a URL advertising loopback (honest, if usually
 // useless — the baseline rung carries the path regardless). It holds a mutex and must always be
 // used through a pointer; go vet's copylocks check enforces that.
 type DocServer struct {
@@ -77,6 +106,12 @@ type DocServer struct {
 	// from the kernel. A stable port buys nothing, because the URL is printed fresh per
 	// presentation and carries whatever port was bound.
 	Port int
+	// Root is the workspace root every grant is fenced to — the same root the tools resolve
+	// paths in, handed down by the composition root. It is REQUIRED: Serve refuses a document
+	// when it is empty rather than granting a URL nothing can re-check, because the fence is
+	// the whole difference between serving a document and serving whatever a symlink named
+	// after the grant points at.
+	Root string
 
 	// mu guards everything below it: the lazy start, the grant map the handler reads on every
 	// request, and the shutdown flag. The critical sections are all short (a map read, a listen)
@@ -86,12 +121,51 @@ type DocServer struct {
 	listener net.Listener
 	// srv is the running server, kept only so Close can shut it down.
 	srv *http.Server
-	// files maps a granted URL path (/d/<token>/<basename>) to the absolute file it grants. It is
+	// files maps a granted URL path (/d/<token>/<basename>) to the fenced grant it names. It is
 	// append-only for the life of the server: grants are small, a session makes a handful, and an
 	// old URL that keeps working is a feature (it re-reads, so it shows the current document).
-	files map[string]string
+	files map[string]grant
 	// closed records that Close has run, so a late Serve fails instead of starting a new listener.
 	closed bool
+}
+
+// grant is one capability: the workspace root a served document is fenced to, and the document's
+// name RELATIVE to that root. The pair is deliberately not a resolved absolute path — it is what
+// makes the fence re-checkable, because every request re-opens (root, name) through
+// security.SafeOpen rather than trusting a string that was inside the workspace once.
+type grant struct {
+	root string
+	name string
+}
+
+// errNotRegular is the refusal for a grant target that is not a regular file — a directory at
+// Serve time, or a document replaced by one since. It is a sentinel so Serve can render it in its
+// own words while handle answers the same bare 404 it gives everything else.
+var errNotRegular = errors.New("not a regular file")
+
+// openGranted opens a granted document THROUGH THE WORKSPACE FENCE and describes the descriptor it
+// opened: security.SafeOpen pins the root and refuses any component that leaves it (including a
+// symlink swapped in after the grant), and the FileInfo is an fstat of that same descriptor, so
+// what is checked is what is served with no path re-walked in between. The caller owns Close.
+//
+// It is shared by Serve and handle on purpose: the grant-time check and the per-request check are
+// the same check, so there is one place for it to be right.
+func openGranted(g grant) (*os.File, os.FileInfo, error) {
+	doc, err := security.SafeOpen(g.root, g.name)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	info, err := doc.Stat()
+	if err != nil {
+		doc.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		doc.Close()
+		return nil, nil, errNotRegular
+	}
+	return doc, info, nil
 }
 
 // Serve grants access to one document and returns the URL at which the user's machine can fetch
@@ -102,7 +176,9 @@ type DocServer struct {
 // model never names a file this server has not been handed by the presentation itself. It is
 // checked to be an existing regular file here as well, so that a URL is never printed for
 // something that cannot be fetched: a link that 404s in front of the user is worse than the
-// baseline rung it would have degraded to.
+// baseline rung it would have degraded to. That check is made through the same fence the request
+// will be, and what is REMEMBERED is the fenced pair (Root, name) — a resolved path that was
+// inside the workspace at grant time proves nothing about the file behind it a minute later.
 //
 // An error means no URL — the caller degrades to the baseline (ADR 0019 §4) and says so in the
 // transcript, because a document the user was told about but cannot reach is the one outcome the
@@ -112,13 +188,22 @@ func (s *DocServer) Serve(path string) (string, error) {
 		return "", errors.New("present: no document path to serve")
 	}
 
-	info, err := os.Stat(path)
+	root := strings.TrimSpace(s.Root)
+	if root == "" {
+		return "", fmt.Errorf("present: cannot serve %q: no workspace root to fence it to", path)
+	}
+
+	// The name is measured against the SYMLINK-RESOLVED root (security.WorkspaceRelative), the
+	// same way the tools render the path they display, because what arrives here is a real path
+	// and the configured root may be reached through a symlink (macOS /tmp). A name that will not
+	// relativise stays absolute, which a fenced open accepts only if it is genuinely inside the
+	// root — the safe direction.
+	granted := grant{root: root, name: security.WorkspaceRelative(path, root)}
+	doc, _, err := openGranted(granted)
 	if err != nil {
 		return "", fmt.Errorf("present: cannot serve %q: %w", path, err)
 	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("present: cannot serve %q: not a regular file", path)
-	}
+	doc.Close()
 
 	token, err := newToken()
 	if err != nil {
@@ -126,7 +211,7 @@ func (s *DocServer) Serve(path string) (string, error) {
 	}
 
 	docPath := docPathPrefix + token + "/" + filepath.Base(path)
-	port, err := s.register(docPath, path)
+	port, err := s.register(docPath, granted)
 	if err != nil {
 		return "", err
 	}
@@ -161,7 +246,7 @@ func (s *DocServer) Close() error {
 // register records one grant, starting the listener on the first one, and reports the bound port.
 // Start and registration share the lock so that two presentations racing on the first call cannot
 // bind two listeners.
-func (s *DocServer) register(docPath, file string) (int, error) {
+func (s *DocServer) register(docPath string, doc grant) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -180,13 +265,17 @@ func (s *DocServer) register(docPath, file string) (int, error) {
 	}
 
 	if s.files == nil {
-		s.files = make(map[string]string)
+		s.files = make(map[string]grant)
 	}
-	s.files[docPath] = file
+	s.files[docPath] = doc
 	return addr.Port, nil
 }
 
 // startLocked binds the listener and runs the server. The caller holds s.mu.
+//
+// The listener is wrapped in the shedding connection cap and every stage of a connection's life
+// is bounded by a timeout, because this port answers whoever can route to it: an unauthenticated
+// peer must not be able to convert "can reach the box" into "holds this process's descriptors".
 //
 // The server's ErrorLog is discarded on purpose, twice over: net/http logs to stderr by default,
 // which would scribble straight across the Bubble Tea screen and corrupt the frame (the same
@@ -197,6 +286,7 @@ func (s *DocServer) startLocked() error {
 	if err != nil {
 		return fmt.Errorf("present: doc server could not listen on port %d: %w", s.Port, err)
 	}
+	bounded := newLimitListener(listener, maxConnections)
 
 	srv := &http.Server{
 		// A bare HandlerFunc, deliberately NOT an http.ServeMux: the mux cleans request paths and
@@ -204,11 +294,13 @@ func (s *DocServer) startLocked() error {
 		// attempts from the exact-match rule and echo a token back in a Location header.
 		Handler:           http.HandlerFunc(s.handle),
 		ReadHeaderTimeout: readHeaderTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 
-	s.listener, s.srv = listener, srv
-	go func() { _ = srv.Serve(listener) }()
+	s.listener, s.srv = bounded, srv
+	go func() { _ = srv.Serve(bounded) }()
 	return nil
 }
 
@@ -227,42 +319,39 @@ func (s *DocServer) handle(w http.ResponseWriter, r *http.Request) {
 	// r.URL.Path is the DECODED path, so a percent-encoded traversal ("%2e%2e") arrives here in
 	// the same form a literal one does — and neither matches a granted path, which is the whole
 	// defence: this map lookup is the only thing that can turn a request into a file.
-	file, ok := s.lookup(r.URL.Path)
+	granted, ok := s.lookup(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 
-	doc, err := os.Open(file)
+	// Re-opened through the fence on EVERY request, not resolved once at grant time: deleted,
+	// renamed, no longer a regular file, or swapped for a symlink that leaves the workspace —
+	// all of them are the same 404, and the error text stays out of the response rather than
+	// describing this box's filesystem or naming the refusal that produced it.
+	doc, info, err := openGranted(granted)
 	if err != nil {
-		// Deleted, renamed or unreadable since it was presented: a 404 is the truth, and the
-		// error text stays out of the response rather than describing this box's filesystem.
 		http.NotFound(w, r)
 		return
 	}
 	defer doc.Close()
 
-	info, err := doc.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		http.NotFound(w, r)
-		return
-	}
-
 	// The content type is decided here rather than left to ServeContent's sniffing, so the answer
 	// is a function of the extension alone. ServeContent then only adds what it is good at: range
 	// requests (a PDF viewer fetches a document in pieces) and conditional GETs.
-	w.Header().Set("Content-Type", contentType(file))
+	w.Header().Set("Content-Type", contentType(granted.name))
 	http.ServeContent(w, r, "", info.ModTime(), doc)
 }
 
-// lookup resolves a request path to the file it was granted, under the lock the handler shares
-// with Serve. It takes no part in deciding the answer beyond exact equality.
-func (s *DocServer) lookup(urlPath string) (string, bool) {
+// lookup resolves a request path to the grant it names, under the lock the handler shares with
+// Serve. It takes no part in deciding the answer beyond exact equality — and it hands back the
+// fenced pair rather than a path, so the handler cannot accidentally open anything else.
+func (s *DocServer) lookup(urlPath string) (grant, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file, ok := s.files[urlPath]
-	return file, ok
+	doc, ok := s.files[urlPath]
+	return doc, ok
 }
 
 // authority composes the URL authority the served link carries: the advertised host (loopback when

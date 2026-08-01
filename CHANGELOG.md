@@ -654,6 +654,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A presented document is re-checked against your workspace on every fetch, and the doc server
+  can no longer be pinned open by a stranger.** On a remote session, `present_document` serves a
+  finished deliverable at a one-off URL carrying a random token (rung 2 of the presentation
+  ladder). The file behind that URL was checked once, when the link was made, and re-opened by its
+  plain path on every request afterwards — so anything that replaced the file *after* the link was
+  printed, a `report.html` swapped for a symlink to `~/.apogee/config.yaml` or a `git checkout` of
+  a branch carrying that name, was served instead, at a URL whose token the model already had. A
+  grant is now the pair *(workspace root, name inside it)* and every fetch re-opens it through the
+  same workspace fence the file tools use: a document that has become a link out of the workspace,
+  a directory, or a file that is simply gone is the same bare 404 the server gives everything else.
+  Editing a presented document still shows the new content on the next fetch, exactly as before.
+  - **The port is bounded now.** It answers whoever can route to the box — a wrong token is a
+    served 404 — and it bounded only how long a connection could take to send its *headers*. A
+    peer could complete one request and then hold the connection open indefinitely, as many times
+    over as it liked, until this process ran out of file descriptors and the agent's own file and
+    network operations began to fail. Responses and idle keep-alives now have their own finite
+    bounds, and at most 32 connections are held at once; past that, new ones are closed
+    immediately rather than queued, and the cap frees as those connections end.
+
 - **A session file you resume by path can no longer decide where apogee writes.** Every saved
   session is stored under its id, and that id is also the *filename* the per-Turn autosave, a
   rename and the `/sessions` browser's delete act on. The id was read straight out of the record's

@@ -103,7 +103,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// what makes bridge.Presenter() non-nil, and with it registers present_document — so the tool
 	// exists exactly where a presentation can be carried out, which in the TUI is always (rung 0,
 	// the transcript line, needs no mechanism at all).
-	rungs := presentationRungs(opts.present, runtime.GOOS, os.Getenv)
+	rungs := presentationRungs(opts.present, roots.workspace, runtime.GOOS, os.Getenv)
 	bridge.SetPresentation(rungs)
 	if rungs.Docs != nil {
 		// The doc server's listener is owned by the app: it binds lazily on the first served
@@ -587,17 +587,23 @@ func rebindSpecFor(
 //   - the doc server (rung 2) on a REMOTE session, where the user's browser is on another machine.
 //     It binds nothing until the first served presentation, so wiring it costs one struct. Its
 //     advertised address is resolved HERE, once: AdvertiseHost may probe the routing table, and
-//     where the user reaches this box from cannot change mid-session.
+//     where the user reaches this box from cannot change mid-session. It is also handed the
+//     workspace root — the same root the file tools are scoped to — because it re-checks every
+//     served document against that fence on every request, not once at the grant.
 //
 // Rung 0 — the transcript line carrying the path — is deliberately absent: it needs no mechanism,
 // it is never skipped, and nothing in the config can turn it off.
-func presentationRungs(p presentSettings, goos string, env func(string) string) tui.Presentation {
+func presentationRungs(p presentSettings, workspace, goos string, env func(string) string) tui.Presentation {
 	rungs := tui.Presentation{Local: present.Locality(env) == present.Local}
 	if rungs.Local && p.autoOpen {
 		rungs.Opener = &present.Opener{GOOS: goos, Env: env, CommandOverride: p.command}
 	}
 	if !rungs.Local {
-		rungs.Docs = &present.DocServer{Host: present.AdvertiseHost(env, p.host), Port: p.port}
+		rungs.Docs = &present.DocServer{
+			Host: present.AdvertiseHost(env, p.host),
+			Port: p.port,
+			Root: workspace,
+		}
 	}
 	return rungs
 }

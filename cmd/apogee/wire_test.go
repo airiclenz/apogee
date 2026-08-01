@@ -525,7 +525,8 @@ func TestPresentationRungs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			env := func(name string) string { return tt.env[name] }
-			rungs := presentationRungs(tt.cfg, "darwin", env)
+			workspace := t.TempDir()
+			rungs := presentationRungs(tt.cfg, workspace, "darwin", env)
 
 			if rungs.Local != tt.wantLocal {
 				t.Errorf("Local = %v; want %v", rungs.Local, tt.wantLocal)
@@ -547,6 +548,11 @@ func TestPresentationRungs(t *testing.T) {
 			}
 			if rungs.Docs.Port != tt.wantPort {
 				t.Errorf("Docs.Port = %d; want the configured %d", rungs.Docs.Port, tt.wantPort)
+			}
+			// The doc server re-checks every served document against the workspace fence on every
+			// request, so the rung is only wired with the root to check against.
+			if rungs.Docs.Root != workspace {
+				t.Errorf("Docs.Root = %q; want the workspace root %q", rungs.Docs.Root, workspace)
 			}
 		})
 	}

@@ -70,6 +70,57 @@ func TestResolveInRoot_EscapesRoot_ReturnsErrPathEscape(t *testing.T) {
 	}
 }
 
+// WorkspaceRelative names an already-resolved path the way a fenced open wants it: relative to the
+// root, measured against the root's REAL path (a root reached through a symlink is the case a
+// plain Rel gets wrong), and falling back to the absolute path rather than to a "../.."-laden name
+// that a fenced open would have to refuse.
+func TestWorkspaceRelative_NamesPathsWithinTheRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	realRoot := EvalRealPath(root)
+	outside := filepath.Join(filepath.Dir(realRoot), "elsewhere", "secret.txt")
+
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a file in the root",
+			path: filepath.Join(realRoot, "report.html"),
+			want: "report.html",
+		},
+		{
+			name: "a file in a subdirectory",
+			path: filepath.Join(realRoot, "docs", "report.html"),
+			want: filepath.Join("docs", "report.html"),
+		},
+		{
+			name: "the root itself",
+			path: realRoot,
+			want: ".",
+		},
+		{
+			name: "a path outside the root stays absolute rather than climbing out",
+			path: outside,
+			want: outside,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// The configured root, not its resolved form: on a box where it is reached through a
+			// symlink (macOS /tmp) these differ, and the resolved one is what must be measured.
+			if got := WorkspaceRelative(tc.path, root); got != tc.want {
+				t.Errorf("WorkspaceRelative(%q, %q) = %q, want %q", tc.path, root, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveInRoot_SymlinkEscape_ReturnsErrPathEscape(t *testing.T) {
 	t.Parallel()
 

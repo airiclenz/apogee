@@ -316,7 +316,33 @@ passes; `make check` green.
 
 **Commit:** `fix(session): validate record ids as filenames and re-mint on explicit-path resume`
 
-## 11. Re-fence the document server per request and bound it
+## 11. Re-fence the document server per request and bound it — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): the item's PRIMARY branch was taken (grant = `(root, workspace-relative name)`,
+re-opened per request through `security.SafeOpen`), not the `*os.File`-kept alternative, which would
+have contradicted two documented behaviours: a deleted document must 404 rather than serve from a
+held descriptor, and grants are append-only for the server's life, so held descriptors would
+accumulate on the very budget the connection cap protects. Four things the item's text left open:
+(a) the root arrives as a new REQUIRED `DocServer.Root` field set by the composition root
+(`presentationRungs` now takes the workspace), so `Serve` fails closed on a server with no fence —
+the type's "zero value is usable" claim is narrowed accordingly, and every construction site
+(including `internal/tui`'s presenter tests) now passes a root; the alternative, passing a root per
+`Serve` call, would have had to travel through `domain.PresentRequest`, whose `DisplayPath` is a
+*display* string that need not be the real relative name. (b) The relative name is derived with
+`security.WorkspaceRelative`, which is `internal/tools`' `workspaceRelative` MOVED into the
+path-safety guard where the rest of the fence lives (the tools-local name now delegates, matching
+that file's existing alias pattern) — measuring against the symlink-resolved root is required, not
+cosmetic, since a real path under a symlinked root (macOS `/tmp`) will not relativise against the
+configured one. This touches item 8's file; it is a consolidation, not a defect fix, and duplicating
+a path-safety rule into a second package is exactly the drift the audit hunts. (c) The cap is a
+local shedding wrapper (`internal/present/listener.go`), not `netutil.LimitListener`: netutil BLOCKS
+accepting while full, which parks the flood in the kernel backlog rather than shedding it — the
+item's own Tests line asks for shedding. No new dependency. (d) Numbers the item did not fix:
+`maxConnections = 32`, `idleTimeout = 60s`, `writeTimeout = 2m`. The timeouts are pinned as
+`http.Server` field values rather than by wall-clock behaviour (a test that waits out a 60-second
+idle timeout is not worth its runtime); the connection cap IS pinned behaviourally — the cap is
+saturated with real keep-alives, the next connection is closed rather than parked or answered, and
+the agent's own fetch succeeds after they end.
 
 **What:** Audit "Medium — The document server re-opens the granted path per request with no
 fence". `internal/present/server.go:236/:115/:196/:201`: store the grant as

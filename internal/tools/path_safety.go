@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -70,18 +68,11 @@ func statInRoot(path, root string) (os.FileInfo, error) {
 }
 
 // workspaceRelative renders an already-resolved absolute path in its workspace-relative
-// form — the short name a tool both DISPLAYS and OPENS the file by. It measures against the
-// SYMLINK-RESOLVED root because resolveInRoot returns a real path: on a box where the root is
-// reached through a symlink (macOS /tmp) a plain Rel against the configured root would answer
-// with a "../.."-laden path. Anything that still will not relativise falls back to the
-// absolute path, which is longer but never wrong — and which a fenced open then accepts only
-// if it is genuinely inside the root, the safe direction.
+// form — the short name a tool both DISPLAYS and OPENS the file by — through the shared
+// path-safety guard, so the doc server's own per-request fence (internal/present) derives the
+// same name from the same rules rather than keeping a second copy of them.
 func workspaceRelative(path, root string) string {
-	rel, err := filepath.Rel(security.EvalRealPath(filepath.Clean(root)), path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return path
-	}
-	return rel
+	return security.WorkspaceRelative(path, root)
 }
 
 // readWorkspaceFileBounded reads path within root through ONE pinned handle: open through

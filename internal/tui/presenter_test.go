@@ -54,19 +54,20 @@ func headlessOpener(t *testing.T) *present.Opener {
 	}
 }
 
-// docServer starts a real (ephemeral-port) doc server advertising a fixed host, so a served URL
-// can be asserted verbatim, and closes it with the test.
-func docServer(t *testing.T) *present.DocServer {
+// docServer starts a real (ephemeral-port) doc server advertising a fixed host and fenced to the
+// workspace root its documents live in, so a served URL can be asserted verbatim, and closes it
+// with the test.
+func docServer(t *testing.T, root string) *present.DocServer {
 	t.Helper()
-	srv := &present.DocServer{Host: "192.168.64.2"}
+	srv := &present.DocServer{Host: "192.168.64.2", Root: root}
 	t.Cleanup(func() { _ = srv.Close() })
 	return srv
 }
 
-// writeDoc writes a document into a temp workspace and returns its absolute path.
-func writeDoc(t *testing.T, name string) string {
+// writeDoc writes a document into the workspace root and returns its absolute path.
+func writeDoc(t *testing.T, root, name string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
+	path := filepath.Join(root, name)
 	if err := os.WriteFile(path, []byte("<h1>report</h1>"), 0o600); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
@@ -117,10 +118,11 @@ func onlyPresented(t *testing.T, prog *stubProgram) presentedMsg {
 func TestPresenterLadderPicksRung(t *testing.T) {
 	t.Parallel()
 
-	html := writeDoc(t, "review.html")
-	markdown := writeDoc(t, "review.md")
-	script := writeDoc(t, "review.bat")
-	injected := writeDoc(t, "report&calc&.html")
+	root := t.TempDir()
+	html := writeDoc(t, root, "review.html")
+	markdown := writeDoc(t, root, "review.md")
+	script := writeDoc(t, root, "review.bat")
+	injected := writeDoc(t, root, "report&calc&.html")
 
 	tests := []struct {
 		name       string
@@ -198,21 +200,21 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 		},
 		{
 			name:       "remote html is served",
-			rungs:      func(t *testing.T) Presentation { return Presentation{Docs: docServer(t)} },
+			rungs:      func(t *testing.T) Presentation { return Presentation{Docs: docServer(t, root)} },
 			path:       html,
 			wantMethod: domain.PresentServed,
 			wantServed: true,
 		},
 		{
 			name:       "remote markdown is not browser-renderable",
-			rungs:      func(t *testing.T) Presentation { return Presentation{Docs: docServer(t)} },
+			rungs:      func(t *testing.T) Presentation { return Presentation{Docs: docServer(t, root)} },
 			path:       markdown,
 			wantMethod: domain.PresentShown,
 		},
 		{
 			name: "a remote session never opens, opener or not",
 			rungs: func(t *testing.T) Presentation {
-				return Presentation{Opener: headlessOpener(t), Docs: docServer(t)}
+				return Presentation{Opener: headlessOpener(t), Docs: docServer(t, root)}
 			},
 			path:       markdown,
 			wantMethod: domain.PresentShown,
@@ -225,8 +227,8 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 		},
 		{
 			name:       "a doc server that cannot read the file is visible",
-			rungs:      func(t *testing.T) Presentation { return Presentation{Docs: docServer(t)} },
-			path:       filepath.Join(t.TempDir(), "gone.html"),
+			rungs:      func(t *testing.T) Presentation { return Presentation{Docs: docServer(t, root)} },
+			path:       filepath.Join(root, "gone.html"),
 			wantMethod: domain.PresentShown,
 			wantReason: "could not serve: ",
 		},

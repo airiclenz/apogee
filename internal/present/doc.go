@@ -16,9 +16,12 @@
 //
 // The package imports the standard library, plus shlex for splitting the present.command
 // template — the same POSIX command-line splitter the terminal tool already uses, so the one
-// place a user's command line is parsed behaves identically wherever it appears. Under ADR 0010
-// it may depend on internal/domain downward and never on the root facade; today it needs
-// neither, because the domain types cross the seam in the caller, not here.
+// place a user's command line is parsed behaves identically wherever it appears — and
+// internal/security, whose path-safety guard fences every read the doc server does (a served
+// document is re-opened through security.SafeOpen on every request, so a workspace path swapped
+// for an escaping symlink after the grant is refused rather than followed). Under ADR 0010 it may
+// depend on internal/domain downward and never on the root facade; today it needs the domain
+// types not at all, because they cross the seam in the caller, not here.
 //
 // It runs OUTSIDE tool confinement by design (ADR 0019 §5): an opener is the host's own
 // act on the user's own desktop session, the same category as the TUI drawing on the

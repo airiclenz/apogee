@@ -45,6 +45,21 @@ func ResolveInRoot(input, root string) (string, error) {
 	return "", fmt.Errorf("%w: %q", ErrPathEscape, input)
 }
 
+// WorkspaceRelative renders an already-resolved absolute path in its workspace-relative
+// form — the short name a caller both DISPLAYS and OPENS the file by. It measures against the
+// SYMLINK-RESOLVED root because ResolveInRoot returns a real path: on a box where the root is
+// reached through a symlink (macOS /tmp) a plain Rel against the configured root would answer
+// with a "../.."-laden path. Anything that still will not relativise falls back to the
+// absolute path, which is longer but never wrong — and which a fenced open (SafeOpen and its
+// siblings) then accepts only if it is genuinely inside the root, the safe direction.
+func WorkspaceRelative(path, root string) string {
+	rel, err := filepath.Rel(EvalRealPath(filepath.Clean(root)), path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+	return rel
+}
+
 // EvalRealPath resolves p through symlinks. When p does not exist, it climbs to the
 // nearest existing ancestor, resolves that, and re-joins the remainder — so a path to a
 // file about to be created still resolves to a real, escape-checkable location even when
