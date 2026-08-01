@@ -85,6 +85,15 @@ func (a *Agent) restoreSnapshot(snap domain.Session) error {
 // leaves the zero state (a freshly-snapshotted, never-stepped Agent). It decodes into a
 // temporary agentState and mutates the Agent only after a clean unmarshal, so a malformed
 // payload returns an error with no partial swap — the atomicity restoreSnapshot relies on.
+//
+// The restored conversation is normalized to zero leading system messages first
+// (dropLeadingSystem): per ADR 0023 the configured system prompt is a request projection and no
+// COMMITTED message may be RoleSystem, so a well-formed apogee snapshot never carries one and this
+// is a no-op on the happy path. A legacy or hand-edited snapshot that does carry one would
+// otherwise put two system messages on the wire, because buildRequest unconditionally prepends the
+// freshly rendered standing content and the wire seam folds the tool block into the FIRST system
+// message only. Enforcing the invariant here — the one seam where outside bytes become history —
+// keeps every later reader (the request projection, the next snapshot) clean.
 func (a *Agent) restoreState(state json.RawMessage) error {
 	if len(state) == 0 {
 		return nil
@@ -93,12 +102,36 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 	if err := json.Unmarshal(state, &st); err != nil {
 		return fmt.Errorf("apogee: decode session state: %w", err)
 	}
+	exchangeStart := st.ExchangeStart
 	if st.Conversation != nil {
+		// Dropping messages shifts the rest of the history down, so the cached rollback boundary
+		// moves with it — otherwise AbortExchange on a normalized legacy snapshot would roll back
+		// one message too far. Clamped at 0: a boundary inside the dropped prefix becomes the
+		// start of the conversation.
+		if dropped := dropLeadingSystem(st.Conversation); dropped > 0 {
+			exchangeStart = max(exchangeStart-dropped, 0)
+		}
 		a.conv = *st.Conversation
 	}
 	a.turns.index = st.TurnIndex
 	a.turns.inExchange = st.InExchange
-	a.turns.exchangeStart = st.ExchangeStart
+	a.turns.exchangeStart = exchangeStart
 	a.pendingInput = st.PendingInput
 	return nil
+}
+
+// dropLeadingSystem removes conv's leading RoleSystem messages and reports how many it dropped —
+// the restore-seam enforcement of ADR 0023's "no system message in committed history" invariant.
+// Only the LEADING run is dropped: that is the position buildRequest's seeded message and the wire
+// seam's tool-block fold collide with, and it leaves a hook-authored mid-history system message
+// (which Conversation.PrefixEnd deliberately still tolerates in a request) alone.
+func dropLeadingSystem(conv *domain.Conversation) int {
+	n := 0
+	for n < conv.Len() && conv.At(n).Role == domain.RoleSystem {
+		n++
+	}
+	if n > 0 {
+		conv.DropRange(0, n)
+	}
+	return n
 }

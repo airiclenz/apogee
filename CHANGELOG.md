@@ -667,6 +667,15 @@ point is a **minor** bump, not a breaking change.
   unchanged — the stored format did not move — and the lines a session already collected replay as
   ordinary scrollback; no new ones are added to it.
 
+- **A session file carrying its own system message no longer doubles the system prompt.** apogee
+  composes the system prompt fresh for every request and never writes it into a session's stored
+  conversation, so no record apogee itself wrote holds one — but a hand-edited file, or one from an
+  older build that stored it, does: reopening such a session put the stored copy *and* the freshly
+  composed one on the wire, and the tool instructions folded into the stored copy, so the model was
+  handed two sets of standing instructions with only one of them current. Any system message at the
+  head of a restored conversation is dropped as the session loads now, leaving exactly one — today's
+  — to go out. Ordinary session files are unaffected in every respect.
+
 - **Pop-up rows line up in columns now.** Every overlay pane built its rows by gluing their fields
   into one string — `name — endpoint`, `Skill Name  what it does`, `a task · 5m ago · 3 msgs` — so
   the second and third tiers landed wherever the first happened to end and each pane read as a

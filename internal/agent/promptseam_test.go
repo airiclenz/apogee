@@ -756,3 +756,115 @@ func TestContextSeam_SubAgentRequestCarriesParentBlocks(t *testing.T) {
 		t.Errorf("sub-agent seeded %q, want the parent session's %q", got, want)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The restore seam — a stored system message is normalized away (ADR 0023)
+// ----------------------------------------------------------------------------
+//
+// No apogee build writes a system message into the conversation, so these tests hand-craft the
+// snapshot a legacy or hand-edited record can have. restoreState drops the leading system run, so
+// buildRequest's unconditional prepend still leaves EXACTLY one system message on the wire.
+
+// legacySnapshot builds a v1 snapshot carrying stored verbatim as the conversation, so a test can
+// pose the shapes the engine itself never writes.
+func legacySnapshot(t *testing.T, inExchange bool, exchangeStart int, stored ...domain.Message) domain.Session {
+	t.Helper()
+	state, err := json.Marshal(agentState{
+		Conversation:  domain.NewConversation(stored),
+		InExchange:    inExchange,
+		ExchangeStart: exchangeStart,
+	})
+	if err != nil {
+		t.Fatalf("marshal agentState: %v", err)
+	}
+	return domain.Session{Version: domain.SessionVersion, State: state}
+}
+
+// TestRestoreSeam_StoredSystemMessageDroppedAndNotDoubledOnTheWire: restoring a snapshot whose
+// conversation OPENS with a system message drops it — the restored history holds none (so the next
+// snapshot is clean) and the next request carries exactly one system message: the freshly rendered
+// configured prompt, never the stored text.
+func TestRestoreSeam_StoredSystemMessageDroppedAndNotDoubledOnTheWire(t *testing.T) {
+	const stale = "MARKER-STORED-SYSTEM-PROMPT-c41"
+
+	sink := &recordingSink{}
+	cfg := menuConfig(t, sink) // zero Profile: native tool calls
+	cfg.Mode = domain.ModeAskBefore
+	cfg.WorkspaceDir = promptWorkspace
+	cfg.SystemPrompt = promptTemplate
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+
+	snap := legacySnapshot(t, false, 0,
+		domain.Message{Role: domain.RoleSystem, Content: "You are a helpful assistant. " + stale},
+		domain.Message{Role: domain.RoleUser, Content: "one"},
+		domain.Message{Role: domain.RoleAssistant, Content: "first"},
+	)
+	if err := a.RestoreSession(snap); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+
+	for i, m := range a.conv.Messages() {
+		if m.Role == domain.RoleSystem {
+			t.Errorf("restored message %d is a system message; the restore seam must normalize it away", i)
+		}
+	}
+	if got := a.conv.Len(); got != 2 {
+		t.Fatalf("restored conversation has %d messages, want 2 (only the stored system message dropped)", got)
+	}
+	if !containsUser(&a.conv, "one") {
+		t.Error("the restore dropped more than the leading system message: user message \"one\" is gone")
+	}
+
+	// seedSystemMessage fails unless the wire request opens with EXACTLY one system message.
+	got := seedSystemMessage(t, a, responder, "two")
+
+	want := prompt.Render(promptTemplate, prompt.Inputs{
+		Workspace: promptWorkspace,
+		Mode:      string(domain.ModeAskBefore),
+		Now:       promptNow,
+	})
+	if got != want {
+		t.Errorf("wire system message = %q\nwant the freshly rendered prompt %q", got, want)
+	}
+	if strings.Contains(got, stale) {
+		t.Errorf("the stored system message reached the wire: %q", got)
+	}
+}
+
+// TestRestoreSeam_ExchangeBoundaryShiftsWithTheDroppedPrefix: dropping the stored system message
+// shifts every later message down, so the cached rollback boundary moves with it — AbortExchange
+// on a restored mid-Exchange snapshot still rolls back to that Exchange's own opening message
+// rather than one message too far into the answered history.
+func TestRestoreSeam_ExchangeBoundaryShiftsWithTheDroppedPrefix(t *testing.T) {
+	a := newProfileAgent(t, baseConfig(&recordingSink{}), &recordingResponder{reply: "unused"})
+
+	// Stored: [0] system, [1] user "done", [2] assistant "ok", [3] user "open" — the Exchange
+	// still in flight opened at index 3.
+	snap := legacySnapshot(t, true, 3,
+		domain.Message{Role: domain.RoleSystem, Content: "stored prompt"},
+		domain.Message{Role: domain.RoleUser, Content: "done"},
+		domain.Message{Role: domain.RoleAssistant, Content: "ok"},
+		domain.Message{Role: domain.RoleUser, Content: "open"},
+	)
+	if err := a.RestoreSession(snap); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	if got := a.exchangeBoundary(); got != 2 {
+		t.Errorf("restored exchangeBoundary() = %d, want 2 (shifted down by the dropped system message)", got)
+	}
+
+	a.AbortExchange()
+
+	if got := a.conv.Len(); got != 2 {
+		t.Fatalf("after abort conv.Len() = %d, want 2 (the answered exchange kept, the open one dropped)", got)
+	}
+	if containsUser(&a.conv, "open") {
+		t.Error("the abort kept the open Exchange's user message; the boundary was too high")
+	}
+	if !containsUser(&a.conv, "done") {
+		t.Error("the abort dropped the answered exchange's user message; the boundary was too low")
+	}
+}

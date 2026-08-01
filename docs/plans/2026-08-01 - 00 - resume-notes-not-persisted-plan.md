@@ -67,7 +67,15 @@ Depends on item 1.
 
 **Commit:** `fix(tui): stop persisting the re-derived context-files notice`
 
-## 3. Restored conversations are normalized to zero leading system messages
+## 3. Restored conversations are normalized to zero leading system messages — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): dropping the leading system run shifts every later message down, so
+`restoreState` also shifts the restored `exchangeStart` by the dropped count (clamped at 0), with a
+second test pinning it — beyond the item's literal "drop … before installing it", but required for
+`AbortExchange` to still roll back to that Exchange's own boundary on a normalized snapshot. Also
+added a `### Fixed` bullet under `## [Unreleased]` in `CHANGELOG.md`, a file this item does not name
+(items 1–2 set that precedent for this plan). No release heading, version field or `VERSION` value
+was touched.
 
 Independent of items 1–2.
 
