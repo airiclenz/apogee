@@ -172,7 +172,11 @@ gauge, instead of opening an empty view over a model that still remembers.
   takes a session id (from `/sessions`) or a file path.
 - `/sessions` opens the in-TUI browser (newest first): `⏎` resumes, `r` renames
   inline, `d` deletes after a confirm, `a` toggles between this workspace and all
-  workspaces. Titles default to the first user message.
+  workspaces. A new session names itself: on its first prompt apogee asks the
+  model, in a single call off to the side of the conversation, for a short title
+  (`auto-title:`, a file-only key, on by default). With that off — or when the
+  call fails or answers with nothing usable — the title falls back to the first
+  user message.
 - `/clear` (or `/new`) closes the current session into history and starts a fresh
   one — neither deletes; discarding is an explicit `d` in the browser.
 - A session killed mid-task resumes to the last completed turn and says so;
