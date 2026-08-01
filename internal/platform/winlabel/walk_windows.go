@@ -46,14 +46,17 @@ import (
 // would be denied.
 //
 // Symlinks and other reparse points are skipped entirely — SetNamedSecurityInfo follows the
-// link, so labelling one would silently mutate a target outside the box. A failure on the
-// ROOT fails the box (the fence would be a box the agent cannot write to at all); a failure
-// on an individual descendant is tolerated, because a single locked or foreign-owned file
-// makes that ONE path read-only to the confined child, exactly as if it were read-only on
-// disk, and must not gate a whole session. A descendant whose PRIOR label cannot be read
-// takes the same tolerated rung, but before anything is written: no journal entry can
-// describe what the read did not deliver, so the path is left exactly as it is
-// (descendantDecision) rather than labelled with no record of how to undo it.
+// link, so labelling one would silently mutate a target outside the box. HARD links are
+// skipped for the same reason by a different mechanism (hardLinkCount): they are not reparse
+// points, but every name of a file shares one NTFS security descriptor, so labelling the
+// in-box name labels the file at all its other names too. A failure on the ROOT fails the box
+// (the fence would be a box the agent cannot write to at all); a failure on an individual
+// descendant is tolerated, because a single locked or foreign-owned file makes that ONE path
+// read-only to the confined child, exactly as if it were read-only on disk, and must not gate
+// a whole session. A descendant whose PRIOR label cannot be read takes the same tolerated
+// rung, but before anything is written: no journal entry can describe what the read did not
+// deliver, so the path is left exactly as it is (descendantDecision) rather than labelled with
+// no record of how to undo it.
 //
 // Errors come back PLAIN: package platform wraps domain.ErrConfinementUnavailable once at its
 // own call site, which is what keeps this package a leaf.
@@ -104,10 +107,15 @@ func LabelTree(root string, j *Journal) error {
 			return nil
 		}
 		prior, priorErr := ReadSDDL(path)
-		shouldJournal, shouldLabel := descendantDecision(prior, priorErr)
+		links, linksErr := hardLinkCount(path)
+		shouldJournal, shouldLabel := descendantDecision(descendantFacts{
+			prior: prior, priorErr: priorErr, links: links, linksErr: linksErr,
+		})
 		if !shouldLabel {
-			// The prior could not be read, so labelling would destroy a possibly-foreign
-			// label with no journalled record to restore it from. The path takes the
+			// Either the prior could not be read — so labelling would destroy a
+			// possibly-foreign label with no journalled record to restore it from — or the
+			// path is (or may be) a hard link, whose descriptor is shared with every other
+			// name of the same file, including names outside the box. The path takes the
 			// tolerated-descendant rung instead (descendantDecision): it stays unlabelled,
 			// and only that one path is opaque to the confined child.
 			return nil
@@ -131,6 +139,40 @@ func LabelTree(root string, j *Journal) error {
 	}
 	j.markLabelled(root)
 	return nil
+}
+
+// hardLinkCount returns how many directory entries name the same underlying file as path —
+// one for an ordinary file, more when the file is hard-linked. LabelTree needs it because a
+// hard link is NOT a reparse point and so survives the skip above, while sharing the very
+// thing a label is written to: on NTFS all names of a file share one MFT record and therefore
+// one security descriptor, so labelling the in-box name marks the file Low wherever else it is
+// linked (descendantDecision).
+//
+// The count comes from a HANDLE: nothing in fs.FileInfo carries it on Windows.
+// FILE_READ_ATTRIBUTES is the whole access asked for — the least the query needs, and one an
+// exclusively-locked file still grants — every share mode is allowed so opening never disturbs
+// another process, FILE_FLAG_BACKUP_SEMANTICS lets the same call answer for directories (which
+// NTFS never hard-links, so they report one), and FILE_FLAG_OPEN_REPARSE_POINT keeps the
+// handle on the path itself rather than on a link target, the same posture the walk's own skip
+// takes.
+func hardLinkCount(path string) (uint32, error) {
+	pathW, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, fmt.Errorf("encode %q: %w", path, err)
+	}
+	handle, err := windows.CreateFile(pathW, windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return 0, fmt.Errorf("open %q to count its links: %w", path, err)
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
+		return 0, fmt.Errorf("read the file information of %q: %w", path, err)
+	}
+	return info.NumberOfLinks, nil
 }
 
 // ClearTree removes the mandatory label from root and everything beneath it, returning it to

@@ -404,7 +404,23 @@ NOTE for the verifier: end-to-end enforcement on a real ABI-1/2 kernel is owner-
 
 **Commit:** `fix(platform): derive landlock access masks from the probed ABI and handle REFER`
 
-## 13. Never label hard-linked files in the low-integrity walk
+## 13. Never label hard-linked files in the low-integrity walk — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): three choices the item's text left open. (a) A link count that could not be
+READ takes the tolerated rung too (`hardLinkCount` returning an error ⇒ skip): an unknown count
+cannot rule the shared-descriptor case out, and the walk must not widen the fence on a guess —
+the same direction the item prescribes for an unreadable prior. It costs the label on a path
+whose attributes cannot be opened at all, which stays read-only to the confined child rather than
+gating the box. (b) The decision seam takes a `descendantFacts` value (prior, priorErr, links,
+linksErr) instead of growing to four positional parameters, so `descendantDecision` stays the ONE
+place a descendant's fate is decided — the alternative, a second predicate the walk ANDs with the
+first, would split the tolerated rung across two functions. (c) `hardLinkCount` opens with
+`FILE_READ_ATTRIBUTES` + `FILE_FLAG_BACKUP_SEMANTICS` + `FILE_FLAG_OPEN_REPARSE_POINT` and every
+share mode, so one call answers for directories too (NTFS never hard-links them; they report 1)
+and never disturbs or follows anything. Out of scope and left as-is: `ClearTree` still clears
+every descendant unconditionally, so teardown writes a NULL SACL over a hard-linked path the
+label walk now skips — the posture it already takes for the unreadable-prior rung, and a change
+to it belongs to a revert-side item, not this one.
 
 **What:** Audit "High — The Windows Low-integrity walk labels hard links…".
 `internal/platform/winlabel/walk_windows.go:100/:127`: the reparse-point skip does not catch

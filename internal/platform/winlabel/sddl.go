@@ -64,25 +64,47 @@ func IsLowLabel(sddl string) bool {
 	}
 }
 
-// descendantDecision is the label walk's three-way decision for one descendant, from
-// the outcome of reading its prior mandatory label: shouldJournal reports whether the prior
-// must be journalled before any label lands, shouldLabel whether the path may be labelled at
-// all.
+// descendantFacts are the two OS reads one descendant's label decision is made from, paired
+// with the errors those reads may have failed with: its prior mandatory label (ReadSDDL) and
+// the number of directory entries naming the same underlying file (hardLinkCount). Gathering
+// them into a value is what keeps descendantDecision pure — the syscalls live in
+// walk_windows.go, the policy does not — and lets a later fact join the decision without
+// re-shaping its call.
+type descendantFacts struct {
+	prior    string
+	priorErr error
+	links    uint32
+	linksErr error
+}
+
+// descendantDecision is the label walk's three-way decision for one descendant, from the
+// outcome of reading its prior mandatory label and its hard-link count: shouldJournal reports
+// whether the prior must be journalled before any label lands, shouldLabel whether the path
+// may be labelled at all.
 //
-//   - A read ERROR skips the path entirely — no journal entry, no label. Labelling anyway
-//     would destroy a possibly-foreign label with no record of how to put it back, which is
-//     the one thing ADR 0020 §2's journal-first invariant forbids; the cost is LabelTree's
-//     tolerated-descendant one — that single path stays opaque to the confined child and
-//     never gates the box.
+//   - A prior-read ERROR skips the path entirely — no journal entry, no label. Labelling
+//     anyway would destroy a possibly-foreign label with no record of how to put it back,
+//     which is the one thing ADR 0020 §2's journal-first invariant forbids; the cost is
+//     LabelTree's tolerated-descendant one — that single path stays opaque to the confined
+//     child and never gates the box.
+//   - A file with MORE THAN ONE hard link takes that same tolerated rung, for the reason the
+//     walk skips reparse points: on NTFS every hard link shares one MFT record and therefore
+//     one security descriptor, so a Low label written through the in-box name lands on the
+//     file wherever else it is linked — pnpm's node_modules is entirely hard links into a
+//     global store under %LOCALAPPDATA%, outside the box. A path apogee cannot label without
+//     mutating something outside the box is not labelled at all.
+//   - A link count that could not be READ takes the rung too: an unknown count cannot rule
+//     the shared-record case out, and the walk must not widen the fence on a guess. The cost
+//     is the same one opaque path.
 //   - A non-empty prior is journalled and then labelled; what the entry may SAY about the
 //     prior remains recordEntry's decision.
 //   - No prior (the overwhelmingly common case) is labelled with nothing to journal.
 //
 // It is pure so the decision is table-testable on any OS — the retire seam
 // pattern.
-func descendantDecision(prior string, readErr error) (shouldJournal, shouldLabel bool) {
-	if readErr != nil {
+func descendantDecision(f descendantFacts) (shouldJournal, shouldLabel bool) {
+	if f.priorErr != nil || f.linksErr != nil || f.links > 1 {
 		return false, false
 	}
-	return prior != "", true
+	return f.prior != "", true
 }

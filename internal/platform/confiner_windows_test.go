@@ -651,6 +651,81 @@ func TestWindowsUnreadablePriorDescendantIsNotLabelled(t *testing.T) {
 	}
 }
 
+func TestWindowsHardLinkedDescendantIsNotLabelled(t *testing.T) {
+	// The hard-link rung of winlabel.descendantDecision, on a real shared NTFS descriptor. A
+	// hard link is NOT a reparse point, so the walk's reparse skip never sees it — while every
+	// name of a file shares one MFT record and therefore one security descriptor, so labelling
+	// the in-box name would mark the file Low at its outside name too. pnpm's node_modules is
+	// entirely hard links into a global store under %LOCALAPPDATA%, which sits outside
+	// WorkspaceRoot ∪ WritablePaths: the box would hand every Low process on the machine write
+	// access to the user's package store. (The skip itself is pinned off-OS by
+	// TestDescendantLabelDecision; this proves the wiring against a real hard link.)
+	home := t.TempDir()
+	ws := t.TempDir()
+	store := t.TempDir() // stands in for the global package store outside the box
+	target := filepath.Join(store, "package.js")
+	if err := os.WriteFile(target, []byte("outside the box"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", target, err)
+	}
+	link := filepath.Join(ws, "package.js")
+	if err := os.Link(target, link); err != nil {
+		t.Skipf("cannot hard-link %q to %q on this host: %v", link, target, err)
+	}
+	sibling := filepath.Join(ws, "sibling.txt")
+	if err := os.WriteFile(sibling, []byte("in the box"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", sibling, err)
+	}
+
+	c := newTokenConfiner(home)
+	t.Cleanup(func() { _ = c.Close() })
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+
+	// The descriptor the two names share is untouched — read through the OUTSIDE name, which
+	// is the one the fence must never reach, and through the in-box name, which is the same
+	// object.
+	for _, path := range []string{target, link} {
+		label, err := winlabel.ReadSDDL(path)
+		if err != nil {
+			t.Fatalf("read label of %q: %v", path, err)
+		}
+		if label != "" {
+			t.Errorf("label of %q = %q; labelling a hard link marks the file Low at every name it has, including outside the box", path, label)
+		}
+	}
+
+	// Nothing may be journalled for a path the walk skipped: the entry would promise a restore
+	// of a label that was never written.
+	journals := winlabel.ListJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals = %v, want exactly one", journals)
+	}
+	onDisk, err := winlabel.ReadJournal(journals[0])
+	if err != nil {
+		t.Fatalf("read journal %q: %v", journals[0], err)
+	}
+	for _, j := range []winlabel.Record{onDisk, {Entries: c.journal.Entries()}} {
+		for _, entry := range j.Entries {
+			if strings.EqualFold(entry.Path, link) {
+				t.Errorf("journal entry %+v names the hard-linked child; nothing may be journalled for a path the walk skipped", entry)
+			}
+		}
+	}
+
+	// The rest of the box is labelled as normal: one shared-descriptor path must not gate the
+	// session, exactly as one unreadable prior does not.
+	for _, path := range []string{ws, sibling} {
+		if got, _ := winlabel.ReadSDDL(path); !winlabel.IsLowLabel(got) {
+			t.Errorf("label of %q = %q, want apogee's Low label — one skipped descendant must not gate the box", path, got)
+		}
+	}
+}
+
 // setFileDACL replaces path's DACL from sddl via the named-object API, protecting it from
 // inherited ACEs so the grants written there are the only ones in force. That API needs
 // READ_CONTROL as well as WRITE_DAC (it reads the current descriptor to propagate

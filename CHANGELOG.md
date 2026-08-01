@@ -654,6 +654,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **On Windows, confining a workspace no longer reaches outside it through hard links.** The
+  Windows fence works by marking the files in your workspace low-integrity for the duration of the
+  run, and the pass that does it skipped symlinks precisely so it could never touch something
+  outside the box. Hard links are not symlinks, and they were not skipped — but on NTFS every name
+  of a file shares **one** security descriptor, so marking the copy inside your workspace marked
+  the file everywhere else it is linked. That is not hypothetical: a `pnpm` project's
+  `node_modules` is *entirely* hard links into the global package store under `%LOCALAPPDATA%`, so
+  confining such a workspace quietly opened the user's whole package store to every low-integrity
+  process on the machine — the agent's confined commands, but also browser sandbox children —
+  outside the box and outside what the teardown journal recorded. A file with more than one name
+  is now left alone: it is not marked, nothing is recorded for it, and — exactly like a file whose
+  existing label cannot be read — that one path is simply read-only to the confined command
+  instead of failing the session.
+
 - **Confinement works on older Linux kernels again — and a confined command can move a file
   inside your workspace.** On Linux the workspace fence is landlock, and apogee asks the kernel
   for it in one go: here are the kinds of write I want fenced, here is the directory they stay

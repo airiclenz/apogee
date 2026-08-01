@@ -8,40 +8,71 @@ import (
 func TestDescendantLabelDecision(t *testing.T) {
 	t.Parallel()
 
-	// The label walk's three-way decision for one descendant, proven on every OS. The rung
-	// that matters most is the read ERROR: labelling a path whose prior could not be read
-	// would destroy a possibly-foreign label with no journalled record to put it back, so the
-	// path must be skipped entirely — no journal entry AND no label.
+	// The label walk's three-way decision for one descendant, proven on every OS. Two rungs
+	// matter most, and both are skips. A prior-read ERROR: labelling a path whose prior could
+	// not be read would destroy a possibly-foreign label with no journalled record to put it
+	// back. A hard-linked file: every name of a file shares one NTFS security descriptor, so
+	// labelling the in-box name would mark the file Low at names outside the box — pnpm's
+	// node_modules is entirely hard links into a global store under %LOCALAPPDATA%. Either
+	// way the path is skipped entirely — no journal entry AND no label.
 	tests := []struct {
 		name              string
-		prior             string
-		readErr           error
+		facts             descendantFacts
 		wantShouldJournal bool
 		wantShouldLabel   bool
 	}{
 		{
-			name:    "read_error_skips_journal_and_label",
-			readErr: errors.New("access is denied"),
+			name:  "read_error_skips_journal_and_label",
+			facts: descendantFacts{priorErr: errors.New("access is denied"), links: 1},
 		},
 		{
-			name:    "read_error_wins_even_over_a_leftover_prior",
-			prior:   "S:AI(ML;;NW;;;ME)",
-			readErr: errors.New("access is denied"),
+			name: "read_error_wins_even_over_a_leftover_prior",
+			facts: descendantFacts{
+				prior:    "S:AI(ML;;NW;;;ME)",
+				priorErr: errors.New("access is denied"),
+				links:    1,
+			},
 		},
 		{
-			name:              "foreign_prior_is_journalled_then_labelled",
-			prior:             "S:AI(ML;;NW;;;ME)",
+			name:  "hard_linked_file_skips_journal_and_label",
+			facts: descendantFacts{links: 2},
+		},
+		{
+			name:  "hard_linked_file_is_skipped_however_many_names_it_has",
+			facts: descendantFacts{links: 9},
+		},
+		{
+			name: "hard_link_count_wins_over_a_journallable_prior",
+			facts: descendantFacts{
+				prior: "S:AI(ML;;NW;;;ME)", // a shared descriptor is not apogee's to rewrite
+				links: 2,
+			},
+		},
+		{
+			name:  "unreadable_link_count_skips_journal_and_label",
+			facts: descendantFacts{linksErr: errors.New("access is denied")},
+		},
+		{
+			name: "foreign_prior_is_journalled_then_labelled",
+			facts: descendantFacts{
+				prior: "S:AI(ML;;NW;;;ME)",
+				links: 1,
+			},
 			wantShouldJournal: true,
 			wantShouldLabel:   true,
 		},
 		{
-			name:              "own_low_prior_still_passes_through_the_journal",
-			prior:             fileSDDL, // recordEntry decides what the entry may say
+			name: "own_low_prior_still_passes_through_the_journal",
+			facts: descendantFacts{
+				prior: fileSDDL, // recordEntry decides what the entry may say
+				links: 1,
+			},
 			wantShouldJournal: true,
 			wantShouldLabel:   true,
 		},
 		{
 			name:            "empty_prior_labels_only",
+			facts:           descendantFacts{links: 1},
 			wantShouldLabel: true,
 		},
 	}
@@ -50,7 +81,7 @@ func TestDescendantLabelDecision(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			shouldJournal, shouldLabel := descendantDecision(tt.prior, tt.readErr)
+			shouldJournal, shouldLabel := descendantDecision(tt.facts)
 			if shouldJournal != tt.wantShouldJournal {
 				t.Errorf("shouldJournal = %v, want %v", shouldJournal, tt.wantShouldJournal)
 			}
