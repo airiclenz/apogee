@@ -664,26 +664,51 @@ func TestTranscriptReset(t *testing.T) {
 	}
 }
 
-// hasConversation gates the save decision, so it must count only what the record would keep. A
-// launch that produced nothing but re-derived chrome — the start-up box and the "context: …" /
-// "resumed: …" notices — is not a conversation, and saving it would file a record whose scrollback
-// encodes to zero entries. The real note that flips it is the same kind as the ephemeral ones, so
-// the flag, not the kind, is what decides.
-func TestTranscriptHasConversationIgnoresEphemeral(t *testing.T) {
+// hasPrompt gates every session save, so only a sent prompt may flip it. Everything the program can
+// put on screen by itself — the start-up box, slash-command notes, error notices, the re-derived
+// "context: …" / "resumed: …" ephemerals — must leave it false, or a launch spent poking at slash
+// commands would file a "Session <date>" record reading 0 messages. An interjection is excluded on
+// purpose: it rides an Exchange that an entryUser opened, so it is never the thing that earns a
+// record.
+func TestTranscriptHasPrompt(t *testing.T) {
 	t.Parallel()
-	tr := &transcript{}
-	tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
-	tr.addEphemeralNote("context: AGENTS.md")
-	tr.addEphemeralNote("resumed: an earlier session")
-
-	if tr.hasConversation() {
-		t.Error("hasConversation = true for an ephemeral-only transcript, want false — none of it persists")
+	tests := []struct {
+		name  string
+		build func(tr *transcript)
+		want  bool
+	}{
+		{name: "empty transcript", build: func(tr *transcript) {}},
+		{name: "start-up box only", build: func(tr *transcript) {
+			tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
+		}},
+		{name: "persisted note", build: func(tr *transcript) { tr.addNote("cancelled") }},
+		{name: "ephemeral notes", build: func(tr *transcript) {
+			tr.addEphemeralNote("context: AGENTS.md")
+			tr.addEphemeralNote("resumed: an earlier session")
+		}},
+		{name: "error notice", build: func(tr *transcript) { tr.addError("loop", "upstream refused", 0) }},
+		{name: "interjection with no opening prompt", build: func(tr *transcript) {
+			tr.addInterjected("wrong file", nil)
+		}},
+		{name: "user message", build: func(tr *transcript) { tr.addUser("hello", nil) }, want: true},
+		{name: "user message after a pile of chrome", build: func(tr *transcript) {
+			tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
+			tr.addEphemeralNote("context: AGENTS.md")
+			tr.addNote("confinement: workspace")
+			tr.addError("loop", "upstream refused", 0)
+			tr.addUser("hello", nil)
+		}, want: true},
 	}
 
-	tr.addNote("cancelled")
-
-	if !tr.hasConversation() {
-		t.Error("hasConversation = false after a persisted note, want true")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{}
+			tc.build(tr)
+			if got := tr.hasPrompt(); got != tc.want {
+				t.Errorf("hasPrompt() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

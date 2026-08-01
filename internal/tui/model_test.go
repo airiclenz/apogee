@@ -1334,6 +1334,36 @@ func TestModelEmptyTranscriptNeverSaves(t *testing.T) {
 	}
 }
 
+// A pre-prompt note is not a conversation. A launch spent on a slash command leaves a persisted,
+// non-ephemeral note in the scrollback, but no prompt was ever sent — so neither the quit flush
+// (saveSession) nor an idle boundary (saveAtIdle) may file a record, or the history fills with
+// "Session <date>" entries reading 0 messages. Sending a prompt opens both boundaries.
+func TestModelPrePromptNoteNeverSaves(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+	m.transcript.addNote("confinement: workspace (fs-fenced)") // e.g. the /confine status note
+
+	if cmd := m.saveAtIdle(); cmd != nil {
+		t.Error("an idle boundary scheduled a save before the first prompt")
+	}
+	m.saveSession()
+	if n := len(host.savedCalls()); n != 0 {
+		t.Errorf("Save calls before the first prompt = %d; want 0 — a slash-command note is not a conversation", n)
+	}
+
+	m.transcript.addUser("now do something", nil)
+
+	cmd := m.saveAtIdle()
+	if cmd == nil {
+		t.Fatal("an idle boundary scheduled no save after the first prompt")
+	}
+	cmdMsg(cmd) // run the save Cmd so its Save reaches the host
+	m.saveSession()
+	if n := len(host.savedCalls()); n != 2 {
+		t.Errorf("Save calls after the first prompt = %d; want 2 (the idle boundary and the quit flush)", n)
+	}
+}
+
 // Quitting while a worker is in flight must NOT snapshot — the worker owns the Agent, and
 // the Agent is single-goroutine, so a snapshot here would race its Step. ctrl+c cancels and
 // DEFERS the exit until the worker returns (item 8), and the last boundary stays unsaved.

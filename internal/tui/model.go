@@ -1405,16 +1405,16 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 // that captures any post-last-turn transcript changes (notes, /confine output) the per-Turn saves did
 // not. Two callers use it: a clean quit, and startNewSession closing the outgoing session on /clear|
 // /new (which then Rotates so the next Turn opens a fresh id). It is a no-op without a wired host or
-// when the transcript holds no conversation — no entry the record would actually keep, which means the
-// seeded start-up box, a scrollback of nothing but re-derived ephemeral notices, and an empty view all
-// count as nothing worth resuming (hasConversation). Both Snapshot and the Save are best-effort: a quit
+// before the session's first prompt (hasPrompt): a launch that only ran slash commands has produced
+// notes and chrome but nothing anyone would resume, so quitting it — or clearing it — must not file a
+// record reading 0 messages. Both Snapshot and the Save are best-effort: a quit
 // must never fail and a session close must never block, so an error is swallowed rather than
 // interrupting. Both callers guarantee no worker is running, so calling Snapshot here respects the
 // Agent's single-goroutine contract (C1). Unlike the per-Turn path this is synchronous — the outgoing
 // session must reach disk before the caller Rotates or the program exits, and there is no Update loop
 // left (or wanted) to deliver a saveDoneMsg to.
 func (m Model) saveSession() {
-	if m.sessions == nil || !m.transcript.hasConversation() {
+	if m.sessions == nil || !m.transcript.hasPrompt() {
 		return
 	}
 	sess, err := m.eng.Snapshot()
@@ -1462,12 +1462,14 @@ func (m Model) snapshotPayload(sess domain.Session) (savePayload, bool) {
 	}, true
 }
 
-// persist builds a savePayload around sess and schedules it, gated on there being a wired host
-// and a conversation worth resuming. It is the entry the per-Turn snapshot (turnSnapshotMsg) and
-// the idle finishers both funnel through, so the "worth saving?" gate lives in one place. It
-// returns the Cmd to run (nil when nothing was scheduled).
+// persist builds a savePayload around sess and schedules it, gated on there being a wired host and
+// a sent prompt (hasPrompt). It is the entry the per-Turn snapshot (turnSnapshotMsg) and the idle
+// finishers both funnel through, so the "worth saving?" gate lives in one place. Those callers only
+// run inside a Turn, which only a prompt opens, so the gate never fires here in practice — it is
+// carried so that every save in the package answers to the same one predicate. It returns the Cmd
+// to run (nil when nothing was scheduled).
 func (m *Model) persist(sess domain.Session) tea.Cmd {
-	if m.sessions == nil || !m.transcript.hasConversation() {
+	if m.sessions == nil || !m.transcript.hasPrompt() {
 		return nil
 	}
 	p, ok := m.snapshotPayload(sess)
@@ -1480,9 +1482,9 @@ func (m *Model) persist(sess domain.Session) tea.Cmd {
 // saveAtIdle persists the current conversation taking the Model's OWN engine Snapshot — valid
 // because every caller is a terminal boundary at which the worker has returned and the Update
 // loop owns the engine again (C1). Best-effort like persist: a Snapshot error, an unwired host,
-// or an empty transcript simply schedules nothing.
+// or a transcript that holds no prompt yet simply schedules nothing.
 func (m *Model) saveAtIdle() tea.Cmd {
-	if m.sessions == nil || !m.transcript.hasConversation() {
+	if m.sessions == nil || !m.transcript.hasPrompt() {
 		return nil
 	}
 	sess, err := m.eng.Snapshot()

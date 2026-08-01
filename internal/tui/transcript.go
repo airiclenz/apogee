@@ -228,16 +228,26 @@ func (t *transcript) replay(entries []entry) {
 	t.entries = append(t.entries, entries...)
 }
 
-// hasConversation reports whether the transcript holds anything the human would want resumed —
-// any entry the record would actually keep. The one-time start-up box is opening chrome and a
-// display-only note is re-derived at every launch, so neither is conversation; they are exactly
-// the entries encodeTranscript skips, which keeps this gate and the blob in agreement. A launch
-// that showed only those is still "empty" for the save decision (saveSession): seeding entries[0]
-// — or printing a "context: …" notice in a repo that has context files — must not on its own turn
-// every quit into a snapshot file holding an empty scrollback.
-func (t *transcript) hasConversation() bool {
+// hasPrompt reports whether the transcript holds at least one committed user message. It is THE
+// save-gate predicate — saveSession, persist and saveAtIdle all funnel through it — so a session
+// earns a history record only once a prompt was actually sent. Everything this program can put on
+// screen by itself leaves the gate shut: the one-time start-up box, slash-command notes (/confine's
+// status line, the /skills catalogue, a /model actuation note, the /sessions browser's notices),
+// error notices, and the re-derived ephemeral chrome. Without that rule a launch spent poking at
+// slash commands and then quitting files a "Session <date>" record reading 0 messages.
+//
+// entryInterjected is deliberately excluded, mirroring the rationale on userTexts: an interjection
+// is a remark steering an Exchange that an entryUser opened (addInterjected), so a transcript
+// holding one always holds that opening entry too — on a resume included, because the stored
+// scrollback carries it. Counting interjections could therefore never change the answer, and
+// leaving them out keeps the gate exactly "a prompt exists" ⇔ "an entryUser exists".
+//
+// Accepted consequence: resuming a LEGACY record that carries no transcript blob leaves the
+// scrollback with no entryUser, so quitting without prompting skips the final quit-flush. Nothing
+// is lost — that record is already on disk; only a cosmetic ctxUsed/UpdatedAt refresh is missed.
+func (t *transcript) hasPrompt() bool {
 	for i := range t.entries {
-		if e := &t.entries[i]; e.kind != entryStartup && !e.ephemeral {
+		if t.entries[i].kind == entryUser {
 			return true
 		}
 	}

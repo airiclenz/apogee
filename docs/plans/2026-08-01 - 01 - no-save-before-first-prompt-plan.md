@@ -22,7 +22,15 @@
   - Retention/pruning of already-saved empty records from earlier builds (owner can delete them in the `/sessions` browser).
   - Version bump / release (see closing note).
 
-## 1. Save gate becomes "a prompt was sent": `hasPrompt` replaces `hasConversation`
+## 1. Save gate becomes "a prompt was sent": `hasPrompt` replaces `hasConversation` — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): the header's "Working-tree note" precondition no longer held at execution time —
+the ephemeral-awareness diff on `internal/tui/transcript.go` + `internal/tui/transcript_test.go` had
+already been COMMITTED as `32063be` ("fix(tui): stop saving a session whose scrollback is only
+ephemeral notices"), so the tree was clean but for an unrelated `TODO.md` edit. Nothing needed
+folding or discarding; the item's supersession was carried out against committed code instead, with
+identical net effect (`hasConversation` deleted, `TestTranscriptHasConversationIgnoresEphemeral`
+replaced by `TestTranscriptHasPrompt`). The pre-existing `TODO.md` modification was left untouched.
 
 **What:** Replace the transcript's save-gate predicate so no save can happen before the first committed user prompt.
 
