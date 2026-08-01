@@ -487,6 +487,22 @@ one result path that never passes `enrichWithResult` — the item's What calls f
 covered, and stripping inside `enrichWithResult` alone would not do it). Package rule recorded as a
 second invariant in `internal/tui/doc.go`.
 
+NOTES (2026-08-01) — correction: this item's commit `0c38d50` says, in the penultimate sentence of its
+message body (which then ends on the `internal/tui/doc.go` second-invariant sentence), "the @file row
+keeps its raw path as the spliced value so a reference still resolves on disk". That sentence is
+REVERSED by follow-up commit `43d882b`: `fileSuggestions` now strips the workspace path ONCE and
+derives both the row's value and its cell from that single `stripEscapes` call, because an accepted
+row is SPLICED into the composer — a raw value left the escape to the bubbles textarea's internal
+sanitizer (a third-party internal standing where this package's own seam belongs), and the mismatch
+also broke `autocompleteExactMatch`, so ⏎ on a fully-typed token re-accepted instead of submitting.
+Nothing is lost to a second channel: an `@ref` resolves from the token read back out of the composed
+text (`extractFileRefs` → `resolveFileRefs`), never from the `acItem`. The cost — a file whose NAME
+holds an ESC byte can no longer be referenced from the dropdown — is recorded in `CHANGELOG.md` and in
+`fileSuggestions`' own comment (`internal/tui/autocomplete.go:451-455`); the `internal/tui/doc.go`
+addition (lines 428-437) carries the seam rule that settles the trade, not the cost. All three were
+written by `43d882b`. Git history is not rewritten, so `0c38d50`'s message keeps the superseded
+sentence and this line is its correction.
+
 **What:** Audit "High — Terminal-escape stripping is enforced per call site, and several
 untrusted producers were missed". Move the discipline to the seams in `internal/tui`:
 `stripEscapes` inside `addNote`/`addError` and inside `presentToolCall`/`enrichWithResult`
