@@ -121,14 +121,22 @@ var entryKindByName = func() map[string]entryKind {
 }()
 
 // encodeTranscript serializes a transcript's committed entries into the versioned wire blob.
-// Only committed entries are written, and only the persisted kinds: the one-time start-up box
-// (entryStartup) is skipped — it is re-seeded fresh on resume — and the in-progress pending
-// buffer is never touched, because tokens that were never committed to an entry were never part
-// of the scrollback. The result is stamped with transcriptVersion.
+// Only committed entries are written, and only the persisted ones: the one-time start-up box
+// (entryStartup) is skipped — it is re-seeded fresh on resume — display-only entries
+// (entry.ephemeral, e.g. the "resumed: <title>" notice) are skipped for the same reason one kind
+// over, and the in-progress pending buffer is never touched, because tokens that were never
+// committed to an entry were never part of the scrollback. The result is stamped with
+// transcriptVersion.
+//
+// Skipping is deliberately encode-side only: nothing ephemeral ever reaches the wire, so decode
+// needs no counterpart and the wire format is unchanged (an old file keeps decoding identically).
 func encodeTranscript(t *transcript) ([]byte, error) {
 	env := wireEnvelope{Version: transcriptVersion, Entries: make([]wireEntry, 0, len(t.entries))}
 	for i := range t.entries {
 		e := &t.entries[i]
+		if e.ephemeral {
+			continue // display-only: re-derived at startup/resume, so persisting it only accumulates
+		}
 		name, ok := entryKindNames[e.kind]
 		if !ok {
 			continue // entryStartup (or any future non-persisted kind): opening chrome, not conversation

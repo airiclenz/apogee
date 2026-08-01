@@ -654,6 +654,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Reopening a session no longer leaves a mark on it.** The `resumed: <title>` line apogee prints
+  when you pick a session back up — along with its "no scrollback recorded" variant and the note
+  saying the session was interrupted mid-task — was being written into the session's own record, so
+  every reopen added another copy: resume a session five times and its saved scrollback carried five
+  `resumed:` lines, none of which you ever typed. Those notices are **display-only** now. You still
+  see each one exactly as before, on every resume, because each is worked out fresh from the record
+  being opened; what changes is that the record keeps only the conversation. Existing session files
+  keep loading unchanged — the stored format did not move — and the lines a session already
+  collected replay as ordinary scrollback; no new ones are added to it.
+
 - **Pop-up rows line up in columns now.** Every overlay pane built its rows by gluing their fields
   into one string — `name — endpoint`, `Skill Name  what it does`, `a task · 5m ago · 3 msgs` — so
   the second and third tiers landed wherever the first happened to end and each pane read as a

@@ -178,6 +178,67 @@ func TestSessionBrowserResumeHappyPath(t *testing.T) {
 	if len(calls) == 0 || calls[len(calls)-1].id != "sess-1" {
 		t.Errorf("post-resume save id = %v, want the loaded 'sess-1'", calls)
 	}
+	// …and that save carries the conversation, not the resume notice: the notice is display-only,
+	// re-derived from the record every time it is opened.
+	saved := calls[len(calls)-1].transcript
+	if strings.Contains(string(saved), "resumed:") {
+		t.Errorf("the saved record carries the resume notice: %s", saved)
+	}
+	if !strings.Contains(string(saved), "what is the capital of france") {
+		t.Errorf("the saved record lost the replayed conversation: %s", saved)
+	}
+}
+
+// Resume notices never accumulate in the record. Opening the SAME session twice — each time
+// resuming, then saving what the view holds back over the record — leaves the stored scrollback
+// exactly as the conversation left it, while the human still sees the notice on every reopen. This
+// is the ISSUES.md defect: the notice used to persist, so a record collected one more "resumed:"
+// line per resume, forever.
+func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
+	var src transcript
+	src.addUser("what is the capital of france", nil)
+	src.apply(domain.MessageEvent{Text: "Paris."})
+	blob, err := encodeTranscript(&src)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", "france question", "/ws/a", time.Now(), 0, blob)
+
+	for round := 1; round <= 2; round++ {
+		m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+		m = openBrowser(t, m)
+		m, cmd := stepCmd(t, m, keyEnter())
+		if cmd == nil {
+			t.Fatalf("round %d: enter dispatched no Load Cmd", round)
+		}
+		m = step(t, m, cmdMsg(cmd)) // fold sessionLoadedMsg → resumeLoaded
+		if !hasEntry(m, entryNote, "resumed: france question") {
+			t.Fatalf("round %d: the human was not shown the resume notice", round)
+		}
+		// A per-Turn save writes the resumed view back over the record — which is exactly what the
+		// next round loads, so anything persisted here compounds.
+		m = driveOneSave(t, m, domain.Session{})
+		calls := host.savedCalls()
+		storeMeta(host, "sess-1", "france question", "/ws/a", time.Now(), 0, calls[len(calls)-1].transcript)
+	}
+
+	rec, err := host.Load("sess-1")
+	if err != nil {
+		t.Fatalf("load after two resumes: %v", err)
+	}
+	entries, err := decodeTranscript(rec.Transcript)
+	if err != nil {
+		t.Fatalf("decode after two resumes: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("record holds %d entries after two resumes; want the original 2 (user + assistant): %+v", len(entries), entries)
+	}
+	for _, e := range entries {
+		if e.kind == entryNote {
+			t.Errorf("record accumulated a note entry: %q", e.text)
+		}
+	}
 }
 
 // A resumed record whose stored snapshot is a mid-Exchange session (InExchange true after the

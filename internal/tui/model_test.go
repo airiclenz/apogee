@@ -1119,6 +1119,22 @@ func TestNewModelReplaysResumedScrollback(t *testing.T) {
 	if last.kind != entryNote || last.text != "resumed: first question" {
 		t.Errorf("last entry = {%v, %q}; want a 'resumed: first question' note", last.kind, last.text)
 	}
+
+	// The notice is display-only: the human sees it (above), but the next save must not carry it —
+	// it is re-derived from the record on every resume, so persisting it would stack copies.
+	if !last.ephemeral {
+		t.Error("the resume notice is persistent; it must be ephemeral")
+	}
+	p, ok := m.snapshotPayload(domain.Session{})
+	if !ok {
+		t.Fatal("snapshotPayload failed on a resumed transcript")
+	}
+	if strings.Contains(string(p.transcript), "resumed:") {
+		t.Errorf("the saved blob carries the resume notice: %s", p.transcript)
+	}
+	if !strings.Contains(string(p.transcript), "a recorded note") {
+		t.Errorf("the saved blob dropped the conversation's own note: %s", p.transcript)
+	}
 }
 
 // A corrupt (undecodable) blob is never fatal: no replayed entries land, the view is left fresh,

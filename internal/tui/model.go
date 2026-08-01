@@ -249,6 +249,10 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 // browser appends on a mid-Exchange resume. A nil payload (a fresh start) is a no-op. It runs at
 // construction, before any WindowSizeMsg, so the replayed entries are present the first time the
 // viewport lays out.
+//
+// All three notices are added EPHEMERALLY (addEphemeralNote): each is derived here from the record
+// being resumed, so the next resume derives it again — persisting one would stack another copy into
+// the record on every reopen while telling a re-read nothing it does not already know.
 func (m *Model) replayResumed(r *ResumedSession) {
 	if r == nil {
 		return
@@ -260,13 +264,13 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	m.ctxUsed = r.CtxUsed // relight the gauge near the session's last observed fill
 	entries, err := decodeTranscript(r.Transcript)
 	if err != nil || len(entries) == 0 {
-		m.transcript.addNote("resumed: " + r.Title + " (no scrollback recorded — the model still remembers)")
+		m.transcript.addEphemeralNote("resumed: " + r.Title + " (no scrollback recorded — the model still remembers)")
 	} else {
 		m.transcript.replay(entries)
-		m.transcript.addNote("resumed: " + r.Title)
+		m.transcript.addEphemeralNote("resumed: " + r.Title)
 	}
 	if r.InExchange {
-		m.transcript.addNote(interruptedNote)
+		m.transcript.addEphemeralNote(interruptedNote)
 	}
 }
 

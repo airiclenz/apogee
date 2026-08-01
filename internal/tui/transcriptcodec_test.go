@@ -102,6 +102,46 @@ func TestTranscriptCodecExcludesStartupAndPending(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecExcludesEphemeral proves the third exclusion: a display-only note is in the
+// transcript the human sees but never in the blob the record keeps, while an ordinary note beside
+// it still round-trips. Persisting a re-derived notice is what made resume notes stack up in the
+// record, one more on every reopen.
+func TestTranscriptCodecExcludesEphemeral(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.addUser("what is the capital of france", nil)
+	tr.addNote("cancelled")
+	tr.addEphemeralNote("resumed: france question")
+
+	if len(tr.entries) != 3 {
+		t.Fatalf("in-memory entries = %d; want 3 — an ephemeral note is displayed like any other", len(tr.entries))
+	}
+	if last := tr.entries[2]; last.kind != entryNote || !last.ephemeral {
+		t.Errorf("ephemeral note = {kind %v, ephemeral %v}; want {entryNote, true}", last.kind, last.ephemeral)
+	}
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if strings.Contains(string(data), "resumed:") {
+		t.Errorf("the ephemeral note reached the wire: %s", data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decoded %d entries; want 2 (the user send and the persistent note)", len(got))
+	}
+	if got[1].kind != entryNote || got[1].text != "cancelled" {
+		t.Errorf("decoded note = %+v; want the persistent 'cancelled' note", got[1])
+	}
+	if got[1].ephemeral {
+		t.Error("a persistent note decoded as ephemeral; the flag is set by the appender, never by the wire")
+	}
+}
+
 // TestTranscriptCodecEmptyIsLegacy pins the legacy case: an empty or nil blob (a record written
 // before the codec existed, or one with no scrollback) decodes to no entries and no error, so the
 // caller degrades to resuming without a replay rather than reporting a fault.

@@ -51,6 +51,13 @@ const (
 // callID matches the result by ToolCall.ID, and done marks the call once its result has
 // arrived (so a re-used tool pairs each result with the right call). A presented document
 // carries no text at all: its facts live in presented, the view render.go composes from.
+//
+// ephemeral marks an entry as display-only: it renders exactly like its kind normally does, but
+// encodeTranscript never writes it to the session record. It generalizes the entryStartup
+// exclusion — the box is opening chrome that is re-seeded on every launch, and a resume-time
+// notice is the same thing one kind over: re-derived from live state at the moment the view is
+// rebuilt, so persisting it would append a fresh copy on every resume until the record was a
+// column of "resumed:" notes.
 type entry struct {
 	kind      entryKind
 	text      string
@@ -58,6 +65,7 @@ type entry struct {
 	callID    string
 	tool      toolView
 	done      bool
+	ephemeral bool     // display-only: rendered, never persisted (see encodeTranscript)
 	skills    []string // entryUser / entryInterjected: display names of the skills this message invoked
 	presented presentedView
 	startup   startupView // entryStartup only: the one-time start-up box's logo + session facts
@@ -127,6 +135,20 @@ func (t *transcript) addInterjected(text string, skills []string) {
 // event that is not itself an engine Event.
 func (t *transcript) addNote(text string) {
 	t.entries = append(t.entries, entry{kind: entryNote, text: text})
+}
+
+// addEphemeralNote appends a note that the human sees but the session record never keeps. It is
+// addNote in every respect the renderer can observe — same kind, same styling, same position in
+// the scrollback — and differs only at the persistence seam, where encodeTranscript skips it.
+//
+// It is for notices that are RE-DERIVED at each startup or resume rather than earned by the
+// conversation: the "resumed: <title>" line, its no-scrollback degrade variant, and the
+// interrupted-mid-exchange note. Each of those is recomputed from live state every time the view is
+// rebuilt, so persisting one adds nothing on the way back in and accumulates a duplicate on the way
+// out — five resumes, five stored "resumed:" notes. A note that records something that actually
+// happened in the session (a cancellation, a failed save, a server switch) belongs in addNote.
+func (t *transcript) addEphemeralNote(text string) {
+	t.entries = append(t.entries, entry{kind: entryNote, text: text, ephemeral: true})
 }
 
 // addPresented appends the presentation entry for one shown document — rung 0 of the ladder,

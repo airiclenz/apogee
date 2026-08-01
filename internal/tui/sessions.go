@@ -334,6 +334,12 @@ func (m Model) loadSession(id string) tea.Cmd {
 // legacy empty blob degrades to an honest no-scrollback note), relight the gauge from the stored
 // fill, and re-arm the same field set startNewSession resets. A session restored mid-task gets the
 // interrupted note (item 8 supplies the step-only /continue drive that finishes it).
+//
+// The resume notices — "resumed: <title>", its no-scrollback degrade variant, and the interrupted
+// note — are ephemeral (addEphemeralNote): they are re-derived from the loaded record every time it
+// is opened, so the record itself must not carry them. The load/restore FAILURE notes above stay
+// persistent: they belong to the session that stays live, and they record something that happened
+// rather than something re-derived.
 func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.transcript.addNote("could not load session: " + msg.err.Error())
@@ -361,13 +367,13 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.transcript.addStartup(newStartupView(m.opts))
 	entries, decErr := decodeTranscript(msg.rec.Transcript)
 	if decErr != nil || len(entries) == 0 {
-		m.transcript.addNote("resumed: " + title + " (no scrollback recorded — the model still remembers)")
+		m.transcript.addEphemeralNote("resumed: " + title + " (no scrollback recorded — the model still remembers)")
 	} else {
 		m.transcript.replay(entries)
-		m.transcript.addNote("resumed: " + title)
+		m.transcript.addEphemeralNote("resumed: " + title)
 	}
 	if m.eng.InExchange() {
-		m.transcript.addNote(interruptedNote)
+		m.transcript.addEphemeralNote(interruptedNote)
 	}
 	// A successful restore starts a new session, so the engine re-read the workspace context files
 	// (the resolved-live posture: a resumed session speaks from the CURRENT files, not the ones its
