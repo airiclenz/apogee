@@ -169,3 +169,33 @@ func TestMCPServerGrain_ForcedGateStillPromptsOnCachedServer(t *testing.T) {
 		t.Errorf("ran counts: search=%d admin=%d; both must run (each prompted, both allowed)", searchRan, adminRan)
 	}
 }
+
+// TestMCPServerGrain_ForcedApprovalNeverCachesTheServer is the WRITE-direction mirror of the
+// test above: a Tier-2 forced gate answered "allow for session" must not write the server-grain
+// cache, so an ordinary call to a SIBLING tool of the same server still prompts. Caching a
+// forced approval at server grain would let one dangerous-call prompt silently pre-clear every
+// tool of that server for the rest of the Session.
+func TestMCPServerGrain_ForcedApprovalNeverCachesTheServer(t *testing.T) {
+	t.Parallel()
+	sink := &recordingSink{}
+	conf := &fakeConfiner{caps: capsBoth()}
+	adminRan, searchRan := 0, 0
+	cfg := autoConfig(sink, conf, true,
+		mcpServerTool{name: "github__admin", alias: "github", ran: &adminRan},
+		mcpServerTool{name: "github__search", alias: "github", ran: &searchRan},
+	)
+	approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
+	cfg.Approver = approver
+
+	driveTwoToolCalls(t, cfg, sink,
+		toolReq{"c1", "github__admin", `{"cmd":"sudo rm"}`}, // Tier-2 (sudo) forces the gate
+		toolReq{"c2", "github__search", `{}`},               // ordinary sibling of the same server
+	)
+
+	if approver.calls != 2 {
+		t.Errorf("Approver consulted %d times; a forced allow-for-session must not cache the server grain, so the sibling still prompts", approver.calls)
+	}
+	if adminRan != 1 || searchRan != 1 {
+		t.Errorf("ran counts: admin=%d search=%d; both must run (each prompted, both allowed)", adminRan, searchRan)
+	}
+}

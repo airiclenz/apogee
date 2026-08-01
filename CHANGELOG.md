@@ -654,6 +654,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Approving a dangerous call "for this session" no longer waves through everything after it.**
+  When the dangerous-action guard stops a call to force your approval — a `sudo …`, a
+  `curl … | bash` — the prompt offers "allow for this session" like any other. Pressing it used to
+  remember that answer under the tool's name, so every later ordinary call to that tool ran
+  unprompted for the rest of the session: the one approval boundary Ask-Before and Allow-Edits have
+  was gone, and you had authorised only the single risky call you were shown. For an MCP tool the
+  remembered key is the whole server, so one forced prompt cleared every tool that server offers.
+  A forced prompt now authorises exactly the call in front of you and remembers nothing —
+  matching what it already did in the other direction, where a cached approval never suppressed a
+  forced prompt. Ordinary "allow for this session" approvals are unchanged.
+
 - **Opening a file no longer crashes apogee mid-answer.** With the Mechanisms on, any successful
   `open_file` could take the whole TUI down the instant the file had been read — the window
   vanished and the answer in flight was lost (per-turn saves survived, so the session itself was

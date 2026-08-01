@@ -281,10 +281,17 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Request: areq, Decision: decision})
 	switch decision {
 	case domain.ApprovalAllowForSession:
-		if a.approved == nil {
-			a.approved = make(map[string]bool)
+		// A forced gate is never pre-allowable, so it skips the cache in BOTH directions: the
+		// read above and this write. Otherwise one "allow for session" on a Tier-2 speed-bump
+		// (or a runtime demote) would silently pre-clear every later ordinary gate under the
+		// same key — for an MCP tool, every tool of that server. A forced allow-for-session
+		// therefore behaves exactly as a plain ApprovalAllow: it authorises this call only.
+		if !force {
+			if a.approved == nil {
+				a.approved = make(map[string]bool)
+			}
+			a.approved[cacheKey] = true
 		}
-		a.approved[cacheKey] = true
 		return true, dispatchDone
 	case domain.ApprovalAllow:
 		return true, dispatchDone

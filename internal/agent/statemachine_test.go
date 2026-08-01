@@ -306,6 +306,44 @@ func TestDispatch_ApprovalAllowForSession(t *testing.T) {
 	}
 }
 
+// TestDispatch_ForcedApprovalNeverCachesAllowForSession is the WRITE-direction mirror of the
+// cache test above: a Tier-2 forced gate answered "allow for session" must not write the
+// allow-for-session cache, so a later ORDINARY gate on the same tool still prompts. The human
+// pressing "allow for session" on a `sudo …` speed-bump authorises that one dangerous call —
+// not the removal of Ask-Before's only approval boundary for the rest of the Session
+// (confinement-execution-contract: "a forced gate … is never pre-allowable").
+func TestDispatch_ForcedApprovalNeverCachesAllowForSession(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink, fakeTool{name: "terminal", readOnly: false, ran: &ran, result: "ok"})
+	cfg.Mode = domain.ModeAskBefore
+	approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
+	cfg.Approver = approver
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "terminal", `{"command":"sudo apt-get install jq"}`), // Tier-2 → forced gate
+		toolCallScript("c2", "terminal", `{"command":"ls"}`),                      // ordinary gate
+		contentScript("done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "install then list"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if approver.calls != 2 {
+		t.Errorf("approver consulted %d times, want 2 (a forced allow-for-session must not pre-allow the next ordinary gate)", approver.calls)
+	}
+	if ran != 2 {
+		t.Errorf("tool ran %d times, want 2 (both calls were allowed)", ran)
+	}
+}
+
 // TestDispatch_PlanBypassesApproval runs a read-only tool in Plan mode without consulting
 // the Approver, and filters write tools out of the menu the model is shown.
 func TestDispatch_PlanBypassesApproval(t *testing.T) {

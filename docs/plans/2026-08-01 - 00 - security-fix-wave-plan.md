@@ -60,7 +60,7 @@ that mutates only `Summary` books a fire (the DeepEqual half). Table-driven, `t.
 
 **Commit:** `fix(agent): make the post-tool-result acted probe panic-safe on summary-carrying results`
 
-## 2. A forced approval never writes the allow-for-session cache
+## 2. A forced approval never writes the allow-for-session cache — ✅ DONE (2026-08-01)
 
 **What:** Audit "High — A forced (Tier-2) approval writes the allow-for-session cache".
 `internal/agent/dispatch.go:283-287`: the `ApprovalAllowForSession` branch writes
