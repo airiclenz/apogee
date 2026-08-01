@@ -43,6 +43,38 @@ const RecordVersion = 1
 // RecordVersion — a record written by a newer Apogee, refused rather than misread.
 var ErrRecordVersion = errors.New("apogee: unsupported session record version")
 
+// ErrInvalidID is returned when a session id cannot address a file inside the store: an id is
+// joined with the store directory to form a path, so anything that is not a single, safe
+// filename component would let a record's own contents choose where Apogee writes and deletes.
+// A record read from an untrusted file declares its id, which makes this a security boundary,
+// not a tidiness check.
+var ErrInvalidID = errors.New("apogee: invalid session id")
+
+// maxIDLen bounds an id so that <id>.json stays inside the 255-byte name limit every
+// mainstream filesystem enforces. Minted ids are 25 bytes; the slack is for legacy stems.
+const maxIDLen = 200
+
+// validateID reports whether id is usable as this store's filename stem: non-empty, no longer
+// than maxIDLen, a single path component (no separator of either OS, no ".", "..", traversal,
+// or absolute path), not dot-prefixed, and free of control characters. Minted ids
+// (NewID) and legacy filename stems both satisfy it; a planted "../../.claude/settings" does
+// not.
+func validateID(id string) error {
+	switch {
+	case id == "":
+		return fmt.Errorf("%w: empty", ErrInvalidID)
+	case len(id) > maxIDLen:
+		return fmt.Errorf("%w %q: longer than %d bytes", ErrInvalidID, id, maxIDLen)
+	case strings.HasPrefix(id, "."):
+		return fmt.Errorf("%w %q: must not start with a dot", ErrInvalidID, id)
+	case id != filepath.Base(id) || strings.ContainsAny(id, `/\`):
+		return fmt.Errorf("%w %q: must be a single filename component", ErrInvalidID, id)
+	case strings.ContainsFunc(id, func(r rune) bool { return r < 0x20 || r == 0x7f }):
+		return fmt.Errorf("%w %q: contains a control character", ErrInvalidID, id)
+	}
+	return nil
+}
+
 // Meta is the browsable summary of one stored session — everything the history browser
 // shows without decoding the conversation.
 type Meta struct {
@@ -100,10 +132,12 @@ func newID(now time.Time, rand io.Reader) string {
 // Save writes rec to <dir>/<rec.Meta.ID>.json atomically (temp file in the same dir +
 // os.Rename), creating the directory if needed and stamping RecordVersion. The same ID
 // overwrites its own file (update-in-place). Save never mints ids or edits Meta beyond the
-// version stamp — cadence and metadata policy live with the caller.
+// version stamp — cadence and metadata policy live with the caller. An id that is not a safe
+// filename component is refused with ErrInvalidID: the write must stay inside s.dir even when
+// the id travelled in from a record the user resumed by path.
 func (s *Store) Save(rec Record) error {
-	if rec.Meta.ID == "" {
-		return errors.New("apogee: cannot save a session record with an empty id")
+	if err := validateID(rec.Meta.ID); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
 		return fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
@@ -150,8 +184,15 @@ func (s *Store) List() ([]Meta, error) {
 }
 
 // Load returns the record stored under id (<dir>/<id>.json), wrapping a pre-plan bare
-// envelope on the fly. The returned Record.Session is always resumable by the engine.
-func (s *Store) Load(id string) (Record, error) { return s.loadPath(filepath.Join(s.dir, id+".json")) }
+// envelope on the fly. The returned Record.Session is always resumable by the engine. An id
+// that is not a safe filename component is refused with ErrInvalidID rather than read from
+// outside the store — LoadPath is the deliberate way to read a record by path.
+func (s *Store) Load(id string) (Record, error) {
+	if err := validateID(id); err != nil {
+		return Record{}, err
+	}
+	return s.loadPath(filepath.Join(s.dir, id+".json"))
+}
 
 // LoadPath returns the record at an explicit path — the read path --resume uses when given
 // a file rather than an id. Legacy bare envelopes are wrapped identically to Load.
@@ -166,8 +207,13 @@ func (s *Store) loadPath(path string) (Record, error) {
 	return decodeRecord(data, path)
 }
 
-// Delete removes the record file for id.
+// Delete removes the record file for id. An id that is not a safe filename component is
+// refused with ErrInvalidID, so a record's declared id can never aim the browser's delete at a
+// file outside the store.
 func (s *Store) Delete(id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
 	if err := os.Remove(filepath.Join(s.dir, id+".json")); err != nil {
 		return fmt.Errorf("apogee: delete session %q: %w", id, err)
 	}
@@ -186,11 +232,27 @@ func (s *Store) Rename(id, title string) error {
 	return s.Save(rec)
 }
 
-// decodeRecord turns raw file bytes into a Record. It first sniffs for the recordVersion
+// decodeRecord turns raw file bytes into a Record and refuses one whose id could not address a
+// file inside a store. The id is the only Meta field that becomes a path — every later Save and
+// Delete names <id>.json — so a file that declares a hostile id is rejected here, at the door,
+// rather than trusted by the writers downstream. List soft-skips such a file like any other it
+// cannot decode.
+func decodeRecord(data []byte, path string) (Record, error) {
+	rec, err := decodeAnyRecord(data, path)
+	if err != nil {
+		return Record{}, err
+	}
+	if err := validateID(rec.Meta.ID); err != nil {
+		return Record{}, fmt.Errorf("apogee: session %q: %w", path, err)
+	}
+	return rec, nil
+}
+
+// decodeAnyRecord decodes either on-disk shape. It first sniffs for the recordVersion
 // key: present means a wrapper (version-checked here — this layer's forward-reject);
 // absent but carrying a bare domain.Session's Version/State keys means a pre-plan file,
 // wrapped with synthetic metadata so legacy sessions still list, load, and resume.
-func decodeRecord(data []byte, path string) (Record, error) {
+func decodeAnyRecord(data []byte, path string) (Record, error) {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return Record{}, fmt.Errorf("apogee: decode session %q: %w", path, err)

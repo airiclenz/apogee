@@ -281,7 +281,23 @@ refused; a normal small diff is byte-identical to today's output.
 
 **Commit:** `fix(tools): bound view_diff reads, content and table size`
 
-## 10. Validate session-record ids as filenames
+## 10. Validate session-record ids as filenames — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): the item's PARENTHETICAL rule was taken ("at minimum reject
+`id != filepath.Base(id)`", hardened to: non-empty, ≤ 200 bytes, no separator of either OS, no
+`.`/`..`/dot prefix, no control characters) rather than the strict minted shape, because the strict
+shape would break two documented behaviours the plan does not authorise changing: pre-plan bare
+envelopes synthesise their id from the FILENAME STEM (`wrapLegacy`), which is arbitrary, and a
+legacy record renamed through `Rename` is then saved as a wrapper under that same stem — so a
+shape check at `decodeRecord`/`Save` would make every legacy session unloadable and unrenamable.
+The lenient rule closes the whole traversal/collision surface the finding describes (the id can no
+longer leave the store directory) and admits both minted ids and legacy stems. Validation sits in
+`decodeRecord` (covering both on-disk shapes, so `List` soft-skips a planted record), plus `Save`,
+`Load` and `Delete`; the old empty-id error is now `ErrInvalidID`, and `TestSaveRejectsEmptyID` is
+folded into the table-driven `TestSaveRejectsUnsafeID` rather than duplicated. Re-minting on
+explicit-path resume is UNCONDITIONAL (`resolveResumeArg`'s `LoadPath` branch), including for a
+path that happens to point at the store's own file for that id: "adopted from a path ⇒ new session"
+is one rule with no store-internals leak, and `--resume <id>` remains the in-place resume.
 
 **What:** Audit "Medium — Session-record IDs from an untrusted file become filesystem
 paths". `internal/session/store.go:116/:154/:171` + `cmd/apogee/wire.go:855-865`: validate

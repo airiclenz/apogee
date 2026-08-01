@@ -852,6 +852,13 @@ func resolveResume(store *session.Store, resume string, continueSession bool, wo
 // resolveResumeArg resolves a --resume value: a store id first (the common case — the id shown in
 // /sessions), else a file path (LoadPath, which also wraps a legacy bare envelope). A value that is
 // neither a known id nor a readable file is a friendly error naming both interpretations.
+//
+// A record loaded by PATH keeps its conversation but not its identity: its id is content the file
+// declares rather than a name this store minted, so adopting it would point every later autosave at
+// whatever record that id names — another session's file, silently overwritten, and (before the
+// store's id validation) any path the id spelled out. Re-minting makes the path-resumed
+// conversation a NEW session of this store, which is also what makes resuming a file from outside
+// the store — a repo-shipped session, a copied record — safe.
 func resolveResumeArg(store *session.Store, arg string) (session.Record, error) {
 	if rec, err := store.Load(arg); err == nil {
 		return rec, nil
@@ -861,6 +868,7 @@ func resolveResumeArg(store *session.Store, arg string) (session.Record, error) 
 		return session.Record{}, fmt.Errorf(
 			"apogee: --resume %q: not a known session id (see /sessions) nor a readable session file", arg)
 	}
+	rec.Meta.ID = session.NewID(time.Now())
 	return rec, nil
 }
 

@@ -654,6 +654,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A session file you resume by path can no longer decide where apogee writes.** Every saved
+  session is stored under its id, and that id is also the *filename* the per-Turn autosave, a
+  rename and the `/sessions` browser's delete act on. The id was read straight out of the record's
+  own contents with nothing checked but that it was non-empty, and `--resume <path>` accepts any
+  readable session file — so a session file shipped inside a repo could declare an id of
+  `../../.claude/settings` and have the next autosave write *there*, or declare the id of a session
+  you already have and have that conversation overwritten. An id that is not a plain filename —
+  a traversal, an absolute path, anything with a separator, a dot-prefixed or control-character
+  name — is now refused wherever ids enter the store: a record declaring one neither loads nor
+  lists (the browser skips it like any other file it cannot read), and no save, load or delete acts
+  on one. And a session resumed from an explicit **path** now continues under a **freshly minted
+  id**: its conversation, title and scrollback carry over exactly as before, but it becomes a new
+  session of your own store instead of writing through the identity a file claimed for itself.
+  Resuming by id — `--resume <id>`, the handle `/sessions` shows — still continues that session in
+  place, `--continue` is unchanged, and every session already in your store, pre-plan files
+  included, still lists, loads, renames and deletes exactly as it did.
+
 - **Previewing a change to a huge file can no longer take the whole app down with it.** `view_diff`
   read the file it was given with no size limit at all and then built a comparison table with one
   cell per pair of lines — a table that grows with the *product* of the two line counts. Two 6,000

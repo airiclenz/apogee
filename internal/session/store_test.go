@@ -303,12 +303,116 @@ func TestSaveLeavesNoTempFile(t *testing.T) {
 	}
 }
 
-// Save refuses a record with no id rather than writing a nameless ".json" file.
-func TestSaveRejectsEmptyID(t *testing.T) {
+// unsafeIDs are the ids no store operation may turn into a path: an empty one would write a
+// nameless ".json" file, the rest escape the store directory or name something that is not a
+// plain record file. Ids reach the store from records the user resumed by path, so these are
+// reachable inputs, not hypotheticals.
+var unsafeIDs = []struct {
+	name string
+	id   string
+}{
+	{"empty", ""},
+	{"relative traversal", filepath.Join("..", "..", ".claude", "settings")},
+	{"leading traversal", "../evil"},
+	{"absolute path", "/etc/apogee-victim"},
+	{"nested path", "sub/dir"},
+	{"backslash path", `sub\dir`},
+	{"dot", "."},
+	{"dot dot", ".."},
+	{"dot prefixed", ".hidden"},
+	{"newline", "two\nlines"},
+	{"nul byte", "nul\x00byte"},
+	{"over length", strings.Repeat("x", maxIDLen+1)},
+}
+
+// Save refuses every id that is not a safe filename component — including the empty one —
+// rather than writing outside the store directory.
+func TestSaveRejectsUnsafeID(t *testing.T) {
 	t.Parallel()
-	st := NewStore(t.TempDir())
-	if err := st.Save(sampleRecord("", time.Now().UTC())); err == nil {
-		t.Error("Save with empty id returned nil, want an error")
+	for _, tc := range unsafeIDs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			st := NewStore(dir)
+			if err := st.Save(sampleRecord(tc.id, time.Now().UTC())); !errors.Is(err, ErrInvalidID) {
+				t.Errorf("Save(id=%q) err = %v, want ErrInvalidID", tc.id, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err == nil && len(entries) != 0 {
+				t.Errorf("Save(id=%q) wrote %d entries into the store, want none", tc.id, len(entries))
+			}
+		})
+	}
+}
+
+// Delete refuses the same ids, so a hostile id can never remove a file outside the store — the
+// browser's delete verb is driven by an id a record declared.
+func TestDeleteRejectsUnsafeID(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	victim := filepath.Join(home, "settings.json")
+	if err := os.WriteFile(victim, []byte(`{"keep":true}`), filePerm); err != nil {
+		t.Fatalf("write victim: %v", err)
+	}
+	st := NewStore(filepath.Join(home, "sessions"))
+
+	for _, tc := range unsafeIDs {
+		if err := st.Delete(tc.id); !errors.Is(err, ErrInvalidID) {
+			t.Errorf("Delete(%q) err = %v, want ErrInvalidID", tc.id, err)
+		}
+	}
+	// The traversal that would have reached it: <sessions>/../settings.json.
+	if err := st.Delete(filepath.Join("..", "settings")); !errors.Is(err, ErrInvalidID) {
+		t.Errorf("Delete of a traversal err = %v, want ErrInvalidID", err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Errorf("a file outside the store was deleted through an id: %v", err)
+	}
+}
+
+// Load refuses an unsafe id rather than reading through it — LoadPath is the deliberate way to
+// read a record from outside the store.
+func TestLoadRejectsUnsafeID(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "secret.json"), []byte(`{"Version":1,"State":null}`), filePerm); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	st := NewStore(filepath.Join(home, "sessions"))
+	if _, err := st.Load(filepath.Join("..", "secret")); !errors.Is(err, ErrInvalidID) {
+		t.Errorf("Load of a traversal id err = %v, want ErrInvalidID", err)
+	}
+}
+
+// A stored file that DECLARES a hostile id is refused at decode: Load surfaces ErrInvalidID and
+// List skips it, so the id never reaches a writer. This is the planted-record case — a session
+// file shipped in a repo and resumed by path.
+func TestDecodeRejectsUnsafeRecordID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+	if err := st.Save(sampleRecord("20260801T120000Z-cccccccc", time.Now().UTC())); err != nil {
+		t.Fatalf("Save legitimate: %v", err)
+	}
+	planted := fmt.Sprintf(
+		`{"recordVersion":%d,"meta":{"id":"../../.claude/settings"},"session":{"Version":1,"State":null}}`,
+		RecordVersion)
+	if err := os.WriteFile(filepath.Join(dir, "planted.json"), []byte(planted), filePerm); err != nil {
+		t.Fatalf("write planted: %v", err)
+	}
+
+	if _, err := st.Load("planted"); !errors.Is(err, ErrInvalidID) {
+		t.Errorf("Load of a record declaring a traversal id err = %v, want ErrInvalidID", err)
+	}
+	if _, err := st.LoadPath(filepath.Join(dir, "planted.json")); !errors.Is(err, ErrInvalidID) {
+		t.Errorf("LoadPath of a record declaring a traversal id err = %v, want ErrInvalidID", err)
+	}
+	metas, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 || metas[0].ID != "20260801T120000Z-cccccccc" {
+		t.Errorf("List = %+v, want only the legitimate record (the planted one soft-skipped)", metas)
 	}
 }
 

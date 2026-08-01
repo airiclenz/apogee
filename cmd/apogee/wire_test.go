@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1010,6 +1011,82 @@ func TestResolveResumeLegacyPath(t *testing.T) {
 	}
 	if rs := resumedSession(rec, false); rs == nil || len(rs.Transcript) != 0 {
 		t.Errorf("resumedSession(legacy) = %+v; want a non-nil payload with an empty transcript", rs)
+	}
+}
+
+// A record resumed from an explicit PATH is adopted with a FRESH id: the file's declared id is
+// content, not identity, so a planted record claiming another session's id must not make the run's
+// autosaves overwrite that session. Resuming by id (the /sessions handle) still continues in place
+// — TestSessionHostRoundTripsThroughResume and TestSessionHostResumeBeginsActive pin that half.
+func TestResolveResumeByPathRemintsID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store := session.NewStore(filepath.Join(dir, "sessions"))
+
+	// The victim: a real session of this store, with its own transcript.
+	victimID := saveAt(t, store, "/ws", time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC), "victim")
+
+	// The planted file: a readable record that CLAIMS the victim's id.
+	planted := session.Record{
+		RecordVersion: session.RecordVersion,
+		Meta:          session.Meta{ID: victimID, Title: "planted", Workspace: "/elsewhere"},
+	}
+	data, err := json.Marshal(planted)
+	if err != nil {
+		t.Fatalf("marshal planted: %v", err)
+	}
+	plantedPath := filepath.Join(dir, "planted.json")
+	if err := os.WriteFile(plantedPath, data, 0o600); err != nil {
+		t.Fatalf("write planted: %v", err)
+	}
+
+	rec, err := resolveResume(store, plantedPath, false, "/ws")
+	if err != nil {
+		t.Fatalf("resolveResume by path: %v", err)
+	}
+	if rec.Meta.ID == victimID {
+		t.Fatalf("path resume adopted the file's declared id %q; want a freshly minted one", victimID)
+	}
+	if rec.Meta.Title != "planted" {
+		t.Errorf("path resume Title = %q; want the record's own title carried over", rec.Meta.Title)
+	}
+
+	// The run continues as a NEW session: its autosave lands on its own file and the victim's
+	// record is untouched.
+	host := newSessionHost(store, "/ws", "m", rec)
+	if host.ActiveID() != rec.Meta.ID {
+		t.Errorf("host active id = %q; want the re-minted %q", host.ActiveID(), rec.Meta.ID)
+	}
+	if err := host.Save(apogee.Session{}, nil, "continued", 1, 0); err != nil {
+		t.Fatalf("Save after a path resume: %v", err)
+	}
+	got, err := store.Load(victimID)
+	if err != nil {
+		t.Fatalf("Load victim: %v", err)
+	}
+	if got.Meta.Title != "victim" {
+		t.Errorf("the victim record was overwritten by the path-resumed session: title = %q", got.Meta.Title)
+	}
+	if metas, err := store.List(); err != nil || len(metas) != 2 {
+		t.Errorf("store holds %d sessions (err %v); want 2 — the victim plus the re-minted one", len(metas), err)
+	}
+}
+
+// A record whose declared id is not a filename — a traversal planted in a repo's session file — is
+// refused outright at load, so --resume of it never starts a run whose autosaves write there.
+func TestResolveResumeRejectsTraversalRecordID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	plantedPath := filepath.Join(dir, "planted.json")
+	planted := fmt.Sprintf(
+		`{"recordVersion":%d,"meta":{"id":"../../.claude/settings"},"session":{"Version":1,"State":null}}`,
+		session.RecordVersion)
+	if err := os.WriteFile(plantedPath, []byte(planted), 0o600); err != nil {
+		t.Fatalf("write planted: %v", err)
+	}
+	store := session.NewStore(filepath.Join(dir, "sessions"))
+	if _, err := resolveResume(store, plantedPath, false, "/ws"); err == nil {
+		t.Fatal("resolveResume of a record declaring a traversal id: want an error, got nil")
 	}
 }
 

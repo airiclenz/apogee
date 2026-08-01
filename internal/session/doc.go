@@ -13,4 +13,9 @@
 // atomically (temp file + rename) under <id>.json and updates in place; List/Load skip or
 // wrap files they cannot read as records, so pre-plan bare domain.Session files still list,
 // load, and resume, and one corrupt file never kills the browser.
+//
+// An id is a filename, so every id crossing the Store — decoded from a file, saved, loaded,
+// or deleted — must be a single safe path component or it is refused with ErrInvalidID. A
+// record read by path declares its own id, and without that gate a planted file would aim
+// Apogee's autosaves and deletes anywhere the user can write.
 package session
