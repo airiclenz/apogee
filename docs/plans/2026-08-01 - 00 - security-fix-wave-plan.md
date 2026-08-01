@@ -175,7 +175,23 @@ green.
 
 **Commit:** `fix(agent): fence workspace context-file reads inside the workspace root`
 
-## 7. `grep` opens walked files through the fence
+## 7. `grep` opens walked files through the fence — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): the fence is anchored at the WORKSPACE root, not at the searched
+subdirectory, so a link that leaves the searched subtree but stays inside the workspace keeps
+matching — the walk's relative name is lifted to a workspace-relative one before the open, and
+the reported location stays relative to the searched directory as before. That lift needs the
+root resolved through symlinks (new `Grep.realRoot`, `security.EvalRealPath`), because
+`resolveInRoot` returns real paths and the raw root is a prefix of none of them where the
+workspace itself is reached through a link (macOS `/tmp`) — without it grep would return nothing
+at all there. Tests are additive: the item's `TestGrep_RefusesEscapingSymlink` (both cases) plus
+`TestGrep_Execute_SearchesSubdirectory`, which covers the subtree walk the path lift introduced
+and which pins the unchanged location rendering (its three display assertions pass against the
+pre-change code; only its escape assertion fails). Accepted narrowing, the same one `read_file`
+took and recorded: an in-workspace symlink whose target is spelled ABSOLUTE is skipped by the
+walk — verified that the target still matches under its own name, so only the duplicate hit is
+lost. The single-file path also opens through the fence, but its refusal still comes from the
+pre-existing `resolveInRoot` gate, so that half is a boundary pin rather than new behaviour.
 
 **What:** Audit "High — `grep` follows workspace symlinks out of the workspace".
 `internal/tools/grep.go:144` (walk) and `:169-177` (`searchFile`): open every walked entry

@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 var grepSpec = toolSpec{
@@ -56,14 +58,22 @@ var errGrepStop = errors.New("grep: match cap reached")
 
 // Grep searches workspace files for lines matching a regular expression, in pure Go
 // (io/fs walk + regexp — no external grep, §3a). It is a read-only tool scoped to a
-// sandbox root.
+// sandbox root: the walk enumerates names, but every file it reads is opened THROUGH
+// the workspace fence, so a symlink pointing out of the root yields nothing.
 type Grep struct {
 	toolSpec
 	root string
+	// realRoot is root resolved through symlinks. resolveInRoot hands back real paths, so
+	// the workspace-relative name a walked entry is opened by must be measured from the
+	// real root — on a host where the workspace itself is reached through a link (macOS's
+	// /tmp, a symlinked /home) the raw root is a prefix of nothing.
+	realRoot string
 }
 
 // NewGrep returns a grep tool that resolves paths within root.
-func NewGrep(root string) *Grep { return &Grep{toolSpec: grepSpec, root: root} }
+func NewGrep(root string) *Grep {
+	return &Grep{toolSpec: grepSpec, root: root, realRoot: security.EvalRealPath(root)}
+}
 
 // ReadOnly reports that grep performs no writes (domain.ReadOnlyTool).
 func (t *Grep) ReadOnly() bool { return true }
@@ -113,19 +123,31 @@ func (t *Grep) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolRe
 	return okSummary(call.ID, text, matched), nil
 }
 
-// search collects matches from a single file or by walking a directory.
-func (t *Grep) search(ctx context.Context, root string, info os.FileInfo, re *regexp.Regexp, globs []string) ([]string, error) {
+// search collects matches from a single file or by walking a directory. target is the
+// resolved absolute path of the search root; it is used to ENUMERATE names only — every
+// file is opened by its workspace-relative name through the fence, never by an absolute
+// path the walk handed out.
+func (t *Grep) search(ctx context.Context, target string, info os.FileInfo, re *regexp.Regexp, globs []string) ([]string, error) {
 	matches := make([]string, 0, defaultGrepResults)
+	targetRel := t.relative(target)
 
 	if !info.IsDir() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		searchFile(root, t.relative(root), re, &matches)
+		t.searchFile(targetRel, targetRel, re, &matches)
 		return matches, nil
 	}
 
-	walkErr := fs.WalkDir(os.DirFS(root), ".", func(rel string, entry fs.DirEntry, err error) error {
+	// prefix lifts a walk-relative name to a workspace-relative one ("" when the search
+	// root IS the workspace root). fs.WalkDir yields slash-separated names, so the join
+	// is path.Join, not filepath.Join.
+	prefix := filepath.ToSlash(targetRel)
+	if prefix == "." {
+		prefix = ""
+	}
+
+	walkErr := fs.WalkDir(os.DirFS(target), ".", func(rel string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries rather than aborting the whole search
 		}
@@ -141,7 +163,7 @@ func (t *Grep) search(ctx context.Context, root string, info os.FileInfo, re *re
 		if !matchesInclude(entry.Name(), globs) {
 			return nil
 		}
-		searchFile(filepath.Join(root, rel), rel, re, &matches)
+		t.searchFile(path.Join(prefix, rel), rel, re, &matches)
 		if len(matches) >= maxGrepMatches {
 			return errGrepStop
 		}
@@ -155,26 +177,36 @@ func (t *Grep) search(ctx context.Context, root string, info os.FileInfo, re *re
 	return matches, nil
 }
 
-// relative renders path relative to the sandbox root for display, falling back to the
-// absolute path if it cannot be made relative.
-func (t *Grep) relative(path string) string {
-	if rel, err := filepath.Rel(t.root, path); err == nil {
+// relative renders p relative to the sandbox root — the name a file is both displayed by
+// and opened by — falling back to the absolute path if it cannot be made relative (which
+// the fenced open then refuses, the safe direction).
+func (t *Grep) relative(p string) string {
+	if rel, err := filepath.Rel(t.realRoot, p); err == nil {
 		return rel
 	}
-	return path
+	return p
 }
 
-// searchFile appends "rel:line:text" for every matching line in path, skipping a file
-// that is oversized or binary (contains a NUL byte in its leading bytes).
-func searchFile(path, rel string, re *regexp.Regexp, matches *[]string) {
-	if info, err := os.Stat(path); err != nil || info.Size() > maxGrepFileBytes {
-		return
-	}
-	file, err := os.Open(path)
+// searchFile appends "display:line:text" for every matching line in the workspace file
+// named by rel, skipping a file that is oversized or binary (contains a NUL byte in its
+// leading bytes).
+//
+// rel is opened THROUGH the workspace fence (os.Root-pinned, security.SafeOpen), so a
+// walked entry that is a symlink out of the workspace — a clone can plant `notes.txt ->
+// ~/.ssh/id_rsa`, and grep is read-only, hence unapproved in every mode — is refused
+// rather than followed, and the size bound is an fstat of the very descriptor the content
+// is then read from. A refusal is skipped like any other unreadable file: grep reports
+// matches, not an inventory, so a silently absent file is the existing contract.
+func (t *Grep) searchFile(rel, display string, re *regexp.Regexp, matches *[]string) {
+	file, err := security.SafeOpen(t.root, rel)
 	if err != nil {
 		return
 	}
 	defer file.Close()
+
+	if info, err := file.Stat(); err != nil || info.IsDir() || info.Size() > maxGrepFileBytes {
+		return
+	}
 
 	reader := bufio.NewReader(file)
 	if sniff, _ := reader.Peek(512); bytes.IndexByte(sniff, 0) >= 0 {
@@ -188,7 +220,7 @@ func searchFile(path, rel string, re *regexp.Regexp, matches *[]string) {
 		lineNumber++
 		line := scanner.Text()
 		if re.MatchString(line) {
-			*matches = append(*matches, fmt.Sprintf("%s:%d:%s", rel, lineNumber, line))
+			*matches = append(*matches, fmt.Sprintf("%s:%d:%s", display, lineNumber, line))
 			if len(*matches) >= maxGrepMatches {
 				return
 			}

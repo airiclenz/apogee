@@ -654,6 +654,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`grep` no longer reads through a symlink that leaves your workspace.** Only the `path` argument
+  you handed `grep` was checked against the workspace boundary — the files the search itself walked
+  onto were opened by name, following any symlink it found. git stores symlinks verbatim, so a
+  cloned repo could ship an innocuous `notes.txt` pointing at `~/.ssh/id_rsa` or `~/.aws/credentials`
+  and have an ordinary search return the matching lines of that file as tool output. `grep` is
+  read-only, so it runs without asking in *every* mode, Plan included, which made this the one read
+  in apogee that reached outside with nothing to approve. Every file a search opens now goes through
+  the same workspace fence the read tools use: a link that resolves outside the workspace is skipped
+  and its content is never returned, while a link that stays inside the workspace — including one
+  pointing out of the subdirectory you searched but still within the workspace — matches exactly as
+  before, with the same reported locations. One narrowing comes with it, the same one `read_file`
+  took: an in-workspace symlink whose target is written as an *absolute* path is skipped by the
+  walk, because the fence resolves relative components only — the file it points at is still
+  searched under its own name, so what is lost is the duplicate hit, not the content.
+
 - **A repo's `AGENTS.md` can no longer be a symlink to a file outside your workspace.** Workspace
   context files — the `AGENTS.md` / `CLAUDE.md` conventions apogee folds into the standing system
   message of every request — were read by name with a plain read that follows symlinks. A cloned
