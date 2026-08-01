@@ -90,23 +90,25 @@ func (m *Model) maybeAutoTitle(firstUserText string) tea.Cmd {
 		return nil
 	}
 	m.autoTitleFired = true
-	return m.titleCmd(firstUserText, func(raw string, err error) tea.Msg {
+	return m.titleCmd([]string{firstUserText}, func(raw string, err error) tea.Msg {
 		return autoTitleMsg{title: raw, err: err}
 	})
 }
 
 // titleCmd builds the Cmd that runs one naming call off the Update loop and reports it through
 // wrap — autoTitleMsg for the automatic path, manualTitleMsg for a bare `/rename`, which is the only
-// thing that differs between them. It captures the seam and the program context by value, so the
-// closure holds no pointer into the value-copied Model (the listSessions posture). The context is
-// the PROGRAM's, not an Exchange's: the naming call outlives the Turn it was fired beside — that is
-// the whole point of firing it in parallel — so only a shutdown should cut it short. Everything else
-// about the deadline is the composition root's (it sets the client's queue-tolerant request timeout).
-func (m Model) titleCmd(firstUserText string, wrap func(raw string, err error) tea.Msg) tea.Cmd {
+// thing that differs between them. prompts is the window the call names the session from, oldest
+// first. It captures the seam, that window and the program context by value, so the closure holds
+// no pointer into the value-copied Model (the listSessions posture) — the window is built for this
+// one call by the caller rather than shared with the Model. The context is the PROGRAM's, not an
+// Exchange's: the naming call outlives the Turn it was fired beside — that is the whole point of
+// firing it in parallel — so only a shutdown should cut it short. Everything else about the
+// deadline is the composition root's (it sets the client's queue-tolerant request timeout).
+func (m Model) titleCmd(prompts []string, wrap func(raw string, err error) tea.Msg) tea.Cmd {
 	generate := m.opts.GenerateTitle
 	parent := m.parent
 	return func() tea.Msg {
-		raw, err := generate(parent, firstUserText)
+		raw, err := generate(parent, prompts)
 		return wrap(raw, err)
 	}
 }
@@ -251,7 +253,7 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 	}
 	m.transcript.addNote("naming this session…")
 	m.layout()
-	return m, m.titleCmd(first, func(raw string, err error) tea.Msg {
+	return m, m.titleCmd([]string{first}, func(raw string, err error) tea.Msg {
 		return manualTitleMsg{title: raw, err: err}
 	})
 }

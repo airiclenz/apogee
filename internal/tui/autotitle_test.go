@@ -23,28 +23,30 @@ import (
 // WHEN a session is named, whether the answer is applied, and — just as load-bearing — that every
 // failure path leaves the conversation exactly as it was.
 
-// titleSeam is a recording [Options.GenerateTitle]: it captures the text each naming call was made
-// about and answers with a scripted reply or error, so a test can prove both that the call fired
-// and what it was asked. It is concurrency-safe because the naming Cmd runs on its own goroutine.
+// titleSeam is a recording [Options.GenerateTitle]: it captures the WINDOW each naming call was
+// made about and answers with a scripted reply or error, so a test can prove both that the call
+// fired and what it was asked. The whole window is kept rather than its first entry, so a caller
+// that starts sending more than one prompt fails an assertion instead of passing silently. It is
+// concurrency-safe because the naming Cmd runs on its own goroutine.
 type titleSeam struct {
 	mu    sync.Mutex
-	calls []string
+	calls [][]string
 	reply string
 	err   error
 }
 
-func (s *titleSeam) generate(_ context.Context, firstUserText string) (string, error) {
+func (s *titleSeam) generate(_ context.Context, prompts []string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls = append(s.calls, firstUserText)
+	s.calls = append(s.calls, append([]string(nil), prompts...))
 	return s.reply, s.err
 }
 
-// asked returns the prompts the seam was called about, in order.
-func (s *titleSeam) asked() []string {
+// asked returns the windows the seam was called with, one per call, in order.
+func (s *titleSeam) asked() [][]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string(nil), s.calls...)
+	return append([][]string(nil), s.calls...)
 }
 
 // titlingOpts are the Options a naming test runs under: a persistence host to name a record in, a
@@ -134,7 +136,10 @@ func TestAutoTitleFiresOnceOnTheFirstPrompt(t *testing.T) {
 	if msg.title != "fix the broken parser" {
 		t.Errorf("naming call yielded %q, want the seam's reply", msg.title)
 	}
-	if want := []string{"please fix the broken parser in tokenizer.go"}; !reflect.DeepEqual(seam.asked(), want) {
+	// One call, and its window is the submitted prompt ALONE: the automatic form names a session
+	// from the one request that exists when it fires.
+	want := [][]string{{"please fix the broken parser in tokenizer.go"}}
+	if !reflect.DeepEqual(seam.asked(), want) {
 		t.Errorf("seam asked about %q, want the submitted prompt %q", seam.asked(), want)
 	}
 
@@ -559,8 +564,11 @@ func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
 	if got := lastNote(m); !strings.Contains(got, "the generated name") {
 		t.Errorf("note = %q, want the new title reported back", got)
 	}
-	if asked, want := seam.asked(), []string{"fix the broken parser in tokenizer.go"}; !reflect.DeepEqual(asked, want) {
-		t.Errorf("seam asked about %q, want the first user message %q", asked, want)
+	// The window is asserted whole, not just its first entry: bare /rename sends the first user
+	// message and nothing else today, and widening that must show up here rather than pass silently.
+	wantWindow := [][]string{{"fix the broken parser in tokenizer.go"}}
+	if asked := seam.asked(); !reflect.DeepEqual(asked, wantWindow) {
+		t.Errorf("seam asked about %q, want the first user message %q", asked, wantWindow)
 	}
 }
 

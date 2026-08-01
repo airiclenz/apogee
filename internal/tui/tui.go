@@ -242,14 +242,16 @@ type Options struct {
 	// while the "is it safe to snapshot" decision stays with the Model that owns the Engine.
 	Sessions SessionHost
 
-	// GenerateTitle names a new Session record from the text of its first prompt — the cosmetic,
-	// out-of-band naming completion (ADR 0022 addendum, 2026-07-31). It is NOT a Turn and NOT a
-	// Mechanism: it never goes through the Engine (whose single-goroutine contract it would
-	// otherwise break, ADR 0011), fires at no Hook point, emits no Token/Usage event, never enters
-	// the transcript, and nothing in the conversation depends on its result. The binary backs it
-	// with its own provider.Client over the server and model this session is bound to AT CALL TIME,
-	// so a `/server` switch or a rebind carries the naming call with it; the renderer owns only
-	// WHEN it fires and whether the answer is applied.
+	// GenerateTitle names a Session record from a WINDOW of the user's requests, oldest first — the
+	// cosmetic, out-of-band naming completion (ADR 0022 addendum, 2026-07-31). The automatic call at
+	// first-prompt submit passes exactly one prompt, which is not a restriction but an identity: one
+	// is all that exists when it fires. It is NOT a Turn and NOT a Mechanism: it never goes through
+	// the Engine (whose single-goroutine contract it would otherwise break, ADR 0011), fires at no
+	// Hook point, emits no Token/Usage event, never enters the transcript, and nothing in the
+	// conversation depends on its result. The binary backs it with its own provider.Client over the
+	// server and model this session is bound to AT CALL TIME, so a `/server` switch or a rebind
+	// carries the naming call with it; the renderer owns only WHEN it fires and whether the answer
+	// is applied.
 	//
 	// It returns the model's RAW reply — cleaning it up is title.Sanitize's job, kept on this side
 	// of the seam so a generated title and a manual `/rename <text>` pass through one pipeline and
@@ -259,7 +261,7 @@ type Options struct {
 	// bare `/rename` reports that generation is unavailable. Never an error. It is a func rather
 	// than an interface for the same reason SaveHostAcknowledgement is: the TUI needs one call, not
 	// a type.
-	GenerateTitle func(ctx context.Context, firstUserText string) (string, error)
+	GenerateTitle func(ctx context.Context, prompts []string) (string, error)
 
 	// AutoTitle gates only the AUTOMATIC naming call — the `auto-title:` config key, default true.
 	// False leaves GenerateTitle wired, so a bare `/rename` still regenerates on demand: the toggle

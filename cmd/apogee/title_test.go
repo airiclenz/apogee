@@ -71,7 +71,7 @@ func TestTitleGeneratorFollowsTheCurrentBinding(t *testing.T) {
 	binding := upstreamBinding{Endpoint: first.URL, Model: "model-a", APIKey: "key-a"}
 	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
 
-	got, err := wiring.generate(context.Background(), "the parser test fails every other run")
+	got, err := wiring.generate(context.Background(), []string{"the parser test fails every other run"})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestTitleGeneratorFollowsTheCurrentBinding(t *testing.T) {
 
 	binding = upstreamBinding{Endpoint: second.URL, Model: "model-b", APIKey: "key-b"}
 
-	got, err = wiring.generate(context.Background(), "the browser rows are unreadable")
+	got, err = wiring.generate(context.Background(), []string{"the browser rows are unreadable"})
 	if err != nil {
 		t.Fatalf("generate after the switch: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestTitleGeneratorSurfacesADeadline(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
-		got, err := wiring.generate(ctx, "name this session")
+		got, err := wiring.generate(ctx, []string{"name this session"})
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("generate = (%q, %v); want a context deadline error", got, err)
 		}
@@ -146,7 +146,7 @@ func TestTitleGeneratorSurfacesADeadline(t *testing.T) {
 		wiring := newTitleWiring(binding, "/home/dev/apogee")
 		wiring.requestTimeout = 30 * time.Millisecond
 
-		got, err := wiring.generate(context.Background(), "name this session")
+		got, err := wiring.generate(context.Background(), []string{"name this session"})
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("generate = (%q, %v); want a context deadline error from the request timeout", got, err)
 		}
@@ -173,7 +173,7 @@ func TestTitleGeneratorDoesNotRetry(t *testing.T) {
 	binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
 	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
 
-	got, err := wiring.generate(context.Background(), "name this session")
+	got, err := wiring.generate(context.Background(), []string{"name this session"})
 	if err == nil {
 		t.Fatalf("generate = (%q, nil); want the 503 surfaced as an error the caller can drop", got)
 	}
@@ -240,9 +240,10 @@ func TestLiveGenerateTitle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), titleRequestTimeout)
 	defer cancel()
 
-	raw, err := wiring.generate(ctx,
-		"The session browser truncates long titles mid-word. Fix the width calculation in the row "+
-			"renderer and add a test for a CJK title.")
+	raw, err := wiring.generate(ctx, []string{
+		"The session browser truncates long titles mid-word. Fix the width calculation in the row " +
+			"renderer and add a test for a CJK title.",
+	})
 	if err != nil {
 		t.Fatalf("live naming call against %s: %v", endpoint, err)
 	}

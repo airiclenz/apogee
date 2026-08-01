@@ -184,7 +184,7 @@ testing conventions). Update the existing `TestPrompt*` tests to the new signatu
 
 **Commit.** `feat(title): name a session from a bounded window of the user's requests`
 
-## 3. Widen the naming seam to a prompt window (mechanical — no behaviour change)
+## 3. Widen the naming seam to a prompt window (mechanical — no behaviour change) — ✅ DONE (2026-08-01)
 
 **Depends on item 2.**
 

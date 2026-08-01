@@ -54,15 +54,17 @@ func newTitleWiring(binding func() upstreamBinding, workspace string) titleWirin
 	}
 }
 
-// generate performs the naming call for firstUserText and returns the model's RAW reply — the value
-// wired into [tui.Options.GenerateTitle]. Cleaning the reply up is deliberately NOT done here:
+// generate performs the naming call for prompts — the window of the user's requests, oldest first —
+// and returns the model's RAW reply; it is the value wired into [tui.Options.GenerateTitle]. How
+// wide that window is belongs to the TUI, which knows which of the two forms asked; this side only
+// renders whatever it is handed. Cleaning the reply up is deliberately NOT done here:
 // title.Sanitize runs TUI-side so the generated title and a manual `/rename <text>` share one
 // pipeline (Ratified design 6).
 //
 // An error is returned as-is and means no title was produced; the caller's posture — silence on the
 // automatic path, a quiet note on a bare `/rename` — is the TUI's to choose, because only it knows
 // which of the two asked.
-func (w titleWiring) generate(ctx context.Context, firstUserText string) (string, error) {
+func (w titleWiring) generate(ctx context.Context, prompts []string) (string, error) {
 	binding := w.binding()
 	// Retries OFF, unlike every other client the binary builds. The Client's default policy re-POSTs
 	// a faulted attempt twice, and here each attempt is bounded by requestTimeout — so one naming call
@@ -73,7 +75,7 @@ func (w titleWiring) generate(ctx context.Context, firstUserText string) (string
 		provider.WithRequestTimeout(w.requestTimeout), provider.WithAPIKey(binding.APIKey),
 		provider.WithMaxRetries(0))
 
-	resp, err := client.Respond(ctx, title.Prompt(firstUserText, w.workspaceBase, w.now()))
+	resp, err := client.Respond(ctx, title.Prompt(prompts, w.workspaceBase, w.now()))
 	if err != nil {
 		return "", err
 	}
