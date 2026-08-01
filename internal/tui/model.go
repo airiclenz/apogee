@@ -288,6 +288,13 @@ func (m *Model) replayResumed(r *ResumedSession) {
 //
 // The name traces to config and the error text to the filesystem, so both are escape-stripped on
 // the way to the terminal exactly as the start-up box strips its host and model.
+//
+// Every notice is added EPHEMERALLY (addEphemeralNote), for the same reason the resume notices are
+// (replayResumed): all of it is re-derived from the live workspace at each boundary — the files are
+// re-read and the report recomputed — so persisting it would tell a re-read nothing it will not work
+// out again while stacking another copy into the record on every startup and every resume. Context
+// files are session-scoped prompt data restored by re-reading (ADR 0026), so the record loses
+// nothing by not keeping the notice.
 func (m *Model) noteContextFiles() {
 	report := m.eng.ContextFilesReport()
 	if len(report.Files) == 0 {
@@ -306,13 +313,13 @@ func (m *Model) noteContextFiles() {
 	}
 
 	if len(loaded) > 0 {
-		m.transcript.addNote("context: " + strings.Join(loaded, ", "))
+		m.transcript.addEphemeralNote("context: " + strings.Join(loaded, ", "))
 	}
 	for _, note := range unreadable {
-		m.transcript.addNote(note)
+		m.transcript.addEphemeralNote(note)
 	}
 	if report.Oversize() {
-		m.transcript.addNote("standing system content ~" + formatTokensFine(report.StandingTokens) +
+		m.transcript.addEphemeralNote("standing system content ~" + formatTokensFine(report.StandingTokens) +
 			" tokens exceeds its Budget share (~" + formatTokensFine(report.SystemShare) +
 			") — trim context files or the system prompt")
 	}

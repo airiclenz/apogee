@@ -142,8 +142,9 @@ func (t *transcript) addNote(text string) {
 // the scrollback — and differs only at the persistence seam, where encodeTranscript skips it.
 //
 // It is for notices that are RE-DERIVED at each startup or resume rather than earned by the
-// conversation: the "resumed: <title>" line, its no-scrollback degrade variant, and the
-// interrupted-mid-exchange note. Each of those is recomputed from live state every time the view is
+// conversation: the "resumed: <title>" line, its no-scrollback degrade variant, the
+// interrupted-mid-exchange note, and the "context: …" notice naming the workspace files the session
+// loaded. Each of those is recomputed from live state every time the view is
 // rebuilt, so persisting one adds nothing on the way back in and accumulates a duplicate on the way
 // out — five resumes, five stored "resumed:" notes. A note that records something that actually
 // happened in the session (a cancellation, a failed save, a server switch) belongs in addNote.

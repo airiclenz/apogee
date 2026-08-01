@@ -45,7 +45,14 @@ when the context-files notice follows.
 
 **Commit:** `fix(tui): make resume-time notes display-only, not persisted`
 
-## 2. Context-file notices become ephemeral
+## 2. Context-file notices become ephemeral — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): extended item 1's `### Fixed` bullet in `CHANGELOG.md` (invited by item 1's own
+NOTES) to cover the context-files notice, and extended `addEphemeralNote`'s doc comment in
+`internal/tui/transcript.go` to list it among the re-derived notices — both beyond the files this
+item names. All three notes `noteContextFiles` can emit (loaded, unreadable, Budget warn) were
+switched, since all three are re-derived from the same report. No release heading, version field or
+`VERSION` value was touched.
 
 Depends on item 1.
 

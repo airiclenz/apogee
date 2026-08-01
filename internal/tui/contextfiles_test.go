@@ -149,6 +149,41 @@ func TestContextFilesNoticeBudgetWarn(t *testing.T) {
 	}
 }
 
+// The notice is display-only: the human sees every line of it, but the session record never keeps
+// one. Each line is re-derived from the workspace at the boundary that printed it — the files were
+// just re-read — so persisting them would stack another copy into the record on every startup and
+// every resume, which is the accumulation defect the resume notice had one call site over.
+func TestContextFilesNoticeNeverPersisted(t *testing.T) {
+	t.Parallel()
+	report := domain.ContextFilesReport{
+		Files: []domain.ContextFileNote{
+			{Name: "AGENTS.md", Bytes: 3174},
+			{Name: "BROKEN.md", Err: "permission denied"},
+		},
+		StandingTokens: 4242,
+		SystemShare:    3900,
+	}
+	m := newTestModelEng(t, &fakeEngine{contextReport: report}, testOpts)
+	m.transcript.addUser("what is the capital of france", nil) // the conversation the record IS for
+
+	if got := contextNotes(m); len(got) != 3 {
+		t.Fatalf("context notes = %v, want all three shown (loaded, unreadable, Budget warn)", got)
+	}
+
+	p, ok := m.snapshotPayload(domain.Session{})
+	if !ok {
+		t.Fatal("snapshotPayload failed on a transcript carrying the context notice")
+	}
+	for _, notice := range []string{"context:", "standing system content"} {
+		if strings.Contains(string(p.transcript), notice) {
+			t.Errorf("the saved blob carries the %q notice: %s", notice, p.transcript)
+		}
+	}
+	if !strings.Contains(string(p.transcript), "what is the capital of france") {
+		t.Errorf("the saved blob lost the conversation it exists for: %s", p.transcript)
+	}
+}
+
 // The notice is a boundary event, not a repaint one: a resize (or any other Msg) must never
 // re-read the report or reprint the note.
 func TestContextFilesNoticeNotReprintedOnRepaint(t *testing.T) {

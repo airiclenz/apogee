@@ -189,11 +189,12 @@ func TestSessionBrowserResumeHappyPath(t *testing.T) {
 	}
 }
 
-// Resume notices never accumulate in the record. Opening the SAME session twice — each time
+// Resume-time notices never accumulate in the record. Opening the SAME session twice — each time
 // resuming, then saving what the view holds back over the record — leaves the stored scrollback
-// exactly as the conversation left it, while the human still sees the notice on every reopen. This
-// is the ISSUES.md defect: the notice used to persist, so a record collected one more "resumed:"
-// line per resume, forever.
+// exactly as the conversation left it, while the human still sees the notices on every reopen. This
+// is the ISSUES.md defect: they used to persist, so a record collected one more "resumed:" line per
+// resume, forever. The workspace loads a context file here too, because the "context: …" notice the
+// restore reprints is re-derived exactly as the resume line is and must compound no more than it.
 func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 	var src transcript
 	src.addUser("what is the capital of france", nil)
@@ -206,7 +207,7 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 	storeMeta(host, "sess-1", "france question", "/ws/a", time.Now(), 0, blob)
 
 	for round := 1; round <= 2; round++ {
-		m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+		m := newBrowserModel(t, &fakeEngine{contextReport: loadedReport()}, host, "/ws/a")
 		m = openBrowser(t, m)
 		m, cmd := stepCmd(t, m, keyEnter())
 		if cmd == nil {
@@ -215,6 +216,9 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 		m = step(t, m, cmdMsg(cmd)) // fold sessionLoadedMsg → resumeLoaded
 		if !hasEntry(m, entryNote, "resumed: france question") {
 			t.Fatalf("round %d: the human was not shown the resume notice", round)
+		}
+		if !hasEntry(m, entryNote, "context: AGENTS.md (3.1 KiB)") {
+			t.Fatalf("round %d: the human was not shown the context-files notice", round)
 		}
 		// A per-Turn save writes the resumed view back over the record — which is exactly what the
 		// next round loads, so anything persisted here compounds.
