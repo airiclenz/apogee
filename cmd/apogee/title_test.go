@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -150,6 +151,35 @@ func TestTitleGeneratorSurfacesADeadline(t *testing.T) {
 			t.Errorf("generate = (%q, %v); want a context deadline error from the request timeout", got, err)
 		}
 	})
+}
+
+// One naming call is ONE POST. The Client's default policy re-POSTs a faulted attempt twice, which
+// on a single-slot server would spend three queue slots — each bounded by the generous
+// titleRequestTimeout — ahead of the user's next Exchange, all for a cosmetic result the caller drops
+// the moment it fails. The wiring therefore turns retries off, and this is what pins that.
+func TestTitleGeneratorDoesNotRetry(t *testing.T) {
+	t.Parallel()
+
+	// 503 is retryable under the default policy: the one answer that would draw a second POST out of
+	// a client that still had a retry budget, and so the only one that can prove the budget is gone.
+	var attempts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		http.Error(w, "overloaded", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
+	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+
+	got, err := wiring.generate(context.Background(), "name this session")
+	if err == nil {
+		t.Fatalf("generate = (%q, nil); want the 503 surfaced as an error the caller can drop", got)
+	}
+	if n := attempts.Load(); n != 1 {
+		t.Errorf("server saw %d naming POSTs; want exactly 1 — a retried title re-enters the queue", n)
+	}
 }
 
 // The composition root always hands the TUI a naming seam: `auto-title:` gates only the AUTOMATIC

@@ -64,8 +64,14 @@ func newTitleWiring(binding func() upstreamBinding, workspace string) titleWirin
 // which of the two asked.
 func (w titleWiring) generate(ctx context.Context, firstUserText string) (string, error) {
 	binding := w.binding()
+	// Retries OFF, unlike every other client the binary builds. The Client's default policy re-POSTs
+	// a faulted attempt twice, and here each attempt is bounded by requestTimeout — so one naming call
+	// could occupy a single-slot server's queue three times over, for a cosmetic result that is dropped
+	// on the first failure anyway. "One out-of-band call" is the contract; a title nobody asked twice
+	// for is not worth a second slot ahead of the user's next Exchange.
 	client := provider.NewClient(binding.Endpoint, binding.Model,
-		provider.WithRequestTimeout(w.requestTimeout), provider.WithAPIKey(binding.APIKey))
+		provider.WithRequestTimeout(w.requestTimeout), provider.WithAPIKey(binding.APIKey),
+		provider.WithMaxRetries(0))
 
 	resp, err := client.Respond(ctx, title.Prompt(firstUserText, w.workspaceBase, w.now()))
 	if err != nil {
