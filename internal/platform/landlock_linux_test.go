@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform/confinetest"
 )
@@ -74,12 +76,19 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		wantFSWrite      bool
 		wantNetwork      bool
 		wantAutoEligible bool
+		wantAccess       uint64 // mask applyLandlock would request; asserted only when wantFSWrite
 	}{
-		{"no_landlock", -1, false, false, false},
-		{"abi1_kernel_5_13", 1, true, false, true}, // fs-only; AutoEligible on fs alone (ADR 0012)
-		{"abi3_kernel_6_2", 3, true, false, true},  // still fs-only, still Auto-eligible
-		{"abi4_kernel_6_7", 4, true, true, true},   // network egress now enforceable
-		{"abi6_newer", 6, true, true, true},
+		{"no_landlock", -1, false, false, false, 0},
+		// fs-only; AutoEligible on fs alone (ADR 0012). Its mask must stay at the ABI-1
+		// baseline: asking for TRUNCATE (ABI 3) here was EINVAL on every create_ruleset.
+		{"abi1_kernel_5_13", 1, true, false, true, baselineFSWriteAccess},
+		// Debian 12 (6.1). REFER exists from here, and must be handled or the kernel denies
+		// cross-directory rename/link outright — including inside the workspace.
+		{"abi2_kernel_5_19", 2, true, false, true, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER},
+		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable.
+		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess},
+		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess}, // network egress now enforceable
+		{"abi6_newer", 6, true, true, true, fullFSWriteAccess},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,7 +108,116 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 			if got := caps.FSWrite; got != tt.wantAutoEligible {
 				t.Errorf("abi %d: fs-confinement availability = %v, want %v (Auto needs fs only, ADR 0012)", tt.abi, got, tt.wantAutoEligible)
 			}
+			if !tt.wantFSWrite {
+				return // nothing is advertised, so no mask is ever handed to this kernel
+			}
+			// Capability honesty is a claim this kernel will ACCEPT the ruleset, not just that
+			// landlock exists: advertising FSWrite while applyLandlock requests a right the ABI
+			// does not know makes every confined call fail with EINVAL, so Auto becomes a mode
+			// in which nothing runs. Exercising the derivation here is what makes the ABI-1 and
+			// ABI-2 rows mean something below ABI 3.
+			if got := accessMaskForABI(tt.abi); got != tt.wantAccess {
+				t.Errorf("abi %d: accessMaskForABI = %#x, want %#x (advertising FSWrite obliges a mask this kernel accepts)", tt.abi, got, tt.wantAccess)
+			}
 		})
+	}
+}
+
+// baselineFSWriteAccess and fullFSWriteAccess are the two mask shapes the tests pin, spelled
+// out from the unix constants rather than from landlockFSWriteAccessABI1 so a right silently
+// dropped from (or added to) the production constant fails the table instead of moving with it.
+const (
+	baselineFSWriteAccess = uint64(unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
+		unix.LANDLOCK_ACCESS_FS_MAKE_DIR |
+		unix.LANDLOCK_ACCESS_FS_MAKE_REG |
+		unix.LANDLOCK_ACCESS_FS_MAKE_SYM |
+		unix.LANDLOCK_ACCESS_FS_MAKE_SOCK |
+		unix.LANDLOCK_ACCESS_FS_MAKE_FIFO |
+		unix.LANDLOCK_ACCESS_FS_MAKE_BLOCK |
+		unix.LANDLOCK_ACCESS_FS_MAKE_CHAR |
+		unix.LANDLOCK_ACCESS_FS_REMOVE_DIR |
+		unix.LANDLOCK_ACCESS_FS_REMOVE_FILE)
+
+	fullFSWriteAccess = baselineFSWriteAccess |
+		unix.LANDLOCK_ACCESS_FS_REFER |
+		unix.LANDLOCK_ACCESS_FS_TRUNCATE
+)
+
+func TestAccessMaskForABI(t *testing.T) {
+	t.Parallel()
+
+	// The exact mask per ABI. Both call sites (ruleset creation and every path-beneath rule)
+	// derive from this function, and the kernel cross-checks them: a rule's allowed_access must
+	// be a subset of the ruleset's handled_access_fs, so one shared derivation is the invariant.
+	tests := []struct {
+		name string
+		abi  int
+		want uint64
+	}{
+		// Not a valid input (applyLandlock refuses below the floor); pinned so the clamp can
+		// never become a mask that handles nothing — a ruleset fencing no write at all.
+		{"below_floor_clamps_to_baseline", -1, baselineFSWriteAccess},
+		{"abi1_kernel_5_13", 1, baselineFSWriteAccess},
+		{"abi2_kernel_5_19", 2, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER},
+		{"abi3_kernel_6_2", 3, fullFSWriteAccess},
+		{"abi4_kernel_6_7", 4, fullFSWriteAccess},
+		{"abi6_newer", 6, fullFSWriteAccess},
+		{"abi99_future", 99, fullFSWriteAccess},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := accessMaskForABI(tt.abi); got != tt.want {
+				t.Errorf("accessMaskForABI(%d) = %#x, want %#x", tt.abi, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAccessMaskForABIRightsTrackTheKernel(t *testing.T) {
+	t.Parallel()
+
+	// The properties behind the table, stated so a future right added to the mask cannot
+	// regress them by moving the pinned constants too.
+	for abi := landlockABIFSWrite; abi <= 8; abi++ {
+		mask := accessMaskForABI(abi)
+
+		// Never above the kernel: an unknown bit in handled_access_fs is EINVAL from
+		// landlock_create_ruleset, and the child dies before exec.
+		if abi < landlockABITruncate && mask&unix.LANDLOCK_ACCESS_FS_TRUNCATE != 0 {
+			t.Errorf("abi %d: mask %#x requests TRUNCATE, which no kernel below ABI %d knows (EINVAL)", abi, mask, landlockABITruncate)
+		}
+		if abi < landlockABIRefer && mask&unix.LANDLOCK_ACCESS_FS_REFER != 0 {
+			t.Errorf("abi %d: mask %#x requests REFER, which no kernel below ABI %d knows (EINVAL)", abi, mask, landlockABIRefer)
+		}
+
+		// Never below the kernel: REFER is denied by default even when UNHANDLED, so leaving it
+		// out of a ruleset that could carry it forbids cross-directory rename/link (`git mv`)
+		// even wholly inside the workspace.
+		if abi >= landlockABIRefer && mask&unix.LANDLOCK_ACCESS_FS_REFER == 0 {
+			t.Errorf("abi %d: mask %#x omits REFER; cross-directory rename/link is then denied inside the box too", abi, mask)
+		}
+		if abi >= landlockABITruncate && mask&unix.LANDLOCK_ACCESS_FS_TRUNCATE == 0 {
+			t.Errorf("abi %d: mask %#x omits TRUNCATE; truncating a file outside the box would go unfenced", abi, mask)
+		}
+
+		// The write-class baseline is the floor at every ABI — the fence itself.
+		if mask&baselineFSWriteAccess != baselineFSWriteAccess {
+			t.Errorf("abi %d: mask %#x drops part of the ABI-1 write baseline %#x", abi, mask, baselineFSWriteAccess)
+		}
+		// Read and execute stay unhandled: the box bounds where a child WRITES (ADR 0012).
+		for _, unhandled := range []struct {
+			name string
+			bit  uint64
+		}{
+			{"LANDLOCK_ACCESS_FS_READ_FILE", unix.LANDLOCK_ACCESS_FS_READ_FILE},
+			{"LANDLOCK_ACCESS_FS_READ_DIR", unix.LANDLOCK_ACCESS_FS_READ_DIR},
+			{"LANDLOCK_ACCESS_FS_EXECUTE", unix.LANDLOCK_ACCESS_FS_EXECUTE},
+		} {
+			if mask&unhandled.bit != 0 {
+				t.Errorf("abi %d: mask %#x handles %s; the box is workspace-WRITE-only", abi, mask, unhandled.name)
+			}
+		}
 	}
 }
 

@@ -361,7 +361,26 @@ succeeds afterwards); a normal grant still serves byte-identical.
 
 **Commit:** `fix(present): re-fence the served document per request and bound the server`
 
-## 12. Derive landlock access masks from the probed ABI
+## 12. Derive landlock access masks from the probed ABI — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): `accessMaskForABI` is called ONCE, in `applyLandlock`, and the derived mask is
+passed to `allowWriteBeneath` as a parameter rather than re-derived there — the item's "used by
+both" in effect, but not by two calls. The kernel cross-checks the two masks (a rule's
+`allowed_access` must be a subset of the ruleset's `handled_access_fs`, else `landlock_add_rule`
+returns EINVAL), and `allowWriteBeneath` has no ABI of its own to derive from: re-probing inside
+the loop would be a second syscall per writable root whose answer could, in principle, differ from
+the one the ruleset was built with. Two other choices the item left open: (a) an `abi` below the
+fs-write floor clamps to the ABI-1 baseline rather than returning zero — it is not a valid input
+(`applyLandlock` refuses below the floor before reaching it), and zero would be a ruleset that
+handles nothing, i.e. fences nothing; (b) `landlockFSWriteAccess` is renamed
+`landlockFSWriteAccessABI1`, since it is now the baseline layer rather than the whole mask.
+Tests are additive: the item's two (the exact-mask table, and `TestLandlockCapabilitiesHonest`
+extended with a `wantAccess` column plus a new `abi2_kernel_5_19` row for Debian 12) plus
+`TestAccessMaskForABIRightsTrackTheKernel`, which states the properties as invariants so a future
+right cannot regress them by moving the pinned constants with it. All three fail against the
+pre-change unconditional mask and pass after. The enforcement battery (`TestLandlockProbe`) SKIPS
+on this dev host — it reports `FSWrite==false`, landlock is absent in this container — so the
+real-kernel pass stays owner-run as the item's verifier note says.
 
 **What:** Audit "High — The landlock ruleset requests an ABI-3 access right while
 advertising ABI-1 support". `internal/platform/landlock_linux.go:85/:204`:

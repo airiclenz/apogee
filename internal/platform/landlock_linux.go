@@ -58,21 +58,29 @@ type landlockConfiner struct {
 	reexecPath string // executable to re-exec for the confined child ("" => os.Executable())
 }
 
-// landlock ABI thresholds (confinement-execution-contract §5; ADR 0012):
+// landlock ABI thresholds (confinement-execution-contract §5; ADR 0012). Each is the ABI
+// version — and, in the comment, the kernel — that first knows the thing named:
 //
 //   - ABI >= 1 (kernel >= 5.13) => filesystem-write confinement is enforceable.
+//   - ABI >= 2 (kernel >= 5.19) => LANDLOCK_ACCESS_FS_REFER exists (cross-directory rename/link).
+//   - ABI >= 3 (kernel >= 6.2)  => LANDLOCK_ACCESS_FS_TRUNCATE exists.
 //   - ABI >= 4 (kernel >= 6.7)  => TCP-connect (network-egress) restriction is enforceable.
 const (
-	landlockABIFSWrite = 1
-	landlockABINetwork = 4
+	landlockABIFSWrite  = 1
+	landlockABIRefer    = 2
+	landlockABITruncate = 3
+	landlockABINetwork  = 4
 )
 
-// landlockFSWriteAccess is the set of filesystem accesses the ruleset HANDLES (restricts).
-// Handling the write-class accesses and then allowing them only beneath the box's writable
-// roots is what fences writes to the workspace. Read and execute are deliberately NOT
-// handled, so a confined child may still read and run programs anywhere — the box bounds
-// where it can WRITE, matching ConfinementBox semantics (workspace-write-only).
-const landlockFSWriteAccess = unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
+// landlockFSWriteAccessABI1 is the ABI-1 baseline of filesystem accesses the ruleset HANDLES
+// (restricts) — every write-class right landlock has known since kernel 5.13, so it is the
+// largest mask that is safe on every landlock kernel. Handling the write-class accesses and
+// then allowing them only beneath the box's writable roots is what fences writes to the
+// workspace. Read and execute are deliberately NOT handled, so a confined child may still read
+// and run programs anywhere — the box bounds where it can WRITE, matching ConfinementBox
+// semantics (workspace-write-only). Rights added by later ABIs are layered on by
+// accessMaskForABI; nothing outside that function may use this constant directly.
+const landlockFSWriteAccessABI1 = unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
 	unix.LANDLOCK_ACCESS_FS_MAKE_DIR |
 	unix.LANDLOCK_ACCESS_FS_MAKE_REG |
 	unix.LANDLOCK_ACCESS_FS_MAKE_SYM |
@@ -81,8 +89,36 @@ const landlockFSWriteAccess = unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
 	unix.LANDLOCK_ACCESS_FS_MAKE_BLOCK |
 	unix.LANDLOCK_ACCESS_FS_MAKE_CHAR |
 	unix.LANDLOCK_ACCESS_FS_REMOVE_DIR |
-	unix.LANDLOCK_ACCESS_FS_REMOVE_FILE |
-	unix.LANDLOCK_ACCESS_FS_TRUNCATE
+	unix.LANDLOCK_ACCESS_FS_REMOVE_FILE
+
+// accessMaskForABI returns the filesystem access mask to HANDLE at ruleset creation and to
+// ALLOW beneath each of the box's writable roots, on a kernel reporting landlock ABI abi. Both
+// call sites derive their mask from this one pure function because the kernel checks them
+// against each other: landlock_create_ruleset answers EINVAL for a handled_access_fs carrying a
+// bit this ABI does not know, and landlock_add_rule answers EINVAL for an allowed_access that is
+// not a subset of the handled set.
+//
+//   - ABI 1: the write-class baseline. TRUNCATE has no bit here, so truncating an existing file
+//     is the one write landlock cannot fence on a 5.13–6.1 kernel — the alternative, asking for
+//     it anyway, made every confined call die with EINVAL while Capabilities reported FSWrite.
+//   - ABI >= 2: + REFER. Landlock denies cross-directory rename and link by DEFAULT, even when
+//     the right is unhandled, so handling it and re-granting it beneath the writable roots is
+//     what lets a confined child `git mv` or mkdir-then-rename inside its own box.
+//   - ABI >= 3: + TRUNCATE, closing the ABI-1/2 gap above.
+//
+// An abi below the fs-write floor is not a valid input — applyLandlock refuses it before
+// reaching here — and clamps to the baseline, so this function can never hand a caller a mask
+// that fences nothing.
+func accessMaskForABI(abi int) uint64 {
+	mask := uint64(landlockFSWriteAccessABI1)
+	if abi >= landlockABIRefer {
+		mask |= unix.LANDLOCK_ACCESS_FS_REFER
+	}
+	if abi >= landlockABITruncate {
+		mask |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
+	}
+	return mask
+}
 
 // NewLandlockConfiner constructs the Linux landlock backend, probing the kernel's
 // landlock ABI once. On a kernel without landlock the probe reports an unavailable ABI
@@ -201,7 +237,12 @@ func applyLandlock(box domain.ConfinementBox) error {
 		return err
 	}
 
-	attr := unix.LandlockRulesetAttr{Access_fs: landlockFSWriteAccess}
+	// The handled mask is derived from the PROBED ABI: a right this kernel does not know makes
+	// landlock_create_ruleset return EINVAL, which would kill every confined call on an ABI-1/2
+	// kernel (Ubuntu 22.04, Debian 12, RHEL 9) that Capabilities still advertises as FSWrite.
+	access := accessMaskForABI(abi)
+
+	attr := unix.LandlockRulesetAttr{Access_fs: access}
 	if handleNet {
 		attr.Access_net = unix.LANDLOCK_ACCESS_NET_CONNECT_TCP
 	}
@@ -226,7 +267,7 @@ func applyLandlock(box domain.ConfinementBox) error {
 		if root == "" {
 			continue
 		}
-		if err := allowWriteBeneath(fd, root); err != nil {
+		if err := allowWriteBeneath(fd, root, access); err != nil {
 			return err
 		}
 	}
@@ -265,11 +306,12 @@ func networkDenyDecision(box domain.ConfinementBox, abi int) (handleNet bool, er
 	return true, nil
 }
 
-// allowWriteBeneath adds a path-beneath rule granting the handled write accesses under
-// root. A root that cannot be opened (e.g. a not-yet-created WritablePaths entry) is
-// skipped rather than failing the whole confinement — the box should not have to exist
-// in full for the writable roots that do exist to be honoured.
-func allowWriteBeneath(rulesetFD int, root string) error {
+// allowWriteBeneath adds a path-beneath rule granting access — the same ABI-derived mask the
+// ruleset handles (accessMaskForABI), passed in so the rule can never ask for a right the
+// ruleset did not handle — under root. A root that cannot be opened (e.g. a not-yet-created
+// WritablePaths entry) is skipped rather than failing the whole confinement — the box should
+// not have to exist in full for the writable roots that do exist to be honoured.
+func allowWriteBeneath(rulesetFD int, root string, access uint64) error {
 	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) {
@@ -280,7 +322,7 @@ func allowWriteBeneath(rulesetFD int, root string) error {
 	defer unix.Close(rootFD)
 
 	rule := unix.LandlockPathBeneathAttr{
-		Allowed_access: landlockFSWriteAccess,
+		Allowed_access: access,
 		Parent_fd:      int32(rootFD),
 	}
 	if _, _, errno := unix.Syscall6(

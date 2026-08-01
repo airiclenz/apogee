@@ -654,6 +654,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Confinement works on older Linux kernels again — and a confined command can move a file
+  inside your workspace.** On Linux the workspace fence is landlock, and apogee asks the kernel
+  for it in one go: here are the kinds of write I want fenced, here is the directory they stay
+  allowed under. The list it asked for included one right no kernel before 6.2 has ever heard of,
+  and a kernel that does not recognise a right in that list rejects the whole request — so on
+  **Ubuntu 22.04, Debian 12 and RHEL 9**, the very kernels Auto was widened to reach, every
+  confined command died before it started with `landlock_create_ruleset: invalid argument`, while
+  apogee went on reporting that it *could* confine. Auto became a mode in which nothing runs. The
+  request is now built from the landlock version the kernel actually reports, so each kernel is
+  asked only for what it knows: older kernels fence everything they can (only truncating an
+  existing file is beyond them), and 6.2 and newer are unchanged.
+  - **Renaming across directories works inside the box now.** Landlock refuses to move or link a
+    file from one directory to another unless it is *explicitly* told to allow it — and apogee had
+    never told it — so a confined `git mv`, or any tool that writes a temporary file and renames it
+    into place, failed even when both directories were inside your own workspace. That permission
+    is now granted beneath every writable root, on the kernels that have it (5.19 and newer). It
+    stops at the fence like every other write: moving a file *out* of the workspace is still
+    refused.
+
 - **A presented document is re-checked against your workspace on every fetch, and the doc server
   can no longer be pinned open by a stranger.** On a remote session, `present_document` serves a
   finished deliverable at a one-off URL carrying a random token (rung 2 of the presentation
