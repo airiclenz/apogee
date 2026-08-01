@@ -654,6 +654,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Opening a file no longer crashes apogee mid-answer.** With the Mechanisms on, any successful
+  `open_file` could take the whole TUI down the instant the file had been read — the window
+  vanished and the answer in flight was lost (per-turn saves survived, so the session itself was
+  intact on reopen). The cause was in the bookkeeping that decides whether a Mechanism actually
+  *changed* a tool's result: it compared the two results whole, and a successful `open_file`
+  attaches a structured summary — how many lines, which ones matched — that cannot be compared
+  that way. The comparison is done field by field now. It fired exactly when a Mechanism looked at
+  a result and left it alone, which is what `error_enrichment` — shipped on by default in the
+  gemma-4 set — does on every result that is not an error, so a plain successful read was enough
+  to hit it. Nothing about when a Mechanism counts as having fired changes.
+
 - **An untouched session no longer lands in your history.** Launching apogee, running a couple of
   slash commands — `/confine` to see where the fence is, `/skills` to read the catalogue, `/model`
   to check what is loaded — and then quitting used to file a record titled `Session 2026-08-01`

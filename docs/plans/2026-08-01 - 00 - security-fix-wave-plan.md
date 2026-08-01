@@ -37,7 +37,7 @@ survives the later architecture refactors.
 
 ---
 
-## 1. Hotfix the post-tool-result acted-probe panic
+## 1. Hotfix the post-tool-result acted-probe panic — ✅ DONE (2026-08-01)
 
 **What:** In `internal/agent/hookrun.go` (`runPostToolResultHooks`, snapshot at `:256`,
 compare at `:260`), replace the whole-struct compare `*result != before` — which panics with
