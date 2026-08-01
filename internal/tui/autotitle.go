@@ -124,7 +124,8 @@ func (m *Model) foldAutoTitle(msg autoTitleMsg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return m.applyTitle(name, titleAutomatic)
+	cmd, _ := m.applyTitle(name, titleAutomatic)
+	return cmd
 }
 
 // foldManualTitle folds a bare `/rename`'s result, and it is the automatic fold's opposite in both
@@ -142,8 +143,8 @@ func (m *Model) foldManualTitle(msg manualTitleMsg) tea.Cmd {
 		return nil
 	}
 	m.titleTouched = true
-	cmd := m.applyTitle(name, titleManual)
-	m.noteRenamed(name)
+	cmd, stashed := m.applyTitle(name, titleManual)
+	m.noteRenamed(name, stashed)
 	return cmd
 }
 
@@ -152,18 +153,20 @@ func (m *Model) foldManualTitle(msg manualTitleMsg) tea.Cmd {
 // thereafter (wire.go), so the heuristic stamped by the first Save can only ever be replaced this
 // way. Before that first Save there is no id to rename, so the title is stashed — together with
 // src, which is what the flush later needs to know — and applied at the save-complete that mints
-// one (flushPendingTitle).
-func (m *Model) applyTitle(name string, src titleSource) tea.Cmd {
+// one (flushPendingTitle). It reports that stash back to its caller, because a title held for a
+// record that does not exist yet and a title written to one are two different things to have to
+// say — which is the difference /rename's note turns on (noteRenamed).
+func (m *Model) applyTitle(name string, src titleSource) (cmd tea.Cmd, stashed bool) {
 	if m.sessions == nil {
-		return nil
+		return nil, false
 	}
 	id := m.sessions.ActiveID()
 	if id == "" {
 		m.pendingTitle = name
 		m.pendingSource = src
-		return nil
+		return nil, true
 	}
-	return m.setSessionTitle(id, name)
+	return m.setSessionTitle(id, name), false
 }
 
 // flushPendingTitle applies a stashed title once a Save has put the record on disk, clearing the
@@ -227,8 +230,8 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.titleTouched = true
-		cmd := m.applyTitle(name, titleManual)
-		m.noteRenamed(name)
+		cmd, stashed := m.applyTitle(name, titleManual)
+		m.noteRenamed(name, stashed)
 		return m, cmd
 	}
 	if m.opts.GenerateTitle == nil {
@@ -253,11 +256,21 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 	})
 }
 
-// noteRenamed records an applied title in the transcript. It is the one place a title is ever
-// SHOWN: the automatic call adds no UI chrome by design (titles surface in the /sessions browser and
-// the resume note), but a rename the human asked for has to report back, and the note doubles as the
-// only preview of what the sanitizer made of what they typed.
-func (m *Model) noteRenamed(name string) {
-	m.transcript.addNote("session renamed: " + name)
+// noteRenamed records a title the human asked for in the transcript. It is the one place a title is
+// ever SHOWN: the automatic call adds no UI chrome by design (titles surface in the /sessions browser
+// and the resume note), but a rename the human asked for has to report back, and the note doubles as
+// the only preview of what the sanitizer made of what they typed.
+//
+// stashed splits the two things a rename can mean here. A record that exists is renamed, and the
+// note says so. A session with no record yet was not renamed — nothing on disk carries that name
+// until the first Save mints the id the stash is waiting for (flushPendingTitle) — so the note
+// promises the name rather than claiming a rename that has not happened. The outcome is the same
+// either way, which is why the difference is a tense and not a warning.
+func (m *Model) noteRenamed(name string, stashed bool) {
+	if stashed {
+		m.transcript.addNote("session name set: " + name + " — applied when the session is first saved")
+	} else {
+		m.transcript.addNote("session renamed: " + name)
+	}
 	m.layout()
 }

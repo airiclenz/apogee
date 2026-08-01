@@ -441,8 +441,8 @@ func TestRenameWithArgumentsNamesTheSession(t *testing.T) {
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
 		t.Errorf("renames = %+v, want %+v (joined on single spaces, sanitized)", got, want)
 	}
-	if got := lastNote(m); !strings.Contains(got, `the "parser" rewrite`) {
-		t.Errorf("note = %q, want the new title reported back", got)
+	if got, want := lastNote(m), `session renamed: the "parser" rewrite`; got != want {
+		t.Errorf("note = %q, want %q (the record exists, so it really was renamed)", got, want)
 	}
 	if m.sessionBrowser.open {
 		t.Error("/rename opened the /sessions browser; it names this session in place")
@@ -619,6 +619,14 @@ func TestRenameBeforeTheFirstSaveStashesTheName(t *testing.T) {
 	}
 	if !m.titleTouched {
 		t.Error("a stashed manual rename left titleTouched unset")
+	}
+	// Nothing on disk carries that name yet, so the note may report the name but not a rename.
+	note := lastNote(m)
+	if !strings.Contains(note, "the parser rewrite") {
+		t.Errorf("note = %q, want the stashed name reported back", note)
+	}
+	if strings.Contains(note, "renamed") {
+		t.Errorf("note = %q, claims a rename before any record existed to rename", note)
 	}
 
 	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0); err != nil {
