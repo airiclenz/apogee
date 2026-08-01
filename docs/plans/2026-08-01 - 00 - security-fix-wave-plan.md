@@ -124,7 +124,12 @@ stale temp file is not mistaken for the store.
 
 **Commit:** `fix(library): persist the store via temp file + rename`
 
-## 5. Strip the harmony open token from an unterminated tail
+## 5. Strip the harmony open token from an unterminated tail — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): two combined vectors were added instead of one — the audit's exact shape
+(`<|start|>assistant<|channel|>final<|message|>hello`) plus an analysis-channel tail preceded by
+plain lead text, which pins that the lead is cut at the match start rather than at
+`<|channel|>`. Both fail before the fix and pass after; additive, never narrower than the item.
 
 **What:** Audit "High — `StripHarmony` leaks `<|start|>role`…".
 `internal/processing/harmony.go:92`: the unterminated-tail path slices at

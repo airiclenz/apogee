@@ -654,6 +654,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A reply cut off mid-stream no longer shows a raw `<|start|>assistant` marker.** When a gpt-oss
+  answer was still arriving — or had been truncated by the token limit — the last, unfinished
+  message kept its `<|start|>role` control token in the visible text, so the answer read as
+  `<|start|>assistanthello` instead of `hello`. The unfinished tail is now cut at the same place a
+  finished message is, so harmony's control tokens stay out of what you read, streaming or not.
+
 - **A crash can no longer wipe what apogee has learned about your model.** The Library — the
   per-model record of corrections and behavioural observations built up across sessions — was
   rewritten whole, in place, on every single observation. Losing power or killing the process during

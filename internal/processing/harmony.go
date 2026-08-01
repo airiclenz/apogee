@@ -88,12 +88,16 @@ func StripHarmony(raw string) HarmonyStripped {
 
 	// A trailing unterminated message (streaming) or trailing plain text.
 	if tail := raw[pos:]; tail != "" {
-		if loc := harmonyOpen.FindStringSubmatch(tail); loc != nil {
-			lead := tail[:strings.Index(tail, "<|channel|>")]
-			if lead != "" {
+		if loc := harmonyOpen.FindStringSubmatchIndex(tail); loc != nil {
+			// The lead is cut at the match start, not at `<|channel|>`: harmonyOpen also matches
+			// the optional `<|start|>role` prefix, and cutting after it would leak that control
+			// token into visible content. Same slicing discipline as the terminated loop above.
+			if lead := tail[:loc[0]]; lead != "" {
 				visible = append(visible, lead)
 			}
-			routeHarmony(HarmonyChannel(loc[1]), loc[2], &visible, &reasoning, &commentary, &hasReasoning)
+			channel := HarmonyChannel(tail[loc[2]:loc[3]])
+			body := tail[loc[4]:loc[5]]
+			routeHarmony(channel, body, &visible, &reasoning, &commentary, &hasReasoning)
 		} else {
 			visible = append(visible, tail)
 		}

@@ -57,6 +57,20 @@ func TestStripHarmony_FullChannelSet(t *testing.T) {
 			wantReasoned:  true,
 		},
 		{
+			name:          "unterminated final tail keeps its start-role prefix out of visible",
+			raw:           "<|start|>assistant<|channel|>final<|message|>hello",
+			wantVisible:   "hello",
+			wantReasoning: "",
+			wantReasoned:  false,
+		},
+		{
+			name:          "unterminated analysis tail with a start-role prefix leaks nothing",
+			raw:           "Here it comes. <|start|>assistant<|channel|>analysis<|message|>still thinking",
+			wantVisible:   "Here it comes.",
+			wantReasoning: "still thinking",
+			wantReasoned:  true,
+		},
+		{
 			name:          "plain non-harmony content passes through as visible",
 			raw:           "just a normal answer",
 			wantVisible:   "just a normal answer",
