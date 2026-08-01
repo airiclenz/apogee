@@ -683,9 +683,46 @@ func TestAutocompleteRowsStripEscapes(t *testing.T) {
 	}
 	for _, item := range items {
 		assertNoESCIn(t, "an \"@\" file row", item.cells...)
+		assertNoESCIn(t, "an \"@\" file row's spliced value", item.value)
 	}
-	if got := items[0].value; !strings.Contains(got, "\x1b") {
-		t.Errorf("file row value = %q; want the RAW path kept, so the splice still resolves on disk", got)
+}
+
+// A row's VALUE is the overlay's second door, because an autocomplete row is not only SHOWN, it is
+// SPLICED: accepting an "@" row writes it into the composer, which inputView paints. That door is
+// currently held shut by the bubbles textarea, whose every insertion path (SetValue → InsertString →
+// insertRunesFromUserInput) runs an internal runeutil.Sanitizer that drops control runes — a
+// third-party internal with no compatibility promise, not this package's own seam. So the property
+// is pinned from both sides: nothing carrying an ESC reaches the box, AND what lands there is
+// EXACTLY the row's own value — fileRefToken's contract, "a row shows exactly what accepting it will
+// insert". A raw value quietly broke the second half, and with it a user-visible behaviour: the
+// sanitized box could never equal the row it came from, so autocompleteExactMatch failed on a
+// fully-typed token and ⏎ re-accepted instead of submitting.
+//
+// The payload here is the CSI one, whose bytes are all printable once the ESCs are gone, so the
+// composer can be compared verbatim (escOSC52 also carries a BEL, which the widget's sanitizer eats
+// but stripEscapes deliberately leaves — stripEscapes removes the ESC introducer, nothing else).
+func TestAcceptedFileRowMatchesItsValue(t *testing.T) {
+	m := newTestModel(t)
+	m.opts.Workspace = "/ws"
+	m.files = &fileCache{
+		root:    "/ws",
+		files:   []string{"docs/no" + escCSI + "tes.md"},
+		expires: time.Now().Add(time.Hour),
+	}
+
+	const draft = "read @docs/no"
+	m.input.SetValue(draft)
+	m.autocomplete = m.computeAutocomplete(len(draft))
+	if !m.autocomplete.active || m.autocomplete.kind != acFile || len(m.autocomplete.items) != 1 {
+		t.Fatalf("the \"@\" overlay did not open on the seeded listing: %+v", m.autocomplete)
+	}
+	row := m.autocomplete.items[0]
+
+	next, _ := m.acceptAutocomplete()
+	got := next.(Model).input.Value()
+	assertNoESCIn(t, "the composer after accepting an \"@\" row", got)
+	if want := "read " + fileRefToken(row.value) + " "; got != want {
+		t.Errorf("composer after accept = %q, want %q (the row's own value, verbatim)", got, want)
 	}
 }
 

@@ -424,4 +424,15 @@
 // nothing and truncates ANSI-preservingly. stripEscapes is idempotent and allocation-free on text
 // with no ESC, so a producer that also strips costs nothing. TestTranscriptStripsTerminalEscapes
 // and its siblings pin every one of those paths.
+//
+// The COMPOSER is that invariant's second door, and the "@" dropdown is what walks through it: an
+// autocomplete row is not only shown, it is SPLICED, so an acItem carrying a stripped cell beside a
+// raw value hands the escape to the input box on accept. What stops it there today is the bubbles
+// textarea's own internal rune sanitizer rather than anything this package does — an undocumented
+// third-party internal standing in for a seam — so fileSuggestions strips the workspace path itself,
+// once, before the row's value and cell are both derived from it. Nothing is lost to a second
+// channel by that: an @ref resolves from the "@token" read back out of the composed text
+// (extractFileRefs → the loop's resolveFileRefs), never from the acItem, so display and resolution
+// are one string and are sanitized once — which also keeps fileRefToken's promise that a row shows
+// exactly what accepting it inserts, the property autocompleteExactMatch's ⏎-submits rule needs.
 package tui

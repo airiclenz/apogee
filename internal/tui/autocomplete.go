@@ -425,19 +425,40 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 // rows for paths with spaces (fileRefToken), so the dropdown teaches the syntax before the user
 // ever types a quote — served through the Model's file cache so a typing burst reuses one
 // workspace walk (filecache.go). newModel always installs the cache, so m.files is never nil
-// here. The item's value stays the raw path; only the cell carries the sigil and quotes.
+// here. The item's value is the path itself; only the cell carries the sigil and quotes.
 //
 // A path is one thing, not a name and a description, so a file row stays SINGLE-CELL: one column,
 // which the popup module lays out as the plain "@path" it always was.
 //
-// The cell is escape-stripped: a filename is the WORKSPACE's, not this program's, and a clone can
-// carry one holding an ESC byte. The item's value keeps the raw path, because that is what the
-// splice must reproduce for the reference to resolve on disk.
+// The PATH is escape-stripped ONCE, before either half of the row is derived from it — a filename is
+// the WORKSPACE's, not this program's, and a clone can carry one holding an ESC byte. Stripping only
+// the cell left the row's other half unsanitized, and a row is not merely shown: accepting it
+// SPLICES its value into the composer (acceptAutocomplete → fileRefToken → spliceCompletion), a box
+// this package then paints. That the escape does not in fact reach the screen today is the bubbles
+// textarea's doing, not this package's — every insertion path runs an internal runeutil.Sanitizer
+// that drops control runes — which is a third-party internal with no compatibility promise standing
+// where doc.go's seam invariant says this package's own strip belongs.
+//
+// Keeping the value raw "so the reference still resolves on disk" was never the trade it looked
+// like, because display and resolution are the SAME string: an @ref resolves from the token read
+// back out of the composed text (extractFileRefs → UserInput.FileRefs → the loop's resolveFileRefs),
+// never from the acItem, so there is no second channel a raw path could travel down. What the
+// mismatch did buy was a bug: the box held the widget's sanitized text while the row held the raw
+// path, so autocompleteExactMatch could never match such a row and ⏎ on a fully-typed token
+// re-accepted instead of submitting. Stripping here restores fileRefToken's contract — a row shows
+// exactly what accepting it will insert — for the one case that broke it.
+//
+// The cost is that a workspace file whose NAME carries an ESC byte cannot be referenced through the
+// dropdown: the stripped path names nothing on disk, so the token never lights up (inputaccent's
+// knownWorkspaceFile asks the same listing) and a submitted ref is reported unresolvable and skipped
+// rather than silently read. An ESC byte in a filename is hostile far more often than load-bearing,
+// and the seam invariant settles which way that trade goes.
 func (m Model) fileSuggestions(partial string) []acItem {
 	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
-		items = append(items, acItem{value: p, cells: popupRow{stripEscapes(fileRefToken(p))}})
+		p = stripEscapes(p)
+		items = append(items, acItem{value: p, cells: popupRow{fileRefToken(p)}})
 	}
 	return items
 }

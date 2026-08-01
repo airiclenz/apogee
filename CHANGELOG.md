@@ -671,9 +671,15 @@ point is a **minor** bump, not a breaking change.
   mechanism the presentation ladder always promises.
   - **Stripping now happens at the seams, not at the call sites.** Every note, error, approval
     record, tool card and popup row is sanitized where it enters the view, so a new producer is
-    covered the day it is written rather than the day someone remembers to wrap it. The `@file`
-    dropdown keeps the raw path as the text it splices in — only the row you *see* is stripped —
-    so a reference still resolves on disk.
+    covered the day it is written rather than the day someone remembers to wrap it.
+  - **The `@file` dropdown strips the path itself, not just the row you see.** A suggestion is not
+    only displayed, it is *inserted*: accepting one writes it into the message you are composing. So
+    the filename is cleaned once, up front, and the row and the text it inserts are now the same
+    string — previously the row was cleaned and the insertion was not, which left the input box
+    relying on the text widget's own filtering to catch it and made an accepted suggestion for such
+    a file compare as "not yet typed out", so ⏎ re-inserted it instead of sending. The trade is that
+    a file whose *name* contains an escape byte can no longer be referenced from the dropdown: the
+    reference is reported as unresolvable and skipped rather than quietly read.
 
 - **A repo's own dangerous-action rules can no longer cancel one of apogee's.** The rules that
   hard-refuse an `rm -rf /` or make a `sudo …` stop for your approval ship with apogee, and a
