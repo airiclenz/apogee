@@ -620,6 +620,38 @@ func TestContextSeam_UnreadableFileNeverReachesTheModel(t *testing.T) {
 	}
 }
 
+// TestContextSeam_EscapingSymlinkNeverReachesTheModel is the wire-facing half of the workspace
+// fence on this path: a clone shipping `AGENTS.md` as a symlink to a file OUTSIDE the workspace
+// contributes nothing to the seeded system message — not the block, not a byte of the target —
+// while the readable sibling beside it still seeds byte-identical content. The name gate cannot
+// see this case (the configured name is a plain relative one); the refusal comes from reading
+// through security.SafeOpen. The user is still told, through the same present-but-unreadable
+// notice a broken file gets.
+func TestContextSeam_EscapingSymlinkNeverReachesTheModel(t *testing.T) {
+	dir, marker := escapingContextWorkspace(t, "file")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md", "CONVENTIONS.md")
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	if want := contextBlock("CONVENTIONS.md", "conventions"); got != want {
+		t.Errorf("seeded system message = %q\nwant %q (the escaping file contributes nothing)", got, want)
+	}
+	if strings.Contains(got, marker) {
+		t.Errorf("the seeded system message carries a file from OUTSIDE the workspace: %q", got)
+	}
+
+	report := a.ContextFilesReport()
+	if len(report.Files) != 2 {
+		t.Fatalf("report holds %d notes, want 2 (the refusal is reported, never silent): %+v", len(report.Files), report.Files)
+	}
+	if note := report.Files[0]; note.Name != "AGENTS.md" || note.Err == "" || note.Bytes != 0 {
+		t.Errorf("first note = %+v, want AGENTS.md carrying its refusal and no size", note)
+	}
+}
+
 // TestContextSeam_MergesDirectivesAndToolBlock: prompt → context files → mechanism directive →
 // tool block, all in ONE system message — the content joins the existing merge, it does not open
 // a second message.

@@ -14,12 +14,12 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // contextFile is one resolved workspace context file held in the session cache. Exactly one of
@@ -40,14 +40,15 @@ type contextFile struct {
 //     so absence is the common case and must stay silent;
 //   - a present-but-UNREADABLE file yields an entry carrying only the error, so the host can
 //     say so out loud without failing the session over a discovered (never configured-by-name)
-//     file;
+//     file; a name that RESOLVES OUT OF THE WORKSPACE is unreadable in exactly this sense —
+//     refused, and reported loudly rather than silently dropped;
 //   - an EMPTY or whitespace-only file is skipped with no trace — there is no point heading a
 //     block over nothing;
 //   - anything else carries the file's verbatim bytes and their size.
 //
 // An empty workspaceDir returns nil: an embedder with no workspace has no basis to resolve a
-// relative name against. Names are assumed already validated (newAgent's gate); the join here
-// is deliberately plain so the resolved path is exactly the configured name under the root.
+// relative name against. Names are assumed already validated (newAgent's gate); readContextFile
+// then fences what the name RESOLVES to.
 func loadContextFiles(workspaceDir string, names []string) []contextFile {
 	if workspaceDir == "" || len(names) == 0 {
 		return nil
@@ -55,8 +56,12 @@ func loadContextFiles(workspaceDir string, names []string) []contextFile {
 
 	files := make([]contextFile, 0, len(names))
 	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(workspaceDir, name))
+		data, err := readContextFile(workspaceDir, name)
 		switch {
+		// The escape case LEADS so a refusal can never be mistaken for absence and dropped in
+		// silence: a hostile repo's escaping symlink must cost the user a visible notice.
+		case errors.Is(err, security.ErrPathEscape):
+			files = append(files, contextFile{name: name, err: err})
 		case errors.Is(err, fs.ErrNotExist):
 			continue
 		case err != nil:
@@ -72,6 +77,28 @@ func loadContextFiles(workspaceDir string, names []string) []contextFile {
 		return nil
 	}
 	return files
+}
+
+// readContextFile reads one context file's verbatim bytes THROUGH the workspace fence, using the
+// same pinned-root open every other in-workspace read in the engine goes through (readFileRef,
+// loop.go). validateContextFileNames gates the configured NAME; this gates what that name
+// resolves to on disk, which is a different class: a clone shipping `AGENTS.md -> ../../.ssh/id_rsa`
+// passes the name gate and, read with a bare os.ReadFile, folds a stranger's file verbatim into the
+// standing SYSTEM message of every request. security.SafeOpen refuses a component that leaves the
+// root instead of following it (ADR 0026's fence), returning ErrPathEscape for the loader to book
+// as present-but-unreadable.
+//
+// The read itself is deliberately unbounded — context files are the user's own conventions, and
+// oversize is reported by ContextFilesReport against the Budget's system share rather than
+// truncated here.
+func readContextFile(workspaceDir, name string) ([]byte, error) {
+	f, err := security.SafeOpen(workspaceDir, name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	return io.ReadAll(f)
 }
 
 // validateContextFileNames rejects a name the loader must never be handed: an empty one, one that

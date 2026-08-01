@@ -16,6 +16,7 @@ import (
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // contextConfig returns a baseConfig rooted at dir and looking for names — the construction
@@ -132,6 +133,86 @@ func TestLoadContextFiles(t *testing.T) {
 				case got[i].size != len(got[i].content):
 					t.Errorf("entry %d size = %d, want %d (the content's byte length)", i, got[i].size, len(got[i].content))
 				}
+			}
+		})
+	}
+}
+
+// escapingContextWorkspace builds a workspace whose configured context-file name resolves OUT of
+// it — the hostile-clone shape (`AGENTS.md -> ../../.ssh/id_rsa`) — and returns the workspace dir
+// plus the marker only the outside file carries. link decides which component escapes: the file
+// name itself, or a parent directory the name is looked up under. A readable sibling
+// (CONVENTIONS.md) is planted alongside so every caller can prove the refusal is targeted.
+func escapingContextWorkspace(t *testing.T, link string) (dir, marker string) {
+	t.Helper()
+
+	dir = t.TempDir()
+	outside := t.TempDir()
+	marker = "PRIVATE-KEY-MATERIAL-" + link
+	writeWorkspaceFile(t, outside, "id_rsa", marker)
+	writeWorkspaceFile(t, dir, "CONVENTIONS.md", "conventions")
+
+	var from, to string
+	switch link {
+	case "file":
+		from, to = filepath.Join(outside, "id_rsa"), filepath.Join(dir, "AGENTS.md")
+	case "parent":
+		from, to = outside, filepath.Join(dir, "docs")
+	default:
+		t.Fatalf("unknown link kind %q", link)
+	}
+	if err := os.Symlink(from, to); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	return dir, marker
+}
+
+// TestLoadContextFilesRefusesEscapingSymlink pins the half of the fence the name gate cannot see.
+// validateContextFileNames judges the configured NAME; a clone shipping `AGENTS.md` as a symlink
+// to `~/.ssh/id_rsa` passes that gate untouched, and a bare os.ReadFile would follow it. The read
+// goes through security.SafeOpen instead, so the escape is REFUSED and kept as an error entry —
+// present-but-unreadable, reported to the user out loud — while the outside bytes never enter the
+// cache and a readable sibling in the same workspace still loads verbatim.
+func TestLoadContextFilesRefusesEscapingSymlink(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		title string
+		link  string
+		names []string
+	}{
+		{"the context file itself is a symlink out of the workspace", "file",
+			[]string{"AGENTS.md", "CONVENTIONS.md"}},
+		{"a parent component is a symlink out of the workspace", "parent",
+			[]string{filepath.Join("docs", "id_rsa"), "CONVENTIONS.md"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.title, func(t *testing.T) {
+			t.Parallel()
+			dir, marker := escapingContextWorkspace(t, tc.link)
+
+			got := loadContextFiles(dir, tc.names)
+
+			if len(got) != 2 {
+				t.Fatalf("loadContextFiles returned %d entries, want 2 (the refusal and the sibling): %+v", len(got), got)
+			}
+			escaped := got[0]
+			if escaped.name != tc.names[0] {
+				t.Fatalf("first entry = %q, want the refused %q", escaped.name, tc.names[0])
+			}
+			if !errors.Is(escaped.err, security.ErrPathEscape) {
+				t.Errorf("refused entry err = %v, want ErrPathEscape (a name resolving outside the workspace)", escaped.err)
+			}
+			if escaped.content != "" || escaped.size != 0 {
+				t.Errorf("refused entry carries content %q (%d bytes); nothing outside the workspace may be cached",
+					escaped.content, escaped.size)
+			}
+			if strings.Contains(escaped.content, marker) {
+				t.Errorf("the read followed the symlink out of the workspace: %q", escaped.content)
+			}
+			if got[1].name != "CONVENTIONS.md" || got[1].content != "conventions" || got[1].err != nil {
+				t.Errorf("sibling entry = %+v, want CONVENTIONS.md loaded verbatim (the refusal is targeted)", got[1])
 			}
 		})
 	}

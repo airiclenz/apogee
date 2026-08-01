@@ -654,6 +654,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A repo's `AGENTS.md` can no longer be a symlink to a file outside your workspace.** Workspace
+  context files — the `AGENTS.md` / `CLAUDE.md` conventions apogee folds into the standing system
+  message of every request — were read by name with a plain read that follows symlinks. A cloned
+  repo shipping `AGENTS.md` as a link to `~/.ssh/id_rsa`, or to your own `~/.apogee/config.yaml`
+  with its upstream API key, therefore had that file's contents sent to the model the first time
+  you started apogee in the clone, with nothing to see but a name and a byte count in the session
+  notice. Context files are now opened through the same workspace fence every other read in apogee
+  goes through: a name that resolves outside the workspace is refused, its content never reaches
+  the model, and the session notice reports the skip out loud beside the files that did load. The
+  check on the configured *names* is unchanged, and a normal context file loads exactly as before.
+
 - **A reply cut off mid-stream no longer shows a raw `<|start|>assistant` marker.** When a gpt-oss
   answer was still arriving — or had been truncated by the token limit — the last, unfinished
   message kept its `<|start|>role` control token in the visible text, so the answer read as

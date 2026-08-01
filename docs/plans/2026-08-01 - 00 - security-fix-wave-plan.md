@@ -145,7 +145,17 @@ green.
 
 **Commit:** `fix(processing): strip the harmony open token from an unterminated tail's visible lead`
 
-## 6. Fence workspace context-file reads
+## 6. Fence workspace context-file reads — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): the `SafeOpen` + `io.ReadAll` pair lives in a small `readContextFile` helper
+rather than inline in the loop, and the escape case leads the loader's switch explicitly (it would
+already fall into the generic `err != nil` branch — leading pins that a refusal can never be read
+as absence). Tests are additive: the item's two cases plus a second escape shape (a symlinked
+PARENT component, `docs -> outside` with name `docs/id_rsa`), both proven to fail against the old
+`os.ReadFile`. Accepted consequence of reading through the fence: a `--workspace` pointing at a
+directory that does not exist now yields one loud unreadable notice per configured name instead of
+silence, because `os.OpenRoot` on a missing root surfaces as `ErrPathEscape` — a broken workspace
+is reported rather than hidden.
 
 **What:** Audit "High — Workspace context files are read with a bare `os.ReadFile`".
 `internal/agent/contextfiles.go:58`: replace `os.ReadFile(filepath.Join(workspaceDir, name))`
