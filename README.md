@@ -176,7 +176,8 @@ gauge, instead of opening an empty view over a model that still remembers.
   model, in a single call off to the side of the conversation, for a short title
   (`auto-title:`, a file-only key, on by default). With that off — or when the
   call fails or answers with nothing usable — the title falls back to the first
-  user message.
+  user message, or to a dated `Session <date>` when that message is empty or
+  opens a code fence.
 - `/clear` (or `/new`) closes the current session into history and starts a fresh
   one — neither deletes; discarding is an explicit `d` in the browser.
 - A session killed mid-task resumes to the last completed turn and says so;
