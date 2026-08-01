@@ -49,7 +49,8 @@ type wireEnvelope struct {
 // wireEntry is the serialized form of one committed [entry]. Kind is the string enum (never the
 // iota); the payload fields mirror entry's, and the two view structs hang off their own optional
 // members so a non-tool / non-presented entry serializes without them. The in-progress pending
-// buffer and the one-time start-up box never reach here (see encodeTranscript).
+// buffer, the one-time start-up box and any display-only (ephemeral) entry never reach here (see
+// encodeTranscript).
 type wireEntry struct {
 	Kind      string         `json:"kind"`
 	Text      string         `json:"text,omitempty"`

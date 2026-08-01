@@ -1405,13 +1405,14 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 // that captures any post-last-turn transcript changes (notes, /confine output) the per-Turn saves did
 // not. Two callers use it: a clean quit, and startNewSession closing the outgoing session on /clear|
 // /new (which then Rotates so the next Turn opens a fresh id). It is a no-op without a wired host or
-// when the transcript holds no conversation (only the seeded start-up box, or nothing at all) — nothing
-// worth resuming. Both Snapshot and the Save are best-effort: a quit must never fail and a session
-// close must never block, so an error is swallowed rather than interrupting. Both callers guarantee no
-// worker is running, so calling Snapshot here respects the Agent's single-goroutine contract (C1).
-// Unlike the per-Turn path this is synchronous — the outgoing session must reach disk before the caller
-// Rotates or the program exits, and there is no Update loop left (or wanted) to deliver a saveDoneMsg
-// to.
+// when the transcript holds no conversation — no entry the record would actually keep, which means the
+// seeded start-up box, a scrollback of nothing but re-derived ephemeral notices, and an empty view all
+// count as nothing worth resuming (hasConversation). Both Snapshot and the Save are best-effort: a quit
+// must never fail and a session close must never block, so an error is swallowed rather than
+// interrupting. Both callers guarantee no worker is running, so calling Snapshot here respects the
+// Agent's single-goroutine contract (C1). Unlike the per-Turn path this is synchronous — the outgoing
+// session must reach disk before the caller Rotates or the program exits, and there is no Update loop
+// left (or wanted) to deliver a saveDoneMsg to.
 func (m Model) saveSession() {
 	if m.sessions == nil || !m.transcript.hasConversation() {
 		return
