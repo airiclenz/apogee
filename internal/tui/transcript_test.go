@@ -664,6 +664,29 @@ func TestTranscriptReset(t *testing.T) {
 	}
 }
 
+// hasConversation gates the save decision, so it must count only what the record would keep. A
+// launch that produced nothing but re-derived chrome — the start-up box and the "context: …" /
+// "resumed: …" notices — is not a conversation, and saving it would file a record whose scrollback
+// encodes to zero entries. The real note that flips it is the same kind as the ephemeral ones, so
+// the flag, not the kind, is what decides.
+func TestTranscriptHasConversationIgnoresEphemeral(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
+	tr.addEphemeralNote("context: AGENTS.md")
+	tr.addEphemeralNote("resumed: an earlier session")
+
+	if tr.hasConversation() {
+		t.Error("hasConversation = true for an ephemeral-only transcript, want false — none of it persists")
+	}
+
+	tr.addNote("cancelled")
+
+	if !tr.hasConversation() {
+		t.Error("hasConversation = false after a persisted note, want true")
+	}
+}
+
 // callEntry returns the tool-call entry with the given CallID, or nil.
 func callEntry(tr *transcript, id string) *entry {
 	for i := range tr.entries {

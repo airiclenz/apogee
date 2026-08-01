@@ -229,12 +229,15 @@ func (t *transcript) replay(entries []entry) {
 }
 
 // hasConversation reports whether the transcript holds anything the human would want resumed —
-// any entry beyond the one-time start-up box seeded at construction. The box is opening chrome,
-// not conversation, so a session that only ever showed it is still "empty" for the save decision
-// (saveSession): seeding entries[0] must not on its own turn every quit into a snapshot file.
+// any entry the record would actually keep. The one-time start-up box is opening chrome and a
+// display-only note is re-derived at every launch, so neither is conversation; they are exactly
+// the entries encodeTranscript skips, which keeps this gate and the blob in agreement. A launch
+// that showed only those is still "empty" for the save decision (saveSession): seeding entries[0]
+// — or printing a "context: …" notice in a repo that has context files — must not on its own turn
+// every quit into a snapshot file holding an empty scrollback.
 func (t *transcript) hasConversation() bool {
 	for i := range t.entries {
-		if t.entries[i].kind != entryStartup {
+		if e := &t.entries[i]; e.kind != entryStartup && !e.ephemeral {
 			return true
 		}
 	}

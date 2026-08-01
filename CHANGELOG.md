@@ -666,6 +666,10 @@ point is a **minor** bump, not a breaking change.
   changes is that the record keeps only the conversation. Existing session files keep loading
   unchanged — the stored format did not move — and the lines a session already collected replay as
   ordinary scrollback; no new ones are added to it.
+  - **A window you never spoke in is no longer filed as a session.** Starting apogee in a repo with
+    context files and quitting without asking anything used to leave a session behind whose entire
+    scrollback was that one `context:` line. The save gate counts only what the record would actually
+    keep now, so a launch with no conversation in it leaves your `/sessions` list untouched.
 
 - **A session file carrying its own system message no longer doubles the system prompt.** apogee
   composes the system prompt fresh for every request and never writes it into a session's stored
