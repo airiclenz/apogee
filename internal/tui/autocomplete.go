@@ -349,7 +349,10 @@ func (m Model) slashSuggestions(partial, outside string) []acItem {
 		}
 		items = append(items, acItem{
 			value: sk.value,
-			cells: popupRow{glyphSkill + " /" + sk.value, skillMenuCell(sk.cells)},
+			// The token cell is escape-stripped like every other cell this module builds
+			// (sessionRowCells, launchProfileRows): a skill id is a directory name a repo chose.
+			// The description cell arrives already stripped from skillSuggestions.
+			cells: popupRow{glyphSkill + " /" + stripEscapes(sk.value), skillMenuCell(sk.cells)},
 			skill: true,
 		})
 	}
@@ -403,7 +406,14 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 			!strings.Contains(strings.ToLower(sk.DisplayName), needle) {
 			continue
 		}
-		items = append(items, acItem{value: sk.ID, cells: popupRow{sk.DisplayName, sk.Summary}})
+		// Both cells come from a repo-supplied SKILL.md front matter, so they are escape-stripped
+		// where the row is built — the popup module strips nothing and truncates
+		// ANSI-preservingly, and an ESC byte takes string length but no display cell, so an
+		// unstripped cell would both reach the terminal live and lie to the column math.
+		items = append(items, acItem{
+			value: sk.ID,
+			cells: popupRow{stripEscapes(sk.DisplayName), stripEscapes(sk.Summary)},
+		})
 		if len(items) >= maxAutocompleteItems {
 			break
 		}
@@ -419,11 +429,15 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 //
 // A path is one thing, not a name and a description, so a file row stays SINGLE-CELL: one column,
 // which the popup module lays out as the plain "@path" it always was.
+//
+// The cell is escape-stripped: a filename is the WORKSPACE's, not this program's, and a clone can
+// carry one holding an ESC byte. The item's value keeps the raw path, because that is what the
+// splice must reproduce for the reference to resolve on disk.
 func (m Model) fileSuggestions(partial string) []acItem {
 	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
-		items = append(items, acItem{value: p, cells: popupRow{fileRefToken(p)}})
+		items = append(items, acItem{value: p, cells: popupRow{stripEscapes(fileRefToken(p))}})
 	}
 	return items
 }

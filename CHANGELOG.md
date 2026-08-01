@@ -654,6 +654,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A file, a filename or a tool argument can no longer turn the rest of your screen into a
+  clickable link.** apogee already stripped terminal escape sequences out of untrusted text, but it
+  did so one producer at a time — and the list had holes. A tool call's **target** (taken verbatim
+  from the model's own arguments, and painted on the status line the moment a call is announced,
+  before any approval prompt), a tool **result's** summary and output lines, a recovered **error**
+  notice, the `/skills` catalogue, the autocomplete dropdown's skill and file rows, the
+  `resumed: …` note and the automatic model-rebind note all went to the terminal unfiltered. That
+  is reachable with no user action beyond normal use: a cloned repo controls the first line of any
+  file the model reads, the first line of any command's output, its own filenames and its own
+  `SKILL.md` front matter. It matters because the chat is drawn through a cell buffer that
+  **deliberately honours OSC 8 hyperlinks** and never closes one at a cell or line boundary, so a
+  single unterminated link opener turns everything painted after it — the rest of the transcript,
+  the input box, the footer — into one clickable link to an attacker's URL. Since the way apogee
+  hands you a finished document is "cmd+click the path we print", that is aimed squarely at the one
+  mechanism the presentation ladder always promises.
+  - **Stripping now happens at the seams, not at the call sites.** Every note, error, approval
+    record, tool card and popup row is sanitized where it enters the view, so a new producer is
+    covered the day it is written rather than the day someone remembers to wrap it. The `@file`
+    dropdown keeps the raw path as the text it splices in — only the row you *see* is stripped —
+    so a reference still resolves on disk.
+
 - **A repo's own dangerous-action rules can no longer cancel one of apogee's.** The rules that
   hard-refuse an `rm -rf /` or make a `sudo …` stop for your approval ship with apogee, and a
   project config is only ever allowed to *tighten* them — it can add a rule, never remove or

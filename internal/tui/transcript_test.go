@@ -1,12 +1,17 @@
 package tui
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // ----------------------------------------------------------------------------
@@ -399,38 +404,70 @@ func TestTranscriptStreamingPreviewTrimsTrailingBlanks(t *testing.T) {
 // Terminal-escape hardening (item 8 — strip ESC from untrusted text)
 // ----------------------------------------------------------------------------
 
-// Untrusted model text and skill display names are escape-stripped at the transcript boundary,
-// so an OSC 52 clipboard-write or a CSI screen game embedded by the model (or a repo-supplied
-// SKILL.md) can never reach the terminal. Each path (streamed tokens, canonical message text,
-// attached skill name) is pinned, and the benign text around the payload is preserved.
-func TestTranscriptStripsTerminalEscapes(t *testing.T) {
-	const osc52 = "\x1b]52;c;cGFyaQ==\a" // an OSC 52 clipboard-write payload
-	const csi = "\x1b[2J\x1b[H"          // a clear-screen + cursor-home CSI payload
+// escOSC52 is an OSC 52 clipboard-write payload — the audit's verified vector.
+const escOSC52 = "\x1b]52;c;cGFyaQ==\a"
 
-	assertNoESC := func(t *testing.T, tr *transcript) {
-		t.Helper()
-		for i, e := range tr.entries {
-			if strings.ContainsRune(e.text, 0x1b) {
-				t.Errorf("entry %d text still carries an ESC byte: %q", i, e.text)
-			}
-			for _, s := range e.skills {
-				if strings.ContainsRune(s, 0x1b) {
-					t.Errorf("entry %d skill name still carries an ESC byte: %q", i, s)
-				}
-			}
-		}
-		for _, ln := range tr.renderLines(newTheme(), 80) {
-			if strings.Contains(ln, "\x1b]") { // the OSC introducer never survives to a rendered line
-				t.Errorf("rendered line leaks an OSC escape introducer: %q", ln)
-			}
+// escCSI is a clear-screen + cursor-home CSI payload.
+const escCSI = "\x1b[2J\x1b[H"
+
+// entryDisplayStrings returns every string of an entry that can reach the terminal — the body, the
+// skill chips, all five fields of a tool card, and the presentation entry's own facts. The
+// assertions below walk THIS rather than e.text alone: the per-call-site discipline this test
+// replaced passed while a tool card's target and summary carried live escapes, precisely because
+// the assertion only looked at the text field.
+func entryDisplayStrings(e entry) []string {
+	out := []string{
+		e.text,
+		e.tool.Label, e.tool.Verb, e.tool.Target, e.tool.Summary.Text,
+		e.presented.Title, e.presented.Path, e.presented.Location, e.presented.Reason,
+		e.startup.Host, e.startup.Model,
+	}
+	out = append(out, e.skills...)
+	for _, d := range e.tool.Details {
+		out = append(out, d.Text)
+	}
+	return out
+}
+
+// assertTranscriptNoESC fails when any entry field, or any rendered line, still carries an escape.
+func assertTranscriptNoESC(t *testing.T, tr *transcript) {
+	t.Helper()
+	for i, e := range tr.entries {
+		assertNoESCIn(t, fmt.Sprintf("entry %d", i), entryDisplayStrings(e)...)
+	}
+	for _, ln := range tr.renderLines(newTheme(), 80) {
+		if strings.Contains(ln, "\x1b]") { // the OSC introducer never survives to a rendered line
+			t.Errorf("rendered line leaks an OSC escape introducer: %q", ln)
 		}
 	}
+}
+
+// assertNoESCIn fails when any of the given strings carries an escape — the non-transcript
+// producers (the status line's activity label, a popup row's cells) that never become an entry.
+func assertNoESCIn(t *testing.T, what string, strs ...string) {
+	t.Helper()
+	for _, s := range strs {
+		if strings.ContainsRune(s, 0x1b) {
+			t.Errorf("%s still carries an ESC byte: %q", what, s)
+		}
+	}
+}
+
+// Untrusted text is escape-stripped at the transcript SEAMS — addNote / addEphemeralNote /
+// addError / addApproval, and presentToolCall / enrichWithResult for the tool card — so an OSC 52
+// clipboard-write, a CSI screen game, or (the real threat) an unterminated OSC 8 opener can never
+// reach the terminal, whichever producer worded the string. The producers are enumerated here
+// because the enumeration is what failed before: stripping was applied per call site, and a
+// tool-call target, a tool result, a recovered fault, the /skills catalogue, a resume note and a
+// rebind note were all missed. The benign text around each payload must survive.
+func TestTranscriptStripsTerminalEscapes(t *testing.T) {
+	const osc52, csi = escOSC52, escCSI
 
 	t.Run("streamed tokens (TokenEvent)", func(t *testing.T) {
 		tr := &transcript{}
 		tr.apply(domain.TokenEvent{Text: "stream " + osc52 + "tokens"})
 		tr.apply(domain.MessageEvent{Text: ""}) // commit the streamed buffer verbatim
-		assertNoESC(t, tr)
+		assertTranscriptNoESC(t, tr)
 		if got := plainRender(tr); !strings.Contains(got, "stream") || !strings.Contains(got, "tokens") {
 			t.Errorf("stripping ate the benign token text:\n%s", got)
 		}
@@ -439,7 +476,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	t.Run("canonical message text (MessageEvent)", func(t *testing.T) {
 		tr := &transcript{}
 		tr.apply(domain.MessageEvent{Text: "final " + csi + "message"})
-		assertNoESC(t, tr)
+		assertTranscriptNoESC(t, tr)
 		if got := plainRender(tr); !strings.Contains(got, "final") || !strings.Contains(got, "message") {
 			t.Errorf("stripping ate the benign message text:\n%s", got)
 		}
@@ -448,11 +485,208 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	t.Run("attached skill display name", func(t *testing.T) {
 		tr := &transcript{}
 		tr.addUser("please review", []string{"Review" + osc52 + "Skill"})
-		assertNoESC(t, tr)
+		assertTranscriptNoESC(t, tr)
 		if got := plainRender(tr); !strings.Contains(got, "Review") || !strings.Contains(got, "Skill") {
 			t.Errorf("stripping ate the benign skill name:\n%s", got)
 		}
 	})
+
+	// The target is pulled verbatim out of the model's own JSON arguments — a hostile model's
+	// cheapest reach to the screen, and foldActivity paints it before any gate runs.
+	t.Run("tool-call target from the model's JSON arguments", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID:        "c1",
+			Tool:      "read_file",
+			Arguments: escapedArgs(t, "path", "ma"+osc52+"in.go"),
+		}})
+		assertTranscriptNoESC(t, tr)
+		if got := tr.entries[0].tool.Target; !strings.Contains(got, "ma") || !strings.Contains(got, "in.go") {
+			t.Errorf("stripping ate the benign target text: %q", got)
+		}
+	})
+
+	// An unregistered (dynamic MCP) tool takes the raw-name fallback: the label, the verb and the
+	// pretty-printed argument body are all the model's own bytes.
+	t.Run("unknown tool label, verb and argument body", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID:        "c1",
+			Tool:      "mcp" + csi + "_thing",
+			Arguments: escapedArgs(t, "note", "bo"+osc52+"dy"),
+		}})
+		assertTranscriptNoESC(t, tr)
+		if len(tr.entries[0].tool.Details) == 0 {
+			t.Fatal("the unknown-tool fallback rendered no argument body to strip")
+		}
+	})
+
+	// The summary and every detail line are built from result.Content — a file's first line or a
+	// command's first output line, both of which a malicious repo owns.
+	t.Run("tool-result summary and detail lines", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal",
+			Arguments: escapedArgs(t, "command", "ls")}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID:  "c1",
+			Content: "out" + osc52 + "put\nsecond" + csi + " line\nthird line",
+		}})
+		assertTranscriptNoESC(t, tr)
+		if len(tr.entries[0].tool.Details) == 0 {
+			t.Fatal("the multi-line output rendered no detail lines to strip")
+		}
+	})
+
+	// An errored result is worded from the same untrusted content, one branch over.
+	t.Run("errored tool result", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file",
+			Arguments: escapedArgs(t, "path", "main.go")}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "c1", IsError: true, Content: "no such fi" + osc52 + "le",
+		}})
+		assertTranscriptNoESC(t, tr)
+	})
+
+	// The orphan branch — a result matching no open call — appends the content as its own block
+	// without passing enrichWithResult, so it strips at its own seam.
+	t.Run("orphan tool result", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "nobody", Content: "orph" + osc52 + "aned",
+		}})
+		assertTranscriptNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "orph") || !strings.Contains(got, "aned") {
+			t.Errorf("stripping ate the benign orphan text:\n%s", got)
+		}
+	})
+
+	// A recovered fault quotes what failed — a path, a command, an upstream body — and names the
+	// model's own tool as the source.
+	t.Run("recovered fault (ErrorEvent)", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ErrorEvent{Source: "read" + csi + "_file", Err: "bo" + osc52 + "om"})
+		assertTranscriptNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "bo") || !strings.Contains(got, "om") {
+			t.Errorf("stripping ate the benign error text:\n%s", got)
+		}
+	})
+
+	// An approval record names the tool the model asked for.
+	t.Run("approval record", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ApprovalEvent{
+			Request:  domain.ApprovalRequest{Tool: "writ" + osc52 + "e_file"},
+			Decision: domain.ApprovalAllow,
+		})
+		assertTranscriptNoESC(t, tr)
+	})
+
+	// The /skills catalogue note is worded from repo-supplied SKILL.md front matter and from the
+	// YAML error text of the files discovery refused.
+	t.Run("the /skills catalogue note", func(t *testing.T) {
+		tr := &transcript{}
+		tr.addNote(skillCatalogNote(
+			[]skills.Skill{{ID: "review", DisplayName: "Rev" + osc52 + "iew", Summary: "su" + csi + "mmary"}},
+			[]skills.SkipError{{Path: "/lib/bad/SKILL.md", Err: errors.New("yaml: " + osc52 + "broken")}},
+			"/home/me/.apogee", "/ws",
+		))
+		assertTranscriptNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "iew") {
+			t.Errorf("stripping ate the benign catalogue text:\n%s", got)
+		}
+	})
+
+	// A resume note quotes a stored session title: untrusted DISK input, since no codec sanitizes a
+	// record's Meta on the way back in.
+	t.Run("resume notes", func(t *testing.T) {
+		tr := &transcript{}
+		tr.addEphemeralNote("resumed: " + "my " + osc52 + "session")
+		tr.addEphemeralNote("resumed: " + "my " + csi + "session (no scrollback recorded)")
+		assertTranscriptNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "session") {
+			t.Errorf("stripping ate the benign resume text:\n%s", got)
+		}
+	})
+
+	// The rebind note names the model id the SERVER advertised.
+	t.Run("the rebind note", func(t *testing.T) {
+		tr := &transcript{}
+		tr.addNote(rebindNote("", 0, "gpt"+osc52+"-oss-20b", 32000, false))
+		tr.addNote(rebindNote("old-model", 8000, "new"+csi+"-model", 32000, false))
+		assertTranscriptNoESC(t, tr)
+		if got := plainRender(tr); !strings.Contains(got, "oss-20b") {
+			t.Errorf("stripping ate the benign rebind text:\n%s", got)
+		}
+	})
+}
+
+// escapedArgs marshals one key/value pair the way a model emits it: the ESC byte travels as the
+// JSON escape a model literally writes as backslash-u-001b, decoding back to the raw byte — which
+// is exactly the shape that reaches a target extractor.
+func escapedArgs(t *testing.T, key, value string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{key: value})
+	if err != nil {
+		t.Fatalf("marshal tool arguments: %v", err)
+	}
+	return raw
+}
+
+// The status line's tool phrase is built only from presentToolCall's view, so it inherits the tool
+// card's seam. It is pinned here because foldActivity paints it the moment a call is ANNOUNCED —
+// before any approval gate runs — which makes it the earliest point a hostile model's argument
+// reaches the screen.
+func TestToolActivityLabelCarriesNoEscape(t *testing.T) {
+	label := toolActivityLabel(domain.ToolCall{
+		Tool:      "terminal",
+		Arguments: escapedArgs(t, "command", "npm "+escOSC52+"test"),
+	})
+	assertNoESCIn(t, "the activity label", label)
+	if !strings.Contains(label, "running") || !strings.Contains(label, "npm ") {
+		t.Errorf("stripping ate the benign label text: %q", label)
+	}
+
+	unknown := toolActivityLabel(domain.ToolCall{Tool: "mcp" + escCSI + "_thing"})
+	assertNoESCIn(t, "the unregistered-tool activity label", unknown)
+}
+
+// Every cell the autocomplete overlay builds is escape-stripped where the row is built, exactly as
+// the session browser and the launcher pickers strip theirs: the popup module strips nothing and
+// truncates ANSI-preservingly, and an ESC byte takes string length but no display cell, so an
+// unstripped cell both reaches the terminal live and lies to the column math. Skill rows come from
+// repo-supplied SKILL.md front matter; file rows come from workspace filenames.
+func TestAutocompleteRowsStripEscapes(t *testing.T) {
+	m := Model{opts: Options{
+		Workspace: "/ws",
+		Skills: fakeSkillCatalog{skills: []skills.Skill{{
+			ID:          "rev" + escCSI + "iew",
+			DisplayName: "Rev" + escOSC52 + "iew",
+			Summary:     "review a" + escOSC52 + " diff",
+		}}},
+	}}
+	m.files = &fileCache{
+		root:    "/ws",
+		files:   []string{"docs/no" + escOSC52 + "tes.md"},
+		expires: time.Now().Add(time.Hour),
+	}
+
+	for _, item := range m.skillSuggestions("", "") {
+		assertNoESCIn(t, "a /skill picker row", item.cells...)
+	}
+	for _, item := range m.slashSuggestions("rev", "") {
+		assertNoESCIn(t, "a merged \"/\" menu row", item.cells...)
+	}
+	items := m.fileSuggestions("")
+	if len(items) == 0 {
+		t.Fatal("the seeded file cache produced no rows to strip")
+	}
+	for _, item := range items {
+		assertNoESCIn(t, "an \"@\" file row", item.cells...)
+	}
+	if got := items[0].value; !strings.Contains(got, "\x1b") {
+		t.Errorf("file row value = %q; want the RAW path kept, so the splice still resolves on disk", got)
+	}
 }
 
 // ----------------------------------------------------------------------------

@@ -276,21 +276,53 @@ var toolRegistry = map[string]toolPresenter{
 // verbatim (the approval flow is a security surface — the model's request is never hidden).
 // The verb mirrors that fallback: an unregistered tool is "running <raw name>", which stays a
 // truthful sentence fragment for a dynamic MCP tool nobody has a verb for.
+// Everything the header states traces back to the model's own JSON arguments — the target on every
+// registered tool, and the raw name behind an unknown tool's label, verb and pretty-printed body —
+// so both exits sanitize before the view leaves this function.
 func presentToolCall(call domain.ToolCall) toolView {
 	p, ok := toolRegistry[call.Tool]
 	if !ok {
-		return toolView{
+		tv := toolView{
 			Label:   call.Tool,
 			Verb:    "running " + call.Tool,
 			name:    call.Tool,
 			Details: prettyJSONDetails(call.Arguments),
 		}
+		tv.sanitize()
+		return tv
 	}
 	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool}
 	if p.target != nil {
 		tv.Target = p.target(parseArgs(call.Arguments))
 	}
+	tv.sanitize()
 	return tv
+}
+
+// sanitize escape-strips every DISPLAY field of the view — label, verb, target, the one-line
+// summary and each detail line — so no ESC byte from a tool call or its result can reach the
+// terminal (stripEscapes). It is the tool card's seam, called once on the way out of
+// presentToolCall and of enrichWithResult, rather than left to the two dozen target and detail
+// extractors above to remember one at a time.
+//
+// The threat is concrete and needs no user action: a malicious repo owns the first line of any file
+// the model reads and the first line of any command's output (firstLineDetail, outputDetail), a
+// hostile model owns every argument a target is pulled from, and the frame is painted through
+// ultraviolet's cell buffer, which deliberately HONOURS OSC 8 hyperlinks and never resets the link
+// state across cells or newlines — one unterminated opener turns the rest of the frame into a
+// clickable link to the attacker's URL, which is aimed squarely at ADR 0019's rung 0 ("cmd+click
+// the path we print").
+//
+// name is deliberately left alone: it is the registry lookup key enrichWithResult reads, never
+// rendered — Label carries the displayed copy of it, and Label is stripped.
+func (tv *toolView) sanitize() {
+	tv.Label = stripEscapes(tv.Label)
+	tv.Verb = stripEscapes(tv.Verb)
+	tv.Target = stripEscapes(tv.Target)
+	tv.Summary.Text = stripEscapes(tv.Summary.Text)
+	for i := range tv.Details {
+		tv.Details[i].Text = stripEscapes(tv.Details[i].Text)
+	}
 }
 
 // enrichWithResult folds a tool's result into the view, in three layers. An error result
@@ -300,7 +332,12 @@ func presentToolCall(call domain.ToolCall) toolView {
 // filling the half beneath it (view_diff alone). Everything else falls to prose: a known
 // tool's extractor splits the text into a summary and a body, and an unknown tool's result is
 // shown raw as body lines, so nothing is ever silently dropped.
+//
+// Every one of those layers words itself from result.Content, which is tool output and therefore
+// repo-controlled, so the sanitize seam is deferred rather than repeated: it runs on whichever
+// branch returns, and on any branch a later tool adds.
 func (tv *toolView) enrichWithResult(result domain.ToolResult) {
+	defer tv.sanitize()
 	if result.IsError {
 		tv.Summary = detailLine{Text: "error: " + firstLine(result.Content)}
 		return

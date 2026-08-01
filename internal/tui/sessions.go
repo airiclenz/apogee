@@ -340,6 +340,10 @@ func (m Model) loadSession(id string) tea.Cmd {
 // is opened, so the record itself must not carry them. The load/restore FAILURE notes above stay
 // persistent: they belong to the session that stays live, and they record something that happened
 // rather than something re-derived.
+//
+// The title those notices quote is untrusted disk input — no codec sanitizes a record's Meta on the
+// way back in, which is why sessionRowCells strips it too — and it needs no wrapping here: both
+// addNote and addEphemeralNote escape-strip at the seam.
 func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.transcript.addNote("could not load session: " + msg.err.Error())

@@ -124,6 +124,12 @@ const statusTargetRunes = 32
 // tool's active verb and, when the call names one, the target it acts on ("reading · main.go",
 // "running · npm test"). An unregistered (dynamic MCP) tool inherits presentToolCall's
 // "running <raw name>" fallback, so it is still a truthful fragment.
+//
+// It needs no escape-stripping of its own: the phrase is built ONLY from presentToolCall's view,
+// which sanitizes on the way out (toolView.sanitize), so the status line inherits the tool card's
+// seam rather than re-deriving the discipline. That matters here more than it looks — foldActivity
+// paints this label the moment a call is ANNOUNCED, before any approval gate runs, so it is the
+// earliest point at which a hostile model's argument reaches the screen.
 func toolActivityLabel(call domain.ToolCall) string {
 	tv := presentToolCall(call)
 	if tv.Target == "" {

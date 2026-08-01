@@ -1875,7 +1875,9 @@ const unknownWindowNote = "context window unknown — automatic compaction and t
 // the change it suppressed.
 //
 // Both ids are rendered the way the footer and the start-up box render them (displayModel), so the
-// note and the chrome beside it can never name the same model two different ways.
+// note and the chrome beside it can never name the same model two different ways. Neither is
+// escape-stripped here: the new id is whatever the server advertised, so it is untrusted, but the
+// note's one destination is addNote, which strips at the seam for every producer.
 func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int, quietSeed bool) string {
 	switch {
 	case oldModel == "":

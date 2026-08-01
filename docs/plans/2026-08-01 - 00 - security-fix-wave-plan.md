@@ -470,7 +470,22 @@ merge, the shipped pattern still matches `sudo …` and the project rule coexist
 
 **Commit:** `fix(security): a project rule add can no longer dissolve a shipped rule by tier promotion`
 
-## 15. Strip terminal escapes at the transcript and popup seams
+## 15. Strip terminal escapes at the transcript and popup seams — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): three of the named producers are covered by a seam instead of being wrapped
+individually, which is the finding's own "strip at the seam rather than per producer" rule applied
+one step further. `toolActivityLabel` builds its phrase only from `presentToolCall`'s view, which
+now sanitizes on the way out (`toolView.sanitize`), so wrapping it again would be a redundant
+strip; the resume note (`sessions.go:370`) and the rebind note (`model.go:1885`) reach the screen
+only through `addEphemeralNote` / `addNote`, both of which now strip. `addEphemeralNote` was added
+to the stripping seam list for that reason (it is `addNote`'s sibling and carries the resume
+notices and the context-file notice). Each of the three carries a doc line saying which seam covers
+it, and all three are pinned by the tests. Two producers the item did not name are stripped as
+well, because leaving them out would reproduce the exact defect the item fixes: `addApproval`
+(builds an entry directly, naming the model's own tool) and `addToolResult`'s orphan branch (the
+one result path that never passes `enrichWithResult` — the item's What calls for that branch to be
+covered, and stripping inside `enrichWithResult` alone would not do it). Package rule recorded as a
+second invariant in `internal/tui/doc.go`.
 
 **What:** Audit "High — Terminal-escape stripping is enforced per call site, and several
 untrusted producers were missed". Move the discipline to the seams in `internal/tui`:

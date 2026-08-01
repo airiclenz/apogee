@@ -405,4 +405,23 @@
 // is a string, not a Builder, for exactly this reason). TestModelNoBuilderByValue guards the
 // strings.Builder case structurally — the behaviour is address-dependent and a behavioural
 // test cannot reliably reproduce the panic.
+//
+// Invariant — untrusted text is escape-stripped at the SEAM it enters the view through, never
+// at each producer. The frame is painted through ultraviolet's cell buffer, which drops most
+// zero-width sequences but deliberately HONOURS OSC 8 hyperlinks and never resets the link state
+// across cells or newlines — so one unterminated OSC 8 opener turns every remaining cell of the
+// frame (the transcript below it, the input box, the footer) into a clickable link to an
+// attacker's URL, which is aimed straight at ADR 0019's rung 0 ("cmd+click the path we print").
+// The producers reaching those seams are the least trustworthy strings in the program: a hostile
+// model owns every tool-call argument and message, a malicious repo owns file first lines, command
+// output, filenames and SKILL.md front matter, and a session record on disk is sanitized by no
+// codec on its Meta. Enumerating them per call site is exactly what failed before — several were
+// missed — so the seams strip on every producer's behalf: [transcript.addNote],
+// [transcript.addEphemeralNote], [transcript.addError], [transcript.addApproval] and
+// [transcript.addToolResult]'s orphan branch for the scrollback, [toolView.sanitize] (called by
+// presentToolCall and enrichWithResult) for the tool card and everything derived from it
+// (toolActivityLabel), and each popupRow builder for the overlays, since the popup module strips
+// nothing and truncates ANSI-preservingly. stripEscapes is idempotent and allocation-free on text
+// with no ESC, so a producer that also strips costs nothing. TestTranscriptStripsTerminalEscapes
+// and its siblings pin every one of those paths.
 package tui

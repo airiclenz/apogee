@@ -133,8 +133,15 @@ func (t *transcript) addInterjected(text string, skills []string) {
 
 // addNote appends a neutral note (e.g. "cancelled") — a transcript record of a UI-level
 // event that is not itself an engine Event.
+//
+// It escape-strips at the SEAM, on behalf of every caller, rather than trusting each producer to
+// remember (stripEscapes). A note is worded from the least trustworthy strings in the program — a
+// repo SKILL.md's front matter (/skills), the model id a server advertises (rebindNote), a
+// launcher profile name, an error string quoting a workspace path — and the per-producer
+// discipline that preceded this had in fact missed several of them. A caller that strips first is
+// harmless: stripEscapes is idempotent and allocates nothing when there is no ESC byte.
 func (t *transcript) addNote(text string) {
-	t.entries = append(t.entries, entry{kind: entryNote, text: text})
+	t.entries = append(t.entries, entry{kind: entryNote, text: stripEscapes(text)})
 }
 
 // addEphemeralNote appends a note that the human sees but the session record never keeps. It is
@@ -148,8 +155,13 @@ func (t *transcript) addNote(text string) {
 // rebuilt, so persisting one adds nothing on the way back in and accumulates a duplicate on the way
 // out — five resumes, five stored "resumed:" notes. A note that records something that actually
 // happened in the session (a cancellation, a failed save, a server switch) belongs in addNote.
+//
+// It escape-strips exactly as addNote does, and for a sharper reason: its two biggest callers word
+// their notice from a stored session title (resumeLoaded, replayResumed) and from the workspace
+// context-file names the session loaded — untrusted DISK input in both cases, since no codec
+// sanitizes a session record's Meta and a repo names its own files.
 func (t *transcript) addEphemeralNote(text string) {
-	t.entries = append(t.entries, entry{kind: entryNote, text: text, ephemeral: true})
+	t.entries = append(t.entries, entry{kind: entryNote, text: stripEscapes(text), ephemeral: true})
 }
 
 // addPresented appends the presentation entry for one shown document — rung 0 of the ladder,
@@ -437,7 +449,9 @@ func (t *transcript) addToolResult(result domain.ToolResult, depth int) {
 			return
 		}
 	}
-	text := result.Content
+	// The orphan branch is the one path a result takes WITHOUT passing enrichWithResult's seam, so
+	// it strips the content itself — it is raw tool output, which a malicious repo controls.
+	text := stripEscapes(result.Content)
 	if result.IsError {
 		text = "error: " + text
 	}
@@ -464,8 +478,13 @@ func (t *transcript) hasOpenToolCall() bool {
 
 // addApproval records an Approval observationally — the decision already came back through
 // the C3 reply channel, so this is a transcript record of what was decided, not the gate.
+//
+// The tool name is the MODEL's — a dynamic MCP tool is named by its server and an unregistered one
+// is echoed raw — so it is escape-stripped like every other note text. This entry is built here
+// rather than through addNote (it carries a depth), which is exactly the kind of bypass that left
+// producers unstripped before.
 func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.ApprovalDecision, depth int) {
-	text := fmt.Sprintf("approval %s: %s", decision, req.Tool)
+	text := fmt.Sprintf("approval %s: %s", decision, stripEscapes(req.Tool))
 	t.entries = append(t.entries, entry{kind: entryNote, text: text, depth: depth})
 }
 
@@ -482,8 +501,13 @@ func (t *transcript) addMechanism(e domain.MechanismFiredEvent) {
 
 // addError appends a recovered-fault notice (ADR 0007 — an ErrorEvent does not stop the
 // loop). source is the tool name / mechanism ID / "loop"; msg is the error text.
+//
+// Both halves are escape-stripped at this seam, as addNote strips its own: an error text routinely
+// quotes what failed — a path, a command, an upstream body, an MCP server's message — so it is
+// untrusted for exactly the reasons the tool card's content is, and source is the model's own tool
+// name when a tool faulted.
 func (t *transcript) addError(source, msg string, depth int) {
-	t.entries = append(t.entries, entry{kind: entryError, text: source + ": " + msg, depth: depth})
+	t.entries = append(t.entries, entry{kind: entryError, text: stripEscapes(source + ": " + msg), depth: depth})
 }
 
 // ----------------------------------------------------------------------------
