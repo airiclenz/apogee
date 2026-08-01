@@ -1,12 +1,15 @@
 // Package title builds and cleans up the session-naming completion — the cosmetic,
-// out-of-band call that gives a new Session record a human title instead of the first line
+// out-of-band call that gives a Session record a human title instead of the first line
 // of the user's first prompt.
 //
-// It is deliberately two pure functions and nothing else. Prompt renders the request; Sanitize
-// turns whatever text came back into a title or reports that nothing usable did. Neither one
-// talks to a server, a Session record, or the TUI, so both are table-testable and the policy
-// that surrounds them — when to fire, whether to apply the result, which title wins — lives
-// entirely with the callers that own that state.
+// It is deliberately two pure functions and nothing else. Prompt renders the request from a
+// WINDOW of the user's requests — one entry for the automatic call at first-prompt submit,
+// because one is all that exists when it fires; a bounded, budget-capped selection of the
+// session's user side when the human asks for a name later. Sanitize turns whatever text came
+// back into a title or reports that nothing usable did. Neither one talks to a server, a Session
+// record, or the TUI, so both are table-testable and the policy that surrounds them — when to
+// fire, whether to apply the result, which title wins — lives entirely with the callers that own
+// that state.
 //
 // The naming call is NOT a Mechanism and NOT a Turn (ADR 0022 addendum, 2026-07-31): it fires
 // at no Hook point, never shapes the primary call, emits no events, and nothing breaks when it
@@ -20,6 +23,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/provider"
 )
@@ -34,10 +38,24 @@ const (
 	titleMaxTokens   = 1024
 )
 
-// promptExcerptRunes bounds how much of the first prompt rides the naming call. The title
-// describes the task, and a task is almost always stated in the opening sentences; a pasted
-// stack trace or a whole file after them adds tokens and queue time without adding signal.
+// promptExcerptRunes bounds how much of the request rides the naming call when the window holds
+// exactly one — the automatic call at first-prompt submit. The title describes the task, and a
+// task is almost always stated in the opening sentences; a pasted stack trace or a whole file
+// after them adds tokens and queue time without adding signal.
 const promptExcerptRunes = 1500
+
+// The shape of the multi-request window an explicitly requested naming call reads. Every count is
+// in RUNES, so a CJK session is bounded by the characters the model reads rather than by bytes.
+// The opening request and the last windowTailEntries are mandatory and exempt from the budget —
+// dropping one of those to satisfy a budget would defeat the selection, and the whole point is to
+// see both where the session started and where it ended up. windowBudgetRunes is roughly a 4x
+// prefill increase over the single-request form, which is affordable because it is paid only on a
+// call the human explicitly asked for and is sitting there waiting on.
+const (
+	windowEntryRunes  = 400
+	windowBudgetRunes = 6000
+	windowTailEntries = 3
+)
 
 // titleMaxRunes is the longest a title runs before word-boundary truncation. It matches the
 // heuristic sessionTitle's cap (internal/tui/model.go) so a generated title and the fallback it
@@ -55,11 +73,18 @@ const titleWordBoundaryFloor = titleMaxRunes * 6 / 10
 // that loop obviously terminating.
 const maxAffixPasses = 4
 
-// systemInstruction is the naming call's system prompt. It asks for the task description alone:
-// the session browser already renders the time and the workspace beside the title, so a title
-// that repeats either wastes the only 50 runes the row has (Ratified design 6).
-const systemInstruction = "You name coding sessions. Read the user's first request and reply " +
-	"with a short title for the work it asks for: 3 to 8 words, one line, plain text. " +
+// systemInstruction is the naming call's system prompt, shared by both naming forms so the two
+// cannot drift apart; it is worded to read correctly for one request as well as for many. It asks
+// for the task description alone: the session browser already renders the time and the workspace
+// beside the title, so a title that repeats either wastes the only 50 runes the row has (Ratified
+// design 6). It asks for the DOMINANT thread rather than a list of the requests, and says outright
+// that a session which moved on is named for what it moved to (ADR 0022 addendum): people look for
+// a session by what they were last doing, and leaving the bias implicit would buy recency by
+// accident — small models answer the last thing they read — rather than by instruction.
+const systemInstruction = "You name coding sessions. Read what the user has asked for and reply " +
+	"with a short title for the main thread of the work: 3 to 8 words, one line, plain text. " +
+	"Name the dominant task rather than listing every request; when the session has moved on to " +
+	"a different task, name the task it moved to. " +
 	"Describe the task only — never the project, the folder, or the date. " +
 	"Reply with the title and nothing else: no quotes, no code fences, no label, no explanation."
 
@@ -68,48 +93,183 @@ const systemInstruction = "You name coding sessions. Read the user's first reque
 // keeps the reply to one line.
 const userInstruction = "Reply with the title only."
 
-// Prompt builds the naming completion for firstPrompt — the request the composition root hands
-// provider.Client.Respond. workspaceBase (the workspace directory's basename) and date are
-// CONTEXT for the model, never title text; they are here so a bare "fix it" still earns a title
-// that reads sensibly, not so they can be echoed back into it.
+// windowHeader labels the numbered block of requests. Naming the order outright is what lets the
+// model read the last entries as the most recent work, which is the half of the instruction the
+// numbering alone cannot carry.
+const windowHeader = "The user's requests in this session, oldest first:"
+
+// Prompt builds the naming completion for prompts — the window of the user's requests, oldest
+// first, that the composition root hands provider.Client.Respond. One request is the automatic
+// call at first-prompt submit, which is not a restriction but an identity: one is all that exists
+// when it fires. Several is an explicitly requested regeneration, which reads a bounded window of
+// the session's user side so a session that moved on can be named for what it moved to (ADR 0022
+// addendum). workspaceBase (the workspace directory's basename) and date are CONTEXT for the
+// model, never title text; they are here so a bare "fix it" still earns a title that reads
+// sensibly, not so they can be echoed back into it.
 //
 // Model is deliberately left empty: the Client's own configured model wins in buildBody, which
 // is what binds the naming call to the session's current server and model (Ratified design 3).
 // The request carries no tools and does not stream — it is one round-trip for one line of text.
-func Prompt(firstPrompt, workspaceBase string, date time.Time) provider.Request {
+func Prompt(prompts []string, workspaceBase string, date time.Time) provider.Request {
 	temperature, maxTokens := titleTemperature, titleMaxTokens
 	return provider.Request{
 		Messages: []provider.Message{
 			{Role: "system", Content: systemInstruction},
-			{Role: "user", Content: userMessage(firstPrompt, workspaceBase, date)},
+			{Role: "user", Content: userMessage(prompts, workspaceBase, date)},
 		},
 		Sampling: provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
 	}
 }
 
-// userMessage renders the naming call's user message: the workspace and date as labelled
-// context, then the bounded excerpt of the first prompt, then the closing instruction. The
-// excerpt is fenced off by its own label so a prompt that itself contains instructions reads as
-// quoted material rather than as something to obey.
-func userMessage(firstPrompt, workspaceBase string, date time.Time) string {
+// userMessage renders the naming call's user message from the prompts that carry a request. A
+// window of one renders the single-request form the automatic call has always sent, byte for
+// byte; several render as the numbered selection below. An empty window renders that same
+// single-request form around an empty request: callers guard against calling with nothing to
+// name, so this is a contract rather than a path anyone reaches.
+func userMessage(prompts []string, workspaceBase string, date time.Time) string {
+	requests := carryingText(prompts)
+	switch len(requests) {
+	case 0:
+		return firstRequestMessage("", workspaceBase, date)
+	case 1:
+		return firstRequestMessage(requests[0], workspaceBase, date)
+	default:
+		return windowMessage(requests, workspaceBase, date)
+	}
+}
+
+// carryingText drops the prompts that hold no request. The window arrives from the transcript,
+// and an entry that is empty once trimmed is nothing to name: numbering it would give the model a
+// blank line to describe and would make the elision marker's count disagree with the numbering.
+func carryingText(prompts []string) []string {
+	requests := make([]string, 0, len(prompts))
+	for _, prompt := range prompts {
+		if strings.TrimSpace(prompt) != "" {
+			requests = append(requests, prompt)
+		}
+	}
+	return requests
+}
+
+// firstRequestMessage renders the single-request form: the workspace and date as labelled
+// context, then the bounded excerpt of the request, then the closing instruction. The excerpt is
+// fenced off by its own label so a prompt that itself contains instructions reads as quoted
+// material rather than as something to obey.
+func firstRequestMessage(request, workspaceBase string, date time.Time) string {
 	return fmt.Sprintf(
 		"Workspace: %s\nDate: %s\n\nThe user's first request:\n%s\n\n%s",
 		strings.TrimSpace(workspaceBase),
 		date.Format("2006-01-02"),
-		excerpt(firstPrompt),
+		excerpt(request),
 		userInstruction,
 	)
 }
 
-// excerpt trims s to promptExcerptRunes, marking a cut with an ellipsis so the model knows it is
-// reading an opening rather than a whole request.
+// windowMessage renders several requests as a numbered list under the same labelled context,
+// oldest first. Each request keeps its ORIGINAL 1-based position in the session's user side, so
+// the run the budget dropped shows up as a gap in the numbering, and the single elision marker
+// standing in that gap tells the model how many went missing rather than leaving it to infer that
+// the session skipped from 1 to 12 on its own.
+func windowMessage(requests []string, workspaceBase string, date time.Time) string {
+	excerpts := make([]string, len(requests))
+	for i, request := range requests {
+		excerpts[i] = entryExcerpt(request)
+	}
+
+	lines := make([]string, 0, len(excerpts)+8)
+	lines = append(lines,
+		"Workspace: "+strings.TrimSpace(workspaceBase),
+		"Date: "+date.Format("2006-01-02"),
+		"",
+		windowHeader,
+		"",
+	)
+	previous := -1
+	for _, i := range selectWindow(excerpts, windowBudgetRunes) {
+		if omitted := i - previous - 1; omitted > 0 {
+			lines = append(lines, elisionMarker(omitted))
+		}
+		lines = append(lines, fmt.Sprintf("%d. %s", i+1, excerpts[i]))
+		previous = i
+	}
+	lines = append(lines, "", userInstruction)
+
+	return strings.Join(lines, "\n")
+}
+
+// selectWindow chooses which of excerpts ride the naming call and returns their indices in
+// chronological order. excerpts holds at least two entries — userMessage renders fewer with the
+// single-request form.
+//
+// The opening request and the last windowTailEntries are mandatory and exempt from budgetRunes;
+// the rest are added newest-first while the running total lasts. The fill STOPS at the first
+// request that does not fit rather than skipping it for an older, smaller one: that is what keeps
+// the omitted entries a single contiguous run, and so the render to a single elision marker.
+//
+// budgetRunes is a parameter rather than a read of windowBudgetRunes so the mandatory set's
+// exemption can be tested at a budget the per-entry cap is able to exhaust.
+func selectWindow(excerpts []string, budgetRunes int) []int {
+	tail := len(excerpts) - windowTailEntries
+	if tail < 1 {
+		tail = 1 // index 0 is mandatory on its own account; never let the tail swallow it
+	}
+
+	total := utf8.RuneCountInString(excerpts[0])
+	for i := tail; i < len(excerpts); i++ {
+		total += utf8.RuneCountInString(excerpts[i])
+	}
+	oldest := tail
+	for i := tail - 1; i >= 1; i-- {
+		cost := utf8.RuneCountInString(excerpts[i])
+		if total+cost > budgetRunes {
+			break
+		}
+		total += cost
+		oldest = i
+	}
+
+	included := make([]int, 0, len(excerpts)-oldest+1)
+	included = append(included, 0)
+	for i := oldest; i < len(excerpts); i++ {
+		included = append(included, i)
+	}
+	return included
+}
+
+// elisionOpen opens the marker line that stands where the omitted requests sat. It is a distinct
+// prefix so the marker can never be read as one more numbered request.
+const elisionOpen = "(… "
+
+// elisionMarker renders the marker for a run of omitted requests, saying how many went missing so
+// the numbering gap reads as deliberate.
+func elisionMarker(omitted int) string {
+	noun := "requests"
+	if omitted == 1 {
+		noun = "request"
+	}
+	return fmt.Sprintf("%s%d earlier %s omitted …)", elisionOpen, omitted, noun)
+}
+
+// entryExcerpt renders one request of a multi-request window as a single line: whitespace
+// collapsed, so a pasted stack trace cannot break the numbering apart, then capped at
+// windowEntryRunes so one huge request cannot crowd the rest of the window out.
+func entryExcerpt(request string) string {
+	return capRunes(collapseWhitespace(request), windowEntryRunes)
+}
+
+// excerpt trims s to promptExcerptRunes, the single-request form's far more generous cap.
 func excerpt(s string) string {
-	s = strings.TrimSpace(s)
+	return capRunes(strings.TrimSpace(s), promptExcerptRunes)
+}
+
+// capRunes trims s to limit RUNES — the characters the model reads, not bytes — marking a cut
+// with an ellipsis so the model knows it is reading an opening rather than a whole request.
+func capRunes(s string, limit int) string {
 	runes := []rune(s)
-	if len(runes) <= promptExcerptRunes {
+	if len(runes) <= limit {
 		return s
 	}
-	return strings.TrimRight(string(runes[:promptExcerptRunes]), " \t\n") + "…"
+	return strings.TrimRight(string(runes[:limit]), " \t\n") + "…"
 }
 
 // Sanitize turns a raw reply into a session title, reporting ok=false when nothing usable

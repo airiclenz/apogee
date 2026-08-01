@@ -1,6 +1,9 @@
 package title
 
 import (
+	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +15,9 @@ var promptDate = time.Date(2026, 7, 31, 14, 30, 0, 0, time.UTC)
 
 // userContent returns the naming request's user message, failing the test if the request is not
 // the expected system+user pair.
-func userContent(t *testing.T, firstPrompt, workspace string) string {
+func userContent(t *testing.T, prompts []string, workspace string) string {
 	t.Helper()
-	req := Prompt(firstPrompt, workspace, promptDate)
+	req := Prompt(prompts, workspace, promptDate)
 	if len(req.Messages) != 2 {
 		t.Fatalf("Prompt built %d messages, want 2 (system + user)", len(req.Messages))
 	}
@@ -24,10 +27,69 @@ func userContent(t *testing.T, firstPrompt, workspace string) string {
 	return req.Messages[1].Content
 }
 
+// listedEntry is one numbered request parsed back out of a rendered window.
+type listedEntry struct {
+	position int
+	body     string
+}
+
+// listedEntries parses the numbered lines out of a rendered user message, in render order, so the
+// window tests can assert on the selection without re-implementing the renderer. Non-numbered
+// lines — the context labels, the header, the elision marker, the closing instruction — carry no
+// "<digits>. " prefix and are skipped.
+func listedEntries(t *testing.T, user string) []listedEntry {
+	t.Helper()
+	var entries []listedEntry
+	for _, line := range strings.Split(user, "\n") {
+		number, body, found := strings.Cut(line, ". ")
+		if !found {
+			continue
+		}
+		position, err := strconv.Atoi(number)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, listedEntry{position: position, body: body})
+	}
+	return entries
+}
+
+// listedPositions returns just the 1-based positions a rendered window numbers.
+func listedPositions(t *testing.T, user string) []int {
+	t.Helper()
+	positions := make([]int, 0, len(user))
+	for _, entry := range listedEntries(t, user) {
+		positions = append(positions, entry.position)
+	}
+	return positions
+}
+
+// markerCount counts the elision marker lines in a rendered window.
+func markerCount(user string) int {
+	count := 0
+	for _, line := range strings.Split(user, "\n") {
+		if strings.HasPrefix(line, elisionOpen) {
+			count++
+		}
+	}
+	return count
+}
+
+// window builds n requests, each opening with its own 1-based sentinel so a test can tell which
+// of them survived the selection, and each padded with body so the size is under the test's
+// control.
+func window(n int, body string) []string {
+	requests := make([]string, n)
+	for i := range requests {
+		requests[i] = fmt.Sprintf("request-%03d %s", i+1, body)
+	}
+	return requests
+}
+
 func TestPromptCarriesWorkspaceDateAndInstruction(t *testing.T) {
 	t.Parallel()
 
-	req := Prompt("add a retry to the uploader", "apogee", promptDate)
+	req := Prompt([]string{"add a retry to the uploader"}, "apogee", promptDate)
 
 	if req.Messages[0].Role != "system" {
 		t.Fatalf("first message role = %q, want system", req.Messages[0].Role)
@@ -47,7 +109,7 @@ func TestPromptCarriesWorkspaceDateAndInstruction(t *testing.T) {
 func TestPromptLeavesModelToTheClient(t *testing.T) {
 	t.Parallel()
 
-	req := Prompt("hello", "apogee", promptDate)
+	req := Prompt([]string{"hello"}, "apogee", promptDate)
 	if req.Model != "" {
 		t.Errorf("Model = %q, want empty so the Client's current binding wins", req.Model)
 	}
@@ -62,7 +124,7 @@ func TestPromptLeavesModelToTheClient(t *testing.T) {
 func TestPromptSetsSamplingConstants(t *testing.T) {
 	t.Parallel()
 
-	req := Prompt("hello", "apogee", promptDate)
+	req := Prompt([]string{"hello"}, "apogee", promptDate)
 	if req.Sampling.Temperature == nil || *req.Sampling.Temperature != titleTemperature {
 		t.Errorf("Temperature = %v, want %v", req.Sampling.Temperature, titleTemperature)
 	}
@@ -79,7 +141,7 @@ func TestPromptCapsTheExcerpt(t *testing.T) {
 
 	// "z" appears nowhere in the message template, so counting it counts excerpt body only.
 	long := strings.Repeat("z", promptExcerptRunes*3) + " SENTINEL_TAIL"
-	user := userContent(t, long, "apogee")
+	user := userContent(t, []string{long}, "apogee")
 
 	if strings.Contains(user, "SENTINEL_TAIL") {
 		t.Error("user message carries the tail of an over-long prompt; the excerpt cap did not apply")
@@ -95,12 +157,270 @@ func TestPromptCapsTheExcerpt(t *testing.T) {
 func TestPromptKeepsAShortPromptWhole(t *testing.T) {
 	t.Parallel()
 
-	user := userContent(t, "  fix the parser  ", "apogee")
+	user := userContent(t, []string{"  fix the parser  "}, "apogee")
 	if !strings.Contains(user, "fix the parser") {
 		t.Errorf("short prompt not carried verbatim:\n%s", user)
 	}
 	if strings.Contains(user, "…") {
 		t.Error("a prompt under the cap must not be marked as truncated")
+	}
+}
+
+func TestPromptOneRequestRendersTheFirstRequestFormVerbatim(t *testing.T) {
+	t.Parallel()
+
+	// Pinned literally: the automatic call sends this message byte for byte, and widening the
+	// seam to a window must not have moved a character of it.
+	want := "Workspace: apogee\n" +
+		"Date: 2026-07-31\n" +
+		"\n" +
+		"The user's first request:\n" +
+		"fix the parser\n" +
+		"\n" +
+		"Reply with the title only."
+
+	got := userContent(t, []string{"  fix the parser  "}, "apogee")
+
+	if got != want {
+		t.Errorf("one-request message =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestPromptDropsEmptyRequestsBeforeSelecting(t *testing.T) {
+	t.Parallel()
+
+	got := userContent(t, []string{"", "   ", "fix the parser", "\n\t "}, "apogee")
+
+	want := userContent(t, []string{"fix the parser"}, "apogee")
+	if got != want {
+		t.Errorf("window of one real request =\n%q\nwant the one-request form\n%q", got, want)
+	}
+}
+
+func TestPromptEmptyWindowRendersAnEmptyRequest(t *testing.T) {
+	t.Parallel()
+
+	// A contract, not a path anyone reaches: both callers refuse to name a session with nothing
+	// in it, so this only pins what the package does if one ever stops.
+	want := "Workspace: apogee\n" +
+		"Date: 2026-07-31\n" +
+		"\n" +
+		"The user's first request:\n" +
+		"\n" +
+		"\n" +
+		"Reply with the title only."
+
+	for name, prompts := range map[string][]string{
+		"nil":              nil,
+		"empty slice":      {},
+		"only empty texts": {"", "  \n\t "},
+	} {
+		if got := userContent(t, prompts, "apogee"); got != want {
+			t.Errorf("%s window =\n%q\nwant\n%q", name, got, want)
+		}
+	}
+}
+
+func TestPromptWindowRendersEveryRequestWhenTheBudgetAllows(t *testing.T) {
+	t.Parallel()
+
+	user := userContent(t, window(10, "do the thing"), "apogee")
+
+	if !strings.Contains(user, windowHeader) {
+		t.Errorf("window message does not label the request block:\n%s", user)
+	}
+	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	if got := listedPositions(t, user); !slices.Equal(got, want) {
+		t.Errorf("listed positions = %v, want %v:\n%s", got, want, user)
+	}
+	if got := markerCount(user); got != 0 {
+		t.Errorf("elision markers = %d, want none when nothing was omitted:\n%s", got, user)
+	}
+	for _, want := range []string{"apogee", "2026-07-31", userInstruction} {
+		if !strings.Contains(user, want) {
+			t.Errorf("window message missing %q:\n%s", want, user)
+		}
+	}
+}
+
+// overflowingWindow is the fixture the budget tests share: enough requests, each over the
+// per-entry cap, that the total budget cannot carry them all.
+func overflowingWindow(t *testing.T) (requests []string, user string) {
+	t.Helper()
+	requests = window(30, strings.Repeat("z", windowEntryRunes*2))
+	return requests, userContent(t, requests, "apogee")
+}
+
+func TestPromptWindowKeepsTheMandatorySetAndFillsNewestFirst(t *testing.T) {
+	t.Parallel()
+
+	requests, user := overflowingWindow(t)
+
+	positions := listedPositions(t, user)
+	if len(positions) >= len(requests) {
+		t.Fatalf("nothing was omitted from %d over-long requests: %v", len(requests), positions)
+	}
+	for _, want := range []int{1, len(requests) - 2, len(requests) - 1, len(requests)} {
+		if !slices.Contains(positions, want) {
+			t.Errorf("request %d is mandatory but was omitted: %v", want, positions)
+		}
+	}
+	// The fill runs newest-first and stops rather than skipping, so what survives is the opening
+	// request plus one contiguous run reaching the newest.
+	tail := positions[1:]
+	for i, position := range tail {
+		if want := tail[0] + i; position != want {
+			t.Fatalf("included tail %v is not contiguous at index %d", positions, i+1)
+		}
+	}
+	if last := tail[len(tail)-1]; last != len(requests) {
+		t.Errorf("included run ends at %d, want the newest request %d", last, len(requests))
+	}
+}
+
+func TestPromptWindowStaysWithinTheRuneBudget(t *testing.T) {
+	t.Parallel()
+
+	_, user := overflowingWindow(t)
+
+	total := 0
+	for _, entry := range listedEntries(t, user) {
+		total += len([]rune(entry.body))
+	}
+	if total > windowBudgetRunes {
+		t.Errorf("included excerpts total %d runes, want at most %d", total, windowBudgetRunes)
+	}
+	// Every candidate is capped at windowEntryRunes, so a fill that stopped early with room for
+	// one more would mean the budget was not actually spent.
+	if total+windowEntryRunes <= windowBudgetRunes {
+		t.Errorf("included excerpts total only %d runes of a %d budget; the fill stopped short",
+			total, windowBudgetRunes)
+	}
+}
+
+func TestPromptWindowMarksTheOmittedRunExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	requests, user := overflowingWindow(t)
+
+	if got := markerCount(user); got != 1 {
+		t.Fatalf("elision markers = %d, want exactly 1:\n%s", got, user)
+	}
+	omitted := len(requests) - len(listedPositions(t, user))
+	if want := elisionMarker(omitted); !strings.Contains(user, want) {
+		t.Errorf("window does not carry %q:\n%s", want, user)
+	}
+}
+
+func TestPromptWindowNumbersByOriginalPositionAcrossTheGap(t *testing.T) {
+	t.Parallel()
+
+	_, user := overflowingWindow(t)
+
+	entries := listedEntries(t, user)
+	for i, entry := range entries {
+		if i > 0 && entry.position <= entries[i-1].position {
+			t.Fatalf("positions %v are not rendered oldest first", listedPositions(t, user))
+		}
+		// Each request opens with its own original position, so a number that survived the
+		// selection must still sit beside the request it belongs to.
+		if want := fmt.Sprintf("request-%03d ", entry.position); !strings.HasPrefix(entry.body, want) {
+			t.Errorf("entry numbered %d does not carry %q", entry.position, want)
+		}
+	}
+	if entries[1].position == entries[0].position+1 {
+		t.Fatalf("nothing was omitted, so the numbering never crosses a gap: %v",
+			listedPositions(t, user))
+	}
+}
+
+func TestPromptWindowCapsEachEntry(t *testing.T) {
+	t.Parallel()
+
+	// "Q" appears nowhere else in the message, so counting it counts one entry's body.
+	huge := strings.Repeat("Q", windowEntryRunes*10)
+	user := userContent(t, []string{"open the file", huge, "then", "and then", "finally"}, "apogee")
+
+	if got := strings.Count(user, "Q"); got != windowEntryRunes {
+		t.Errorf("the huge entry carried %d runes, want the per-entry cap of %d",
+			got, windowEntryRunes)
+	}
+	for _, entry := range listedEntries(t, user) {
+		if got := len([]rune(entry.body)); got > windowEntryRunes+1 {
+			t.Errorf("entry %d is %d runes, want at most %d plus the ellipsis",
+				entry.position, got, windowEntryRunes)
+		}
+	}
+}
+
+func TestPromptWindowCapsEntriesInRunesNotBytes(t *testing.T) {
+	t.Parallel()
+
+	// 600 CJK runes are 1800 bytes: a byte cap would keep a third of what a rune cap keeps.
+	cjk := strings.Repeat("日", windowEntryRunes+200)
+	user := userContent(t, []string{"open the file", cjk, "then", "and then", "finally"}, "apogee")
+
+	if got := strings.Count(user, "日"); got != windowEntryRunes {
+		t.Errorf("CJK entry carried %d runes, want %d", got, windowEntryRunes)
+	}
+}
+
+func TestPromptWindowCollapsesAnEntryOntoOneLine(t *testing.T) {
+	t.Parallel()
+
+	requests := []string{"open the file", "fix this:\n\tpanic: boom\n\tat main.go:1", "and go on"}
+	user := userContent(t, requests, "apogee")
+
+	if got := listedPositions(t, user); !slices.Equal(got, []int{1, 2, 3}) {
+		t.Errorf("listed positions = %v, want one line per request:\n%s", got, user)
+	}
+	if !strings.Contains(user, "2. fix this: panic: boom at main.go:1") {
+		t.Errorf("a multi-line request did not collapse onto its numbered line:\n%s", user)
+	}
+}
+
+func TestSelectWindowKeepsTheMandatorySetOverTheBudget(t *testing.T) {
+	t.Parallel()
+
+	excerpts := []string{"a", "b", "c", "d", "e", "f"}
+
+	// A budget the mandatory set alone blows: it is exempt, so it rides anyway.
+	got := selectWindow(excerpts, 1)
+
+	if want := []int{0, 3, 4, 5}; !slices.Equal(got, want) {
+		t.Errorf("selectWindow over budget = %v, want the mandatory set %v", got, want)
+	}
+}
+
+func TestSelectWindowStopsAtTheFirstEntryThatDoesNotFit(t *testing.T) {
+	t.Parallel()
+
+	// Entry 2 does not fit; entry 1 would. Skipping it for entry 1 would leave the omitted
+	// entries in two runs, which the single elision marker cannot render.
+	excerpts := []string{"a", "b", strings.Repeat("x", 10), "c", "d", "e"}
+
+	got := selectWindow(excerpts, 8)
+
+	if want := []int{0, 3, 4, 5}; !slices.Equal(got, want) {
+		t.Errorf("selectWindow = %v, want %v — the fill must stop, not skip", got, want)
+	}
+}
+
+func TestSystemInstructionAsksForTheDominantThreadBiasedRecent(t *testing.T) {
+	t.Parallel()
+
+	// Asserted on the constant so the instruction cannot be silently reworded away: recency by
+	// accident is not the same as recency by instruction.
+	for _, want := range []string{
+		"main thread",
+		"dominant task rather than listing every request",
+		"moved on to a different task, name the task it moved to",
+		"3 to 8 words",
+		"never the project, the folder, or the date",
+	} {
+		if !strings.Contains(systemInstruction, want) {
+			t.Errorf("system instruction does not say %q:\n%s", want, systemInstruction)
+		}
 	}
 }
 

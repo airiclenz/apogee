@@ -118,7 +118,17 @@ text, since the section heading keeps its original date.
 
 **Commit.** `docs(adr): record the naming call's input window`
 
-## 2. `internal/title`: multi-prompt selection, budget, and the revised instruction
+## 2. `internal/title`: multi-prompt selection, budget, and the revised instruction — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): three details the item's text left open, all decided in the direction the item
+implies. (a) A multi-entry excerpt has its whitespace collapsed (reusing `collapseWhitespace`)
+before the 400-rune cap, so "one numbered line per included entry" holds literally even when a
+request pasted a stack trace. (b) The 1-based numbering counts positions in the *non-empty*
+requests — empties are dropped first, as the item orders — so the numbering gap and the elision
+marker's count always agree. (c) `selectWindow` takes the budget as a parameter (`windowBudgetRunes`
+at the one call site) because the Tests bullet "mandatory entries are included even when they alone
+exceed the budget" is otherwise unreachable: 4 mandatory entries × the 400-rune cap = 1600, which
+can never exceed 6000.
 
 **What.** In `internal/title/title.go`:
 
