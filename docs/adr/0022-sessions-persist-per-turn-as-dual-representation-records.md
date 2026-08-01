@@ -46,7 +46,9 @@ to one in-flight write plus one pending. A crash therefore loses **at most one T
 whole session (the owner chose maximum crash-safety over the cheaper per-Exchange cadence). A
 save failure **never interrupts the conversation**: it is noted once on the ok→fail transition
 (and recovery noted on fail→ok) and the run continues — parity with apogee-code's swallowed
-`session_save_failed`. Empty sessions (nothing past the start-up box) are never written.
+`session_save_failed`. Empty sessions are never written — a session is saved only once its
+transcript holds an entry the record would actually keep, which the start-up box is not and (per
+the 2026-08-01 addendum below) neither is an ephemeral notice.
 
 The ordering that makes an async per-Turn save safe is load-bearing and is stated in the
 worker's doc comment: every event of a Turn is delivered to the Model *synchronously inside*
@@ -235,7 +237,11 @@ substance; what is added is the distinction it left implicit.
   start-up box was already excluded from persistence by being absent from `entryKindNames`; the
   general form is an `entry.ephemeral` flag that `encodeTranscript` skips, with kind, styling and
   position in the scrollback untouched. Only persistence differs, so rendering and
-  `hasConversation` need no per-kind duplication.
+  `hasConversation` need no per-kind duplication — the latter reads the flag beside `entryStartup`,
+  keeping Decision 1's save gate in agreement with the blob: a scrollback of nothing but ephemeral
+  notices is still an empty session. A `context: …` notice in a repo that has context files, or a
+  degrade note over a blob that would not decode, does not on its own turn a quit into a stored
+  record holding an empty scrollback.
 - **The wire format does not move.** Skipping is **encode-side only** — nothing ephemeral ever
   reaches the blob, so decode needs no counterpart, no kind name is added, and the transcript
   blob's version under Decision 5 is *not* bumped. An older record keeps decoding identically, and
