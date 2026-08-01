@@ -181,6 +181,12 @@ shortly after it is born.
   dropped. An explicitly requested regeneration (bare `/rename`) is the exception — the user
   asked for it, so it applies and leaves the mark set. Naming fires once per new Session record,
   including after the `/clear` / `/new` rotation of Decision 4, and never on a resumed session.
+- **The two naming forms read different amounts of the session** (added 2026-08-01). The automatic
+  call reads the first prompt — the only one that exists when it fires — while an explicitly
+  requested regeneration (bare `/rename`) reads a bounded, budget-capped window of the user side
+  of the transcript: the opening request plus the most recent, filled inward from the newest. That
+  form is instructed to name the **dominant thread, biased recent**, because a session that moved
+  on must be findable by what it moved to.
 - **The gate is a config key, default on.** `auto-title` (flat, config-file only, nil ⇒ true)
   gates only the *automatic* firing; the seam stays wired so `/rename` regenerates on demand even
   when it is off. The automatic path fails **silently** to the heuristic title — a cosmetic
