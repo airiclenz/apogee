@@ -121,6 +121,8 @@ func namingCall(t *testing.T, cmd tea.Cmd) (autoTitleMsg, bool) {
 // The first prompt of a fresh session fires exactly one naming call, carrying the submitted text;
 // the next prompt of the same session fires none — one Session record, one cosmetic call.
 func TestAutoTitleFiresOnceOnTheFirstPrompt(t *testing.T) {
+	t.Parallel()
+
 	seam := &titleSeam{reply: "fix the broken parser"}
 	host := &fakeSessionHost{}
 	m := newTitlingModel(t, host, seam, true)
@@ -158,6 +160,8 @@ func TestAutoTitleFiresOnceOnTheFirstPrompt(t *testing.T) {
 // resumed record (which already has a name). Each is proved on the gate itself, so the assertion is
 // "no Cmd was produced" rather than "no Msg turned up in time".
 func TestAutoTitleDoesNotFire(t *testing.T) {
+	t.Parallel()
+
 	resumedOpts := titlingOpts(&fakeSessionHost{}, &titleSeam{}, true)
 	resumedOpts.Resumed = &ResumedSession{Title: "an older task"}
 
@@ -172,6 +176,8 @@ func TestAutoTitleDoesNotFire(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := newModel(context.Background(), &fakeEngine{}, tc.opts, nil)
 			if cmd := m.maybeAutoTitle("fix the parser"); cmd != nil {
 				t.Error("a naming call fired; want none")
@@ -183,6 +189,8 @@ func TestAutoTitleDoesNotFire(t *testing.T) {
 // A result that lands once the record has an id renames it straight away — Rename is the only
 // writer of a stored title, because Save fixes the title at create.
 func TestAutoTitleAppliesThroughRename(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1", Title: "please fix the broken parser in token…"})
 	m := newTitlingModel(t, host, &titleSeam{}, true)
@@ -209,6 +217,8 @@ func TestAutoTitleAppliesThroughRename(t *testing.T) {
 // A result that beats the first Save has no id to rename yet, so it is stashed — and applied at the
 // save-complete that put the record on disk.
 func TestAutoTitleStashedUntilTheFirstSave(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newTitlingModel(t, host, &titleSeam{}, true)
 
@@ -244,6 +254,8 @@ func TestAutoTitleStashedUntilTheFirstSave(t *testing.T) {
 // A save that FAILED has not put the record on disk, so the stash is held for the next save rather
 // than spent on a rename the store would drop.
 func TestAutoTitleStashSurvivesAFailedSave(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1"})
 	m := newTitlingModel(t, host, &titleSeam{}, true)
@@ -262,6 +274,8 @@ func TestAutoTitleStashSurvivesAFailedSave(t *testing.T) {
 // A human who names the session first wins: the browser's `r` sets the never-clobber flag and a
 // naming call landing afterwards is dropped without a word.
 func TestAutoTitleDroppedAfterABrowserRename(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1", Title: "old"})
 	storeMeta(host, "s1", "old", "/ws", time.Now(), 0, nil)
@@ -292,6 +306,8 @@ func TestAutoTitleDroppedAfterABrowserRename(t *testing.T) {
 // Every failure path is silent: a failed call and a reply nothing survives sanitizing both leave the
 // transcript untouched, nothing stashed, and the stored title alone.
 func TestAutoTitleFailuresAreSilent(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		msg  autoTitleMsg
@@ -302,6 +318,8 @@ func TestAutoTitleFailuresAreSilent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			host := &fakeSessionHost{}
 			host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
 			m := newTitlingModel(t, host, &titleSeam{}, true)
@@ -327,6 +345,8 @@ func TestAutoTitleFailuresAreSilent(t *testing.T) {
 // /new rotates to a fresh Session record, and a fresh record names itself: the latch and both
 // never-clobber fields reset, so the next first prompt fires again.
 func TestAutoTitleFiresAgainAfterNewSession(t *testing.T) {
+	t.Parallel()
+
 	seam := &titleSeam{reply: "the second task"}
 	host := &fakeSessionHost{}
 	m := newTitlingModel(t, host, seam, true)
@@ -357,6 +377,8 @@ func TestAutoTitleFiresAgainAfterNewSession(t *testing.T) {
 // conversation. Two models fed identical input differ only in the naming Msg, and their transcripts
 // stay identical entry for entry.
 func TestAutoTitleLeavesTheTranscriptUntouched(t *testing.T) {
+	t.Parallel()
+
 	named := &fakeSessionHost{}
 	named.Activate(session.Meta{ID: "s1"})
 	bare := &fakeSessionHost{}
@@ -388,6 +410,8 @@ func TestAutoTitleLeavesTheTranscriptUntouched(t *testing.T) {
 // run — the resumed record already has a name — and drops any title stashed for the session it
 // replaced.
 func TestAutoTitleLatchedByAResumedSession(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	storeMeta(host, "s1", "an older task", "/ws", time.Now(), 0, nil)
 	m := newTitlingModel(t, host, &titleSeam{}, true)
@@ -432,6 +456,8 @@ func idle(t *testing.T, m Model) Model {
 // the same sanitizer a generated title does, and land through Rename — with titleTouched set, so
 // nothing generated may overwrite what the human typed.
 func TestRenameWithArgumentsNamesTheSession(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1", Title: "please fix the broken parser in token…"})
 	m := newTitlingModel(t, host, &titleSeam{}, true)
@@ -457,6 +483,8 @@ func TestRenameWithArgumentsNamesTheSession(t *testing.T) {
 // A name that sanitizes away to nothing is refused with the form that always works, and changes
 // nothing — the same posture a mistyped /confine gets, for the same reason.
 func TestRenameWithAnEmptyNameIsRefused(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
 	m := newTitlingModel(t, host, &titleSeam{}, true)
@@ -479,6 +507,8 @@ func TestRenameWithAnEmptyNameIsRefused(t *testing.T) {
 // The two ways a bare /rename cannot ask the model. Both SAY so: the automatic call is silent
 // because nobody asked for it, and this one was asked for by name.
 func TestRenameBareRefusals(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name   string
 		seam   *titleSeam
@@ -490,6 +520,8 @@ func TestRenameBareRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			host := &fakeSessionHost{}
 			host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
 			m := newTitlingModel(t, host, tc.seam, false)
@@ -515,6 +547,8 @@ func TestRenameBareRefusals(t *testing.T) {
 // Without a persistence host there is no Session record, so there is no name to change — and
 // /rename says that rather than reporting a title it could not store.
 func TestRenameWithoutPersistenceSaysSo(t *testing.T) {
+	t.Parallel()
+
 	m := newTitlingModel(t, nil, &titleSeam{reply: "a generated name"}, true)
 
 	m, cmd := sendPrompt(t, m, "/rename the parser rewrite")
@@ -533,6 +567,8 @@ func TestRenameWithoutPersistenceSaysSo(t *testing.T) {
 // the automatic firing (Ratified design 7) — and its answer applies OVER a name the human set by
 // hand a moment ago: the request is the newer instruction.
 func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1"})
 	seam := &titleSeam{reply: "Title: the generated name"}
@@ -581,6 +617,8 @@ func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
 // dominant thread) is title.Prompt's business, not the renderer's; all the seam is owed here is
 // every request, in the order they were made.
 func TestRenameBareSendsTheWholeUserSide(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1"})
 	seam := &titleSeam{reply: "rework the token cache"}
@@ -617,6 +655,8 @@ func TestRenameBareSendsTheWholeUserSide(t *testing.T) {
 // of through /new because /new also empties the scrollback (startNewSession) — and a transcript full
 // of requests is exactly the condition this has to hold under.
 func TestAutoTitleWindowIsTheSubmittedPromptAlone(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1"})
 	seam := &titleSeam{reply: "a generated name"}
@@ -647,7 +687,11 @@ func TestAutoTitleWindowIsTheSubmittedPromptAlone(t *testing.T) {
 // of asking for a new one, and letting a mid-Exchange "wrong file" count as a request would let it
 // outweigh the task it was correcting.
 func TestRenameBareExcludesInterjections(t *testing.T) {
+	t.Parallel()
+
 	t.Run("beside requests", func(t *testing.T) {
+		t.Parallel()
+
 		host := &fakeSessionHost{}
 		host.Activate(session.Meta{ID: "s1"})
 		seam := &titleSeam{reply: "a generated name"}
@@ -672,6 +716,8 @@ func TestRenameBareExcludesInterjections(t *testing.T) {
 	})
 
 	t.Run("alone", func(t *testing.T) {
+		t.Parallel()
+
 		host := &fakeSessionHost{}
 		host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
 		m := newTitlingModel(t, host, &titleSeam{reply: "a generated name"}, false)
@@ -693,6 +739,8 @@ func TestRenameBareExcludesInterjections(t *testing.T) {
 // A bare /rename that comes back with nothing usable says so and leaves the stored title alone —
 // quietly, with the form that always works.
 func TestRenameBareFailureNotesAndKeepsTheTitle(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		seam *titleSeam
@@ -702,6 +750,8 @@ func TestRenameBareFailureNotesAndKeepsTheTitle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			host := &fakeSessionHost{}
 			host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
 			m := newTitlingModel(t, host, tc.seam, false)
@@ -733,6 +783,8 @@ func TestRenameBareFailureNotesAndKeepsTheTitle(t *testing.T) {
 // which is what lets a session be named before it has said anything — and that stash is the
 // human's, so it flushes even though titleTouched is set.
 func TestRenameBeforeTheFirstSaveStashesTheName(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{} // no active record yet
 	m := newTitlingModel(t, host, &titleSeam{}, true)
 
@@ -774,6 +826,8 @@ func TestRenameBeforeTheFirstSaveStashesTheName(t *testing.T) {
 // the flush when a human named a session while it waited, rather than landing on the record the
 // first Save has just minted.
 func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{} // no active record: the naming call beat the first Save
 	storeMeta(host, "old1", "an older task", "/ws", time.Now(), 0, nil)
 	m := newTitlingModel(t, host, &titleSeam{}, true)
