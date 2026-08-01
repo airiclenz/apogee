@@ -29,6 +29,8 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   sessions for the session history (I think they should be marked / grouped for that schedule run).
   Needs grilling.
 
+- **Naming Sub-Agents** Sub agents should be able to receive a summary / name that identifies what they do. This should be visible in the session chat.
+
 - **[P1] Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
   2026-07-29 the local-server half); the profile half is all that remains.** The shipped bodies have
   left this file for their authoritative records — see the ledger at the end of this entry
