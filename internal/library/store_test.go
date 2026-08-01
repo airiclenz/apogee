@@ -339,6 +339,59 @@ func TestStoreLoadIgnoresStalePersistTempFile(t *testing.T) {
 	}
 }
 
+// captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
+// stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only
+// race-free during the sequential test phase (the internal/agent and cmd/apogee precedent).
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	captured := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		captured <- string(b)
+	}()
+
+	f()
+
+	_ = w.Close()
+	os.Stderr = orig
+	return <-captured
+}
+
+// A persist that cannot publish reports itself once, with ONE "apogee: " prefix: atomicWrite's
+// errors already carry the prefix, so persist prints them as-is rather than wrapping them in a
+// second one ("apogee: apogee: rename library store into …").
+func TestStorePersistFailureNoticeCarriesOnePrefix(t *testing.T) {
+	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
+	dir := t.TempDir()
+	// Occupy the store path with a directory, so MkdirAll, the encode and the temp-file write all
+	// succeed and persist fails at atomicWrite's rename — the branch that prints a wrapped error.
+	if err := os.Mkdir(filepath.Join(dir, storeFileName), dirPerm); err != nil {
+		t.Fatalf("plant a directory at the store path: %v", err)
+	}
+
+	st := NewStore(dir)
+	out := captureStderr(t, func() {
+		st.Record(highFP("sha256:persist-fail"), CategoryCorrection, []string{"read_file"}, "read the file first")
+	})
+
+	notice := strings.TrimSpace(out)
+	if notice == "" {
+		t.Fatal("a persist that could not publish wrote nothing to stderr; want one diagnostic line")
+	}
+	if !strings.HasPrefix(notice, "apogee: ") {
+		t.Errorf("persist notice = %q; want it to start with %q", notice, "apogee: ")
+	}
+	if n := strings.Count(notice, "apogee: "); n != 1 {
+		t.Errorf("persist notice = %q; want exactly one %q prefix, got %d", notice, "apogee: ", n)
+	}
+}
+
 // SanitizeContent scrubs untrusted observation text into a single directive-inert line: control
 // characters are stripped, CR/LF are folded to single spaces, and whitespace runs collapse (item S4).
 func TestSanitizeContent(t *testing.T) {

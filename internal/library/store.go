@@ -287,8 +287,10 @@ func (s *Store) persist() {
 		fmt.Fprintf(os.Stderr, "apogee: encode library store: %v\n", err)
 		return
 	}
+	// atomicWrite's errors already carry the "apogee: " prefix the house convention puts on a
+	// returned error, so this one is printed as-is — wrapping it would double the prefix.
 	if err := atomicWrite(s.storePath(), data); err != nil {
-		fmt.Fprintf(os.Stderr, "apogee: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
 	}
 }
 
