@@ -177,9 +177,9 @@ gauge, instead of opening an empty view over a model that still remembers.
   (`auto-title:`, a file-only key, on by default). With that off — or when the
   call fails or answers with nothing usable — the title falls back to the first
   user message, or to a dated `Session <date>` when that message is empty or
-  opens a code fence. A bare `/rename` later re-reads what you have asked since
-  and names the session for what it has become, so one that moved on to another
-  task gets named for where it ended up.
+  opens a code fence. A bare `/rename` later re-reads the session — your opening
+  request plus the most recent ones — and names it for what it has become, so
+  one that moved on to another task gets named for where it ended up.
 - `/clear` (or `/new`) closes the current session into history and starts a fresh
   one — neither deletes; discarding is an explicit `d` in the browser.
 - A session killed mid-task resumes to the last completed turn and says so;

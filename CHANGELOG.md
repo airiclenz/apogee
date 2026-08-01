@@ -493,10 +493,10 @@ point is a **minor** bump, not a breaking change.
   three most recent are always in, and the ones between them are added newest-first while a rune
   budget lasts. A short session therefore hands over its whole user side; a long one hands over its
   two ends, with the omitted middle standing as a single marker that says how many were left out.
-  Every included request is excerpted and the budget is a hard cap, so the call a hundred prompts
-  in costs about what it costs four prompts in — and it is still one short completion off to the
-  side of the conversation, never a Turn. Mid-turn interjections are steering rather than requests
-  and stay out of the window.
+  Every included request is excerpted and the budget is a hard cap, so the naming call stays
+  bounded however long the session runs — it cannot grow with the transcript — and it is still one
+  short completion off to the side of the conversation, never a Turn. Mid-turn interjections are
+  steering rather than requests and stay out of the window.
   - **The model is asked for the dominant thread, biased recent.** The instruction now says to name
     the main thread of the work rather than enumerate the requests, and says outright that when the
     session has moved to a different task the title names what it moved to. You look for a session
