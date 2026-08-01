@@ -654,6 +654,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **An untouched session no longer lands in your history.** Launching apogee, running a couple of
+  slash commands — `/confine` to see where the fence is, `/skills` to read the catalogue, `/model`
+  to check what is loaded — and then quitting used to file a record titled `Session 2026-08-01`
+  reading `0 msgs`, because anything printed to the scrollback counted as a session worth keeping. A
+  session is saved only once you have actually **sent a prompt** now, so a window you merely poked
+  at leaves your `/sessions` list exactly as you found it. Nothing else changes: the record still
+  appears the moment you send that first prompt, and every later save — after each turn, when the
+  session goes idle, and on quit — behaves as before.
+  - **One cosmetic exception, by design.** Reopening one of the oldest session files — from before
+    scrollbacks were stored — and quitting without asking anything skips the usual refresh of its
+    "last updated" time and context reading. The record itself is already on disk and nothing in it
+    is lost.
+
+  See the second 2026-08-01 addendum to
+  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
+
 - **Reopening a session no longer leaves a mark on it.** The `resumed: <title>` line apogee prints
   when you pick a session back up — along with its "no scrollback recorded" variant, the note saying
   the session was interrupted mid-task, and the `context: AGENTS.md (3.1 KiB)` line naming the
@@ -668,8 +684,9 @@ point is a **minor** bump, not a breaking change.
   ordinary scrollback; no new ones are added to it.
   - **A window you never spoke in is no longer filed as a session.** Starting apogee in a repo with
     context files and quitting without asking anything used to leave a session behind whose entire
-    scrollback was that one `context:` line. The save gate counts only what the record would actually
-    keep now, so a launch with no conversation in it leaves your `/sessions` list untouched.
+    scrollback was that one `context:` line. A launch with no conversation in it leaves your
+    `/sessions` list untouched now — a rule since sharpened further, to the first prompt (see the
+    entry above).
 
 - **A session file carrying its own system message no longer doubles the system prompt.** apogee
   composes the system prompt fresh for every request and never writes it into a session's stored

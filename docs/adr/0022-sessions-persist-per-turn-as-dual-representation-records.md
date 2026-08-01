@@ -47,8 +47,9 @@ whole session (the owner chose maximum crash-safety over the cheaper per-Exchang
 save failure **never interrupts the conversation**: it is noted once on the ok→fail transition
 (and recovery noted on fail→ok) and the run continues — parity with apogee-code's swallowed
 `session_save_failed`. Empty sessions are never written — a session is saved only once its
-transcript holds an entry the record would actually keep, which the start-up box is not and (per
-the 2026-08-01 addendum below) neither is an ephemeral notice.
+transcript holds a committed **user prompt** (sharpened from "an entry the record would actually
+keep" by the second 2026-08-01 addendum below; neither the start-up box nor an ephemeral notice
+ever qualified under either reading).
 
 The ordering that makes an async per-Turn save safe is load-bearing and is stated in the
 worker's doc comment: every event of a Turn is delivered to the Model *synchronously inside*
@@ -236,10 +237,10 @@ substance; what is added is the distinction it left implicit.
 - **The mechanism generalizes the `entryStartup` precedent rather than minting a kind.** The
   start-up box was already excluded from persistence by being absent from `entryKindNames`; the
   general form is an `entry.ephemeral` flag that `encodeTranscript` skips, with kind, styling and
-  position in the scrollback untouched. Only persistence differs, so rendering and
-  `hasConversation` need no per-kind duplication — the latter reads the flag beside `entryStartup`,
-  keeping Decision 1's save gate in agreement with the blob: a scrollback of nothing but ephemeral
-  notices is still an empty session. A `context: …` notice in a repo that has context files, or a
+  position in the scrollback untouched. Only persistence differs, so rendering and the save gate
+  need no per-kind duplication — the gate (`hasPrompt`, per the second 2026-08-01 addendum below)
+  agrees with the blob a fortiori: a scrollback of nothing but ephemeral notices holds no prompt,
+  so it is still an empty session. A `context: …` notice in a repo that has context files, or a
   degrade note over a blob that would not decode, does not on its own turn a quit into a stored
   record holding an empty scrollback.
 - **The wire format does not move.** Skipping is **encode-side only** — nothing ephemeral ever
@@ -250,3 +251,34 @@ substance; what is added is the distinction it left implicit.
   the model still remembers" is still shown on a corrupt or future-version transcript blob, exactly
   as specified; it is simply not written back into the record, which is the point — a record that
   failed to decode must not accumulate notes about having failed to decode.
+
+## Addendum (2026-08-01, second) — the save gate is "a prompt was sent"
+
+Decision 1's "empty sessions are never written" was implemented as *any* entry the record would
+keep, and the addendum above narrowed that only by the ephemeral flag. Both readings were still too
+loose: plenty of **persisted** entries legitimately precede any prompt — a `/confine` status note,
+the `/skills` catalogue, a `/model` actuation note, the `/sessions` browser's "no saved sessions"
+notice, an error note — so a launch spent poking at slash commands and then quitting (or `/clear`)
+filed a record titled `Session <date>` reading `0 msgs`. The owner's directive of 2026-08-01: a
+completely new session must not appear in history until a prompt has been sent. Nothing else in
+this ADR moves — the record shape, the per-Turn cadence, and the per-layer versioning are untouched.
+
+- **One predicate, all three gates.** The gate is now `hasPrompt` — true iff the transcript holds at
+  least one committed user entry — and `saveSession` (clean quit, and the `/clear`|`/new` rotation
+  of Decision 4), `persist` (the per-Turn fold) and `saveAtIdle` all read it. Keeping the
+  "worth saving?" rule in one predicate costs the per-Turn paths nothing: a Turn only exists
+  because a prompt opened it, so those two gates were already unreachable before the first prompt.
+- **The policy stays at the TUI gate.** `internal/session` and the host seam remain policy-free —
+  the first `Save` still mints the id and creates the file. Which sessions deserve a record is a
+  question about the conversation, so it is answered where the conversation is held.
+- **Interjections are deliberately excluded.** An interjection rides an Exchange that a user entry
+  opened, and a restored scrollback carries that opening entry, so counting `entryInterjected`
+  could never change the answer — mirroring the exclusion rationale on the user-text accessors and
+  keeping the gate exactly "a prompt exists" ⇔ "a user entry exists".
+- **Accepted consequence: legacy no-blob resumes skip the quit-flush.** Resuming a pre-plan bare
+  envelope (no transcript blob) leaves the scrollback with no user entry, so quitting without
+  prompting saves nothing. Nothing is lost — that record is already on disk; only a cosmetic
+  context-fill/`UpdatedAt` refresh is missed.
+- **Records already written by earlier builds are left alone.** There is no retro-pruning of the
+  empty `Session <date>` records those builds filed; the browser's `d` deletes them, consistent
+  with "no auto-pruning, manual `d` only" in the Consequences above.

@@ -51,7 +51,17 @@ replaced by `TestTranscriptHasPrompt`). The pre-existing `TODO.md` modification 
 
 **Commit:** `fix(tui): never save a session before its first prompt`
 
-## 2. Documentation: ADR 0022 amendment and changelog
+## 2. Documentation: ADR 0022 amendment and changelog — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): two stale-gate statements beyond the item's literal targets were corrected in
+the same pass, because both describe the very gate this item documents and would otherwise
+contradict the new amendment. (a) ADR 0022 Decision 1 (~line 51) still read "saved only once its
+transcript holds an entry the record would actually keep" — reworded to the prompt gate with a
+pointer to the new addendum, matching how that sentence already pointed at the ephemeral addendum.
+(b) `CHANGELOG.md`'s existing `[Unreleased]` sub-bullet "A window you never spoke in is no longer
+filed as a session" described the mechanism as "the save gate counts only what the record would
+actually keep now" — that clause was replaced with a pointer to the new bullet. No other content
+changed; no release heading and no `VERSION` field was touched.
 
 Depends on item 1.
 
