@@ -161,8 +161,10 @@ func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 		if err := store.Load(); err != nil {
 			// A broken/absent Library never blocks startup: Load leaves the store empty-and-usable on
 			// any soft error, so the run degrades to that empty store and proceeds (like the store's
-			// own persist path, the degrade is surfaced to stderr).
-			fmt.Fprintf(os.Stderr, "apogee: library store degraded to empty: %v\n", err)
+			// own persist path, the degrade is surfaced to stderr). Load's errors already carry the
+			// "apogee: " prefix the house convention puts on a returned error, so the consequence is
+			// appended rather than prefixed — wrapping would print it twice.
+			fmt.Fprintf(os.Stderr, "%v — library store degraded to empty\n", err)
 		}
 		deps.Library = store
 		// The full identity ladder (ADR 0021 §3), keyed IDENTICALLY to the Validated-set

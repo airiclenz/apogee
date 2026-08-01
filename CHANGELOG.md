@@ -654,6 +654,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A library store that could not be read no longer reports itself as `apogee: apogee: …`.** When
+  `library.json` is corrupt or unreadable, apogee degrades to an empty store and says so on stderr
+  rather than blocking startup — but the notice wrapped the store's error in a *second* `apogee: `
+  prefix, because by house convention a returned error already carries one. The notice now leads
+  with the store's own prefixed error and appends the consequence, so it reads `apogee: decode
+  library store "…": invalid character 'o' … — library store degraded to empty`: one prefix, the
+  cause first and what apogee did about it last. Nothing about the degrade itself changes — a
+  broken store still falls back to empty, still injects nothing, and still never blocks a run.
+
 - **A file, a filename or a tool argument can no longer turn the rest of your screen into a
   clickable link.** apogee already stripped terminal escape sequences out of untrusted text, but it
   did so one producer at a time — and the list had holes. A tool call's **target** (taken verbatim

@@ -43,6 +43,17 @@ func captureStderr(t *testing.T, f func()) string {
 	return <-captured
 }
 
+// lineContaining returns the first line of out that contains want, trimmed. Isolating the one line
+// keeps a per-line assertion honest even when an unrelated notice shares the captured stream.
+func lineContaining(out, want string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, want) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
 // TestEnableMechanisms_CorruptLibraryStoreDegradesToEmpty seeds LibraryDir/library.json with garbage
 // bytes, arms EnableMechanisms=["library"], and proves the three parts of the degrade contract: (1)
 // construction still succeeds (a broken store never blocks startup), (2) the build path emits the
@@ -89,6 +100,17 @@ func TestEnableMechanisms_CorruptLibraryStoreDegradesToEmpty(t *testing.T) {
 	const notice = "library store degraded to empty"
 	if got := strings.Count(stderr, notice); got != 1 {
 		t.Errorf("degrade notice appeared %d time(s) (stderr = %q); want exactly 1", got, stderr)
+	}
+
+	// The notice carries ONE "apogee: " prefix: Load's errors already arrive prefixed, so the
+	// degrade path appends its consequence rather than wrapping them in a second prefix
+	// ("apogee: library store degraded to empty: apogee: decode library store …").
+	degradeLine := lineContaining(stderr, notice)
+	if !strings.HasPrefix(degradeLine, "apogee: ") {
+		t.Errorf("degrade notice = %q; want it to start with %q", degradeLine, "apogee: ")
+	}
+	if got := strings.Count(degradeLine, "apogee: "); got != 1 {
+		t.Errorf("degrade notice = %q; want exactly one %q prefix, got %d", degradeLine, "apogee: ", got)
 	}
 
 	// Drive an Exchange so the armed library Mechanism's inject hook actually runs over the empty store.
