@@ -95,6 +95,83 @@ func TestDescendantLabelDecision(t *testing.T) {
 	}
 }
 
+func TestDescendantClearDecision(t *testing.T) {
+	t.Parallel()
+
+	// The teardown walk's decision for one descendant, the mirror of the label walk's above and
+	// proven on every OS beside it. The clear writes a NULL SACL, so it must skip exactly the
+	// paths the label pass skipped: a hard-linked file's descriptor is shared with every other
+	// name of the file, including names outside the box, and clearing it would erase a label
+	// apogee never wrote — the foreign label teardown exists to put back. An unreadable count
+	// cannot rule that out, so it takes the same rung.
+	tests := []struct {
+		name            string
+		links           uint32
+		linksErr        error
+		wantShouldClear bool
+	}{
+		{name: "hard_linked_file_is_not_cleared", links: 2},
+		{name: "hard_linked_file_is_skipped_however_many_names_it_has", links: 9},
+		{
+			name:     "unreadable_link_count_is_not_cleared",
+			linksErr: errors.New("access is denied"),
+		},
+		{
+			name:     "unreadable_count_wins_over_a_single_reported_link",
+			links:    1,
+			linksErr: errors.New("access is denied"),
+		},
+		{name: "single_named_file_is_cleared", links: 1, wantShouldClear: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := clearDescendantDecision(tt.links, tt.linksErr); got != tt.wantShouldClear {
+				t.Errorf("clearDescendantDecision(%d, %v) = %v, want %v",
+					tt.links, tt.linksErr, got, tt.wantShouldClear)
+			}
+		})
+	}
+}
+
+func TestLabelAndClearSkipTheSameDescendants(t *testing.T) {
+	t.Parallel()
+
+	// The invariant the two decisions exist to keep together: every path the label walk refuses
+	// over a shared descriptor is a path teardown also refuses to write its NULL SACL over.
+	// Were they to drift apart, teardown would clear a record LabelTree never labelled — the
+	// foreign label on the far end of a hard link, destroyed by the revert of a box it was
+	// never in.
+	shared := []descendantFacts{
+		{links: 2},
+		{links: 9},
+		{linksErr: errors.New("access is denied")},
+		{prior: "S:AI(ML;;NW;;;ME)", links: 2},
+	}
+
+	for _, f := range shared {
+		if _, shouldLabel := descendantDecision(f); shouldLabel {
+			t.Errorf("facts %+v: shouldLabel = true over a possibly shared descriptor", f)
+		}
+		if clearDescendantDecision(f.links, f.linksErr) {
+			t.Errorf("facts %+v: shouldClear = true over a possibly shared descriptor; teardown would write over a record the label pass refused",
+				f)
+		}
+	}
+
+	// The other direction: a single-named file the label walk labels is one teardown clears
+	// back, so the revert stays complete for everything apogee actually touched.
+	own := descendantFacts{prior: "S:AI(ML;;NW;;;ME)", links: 1}
+	if _, shouldLabel := descendantDecision(own); !shouldLabel {
+		t.Fatalf("facts %+v: shouldLabel = false; the fixture no longer exercises a labelled path", own)
+	}
+	if !clearDescendantDecision(own.links, own.linksErr) {
+		t.Errorf("facts %+v: shouldClear = false over a path the label walk labels; the label would be stranded", own)
+	}
+}
+
 func TestIsLowLabelSDDL(t *testing.T) {
 	t.Parallel()
 

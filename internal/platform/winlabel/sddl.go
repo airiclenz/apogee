@@ -77,6 +77,23 @@ type descendantFacts struct {
 	linksErr error
 }
 
+// descriptorMayBeShared reports whether a descendant's security descriptor may also be the
+// descriptor of a name OUTSIDE the box, from the hard-link count read for it (hardLinkCount)
+// and the error that read may have failed with. On NTFS every hard link of a file names one
+// MFT record and therefore one descriptor, so a write through the in-box name lands on the
+// file wherever else it is linked — pnpm's node_modules is entirely hard links into a global
+// store under %LOCALAPPDATA%, outside the box. A count that could not be READ answers true
+// too: an unknown count cannot rule the shared-record case out, and neither walk may widen
+// what it writes to on a guess.
+//
+// It is ONE rule because it must hold identically on both sides of the label lifecycle — the
+// label walk skips such a path (descendantDecision) and teardown must skip the same one
+// (clearDescendantDecision), or teardown writes over a descriptor the label walk deliberately
+// refused to touch. Two copies of the rule could drift into exactly that gap.
+func descriptorMayBeShared(links uint32, linksErr error) bool {
+	return linksErr != nil || links > 1
+}
+
 // descendantDecision is the label walk's three-way decision for one descendant, from the
 // outcome of reading its prior mandatory label and its hard-link count: shouldJournal reports
 // whether the prior must be journalled before any label lands, shouldLabel whether the path
@@ -103,8 +120,35 @@ type descendantFacts struct {
 // It is pure so the decision is table-testable on any OS — the retire seam
 // pattern.
 func descendantDecision(f descendantFacts) (shouldJournal, shouldLabel bool) {
-	if f.priorErr != nil || f.linksErr != nil || f.links > 1 {
+	if f.priorErr != nil || descriptorMayBeShared(f.links, f.linksErr) {
 		return false, false
 	}
 	return f.prior != "", true
+}
+
+// clearDescendantDecision is the teardown walk's decision for one descendant, from its
+// hard-link count alone: shouldClear reports whether ClearTree may write the NULL SACL over
+// it. It is descendantDecision's mirror on the revert side, and it exists for the same
+// reason — the clear is a WRITE to the very descriptor a hard link shares, so a path whose
+// descriptor may reach outside the box must be left exactly as it is:
+//
+//   - A file with more than one hard link, or one whose count could not be read, is skipped
+//     (descriptorMayBeShared). LabelTree refused that same path, so there is nothing of
+//     apogee's on it to remove; clearing it anyway would erase whatever label the record
+//     carries at its other names — the foreign label teardown exists to preserve, not destroy.
+//   - Everything else is cleared, as before.
+//
+// The skip is a DECISION, not a failure: it is not counted into clearTreeOutcome, because a
+// count that keeps the journal would strand it forever over a path apogee never labelled and
+// have ConfinementResidue alarm about it every session.
+//
+// Its one residue is the path hard-linked AFTER the label pass reached it — labelled while it
+// had a single name, skipped by the clear once it has two — which keeps apogee's Low label
+// with nothing recorded. That is the same residue the walks' reparse-point skip already
+// carries for a file replaced by a symlink mid-run, and the alternative is worse: writing over
+// a record the label pass never wrote to, which is the case this decision exists for.
+//
+// It is pure so the decision is table-testable on any OS — the retire seam pattern.
+func clearDescendantDecision(links uint32, linksErr error) (shouldClear bool) {
+	return !descriptorMayBeShared(links, linksErr)
 }

@@ -726,6 +726,93 @@ func TestWindowsHardLinkedDescendantIsNotLabelled(t *testing.T) {
 	}
 }
 
+func TestWindowsHardLinkedDescendantIsNotClearedOnTeardown(t *testing.T) {
+	// The revert-side mirror of the test above, on a real shared NTFS descriptor. The label
+	// pass skips a hard-linked descendant — so nothing of apogee's is ever on that record — but
+	// the CLEAR is a write too: a NULL SACL through the in-box name would strip the label from
+	// the file at its outside name, which is a label apogee never wrote and teardown exists to
+	// preserve. The fixture plants a foreign Medium label on a file outside the box, hard-links
+	// it in, and asserts the label is still there verbatim after teardown. (The skip itself is
+	// pinned off-OS by TestDescendantClearDecision; this proves the wiring.)
+	home := t.TempDir()
+	ws := t.TempDir()
+	store := t.TempDir() // stands in for the global package store outside the box
+	target := filepath.Join(store, "package.js")
+	if err := os.WriteFile(target, []byte("outside the box"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", target, err)
+	}
+	if err := winlabel.SetSDDL(target, "S:(ML;;NW;;;ME)"); err != nil {
+		t.Fatalf("apply the foreign Medium label to %q: %v", target, err)
+	}
+	foreign, err := winlabel.ReadSDDL(target)
+	if err != nil {
+		t.Fatalf("read the planted label of %q: %v", target, err)
+	}
+	if foreign == "" || winlabel.IsLowLabel(foreign) {
+		t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low foreign label", foreign)
+	}
+	link := filepath.Join(ws, "package.js")
+	if err := os.Link(target, link); err != nil {
+		t.Skipf("cannot hard-link %q to %q on this host: %v", link, target, err)
+	}
+	sibling := filepath.Join(ws, "sibling.txt")
+	if err := os.WriteFile(sibling, []byte("in the box"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", sibling, err)
+	}
+
+	c := newTokenConfiner(home)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = c.Close()
+		}
+	})
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label or clear")
+	}
+
+	if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	// The label pass left the shared record alone, which is what makes the teardown assertion
+	// below about the CLEAR rather than about a restore.
+	if got, _ := winlabel.ReadSDDL(target); got != foreign {
+		t.Fatalf("label of %q = %q while the box is up, want the planted %q untouched", target, got, foreign)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close (teardown): %v", err)
+	}
+	closed = true
+
+	// Read through BOTH names of the one record: the foreign label survives the revert.
+	for _, path := range []string{target, link} {
+		got, err := winlabel.ReadSDDL(path)
+		if err != nil {
+			t.Fatalf("read label of %q after teardown: %v", path, err)
+		}
+		if got != foreign {
+			t.Errorf("label of %q after teardown = %q, want the foreign label %q — clearing a hard link erases the label of a file at every name it has, including outside the box",
+				path, got, foreign)
+		}
+	}
+
+	// The rest of the box is reverted as normal, and the journal retires: a skipped descendant
+	// is a decision, not a failure, so it must not strand the journal and alarm Residue forever.
+	for _, path := range []string{ws, sibling} {
+		got, err := winlabel.ReadSDDL(path)
+		if err != nil {
+			t.Fatalf("read label of %q after teardown: %v", path, err)
+		}
+		if got != "" {
+			t.Errorf("%q still carries a mandatory label after teardown: %q", path, got)
+		}
+	}
+	if left := winlabel.ListJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after teardown, want the fully reverted journal retired", left)
+	}
+}
+
 // setFileDACL replaces path's DACL from sddl via the named-object API, protecting it from
 // inherited ACEs so the grants written there are the only ones in force. That API needs
 // READ_CONTROL as well as WRITE_DAC (it reads the current descriptor to propagate

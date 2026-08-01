@@ -184,6 +184,13 @@ func hardLinkCount(path string) (uint32, error) {
 // before deleting the journal. Swallowing those failures would strand Low labels on the disk
 // with no record and no residue report; returning them keeps the journal, so the next session
 // or recovery retries.
+//
+// It skips exactly what LabelTree skips, and that pairing is the point: reparse points, whose
+// target SetNamedSecurityInfo would follow out of the box, and hard links, whose descriptor is
+// the same NTFS record as every other name of the file (clearDescendantDecision). The clear is
+// a WRITE — a NULL SACL — so clearing a path the label pass refused would destroy a label on a
+// record apogee never wrote to, which is the mirror image of the harm the label-side skip
+// exists to prevent. A skipped path is not a failure and is not counted.
 func ClearTree(root string) error {
 	if err := SetSDDL(root, clearSDDL); err != nil {
 		if os.IsNotExist(err) {
@@ -217,6 +224,16 @@ func ClearTree(root string) error {
 			if entry.IsDir() {
 				return fs.SkipDir
 			}
+			return nil
+		}
+		links, linksErr := hardLinkCount(path)
+		if !clearDescendantDecision(links, linksErr) {
+			// The path is — or may be — one name of a file whose descriptor is shared with
+			// names outside the box, so the NULL SACL below would land on all of them.
+			// LabelTree skipped this same path for the same reason, so nothing of apogee's is
+			// on it to clear (descendantDecision, clearDescendantDecision). The skip is not
+			// counted: a failure here would keep the journal forever over a path apogee never
+			// labelled.
 			return nil
 		}
 		if err := SetSDDL(path, clearSDDL); err != nil && !os.IsNotExist(err) {

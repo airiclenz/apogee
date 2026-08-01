@@ -703,6 +703,13 @@ point is a **minor** bump, not a breaking change.
   is now left alone: it is not marked, nothing is recorded for it, and — exactly like a file whose
   existing label cannot be read — that one path is simply read-only to the confined command
   instead of failing the session.
+  - **Teardown skips them too.** Clearing the marks at the end of a run wrote a blank integrity
+    setting over *every* file in the workspace, including the ones the pass above now refuses to
+    mark — and on a hard link that write reaches the same shared record, so a label a store file
+    carried in its own right was in the path of apogee's cleanup. Both passes now skip a file with
+    more than one name: apogee neither marks it nor unmarks it. Skipping is not counted as a
+    cleanup failure, so it never holds the teardown record open or surfaces as leftover state to
+    report.
 
 - **Confinement works on older Linux kernels again — and a confined command can move a file
   inside your workspace.** On Linux the workspace fence is landlock, and apogee asks the kernel
