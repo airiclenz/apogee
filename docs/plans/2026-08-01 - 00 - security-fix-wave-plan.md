@@ -244,7 +244,26 @@ passes; `make check` green.
 
 **Commit:** `fix(tools): pin present_document, diagnostics and list_dir I/O to the workspace root`
 
-## 9. Bound and fence `view_diff`
+## 9. Bound and fence `view_diff` — ✅ DONE (2026-08-01)
+
+NOTES (2026-08-01): the over-budget path DEGRADES (a success result carrying the diffstat plus a
+sentence saying the rendering was withheld), the branch of the item's "refuse or degrade" its Tests
+line requires. Its counts are approximate by construction and the sentence says so: everything
+between the identical head and the identical tail counts as changed, since deciding which inner
+lines survive is exactly the LCS work the cap avoids — an upper bound, never an under-count.
+Nothing proportional to the line count is allocated on that path (neither side is even split; the
+`strings.Split` slices alone would be 160 MiB for a 10 MiB file of short lines), pinned by an
+allocation ceiling in the test. Reading through `readWorkspaceFileBounded` drops the `resolveInRoot`
+pre-pass entirely, as `read_file` did, so this item carries the same recorded narrowing: an
+in-workspace symlink whose target is spelled ABSOLUTE is now refused (CHANGELOG). Tests are
+additive: the item's escaping-symlink case is a BOUNDARY PIN (it passes against the pre-change code,
+which resolved symlinks at check time), so the fence half is regressed by
+`TestViewDiff_RefusesComponentSwappedMidRead` instead — the check-then-use race, measured at 66
+escapes in 2000 calls before the fix — plus a small table pinning the degraded stat's arithmetic
+(including the head/tail overlap clamp). "A normal small diff is byte-identical to today's output"
+needed no new test: `TestViewDiff_ReportsDiffStat` already asserts exact content and passes
+unchanged. NOT done, deliberately out of the item's literal (a)/(b)/(c): the audit's side note that
+the LCS fill loop takes no `ctx` — with the table capped at 25e6 cells the fill is sub-second.
 
 **What:** Audit "High — `view_diff` reads unbounded and unfenced, then allocates a quadratic
 table". `internal/tools/diff.go:69/:131-149`: (a) read the old side through

@@ -654,6 +654,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Previewing a change to a huge file can no longer take the whole app down with it.** `view_diff`
+  read the file it was given with no size limit at all and then built a comparison table with one
+  cell per pair of lines — a table that grows with the *product* of the two line counts. Two 6,000
+  line versions of a file already cost 288 MiB of it; a large generated file — a lock file, a CSV, a
+  long log — runs to gigabytes and the process is killed, taking the in-flight Turn and anything
+  unsaved in the transcript with it. `view_diff` is read-only, so it never asks before running, in
+  any mode. Both sides are now bounded before anything is compared: the file is held to the same
+  10 MiB ceiling `read_file` uses, the proposed content to the 512 KiB ceiling the write tools use,
+  and a pair too large to lay out as a table comes back as a **diffstat with a sentence saying the
+  line-by-line rendering was withheld** instead of being rendered at any cost. Every diff small
+  enough to read is byte-identical to before.
+  - **The file is also read through the workspace fence now**, like every other read in apogee: the
+    path was checked and then opened again by name, so a symlinked component swapped between the
+    two followed the swap out of the workspace — measured at 66 escapes in 2,000 calls under a
+    racing swap. The same narrowing `read_file` took comes with it: an in-workspace symlink whose
+    target is written as an *absolute* path is refused, and a refusal says the path is outside the
+    workspace rather than reporting the file as missing.
+
 - **`present_document`, `diagnostics` and `list_dir` now do their file I/O through the workspace
   fence, not just their path check.** All three checked the path you gave them against the workspace
   boundary and then acted on the *resolved string* — a plain stat, a plain directory read, a parse

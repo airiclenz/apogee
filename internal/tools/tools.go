@@ -18,6 +18,7 @@ const (
 	defaultDirDepth     = 3                // list_dir recursion depth when unspecified
 	defaultGrepResults  = 50               // grep result count when unspecified
 	maxGrepFileBytes    = 5 * 1024 * 1024  // grep skips a file larger than this
+	maxDiffTableCells   = 25_000_000       // view_diff refuses an LCS table larger than this (~200 MiB)
 )
 
 // toolSpec is a built-in tool's model-facing identity — the stable name the model
