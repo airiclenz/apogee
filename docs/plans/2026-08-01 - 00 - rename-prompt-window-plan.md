@@ -216,9 +216,20 @@ rather than passing silently.
 
 **Commit.** `refactor(title): widen the naming seam to a prompt window`
 
-## 4. Bare `/rename` names from the session's user side
+## 4. Bare `/rename` names from the session's user side — ✅ DONE (2026-08-01)
 
 **Depends on item 3.**
+
+NOTES (2026-08-01): two comment edits beyond the file-header block this item names, both because the
+change falsified existing wording. (a) `runRename`'s own doc comment — its bare-`/rename` bullet said
+the form runs "the same out-of-band call the first prompt fires" without qualification; it now states
+that this form hands over the whole user side. (b) The trailing comment in item 3's
+`TestRenameBareRegeneratesOverAManualName`, which claimed bare `/rename` "sends the first user
+message and nothing else today". Its assertion is unchanged and still passes: that session makes
+exactly one request, because a slash command is driven rather than submitted as a user message, so
+its whole user side IS the one prompt. The widening is therefore proved by this item's own
+`TestRenameBareSendsTheWholeUserSide` (verified failing against the pre-widening `runRename`), not by
+that test.
 
 **What.**
 

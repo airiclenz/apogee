@@ -242,6 +242,25 @@ func (t *transcript) firstUserText() string {
 	return ""
 }
 
+// userTexts returns the text of every committed user message, oldest first, and nil when nothing
+// has been asked yet. It is the session's user side as a bare `/rename` reads it (runRename): the
+// naming call selects its own bounded window out of this (title.Prompt), so what is owed here is
+// the whole ordered list rather than a pre-trimmed one.
+//
+// Interjections are deliberately left out, following firstUserText's line. An entryInterjected is a
+// remark steering work already under way (addInterjected) — it is not a request that opened an
+// Exchange, which is why it is not an entryUser in the first place — so counting it among the
+// session's requests would let a mid-Exchange "wrong file" outweigh the task it was correcting.
+func (t *transcript) userTexts() []string {
+	var texts []string
+	for i := range t.entries {
+		if t.entries[i].kind == entryUser {
+			texts = append(texts, t.entries[i].text)
+		}
+	}
+	return texts
+}
+
 // presentedStatus is the short line that closes a presentation entry. A rung that was tried and
 // did not deliver says so and states that the path still stands — the entry is the one thing the
 // ladder can always promise, so the wording never leaves the user wondering whether anything

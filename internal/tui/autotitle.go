@@ -12,10 +12,13 @@ import (
 // Automatic session naming (ADR 0022 addendum, 2026-07-31)
 // ----------------------------------------------------------------------------
 //
-// A new Session record is named from the first thing the human asked, by one small out-of-band
-// completion fired at that prompt's submit — in PARALLEL with the Exchange the prompt starts. On a
-// single-slot server it therefore queues behind Turn 1 and answers between Turns 1 and 2, which is
-// the cheapest KV-eviction point in the whole session: the context is at its smallest there.
+// A new Session record is named by one small out-of-band completion fired at the first prompt's
+// submit — in PARALLEL with the Exchange the prompt starts. On a single-slot server it therefore
+// queues behind Turn 1 and answers between Turns 1 and 2, which is the cheapest KV-eviction point
+// in the whole session: the context is at its smallest there. That automatic call names the session
+// from the first thing the human asked, because when it fires that is the only thing they have
+// asked; a bare /rename asked for later reads a bounded window of the session's user side instead
+// (runRename), so a session that moved on to another task can be named for where it ended up.
 //
 // The call is COSMETIC. It is not a Turn and not a Mechanism: it fires at no Hook point, never
 // shapes the primary call, never reaches the Engine (whose single-goroutine contract it would
@@ -34,10 +37,12 @@ import (
 // pendingSource stash a title that resolved before the first Save minted an id to rename, together
 // with who asked for it.
 //
-// /rename (runRename) is the human's half of the same machinery, and it inverts one rule: it is an
+// /rename (runRename) is the human's half of the same machinery, and it inverts two rules. It is an
 // explicit request, so its answer applies even over a name the human set a moment ago, and — unlike
-// the automatic call — it SPEAKS. A verb the human typed that quietly did nothing would be a bug in
-// the interface, so every one of its outcomes lands as a transcript note.
+// the automatic call — it SPEAKS: a verb the human typed that quietly did nothing would be a bug in
+// the interface, so every one of its outcomes lands as a transcript note. And it reads the whole
+// user side of the session rather than its opening request, because "name this" typed late means
+// the session as it now stands.
 
 // autoTitleMsg carries the AUTOMATIC naming call's result back to the Update loop. title is the
 // model's raw reply (title.Sanitize turns it into a title, or reports that nothing usable came
@@ -211,7 +216,10 @@ const renameUsage = "try /rename <name>"
 //     what lets a session be named BEFORE it has said anything, overriding the heuristic title the
 //     first Save would otherwise stamp.
 //   - bare `/rename` asks the model, running the same out-of-band call the first prompt fires
-//     (titleCmd) and folding it as a manualTitleMsg.
+//     (titleCmd) and folding it as a manualTitleMsg. Where the automatic call names the session
+//     from its opening request, this one hands over the session's whole user side (userTexts) and
+//     lets title.Prompt bound it: the human asked for a name NOW, so the answer must describe the
+//     session as it now stands rather than the task it may have left hours ago.
 //
 // Both forms set titleTouched: a human named this session, so no automatic title may overwrite it
 // (Ratified design 5). And every branch says what happened — the refusals included, because unlike
@@ -243,17 +251,17 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	}
-	first := m.transcript.firstUserText()
-	if first == "" {
-		// The model names a session from the first thing it was asked, and nothing has been asked
-		// yet. The manual form works from the very first keystroke, so it is what the note offers.
+	prompts := m.transcript.userTexts()
+	if len(prompts) == 0 {
+		// The model names a session from what it has been asked, and nothing has been asked yet. The
+		// manual form works from the very first keystroke, so it is what the note offers.
 		m.transcript.addNote("nothing to name yet — ask something first, or " + renameUsage)
 		m.layout()
 		return m, nil
 	}
 	m.transcript.addNote("naming this session…")
 	m.layout()
-	return m, m.titleCmd([]string{first}, func(raw string, err error) tea.Msg {
+	return m, m.titleCmd(prompts, func(raw string, err error) tea.Msg {
 		return manualTitleMsg{title: raw, err: err}
 	})
 }

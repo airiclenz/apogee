@@ -564,12 +564,130 @@ func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
 	if got := lastNote(m); !strings.Contains(got, "the generated name") {
 		t.Errorf("note = %q, want the new title reported back", got)
 	}
-	// The window is asserted whole, not just its first entry: bare /rename sends the first user
-	// message and nothing else today, and widening that must show up here rather than pass silently.
+	// The window is asserted whole, not just its first entry. It holds one prompt here because this
+	// session made exactly one REQUEST: a slash command is driven, never submitted as a user message,
+	// so the `/rename my own name` above is not part of the user side that bare /rename reads
+	// (TestRenameBareSendsTheWholeUserSide is where the multi-request window is pinned).
 	wantWindow := [][]string{{"fix the broken parser in tokenizer.go"}}
 	if asked := seam.asked(); !reflect.DeepEqual(asked, wantWindow) {
-		t.Errorf("seam asked about %q, want the first user message %q", asked, wantWindow)
+		t.Errorf("seam asked about %q, want the session's one request %q", asked, wantWindow)
 	}
+}
+
+// A bare /rename typed LATE names the session from its whole user side, oldest first — not from the
+// opening request alone. That is the point of the verb: a session that started on one task and moved
+// to another has to be nameable for where it ended up, and only the later requests say where that
+// is. What the naming call then does with the window (bounding it, excerpting it, asking for the
+// dominant thread) is title.Prompt's business, not the renderer's; all the seam is owed here is
+// every request, in the order they were made.
+func TestRenameBareSendsTheWholeUserSide(t *testing.T) {
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1"})
+	seam := &titleSeam{reply: "rework the token cache"}
+	m := newTitlingModel(t, host, seam, false) // auto-title off: only /rename reaches the seam
+
+	// A session that opens on the parser and moves on to the cache — the case the widening exists
+	// for, since naming it from prompt 1 alone would file it under the task it left.
+	prompts := []string{
+		"fix the broken parser in tokenizer.go",
+		"now rework the token cache",
+		"make the cache eviction LRU",
+	}
+	for _, p := range prompts {
+		m, _ = sendPrompt(t, m, p)
+		m = idle(t, m)
+	}
+
+	m, cmd := sendPrompt(t, m, "/rename")
+	if cmd == nil {
+		t.Fatal("bare /rename dispatched no naming call")
+	}
+	if _, ok := cmdMsg(cmd).(manualTitleMsg); !ok {
+		t.Fatal("bare /rename did not yield a manualTitleMsg")
+	}
+	want := [][]string{prompts}
+	if got := seam.asked(); !reflect.DeepEqual(got, want) {
+		t.Errorf("seam asked about %q, want every user message in order %q", got, want)
+	}
+}
+
+// The automatic call is untouched by the widening (Ratified design 6): it hands the seam exactly ONE
+// request even when the transcript already holds several, because its window is the prompt being
+// submitted rather than anything read back off the transcript. The latch is cleared by hand instead
+// of through /new because /new also empties the scrollback (startNewSession) — and a transcript full
+// of requests is exactly the condition this has to hold under.
+func TestAutoTitleWindowIsTheSubmittedPromptAlone(t *testing.T) {
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1"})
+	seam := &titleSeam{reply: "a generated name"}
+	m := newTitlingModel(t, host, seam, true)
+
+	m, cmd := sendPrompt(t, m, "fix the broken parser in tokenizer.go")
+	if _, ok := namingCall(t, cmd); !ok {
+		t.Fatal("the first prompt batched no naming call")
+	}
+	m = idle(t, m)
+	m, _ = sendPrompt(t, m, "now rework the token cache")
+	m = idle(t, m)
+
+	m.autoTitleFired = false // a fresh Session record unlatches naming; its scrollback is not fresh
+	m, cmd = sendPrompt(t, m, "make the cache eviction LRU")
+	if _, ok := namingCall(t, cmd); !ok {
+		t.Fatal("the unlatched record fired no naming call")
+	}
+
+	want := [][]string{{"fix the broken parser in tokenizer.go"}, {"make the cache eviction LRU"}}
+	if got := seam.asked(); !reflect.DeepEqual(got, want) {
+		t.Errorf("seam asked about %q, want one submitted prompt per call %q", got, want)
+	}
+}
+
+// Interjections are not requests, so they stay out of the window — the line firstUserText already
+// draws, kept for the same reason: a remark steering work already under way corrects a task instead
+// of asking for a new one, and letting a mid-Exchange "wrong file" count as a request would let it
+// outweigh the task it was correcting.
+func TestRenameBareExcludesInterjections(t *testing.T) {
+	t.Run("beside requests", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		host.Activate(session.Meta{ID: "s1"})
+		seam := &titleSeam{reply: "a generated name"}
+		m := newTitlingModel(t, host, seam, false)
+
+		m, _ = sendPrompt(t, m, "fix the broken parser in tokenizer.go")
+		// The delivery fold records a mid-Exchange remark exactly this way (interject.go).
+		m.transcript.addInterjected("no, the other tokenizer", nil)
+		m = idle(t, m)
+		m, _ = sendPrompt(t, m, "now rework the token cache")
+		m = idle(t, m)
+
+		m, cmd := sendPrompt(t, m, "/rename")
+		if cmd == nil {
+			t.Fatal("bare /rename dispatched no naming call")
+		}
+		cmdMsg(cmd)
+		want := [][]string{{"fix the broken parser in tokenizer.go", "now rework the token cache"}}
+		if got := seam.asked(); !reflect.DeepEqual(got, want) {
+			t.Errorf("seam asked about %q, want the requests without the interjection %q", got, want)
+		}
+	})
+
+	t.Run("alone", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
+		m := newTitlingModel(t, host, &titleSeam{reply: "a generated name"}, false)
+		m.transcript.addInterjected("no, the other tokenizer", nil)
+
+		m, cmd := sendPrompt(t, m, "/rename")
+		if cmd != nil {
+			t.Error("a session that has asked for nothing dispatched a naming call")
+		}
+		if got := lastNote(m); !strings.Contains(got, "nothing to name yet") {
+			t.Errorf("note = %q, want the nothing-to-name refusal: an interjection is not a request", got)
+		}
+		if got := host.renamedTitles(); len(got) != 0 {
+			t.Errorf("renames = %+v, want none", got)
+		}
+	})
 }
 
 // A bare /rename that comes back with nothing usable says so and leaves the stored title alone —
