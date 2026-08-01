@@ -486,6 +486,31 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Bare `/rename` now names a session for what it has become, not for how it opened.** Typed late
+  in a long session it re-derived a title from the very first thing you said and nothing else, so a
+  session that opened on one task and moved to another stayed listed under the task it left. The
+  call now reads a **bounded window of the user side of the session**: your opening request and the
+  three most recent are always in, and the ones between them are added newest-first while a rune
+  budget lasts. A short session therefore hands over its whole user side; a long one hands over its
+  two ends, with the omitted middle standing as a single marker that says how many were left out.
+  Every included request is excerpted and the budget is a hard cap, so the call a hundred prompts
+  in costs about what it costs four prompts in — and it is still one short completion off to the
+  side of the conversation, never a Turn. Mid-turn interjections are steering rather than requests
+  and stay out of the window.
+  - **The model is asked for the dominant thread, biased recent.** The instruction now says to name
+    the main thread of the work rather than enumerate the requests, and says outright that when the
+    session has moved to a different task the title names what it moved to. You look for a session
+    by what you were last doing, so recency is instructed rather than left to a small model
+    answering the last thing it read.
+  - **Automatic naming still reads your first prompt.** The call that fires on a fresh session's
+    first message sends exactly one request — at that moment exactly one exists — and its firing
+    rules, the `auto-title:` key, the heuristic fallback and the never-clobber rule are all
+    untouched. Both forms do now share one instruction, so the automatic call asks for the dominant
+    thread in the same words rather than in a second set that could drift.
+
+  See the addendum to
+  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
+
 - **The `/` menu now reads alphabetically.** The command dropdown used to list its rows in the order
   the table happened to declare them, which was neither the order they were added nor one you could
   predict; the rows now run `clear` … `version`, so a command is found where its name says it is.

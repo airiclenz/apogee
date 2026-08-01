@@ -264,7 +264,7 @@ that test.
 
 **Commit.** `feat(tui): bare /rename names from the whole user side of the session`
 
-## 5. README and CHANGELOG
+## 5. README and CHANGELOG — ✅ DONE (2026-08-01)
 
 **Depends on items 1, 2, 3, 4.**
 
