@@ -141,9 +141,16 @@ already in the plan's per-item NOTES, mirrored here so the ADR stays the ground 
   spell out, consistent with "built … at construction".
 - **A degraded Library store never blocks construction.** §2's "the library store is loaded from
   `Config.LibraryDir` … the way `cmd/apogee/wire.go` derives them today" is made literal: a
-  corrupt or absent store degrades to an empty store with wire.go's exact `os.Stderr` notice, so
+  corrupt or absent store degrades to an empty store with an `os.Stderr` notice, so
   an unreadable Library disables learning rather than failing `New`/`Resume` — the posture the
-  cmd path it replaces already had.
+  cmd path it replaces already had. *(Pointer corrected 2026-08-01. This bullet used to read "with
+  wire.go's exact `os.Stderr` notice", which was true when written — the engine copied wire.go's
+  string verbatim. Neither half holds today: the notice lives in the engine, in `deriveDeps`
+  (`internal/agent/construct.go`), and it now reads `"%v — library store degraded to empty"`,
+  appending the consequence to a `Load` error that already carries the house `apogee: ` prefix,
+  where wire.go's original `"apogee: library store degraded to empty: %v"` wrapped that error and
+  printed the prefix twice. The decision above is unchanged — only where the notice lives and how
+  it is worded.)*
 
 **Note (2026-07-25) — how this ADR reads after ADR 0003's row-shape amendment.** The Mechanism
 registry now holds `RegisteredMechanism{Descriptor, Ordering, Hook}` rows and a Mechanism value

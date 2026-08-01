@@ -1,10 +1,11 @@
 package agent
 
 // Construction-path coverage for the corrupt-store degrade branch (post-v1.3.0 review-fixes item 10a;
-// ADR 0015 Realisation "a corrupt or absent store degrades to an empty store with wire.go's exact
-// os.Stderr notice"). The engine's single build path (buildEnabledMechanisms in loop.go) Loads a
-// Library store only when `library` is armed and, on a soft Load error, degrades to an empty store and
-// surfaces the failure to stderr rather than blocking startup. The existing temp-dir tests only cover
+// ADR 0015 Realisation "a corrupt or absent store degrades to an empty store with an os.Stderr
+// notice"). The engine's single build path (buildEnabledMechanisms in construct.go) derives its Deps
+// through deriveDeps, which Loads a Library store only when `library` is armed and, on a soft Load
+// error, degrades to an empty store and surfaces the failure to stderr — "%v — library store degraded
+// to empty", the consequence appended to Load's already-prefixed error — rather than blocking startup. The existing temp-dir tests only cover
 // the happy (absent → empty) path; this pins the CORRUPT-bytes soft-error path end to end.
 
 import (
