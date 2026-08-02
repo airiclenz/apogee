@@ -1353,11 +1353,8 @@ func TestLoadProfileSameAddressMovesNothing(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if result.Moved {
-		t.Errorf("result = %+v; want Moved false — the profile serves the session's own endpoint", result)
-	}
-	if result.Switch != (tui.ServerSwitchResult{}) {
-		t.Errorf("result.Switch = %+v; want the zero value when nothing moved", result.Switch)
+	if result.Move != nil {
+		t.Error("result carries a Move; want none — the profile serves the session's own endpoint")
 	}
 	if len(agent.specs) != 0 {
 		t.Errorf("SwitchUpstream called %+v; want no engine move at all", agent.specs)
@@ -1385,6 +1382,12 @@ func TestLoadProfileSameAddressMovesNothing(t *testing.T) {
 // A profile that resolves ELSEWHERE is followed: the same fold `/server` performs, with the profile
 // name as the alias, the launcher's own api key for that backend, and no discovery hint — a profile
 // name is not a wire model id.
+//
+// The move is RESOLVED by the seam and PERFORMED by its caller, and this test says so twice. The
+// load runs on the TUI's actuation Cmd goroutine — for minutes on a large model — while the move
+// mutates the Agent, which only the Update goroutine may do (ADR 0029 D2, the rebind contract): so
+// nothing about the session may have moved when load returns, and everything must move when the
+// returned call is committed.
 func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 	t.Parallel()
 
@@ -1399,16 +1402,27 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if !result.Moved {
-		t.Fatalf("result = %+v; want Moved true — the profile serves another address", result)
+	if result.Move == nil {
+		t.Fatalf("result = %+v; want a resolved Move — the profile serves another address", result)
 	}
+	if len(agent.specs) != 0 || len(host.models) != 0 || holder.Endpoint() != "http://127.0.0.1:8080" {
+		t.Errorf("the seam moved the session itself: specs %+v, models %v, endpoint %q; want the move "+
+			"resolved and left for the Update goroutine to commit",
+			agent.specs, host.models, holder.Endpoint())
+	}
+
+	switched, err := result.Move()
+	if err != nil {
+		t.Fatalf("committing the resolved move: %v", err)
+	}
+
 	want := tui.ServerSwitchResult{
 		Endpoint:      "http://127.0.0.1:9090",
 		HostAlias:     "there",
 		ContextWindow: 16384,
 	}
-	if result.Switch != want {
-		t.Errorf("result.Switch = %+v; want %+v (alias = the profile name, the global pin survives)", result.Switch, want)
+	if switched != want {
+		t.Errorf("the committed move = %+v; want %+v (alias = the profile name, the global pin survives)", switched, want)
 	}
 	wantSpec := apogee.UpstreamSpec{Endpoint: "http://127.0.0.1:9090", APIKey: "llamacpp-key"}
 	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
@@ -1514,8 +1528,8 @@ func TestLoadProfileWildcardBindMovesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if result.Moved {
-		t.Errorf("result = %+v; want Moved false — `0.0.0.0:8080` and `127.0.0.1:8080` are one server", result)
+	if result.Move != nil {
+		t.Error("result carries a Move; want none — `0.0.0.0:8080` and `127.0.0.1:8080` are one server")
 	}
 	if len(agent.specs) != 0 {
 		t.Errorf("SwitchUpstream called %+v; want no engine move at all", agent.specs)
@@ -1534,8 +1548,8 @@ func TestLoadProfileWildcardBindMovesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !moved.Moved {
-		t.Errorf("result = %+v; want Moved true — another PORT is another server however it is bound", moved)
+	if moved.Move == nil {
+		t.Errorf("result = %+v; want a resolved Move — another PORT is another server however it is bound", moved)
 	}
 }
 
@@ -1558,14 +1572,18 @@ func TestLoadProfileCrossAddressDialsTheLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !result.Moved {
-		t.Fatalf("result = %+v; want Moved true — another PORT is another server however it is bound", result)
+	if result.Move == nil {
+		t.Fatalf("result = %+v; want a resolved Move — another PORT is another server however it is bound", result)
+	}
+	switched, err := result.Move()
+	if err != nil {
+		t.Fatalf("committing the resolved move: %v", err)
 	}
 
 	const dial, bind = "http://127.0.0.1:9090", "http://0.0.0.0:9090"
 	want := tui.ServerSwitchResult{Endpoint: dial, HostAlias: "there", ContextWindow: 16384}
-	if result.Switch != want {
-		t.Errorf("result.Switch = %+v; want %+v", result.Switch, want)
+	if switched != want {
+		t.Errorf("the committed move = %+v; want %+v", switched, want)
 	}
 	wantSpec := apogee.UpstreamSpec{Endpoint: dial, APIKey: "llamacpp-key"}
 	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
@@ -1576,7 +1594,7 @@ func TestLoadProfileCrossAddressDialsTheLoopback(t *testing.T) {
 	}
 	// Said the other way round too, because the defect this pins is one specific wrong value: the
 	// bind spelling must reach nothing the session talks through.
-	reached := []string{result.Switch.Endpoint, holder.Endpoint()}
+	reached := []string{switched.Endpoint, holder.Endpoint()}
 	for _, spec := range agent.specs {
 		reached = append(reached, spec.Endpoint)
 	}
@@ -1630,8 +1648,15 @@ func TestUnloadAndStopActOnTheServerASessionMovedTo(t *testing.T) {
 	}
 	wiring, _, _, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
-	if _, err := wiring.load("there", nil); err != nil {
+	loaded, err := wiring.load("there", nil)
+	if err != nil {
 		t.Fatalf("load: %v", err)
+	}
+	if loaded.Move == nil {
+		t.Fatal("the load resolved no move; the session below is meant to have followed the profile")
+	}
+	if _, err := loaded.Move(); err != nil { // the commit the completion fold makes on the Update goroutine
+		t.Fatalf("committing the resolved move: %v", err)
 	}
 	moved := holder.Endpoint()
 	if moved != "http://127.0.0.1:9090" {

@@ -1796,10 +1796,11 @@ type heartbeatState struct {
 	observedModel  string
 	observedWindow int
 	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
-	// lands while a worker owns the engine, applied in finishWorker. Latest-wins: a second change
-	// during the same Exchange replaces the first, so only the newest reality is ever bound. nil ⇒
-	// nothing is deferred. A pointer into a value-copied Model is safe because it is only ever
-	// replaced, never written through (the pendingSave posture, ADR 0011).
+	// lands while a worker owns the engine (applied in finishWorker) or while a launcher verb owns
+	// the server it talks to (applied in foldActuationDone). Latest-wins: a second change inside the
+	// same window replaces the first, so only the newest reality is ever bound. nil ⇒ nothing is
+	// deferred. A pointer into a value-copied Model is safe because it is only ever replaced, never
+	// written through (the pendingSave posture, ADR 0011).
 	pendingRebind *rebindIntent
 	// lastRebindFailed is the model id whose rebind last failed, so a refusal is noted once per
 	// distinct target instead of once every Interval. "" once a rebind succeeds.
@@ -1851,10 +1852,15 @@ func (m Model) heartbeatLive(gen int) bool {
 }
 
 // beatCmd runs one observation off the Update loop and reports it as a beatMsg stamped with the
-// current generation. It captures the program context, so a shutdown cancels a beat still in
+// CURRENT generation. It captures the program context, so a shutdown cancels a beat still in
 // flight, and the seam func by value — no pointer into the value-copied Model (the saveCmd
 // posture). It returns nil when the monitor is unwired, which is what makes Init's tea.Batch
 // collapse to the focus Cmd alone.
+//
+// It CONTINUES a chain and never opens one: Init issues the session's first beat on the generation
+// newModel armed, and the tick fold issues the next one of the chain that scheduled the tick.
+// Anything else firing an immediate beat wants [Model.armBeat], which retires the running chain
+// first — one live chain per session is the invariant, and this func alone cannot keep it.
 func (m Model) beatCmd() tea.Cmd {
 	observe := m.opts.Heartbeat
 	if observe == nil {
@@ -1864,6 +1870,23 @@ func (m Model) beatCmd() tea.Cmd {
 	return func() tea.Msg {
 		return beatMsg{gen: gen, beat: observe(ctx)}
 	}
+}
+
+// armBeat opens a FRESH tick chain and returns its first beat, fired now rather than one Interval
+// from now. It is what every caller that fires an immediate beat outside the chain's own rhythm uses
+// — a committed server switch, a completed profile load — because arming is what RETIRES the chain
+// already running: a beat issued on the CURRENT generation leaves the running chain's pending tick
+// live beside the new one, and two chains poll the server at twice the Interval while halving the
+// offline debounce (doc.go's tick-chain invariant, the spinner's doubled frame rate one level
+// across). [Model.beatCmd] stays the CONTINUATION — the tick fold re-issues the current chain's next
+// observation with it and must not bump.
+//
+// It takes a pointer because the generation bump must land on the Model copy the caller returns —
+// which is also why every caller arms in a statement of its own: in `return m, m.armBeat()` the
+// order of the bump and the copy of m is unspecified ([spinnerAnim.arm], ADR 0011).
+func (m *Model) armBeat() tea.Cmd {
+	m.hb.gen++
+	return m.beatCmd()
 }
 
 // beatTick schedules the next beat one heartbeat.Interval after the beat that just landed. Timing
@@ -1940,11 +1963,17 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 	}
 	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, beat.ContextWindow
 	intent := rebindIntent{model: beat.ActiveModel, window: beat.ContextWindow, quietSeed: firstContact}
-	if m.busy() {
-		// A worker owns the engine, and Agent.Rebind is idle-only by construction. Stash the intent
-		// for finishWorker rather than refuse it: the human is mid-answer, and the switch they made
-		// upstream should land the moment the Exchange closes (latest-wins, so a second switch during
-		// the same Exchange simply supersedes this one).
+	if m.busy() || m.actuation.inFlight {
+		// The engine is not the Update loop's to re-point right now, and Agent.Rebind is idle-only by
+		// construction. Stash the intent for the boundary rather than refuse it — finishWorker for a
+		// worker's Exchange, foldActuationDone for a launcher verb — so the switch the human made
+		// upstream lands the moment the engine is quiescent again (latest-wins, so a second change
+		// inside the same window simply supersedes this one).
+		//
+		// The actuation half is the same claim [Model.foldBeatFailure] makes about a FAILED beat, made
+		// about one that lands: a profile load's own completion may re-point the whole session
+		// (foldActuationDone → ProfileLoadResult.Move), and a rebind driven into the engine beside that
+		// move is exactly the unsynchronized pair the latch exists to prevent.
 		m.hb.pendingRebind = &intent
 		return m, false
 	}
@@ -1999,11 +2028,12 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	return m, true
 }
 
-// applyPendingRebind binds a change that was captured while a worker owned the engine. The terminal
-// fold IS the boundary Agent.Rebind demands — the same one AbortExchange and the idle save already
-// use — and the worker's terminal Msg travelling through the Bubble Tea channel is what establishes
-// the happens-before in both directions, which is why the engine's per-model bindings need no lock
-// (ADR 0024). A no-op when nothing was deferred.
+// applyPendingRebind binds a change that was captured while the engine was not the Update loop's to
+// re-point — a worker owned it, or a launcher verb owned the server it talks to. Both terminal folds
+// ARE the boundary Agent.Rebind demands — the same one AbortExchange and the idle save already use —
+// and the Msg travelling through the Bubble Tea channel is what establishes the happens-before in
+// both directions, which is why the engine's per-model bindings need no lock (ADR 0024). A no-op
+// when nothing was deferred.
 func (m *Model) applyPendingRebind() {
 	intent := m.hb.pendingRebind
 	if intent == nil {
@@ -2114,14 +2144,17 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult) (tea.Mod
 	m.opts.HostAlias = result.HostAlias
 	m.opts.ContextWindow = result.ContextWindow
 	m.opts.Model = ""
-	m.hb = heartbeatState{gen: m.hb.gen + 1, switched: true}
+	m.hb = heartbeatState{gen: m.hb.gen, switched: true}
 	// The box's facts were frozen when it was seeded; restate it so the top of the scrollback names
 	// the server this session is now on rather than the one it launched against (applyRebind's own
 	// reason, one level up).
 	m.transcript.refreshStartup(newStartupView(m.opts))
 	m.transcript.addNote(serverSwitchNote(from, m.opts))
 	m.layout()
-	return m, m.beatCmd()
+	// The fresh generation IS the retirement of the old chain, so the first beat is armed rather than
+	// merely issued — in a statement of its own, per [Model.armBeat].
+	beat := m.armBeat()
+	return m, beat
 }
 
 // serverSwitchNote words a committed switch: the server left, by the label the footer called it, and
@@ -2144,7 +2177,8 @@ func serverSwitchNote(from string, to Options) string {
 //   - While an ACTUATION is in flight it is ignored for the mirror-image reason (ADR 0029 D5): the
 //     server is EXPECTED to be down mid-restart, so a beat that cannot read it is evidence of
 //     nothing. A beat that LANDS in that shadow is folded normally — a server answering mid-load is
-//     harmless news, and the post-actuation beat is what completes the move.
+//     harmless news — though the BINDING it observes is stashed for the completion fold rather than
+//     driven into an engine the completion may be about to re-point (observeBinding).
 //   - Before any beat has ever landed, one failure is enough: a cold start against a server that
 //     is not running should say so at once rather than after a debounce it has no evidence for.
 //   - Otherwise the crossing waits for offlineFailureThreshold consecutive idle failures.

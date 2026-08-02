@@ -654,6 +654,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Loading a Launch profile no longer leaves a second heartbeat running, or moves the session from
+  the wrong place.** Every `/model` profile load added one more upstream check to the session: after
+  one load the server was polled twice per interval, after two loads three times — needless traffic
+  against a single-slot local server, and it also halved the delay before the footer says *server
+  offline*, so a brief hiccup flipped the display (and refused your next message) in about half the
+  time it is meant to take. The load's own follow-up check now retires the one already running, so a
+  session polls exactly once per interval however many profiles you load.
+  - **And a load that moves the session now commits that move at a safe moment.** When the profile
+    you load lives on a different server, apogee re-points the whole session at it. That re-pointing
+    used to happen inside the background load — which, on a large model, blocks for minutes — while
+    the heartbeat could be re-binding the session at the same instant from the other side. Nothing
+    ordered the two, so a server that swaps its model underneath you mid-load (Ollama loading on
+    demand, a second client, an action in the LM Studio window) could leave the session pointed at
+    one server holding another one's settings. The move is now handed back by the loader and
+    performed at the same quiescent point every other binding change uses, and a binding observed
+    while a load is in flight waits for that point instead of racing it. A load that fails to move
+    the session says so and leaves it exactly where it was.
+
+  See the 2026-08-02 amendment to
+  [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
+
 - **A session on a server that does not advertise its context window no longer wedges when the
   history gets long.** When apogee cannot discover the window and you have not set `context-window:`
   yourself, none of the size bounds can do arithmetic — and the last line of defence, the emergency

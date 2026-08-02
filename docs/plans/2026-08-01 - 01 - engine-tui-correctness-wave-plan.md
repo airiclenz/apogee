@@ -162,7 +162,26 @@ ErrorEvent text names `context-window:`. A known-window session's behavior is un
 
 **Commit:** `fix(agent): emergency compaction stays functional when the context window is unknown`
 
-## 5. Profile-load moves commit on the Update goroutine; one beat chain
+## 5. Profile-load moves commit on the Update goroutine; one beat chain — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** three deviations from the item's literal text. (a) The resolved move crosses the
+seam as ONE call — `ProfileLoadResult.Move func() (ServerSwitchResult, error)`, replacing `Moved`/`Switch`
+— rather than as endpoint/alias/key fields: the binary closes over what it resolved and the fold commits
+it on the Update goroutine, which keeps the per-server api key out of the renderer (the posture
+`ServerChoice`'s doc states) and needs no fifth `Options` seam. (b) Gating `observeBinding` on
+`actuation.inFlight` needs a release point or the stash strands until the next Exchange ends (the
+immediate post-load beat cannot recover it — `observedModel` was already advanced at capture), so
+`foldActuationDone` applies the pending rebind on every path that leaves the session where it was; a load
+that MOVES discards it with the rest of the heartbeat state, as `foldServerSwitch` always has. This
+inverts `TestActuationDoesNotShadowLandedBeats`, which pinned the old immediate bind — rewritten as
+`TestActuationDefersABindingObservedUnderTheLatch` (the beat is still folded; only the binding defers).
+(c) The generation bump is a new pointer-receiver `Model.armBeat` (the `spinnerAnim.arm` convention) used
+by both immediate-beat sites, rather than folded into `beatCmd` — `Init` calls `beatCmd` on a value copy
+it cannot return, so a bumping `beatCmd` there would arm a chain and then fire the beat on a generation
+the Model never adopted. Test (a) "no engine call off the Update goroutine" is asserted on the
+CROSS-server load (the only branch that ever called the engine) at both layers. ADR 0029 D2 gets a dated
+amendment (it read "the composition root performs the … fold", which is where the defect lived) plus a
+CHANGELOG `Fixed` entry; no version identifier touched.
 
 **What:** Audit "High — The profile-load actuation path drives the engine off the Update
 goroutine and forks a second heartbeat chain". Two defects, one path:

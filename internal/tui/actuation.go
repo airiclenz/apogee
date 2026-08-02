@@ -302,13 +302,15 @@ func (m Model) foldActuation(msg actuationMsg) (tea.Model, tea.Cmd) {
 // below, so every path out of here leaves the session actuable again — and then what happened is
 // told, in the order it happened.
 //
-// A profile load that MOVED the session takes the `/server` fold whole
-// ([Model.foldServerSwitch]): the composition root already re-pointed the wire, so the display
-// adopts the new server, the old heartbeat chain retires, and the fresh chain's first beat — fired
-// now rather than one Interval from now — binds what the profile actually loaded. A load that
-// moved nothing says so and fires the same immediate beat, which is what completes it: the ordinary
-// rebind path then words the change ("model changed: A → B"), because that IS what happened to a
-// session whose server swapped its model underneath it.
+// A profile load that has to MOVE the session commits the move HERE and then takes the `/server`
+// fold whole ([Model.foldServerSwitch]): the display adopts the new server, the old heartbeat chain
+// retires, and the fresh chain's first beat — fired now rather than one Interval from now — binds
+// what the profile actually loaded. Committing it here rather than inside the seam is the whole
+// point of [ProfileLoadResult.Move]: re-pointing the engine is an Update-goroutine act, and the
+// blocking load that resolved it ran on a Cmd goroutine where a heartbeat-driven rebind would race
+// it. A load that moved nothing says so and fires the same immediate beat, which is what completes
+// it: the ordinary rebind path then words the change ("model changed: A → B"), because that IS what
+// happened to a session whose server swapped its model underneath it.
 //
 // A failure is the launcher's own words. The one that earns a coda is the health-wait timeout: the
 // server was left running, so the heartbeat binding it later is a real outcome rather than
@@ -335,6 +337,31 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 		m.transcript.addNote(stripEscapes(step))
 	}
 
+	if verb == verbLoad && ev.err == nil && ev.load.Move != nil {
+		// The move the load RESOLVED, committed on the Update goroutine — the boundary Agent.Rebind
+		// and Agent.SwitchUpstream both state as their synchronization, and the reason the seam hands
+		// back a call rather than performing one (ADR 0029 D2, [ProfileLoadResult.Move]).
+		from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
+		switched, moveErr := ev.load.Move()
+		if moveErr == nil {
+			// The /server fold repaints on its way out (it restates the start-up box and lays out), so
+			// the notices above are on screen with the move rather than one frame behind it. It also
+			// replaces the whole heartbeat state, which discards any rebind stashed under the latch —
+			// an observation of the server being LEFT is not news about the one being joined.
+			return m.foldServerSwitch(from, switched)
+		}
+		// The profile is loaded but the session could not follow it there, so it stays exactly where
+		// it was and the failure is told like every other one below.
+		ev.err = fmt.Errorf("profile %s loaded, but the session could not follow it: %w", profile, moveErr)
+	}
+
+	// Every path from here leaves the session on the server it was already talking to, which makes
+	// this fold the quiescent boundary a binding change observed under the latch has been waiting
+	// for: observeBinding STASHES one rather than driving Agent.Rebind beside a move this completion
+	// may be about to make. It is finishWorker's posture, one level across, and it runs BEFORE the
+	// completion's own words because the beat that saw it landed before the completion did.
+	m.applyPendingRebind()
+
 	if ev.err != nil {
 		note := stripEscapes(ev.err.Error())
 		if errors.Is(ev.err, ErrStartupTimeout) {
@@ -356,12 +383,10 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 	}
-	if ev.load.Moved {
-		// The /server fold repaints on its way out (it restates the start-up box and lays out), so
-		// the notices above are on screen with the move rather than one frame behind it.
-		return m.foldServerSwitch(hostDisplay(m.opts), ev.load.Switch)
-	}
 	m.transcript.addNote("profile " + stripEscapes(profile) + " loaded — waiting for the beat")
 	m.refreshViewport()
-	return m, m.beatCmd()
+	// Armed in a statement of its own: the immediate beat opens a FRESH chain, and the generation
+	// bump has to land on the Model this returns (the spinnerAnim.arm convention, [Model.armBeat]).
+	beat := m.armBeat()
+	return m, beat
 }

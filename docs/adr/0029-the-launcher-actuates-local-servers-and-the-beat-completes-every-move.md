@@ -58,6 +58,21 @@ TODO's "how is a launcher-backed `servers:` entry marked" question dissolves; `s
 what ADR 0028 D5 made it, and `/server` keeps meaning "move among running endpoints" while
 `/load` means "make the world serve this".
 
+> **Amendment 2026-08-02 — the composition root RESOLVES the move; the completion fold COMMITS
+> it.** As first built, the `LoadProfile` seam performed the move itself, which put
+> `SwitchUpstream` + Monitor-swap on the actuation Cmd goroutine — where it ran unsynchronized
+> against a heartbeat-driven `Agent.Rebind` on the Update goroutine, because the latch of decision
+> 5 gates lifecycle calls and sends but not observed-binding rebinds. On a minutes-long load of a
+> large model that window is wide, and any server that swaps its model underneath the session
+> (Ollama on demand, a second client, an LM Studio action) can land a rebind inside it. Revised:
+> the seam resolves the move — endpoint, alias, key — and hands it back as ONE call in
+> `tui.ProfileLoadResult.Move`, which the actuation completion fold invokes on the Update
+> goroutine; the same closure, the same three steps, the same `/server` fold afterwards, moved to
+> the boundary that orders it. Decision 1 is untouched — still only a Beat binds — and decision 5
+> gains its missing half: a binding observed while the latch is held is STASHED and applied at the
+> completion, the posture a change observed mid-Exchange already had. Found by the 2026-08-01 code
+> audit; recorded in `docs/plans/2026-08-01 - 01 - engine-tui-correctness-wave-plan.md`, item 5.
+
 **3. Three idle-only verbs, acting on the session's endpoint.** `/load` (bare = a picker over
 the launcher's profiles in the launcher's own order, favourites first — rows carry the
 backend, the profile's merged `context_size` when configured, and a running attribution from

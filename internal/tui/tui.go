@@ -346,11 +346,11 @@ type Options struct {
 	// composite verb of ADR 0029 D2. The binary drives the launcher (a BLOCKING call: up to ~30 s
 	// waiting for health, plus a stop escalation when a restart displaces an occupant, and minutes
 	// for a large model), then decides whether the session has to move at all: a profile that
-	// resolves to the endpoint this session is already on moves nothing — Moved false, and the next
-	// beat observes the new model and rebinds through the ordinary path — while one that resolves
-	// elsewhere is FOLLOWED with the same fold `/server` performs, reported as Moved true carrying
-	// the [ServerSwitchResult] that fold already understands. No result here is ever a binding; only
-	// a Beat binds (ADR 0029 D1).
+	// resolves to the endpoint this session is already on moves nothing — no Move in the result, and
+	// the next beat observes the new model and rebinds through the ordinary path — while one that
+	// resolves elsewhere is FOLLOWED with the same fold `/server` performs, reported as a resolved
+	// [ProfileLoadResult.Move] the completion fold commits and hands to that fold. No result here is
+	// ever a binding; only a Beat binds (ADR 0029 D1).
 	//
 	// Because it blocks, the TUI runs it on a Cmd goroutine and holds the actuation latch across it —
 	// that latch is also the per-address serialization the launcher's contract demands of its caller.
@@ -446,21 +446,32 @@ type LaunchProfileChoice struct {
 	Running       bool   // discovery attributes a live instance to this profile right now
 }
 
-// ProfileLoadResult is what a completed profile load hands back: whether the session had to MOVE to follow
-// the profile, and — when it did — the same [ServerSwitchResult] a `/server` switch produces, so the
-// completion fold that already exists understands both without a second shape (ADR 0029 D2).
+// ProfileLoadResult is what a completed profile load hands back: whether the session has to MOVE to
+// follow the profile, and — when it does — the move itself, RESOLVED but not yet performed, as one
+// call that answers with the same [ServerSwitchResult] a `/server` switch produces, so the completion
+// fold that already exists understands both without a second shape (ADR 0029 D2).
 //
-// Moved false is the ordinary local case, not a failure: the profile loaded into the very server this
-// session is talking to, nothing was re-pointed, and the next beat observes the model change and
-// rebinds through the ordinary path. Switch is meaningful only when Moved is true.
+// Move nil is the ordinary local case, not a failure: the profile loaded into the very server this
+// session is talking to, nothing needs re-pointing, and the next beat observes the model change and
+// rebinds through the ordinary path.
+//
+// Move is a CALL rather than three fields because of WHERE it must run. The load itself blocks for
+// minutes on a Cmd goroutine, while the move mutates the engine (Agent.SwitchUpstream) and the
+// Update loop is the only boundary that synchronizes such a mutation against the heartbeat's own
+// rebinds — so the seam resolves the move where it has the launcher's answers (the endpoint, the
+// alias, that server's key) and the completion fold COMMITS it where mutating is safe. It also keeps
+// the credential out of the renderer, exactly as [ServerChoice] does: this package carries the move,
+// never its inputs. An error means nothing moved — the engine's own switch is validate-then-commit —
+// so the session stays where it was and the failure is a transcript note.
 //
 // Notices are the launcher's own lines worth telling the human — config warnings, the drift notice a
 // non-restarting activation emits — surfaced in order as transcript notes. They are carried even
 // alongside an error, because a load that failed after warning about the config still warned.
 type ProfileLoadResult struct {
-	Moved   bool               // the session was re-pointed at the profile's server
-	Switch  ServerSwitchResult // what the display adopts; zero unless Moved
-	Notices []string           // launcher notices to surface as transcript notes, in order
+	// Move commits the resolved move and reports what the display adopts. nil ⇒ the session stays on
+	// the server it is already on. Called at most once, on the Update goroutine.
+	Move    func() (ServerSwitchResult, error)
+	Notices []string // launcher notices to surface as transcript notes, in order
 }
 
 // ActuationResult is what `/unload-model` and `/stop-server` did: the launcher's own [StopResult]

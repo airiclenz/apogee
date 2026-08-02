@@ -247,7 +247,11 @@
 // the server has answered), and the beatMsg fold re-arms from the LANDED beat rather than off a
 // fixed clock, so an observation and its wait are strictly sequential and two beats can never
 // overlap. The spinner's generation counter guards it identically: a Msg from a retired chain is
-// inert. What a beat MEANS is [Model.foldBeat] — a failure while an Exchange is in flight is
+// inert — and it is [Model.armBeat], not [Model.beatCmd], that every out-of-rhythm beat goes out
+// through (a committed `/server` switch, a completed profile load), because opening a generation is
+// what RETIRES the chain already running. A beat merely issued on the current generation would leave
+// two live chains polling one server, which is the frame-rate doubling spinnerAnim.arm exists to
+// prevent, one seam across. What a beat MEANS is [Model.foldBeat] — a failure while an Exchange is in flight is
 // IGNORED (a streaming reply is stronger evidence that the server is there than a timed-out probe
 // on a saturated one), a failure before any beat has ever landed is believed at once (a cold start
 // against a stopped server should say so), and otherwise the offline crossing waits for
@@ -270,8 +274,10 @@
 // against the last OBSERVATION rather than against the binding — which is what lets a
 // `context-window:` pin outrank the server's window forever without the renderer knowing a pin
 // exists — and a change is applied at once when the engine is idle, or stashed as a latest-wins
-// pendingRebind and applied in finishWorker when a worker owns it, the same quiescent boundary
-// AbortExchange and the idle save use. [Model.applyRebind] then adopts what was actually BOUND
+// pendingRebind and applied at the next quiescent boundary when something else owns the engine:
+// finishWorker when a worker does (the boundary AbortExchange and the idle save use), and the
+// actuation completion fold while a launcher verb owns the server the session talks to, since that
+// completion may re-point the session itself. [Model.applyRebind] then adopts what was actually BOUND
 // (never merely what was observed), restates the start-up box in place (transcript.refreshStartup —
 // its facts were frozen when it was seeded, and a late-bound session would otherwise keep a
 // "connecting" box at the top of its scrollback), and words the change once: connected / model

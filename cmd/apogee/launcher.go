@@ -468,7 +468,8 @@ func (w launcherWiring) profiles() ([]tui.LaunchProfileChoice, error) {
 }
 
 // load is [tui.Options.LoadProfile], the composite verb of ADR 0029 D2: activate the Launch profile,
-// then decide whether the session has to follow it.
+// then decide whether the session has to follow it — and, when it does, resolve the move it would
+// take WITHOUT performing it (see the move's own note below).
 //
 // It BLOCKS — the facade's contract, and the reason the TUI runs it on a Cmd goroutine under the
 // actuation latch. Everything it reads it reads fresh: the config, so a profile added seconds ago in
@@ -547,11 +548,18 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 	// APIKeyFor is one of the accessors the facade's type aliases expose without a compatibility
 	// promise; it is the only such call in apogee, and it is confined to this file with the rest of
 	// the library's vocabulary.
-	switched, err := w.move(addrEndpoint(dialAddr(addr)), name, "", cfg.APIKeyFor(profile.Backend))
-	if err != nil {
-		return tui.ProfileLoadResult{Notices: notices}, err
-	}
-	return tui.ProfileLoadResult{Moved: true, Switch: switched, Notices: notices}, nil
+	//
+	// The move is RESOLVED here and PERFORMED by the caller. This func runs on the TUI's actuation Cmd
+	// goroutine — for minutes on a large model — while move re-points the Agent, and the Update
+	// goroutine is the boundary that synchronizes every such mutation against the heartbeat's own
+	// rebinds (rebind.go: "the boundary the host crosses to call this IS the synchronization"). Driving
+	// it from here would race a Rebind landing during the load with no happens-before edge between
+	// them, so what crosses the seam is the one call the completion fold makes where mutating is safe
+	// (ADR 0029 D2, tui.ProfileLoadResult.Move). Nothing about the session has changed when this
+	// returns; only the launcher's world has.
+	endpoint, apiKey := addrEndpoint(dialAddr(addr)), cfg.APIKeyFor(profile.Backend)
+	move := func() (tui.ServerSwitchResult, error) { return w.move(endpoint, name, "", apiKey) }
+	return tui.ProfileLoadResult{Move: move, Notices: notices}, nil
 }
 
 // projectStartupTimeout marks the launcher's health-wait timeout so the renderer can recognise it

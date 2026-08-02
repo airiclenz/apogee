@@ -46,6 +46,27 @@ type fakeLauncher struct {
 	lists int
 	loads []string
 	acts  []string
+	moves int
+}
+
+// follows scripts a load that has to MOVE the session: the seam resolves the move and hands it back
+// as the call [ProfileLoadResult.Move] declares, answering with switched — or refusing with err —
+// when it is finally committed. The commit is COUNTED, which is what lets a test say where it ran:
+// the seam resolving it runs on a Cmd goroutine, the fold committing it on the Update goroutine.
+func (f *fakeLauncher) follows(switched ServerSwitchResult, err error) {
+	f.result.Move = func() (ServerSwitchResult, error) {
+		f.mu.Lock()
+		f.moves++
+		f.mu.Unlock()
+		return switched, err
+	}
+}
+
+// committed reports how many times the resolved move has been committed.
+func (f *fakeLauncher) committed() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.moves
 }
 
 // newLauncher is the fake most tests open on: two profiles defined and every verb succeeding.
@@ -398,18 +419,41 @@ func TestActuationShadowsFailedBeats(t *testing.T) {
 }
 
 // A beat that LANDS in the shadow is folded normally: a server answering mid-actuation is harmless
-// news, and suppressing it would only delay the binding the load exists to produce.
-func TestActuationDoesNotShadowLandedBeats(t *testing.T) {
+// news, and suppressing it would only delay the binding the load exists to produce. What IS deferred
+// is the binding itself — the completion may be about to re-point the whole session, and a rebind
+// driven into the engine beside that move is the unsynchronized pair the latch exists to prevent —
+// so the observation is stashed and the completion fold is the boundary it lands at, exactly as
+// finishWorker is for one observed mid-Exchange.
+func TestActuationDefersABindingObservedUnderTheLatch(t *testing.T) {
 	t.Parallel()
 
 	m, rb := wireLauncher(t, newLauncher())
-	m, _ = startLoad(t, m, "alpha")
+	m, cmd := startLoad(t, m, "alpha")
 
 	m = foldBeatMsg(t, m, upBeat("other-model", 16384))
 
-	want := []rebindCall{{model: "other-model", window: 16384}}
-	if !reflect.DeepEqual(rb.calls, want) {
-		t.Errorf("rebind calls = %v, want %v — a landed beat still binds under the latch", rb.calls, want)
+	if len(rb.calls) != 0 {
+		t.Fatalf("rebind calls = %v, want none while a launcher verb owns the server", rb.calls)
+	}
+	want := rebindIntent{model: "other-model", window: 16384}
+	if m.hb.pendingRebind == nil || *m.hb.pendingRebind != want {
+		t.Fatalf("pendingRebind = %+v, want the observation stashed (%+v)", m.hb.pendingRebind, want)
+	}
+	if !m.hb.everOnline || m.hb.offline {
+		t.Errorf("hb = {everOnline:%v offline:%v}, want the landed beat itself folded normally",
+			m.hb.everOnline, m.hb.offline)
+	}
+
+	m, _ = driveActuation(t, m, cmd)
+
+	if got := ([]rebindCall{{model: "other-model", window: 16384}}); !reflect.DeepEqual(rb.calls, got) {
+		t.Errorf("rebind calls = %v, want the stashed change applied exactly once at the completion", rb.calls)
+	}
+	if m.hb.pendingRebind != nil {
+		t.Errorf("pendingRebind = %+v, want it cleared by the apply", m.hb.pendingRebind)
+	}
+	if m.opts.Model != "other-model" {
+		t.Errorf("opts.Model = %q, want the deferred binding bound by the completion", m.opts.Model)
 	}
 }
 
@@ -426,7 +470,6 @@ func TestProfileLoadSameServerWaitsForTheBeat(t *testing.T) {
 	fake := newLauncher()
 	m, rb := wireLauncher(t, fake)
 	before := m.opts
-	beforeGen := m.hb.gen
 	m, cmd := startLoad(t, m, "alpha")
 
 	m, cmd = driveActuation(t, m, cmd)
@@ -437,9 +480,9 @@ func TestProfileLoadSameServerWaitsForTheBeat(t *testing.T) {
 	if got := fake.loaded(); !reflect.DeepEqual(got, []string{"alpha"}) {
 		t.Errorf("loads = %v, want the picked profile activated once", got)
 	}
-	if m.opts.Endpoint != before.Endpoint || m.opts.Model != before.Model || m.hb.gen != beforeGen {
-		t.Errorf("the session moved on a same-server load: endpoint %q, model %q, gen %d",
-			m.opts.Endpoint, m.opts.Model, m.hb.gen)
+	if m.opts.Endpoint != before.Endpoint || m.opts.Model != before.Model {
+		t.Errorf("the session moved on a same-server load: endpoint %q, model %q",
+			m.opts.Endpoint, m.opts.Model)
 	}
 	if len(rb.calls) != 0 {
 		t.Errorf("rebind calls = %v, want none — only a Beat binds", rb.calls)
@@ -457,18 +500,18 @@ func TestProfileLoadSameServerWaitsForTheBeat(t *testing.T) {
 	}
 }
 
-// A profile that lives on another server is FOLLOWED: the composition root already re-pointed the
-// wire, so the completion takes the /server fold whole — display adopted, model unbound, a fresh
-// heartbeat generation, and the first beat of the new chain fired now.
+// A profile that lives on another server is FOLLOWED: the completion commits the move the load
+// resolved and then takes the /server fold whole — display adopted, model unbound, a fresh heartbeat
+// generation, and the first beat of the new chain fired now.
 func TestProfileLoadMovedTakesTheSwitchFold(t *testing.T) {
 	t.Parallel()
 
 	fake := newLauncher()
-	fake.result = ProfileLoadResult{Moved: true, Switch: ServerSwitchResult{
+	fake.follows(ServerSwitchResult{
 		Endpoint:      "http://localhost:8081",
 		HostAlias:     "beta",
 		ContextWindow: remoteWindow,
-	}}
+	}, nil)
 	m, rb := wireLauncher(t, fake)
 	oldGen := m.hb.gen
 	m, cmd := startLoad(t, m, "beta")
@@ -477,6 +520,9 @@ func TestProfileLoadMovedTakesTheSwitchFold(t *testing.T) {
 
 	if m.actuation.inFlight {
 		t.Fatal("the latch was not released by the completion")
+	}
+	if n := fake.committed(); n != 1 {
+		t.Errorf("the resolved move was committed %d times, want exactly once — by the fold", n)
 	}
 	if m.opts.Endpoint != "http://localhost:8081" || m.opts.HostAlias != "beta" {
 		t.Errorf("opts = {%q %q}, want the profile's server adopted", m.opts.Endpoint, m.opts.HostAlias)
@@ -499,6 +545,100 @@ func TestProfileLoadMovedTakesTheSwitchFold(t *testing.T) {
 	}
 	if beat, ok := cmd().(beatMsg); !ok || beat.gen != m.hb.gen {
 		t.Errorf("the completion's Cmd yielded %T, want the new chain's first beat", cmd())
+	}
+}
+
+// The move a load resolves is committed by the FOLD, never by the seam that resolved it. The seam
+// blocks for minutes on a Cmd goroutine while the move re-points the engine, and the Update loop is
+// the only boundary that orders such a mutation against the heartbeat's own rebinds — so a load that
+// has answered must have changed nothing about the session until its completion is folded.
+func TestProfileLoadCommitsTheMoveOnTheUpdateGoroutine(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	fake.follows(ServerSwitchResult{Endpoint: "http://localhost:8081", HostAlias: "beta"}, nil)
+	m, _ := wireLauncher(t, fake)
+	m, cmd := startLoad(t, m, "beta")
+
+	// Running the pump's producer runs the whole seam on its own goroutine: the load has answered and
+	// its completion is sitting on the channel, unfolded.
+	item := pumpItem(t, cmd)
+
+	if got := fake.loaded(); !reflect.DeepEqual(got, []string{"beta"}) {
+		t.Fatalf("loads = %v, want the profile activated by the Cmd goroutine", got)
+	}
+	if n := fake.committed(); n != 0 {
+		t.Errorf("the move was committed %d times off the Update goroutine; the seam resolves it and stops", n)
+	}
+
+	m, _ = stepCmd(t, m, item)
+
+	if n := fake.committed(); n != 1 {
+		t.Errorf("the move was committed %d times by the fold, want exactly once", n)
+	}
+	if m.opts.Endpoint != "http://localhost:8081" {
+		t.Errorf("opts.Endpoint = %q, want the fold to have adopted what the committed move answered",
+			m.opts.Endpoint)
+	}
+}
+
+// A move the engine refuses leaves the session exactly where it was — Agent.SwitchUpstream is
+// validate-then-commit — and the note says both halves of the truth: the profile IS loaded, and the
+// session did not follow it. Nothing is armed, because nothing moved.
+func TestProfileLoadMoveRefusedKeepsTheSession(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	fake.follows(ServerSwitchResult{}, errors.New("an exchange is still open"))
+	m, _ := wireLauncher(t, fake)
+	before, beforeGen := m.opts, m.hb.gen
+	m, cmd := startLoad(t, m, "beta")
+
+	m, cmd = driveActuation(t, m, cmd)
+
+	if m.actuation.inFlight {
+		t.Fatal("a refused move left the latch held")
+	}
+	if m.opts.Endpoint != before.Endpoint || m.opts.Model != before.Model || m.hb.gen != beforeGen {
+		t.Errorf("the session moved on a refused move: endpoint %q, model %q, gen %d",
+			m.opts.Endpoint, m.opts.Model, m.hb.gen)
+	}
+	if cmd != nil {
+		t.Error("a refused move fired a beat; the session is on the server it always was")
+	}
+	want := "profile beta loaded, but the session could not follow it: an exchange is still open"
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q", got, want)
+	}
+}
+
+// A completion's immediate beat ARMS a chain rather than merely issuing one on the running
+// generation: the chain that was live when the load started is retired by the bump, so exactly one
+// chain polls the server afterwards. Two would double the /v1/models traffic against the single-slot
+// local server this product targets and halve the offline debounce (doc.go's tick-chain invariant).
+func TestProfileLoadLeavesExactlyOneBeatChain(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wireLauncher(t, newLauncher())
+	retired := m.hb.gen
+	m, cmd := startLoad(t, m, "alpha")
+
+	m, cmd = driveActuation(t, m, cmd)
+
+	if m.hb.gen == retired {
+		t.Fatalf("hb.gen = %d, want the completion's immediate beat to open a fresh chain", m.hb.gen)
+	}
+	if cmd == nil {
+		t.Fatal("the completion fired no beat")
+	}
+	if beat, ok := cmd().(beatMsg); !ok || beat.gen != m.hb.gen {
+		t.Fatalf("the completion's Cmd yielded %T, want the armed chain's first beat", cmd())
+	}
+	if _, stale := stepCmd(t, m, heartbeatTickMsg{gen: retired}); stale != nil {
+		t.Error("a tick from the chain the load displaced still scheduled a beat — two chains poll one server")
+	}
+	if _, live := stepCmd(t, m, heartbeatTickMsg{gen: m.hb.gen}); live == nil {
+		t.Error("the armed chain's own tick scheduled nothing — the load left no live chain at all")
 	}
 }
 
