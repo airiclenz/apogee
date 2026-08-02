@@ -864,6 +864,207 @@ func TestTranscriptDepthLabelsEachLevel(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// A sub-agent run collapses to its call block (layout.md, "Collapsed and expanded blocks")
+// ----------------------------------------------------------------------------
+
+// subAgentCall folds the sub_agent call that HEADS a run at depth. Everything folded after it at a
+// deeper depth is that run's span, until the stream climbs back out to depth or shallower.
+func subAgentCall(tr *transcript, id, task string, depth int) {
+	tr.apply(domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: depth},
+		Call:      domain.ToolCall{ID: id, Tool: "sub_agent", Arguments: []byte(`{"task":"` + task + `"}`)},
+	})
+}
+
+// subAgentReport folds a run's report back into its head, which is what ends the run: the head is
+// done from there on, and its collapsed summary switches from the live tempo to the report's gist.
+// A run built without one is a run still working.
+func subAgentReport(tr *transcript, id, content string, depth int) {
+	tr.apply(domain.ToolResultEvent{
+		EventBase: domain.EventBase{Depth: depth},
+		Result:    domain.ToolResult{CallID: id, Content: content},
+	})
+}
+
+// runCall folds a terminal call and its multi-line output at depth — an inner block that carries a
+// body, so an expanded run demonstrably paints its inner blocks in THEIR own states.
+func runCall(tr *transcript, id, command, output string, depth int) {
+	base := domain.EventBase{Depth: depth}
+	tr.apply(domain.ToolCallEvent{EventBase: base,
+		Call: domain.ToolCall{ID: id, Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
+	tr.apply(domain.ToolResultEvent{EventBase: base,
+		Result: domain.ToolResult{CallID: id, Content: output}})
+}
+
+// TestSubAgentRunCollapsesToItsCallBlock is the item's acceptance golden, in both directions. By
+// default the whole run is ONE block: the ⤷ descent label, the rail, the inner blocks and every
+// spacer among them are gone, and the head's summary slot carries the cascading count and gist.
+// Expanded, the head shows the report it actually returned and the railed span comes back exactly
+// as it has always painted — with each inner block in its OWN state, which is why the Run inside it
+// is still collapsed to its first line and a remainder marker.
+func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	readCall(tr, "c1", "a.go", 1, 5, 1)
+	runCall(tr, "c2", "go test", "ok   a\nok   b\nPASS", 1)
+	subAgentReport(tr, "s1", "Found 4 gaps\nin the suite\nhere they are", 0)
+
+	collapsed := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ survey the tests 2 tool calls · Found 4 gaps",
+		"    Found 4 gaps",
+		"    … +2 more lines",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != collapsed {
+		t.Errorf("collapsed run mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+	}
+	if strings.Contains(collapsed, glyphSubLabel) || strings.Contains(collapsed, glyphSubRail) {
+		t.Errorf("the collapsed run kept a descent label or a rail:\n%s", collapsed)
+	}
+
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the run's head entry expanded")
+	}
+	expanded := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ survey the tests",
+		"    Found 4 gaps",
+		"    in the suite",
+		"    here they are",
+		"",
+		"│ ⤷ sub-agent",
+		"│",
+		"│ ✦ Read File",
+		"│   ┕ a.go 1 - 5",
+		"│",
+		"│ ✦ Run",
+		"│   ┕ go test",
+		"│     ok   a",
+		"│     … +2 more lines",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != expanded {
+		t.Errorf("expanded run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, expanded)
+	}
+
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false on the way back; want the run's head collapsed again")
+	}
+	if got := renderPlain(tr, 80); got != collapsed {
+		t.Errorf("re-collapsed run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+	}
+}
+
+// TestSubAgentSummaryTempi pins the collapsed summary's two tempi: while the run works it counts
+// the calls and names what the span has open right now, in the same words the status line uses for
+// that call; once the report lands it counts the calls and shows the report's own gist. A run with
+// nothing to add to the count says the count alone rather than trailing an empty separator.
+func TestSubAgentSummaryTempi(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  string
+	}{
+		{
+			name: "working: the count plus the live phrase of the span's open call",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				tr.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1},
+					Call: domain.ToolCall{ID: "c2", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
+			},
+			want: "  ┕ survey the tests 2 tool calls · searching · TODO",
+		},
+		{
+			name: "working with every call settled: the count alone",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+			},
+			want: "  ┕ survey the tests 1 tool call",
+		},
+		{
+			name: "finished: the count plus a one-line report, which needs no body",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentReport(tr, "s1", "Found 4 gaps", 0)
+			},
+			want: "  ┕ survey the tests 1 tool call · Found 4 gaps",
+		},
+		{
+			name: "finished: the count plus the first line of a report long enough to be a body",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentReport(tr, "s1", "Found 4 gaps\nand here they are", 0)
+			},
+			want: "  ┕ survey the tests 1 tool call · Found 4 gaps",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+
+			// The head block is its header then its branch line; the branch carries the summary.
+			branch := strings.Split(renderPlain(tr, 80), "\n")[1]
+			if branch != tc.want {
+				t.Errorf("summary line = %q; want %q", branch, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubAgentCountIsTransitive proves the one number covers the whole run: the span holds every
+// entry of every level below the head, so a nested run's calls — and the nested sub_agent call
+// itself — count toward the outer run's total without a second rule for depth.
+func TestSubAgentCountIsTransitive(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the repo", 0)
+	readCall(tr, "c1", "a.go", 1, 5, 1)
+	subAgentCall(tr, "s2", "read the tests", 1)
+	readCall(tr, "c2", "b.go", 1, 9, 2)
+	readCall(tr, "c3", "c.go", 1, 3, 2)
+	subAgentReport(tr, "s2", "tests read", 1)
+	subAgentReport(tr, "s1", "survey complete", 0)
+
+	// One read at depth 1, the nested sub-agent call, and its two reads at depth 2.
+	want := "  ┕ survey the repo 4 tool calls · survey complete"
+	if branch := strings.Split(renderPlain(tr, 80), "\n")[1]; branch != want {
+		t.Errorf("transitive summary = %q; want %q", branch, want)
+	}
+}
+
+// TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent is the cascade: expanding a run reveals
+// its inner blocks in their own states, and an inner block that is itself a run collapses its own
+// span by this same rule. One rule, applied at every depth — not a special case for nesting.
+func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the repo", 0)
+	subAgentCall(tr, "s2", "read the tests", 1)
+	readCall(tr, "c1", "b.go", 1, 9, 2)
+	subAgentReport(tr, "s2", "tests read", 1)
+	subAgentReport(tr, "s1", "survey complete", 0)
+
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the outer run expanded")
+	}
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ survey the repo survey complete",
+		"",
+		"│ ⤷ sub-agent",
+		"│",
+		"│ ✦ Sub-Agent",
+		"│   ┕ read the tests 1 tool call · tests read",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("nested run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Tool call + result group by CallID
 // ----------------------------------------------------------------------------
 

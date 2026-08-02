@@ -270,12 +270,21 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 // The issue's core case: two sub-agent calls back to back are never visually connected. The
 // second call's own tool-call block sits at the parent's depth between the two runs, so the join
 // dips to 0, the rail breaks, and a fresh ⤷ sub-agent label opens the second run.
+//
+// Both runs are EXPANDED first, because a collapsed run elides its span whole (layout.md) and a run
+// with no rail on screen cannot say anything about how two rails meet. The rule under test is the
+// expanded paint's, and this pins it unchanged.
 func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"first"}`)}})
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "first child"})
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: []byte(`{"task":"second"}`)}})
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "second child"})
+	for _, head := range []int{0, 2} {
+		if !tr.setExpanded(head, true) {
+			t.Fatalf("setExpanded(%d, true) = false; want the sub-agent head expanded", head)
+		}
+	}
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
@@ -346,7 +355,7 @@ func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
 	th := newTheme()
-	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80, false).lines
+	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80, blockState{}).lines
 	head := block[0]
 
 	if got, want := ansi.Strip(head), "✦ Read File"; got != want {
@@ -904,6 +913,34 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				{line: 5, kind: targetHeader, entry: 1, text: "✦ Run"},
 				{line: 8, kind: targetMarker, entry: 1, text: "    … +1 more line"},
 			},
+		},
+		{
+			// A sub-agent run's head is a target for its SPAN alone. This one is still working, so
+			// it has no body to truncate and nothing among its views hides anything — what a click
+			// there reveals is the elided run behind it, and only the span rule knows that.
+			name:  "a working sub-agent head is a target for its elided span",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+			},
+			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"}},
+		},
+		{
+			// Expanded, the run's head keeps its mark — that is the click that closes it again —
+			// even though its own one-line report hides nothing. The span it reveals carries no
+			// marks of its own here, the read inside it having nothing to reveal either.
+			name:  "an expanded sub-agent head stays clickable",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentReport(tr, "s1", "survey complete", 0)
+				if !tr.setExpanded(0, true) {
+					t.Fatal("setExpanded(0, true) = false; want the run's head expanded")
+				}
+			},
+			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"}},
 		},
 		{
 			// A railed sub-agent block is marked exactly like a flat one — the rail prefixes lines

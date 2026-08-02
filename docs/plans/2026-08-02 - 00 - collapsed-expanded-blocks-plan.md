@@ -206,9 +206,27 @@ unchanged.
 
 **Commit:** `feat(tui): a motionless click on a header or marker toggles the block`
 
-## 5. A sub-agent run collapses to its call block with a cascading summary
+## 5. A sub-agent run collapses to its call block with a cascading summary — ✅ DONE (2026-08-02)
 
 Depends on item 4.
+
+NOTES (2026-08-02): three files beyond the one the item names. `activity.go` gained `toolPhrase(toolView)`
+— the composition itself, split out of `toolActivityLabel` so the run's live tempo and the status line
+cannot word the same call two ways (the item asks for "the same composition as `toolActivityLabel`";
+sharing it is how that is made true rather than asserted). `render.go`'s `renderToolBlock` now takes a
+`blockState{expanded, elides}` instead of a bare `expanded bool`, because the target rule's new half —
+a run with a span is clickable however short its own report is — is a fact no `toolView` records; the
+change is mechanical at the three call sites plus `render_test.go`'s `TestToolHeaderLabelStyled`.
+`doc.go`'s P3.14 paragraph gained a closing sentence: it described the railed frame as what the renderer
+draws, which is now what expanding a run reveals.
+
+NOTES (2026-08-02): `TestRenderConsecutiveSubAgentRunsAreNotConnected` now expands both heads before
+asserting — its subject is how two rails meet, and a collapsed run has no rail on screen. The assertion
+itself is unchanged, which is the item's "the rail tests pass unchanged for the expanded paint". One
+visible consequence of the spec as written: a finished run whose report is long enough to be a body
+shows that report's first line twice when collapsed — once in the summary slot (`N tool calls · <first
+line>`) and once as the body's compact paint — since layout.md keeps the compact body shape unchanged
+in the collapsed state and separately gives the summary slot the report's first line.
 
 **What:** the run is a block; one rule at every depth.
 

@@ -131,7 +131,18 @@ const statusTargetRunes = 32
 // paints this label the moment a call is ANNOUNCED, before any approval gate runs, so it is the
 // earliest point at which a hostile model's argument reaches the screen.
 func toolActivityLabel(call domain.ToolCall) string {
-	tv := presentToolCall(call)
+	return toolPhrase(presentToolCall(call))
+}
+
+// toolPhrase is the composition itself: a call's view worded as the sentence fragment naming what
+// it is doing right now. It is split out from toolActivityLabel because a COLLAPSED sub-agent run
+// says the same thing about the call its span has open (subAgentGist, render.go) and must not word
+// it a second way — there is ONE phrase for "what is happening", wherever it is shown, so a change
+// to the wording moves the status line and the run's summary together.
+//
+// It takes the view rather than the call, since the transcript's own entries carry views already
+// sanitized by presentToolCall; toolActivityLabel is the seam that builds one from a raw call.
+func toolPhrase(tv toolView) string {
 	if tv.Target == "" {
 		return tv.Verb
 	}

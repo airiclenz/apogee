@@ -170,12 +170,24 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 				appendBlock(false, d, i, plainPaint(renderSubAgentLabel(th, d, width)))
 			}
 		}
-		// Consecutive same-label tool calls fold into one block at render time, so a batch of
-		// reads is one header plus an aligned branch per file. The entry list is untouched: a
-		// call that arrives mid-stream joins its group on the next repaint for free, and a run
-		// is same-depth by construction, so the label logic above fires exactly as before.
-		if run := toolCallRun(t.entries, i); len(run) > 1 {
-			block := renderToolBlock(th, run, railedWidth(width, e.depth), e.expanded).railed(th, e.depth)
+		// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
+		// cascading summary and the whole span is then skipped outright, which is what elides the
+		// inner blocks, their ⤷ labels, and every rail and spacer among them — nothing is painted
+		// and afterwards taken back, and the descent logic above never fires because it never sees
+		// a deeper entry. Expanded, only the head is painted here and the loop walks into the span
+		// exactly as it always has, so every inner block keeps its OWN state and a nested run
+		// collapses inside an expanded parent by this same rule, at every depth.
+		if span := subAgentSpan(t.entries, i); span > 0 {
+			appendBlock(false, e.depth, i, renderSubAgentRun(th, e, t.entries[i+1:i+1+span], width))
+			if !e.expanded {
+				i += span
+			}
+		} else if run := toolCallRun(t.entries, i); len(run) > 1 {
+			// Consecutive same-label tool calls fold into one block at render time, so a batch of
+			// reads is one header plus an aligned branch per file. The entry list is untouched: a
+			// call that arrives mid-stream joins its group on the next repaint for free, and a run
+			// is same-depth by construction, so the label logic above fires exactly as before.
+			block := renderToolBlock(th, run, railedWidth(width, e.depth), blockState{expanded: e.expanded}).railed(th, e.depth)
 			appendBlock(false, e.depth, i, block)
 			i += len(run) - 1
 		} else {
@@ -225,7 +237,7 @@ func renderEntryLines(th theme, e entry, width int) blockPaint {
 		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
 		return plainPaint(railLines(th, withMarker(th, marker, body), e.depth))
 	case entryToolCall:
-		return renderToolBlock(th, []toolView{e.tool}, inner, e.expanded).railed(th, e.depth)
+		return renderToolBlock(th, []toolView{e.tool}, inner, blockState{expanded: e.expanded}).railed(th, e.depth)
 	case entryToolResult:
 		return plainPaint(railLines(th, renderOrphanResult(th, e.text, inner), e.depth))
 	case entryError:
@@ -248,6 +260,102 @@ func renderSubAgentLabel(th theme, depth, width int) []string {
 	inner := railedWidth(width, depth)
 	body := hangingWrap(th, th.subRail, glyphSubLabel+" ", subAgentLabel, inner)
 	return railLines(th, body, depth)
+}
+
+// subAgentToolName is the raw tool id whose call block heads a sub-agent run. The span rule matches
+// on the view's retained name (toolView.name, which the codec round-trips) rather than on the
+// "Sub-Agent" label, so a relabelling cannot silently switch the rule off and a third-party tool
+// that happens to share the label cannot switch it on.
+const subAgentToolName = "sub_agent"
+
+// subAgentSpan is the length of the run entries[i] heads: the maximal following stretch of entries
+// nested deeper than it. That stretch IS the run — the transcript records a sub-agent's work
+// head-first and folds the report back into the head (transcript.addToolResult), so everything the
+// child did lies between the call and the next entry standing at the parent's own depth. Nothing
+// marks the span; it is derived at paint from the depths already on the entries, exactly as
+// renderView's ⤷ descent labels are.
+//
+// It answers 0 for anything that is not a sub-agent call, and for a run that produced no nested
+// entry at all (a child that failed before its first event) — either way the head is an ordinary
+// tool block with nothing behind it, and renderView paints it as one.
+func subAgentSpan(entries []entry, i int) int {
+	head := entries[i]
+	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+		return 0
+	}
+	n := 0
+	for j := i + 1; j < len(entries) && entries[j].depth > head.depth; j++ {
+		n++
+	}
+	return n
+}
+
+// renderSubAgentRun paints the head block of a sub-agent run — the whole of what a COLLAPSED run
+// shows, since renderView elides its span, and the opening block of an expanded one. The two states
+// differ in exactly what layout.md says they do: collapsed, the head's summary slot carries the
+// cascading summary of the work behind it; expanded, the head is an ordinary block with its full
+// report and the span paints as it always has.
+//
+// The head's view is COPIED before its summary is replaced, so the substitution is a paint-time act
+// on a fact the entry keeps whole — the same discipline the body's truncation follows
+// (collapsedDetails), and the reason expanding shows the report the run actually returned.
+func renderSubAgentRun(th theme, head entry, span []entry, width int) blockPaint {
+	view := head.tool
+	if !head.expanded {
+		view.Summary = subAgentSummary(head, span)
+	}
+	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
+		expanded: head.expanded,
+		elides:   true,
+	}).railed(th, head.depth)
+}
+
+// subAgentSummary words a collapsed run's one line: how much work happened in there, then its gist
+// (layout.md, "A sub-agent run collapses to its call block"). The count is TRANSITIVE by
+// construction — the span holds every entry of every level below the head, so counting its tool
+// calls counts the grandchildren too, and the same rule read at a deeper head gives that level's
+// own total without a second rule.
+//
+// A run with nothing to say beyond the count — no call open yet, or a report that carried no line
+// at all — keeps the count alone rather than trailing an empty separator.
+func subAgentSummary(head entry, span []entry) detailLine {
+	calls := 0
+	for i := range span {
+		if span[i].kind == entryToolCall {
+			calls++
+		}
+	}
+	text := plural(calls, "tool call")
+	if gist := subAgentGist(head, span); gist != "" {
+		text += " · " + gist
+	}
+	return detailLine{Text: text}
+}
+
+// subAgentGist is the second half of a collapsed run's summary, in the two tempi layout.md gives it.
+// While the run works — the head has no result yet — it is the live phrase for the call the span has
+// open, the same composition the status line shows for that call (toolPhrase, activity.go), read off
+// the span at paint rather than kept as a second copy of the activity state. The MOST RECENT open
+// call is the honest one when several are open at once: it is the work the child turned to last.
+//
+// Once the report lands the head has a gist of its own and that is the line — the summary a short
+// report was compressed to, or, where the report was long enough to become a body, its first line.
+func subAgentGist(head entry, span []entry) string {
+	if head.done {
+		if head.tool.Summary.Text != "" {
+			return head.tool.Summary.Text
+		}
+		if len(head.tool.Details) > 0 {
+			return head.tool.Details[0].Text
+		}
+		return ""
+	}
+	for i := len(span) - 1; i >= 0; i-- {
+		if e := span[i]; e.kind == entryToolCall && !e.done {
+			return toolPhrase(e.tool)
+		}
+	}
+	return ""
 }
 
 // renderUserBlock renders something the human said as a full-width white-on-dark-gray block: the
@@ -471,27 +579,27 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // which is no padding at all. An empty slice renders nothing — every caller passes at least one
 // view, and a renderer on the repaint path must not be the thing that panics if one ever does not.
 //
-// expanded is the block's view state (entry.expanded), and it changes exactly one thing: an
-// expanded block paints its retained body whole while a collapsed one paints the compact shape,
-// remainder marker and all (renderToolBranch). A GROUPED run is the degenerate case — its members
-// carry no body by definition (groupable), so both states paint identically and the head entry's
-// state is passed only so the two callers share one call shape (layout.md, "Collapsed and expanded
-// blocks").
+// state is the block's view state, and its expanded half changes exactly one thing: an expanded
+// block paints its retained body whole while a collapsed one paints the compact shape, remainder
+// marker and all (renderToolBranch). A GROUPED run is the degenerate case — its members carry no
+// body by definition (groupable), so both states paint identically and the head entry's state is
+// passed only so the two callers share one call shape (layout.md, "Collapsed and expanded blocks").
 //
 // It also marks the block's CLICK SURFACE as it emits it — every physical line of the header, and
 // any remainder marker a branch synthesized — because the lines and the marks have to be one act:
 // a second pass over the finished lines would be a second derivation of the same accounting, and
 // the two would drift the first time the shape changed (ADR 0030's rule). The header is marked
-// only when the collapsed paint HIDES something (blockHidesWhenCollapsed) — a block with nothing
-// to reveal has nothing to toggle, so a body-less group's header keeps a click's selection meaning.
-// The mark is state-independent by design: an expanded block still marks its header, which is what
-// lets the same click collapse it again.
-func renderToolBlock(th theme, views []toolView, width int, expanded bool) blockPaint {
+// when the collapsed paint HIDES something — either inside the views (blockHidesWhenCollapsed) or
+// outside them (state.elides, the sub-agent run's span) — because a block with nothing to reveal
+// has nothing to toggle, so a body-less group's header keeps a click's selection meaning. The mark
+// is state-independent by design: an expanded block still marks its header, which is what lets the
+// same click collapse it again.
+func renderToolBlock(th theme, views []toolView, width int, state blockState) blockPaint {
 	if len(views) == 0 {
 		return blockPaint{}
 	}
 	header := targetNone
-	if blockHidesWhenCollapsed(views) {
+	if state.elides || blockHidesWhenCollapsed(views) {
 		header = targetHeader
 	}
 	var out blockPaint
@@ -501,9 +609,23 @@ func renderToolBlock(th theme, views []toolView, width int, expanded bool) block
 		column = max(column, th.measure.Width(tv.Target))
 	}
 	for i, tv := range views {
-		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, expanded))
+		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, state.expanded))
 	}
 	return out
+}
+
+// blockState is what a tool block's painter is told beyond the views themselves: which of the two
+// paints to draw, and whether the collapsed one hides anything the views cannot account for.
+//
+// elides is the sub-agent run's case, and today its only one. A collapsed run's whole span — every
+// inner block, every ⤷ label, every rail — is left unpainted by [transcript.renderView] before the
+// head block ever reaches the painter, so nothing among the views records that there is something
+// behind the header. The toggle-target rule has to know anyway: layout.md makes a run with a span
+// clickable however short its own report is. Like the mark itself it is state-INDEPENDENT — an
+// expanded run sets it too, which is what leaves the header clickable so the same click closes it.
+type blockState struct {
+	expanded bool
+	elides   bool
 }
 
 // blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the
@@ -715,7 +837,7 @@ func renderOrphanResult(th theme, text string, width int) []string {
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
 	}
-	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width, false).lines
+	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width, blockState{}).lines
 }
 
 // renderDetails renders tool-detail lines as ┝/┕ tree branches (the last line gets ┕),

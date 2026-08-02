@@ -47,7 +47,12 @@
 // tool-call block sits at the PARENT's depth — the join dips there, the spacer goes bare, and the
 // descent logic opens a fresh ⤷ label for the second run. The whole frame — rail and label alike —
 // is one style role (theme's subRail) in the tool-header orange (colCode), coherent with the orange
-// ✦ tool markers.
+// ✦ tool markers. That whole frame is what a COLLAPSED run elides: by default a sub_agent call
+// block and the span of deeper entries behind it are ONE block ([subAgentSpan],
+// [renderSubAgentRun]), its summary slot carrying the run's transitive tool-call count and its gist
+// — the live phrase of whatever the span has open, then the report's first line — and the framing
+// above is what expanding it reveals, each inner block in its own state (layout.md, "Collapsed and
+// expanded blocks").
 //
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):
