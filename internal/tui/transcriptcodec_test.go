@@ -142,6 +142,39 @@ func TestTranscriptCodecExcludesEphemeral(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecExcludesExpandedState proves the fourth exclusion, and the one the wire form
+// gets for free: a block's expanded state is the VIEW's alone (layout.md, "Collapsed and expanded
+// blocks"), so an expanded tool call is stored exactly as a collapsed one and a resumed session
+// paints everything collapsed. The call itself must still round-trip whole — the state is excluded,
+// not the block — so the retained body is asserted beside it.
+func TestTranscriptCodecExcludesExpandedState(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{entries: mixedEntries()}
+	if !tr.toggleExpanded(2) {
+		t.Fatal("toggleExpanded(2) = false; the fixture's tool call did not expand")
+	}
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if strings.Contains(string(data), "expanded") {
+		t.Errorf("the expanded state reached the wire: %s", data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if !reflect.DeepEqual(got, mixedEntries()) {
+		t.Errorf("an expanded entry decoded as something other than its collapsed self:\n got = %+v\nwant = %+v", got, mixedEntries())
+	}
+	for i := range got {
+		if got[i].expanded {
+			t.Errorf("entries[%d] decoded expanded; a resumed session paints every block collapsed", i)
+		}
+	}
+}
+
 // TestTranscriptCodecEmptyIsLegacy pins the legacy case: an empty or nil blob (a record written
 // before the codec existed, or one with no scrollback) decodes to no entries and no error, so the
 // caller degrades to resuming without a replay rather than reporting a fault.

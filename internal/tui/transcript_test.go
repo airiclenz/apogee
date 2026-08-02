@@ -909,6 +909,45 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	}
 }
 
+// toggleExpanded flips the block state of a TOOL-CALL entry and nothing else: an index naming
+// another kind, or naming nothing at all (a click resolved against a paint the transcript has
+// grown past), answers false and leaves every entry as it was. It runs on the repaint path, so
+// the out-of-range cases are the point — a panic there is the whole session.
+func TestToggleExpandedTargetsToolCallsOnly(t *testing.T) {
+	fixture := func() *transcript {
+		tr := &transcript{}
+		tr.addUser("read a.go", nil)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
+		return tr
+	}
+	cases := []struct {
+		name  string
+		index int
+		want  bool
+	}{
+		{name: "a tool call toggles", index: 1, want: true},
+		{name: "a user send has no block state", index: 0, want: false},
+		{name: "an index past the tail is no entry", index: 2, want: false},
+		{name: "a negative index is no entry", index: -1, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := fixture()
+
+			got := tr.toggleExpanded(tc.index)
+
+			if got != tc.want {
+				t.Errorf("toggleExpanded(%d) = %v; want %v", tc.index, got, tc.want)
+			}
+			for i := range tr.entries {
+				if expanded := tr.entries[i].expanded; expanded != (tc.want && i == tc.index) {
+					t.Errorf("entries[%d].expanded = %v after toggleExpanded(%d)", i, expanded, tc.index)
+				}
+			}
+		})
+	}
+}
+
 // reset returns the transcript to its empty state — no committed entries, no in-progress buffer —
 // but preserves the debug flag (a hidden view toggle, not conversation). It is the /clear + /new
 // "start a new session" primitive; the caller re-seeds the start-up box afterwards.

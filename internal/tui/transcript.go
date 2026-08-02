@@ -58,6 +58,14 @@ const (
 // notice is the same thing one kind over: re-derived from live state at the moment the view is
 // rebuilt, so persisting it would append a fresh copy on every resume until the record was a
 // column of "resumed:" notes.
+//
+// expanded is the block's VIEW state and nothing else (entryToolCall only, toggleExpanded its one
+// writer): false — the zero value, and therefore the default for every entry however it was born,
+// folded mid-flight or replayed from a record — is the collapsed, compact paint; true paints the
+// block's retained body in full (layout.md, "Collapsed and expanded blocks"). It sits beside done
+// because it is the same kind of per-entry fact the painter reads off the shared entries slice,
+// and it is deliberately absent from the wire form — the state is the view's alone, so a resumed
+// session paints everything collapsed and /clear forgets it with everything else.
 type entry struct {
 	kind      entryKind
 	text      string
@@ -65,6 +73,7 @@ type entry struct {
 	callID    string
 	tool      toolView
 	done      bool
+	expanded  bool     // view-only block state: false = collapsed (the default); never persisted
 	ephemeral bool     // display-only: rendered, never persisted (see encodeTranscript)
 	skills    []string // entryUser / entryInterjected: display names of the skills this message invoked
 	presented presentedView
@@ -474,6 +483,26 @@ func (t *transcript) hasOpenToolCall() bool {
 		}
 	}
 	return false
+}
+
+// toggleExpanded flips one block between its collapsed and expanded paint and reports whether it
+// found a block to flip. index addresses t.entries, and only a tool-call entry has a block state:
+// every other kind — a user send, an assistant answer, a note — paints one way whatever is asked
+// of it, and an index outside the slice is a caller resolving a click against a paint the
+// transcript has already grown past. Both answer false and change nothing, because this sits on
+// the repaint path where a panic is the whole session.
+//
+// It is the one writer of entry.expanded, and it writes THROUGH the entries slice exactly as
+// addToolResult marks done: the Model is copied by value on every Update (ADR 0011), so per-entry
+// state on the shared backing array is how a view fact survives the copy without a map or a
+// no-copy type on the Model. Nothing here touches the engine, the call/result pairing, or the
+// session record — an expanded block is a way of looking at the scrollback, not a change to it.
+func (t *transcript) toggleExpanded(index int) bool {
+	if index < 0 || index >= len(t.entries) || t.entries[index].kind != entryToolCall {
+		return false
+	}
+	t.entries[index].expanded = !t.entries[index].expanded
+	return true
 }
 
 // addApproval records an Approval observationally — the decision already came back through

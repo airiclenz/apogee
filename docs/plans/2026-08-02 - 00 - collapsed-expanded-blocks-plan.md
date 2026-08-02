@@ -93,7 +93,7 @@ the outcome builders.
 
 **Commit:** `refactor(tui): tool outcomes retain full bodies; truncation moves to paint`
 
-## 2. Blocks carry an expanded state and paint their full bodies
+## 2. Blocks carry an expanded state and paint their full bodies — ✅ DONE (2026-08-02)
 
 Depends on item 1.
 

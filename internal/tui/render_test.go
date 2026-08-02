@@ -345,7 +345,7 @@ func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
 	th := newTheme()
-	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80)
+	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80, false)
 	head := block[0]
 
 	if got, want := ansi.Strip(head), "✦ Read File"; got != want {
@@ -666,6 +666,97 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 				t.Errorf("collapsed body mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 			}
 		})
+	}
+}
+
+// TestExpandedBlockPaintsItsWholeBody pins what the expanded state is FOR: the block paints every
+// body line the entry retained and grows no remainder marker, and collapsing it again paints
+// exactly the compact shape back. The round trip runs over one transcript rather than two
+// fixtures, because that is the claim — nothing about the entry changes but the flag the painter
+// reads (layout.md, "Collapsed and expanded blocks").
+func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
+	diffContent := func(n int) string { return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n") }
+	paintedDiff := func(n int) []string {
+		out := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, "    + added")
+		}
+		return out
+	}
+	cases := []struct {
+		name          string
+		build         func(tr *transcript)
+		wantCollapsed []string
+		wantExpanded  []string
+	}{
+		{
+			name: "free-form output expands from its first line to all of them",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
+			},
+			wantCollapsed: []string{"    ok   a", "    … +3 more lines"},
+			wantExpanded:  []string{"    ok   a", "    ok   b", "    ok   c", "    PASS"},
+		},
+		{
+			name: "a diff body expands past diffDetailCap",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
+					Content: diffContent(diffDetailCap + 3), Summary: domain.DiffStat{Added: diffDetailCap + 3}}})
+			},
+			wantCollapsed: append(paintedDiff(diffDetailCap), "    … +3 more lines"),
+			wantExpanded:  paintedDiff(diffDetailCap + 3),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+			// The block is a header, a branch line, then its body: everything past the branch is
+			// what the block's state made of the retained lines.
+			body := func() string {
+				lines := strings.Split(renderPlain(tr, 80), "\n")
+				return strings.Join(lines[2:], "\n")
+			}
+
+			if got, want := body(), strings.Join(tc.wantCollapsed, "\n"); got != want {
+				t.Errorf("default paint mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false; want the tool-call entry toggled")
+			}
+			if got, want := body(), strings.Join(tc.wantExpanded, "\n"); got != want {
+				t.Errorf("expanded paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			if strings.Contains(body(), "more line") {
+				t.Errorf("the expanded body kept a remainder marker:\n%s", body())
+			}
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false on the way back; want the entry toggled")
+			}
+			if got, want := body(), strings.Join(tc.wantCollapsed, "\n"); got != want {
+				t.Errorf("re-collapsed paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// A grouped run paints the same in both states, and no special case in the painter makes that
+// true: a groupable call carries no body by definition, so there is nothing for the expanded
+// paint to reveal (layout.md — the group is the degenerate case of the two-state rule).
+func TestExpandedGroupPaintsIdentically(t *testing.T) {
+	tr := &transcript{}
+	readCall(tr, "c1", "main.go", 1, 154, 0)
+	readCall(tr, "c2", "util.go", 1, 42, 0)
+
+	collapsed := renderPlain(tr, 80)
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the group's head entry toggled")
+	}
+
+	if got := renderPlain(tr, 80); got != collapsed {
+		t.Errorf("expanded group repainted:\n--- got ---\n%s\n--- want (unchanged) ---\n%s", got, collapsed)
 	}
 }
 

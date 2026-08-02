@@ -87,7 +87,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// call that arrives mid-stream joins its group on the next repaint for free, and a run
 		// is same-depth by construction, so the label logic above fires exactly as before.
 		if run := toolCallRun(t.entries, i); len(run) > 1 {
-			appendBlock(false, e.depth, railLines(th, renderToolBlock(th, run, railedWidth(width, e.depth)), e.depth))
+			appendBlock(false, e.depth, railLines(th, renderToolBlock(th, run, railedWidth(width, e.depth), e.expanded), e.depth))
 			i += len(run) - 1
 		} else {
 			appendBlock(e.kind == entryUser, e.depth, renderEntryLines(th, e, width))
@@ -130,7 +130,7 @@ func renderEntryLines(th theme, e entry, width int) []string {
 		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
 		return railLines(th, withMarker(th, marker, body), e.depth)
 	case entryToolCall:
-		return railLines(th, renderToolBlock(th, []toolView{e.tool}, inner), e.depth)
+		return railLines(th, renderToolBlock(th, []toolView{e.tool}, inner, e.expanded), e.depth)
 	case entryToolResult:
 		return railLines(th, renderOrphanResult(th, e.text, inner), e.depth)
 	case entryError:
@@ -375,7 +375,14 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // cells (th.measure, width.go), so a multi-byte path pads correctly. A block of one pads to itself,
 // which is no padding at all. An empty slice renders nothing — every caller passes at least one
 // view, and a renderer on the repaint path must not be the thing that panics if one ever does not.
-func renderToolBlock(th theme, views []toolView, width int) []string {
+//
+// expanded is the block's view state (entry.expanded), and it changes exactly one thing: an
+// expanded block paints its retained body whole while a collapsed one paints the compact shape,
+// remainder marker and all (renderToolBranch). A GROUPED run is the degenerate case — its members
+// carry no body by definition (groupable), so both states paint identically and the head entry's
+// state is passed only so the two callers share one call shape (layout.md, "Collapsed and expanded
+// blocks").
+func renderToolBlock(th theme, views []toolView, width int, expanded bool) []string {
 	if len(views) == 0 {
 		return nil
 	}
@@ -385,7 +392,7 @@ func renderToolBlock(th theme, views []toolView, width int) []string {
 		column = max(column, th.measure.Width(tv.Target))
 	}
 	for i, tv := range views {
-		out = append(out, renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width)...)
+		out = append(out, renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, expanded)...)
 	}
 	return out
 }
@@ -399,8 +406,8 @@ func renderToolBlock(th theme, views []toolView, width int) []string {
 //     the block repaints whole once the result folds in. Its Details, if any, are the block's
 //     body and lay out beneath the branch at the branch marker's own width — not as ┝/┕ branches
 //     of their own, because only calls are (a Run's output, a diff body under its diffstat) —
-//     truncated to what the collapsed shape shows, which is the one place that truncation
-//     happens (collapsedDetails).
+//     truncated to what the collapsed shape shows when the block is collapsed, which is the one
+//     place that truncation happens (collapsedDetails), and painted whole when it is expanded.
 //   - a call with NO target — the only shape with no target line: the header stands alone and
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
 //     line to ride (an unregistered tool's pretty-printed arguments then its "error: …"
@@ -410,7 +417,11 @@ func renderToolBlock(th theme, views []toolView, width int) []string {
 // there are: a body of one line and a body of ten lay out the same way. Anything overlong
 // soft-wraps under its marker like any other detail line — nothing is clipped for alignment's
 // sake.
-func renderToolBranch(th theme, tv toolView, column int, marker string, width int) []string {
+// The block's state reaches only the body: an expanded block lays out every line the entry
+// retained and grows no remainder marker, a collapsed one paints collapsedDetails. The targetless
+// shape ignores the state entirely, because it hides nothing in either — its detail lines ARE the
+// block's branches.
+func renderToolBranch(th theme, tv toolView, column int, marker string, width int, expanded bool) []string {
 	if tv.Target == "" {
 		return renderDetails(th, branchDetails(tv), width)
 	}
@@ -420,8 +431,12 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 		text += pad + " " + tv.Summary.Text
 		style = detailStyle(th, tv.Summary.Kind)
 	}
+	body := tv.Details
+	if !expanded {
+		body = collapsedDetails(tv.Details)
+	}
 	out := hangingWrap(th, style, marker, text, width)
-	return append(out, renderSubDetails(th, collapsedDetails(tv.Details), th.measure.Width(marker), width)...)
+	return append(out, renderSubDetails(th, body, th.measure.Width(marker), width)...)
 }
 
 // diffDetailCap bounds how many diff lines a COLLAPSED block paints — enough to read a focused
@@ -545,12 +560,15 @@ func groupable(tv toolView) bool {
 // a ✦ result header — the bare word styled like any tool label — with the raw content hanging
 // off branches. It is targetless by construction, so it renders through the block renderer's
 // no-target shape. The caller frames it for depth — width is already the railed inner column.
+//
+// It paints collapsed and stays that way: the targetless shape hides nothing (its lines are the
+// branches themselves), so a stray result has no second state to show and is no toggle target.
 func renderOrphanResult(th theme, text string, width int) []string {
 	details := make([]detailLine, 0)
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
 	}
-	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width)
+	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width, false)
 }
 
 // renderDetails renders tool-detail lines as ┝/┕ tree branches (the last line gets ┕),
