@@ -791,7 +791,7 @@ type blockMark struct {
 // safe to use as an index into the targets on the mouse path (model.go).
 func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 	t.Helper()
-	rendered := tr.renderView(newTheme(), width)
+	rendered := tr.renderView(newTheme(), width, false)
 	if len(rendered.targets) != len(rendered.lines) {
 		t.Fatalf("targets and lines out of lockstep: %d targets for %d lines",
 			len(rendered.targets), len(rendered.lines))
@@ -1008,6 +1008,132 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 			t.Errorf("line %d is marked %v but names entry %d, a %v", line, want, entry,
 				m.transcript.entries[entry].kind)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The live star: which blocks blink their header glyph (layout.md, "The live star")
+// ----------------------------------------------------------------------------
+
+// headerStar renders tr at one blink phase and returns its first rendered line with the styling
+// stripped — the block header the star leads. The phase is the renderer's parameter rather than
+// anything the transcript holds, so a test names it outright instead of driving a clock.
+func headerStar(t *testing.T, tr *transcript, blink bool) string {
+	t.Helper()
+	lines := tr.renderView(newTheme(), 80, blink).lines
+	if len(lines) == 0 {
+		t.Fatal("the transcript rendered nothing at all")
+	}
+	return strings.TrimRight(ansiPattern.ReplaceAllString(lines[0], ""), " ")
+}
+
+// TestLiveBlockHeaderStarBlinks is the rule in one table: a block still holding an open call paints
+// ✦ or ✧ by the frame's blink phase, and a block with everything it was waiting for paints ✦ at
+// BOTH phases — the phase alone never moves a settled star. Each case asserts the header at both
+// phases, so a block that blinked when it should not have fails here just as loudly as one that did
+// not blink when it should.
+func TestLiveBlockHeaderStarBlinks(t *testing.T) {
+	openRead := func(tr *transcript, id, path string, depth int) {
+		tr.apply(domain.ToolCallEvent{
+			EventBase: domain.EventBase{Depth: depth},
+			Call:      domain.ToolCall{ID: id, Tool: "read_file", Arguments: []byte(`{"path":"` + path + `"}`)},
+		})
+	}
+	openRun := func(tr *transcript, id, command string) {
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: id, Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
+	}
+	cases := []struct {
+		name             string
+		build            func(t *testing.T, tr *transcript)
+		settled, flipped string
+	}{
+		{
+			name:    "a call still awaiting its result blinks",
+			build:   func(_ *testing.T, tr *transcript) { openRun(tr, "c1", "go test ./...") },
+			settled: "✦ Run", flipped: "✧ Run",
+		},
+		{
+			name: "a landed result settles the star",
+			build: func(_ *testing.T, tr *transcript) {
+				openRun(tr, "c1", "go test ./...")
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "PASS"}})
+			},
+			settled: "✦ Run", flipped: "✦ Run",
+		},
+		{
+			// The state is none of the star's business: expanding a block shows more of it, it does
+			// not make the work behind it land.
+			name: "an expanded live block blinks like any other",
+			build: func(t *testing.T, tr *transcript) {
+				openRun(tr, "c1", "go test ./...")
+				if !tr.setExpanded(0, true) {
+					t.Fatal("setExpanded(0, true) = false; want the in-flight call expanded")
+				}
+			},
+			settled: "✦ Run", flipped: "✧ Run",
+		},
+		{
+			// A group has ONE header for many calls, so its star answers for all of them: a batch
+			// whose first read landed and whose second has not is still working.
+			name: "a group blinks while any of its calls is open",
+			build: func(_ *testing.T, tr *transcript) {
+				readCall(tr, "c1", "main.go", 1, 154, 0)
+				openRead(tr, "c2", "util.go", 0)
+			},
+			settled: "✦ Read File", flipped: "✧ Read File",
+		},
+		{
+			name: "a group whose calls have all landed settles",
+			build: func(_ *testing.T, tr *transcript) {
+				readCall(tr, "c1", "main.go", 1, 154, 0)
+				readCall(tr, "c2", "util.go", 1, 42, 0)
+			},
+			settled: "✦ Read File", flipped: "✦ Read File",
+		},
+		{
+			// A run is live until its REPORT lands, whatever the span has already finished.
+			name: "a sub-agent run blinks while its report is out",
+			build: func(_ *testing.T, tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+			},
+			settled: "✦ Sub-Agent", flipped: "✧ Sub-Agent",
+		},
+		{
+			// The mirror case, and the reason the rule asks the span as well as the head: the report
+			// landed over a call that never got its result, so work is still standing behind the
+			// star — and behind a COLLAPSED run nothing else on screen says so.
+			name: "a reported run whose span still holds an open call keeps blinking",
+			build: func(_ *testing.T, tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				openRead(tr, "c1", "a.go", 1)
+				subAgentReport(tr, "s1", "survey complete", 0)
+			},
+			settled: "✦ Sub-Agent", flipped: "✧ Sub-Agent",
+		},
+		{
+			name: "a finished run settles",
+			build: func(_ *testing.T, tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentReport(tr, "s1", "survey complete", 0)
+			},
+			settled: "✦ Sub-Agent", flipped: "✦ Sub-Agent",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(t, tr)
+
+			if got := headerStar(t, tr, false); got != tc.settled {
+				t.Errorf("header at the settled phase = %q, want %q", got, tc.settled)
+			}
+			if got := headerStar(t, tr, true); got != tc.flipped {
+				t.Errorf("header at the flipped phase = %q, want %q", got, tc.flipped)
+			}
+		})
 	}
 }
 

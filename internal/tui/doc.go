@@ -52,7 +52,10 @@
 // [renderSubAgentRun]), its summary slot carrying the run's transitive tool-call count and its gist
 // — the live phrase of whatever the span has open, then the report's first line — and the framing
 // above is what expanding it reveals, each inner block in its own state (layout.md, "Collapsed and
-// expanded blocks").
+// expanded blocks"). While anything behind a block's header is still waiting for a result, that
+// header's ✦ blinks against ✧ ([blockState.star]) on the STATUS SPINNER's frame parity
+// ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick repaints
+// the viewport only while [transcript.hasOpenToolCall] holds, so an idle chain costs no repaints.
 //
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):

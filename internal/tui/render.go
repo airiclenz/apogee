@@ -118,7 +118,14 @@ func (p blockPaint) railed(th theme, depth int) blockPaint {
 // viewport's lines, recording where the last user block begins. Blocks are separated by one
 // line (layout.md), railed at the depth the two blocks share so a sub-agent run's frame is
 // continuous through its separators (railSpacer).
-func (t *transcript) renderView(th theme, width int) renderedTranscript {
+//
+// blink is this frame's phase of the live star ([spinnerAnim.blink]): it reaches only the header
+// glyph of a block that still holds an open call, and every other line of the transcript paints
+// identically at either phase. It is a PARAMETER rather than transcript state because the phase
+// belongs to the frame being drawn and not to the scrollback — the same entries painted a tick
+// later are the same entries (ADR 0011: the Model is copied by value, and the renderer stays a
+// pure function of what it is handed).
+func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscript {
 	if width < 1 {
 		width = 1
 	}
@@ -178,7 +185,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// exactly as it always has, so every inner block keeps its OWN state and a nested run
 		// collapses inside an expanded parent by this same rule, at every depth.
 		if span := subAgentSpan(t.entries, i); span > 0 {
-			appendBlock(false, e.depth, i, renderSubAgentRun(th, e, t.entries[i+1:i+1+span], width))
+			appendBlock(false, e.depth, i, renderSubAgentRun(th, e, t.entries[i+1:i+1+span], width, blink))
 			if !e.expanded {
 				i += span
 			}
@@ -187,11 +194,20 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 			// reads is one header plus an aligned branch per file. The entry list is untouched: a
 			// call that arrives mid-stream joins its group on the next repaint for free, and a run
 			// is same-depth by construction, so the label logic above fires exactly as before.
-			block := renderToolBlock(th, run, railedWidth(width, e.depth), blockState{expanded: e.expanded}).railed(th, e.depth)
+			//
+			// The group's liveness is the group's, not its head's: a batch of reads whose first call
+			// has landed and whose last has not is still working, and the one star over them all says
+			// so. The run is entries[i:i+len(run)] by construction (toolCallRun walks adjacent
+			// entries forward), so the views' own entries are what the rule reads.
+			block := renderToolBlock(th, run, railedWidth(width, e.depth), blockState{
+				expanded: e.expanded,
+				live:     anyOpenCall(t.entries[i : i+len(run)]),
+				blink:    blink,
+			}).railed(th, e.depth)
 			appendBlock(false, e.depth, i, block)
 			i += len(run) - 1
 		} else {
-			appendBlock(e.kind == entryUser, e.depth, i, renderEntryLines(th, e, width))
+			appendBlock(e.kind == entryUser, e.depth, i, renderEntryLines(th, e, width, blink))
 		}
 		prevDepth = e.depth
 	}
@@ -200,15 +216,17 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// buffer keeps them (a mid-stream "\n\n" may be a paragraph break about to be continued),
 		// but the preview must not grow a wobbling gap above the footer. An empty buffer still
 		// renders its lone marker line, so the human sees that streaming has begun.
-		preview := renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width)
+		preview := renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width, blink)
 		appendBlock(false, 0, len(t.entries), preview)
 	}
 	return renderedTranscript{lines: lines, lastUserStart: lastUserStart, userBlocks: userBlocks, targets: targets}
 }
 
-// renderLines is the line slice alone — the viewport content and the substring-test surface.
+// renderLines is the line slice alone — the viewport content and the substring-test surface — at
+// the star's SETTLED phase: the blink is a fact about the frame being drawn, and a caller that has
+// no frame (a width probe, a substring assertion) has no phase either.
 func (t *transcript) renderLines(th theme, width int) []string {
-	return t.renderView(th, width).lines
+	return t.renderView(th, width, false).lines
 }
 
 // renderEntryLines renders one committed entry into its physical lines, framed for its
@@ -219,8 +237,10 @@ func (t *transcript) renderLines(th theme, width int) []string {
 //
 // Only a tool call has a click surface — it is the only kind with two states to toggle between —
 // so every other kind comes back as plainPaint: a note or an answer paints one way whatever is
-// asked of it, and a click there keeps its selection meaning.
-func renderEntryLines(th theme, e entry, width int) blockPaint {
+// asked of it, and a click there keeps its selection meaning. blink reaches that one kind for the
+// same reason: a tool call is the only entry that can still be WAITING for something, so it is the
+// only header with a star to blink (layout.md, "The live star").
+func renderEntryLines(th theme, e entry, width int, blink bool) blockPaint {
 	inner := railedWidth(width, e.depth)
 	switch e.kind {
 	case entryUser:
@@ -237,7 +257,11 @@ func renderEntryLines(th theme, e entry, width int) blockPaint {
 		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
 		return plainPaint(railLines(th, withMarker(th, marker, body), e.depth))
 	case entryToolCall:
-		return renderToolBlock(th, []toolView{e.tool}, inner, blockState{expanded: e.expanded}).railed(th, e.depth)
+		return renderToolBlock(th, []toolView{e.tool}, inner, blockState{
+			expanded: e.expanded,
+			live:     !e.done,
+			blink:    blink,
+		}).railed(th, e.depth)
 	case entryToolResult:
 		return plainPaint(railLines(th, renderOrphanResult(th, e.text, inner), e.depth))
 	case entryError:
@@ -299,7 +323,12 @@ func subAgentSpan(entries []entry, i int) int {
 // The head's view is COPIED before its summary is replaced, so the substitution is a paint-time act
 // on a fact the entry keeps whole — the same discipline the body's truncation follows
 // (collapsedDetails), and the reason expanding shows the report the run actually returned.
-func renderSubAgentRun(th theme, head entry, span []entry, width int) blockPaint {
+// A run is live until its REPORT lands, and its span is asked as well as its head: a report that
+// never arrived (a child cancelled mid-tool) leaves the head open, and — the mirror case — a head
+// already reported over a call that never got its result leaves work still standing behind the
+// star. Either way the block still contains an open call, which is exactly what layout.md makes the
+// star's rule.
+func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool) blockPaint {
 	view := head.tool
 	if !head.expanded {
 		view.Summary = subAgentSummary(head, span)
@@ -307,6 +336,8 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int) blockPaint
 	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
 		expanded: head.expanded,
 		elides:   true,
+		live:     !head.done || anyOpenCall(span),
+		blink:    blink,
 	}).railed(th, head.depth)
 }
 
@@ -584,6 +615,8 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // marker and all (renderToolBranch). A GROUPED run is the degenerate case — its members carry no
 // body by definition (groupable), so both states paint identically and the head entry's state is
 // passed only so the two callers share one call shape (layout.md, "Collapsed and expanded blocks").
+// Its live half reaches one glyph and no shape at all: the header's leading star (state.star), ✦
+// once the block has settled and blinking against ✧ while it still holds an open call.
 //
 // It also marks the block's CLICK SURFACE as it emits it — every physical line of the header, and
 // any remainder marker a branch synthesized — because the lines and the marks have to be one act:
@@ -603,7 +636,7 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 		header = targetHeader
 	}
 	var out blockPaint
-	out.add(hangingWrap(th, th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width), header)
+	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", th.toolLabel.Render(views[0].Label), width), header)
 	column := 0
 	for _, tv := range views {
 		column = max(column, th.measure.Width(tv.Target))
@@ -623,9 +656,43 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 // behind the header. The toggle-target rule has to know anyway: layout.md makes a run with a span
 // clickable however short its own report is. Like the mark itself it is state-INDEPENDENT — an
 // expanded run sets it too, which is what leaves the header clickable so the same click closes it.
+//
+// live and blink are the LIVE STAR's two halves, and they are deliberately separate: live is a fact
+// about the block (something in it is still waiting for a result — anyOpenCall), blink is a fact
+// about the frame (the spinner's phase this repaint was asked for — spinnerAnim.blink). Only their
+// conjunction paints ✧, so a settled block is immune to the phase and a live one needs no clock of
+// its own.
 type blockState struct {
 	expanded bool
 	elides   bool
+	live     bool
+	blink    bool
+}
+
+// star is the glyph the block's header leads with (layout.md, "The live star"): ✦ for a block that
+// has everything it was waiting for, and ✦/✧ alternating with the frame's blink phase while it does
+// not. The zero value is a settled block at the settled phase, which is why every caller with
+// nothing running — a stray result's block, a width probe — keeps the star the transcript has
+// always led with without saying so.
+func (s blockState) star() string {
+	if s.live && s.blink {
+		return glyphAssistantHollow
+	}
+	return glyphAssistant
+}
+
+// anyOpenCall reports whether any of these entries is a tool call still waiting for its result —
+// what makes the block they belong to LIVE, and so what makes its header star blink. It is
+// transcript.hasOpenToolCall's rule read over one block's own entries instead of over the whole
+// scrollback: the status line asks whether ANYTHING is still running, a header asks whether the
+// work behind THAT star is.
+func anyOpenCall(entries []entry) bool {
+	for i := range entries {
+		if entries[i].kind == entryToolCall && !entries[i].done {
+			return true
+		}
+	}
+	return false
 }
 
 // blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the

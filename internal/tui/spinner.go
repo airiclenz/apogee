@@ -338,6 +338,13 @@ func (s spinnerAnim) interval() time.Duration { return s.spec().interval }
 // glyph is this frame's braille cell(s), pure in [spinnerAnim.frame].
 func (s spinnerAnim) glyph() string { return s.spec().glyph(s.frame) }
 
+// blink is this frame's phase of the transcript's LIVE STAR — the ✦/✧ alternation a tool block
+// still holding an open call paints its header glyph from (layout.md, "The live star";
+// [blockState.star]). It is the frame's parity and nothing else, which is the whole point: the
+// transcript carries no timer of its own, so the tick that advances this animation is the same tick
+// that flips the star, and a run that is not spinning has a star that is not blinking either.
+func (s spinnerAnim) blink() bool { return s.frame%2 == 1 }
+
 // framesPerColorLoop is how many of THIS style's frames one colour lap spans: 100 at classic's
 // 10 fps, 120 at snake's 12, 200 at glitter's 20. Deriving the count from the style's interval is
 // what keeps the loop's wall-clock period at spinnerColorPeriod under every style, so selecting a

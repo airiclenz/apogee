@@ -55,17 +55,18 @@ var (
 // sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level) and opened
 // by a ⤷ sub-agent label (P3.14).
 const (
-	glyphAssistant  = "✦"
-	glyphBranch     = "┝"
-	glyphBranchLast = "┕"
-	glyphUser       = "❯"
-	glyphSubRail    = "│"
-	glyphSubLabel   = "⤷"
-	glyphBullet     = "•" // a markdown bullet-list item (- / * / +)
-	glyphSkill      = "✦" // marks a skill: the sent block's chips and the "/" menu's skill rows
-	glyphPresented  = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
-	glyphInterject  = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
-	glyphTableRule  = "─" // one cell of the rule under a markdown table's header row (mdtable.go)
+	glyphAssistant       = "✦"
+	glyphAssistantHollow = "✧" // the other half of the live star: a tool block still holding an open call alternates ✦/✧ on the spinner's tick (layout.md, "The live star")
+	glyphBranch          = "┝"
+	glyphBranchLast      = "┕"
+	glyphUser            = "❯"
+	glyphSubRail         = "│"
+	glyphSubLabel        = "⤷"
+	glyphBullet          = "•" // a markdown bullet-list item (- / * / +)
+	glyphSkill           = "✦" // marks a skill: the sent block's chips and the "/" menu's skill rows
+	glyphPresented       = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
+	glyphInterject       = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
+	glyphTableRule       = "─" // one cell of the rule under a markdown table's header row (mdtable.go)
 )
 
 // subAgentLabel is the one-line header that opens each contiguous run of sub-agent

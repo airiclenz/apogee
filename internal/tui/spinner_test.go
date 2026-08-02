@@ -10,6 +10,7 @@ import (
 	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/charmbracelet/x/ansi"
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
@@ -652,6 +653,120 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 	idle.state = stateIdle
 	if _, cmd := stepCmd(t, idle, spinnerTickMsg{gen: idle.spin.gen}); cmd != nil {
 		t.Error("the tick chain outlived the run instead of dying at idle")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The tick as the live star's clock (layout.md, "The live star")
+// ----------------------------------------------------------------------------
+
+// openCall folds a terminal call with no result — the open call that makes a block live.
+func openCall(m *Model, id, command string) {
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: id, Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
+}
+
+// TestSpinnerTickRepaintsOnlyWhileACallIsOpen pins both halves of the tick's second job: it
+// repaints the transcript so a live block's star can flip, and it does that ONLY while a call is
+// open. The guard is not economy alone — a repaint is where a held drag-selection is judged
+// (refreshViewport's keep-if-unchanged rule), so a tick that repainted unconditionally would put
+// that judgment between the human and every selection for the whole of a turn, ten to twenty times
+// a second, to draw a frame identical to the last one. The stash refreshViewport writes (m.lines)
+// is the observable: a sentinel left standing is a repaint that did not happen.
+func TestSpinnerTickRepaintsOnlyWhileACallIsOpen(t *testing.T) {
+	const sentinel = "left standing by a tick that drew nothing"
+
+	running := newTestModel(t)
+	running.input.SetValue("run the tests")
+	running = step(t, running, keyEnter()) // submit armed the chain
+	if running.state != stateRunning {
+		t.Fatalf("precondition: state = %v after a submit, want running", running.state)
+	}
+
+	// Nothing open: every block paints the same at either phase, so there is nothing to redraw.
+	idle := running
+	idle.lines = []string{sentinel}
+	idle = step(t, idle, spinnerTickMsg{gen: idle.spin.gen})
+	if got := strings.Join(idle.lines, "\n"); got != sentinel {
+		t.Errorf("a tick with no call open repainted the transcript:\n%s", got)
+	}
+
+	// One open call, and the tick is the only clock its star has.
+	live := running
+	openCall(&live, "c1", "go test ./...")
+	live.lines = []string{sentinel}
+	live = step(t, live, spinnerTickMsg{gen: live.spin.gen})
+	if got := strings.Join(live.lines, "\n"); got == sentinel {
+		t.Error("a tick with a call open did not repaint — the live star would never flip")
+	}
+}
+
+// TestTickRepaintReachesADetachedViewport checks the flip reaches the rows a human who has SCROLLED
+// UP is looking at — often the very block still working. refreshViewport's detached path returns
+// early to leave the offset exactly where the human put it, but it swaps the content lines before it
+// does, and that is what carries the new glyph onto the screen without re-attaching the view.
+func TestTickRepaintReachesADetachedViewport(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("run the tests")
+	m = step(t, m, keyEnter())
+	m.transcript.reset() // the live block opens the scrollback…
+	openCall(&m, "c1", "go test ./...")
+	for i := 0; i < 30; i++ { // …and a screenful of history pushes it off the tail
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+	m.detached = true
+	m.viewport.SetYOffset(0) // scrolled back up to the live block
+	if m.viewport.AtBottom() {
+		t.Fatal("precondition: the held offset is already at the bottom")
+	}
+	if before := plain(m.View()); !strings.Contains(before, "✦ Run") {
+		t.Fatalf("precondition: the settled star is not on screen:\n%s", before)
+	}
+
+	m = step(t, m, spinnerTickMsg{gen: m.spin.gen})
+
+	if !m.detached {
+		t.Error("the tick's repaint re-attached a scrolled-up view")
+	}
+	if after := plain(m.View()); !strings.Contains(after, "✧ Run") {
+		t.Errorf("the flipped star never reached the detached viewport:\n%s", after)
+	}
+}
+
+// TestBlinkingStarDropsOnlyTheSelectionsSpanningIt walks the star's one interaction with a held
+// drag-selection, in both directions. The flip rewrites the header line, so a selection spanning it
+// is dropped — the keep-if-unchanged rule doing its ordinary job on a line that changed, not a rule
+// of the star's own — while a selection over text the flip did not touch lives through the same
+// repaint.
+func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
+	// live returns a running model whose transcript is exactly the given lead-in plus one open
+	// tool-call block, repainted and with a drag-selection armed across the viewport's first row.
+	live := func(t *testing.T, leadIn func(m *Model)) Model {
+		t.Helper()
+		m := newTestModel(t)
+		m.input.SetValue("run the tests")
+		m = step(t, m, keyEnter())
+		m.transcript.reset() // drop the seeded start-up box and the send: the lead-in owns line 0
+		leadIn(&m)
+		openCall(&m, "c1", "go test ./...")
+		m.refreshViewport()
+		return armTranscriptSelection(t, m)
+	}
+
+	// Row 0 IS the live header: the flip rewrites the very line the span covers.
+	spanning := live(t, func(*Model) {})
+	spanning = step(t, spanning, spinnerTickMsg{gen: spanning.spin.gen})
+	if spanning.transcriptSel.active {
+		t.Error("a selection spanning the flipping header survived the flip")
+	}
+
+	// Row 0 is a settled user block and the live header sits below it: the flip is none of the
+	// span's business.
+	elsewhere := live(t, func(m *Model) { m.transcript.addUser("run the tests", nil) })
+	elsewhere = step(t, elsewhere, spinnerTickMsg{gen: elsewhere.spin.gen})
+	if !elsewhere.transcriptSel.active {
+		t.Error("the star's flip dropped a selection over settled lines it never touched")
 	}
 }
 

@@ -264,9 +264,26 @@ paint.
 
 **Commit:** `feat(tui): a sub-agent run collapses to its call block with a cascading summary`
 
-## 6. A live block's header star blinks on the spinner tick
+## 6. A live block's header star blinks on the spinner tick — ✅ DONE (2026-08-02)
 
 Depends on item 5.
+
+NOTES (2026-08-02): three files beyond the two the item names. `theme.go` holds the second glyph
+(`glyphAssistantHollow`), where every marker glyph lives; `spinner.go` gained `spinnerAnim.blink()`
+— the frame's parity, stated once beside the animation it is read off, so "the transcript carries no
+timer of its own" is a fact about the code and not only about the spec; `doc.go`'s collapse paragraph
+gained the star's closing sentence. The phase reaches the painter as a PARAMETER (`renderView(th,
+width, blink)`, threaded to `renderEntryLines` / `renderSubAgentRun`) rather than the renderer reading
+`m.spin.frame`: render.go sees no Model, and the blink is a fact about the frame being drawn rather
+than about the scrollback. `renderLines` keeps its signature and paints the settled phase, so only two
+mechanical test call sites moved (`model_test.go`'s `TestStatusLineAlignsWithTranscriptText`,
+`render_test.go`'s `blockMarks`).
+
+NOTES (2026-08-02): the item's "any open call among its group's views" is read over the group's
+ENTRIES (`anyOpenCall`, render.go) — a `toolView` records no `done`, and the run is
+`entries[i:i+len(run)]` by construction (`toolCallRun` walks adjacent entries forward). The detached
+half of the item's model.go check needed no extension: `refreshViewport`'s early return swaps the
+content lines before it returns, which `TestTickRepaintReachesADetachedViewport` now pins.
 
 **What:**
 
