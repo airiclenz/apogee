@@ -29,7 +29,10 @@ func (b Budget) EstimateTokens(chars int) int {
 // deliberately conservative: comparing the whole conversation against the
 // History slice trips slightly before the prompt would overflow. A non-positive
 // History (the window is unknown, so nothing was allocated) never trips —
-// there is no basis to bound.
+// there is no basis to bound HERE; the engine's trigger substitutes its own
+// conservative ceiling before calling this (internal/agent, ADR 0018), so the
+// compare stays the single one while the assumption stays out of the Budget
+// view hooks and Mechanisms read.
 func (b Budget) HistoryExceedsAllocation(msgs []Message) bool {
 	if b.History <= 0 {
 		return false

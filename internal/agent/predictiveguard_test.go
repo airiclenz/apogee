@@ -5,8 +5,8 @@ package agent
 // reaches the wire — saving the round-trip the server would reject, and covering the one case the
 // reactive path cannot (a server whose 400 body the provider cannot classify as an overflow).
 // These tests pin the threshold (the full working room, exactly — not a comfort margin), the one
-// fold the predictive and reactive paths share, and the two ways the guard stays out of the way:
-// an unknown window makes it inert, and a refused fold still sends the request.
+// fold the predictive and reactive paths share, the conservative ceiling an unknown window falls
+// back to, and the way the guard stays out of the way: a refused fold still sends the request.
 
 import (
 	"context"
@@ -211,35 +211,84 @@ func TestPredictiveGuardUncalibratedNeedsTwiceTheRoom(t *testing.T) {
 	}
 }
 
-// TestPredictiveGuardIsInertWithoutAKnownWindow proves the guard cannot fire on a guess: with no
-// discovered or configured window there is no working room to compare against, so even a wildly
-// oversized history is sent untouched and the reactive recovery is the only protection.
-func TestPredictiveGuardIsInertWithoutAKnownWindow(t *testing.T) {
-	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "the reply", summary: "UNREACHED"}
-	cfg := baseConfig(sink)
-	cfg.Context.CompactionEnabled = true // compaction is ON: the WINDOW is what makes the guard inert
-	a, err := newAgent(cfg, up)
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
+// TestPredictiveGuardWithoutAKnownWindowUsesTheConservativeCeiling pins what an unknown window
+// does to the guard. It used to make it INERT — no working room, so no comparison — which left a
+// session with no window with no predictive protection at all, including against the one failure
+// the reactive path cannot see (a 400 the provider cannot classify as an overflow). It now measures
+// the TRANSCRIPT against compactUnknownWindowTranscriptTokens, the same ceiling the emergency fold
+// renders against, so the guard still fires only on "cannot fit", just against an assumed window
+// rather than a discovered one (audit 2026-08-01, follow-up B). The seeded shape carries no tool
+// menu, so what it sizes is the transcript either way; that the menu is EXCLUDED is pinned by
+// TestUnknownWindowGuardMeasuresTheTranscriptNotTheWholeRequest (unknownwindow_test.go).
+func TestPredictiveGuardWithoutAKnownWindowUsesTheConservativeCeiling(t *testing.T) {
+	ceilingChars := func(a *Agent) int {
+		return int(float64(compactUnknownWindowTranscriptTokens) * a.budget().CharsPerToken)
 	}
-	calibrate(a)
-	seedSizedOpenTurn(t, a, 500_000)
+	tests := []struct {
+		name     string
+		chars    func(*Agent) int
+		wantFold bool
+	}{
+		{
+			name:     "a request under the assumed ceiling is sent as built",
+			chars:    func(a *Agent) int { return ceilingChars(a) / 2 },
+			wantFold: false,
+		},
+		{
+			name:     "a request past the assumed ceiling folds before the wire",
+			chars:    func(a *Agent) int { return 4 * ceilingChars(a) },
+			wantFold: true,
+		},
+	}
 
-	res, err := a.Step(context.Background())
-	if err != nil {
-		t.Fatalf("Step: %v", err)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			up := &recoveryResponder{reply: "the reply", summary: "EMERGENCY-SUMMARY"}
+			cfg := baseConfig(sink) // no MaxContextTokens: neither discovery nor `context-window:` reported one
+			cfg.Context.CompactionEnabled = true
+			a, err := newAgent(cfg, up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			calibrate(a) // CALIBRATED, so the ratio margin is out of the way and the ceiling is the bare one
+			if room := workingRoom(a); room > 0 {
+				t.Fatalf("test setup: working room = %d, want none — this test is about an unknown window", room)
+			}
+			seedSizedOpenTurn(t, a, tc.chars(a))
 
-	if res.Status != domain.StatusExchangeComplete {
-		t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
-	}
-	if up.summaries != 0 {
-		t.Errorf("summarizer calls = %d with an unknown window, want 0 — there is no basis to predict", up.summaries)
-	}
-	if len(up.mains) != 1 || len(up.mains[0].Messages) != 3 {
-		t.Errorf("main requests = %d (first carrying %d messages), want 1 carrying the 3 seeded ones",
-			len(up.mains), len(up.mains[0].Messages))
+			res, err := a.Step(context.Background())
+			if err != nil {
+				t.Fatalf("Step: %v", err)
+			}
+
+			if res.Status != domain.StatusExchangeComplete {
+				t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+			}
+			wantSummaries := 0
+			if tc.wantFold {
+				wantSummaries = 1
+			}
+			if up.summaries != wantSummaries {
+				t.Errorf("summarizer calls = %d, want %d", up.summaries, wantSummaries)
+			}
+			if len(up.mains) != 1 {
+				t.Fatalf("main requests = %d, want 1", len(up.mains))
+			}
+			sent := up.mains[0]
+			if !tc.wantFold {
+				if len(sent.Messages) != 3 {
+					t.Errorf("request carried %d messages, want the 3 seeded ones untouched", len(sent.Messages))
+				}
+				return
+			}
+			if len(sent.Messages) != 3 {
+				t.Fatalf("folded request carried %d messages, want 3 (prefix | summary | bridge)", len(sent.Messages))
+			}
+			if got := sent.Messages[1]; got.Role != string(domain.RoleAssistant) || !strings.Contains(got.Content, "EMERGENCY-SUMMARY") {
+				t.Errorf("request message 1 is not the assistant summary: %+v", got)
+			}
+		})
 	}
 }
 

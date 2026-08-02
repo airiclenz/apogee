@@ -3,8 +3,9 @@ package agent
 // The STRUCTURAL floor on a single oversized tool result (context-overflow-recovery item 5):
 // a result whose estimated tokens exceed the ENTIRE History allocation is clamped to the shared
 // head/tail elision as it enters the conversation. These tests pin the four properties the item
-// names — over the allocation is clamped, under it passes verbatim, an unknown window is inert,
-// and the tighter `tool_result_cap` Mechanism still governs what the REQUEST carries.
+// names — over the allocation is clamped, under it passes verbatim, an unknown window measures
+// against the conservative assumed ceiling instead (unknownwindow_test.go owns that case), and the
+// tighter `tool_result_cap` Mechanism still governs what the REQUEST carries.
 
 import (
 	"context"
@@ -111,8 +112,8 @@ func TestOversizedToolResultIsClampedByTheStructuralFloor(t *testing.T) {
 }
 
 // TestToolResultFloorLeavesEverythingElseVerbatim pins the floor's inert cases: a result under the
-// History allocation, any result at all while the window is unknown (a zero allocation — no basis
-// to bound), and a pathological single-line body the head/tail form cannot shrink (never grown).
+// History allocation, a result under the conservative ceiling an unknown window falls back to, and
+// a pathological single-line body the head/tail form cannot shrink (never grown).
 func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 	sink := &recordingSink{}
 	a, floorChars := floorAgent(t, sink)
@@ -123,13 +124,10 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 	}
 	unshrinkable := strings.Repeat("x", floorChars+1) // one enormous line: head+tail+marker is LONGER
 
-	unbudgeted := &recordingSink{}
-	noWindow, err := newAgent(baseConfig(unbudgeted), echoResponder{reply: "unused"})
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
-	if b := noWindow.budget(); b.History != 0 {
-		t.Fatalf("History = %d with no configured window, want the zero allocation", b.History)
+	noWindow, ceilingChars := unknownWindowAgent(t, &recordingSink{})
+	underTheCeiling := numberedLines(20)
+	if len(underTheCeiling) >= ceilingChars {
+		t.Fatalf("payload of %d chars is not under the assumed ceiling of %d chars", len(underTheCeiling), ceilingChars)
 	}
 
 	tests := []struct {
@@ -138,7 +136,7 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 		content string
 	}{
 		{"under the History allocation", a, underTheFloor},
-		{"unknown window", noWindow, numberedLines(400)},
+		{"unknown window, under the assumed ceiling", noWindow, underTheCeiling},
 		{"single line the head/tail form cannot shrink", a, unshrinkable},
 	}
 	for _, tc := range tests {

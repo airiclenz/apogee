@@ -764,8 +764,26 @@ point is a **minor** bump, not a breaking change.
     in your config, or use a server that reports the window — instead of leaving you with an error
     that will repeat identically on every message. The server's own message still comes first, and a
     session that knows its window keeps the exact wording it had.
+  - **The three other size bounds work there too, instead of standing down.** Rescuing the fold was
+    not enough on its own: one large file read still went into the history whole, and the fold keeps
+    the most recent message no matter what, so the very next summary attempt choked on it and the
+    session wedged again. Without a known window apogee now applies the same conservative assumption
+    everywhere it applies it to the fold — a single tool result that would not fit is shortened to
+    its head and tail (with a note telling the model to re-read the part it needs), a long history is
+    summarized at the next quiet point rather than growing until the server rejects it, and a
+    conversation that clearly cannot fit is folded before the request goes out rather than after.
+    That last one also brings back the only protection against a server whose rejection apogee cannot
+    recognise as an overflow at all. What each of those bounds weighs is the conversation itself —
+    never the fixed weight of the tool list and the system prompt, which ride every request and which
+    no amount of summarizing can shrink; weighing those too would have folded your history away every
+    single turn, on a conversation of four short messages, without ever getting under the bound.
+    **The trade-off is deliberate:** if your server has a *large* window it never advertised,
+    apogee now treats it as a small one and shortens things it did not have to — so if you are on a
+    big model whose server is quiet about its window, set `context-window:` and everything sizes to
+    the real number again. The compaction notice you may see in that situation names the same key.
+    A session whose window is known is completely unaffected.
 
-  See the 2026-08-02 amendment to
+  See the 2026-08-02 amendments to
   [ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
 
 - **A sub-agent that dies mid-task now says so, instead of reporting success.** When a delegated

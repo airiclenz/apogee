@@ -38,6 +38,24 @@ const (
 	// enough that the summary is written from a substantial tail rather than the last message alone.
 	// A real window always beats it, which is why the give-up event names `context-window:`
 	// (overflowGiveUpErr, loop.go).
+	//
+	// It is also the ONE ceiling the other three window-gated growth bounds fall back to — the
+	// predictive guard (requestExceedsWindow, loop.go), the boundary compaction trigger
+	// (historyExceedsAllocation) and the structural tool-result clamp (clampToolResult,
+	// dispatch.go) — rather than each inventing its own default. With no window there is nothing to
+	// ALLOCATE across a request's parts (context.Allocate returns the zero Allocation for exactly
+	// that reason), so the one meaningful rule left is that nothing the fold can shed — the
+	// conversation, or a single result about to enter it — may exceed what the fold can actually
+	// render. Keying every bound to the fold's own budget is what makes the fold survivable here: a
+	// result bigger than it survives the clamp only to become the most recent message the fold's
+	// transcript render keeps UNCONDITIONALLY (context.renderBudgetedTranscript), which re-wedges
+	// the very session the bound above rescued (audit 2026-08-01, follow-up B).
+	//
+	// Being a TRANSCRIPT budget is load-bearing for what each bound measures against it: the
+	// transcript, never a request's fixed cost. The tool menu and the standing system content ride
+	// every request and no fold can shrink either, so measuring them against this ceiling would
+	// fire a bound that folding can never satisfy — the default 19-tool menu alone is ~3.8k tokens
+	// at a code-heavy ratio, past a 3072-token ceiling before the user has typed anything.
 	compactUnknownWindowTranscriptTokens = 3072
 )
 
@@ -109,15 +127,21 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 	// trigger off (compactSat) so the still-oversized history is not re-folded at every Exchange
 	// opening, and emit exactly one ErrorEvent naming the cause. shouldAutoCompact clears the latch
 	// once the estimate drops back under the allocation.
+	//
+	// With no window known there IS no allocation — the compare ran against the conservative
+	// unknown-window ceiling — so the remedy is appended for the same reason the overflow give-up
+	// appends it (overflowGiveUpErr): this notice is then the one place the user learns that the
+	// bound biting their session is an assumption apogee had to make, and that a config key replaces
+	// it with the truth.
 	if a.historyExceedsAllocation() {
 		a.compactSat = true
-		a.cfg.Events.Emit(domain.ErrorEvent{
-			EventBase: a.base(turn),
-			Source:    "compaction",
-			Err: "compaction could not bring the history under its allocation: the protected prefix " +
-				"(system prompt + first user message) and the compaction summary together exceed it; " +
-				"automatic folding is paused until the history estimate drops below the allocation",
-		})
+		msg := "compaction could not bring the history under its allocation: the protected prefix " +
+			"(system prompt + first user message) and the compaction summary together exceed it; " +
+			"automatic folding is paused until the history estimate drops below the allocation"
+		if a.cfg.Context.MaxContextTokens <= 0 {
+			msg += " — " + unknownWindowRemedy
+		}
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "compaction", Err: msg})
 	}
 }
 
@@ -127,8 +151,9 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 // S2), and when the history has outgrown its Budget History allocation
 // (domain.Budget.HistoryExceedsAllocation) AND the trigger is not saturated (compactSat). It
 // clears the saturation latch the moment the estimate falls back under the allocation, so growth
-// alone cannot re-trigger a fold that already proved it cannot help. A zero History allocation (the
-// window is unknown) never trips, so an unbudgeted Agent never auto-folds.
+// alone cannot re-trigger a fold that already proved it cannot help. An unbudgeted Agent (no window
+// known, so no allocation) measures against the conservative unknown-window ceiling instead of
+// standing down — historyExceedsAllocation owns that substitution and its rationale.
 func (a *Agent) shouldAutoCompact() bool {
 	if !a.cfg.Context.CompactionEnabled {
 		return false
@@ -157,10 +182,23 @@ func (a *Agent) shouldAutoCompact() bool {
 // Budget's History allocation — the raw over-budget signal both the auto-fold trigger and the
 // post-fold saturation check read. It routes through the single domain compare on the SAME Budget
 // view the hooks receive (domain.Budget.HistoryExceedsAllocation), so the compaction trigger and a
-// hook reading the Budget can never disagree. A zero History allocation (an unknown window) never
-// trips.
+// hook reading the Budget can never disagree wherever an allocation exists.
+//
+// Where one does NOT exist — a zero History, meaning no window is known — the compare would answer
+// false for a history of any size, so the boundary trigger never fired and the history grew until
+// the server rejected it (audit 2026-08-01, follow-up B). The bound substituted here is the same
+// conservative ceiling the emergency fold renders against
+// (compactUnknownWindowTranscriptTokens): the fold is what this trigger's fold-to-a-summary
+// actually costs, so a history the fold cannot render whole is precisely the history worth folding.
+// The substitution is the ENGINE's, deliberately: the Budget the hooks and Mechanisms see keeps its
+// honest zero allocation, so nothing outside this file starts steering on a guessed window
+// (guided_decomposition's stated posture) or shows a fill against a window nobody reported.
 func (a *Agent) historyExceedsAllocation() bool {
-	return a.budget().HistoryExceedsAllocation(a.conv.Messages())
+	b := a.budget()
+	if b.History <= 0 {
+		b.History = compactUnknownWindowTranscriptTokens
+	}
+	return b.HistoryExceedsAllocation(a.conv.Messages())
 }
 
 // overflowBridge is the user-role message appended after an emergency fold. Its ROLE is the

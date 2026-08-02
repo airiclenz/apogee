@@ -262,15 +262,17 @@ func (a *Agent) refold(ctx context.Context, t *turnRun) foldOutcome {
 	return foldDeclined
 }
 
-// unknownWindowRemedy is appended to the overflow give-up message when no context window is
-// known. Without one the Budget is empty, so the bounds that keep a session inside its window are
-// all inert — the predictive guard never fires, automatic compaction never triggers, and the
-// structural tool-result clamp is disabled — and every message from here on will overflow the same
-// way. The remedy is a config key, so the event names it rather than leaving the user with a
-// session that fails identically until /clear (audit 2026-08-01).
-const unknownWindowRemedy = "no context window is known for this model, so apogee cannot bound " +
-	"what it sends: set `context-window:` (in tokens) in your config, or use a server that reports " +
-	"the window, and the growth bounds come back"
+// unknownWindowRemedy is appended to the two events a session with no known window can hit — the
+// overflow give-up (below) and the compaction saturation notice (compact.go). Without a window the
+// Budget is empty, so every growth bound falls back to one conservative assumed ceiling
+// (compactUnknownWindowTranscriptTokens): the session is bounded, but bounded by a guess, and a
+// guess that is too small silently shrinks what the model may hold while a guess that is too large
+// still ends here. Either way the user is the only one who can replace the guess with the truth, so
+// both events name the config key that does it rather than leaving a session that behaves oddly or
+// fails identically until /clear (audit 2026-08-01).
+const unknownWindowRemedy = "no context window is known for this model, so apogee is bounding what " +
+	"it sends by a conservative assumption: set `context-window:` (in tokens) in your config, or use " +
+	"a server that reports the window, and the growth bounds follow the real one"
 
 // overflowGiveUpErr builds the give-up ErrorEvent's text from the sanitized message the provider
 // produced. The provider's message always LEADS, unchanged, so a give-up stays what it always was
@@ -671,24 +673,47 @@ const uncalibratedRoomMargin = 2
 // margin. The ~60%-of-working-room History allocation stays the boundary trigger's business
 // (Budget.HistoryExceedsAllocation), not this one's.
 //
-// It is inert — always false — when the window is unknown (no discovery, no config: Allocate
-// returns the zero Allocation, leaving no working room), so an unbudgeted Agent never
-// predictively folds and the reactive recovery is its only protection. The estimate is advisory:
-// an over-estimate costs one fold, and an under-estimate costs nothing, because the wire overflow
-// still routes to the reactive path. That asymmetry is why an UNCALIBRATED Budget is measured
-// against uncalibratedRoomMargin (documented above) times the working room rather than the bare
-// working room.
+// With an UNKNOWN window (no discovery, no config: Allocate returns the zero Allocation, leaving
+// no working room) BOTH sides of the compare change. The room becomes
+// compactUnknownWindowTranscriptTokens — the same conservative ceiling the emergency fold renders
+// against — and the measure becomes the TRANSCRIPT alone: the conversation, without the tool menu
+// and without the standing system content the request projection seeds at position 0. That
+// ceiling is a transcript budget (compact.go), the transcript is the only part a fold can shed,
+// and the boundary trigger measures exactly the same quantity against the same number
+// (historyExceedsAllocation), so on an unknown window all three bounds read one number through one
+// measure.
+//
+// Measuring the whole REQUEST against that ceiling instead would compare a request-sized quantity
+// to a transcript-sized bound, and the fixed costs alone settle it: the default 19-tool menu is
+// ~11.5k characters ≈ 3.8k tokens at a code-heavy 3.0 chars/token, already past the ceiling with an
+// empty conversation. The guard would then fire on a four-message session and fold every Exchange
+// without any fold ever getting under the bound — a comfort margin, which decision 7 forbids
+// outright (audit 2026-08-01, follow-up B).
+//
+// It used to be INERT here, which left the ONE case the reactive path cannot cover (a 400 the
+// provider cannot classify as an overflow) with no protection at all on exactly the sessions that
+// have no window to protect them. Bounding against an assumed small window means a large window a
+// server never advertised is managed as if it were small — the give-up and saturation events both
+// name `context-window:` for that reason, and a pinned window restores the exact arithmetic above.
+//
+// The estimate is advisory either way: an over-estimate costs one fold, and an under-estimate
+// costs nothing, because the wire overflow still routes to the reactive path. That asymmetry is
+// why an UNCALIBRATED Budget is measured against uncalibratedRoomMargin (documented above) times
+// the room rather than the bare room — the ratio's uncertainty is independent of the window's, so
+// the margin applies to the assumed room as well.
 func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 	b := a.budget()
-	room := b.ContextLimit - b.ResponseReserve
-	if room <= 0 {
-		return false
+	room, chars := b.ContextLimit-b.ResponseReserve, 0
+	if room > 0 {
+		st := req.State()
+		chars = domain.PromptChars(st.Messages, st.Tools)
+	} else {
+		room, chars = compactUnknownWindowTranscriptTokens, domain.PromptChars(a.conv.Messages(), nil)
 	}
 	if b.Used == 0 {
 		room *= uncalibratedRoomMargin
 	}
-	st := req.State()
-	return b.EstimateTokens(domain.PromptChars(st.Messages, st.Tools)) > room
+	return b.EstimateTokens(chars) > room
 }
 
 // maxRefFileBytes caps a single @file reference, mirroring the read_file tool's ceiling

@@ -44,8 +44,10 @@ const defaultReserveFraction = 0.20
 // SystemPrompt, FileContext, History — draw from (CONTEXT: Budget, "the single authority on how
 // much room each part gets"). SystemPrompt + FileContext + History sum to Window -
 // ResponseReserve, so every field sums to Window exactly. A zero Allocation (every field 0) means
-// the window is unknown — there is no basis to allocate — and a consumer treats it as unbounded,
-// matching the generative Compaction path.
+// the window is unknown — there is no basis to allocate. A consumer then either stays inert (every
+// window-gated Mechanism, which must never steer on a guess) or substitutes its own conservative
+// ceiling (the engine's structural bounds — internal/agent, ADR 0018); what it must NOT read it as
+// is "unbounded", which is what wedged an unbudgeted session (audit 2026-08-01).
 type Allocation struct {
 	Window          int
 	ResponseReserve int
@@ -164,7 +166,9 @@ func PromptChars(msgs []domain.Message, tools []domain.ToolDef) int {
 // history) so it tracks the model's real tokenizer, and it is deliberately conservative: comparing
 // the whole conversation against the History slice trips slightly before the prompt would overflow.
 // A non-positive historyBudget (the window is unknown, so Allocate returned a zero Allocation)
-// never trips — there is no basis to bound, matching /compact's unbounded transcript render.
+// never trips — there is no basis to bound HERE; the engine's trigger substitutes a conservative
+// ceiling before calling in (internal/agent, ADR 0018), the same way the fold budgets its own
+// transcript rather than rendering everything.
 // It builds on the single domain compare (domain.Budget.HistoryExceedsAllocation), so it can
 // never disagree with a hook reading the same Budget.
 func HistoryExceedsAllocation(historyBudget int, e *TokenEstimator, msgs []domain.Message) bool {

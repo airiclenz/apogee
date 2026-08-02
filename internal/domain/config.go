@@ -156,7 +156,7 @@ type Config struct {
 // ContextConfig governs the structural context reducers — Budget and Compaction —
 // which are NOT Mechanisms and stay on under Bypass (CONTEXT: Budget, Compaction).
 type ContextConfig struct {
-	MaxContextTokens  int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (Budget/Compaction inactive until known)
+	MaxContextTokens  int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (the Budget then allocates nothing and the engine's growth bounds fall back to one conservative assumed ceiling — internal/agent, ADR 0018)
 	ResponseReserve   int
 	CompactionEnabled bool // generative summarisation; default true
 }

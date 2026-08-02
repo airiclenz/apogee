@@ -471,16 +471,26 @@ func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
 // transcript. That is the price of a floor that must hold for every later reducer — and the model
 // is told, in the marker, to re-read the omitted range.
 //
-// It is inert when the window is unknown (a zero History allocation — Allocate had no basis to
-// allocate), matching every other Budget-gated path, and it never GROWS a result: a pathological
-// few-very-long-lines body the head/tail form cannot shrink is left whole (the same guard
-// tool_result_cap applies).
+// With an unknown window (a zero History allocation — Allocate had no basis to allocate) the floor
+// measures against compactUnknownWindowTranscriptTokens instead of standing down. Being inert there
+// was not the conservative choice it looked like: the fold's transcript render keeps the most recent
+// message UNCONDITIONALLY, so an unclamped giant result becomes the one message the emergency fold
+// cannot shed and re-wedges the session bounding the fold was meant to un-wedge (audit 2026-08-01,
+// follow-up B). Keying the floor to the fold's own unknown-window budget makes the two meet exactly:
+// a result that survives the clamp is, by construction, one the fold can still render.
+//
+// It never GROWS a result: a pathological few-very-long-lines body the head/tail form cannot shrink
+// is left whole (the same guard tool_result_cap applies).
 func (a *Agent) clampToolResult(content string) string {
 	b := a.budget()
-	if b.History <= 0 || b.EstimateTokens(len(content)) <= b.History {
+	bound := b.History
+	if bound <= 0 {
+		bound = compactUnknownWindowTranscriptTokens
+	}
+	if b.EstimateTokens(len(content)) <= bound {
 		return content
 	}
-	clamped := apogeectx.TruncateToolResult(content, int(float64(b.History)*b.CharsPerToken))
+	clamped := apogeectx.TruncateToolResult(content, int(float64(bound)*b.CharsPerToken))
 	if len(clamped) >= len(content) {
 		return content
 	}
