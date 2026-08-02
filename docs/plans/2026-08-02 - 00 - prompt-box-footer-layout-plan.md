@@ -224,7 +224,7 @@ the box) and on the footer line.
 
 **Commit:** `feat(tui): the prompt box closes its frame and the footer sheds its`
 
-## 4. Retire the two issues
+## 4. Retire the two issues — ✅ DONE (2026-08-02)
 
 Depends on items 1-3.
 
