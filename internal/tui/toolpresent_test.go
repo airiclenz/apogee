@@ -305,7 +305,7 @@ func TestPresentToolCall(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tv := presentToolCall(tc.call)
+			tv := presentToolCall(tc.call, workspaceRoot{})
 			if tv.Label != tc.wantLabel {
 				t.Errorf("Label = %q, want %q", tv.Label, tc.wantLabel)
 			}
@@ -316,7 +316,7 @@ func TestPresentToolCall(t *testing.T) {
 				t.Errorf("Target = %q, want %q", tv.Target, tc.wantTarget)
 			}
 			if tc.result.Content != "" {
-				tv.enrichWithResult(tc.result)
+				tv.enrichWithResult(tc.result, workspaceRoot{})
 			}
 			if got := detailsText(tv); !strings.Contains(got, tc.wantDetail) {
 				t.Errorf("details = %q; want a line containing %q", got, tc.wantDetail)
@@ -329,8 +329,8 @@ func TestPresentToolCall(t *testing.T) {
 // summary — a normal in-band outcome the model reacts to. It is the *summary*, not a body
 // line, which is what keeps an errored call grouping with its neighbours.
 func TestPresentToolCallErrorResult(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)})
-	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "file not found: missing", IsError: true})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)}, workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "file not found: missing", IsError: true}, workspaceRoot{})
 	if got := tv.Summary.Text; got != "error: file not found: missing" {
 		t.Errorf("error summary = %q; want the error text", got)
 	}
@@ -394,8 +394,8 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tv := presentToolCall(tc.call)
-			tv.enrichWithResult(tc.result)
+			tv := presentToolCall(tc.call, workspaceRoot{})
+			tv.enrichWithResult(tc.result, workspaceRoot{})
 			if tv.Summary.Text != tc.wantSummary {
 				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
 			}
@@ -413,7 +413,7 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 // A call still in flight carries neither half of an outcome, and the zero summary is plain, so
 // it groups with its finished neighbours rather than breaking their block.
 func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
 	if tv.Summary.Text != "" || tv.Details.len() != 0 {
 		t.Errorf("in-flight outcome = %+v / %+v; want both halves empty", tv.Summary, tv.Details)
 	}
@@ -497,16 +497,16 @@ func TestBodyKindIsSettledWhereTheLinesAre(t *testing.T) {
 // bodies: view_diff's tagged body settles as a diff, free-form output settles as plain. Together
 // with TestBodyKindIsSettledWhereTheLinesAre this is the whole contract collapsedDetails relies on.
 func TestBodyKindFollowsTheProducer(t *testing.T) {
-	diff := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)})
+	diff := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
 	diff.enrichWithResult(domain.ToolResult{
 		CallID: "1", Content: "  ctx\n- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1},
-	})
+	}, workspaceRoot{})
 	if !diff.Details.isDiff() {
 		t.Errorf("a view_diff body must settle as a diff body: %+v", diff.Details)
 	}
 
-	run := presentToolCall(domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)})
-	run.enrichWithResult(domain.ToolResult{CallID: "2", Content: "ok   a\nok   b\nPASS"})
+	run := presentToolCall(domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}, workspaceRoot{})
+	run.enrichWithResult(domain.ToolResult{CallID: "2", Content: "ok   a\nok   b\nPASS"}, workspaceRoot{})
 	if run.Details.isDiff() {
 		t.Errorf("free-form output must settle as a plain body: %+v", run.Details)
 	}
@@ -540,9 +540,9 @@ func TestBodyKindMatchesItsLinesEverywhere(t *testing.T) {
 	for _, name := range names {
 		for i, result := range results {
 			t.Run(name+"/"+strconv.Itoa(i), func(t *testing.T) {
-				tv := presentToolCall(domain.ToolCall{ID: "1", Tool: name, Arguments: []byte(args)})
+				tv := presentToolCall(domain.ToolCall{ID: "1", Tool: name, Arguments: []byte(args)}, workspaceRoot{})
 				assertBodyKindMatchesLines(t, tv, "before the result")
-				tv.enrichWithResult(result)
+				tv.enrichWithResult(result, workspaceRoot{})
 				assertBodyKindMatchesLines(t, tv, "after the result")
 				assertBodyKindMatchesLines(t, fromWireToolView(toWireToolView(tv)), "off the wire")
 			})
@@ -639,8 +639,8 @@ func funcDeclNamed(file *ast.File, name string) *ast.FuncDecl {
 // itself keeps every line, so what the paint hides is only hidden.
 func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 	long := strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n")
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)})
-	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: long, Summary: domain.DiffStat{Added: diffDetailCap + 5}})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: long, Summary: domain.DiffStat{Added: diffDetailCap + 5}}, workspaceRoot{})
 
 	if want := "+" + strconv.Itoa(diffDetailCap+5) + " -0"; tv.Summary.Text != want {
 		t.Errorf("diffstat = %q, want %q", tv.Summary.Text, want)
@@ -654,8 +654,8 @@ func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 // there is no diff to describe — so it falls to the prose floor as one plain summary line
 // with nothing beneath the branch, exactly as it rendered before the view read fields.
 func TestViewDiffNoChangesRendersAsProse(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)})
-	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "No changes detected"})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "No changes detected"}, workspaceRoot{})
 
 	if tv.Summary.Text != "No changes detected" || tv.Summary.Kind != detailPlain {
 		t.Errorf("the no-changes sentinel must be one plain summary line: %+v", tv.Summary)

@@ -437,9 +437,10 @@
 // codec on its Meta. Enumerating them per call site is exactly what failed before — several were
 // missed — so the seams strip on every producer's behalf: [transcript.addNote],
 // [transcript.addEphemeralNote], [transcript.addError], [transcript.addApproval] and
-// [transcript.addToolResult]'s orphan branch for the scrollback, [toolView.sanitize] (called by
-// presentToolCall and enrichWithResult) for the tool card and everything derived from it
-// (toolActivityLabel), and each popupRow builder for the overlays, since the popup module strips
+// [transcript.addToolResult]'s orphan branch for the scrollback, [toolView.sanitize] (run by
+// [toolView.finishDisplay], which presentToolCall and enrichWithResult both leave through) for the
+// tool card and everything derived from it (toolActivityLabel), and each popupRow builder for the
+// overlays, since the popup module strips
 // nothing and truncates ANSI-preservingly. stripEscapes is idempotent and allocation-free on text
 // with no ESC, so a producer that also strips costs nothing. TestTranscriptStripsTerminalEscapes
 // and its siblings pin every one of those paths.

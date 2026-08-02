@@ -27,6 +27,12 @@ type transcript struct {
 	// Update, and a Builder forbids the copy — it panics copyCheck)
 	streaming bool // whether pending holds an un-committed assistant buffer
 	debug     bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
+	// ws is the project root a tool card's paths are printed relative to (workspacepath.go), resolved
+	// once at construction from Options.Workspace. It lives here because addToolCall and
+	// addToolResult are reached through apply, which folds an Event with no Model in sight; it is a
+	// fact about the RUN rather than about the conversation, so reset preserves it as it does debug.
+	// The zero value shortens nothing, which is what a hand-built test transcript gets.
+	ws workspaceRoot
 }
 
 // entryKind tags a transcript entry so the renderer can prefix and style it. The set
@@ -229,7 +235,8 @@ func (t *transcript) refreshStartup(v startupView) {
 }
 
 // reset returns the transcript to its empty state — no committed entries and no in-progress
-// assistant buffer — while preserving the debug flag (a hidden view toggle, not conversation).
+// assistant buffer — while preserving the debug flag (a hidden view toggle, not conversation) and
+// the workspace root (a fact about the run, which /clear does not move).
 // It is the /clear + /new "start a new session" primitive: the caller re-seeds the one-time
 // start-up box with addStartup so the fresh view matches a launch. It does NOT touch the engine's
 // memory (ClearContext) — that is the caller's separate, fallible step (model.startNewSession).
@@ -237,7 +244,7 @@ func (t *transcript) reset() {
 	t.entries = nil
 	t.pending = ""
 	t.streaming = false
-	// t.debug is deliberately preserved across a session reset.
+	// t.debug and t.ws are deliberately preserved across a session reset.
 }
 
 // replay appends already-decoded committed entries after whatever the transcript already holds —
@@ -433,13 +440,15 @@ func (t *transcript) finalizeNarration(depth int) {
 // addToolCall appends a tool-call entry: the presentation view (friendly label + target)
 // built from the model's requested call, plus the call ID the paired result folds into. The
 // view shows the call verbatim where it cannot summarise it (a malformed argument is rendered
-// as-is rather than hidden — the human approving a write must see exactly what was asked).
+// as-is rather than hidden — the human approving a write must see exactly what was asked). What it
+// does restate is a path's SPELLING: the workspace root is shortened out of it (t.ws), which
+// changes how the call reads and nothing about what was requested.
 func (t *transcript) addToolCall(call domain.ToolCall, depth int) {
 	t.entries = append(t.entries, entry{
 		kind:   entryToolCall,
 		depth:  depth,
 		callID: call.ID,
-		tool:   presentToolCall(call),
+		tool:   presentToolCall(call, t.ws),
 	})
 }
 
@@ -453,7 +462,7 @@ func (t *transcript) addToolResult(result domain.ToolResult, depth int) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		e := &t.entries[i]
 		if e.kind == entryToolCall && !e.done && e.callID == result.CallID {
-			e.tool.enrichWithResult(result)
+			e.tool.enrichWithResult(result, t.ws)
 			e.done = true
 			return
 		}

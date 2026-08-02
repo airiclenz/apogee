@@ -119,6 +119,15 @@ func (b *toolBody) stripEscapes() {
 	}
 }
 
+// shortenPaths spells every path the body's lines name inside the workspace relative to it (the
+// finishDisplay seam's work on the body — workspaceRoot.shorten). Like stripEscapes it rewrites
+// only Text, so the kind newToolBody settled still describes what the body holds.
+func (b *toolBody) shortenPaths(w workspaceRoot) {
+	for i := range b.lines {
+		b.lines[i].Text = w.shorten(b.lines[i].Text)
+	}
+}
+
 // toolView is the presentation model of a tool call (later enriched by its result): a
 // friendly Label, the active Verb for the status line, the Target it acts on (a path, a
 // directory, a pattern), and the outcome split in two — the one-line Summary that rides the
@@ -339,8 +348,9 @@ var toolRegistry = map[string]toolPresenter{
 // truthful sentence fragment for a dynamic MCP tool nobody has a verb for.
 // Everything the header states traces back to the model's own JSON arguments — the target on every
 // registered tool, and the raw name behind an unknown tool's label, verb and pretty-printed body —
-// so both exits sanitize before the view leaves this function.
-func presentToolCall(call domain.ToolCall) toolView {
+// so both exits leave through finishDisplay, which escape-strips the view and spells the paths in
+// it relative to the workspace root ws names.
+func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	p, ok := toolRegistry[call.Tool]
 	if !ok {
 		tv := toolView{
@@ -349,22 +359,55 @@ func presentToolCall(call domain.ToolCall) toolView {
 			name:    call.Tool,
 			Details: newToolBody(prettyJSONDetails(call.Arguments)),
 		}
-		tv.sanitize()
+		tv.finishDisplay(ws)
 		return tv
 	}
 	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool}
 	if p.target != nil {
 		tv.Target = p.target(parseArgs(call.Arguments))
 	}
-	tv.sanitize()
+	tv.finishDisplay(ws)
 	return tv
+}
+
+// finishDisplay is the seam every freshly built or freshly enriched view leaves through, and it is
+// two acts in one order: escape-strip every display field (sanitize), then shorten the workspace
+// root out of the paths those fields name (shortenPaths). The order is load-bearing — an ESC byte
+// buried inside a path splits the root's spelling in two, so a shortener running first would not
+// recognise the mention and would leave the absolute path on screen, which is a repo that controls
+// a filename opting itself out of the rule.
+//
+// The two exits of presentToolCall and the one of enrichWithResult go through here rather than
+// calling either half directly, so a later tool or a later branch cannot pick up one discipline and
+// miss the other.
+func (tv *toolView) finishDisplay(ws workspaceRoot) {
+	tv.sanitize()
+	tv.shortenPaths(ws)
+}
+
+// shortenPaths spells every path the view's display fields name inside the workspace relative to it
+// — the target that leads the branch line, the one-line summary beside it, and every line of the
+// body beneath (workspaceRoot.shorten). It is presentation and nothing else: the model's arguments
+// and the tool's own result are untouched, so the agent's view of a path never changes with the
+// transcript's spelling of it.
+//
+// Label and Verb are deliberately left out. They name the TOOL — a friendly label, or an
+// unregistered tool's raw id behind "running <name>" — and a tool id is not a path, so shortening
+// them could only ever mangle a name that happened to read like one.
+func (tv *toolView) shortenPaths(ws workspaceRoot) {
+	if ws.root == "" {
+		return
+	}
+	tv.Target = ws.shorten(tv.Target)
+	tv.Summary.Text = ws.shorten(tv.Summary.Text)
+	tv.Details.shortenPaths(ws)
 }
 
 // sanitize escape-strips every DISPLAY field of the view — label, verb, target, the one-line
 // summary and each detail line — so no ESC byte from a tool call or its result can reach the
-// terminal (stripEscapes). It is the tool card's seam, called once on the way out of
-// presentToolCall and of enrichWithResult, rather than left to the two dozen target and detail
-// extractors above to remember one at a time.
+// terminal (stripEscapes). It is the tool card's security seam, run on the way out of
+// presentToolCall and of enrichWithResult (finishDisplay) rather than left to the two dozen target
+// and detail extractors above to remember one at a time.
 //
 // The threat is concrete and needs no user action: a malicious repo owns the first line of any file
 // the model reads and the first line of any command's output (firstLineDetail, outputDetail), a
@@ -411,10 +454,12 @@ func bodyIsDiff(details []detailLine) bool {
 // shown raw as body lines, so nothing is ever silently dropped.
 //
 // Every one of those layers words itself from result.Content, which is tool output and therefore
-// repo-controlled, so the sanitize seam is deferred rather than repeated: it runs on whichever
-// branch returns, and on any branch a later tool adds.
-func (tv *toolView) enrichWithResult(result domain.ToolResult) {
-	defer tv.sanitize()
+// repo-controlled, so the finishDisplay seam is deferred rather than repeated: it runs on whichever
+// branch returns, and on any branch a later tool adds. Re-finishing the fields the call already
+// left through costs one pass and is exactly idempotent — a stripped line has no ESC left to strip
+// and a shortened path no longer spells the root — which is what lets the seam stay one call.
+func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot) {
+	defer tv.finishDisplay(ws)
 	if result.IsError {
 		tv.Summary = detailLine{Text: "error: " + firstLine(result.Content)}
 		return

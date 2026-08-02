@@ -641,13 +641,13 @@ func TestToolActivityLabelCarriesNoEscape(t *testing.T) {
 	label := toolActivityLabel(domain.ToolCall{
 		Tool:      "terminal",
 		Arguments: escapedArgs(t, "command", "npm "+escOSC52+"test"),
-	})
+	}, workspaceRoot{})
 	assertNoESCIn(t, "the activity label", label)
 	if !strings.Contains(label, "running") || !strings.Contains(label, "npm ") {
 		t.Errorf("stripping ate the benign label text: %q", label)
 	}
 
-	unknown := toolActivityLabel(domain.ToolCall{Tool: "mcp" + escCSI + "_thing"})
+	unknown := toolActivityLabel(domain.ToolCall{Tool: "mcp" + escCSI + "_thing"}, workspaceRoot{})
 	assertNoESCIn(t, "the unregistered-tool activity label", unknown)
 }
 

@@ -125,13 +125,16 @@ const statusTargetRunes = 32
 // "running · npm test"). An unregistered (dynamic MCP) tool inherits presentToolCall's
 // "running <raw name>" fallback, so it is still a truthful fragment.
 //
-// It needs no escape-stripping of its own: the phrase is built ONLY from presentToolCall's view,
-// which sanitizes on the way out (toolView.sanitize), so the status line inherits the tool card's
-// seam rather than re-deriving the discipline. That matters here more than it looks — foldActivity
-// paints this label the moment a call is ANNOUNCED, before any approval gate runs, so it is the
-// earliest point at which a hostile model's argument reaches the screen.
-func toolActivityLabel(call domain.ToolCall) string {
-	return toolPhrase(presentToolCall(call))
+// It needs no escape-stripping and no path-shortening of its own: the phrase is built ONLY from
+// presentToolCall's view, which leaves that function through finishDisplay, so the status line
+// inherits the tool card's seam rather than re-deriving the discipline — and reads the same
+// workspace-relative path the block beneath it will. That matters here more than it looks —
+// foldActivity paints this label the moment a call is ANNOUNCED, before any approval gate runs, so
+// it is the earliest point at which a hostile model's argument reaches the screen. It also buys the
+// left slot its width back: statusTargetRunes clips at 32, which a project-relative path fits and
+// an absolute one routinely did not.
+func toolActivityLabel(call domain.ToolCall, ws workspaceRoot) string {
+	return toolPhrase(presentToolCall(call, ws))
 }
 
 // toolPhrase is the composition itself: a call's view worded as the sentence fragment naming what
@@ -187,7 +190,7 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 	case domain.StreamResetEvent:
 		m.setActivity(actRetrying, "", e.Depth)
 	case domain.ToolCallEvent:
-		m.setActivity(actTool, toolActivityLabel(e.Call), e.Depth)
+		m.setActivity(actTool, toolActivityLabel(e.Call, m.transcript.ws), e.Depth)
 	case domain.ToolResultEvent:
 		// One result does not end the tool phase while another call is still open (a parallel
 		// batch); today's loop dispatches sequentially, so this normally falls straight through

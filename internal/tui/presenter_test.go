@@ -516,11 +516,11 @@ func TestPresentDocumentToolCard(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{
 		Tool:      "present_document",
 		Arguments: []byte(`{"path":"docs/review.html","title":"Architecture review"}`),
-	})
+	}, workspaceRoot{})
 	if tv.Label != "Present" || tv.Verb != "presenting" || tv.Target != "docs/review.html" {
 		t.Errorf("view = %+v; want the Present/presenting/path registry entry", tv)
 	}
-	tv.enrichWithResult(domain.ToolResult{Content: "Presented docs/review.html: opened on the user's machine."})
+	tv.enrichWithResult(domain.ToolResult{Content: "Presented docs/review.html: opened on the user's machine."}, workspaceRoot{})
 	if tv.Summary.Text != "Presented docs/review.html: opened on the user's machine." {
 		t.Errorf("summary = %q; want the result's first line", tv.Summary.Text)
 	}

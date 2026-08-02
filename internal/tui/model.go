@@ -251,6 +251,12 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		m.hb.gen = 1
 	}
 
+	// Resolve the root every tool card's paths are printed relative to, before anything can record a
+	// call against the transcript (workspacepath.go). It is set on the transcript rather than kept
+	// on the Model because the fold that records a call reaches no Model, and reset preserves it —
+	// /clear opens a new session in the same workspace.
+	m.transcript.ws = newWorkspaceRoot(opts.Workspace)
+
 	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
 	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
 	// every repaint, so it reflows on resize with no "already shown" guard, and /clear re-seeds it

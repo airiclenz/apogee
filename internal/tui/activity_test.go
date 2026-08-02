@@ -83,7 +83,7 @@ func TestToolActivityLabel(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := toolActivityLabel(tc.call); got != tc.want {
+			if got := toolActivityLabel(tc.call, workspaceRoot{}); got != tc.want {
 				t.Errorf("toolActivityLabel() = %q, want %q", got, tc.want)
 			}
 		})
@@ -93,7 +93,7 @@ func TestToolActivityLabel(t *testing.T) {
 		got := toolActivityLabel(domain.ToolCall{
 			Tool:      "read_file",
 			Arguments: []byte(`{"path":"` + longPath + `"}`),
-		})
+		}, workspaceRoot{})
 		if !strings.HasPrefix(got, "reading · ") {
 			t.Fatalf("clipped label lost its verb: %q", got)
 		}
