@@ -82,6 +82,16 @@ type toolView struct {
 	Details []detailLine
 
 	name string
+
+	// hasDiffBody is the retained body's KIND — true when Details carries a red/green line —
+	// and it is the one fact the collapsed paint's cap depends on: a diff body keeps
+	// diffDetailCap lines, any other multi-line body keeps its first (collapsedDetails,
+	// render.go). It is SETTLED ONCE, at the sanitize seam every path that can give a view a
+	// body passes through, and read from there on: the body is retained whole and capped only
+	// at paint, so a rule re-derived from the lines would walk a command's whole output on
+	// every repaint. It is never persisted — the wire carries each line's own Kind, from which
+	// decode settles this again through the same seam (fromWireToolView).
+	hasDiffBody bool
 }
 
 // toolOutcome is what a prose extractor returns: the one-line Summary that rides the branch
@@ -316,6 +326,11 @@ func presentToolCall(call domain.ToolCall) toolView {
 //
 // name is deliberately left alone: it is the registry lookup key enrichWithResult reads, never
 // rendered — Label carries the displayed copy of it, and Label is stripped.
+//
+// It also SETTLES the body's kind (hasDiffBody), which is a second act only in name: the set of
+// places that can hand a view a body is exactly the set that must strip it, and this seam is the
+// one none of them may skip. Deriving the kind anywhere else would be a rule a new body path could
+// forget; deriving it at paint would re-walk a retained body once a frame.
 func (tv *toolView) sanitize() {
 	tv.Label = stripEscapes(tv.Label)
 	tv.Verb = stripEscapes(tv.Verb)
@@ -324,6 +339,21 @@ func (tv *toolView) sanitize() {
 	for i := range tv.Details {
 		tv.Details[i].Text = stripEscapes(tv.Details[i].Text)
 	}
+	tv.hasDiffBody = bodyIsDiff(tv.Details)
+}
+
+// bodyIsDiff reports whether a body carries a red/green diff line — the exact test for a diff
+// body, since diffBody is the diff kinds' only producer and never emits an untagged body ("No
+// changes detected" carries no diff at all and never reaches it). It runs once per view, at the
+// sanitize seam; the painter reads its answer off the view (toolView.hasDiffBody) rather than
+// asking again.
+func bodyIsDiff(details []detailLine) bool {
+	for _, d := range details {
+		if d.Kind == detailDiffAdded || d.Kind == detailDiffRemoved {
+			return true
+		}
+	}
+	return false
 }
 
 // enrichWithResult folds a tool's result into the view, in three layers. An error result

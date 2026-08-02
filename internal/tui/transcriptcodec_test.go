@@ -18,22 +18,26 @@ import (
 // an enriched tool-call card (summary + coloured details + done, carrying its unexported name),
 // a standalone tool result, a recovered error, a neutral note, and a presented document with a
 // domain Method. It is the fixture behind the round-trip and exclusion tests.
+//
+// The tool card is finished through sanitize rather than left a bare literal, because that seam is
+// where a view's body kind is settled (toolView.hasDiffBody) — a fixture that skipped it would
+// describe a view the presenter never produces, and the round-trip's DeepEqual would then pass or
+// fail on the fixture's shortcut instead of on the codec.
 func mixedEntries() []entry {
+	toolCard := toolView{
+		Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
+		Summary: detailLine{Text: "1 - 100"},
+		Details: []detailLine{
+			{Kind: detailDiffAdded, Text: "+ added line"},
+			{Kind: detailDiffRemoved, Text: "- removed line"},
+			{Kind: detailPlain, Text: "  context"},
+		},
+	}
+	toolCard.sanitize()
 	return []entry{
 		{kind: entryUser, text: "read main.go", skills: []string{"reviewer", "go-expert"}},
 		{kind: entryAssistant, text: "Reading it now.", depth: 1},
-		{
-			kind: entryToolCall, callID: "c1", done: true,
-			tool: toolView{
-				Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
-				Summary: detailLine{Text: "1 - 100"},
-				Details: []detailLine{
-					{Kind: detailDiffAdded, Text: "+ added line"},
-					{Kind: detailDiffRemoved, Text: "- removed line"},
-					{Kind: detailPlain, Text: "  context"},
-				},
-			},
-		},
+		{kind: entryToolCall, callID: "c1", done: true, tool: toolCard},
 		{kind: entryToolResult, text: "error: boom", depth: 2},
 		{kind: entryError, text: "loop: recovered fault"},
 		{kind: entryNote, text: "cancelled"},
@@ -291,6 +295,46 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 	// The strip removes only the ESC byte, leaving the surrounding text intact.
 	if got[0].text != "hithere" {
 		t.Errorf("stripped user text = %q; want %q", got[0].text, "hithere")
+	}
+}
+
+// TestTranscriptCodecSettlesTheBodyKindOnDecode proves the derived body kind survives a resume
+// even though the wire never carries it: the blob stores each line's own Kind and nothing above
+// it, so decode has to settle the view's kind again or a resumed diff would paint one line plus a
+// remainder marker instead of its diffDetailCap lines. Asserted at the cap, which is what the
+// reader would have seen go wrong.
+func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
+	t.Parallel()
+	body := make([]detailLine, 0, diffDetailCap+3)
+	for range diffDetailCap + 3 {
+		body = append(body, detailLine{Kind: detailDiffAdded, Text: "+ added"})
+	}
+	tr := &transcript{entries: []entry{{
+		kind: entryToolCall, callID: "c1", done: true,
+		tool: toolView{
+			Label: "View Diff", Verb: "diffing", Target: "main.go", name: "view_diff",
+			Summary: detailLine{Text: "+23 -0"}, Details: body,
+		},
+	}}}
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("decoded %d entries; want the one tool call", len(got))
+	}
+	if !got[0].tool.hasDiffBody {
+		t.Error("decoded diff body did not settle as a diff body")
+	}
+	shown, _, truncated := collapsedDetails(got[0].tool)
+	if !truncated || len(shown) != diffDetailCap {
+		t.Errorf("decoded diff body paints %d lines (truncated=%v); want the diff cap of %d",
+			len(shown), truncated, diffDetailCap)
 	}
 }
 

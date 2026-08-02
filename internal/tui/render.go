@@ -709,7 +709,7 @@ func blockHidesWhenCollapsed(views []toolView) bool {
 		if tv.Target == "" {
 			continue
 		}
-		if _, _, truncated := collapsedDetails(tv.Details); truncated {
+		if _, _, truncated := collapsedDetails(tv); truncated {
 			return true
 		}
 	}
@@ -763,7 +763,7 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 		out.add(renderSubDetails(th, tv.Details, indent, width), targetNone)
 		return out
 	}
-	shown, remainder, truncated := collapsedDetails(tv.Details)
+	shown, remainder, truncated := collapsedDetails(tv)
 	out.add(renderSubDetails(th, shown, indent, width), targetNone)
 	if truncated {
 		out.add(renderSubDetails(th, []detailLine{remainder}, indent, width), targetMarker)
@@ -788,36 +788,30 @@ const diffDetailCap = 20
 // The split is also the toggle-target rule's oracle: truncated is exactly "the collapsed paint
 // hides something", which is what makes a header clickable (blockHidesWhenCollapsed).
 //
-// Two flavours, told apart by the body's own line kinds: a diff body — recognised by carrying at
-// least one tagged line, which every body diffBody produces does — keeps diffDetailCap lines, so
-// a focused change reads in place; any other multi-line body keeps its first line alone, the
-// gist a Run's output is worth in the chat. A body already inside its cap paints whole and grows
-// no marker.
+// Two flavours, told apart by the kind the view settled when its body was produced
+// (toolView.hasDiffBody, toolpresent.go): a diff body — one carrying at least one tagged line,
+// which every body diffBody produces does — keeps diffDetailCap lines, so a focused change reads
+// in place; any other multi-line body keeps its first line alone, the gist a Run's output is
+// worth in the chat. A body already inside its cap paints whole and grows no marker.
+//
+// The kind is READ, never re-derived here. This runs on every repaint and twice per call — the
+// toggle-target rule asks it as well as the branch — over a body the entry now retains whole, so
+// sniffing the lines at this seam would walk a command's whole output once a frame. It takes the
+// VIEW rather than its Details for the same reason the rule and the paint share one function: the
+// body and the kind that caps it cannot be passed in disagreeing.
 //
 // It is the BODY's rule, not every detail line's: the targetless shape has no body — its detail
 // lines ARE the block's ┝/┕ branches (renderDetails), an unregistered tool's verbatim arguments
 // among them — and hiding those would hide what the model asked for, which no block does.
-func collapsedDetails(details []detailLine) (shown []detailLine, remainder detailLine, truncated bool) {
+func collapsedDetails(tv toolView) (shown []detailLine, remainder detailLine, truncated bool) {
 	limit := 1
-	if hasDiffLine(details) {
+	if tv.hasDiffBody {
 		limit = diffDetailCap
 	}
-	if len(details) <= limit {
-		return details, detailLine{}, false
+	if len(tv.Details) <= limit {
+		return tv.Details, detailLine{}, false
 	}
-	return details[:limit], detailLine{Text: "… +" + plural(len(details)-limit, "more line")}, true
-}
-
-// hasDiffLine reports whether a body carries a red/green diff line — the painter's exact test
-// for a diff body, since diffBody is the diff kinds' only producer and never emits an untagged
-// body ("No changes detected" carries no diff at all and never reaches it).
-func hasDiffLine(details []detailLine) bool {
-	for _, d := range details {
-		if d.Kind == detailDiffAdded || d.Kind == detailDiffRemoved {
-			return true
-		}
-	}
-	return false
+	return tv.Details[:limit], detailLine{Text: "… +" + plural(len(tv.Details)-limit, "more line")}, true
 }
 
 // branchDetails is what a targetless call hangs off its header: the body, plus the summary as

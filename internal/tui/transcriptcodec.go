@@ -252,23 +252,28 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 	return e, true
 }
 
-// fromWireToolView rebuilds a toolView from the wire, escape-stripping every rendered field and
-// restoring the unexported name so enrichWithResult can still find the result extractor. A nil
-// Details stays nil (never a non-nil empty slice) so a not-yet-enriched call round-trips exactly.
+// fromWireToolView rebuilds a toolView from the wire and finishes it through the presenter's own
+// seam: sanitize escape-strips every rendered field and settles the body's kind, which is derived
+// and never stored — the wire carries each line's own Kind and nothing above it, so a resumed diff
+// body would come back capped at one line if decode skipped the seam. name is stripped here
+// instead, because sanitize leaves it alone by design (it is the registry key enrichWithResult
+// reads, never rendered) and it still has to be restored for that lookup. A nil Details stays nil
+// (never a non-nil empty slice) so a not-yet-enriched call round-trips exactly.
 func fromWireToolView(w *wireToolView) toolView {
 	tv := toolView{
-		Label:   stripEscapes(w.Label),
-		Verb:    stripEscapes(w.Verb),
-		Target:  stripEscapes(w.Target),
+		Label:   w.Label,
+		Verb:    w.Verb,
+		Target:  w.Target,
 		name:    stripEscapes(w.Name),
-		Summary: detailLine{Kind: detailKind(w.Summary.Kind), Text: stripEscapes(w.Summary.Text)},
+		Summary: detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text},
 	}
 	if len(w.Details) > 0 {
 		tv.Details = make([]detailLine, 0, len(w.Details))
 		for _, d := range w.Details {
-			tv.Details = append(tv.Details, detailLine{Kind: detailKind(d.Kind), Text: stripEscapes(d.Text)})
+			tv.Details = append(tv.Details, detailLine{Kind: detailKind(d.Kind), Text: d.Text})
 		}
 	}
+	tv.sanitize()
 	return tv
 }
 

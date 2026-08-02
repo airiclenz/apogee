@@ -445,6 +445,67 @@ func TestDiffBody(t *testing.T) {
 	}
 }
 
+// TestBodyKindIsSettledAtTheViewSeam pins the mechanism the collapsed paint's cap reads: the
+// body's kind is decided ONCE, where the view is finished (sanitize), and kept on the view — not
+// re-derived from the lines on every repaint, over a body the entry retains whole. Both flavours
+// and both edges are covered: an empty body and a single line never truncate whatever their kind,
+// so they are exactly the shapes where a wrong answer would hide until the body grew.
+func TestBodyKindIsSettledAtTheViewSeam(t *testing.T) {
+	tests := []struct {
+		name    string
+		details []detailLine
+		want    bool
+	}{
+		{name: "no body at all", details: nil, want: false},
+		{name: "a single plain line", details: []detailLine{{Text: "ok"}}, want: false},
+		{
+			name:    "a multi-line plain body",
+			details: []detailLine{{Text: "ok   a"}, {Text: "ok   b"}, {Text: "PASS"}},
+			want:    false,
+		},
+		{
+			name:    "a single diff line",
+			details: []detailLine{{Kind: detailDiffAdded, Text: "+ added"}},
+			want:    true,
+		},
+		{
+			name: "a diff line behind context — the scan cannot stop at the first line",
+			details: []detailLine{
+				{Text: "  ctx"}, {Text: "  ctx"}, {Kind: detailDiffRemoved, Text: "- gone"},
+			},
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tv := toolView{Label: "Tool", Target: "main.go", Details: tc.details}
+			tv.sanitize()
+			if tv.hasDiffBody != tc.want {
+				t.Errorf("hasDiffBody = %v, want %v for %+v", tv.hasDiffBody, tc.want, tc.details)
+			}
+		})
+	}
+}
+
+// TestBodyKindFollowsTheProducer proves the seam is reached on the paths that actually make
+// bodies: view_diff's tagged body settles as a diff, free-form output settles as plain. Together
+// with TestBodyKindIsSettledAtTheViewSeam this is the whole contract collapsedDetails relies on.
+func TestBodyKindFollowsTheProducer(t *testing.T) {
+	diff := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)})
+	diff.enrichWithResult(domain.ToolResult{
+		CallID: "1", Content: "  ctx\n- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1},
+	})
+	if !diff.hasDiffBody {
+		t.Errorf("a view_diff body must settle as a diff body: %+v", diff.Details)
+	}
+
+	run := presentToolCall(domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)})
+	run.enrichWithResult(domain.ToolResult{CallID: "2", Content: "ok   a\nok   b\nPASS"})
+	if run.hasDiffBody {
+		t.Errorf("free-form output must settle as a plain body: %+v", run.Details)
+	}
+}
+
 // TestDiffStatSpansTheWholeDiff: the diffstat riding the branch describes the whole diff even
 // when the collapsed paint stops at diffDetailCap — a truncated paint cannot tell you how big
 // the change was, and the stat no longer comes from the body's lines at all but from the tool's
