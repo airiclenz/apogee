@@ -289,7 +289,11 @@ keeps every body line, and the collapsed caps — free-form output's first line 
 `… +N more lines` remainder, the diff body's cap with its remainder — apply at paint, not at
 build. Expanded shows everything, uncapped; the remainder markers exist only in the collapsed
 paint. A group is the degenerate case: its calls carry no bodies (that is what made them
-groupable), so both states paint identically and the rule never mentions groups.
+groupable), so both states paint identically and the rule never mentions groups. A call with **no
+target** is the other shape the two states pass over: its lines are the block's own `┝`/`┕`
+branches rather than a body — an unregistered tool's verbatim arguments, a stray `result` — and
+what the model actually asked for is never hidden from the human approving it, so those lines are
+uncapped in both states.
 
 **Collapsed is the default, always** — including a call still in flight and a sub-agent run still
 working. Only a click changes a block's state, so nothing ever expands or collapses by itself: a
@@ -299,9 +303,12 @@ collapsed, and `/clear` forgets it with everything else.
 
 **What a click means.** A motionless click — press and release in the same cell — on a block's
 **header line** toggles that block; on a `… +N more lines` marker it expands the block the body
-belongs to. Everywhere else in the transcript a click keeps its selection meaning, and any drag
-is a drag-select wherever it starts, header lines included: motion is what arbitrates, exactly as
-it already separates click-to-position from drag in the prompt. Keyboard toggling is deliberately
+belongs to. A header toggles only where its block has something to reveal — a capped body, or a
+sub-agent run's elided span — so a block that hides nothing in either state (a body-less group, a
+targetless call whose lines are its branches) has no state worth flipping and its header is not a
+target. Everywhere else in the transcript a click keeps its selection meaning, and any drag is a
+drag-select wherever it starts, header lines included: motion is what arbitrates, exactly as it
+already separates click-to-position from drag in the prompt. Keyboard toggling is deliberately
 absent, on the same precedent that keeps transcript selection mouse-only; a block-cursor mode is
 its own future feature. After a toggle the clicked header keeps its screen row — content grows or
 shrinks *below* it, and the line under the cursor never moves.

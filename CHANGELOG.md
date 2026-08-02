@@ -10,6 +10,39 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Tool blocks collapse and expand — click a header, or its `… +N more lines` marker, to see
+  everything a call actually returned.** The compact block is unchanged and it is still what you
+  get by default: a command's output shows its first line, a diff its first 20, each with the
+  `… +N more lines` remainder counting the rest. What changed is that the rest is still *there* —
+  the transcript retains every line of every body and the caps became a **paint-time act** — so a
+  **motionless click on a block's header** opens it in full, a second click closes it again, and a
+  click on the remainder marker opens the block that body belongs to. Dragging is untouched:
+  motion is what separates a selection from a click, header lines included, exactly as it already
+  does in the prompt. After a toggle the line under the cursor **keeps its screen row** — the block
+  grows or shrinks below it — whether the view is riding the tail or scrolled up.
+  - **A sub-agent run collapses to its call block.** Collapsed — the default, including while it is
+    still working — a `Sub-Agent` call stands alone and its whole railed span is elided, every
+    inner block, `⤷` label and rail with it. Its summary line carries the run in two tempi:
+    `4 tool calls · reading main.go` while it works, ticking as inner calls land, then
+    `4 tool calls · ` plus the report's first line once the report arrives. The count is
+    **transitive**, so one number says how much work happened in there however deeply it nested.
+    Expanding reveals the inner blocks *in their own states* — a nested run stays collapsed inside
+    an expanded parent, because this is one rule applied at every depth and not a special case.
+  - **A live block's star blinks.** While a block still holds a call whose result has not landed —
+    or a run whose report has not — its header glyph alternates `✦`/`✧` on the spinner's own tick,
+    so work in progress is visible without the transcript carrying a timer of its own. It settles
+    to `✦` when the result lands, and the tick repaints the transcript only while something is
+    actually open.
+  - **The state is the view's alone.** It is never encoded with the transcript: a resumed session
+    paints everything collapsed and `/clear` forgets it with everything else. A block that hides
+    nothing has nothing to toggle — a group of body-less calls, or a call with no target whose
+    lines are the block's own branches, since an unregistered tool's verbatim arguments are never
+    capped — and a click there keeps its ordinary selection meaning. Toggling is mouse-only for
+    now, on the same precedent that keeps transcript selection mouse-only; a keyboard block-cursor
+    is its own future feature.
+
+  Specced in `layout.md` ("Collapsed and expanded blocks").
+
 - **A new session names itself from your first prompt — and `/rename` sets or re-asks for a name.**
   A saved session was listed under the first line you typed, cut at 50 characters, so the
   `/sessions` browser read as a wall of half-sentences. Now the first thing you say in a fresh

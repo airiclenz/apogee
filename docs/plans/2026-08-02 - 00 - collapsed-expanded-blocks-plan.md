@@ -311,9 +311,19 @@ code item — run the full gate here, not only the package tests).
 
 **Commit:** `feat(tui): a live block's header star blinks on the spinner tick`
 
-## 7. Docs closeout
+## 7. Docs closeout — ✅ DONE (2026-08-02)
 
 Depends on item 6.
+
+NOTES (2026-08-02): the layout.md verification found the section true of the shipped paint everywhere
+except the two facts item 1's and item 3's NOTES record, so both landed in the spec: the **targetless
+shape** is now named beside the group as the other block the two states pass over (its lines are the
+block's own ┝/┕ branches, never capped — an unregistered tool's verbatim arguments are not hidden from
+the human approving them), and "What a click means" now carries the **target rule** (a header toggles
+only where its block hides something; a block with nothing to reveal keeps a click's selection
+meaning). ISSUES.md follows this item's literal instruction and marks the entry `[X]` per the file's
+legend, where the file's past practice for a closed entry was deletion — the entry stays readable as
+the record of what shipped.
 
 **What:** this item owns every cross-cutting doc amendment — no other item touches these
 files.
