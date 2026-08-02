@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,6 +25,12 @@ func popupLines(out string) []string {
 func popupInterior(line string) string {
 	return strings.Trim(strip(line), "│ ")
 }
+
+// elisionMarkerPattern matches EITHER wording of the "there is prose you cannot see" marker — the
+// full phrase and the short form a narrow pane trades down to (popupElisionMarkerFitting). A
+// property that only cares THAT the pane accounted for what it hid should not have to know which
+// width it was drawn at; the tests that care about the wording assert it exactly.
+var elisionMarkerPattern = regexp.MustCompile(`… \(\+\d+ more lines\)|… \+\d+`)
 
 // Every rendered line — border runes included — is exactly the total width it was handed, with
 // and without the optional title / hint rows, so the pane's right border always lands on the
@@ -370,7 +378,7 @@ func TestRenderPopupBodyMaxRows(t *testing.T) {
 // text the human was never told existed.
 func TestRenderPopupBodyBudgetOfZeroShowsNoBodyButSaysSo(t *testing.T) {
 	th := newTheme()
-	const width = 60 // wide enough to seat the title and the marker; the narrow case is truncation, tested above
+	const width = 60 // wide enough to seat the title and the phrase in full; the narrow ladder is the test below
 
 	lines := popupLines(renderPopup(th, popupSpec{
 		title:       "approve write_file?",
@@ -414,6 +422,62 @@ func TestRenderPopupBodyBudgetOfZeroShowsNoBodyButSaysSo(t *testing.T) {
 	}
 	if marker := popupInterior(oneRow[2]); marker != "… (+3 more lines)" {
 		t.Errorf("body row = %q, want the elision marker", marker)
+	}
+}
+
+// The title row seats the count at every WIDTH a pane can be drawn at, not just the wide ones.
+// Composing the row at full length and clipping it to the inner budget meant the pane's name won
+// the row and the count fell off the end of it — so on a terminal that was both short and narrow
+// (the split tmux pane the title-row fallback exists for) the prose went silent again, exactly as
+// it had before the marker learned to ride the title. The count now outranks the WORDING that
+// carries it: the phrase sheds its noun first ("… +3"), and only past that is the NAME clipped —
+// never the number.
+func TestRenderPopupNarrowTitleKeepsTheElisionCount(t *testing.T) {
+	th := newTheme()
+	const title = "approve write_file?"
+	spec := popupSpec{
+		title:       title,
+		body:        strings.Join([]string{"l0", "l1", "l2"}, "\n"),
+		maxBodyRows: 0,
+		hint:        "a allow · d deny",
+	}
+
+	// The full phrase is 17 cells and the name 19, so with the two-space gutter the row seats both
+	// from 38 inner cells — 42 columns — up. Below that the ladder takes over.
+	cases := []struct {
+		width int
+		want  string // "" = the name is clipped at this width, so only the properties below are asserted
+	}{
+		{60, title + "  … (+3 more lines)"},
+		{42, title + "  … (+3 more lines)"}, // the narrowest pane that seats the phrase in full
+		{41, title + "  … +3"},              // one cell short: the noun goes, the count stays
+		{34, title + "  … +3"},
+		{24, ""}, // now the name gives way instead — the count still does not
+		{20, ""},
+		{12, ""},
+	}
+
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("%d columns", c.width), func(t *testing.T) {
+			lines := popupLines(renderPopup(th, spec, c.width))
+			if got := len(lines); got != 2+1+1 { // 2 borders + the title + the hint
+				t.Fatalf("pane on a %d-column terminal rendered %d physical lines, want 4:\n%s",
+					c.width, got, strip(strings.Join(lines, "\n")))
+			}
+			row := popupInterior(lines[1])
+			if c.want != "" && row != c.want {
+				t.Errorf("title row on a %d-column pane = %q, want %q", c.width, row, c.want)
+			}
+			if !strings.Contains(row, "+3") {
+				t.Errorf("title row on a %d-column pane = %q: the count of hidden lines is not on it", c.width, row)
+			}
+			// …and the identity the decision turns on is still on it: whole where the width allows,
+			// an honest prefix of the name where it does not.
+			name, _, split := strings.Cut(row, popupGutter)
+			if !split || name == "" || !strings.HasPrefix(title, strings.TrimSuffix(name, "…")) {
+				t.Errorf("title row on a %d-column pane = %q: the pane's name is not legible on it", c.width, row)
+			}
+		})
 	}
 }
 

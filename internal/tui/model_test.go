@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -866,6 +867,11 @@ func TestModelApprovalLongArgsCapsBody(t *testing.T) {
 // account for every line it is not showing. Between 12 and 15 rows the budget grants no body row at
 // all, so the count rides the title — the row the pane always has, beside the tool name the
 // decision turns on.
+//
+// It runs at narrowOverlayWindow as well as at 80 columns, because the title row was the one place
+// the accounting could still be lost: composed at full length and clipped to the pane's width, it
+// dropped the count off its end on anything under about 43 columns, so a terminal that was short
+// AND narrow — the same split pane — silently went back to the state this test exists to forbid.
 func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 	req := domain.ApprovalRequest{
 		Tool:      "write_file",
@@ -873,39 +879,42 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 		Arguments: json.RawMessage(`{"path":"/ws/a/main.go","content":"package main"}`),
 	}
 
-	for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16, 20, 24} {
-		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
-			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
-			pane := m.approvalPrompt(req)
-			rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
-			flat := strings.Join(rows, "\n")
+	for _, width := range []int{80, narrowOverlayWindow} {
+		for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16, 20, 24} {
+			t.Run(fmt.Sprintf("%d×%d", width, height), func(t *testing.T) {
+				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
+				pane := m.approvalPrompt(req)
+				rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
+				flat := strings.Join(rows, "\n")
 
-			if got := lipgloss.Height(pane); got > m.viewport.Height() {
-				t.Errorf("approval pane is %d rows on a %d-row viewport (+%d): the input box goes off the frame\n%s",
-					got, m.viewport.Height(), got-m.viewport.Height(), flat)
-			}
-			if !strings.Contains(flat, "approve write_file?") {
-				t.Errorf("pane does not carry the tool name the decision turns on:\n%s", flat)
-			}
-			// Either the whole body is on the screen (its last content line is the args' close
-			// brace, so "package main" is the tail that proves it) or the pane counts out what is
-			// missing. Never neither.
-			if !strings.Contains(flat, "more lines)") && !strings.Contains(flat, "package main") {
-				t.Errorf("pane shows neither the whole body nor a marker for the lines it hid:\n%s", flat)
-			}
+				if got := lipgloss.Height(pane); got > m.viewport.Height() {
+					t.Errorf("approval pane is %d rows on a %d-row viewport (+%d): the input box goes off the frame\n%s",
+						got, m.viewport.Height(), got-m.viewport.Height(), flat)
+				}
+				if !strings.Contains(flat, "approve write_file?") {
+					t.Errorf("pane does not carry the tool name the decision turns on:\n%s", flat)
+				}
+				// Either the whole body is on the screen — its last line is the args' lone close
+				// brace, the one tail no wrap can break up — or the pane counts out what is missing,
+				// in whichever wording the width can pay for. Never neither.
+				bodyComplete := slices.ContainsFunc(rows, func(r string) bool { return strings.Trim(r, "│ ") == "}" })
+				if !bodyComplete && !elisionMarkerPattern.MatchString(flat) {
+					t.Errorf("pane shows neither the whole body nor a marker for the lines it hid:\n%s", flat)
+				}
 
-			// On a window with no body budget the marker has nowhere to go but the title row, which
-			// is exactly the case the finding was about — assert the placement, not just presence.
-			if maxBody, _ := m.popupBudget(0, 0); maxBody == 0 {
-				if got, want := len(rows), 4; got != want { // 2 borders + title + hint
-					t.Fatalf("pane with no body budget is %d rows, want %d:\n%s", got, want, flat)
+				// On a window with no body budget the marker has nowhere to go but the title row, which
+				// is exactly the case the finding was about — assert the placement, not just presence.
+				if maxBody, _ := m.popupBudget(0, 0); maxBody == 0 {
+					if got, want := len(rows), 4; got != want { // 2 borders + title + hint
+						t.Fatalf("pane with no body budget is %d rows, want %d:\n%s", got, want, flat)
+					}
+					title := strings.Trim(rows[1], "│ ")
+					if !strings.HasPrefix(title, "approve write_file?") || !elisionMarkerPattern.MatchString(title) {
+						t.Errorf("title row = %q, want the tool name followed by the elision marker", title)
+					}
 				}
-				title := strings.Trim(rows[1], "│ ")
-				if !strings.HasPrefix(title, "approve write_file?") || !strings.Contains(title, "more lines)") {
-					t.Errorf("title row = %q, want the tool name followed by the elision marker", title)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 

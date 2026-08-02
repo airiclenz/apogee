@@ -3256,8 +3256,10 @@ func (m Model) popupBudget(rows, rowCap int) (maxBody, maxRows int) {
 // rather than clipping it, and whatever it cannot seat it counts out in the "… (+N more lines)"
 // marker — the body block's last row while it has one, and the TITLE row when the window leaves the
 // pane its irreducible four (popupBudget grants no body rows between 12 and 15 rows, where a fifth
-// would push the input box off the frame). So the title always carries the identity the decision
-// turns on, and says when there is more to read than it is showing.
+// would push the input box off the frame). On a pane too narrow to seat the tool name beside the
+// full phrase the count is stated in fewer words rather than clipped off the row (popupTitleLine),
+// because the terminal that is short is usually the one that is narrow. So the title always carries
+// the identity the decision turns on, and says when there is more to read than it is showing.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
 	if req.Reason != "" {

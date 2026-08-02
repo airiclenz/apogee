@@ -828,13 +828,28 @@ func browserWithSessions(n int) sessionBrowser {
 // this size.
 const smallestOverlayWindow = 12
 
-// modelWithOverlayRoom builds a laid-out model on a height-row terminal with a transcript long
-// enough that the viewport is full — the state in which an overlay has to take its rows from
-// something already occupying them.
+// narrowOverlayWindow is a terminal too NARROW to seat a pane's name beside the full
+// "… (+N more lines)" phrase: the approval prompt's title and that phrase come to 38 cells with the
+// gutter, so 42 columns is the last width that fits them and anything under it makes the pane trade
+// wording for width (popupElisionMarkerFitting). A short window is usually a narrow one too — one
+// split pane, not two coincidences — so every property asserted at the standard 80 columns is
+// asserted here as well.
+const narrowOverlayWindow = 34
+
+// modelWithOverlayRoom builds a laid-out model on a height-row terminal 80 columns wide, the width
+// the overlay properties use unless they are specifically about narrowness.
 func modelWithOverlayRoom(t *testing.T, height int, opts Options) Model {
 	t.Helper()
+	return modelWithOverlayRoomAt(t, 80, height, opts)
+}
+
+// modelWithOverlayRoomAt builds a laid-out model on a width×height terminal with a transcript long
+// enough that the viewport is full — the state in which an overlay has to take its rows from
+// something already occupying them.
+func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model {
+	t.Helper()
 	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
-	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: height})
 	for i := range 40 {
 		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
 	}
@@ -859,6 +874,11 @@ func modelWithOverlayRoom(t *testing.T, height int, opts Options) Model {
 // account for the lines it dropped. Fitting is otherwise trivially satisfiable — hide everything,
 // say nothing — which is what a zero body budget did before the marker learned to ride the title
 // row, on a surface where the human is ruling on what a tool is about to do.
+//
+// Both properties run at narrowOverlayWindow as well as at the standard 80 columns: the marker that
+// rides the title row was composed long and clipped to the pane's width, so the accounting survived
+// the SHORT window only to go silent on a narrow one — and the terminal these panes shrink for is
+// generally both.
 func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 	servers := make([]ServerChoice, 0, 12)
 	for i := range 12 {
@@ -875,20 +895,20 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 	overlays := []struct {
 		name  string
 		prose bool // the pane carries a body, so it owes an accounting of whatever it cannot seat
-		open  func(t *testing.T, height int) Model
+		open  func(t *testing.T, width, height int) Model
 	}{
-		{"session browser", false, func(t *testing.T, height int) Model {
-			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
+		{"session browser", false, func(t *testing.T, width, height int) Model {
+			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 			m.sessionBrowser = browserWithSessions(8)
 			return m
 		}},
-		{"server picker", false, func(t *testing.T, height int) Model {
-			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a", Servers: servers})
+		{"server picker", false, func(t *testing.T, width, height int) Model {
+			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a", Servers: servers})
 			m.picker = picker{open: true, kind: pickerServer}
 			return m
 		}},
-		{"approval prompt", true, func(t *testing.T, height int) Model {
-			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
+		{"approval prompt", true, func(t *testing.T, width, height int) Model {
+			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 			m.state = stateAwaitingApproval
 			m.pending = &approvalReqMsg{Request: domain.ApprovalRequest{
 				Tool:      "write_file",
@@ -897,8 +917,8 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			}}
 			return m
 		}},
-		{"ask prompt", true, func(t *testing.T, height int) Model {
-			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
+		{"ask prompt", true, func(t *testing.T, width, height int) Model {
+			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 			m.state = stateAwaitingAsk
 			m.pendingAsk = &askReqMsg{Request: domain.AskRequest{
 				Question: longProse,
@@ -909,31 +929,33 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 	}
 
 	for _, ov := range overlays {
-		for _, height := range []int{smallestOverlayWindow, 13, 16, 20, 24, 30} {
-			t.Run(fmt.Sprintf("%s/%d rows", ov.name, height), func(t *testing.T) {
-				m := ov.open(t, height)
+		for _, width := range []int{80, narrowOverlayWindow} {
+			for _, height := range []int{smallestOverlayWindow, 13, 16, 20, 24, 30} {
+				t.Run(fmt.Sprintf("%s/%d×%d", ov.name, width, height), func(t *testing.T) {
+					m := ov.open(t, width, height)
 
-				content := m.View().Content
-				frame := strings.Split(content, "\n")
-				plainFrame := ansiPattern.ReplaceAllString(content, "")
+					content := m.View().Content
+					frame := strings.Split(content, "\n")
+					plainFrame := ansiPattern.ReplaceAllString(content, "")
 
-				if len(frame) > height {
-					t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
-						len(frame), height, len(frame)-height, plainFrame)
-				}
-				// The footer is the last thing View stacks, so its presence is the proof nothing was
-				// pushed past the last row.
-				if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-					t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
-				}
-				// …and it did not buy the fit by hiding prose quietly: either the body is on the
-				// screen to its last word, or the pane counts out the lines it is not showing —
-				// in its body block where it has a row for the marker, on its title row where the
-				// window leaves it none.
-				if ov.prose && !strings.Contains(plainFrame, proseTail) && !strings.Contains(plainFrame, "more lines)") {
-					t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
-				}
-			})
+					if len(frame) > height {
+						t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
+							len(frame), height, len(frame)-height, plainFrame)
+					}
+					// The footer is the last thing View stacks, so its presence is the proof nothing was
+					// pushed past the last row.
+					if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
+						t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+					}
+					// …and it did not buy the fit by hiding prose quietly: either the body is on the
+					// screen to its last word, or the pane counts out the lines it is not showing —
+					// in its body block where it has a row for the marker, on its title row where the
+					// window leaves it none, and in whichever wording the width can pay for.
+					if ov.prose && !strings.Contains(plainFrame, proseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
+						t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
+					}
+				})
+			}
 		}
 	}
 }

@@ -722,6 +722,13 @@ point is a **minor** bump, not a breaking change.
     left it is the whole body, and with none left it moves up beside the pane's name, so a
     half-height tmux pane reads `approve write_file?  … (+12 more lines)`. The window can take the
     text away; it cannot take away your knowing there was some.
+  - **…on a narrow pane as well as a short one.** A half-height pane is usually a half-width pane
+    too, and the count moved onto the title row only to be cut off the end of it: under about 43
+    columns the tool name filled the row and the elision was silent again, on exactly the split
+    terminal the whole arrangement is for. The title row is now fitted to the pane's width instead
+    of being cut down to it, and it gives way in the order you read it in — the count keeps its
+    place and loses its wording first (`approve write_file?  … +12`), and only past that does the
+    **name** shorten (`approve writ…  … +12`). The number is the last thing on the row to go.
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it

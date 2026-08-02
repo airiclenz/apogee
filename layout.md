@@ -112,9 +112,15 @@ IS the body, and with none left — the twelve-to-fifteen-row case, where the fo
 whole pane — it moves onto the **title row**, after the pane's name. So the approval prompt on a
 half-height tmux pane reads `approve write_file?  … (+12 more lines)`: the tool the decision turns
 on, and the fact that there is more to read than the window can show. A pane may lose the text; it
-may not lose the reader's knowledge that there was text. (Width is the one thing prior to this:
-a line still truncates to the pane's inner width, and if the title cannot hold both, the tool name
-keeps the row.)
+may not lose the reader's knowledge that there was text.
+
+**Narrowness does not buy silence either.** A half-height pane is usually a half-width one too, and
+the title row is composed **to** the pane's width rather than composed long and clipped to it — a
+clipped row would drop the count off its end and put the silence straight back. The width is spent
+in the order the row is read for: the pane's name, then the count, then the words around the count.
+So the marker sheds its noun before it sheds its number (`approve write_file?  … +12` under about
+43 columns), and past that the **name** is what gives way to an ellipsis (`approve writ…  … +12`),
+never the number. On a pane too narrow for even a clipped name, the count is the whole row.
 
 ---
 
