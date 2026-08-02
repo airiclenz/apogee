@@ -260,13 +260,21 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 // the registry key enrichWithResult reads, never rendered) and it still has to be restored for that
 // lookup. A body-less card stays body-less (never a non-nil empty line slice) so a not-yet-enriched
 // call round-trips exactly.
+//
+// The summary's MARK (branchSummary — whose words the line is) is deliberately not on the wire and
+// comes back unset, for the same reason the body's kind is re-derived rather than stored: what a
+// record keeps is FINISHED display text, spelled the way it was shown, and the mark governs an act
+// that happened on the way IN. This path runs sanitize alone and never finishDisplay, so no
+// replayed line is respelled and none needs a mark to protect it; a resumed call still awaiting its
+// result carries no summary at all, and enrichWithResult words the slot afresh with a mark of its
+// own when the result lands (TestTranscriptCodecReplaysAPromotedSummaryAsShown).
 func fromWireToolView(w *wireToolView) toolView {
 	tv := toolView{
 		Label:   w.Label,
 		Verb:    w.Verb,
 		Target:  w.Target,
 		name:    stripEscapes(w.Name),
-		Summary: detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text},
+		Summary: namedSummary(detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text}),
 	}
 	if len(w.Details) > 0 {
 		lines := make([]detailLine, 0, len(w.Details))

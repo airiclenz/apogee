@@ -27,7 +27,7 @@ import (
 func mixedEntries() []entry {
 	toolCard := toolView{
 		Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
-		Summary: detailLine{Text: "1 - 100"},
+		Summary: namedSummary(detailLine{Text: "1 - 100"}),
 		Details: newToolBody([]detailLine{
 			{Kind: detailDiffAdded, Text: "+ added line"},
 			{Kind: detailDiffRemoved, Text: "- removed line"},
@@ -180,6 +180,39 @@ func TestTranscriptCodecExcludesExpandedState(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecReplaysAPromotedSummaryAsShown pins what a resume owes a card whose summary is
+// the tool's own output promoted onto the branch (a one-line `cat`): the stored line is finished
+// display text, and it comes back exactly as it was shown, absolute path included — beside a target
+// that was and stays workspace-relative. The wire carries no mark for whose words a summary is
+// (branchSummary is the presenter's side of the seam) and needs none, because decode escape-strips a
+// replayed card and respells nothing.
+func TestTranscriptCodecReplaysAPromotedSummaryAsShown(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
+	tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
+		Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, 0)
+	tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, 0)
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 1 || got[0].kind != entryToolCall {
+		t.Fatalf("decoded %+v; want the one tool call", got)
+	}
+	if want := "/home/me/proj/docs/plan.md"; got[0].tool.Summary.Text != want {
+		t.Errorf("replayed summary = %q, want %q — the quoted line was respelled on the way back",
+			got[0].tool.Summary.Text, want)
+	}
+	if want := "cat paths.txt"; got[0].tool.Target != want {
+		t.Errorf("replayed target = %q, want %q", got[0].tool.Target, want)
+	}
+}
+
 // TestTranscriptCodecEmptyIsLegacy pins the legacy case: an empty or nil blob (a record written
 // before the codec existed, or one with no scrollback) decodes to no entries and no error, so the
 // caller degrades to resuming without a replay rather than reporting a fault.
@@ -253,7 +286,7 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 			kind: entryToolCall, callID: "c1",
 			tool: toolView{
 				Label: "Read" + esc + "File", Target: "ma" + esc + "in.go", name: "read" + esc + "_file",
-				Summary: detailLine{Text: "1" + esc + "2"},
+				Summary: namedSummary(detailLine{Text: "1" + esc + "2"}),
 				Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+a" + esc + "dd"}}),
 			},
 		},
@@ -314,7 +347,7 @@ func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
 		kind: entryToolCall, callID: "c1", done: true,
 		tool: toolView{
 			Label: "View Diff", Verb: "diffing", Target: "main.go", name: "view_diff",
-			Summary: detailLine{Text: "+23 -0"}, Details: newToolBody(body),
+			Summary: namedSummary(detailLine{Text: "+23 -0"}), Details: newToolBody(body),
 		},
 	}}}
 
@@ -362,7 +395,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 			kind: entryToolCall, callID: "c1", done: true,
 			tool: toolView{
 				Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
-				Summary: detailLine{Text: "1 - 10"},
+				Summary: namedSummary(detailLine{Text: "1 - 10"}),
 				Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+x"}}),
 			},
 		},

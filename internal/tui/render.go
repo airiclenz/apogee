@@ -357,7 +357,12 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 //
 // A run with nothing to say beyond the count — no call open yet, or a report that carried no line
 // at all — keeps the count alone rather than trailing an empty separator.
-func subAgentSummary(head entry, span []entry) detailLine {
+//
+// The line is marked QUOTED (branchSummary) for what its second half is: the child's own report,
+// or the phrase for the call it has open. Nothing respells it in either case — this is composed at
+// paint, long after the shortening seam ran on the way in — so the mark is a statement about the
+// text rather than a switch, and it is the one that stays true if a seam ever reads it.
+func subAgentSummary(head entry, span []entry) branchSummary {
 	calls := 0
 	for i := range span {
 		if span[i].kind == entryToolCall {
@@ -368,7 +373,7 @@ func subAgentSummary(head entry, span []entry) detailLine {
 	if gist := subAgentGist(head, span); gist != "" {
 		text += " · " + gist
 	}
-	return detailLine{Text: text}
+	return quotedSummary(detailLine{Text: text})
 }
 
 // subAgentGist is the second half of a collapsed run's summary, in the two tempi layout.md gives it.
@@ -827,13 +832,17 @@ func collapsedDetails(body toolBody) (shown []detailLine, remainder detailLine, 
 // its last line. A targetless block has no branch line for a summary to ride, so the outcome
 // simply closes the branch list — which is where an "error: …" on an unregistered tool has
 // always sat, after the arguments that provoked it.
+//
+// It lays the summary's LINE out and drops the mark that came with it: whose words the line is
+// decided how it was spelled at the presenter's seam (branchSummary), which is long settled by the
+// time anything is painted.
 func branchDetails(tv toolView) []detailLine {
 	if tv.Summary.Text == "" {
 		return tv.Details.all()
 	}
 	out := make([]detailLine, 0, tv.Details.len()+1)
 	out = append(out, tv.Details.all()...)
-	return append(out, tv.Summary)
+	return append(out, tv.Summary.detailLine)
 }
 
 // branchMarker is the tree marker leading a branch line: ┕ closes a block, ┝ continues it. Its

@@ -183,6 +183,69 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 	}
 }
 
+// The SUMMARY slot is not always a phrase the block wrote. Output that came to exactly one line is
+// PROMOTED into it — the line rides the branch beside the target instead of hanging beneath it —
+// and promotion moves where the text sits, never whose text it is: `cat` on a one-line file puts
+// that file's content on the branch, so an in-workspace absolute path in it must reach the screen
+// with the spelling the file holds, exactly as it would one row lower in a body.
+//
+// The other rows are the contrast the rule needs: a sentence the tool reported about a path it
+// acted on, and the same extractor's own "(no output)" phrase, are the block's words and still
+// shorten. That is why the slot cannot be judged by its text — the mark travels with the line
+// (branchSummary), set where the line was put there.
+func TestToolCardSummaryQuotesPromotedOutputOnly(t *testing.T) {
+	t.Parallel()
+
+	ws := newWorkspaceRoot("/home/me/proj")
+	cases := []struct {
+		name        string
+		call        domain.ToolCall
+		res         domain.ToolResult
+		wantTarget  string
+		wantSummary string
+	}{
+		{
+			name:        "a one-line output is quoted where it lands",
+			call:        domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)},
+			res:         domain.ToolResult{CallID: "1", Content: "/home/me/proj/docs/plan.md\n"},
+			wantTarget:  "cat paths.txt",
+			wantSummary: "/home/me/proj/docs/plan.md",
+		},
+		{
+			name:        "a sentence the tool reported names its path and shortens",
+			call:        domain.ToolCall{ID: "2", Tool: "single_find_and_replace", Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)},
+			res:         domain.ToolResult{CallID: "2", Content: "replaced text in /home/me/proj/main.go"},
+			wantTarget:  "main.go",
+			wantSummary: "replaced text in main.go",
+		},
+		{
+			name:        "the extractor's own phrase for no output is the block's words",
+			call:        domain.ToolCall{ID: "3", Tool: "terminal", Arguments: []byte(`{"command":"touch /home/me/proj/new.txt"}`)},
+			res:         domain.ToolResult{CallID: "3", Content: "\n"},
+			wantTarget:  "touch new.txt",
+			wantSummary: "(no output)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := presentToolCall(tc.call, ws)
+			tv.enrichWithResult(tc.res, ws)
+
+			if tv.Summary.Text != tc.wantSummary {
+				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
+			}
+			if tv.Target != tc.wantTarget {
+				t.Errorf("target = %q, want %q — the path the block NAMES shortens either way", tv.Target, tc.wantTarget)
+			}
+			if !strings.Contains(string(tc.call.Arguments), "/home/me/proj") {
+				t.Errorf("the call's own arguments were rewritten: %s", tc.call.Arguments)
+			}
+		})
+	}
+}
+
 // An unregistered tool's arguments are the model's request quoted verbatim — the approval surface's
 // whole point — so they are shown exactly as they were sent, workspace paths included. What is
 // equally untouched is the tool's own id: it is a name, not a path.

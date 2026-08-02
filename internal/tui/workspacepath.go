@@ -13,13 +13,16 @@ import (
 // check and an os.Open both want an unambiguous path. A transcript reader needs the opposite:
 // they are looking at ONE project, every interesting file is inside it, and repeating the same
 // long prefix on every branch line spends the row's width saying what the reader already knows.
-// So the workspace root is shortened out of the paths a tool block NAMES — the target it acts on
-// and the one-line summary of its outcome — and out of nothing else. A body is not in that set: it
-// is text the block QUOTES (a diff's hunk lines, an edit's replacement string, an unregistered
-// tool's verbatim arguments), where an absolute path is file content and has to reach the screen
-// exactly as it stands in the file, or the block misrepresents what a write will land on disk. The
-// shortening is a spelling applied on the way to the screen, never a rewrite of the arguments the
-// model sent or the output a tool returned (layout.md, "The rules behind the tool-call sketch").
+// So the workspace root is shortened out of the paths a tool block NAMES — the target it acts on,
+// and the one-line summary of its outcome when that summary is the block's own wording — and out of
+// nothing else. What the block QUOTES is not in that set: a body (a diff's hunk lines, an edit's
+// replacement string, an unregistered tool's verbatim arguments) and equally a one-line output
+// promoted onto the branch beside the target, where an absolute path is file content and has to
+// reach the screen exactly as it stands in the file, or the block misrepresents what a write will
+// land on disk. Which lines are quoted is marked where they are built (branchSummary, toolBody),
+// never guessed from the text. The shortening is a spelling applied on the way to the screen, never
+// a rewrite of the arguments the model sent or the output a tool returned (layout.md, "The rules
+// behind the tool-call sketch").
 
 // workspaceRoot is the project root a tool card's paths are printed relative to. It is a resolved
 // root rather than a raw string so the cleaning and the validation happen ONCE per session

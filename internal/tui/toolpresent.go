@@ -63,6 +63,36 @@ type detailLine struct {
 	Text string
 }
 
+// branchSummary is the one-line outcome riding the branch line beside the target, bound to the one
+// fact the shortening seam depends on: WHOSE words it is. Most summaries are the presenter's own —
+// a typed phrase worded by summaryLine ("1 - 154", "+2 -2"), a tool's own report sentence
+// ("replaced text in <path>"), an "error: …" line — and the workspace root is shortened out of the
+// paths those NAME (toolView.shortenPaths). One is not: output that came to exactly one line is
+// PROMOTED into this slot as it stands (promotedOutput, outputDetail), and that line is quoted
+// content, no different from a body — a `cat` printing an in-workspace path must show the spelling
+// the file holds, not the transcript's shorter one for it.
+//
+// The mark travels WITH the text, the way a body's kind travels with its lines (toolBody): the
+// summary a prose extractor builds and the summary the view carries are one type, so the fact
+// cannot be dropped in the hand-off (enrichWithResult), and no seam has to guess it from the text —
+// a line of output can look exactly like a path, which is why the body's rule is structural too.
+type branchSummary struct {
+	detailLine
+	quoted bool
+}
+
+// namedSummary is a summary in the presenter's OWN words — a typed phrase, or a sentence naming a
+// path — so the shortening seam spells that path relative to the workspace.
+func namedSummary(line detailLine) branchSummary {
+	return branchSummary{detailLine: line}
+}
+
+// quotedSummary is a summary carrying text the block QUOTES rather than words of its own — a
+// one-line tool output promoted onto the branch — which no seam respells.
+func quotedSummary(line detailLine) branchSummary {
+	return branchSummary{detailLine: line, quoted: true}
+}
+
 // toolBody is a tool call's retained body — the detail lines that lay out beneath its branch line
 // — bound to the one fact the collapsed paint's cap depends on: whether those lines are a DIFF (a
 // body carrying at least one red/green line). A diff body keeps diffDetailCap lines when the block
@@ -131,10 +161,14 @@ func (b *toolBody) stripEscapes() {
 // raw-fallback label. Every Label renders the same way — bold orange (render.go) — so a raw
 // fallback is not visually singled out.
 type toolView struct {
-	Label   string
-	Verb    string
-	Target  string
-	Summary detailLine
+	Label  string
+	Verb   string
+	Target string
+
+	// Summary is the one-line outcome riding the branch line, carrying whose words it is
+	// (branchSummary): the shortening seam respells the phrases the block writes itself and
+	// never a one-line output promoted into this slot.
+	Summary branchSummary
 
 	// Details is the body laid out beneath the branch line, carrying its own kind (toolBody):
 	// the painter asks the body what it is rather than the view keeping a second, separately
@@ -150,15 +184,29 @@ type toolView struct {
 // body-only (every one of its lines). A tool whose result carries a domain.ToolSummary
 // does not come through here at all: summaryLine words the branch line and the presenter's
 // body renderer (view_diff's alone) fills the half beneath it.
+//
+// The Summary is a branchSummary rather than a bare line because the extractor is the one thing
+// that knows whose words it just wrote — its own sentence, or the tool's output promoted onto the
+// branch — and the view it hands the outcome to inherits that fact with the text.
 type toolOutcome struct {
-	Summary detailLine
+	Summary branchSummary
 	Details []detailLine
 }
 
-// summaryOnly is the outcome of a tool whose whole result is one plain line: it rides the
-// branch line beside the target and nothing hangs beneath it.
+// summaryOnly is the outcome of a tool whose whole result is one plain line in the PRESENTER's
+// wording — a fixed sentence, a phrase it composed: it rides the branch line beside the target,
+// nothing hangs beneath it, and the shortening seam spells any path it names relative to the
+// workspace.
 func summaryOnly(text string) toolOutcome {
-	return toolOutcome{Summary: detailLine{Text: text}}
+	return toolOutcome{Summary: namedSummary(detailLine{Text: text})}
+}
+
+// promotedOutput is the outcome of a tool whose OUTPUT came to exactly one line: the line is
+// promoted into the summary slot and rides the branch beside the target. Promotion moves where the
+// text sits and changes nothing about whose text it is — it is the tool's own line, quoted, so it
+// is marked as such and reaches the screen with the spelling the tool wrote (branchSummary).
+func promotedOutput(text string) toolOutcome {
+	return toolOutcome{Summary: quotedSummary(detailLine{Text: text})}
 }
 
 // toolPresenter maps a tool name to its friendly label, the active verb naming what the tool
@@ -378,19 +426,25 @@ func (tv *toolView) finishDisplay(ws workspaceRoot) {
 }
 
 // shortenPaths spells the paths the view NAMES relative to the workspace — the target that leads
-// the branch line, and the one-line summary of the outcome beside it (workspaceRoot.shorten). It is
-// presentation and nothing else: the model's arguments and the tool's own result are untouched, so
-// the agent's view of a path never changes with the transcript's spelling of it.
+// the branch line, and the one-line summary beside it when that summary is the block's OWN wording
+// (workspaceRoot.shorten). It is presentation and nothing else: the model's arguments and the
+// tool's own result are untouched, so the agent's view of a path never changes with the
+// transcript's spelling of it.
 //
-// The BODY is deliberately not shortened, and that boundary is the rule's whole point. A body is
-// text the block QUOTES rather than a path it names — a diff's hunk lines, an edit's replacement
+// What the block QUOTES is left alone, and that boundary is the rule's whole point. A body is
+// quoted text rather than a path the block names — a diff's hunk lines, an edit's replacement
 // string, an unregistered tool's verbatim arguments — so an absolute in-workspace path occurring
 // inside it is file CONTENT, and shortening it would show the human approving a write a spelling
-// the file will not contain. Nothing here reads the text to tell the two apart: a content line can
-// look exactly like a path, so the distinction is structural — it is the SLOT a string sits in.
-// Should a presenter ever build a body line that genuinely is a path (a listed file, a search hit's
-// file name), it must say so where it builds the line — a mark on detailLine, set by the producer,
-// which is the only place that knows — and this seam must read that mark rather than guess.
+// the file will not contain. The SUMMARY is quoted in that same sense whenever a tool's whole
+// output came to one line, because that line is promoted into the slot as it stands
+// (promotedOutput): `cat` printing one path names nothing — it prints a file's contents, which
+// happen to fit on the branch.
+//
+// Nothing here reads the text to tell the two apart: a line of output can look exactly like a path,
+// so the distinction is structural — it is what the SLOT was filled with, marked by the presenter
+// that filled it (branchSummary.quoted) and read here. Should a presenter ever build a BODY line
+// that genuinely is a path (a listed file, a search hit's file name), it must say so the same way —
+// a mark on detailLine, set by the producer, which is the only place that knows.
 //
 // Label and Verb are left out for their own reason. They name the TOOL — a friendly label, or an
 // unregistered tool's raw id behind "running <name>" — and a tool id is not a path, so shortening
@@ -400,7 +454,9 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 		return
 	}
 	tv.Target = ws.shorten(tv.Target)
-	tv.Summary.Text = ws.shorten(tv.Summary.Text)
+	if !tv.Summary.quoted {
+		tv.Summary.Text = ws.shorten(tv.Summary.Text)
+	}
 }
 
 // sanitize escape-strips every DISPLAY field of the view — label, verb, target, the one-line
@@ -422,7 +478,8 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 //
 // The body's KIND is not this seam's business and never was a rule a body path had to remember: a
 // body carries its own kind (toolBody), settled where its lines were, and the strip below rewrites
-// only line text — so a sanitized body says exactly what it said before.
+// only line text — so a sanitized body says exactly what it said before. The summary's mark is the
+// same: whose words a line is does not change when an ESC byte leaves it.
 func (tv *toolView) sanitize() {
 	tv.Label = stripEscapes(tv.Label)
 	tv.Verb = stripEscapes(tv.Verb)
@@ -453,6 +510,11 @@ func bodyIsDiff(details []detailLine) bool {
 // tool's extractor splits the text into a summary and a body, and an unknown tool's result is
 // shown raw as body lines, so nothing is ever silently dropped.
 //
+// The first two layers WORD the summary themselves — an "error: …" line, a typed phrase — so both
+// mark it as the block's own (namedSummary). The prose layer hands its outcome's mark straight
+// through, because that extractor is the one that may promote the tool's output onto the branch
+// instead of wording anything (outputDetail), and only it knows which it did.
+//
 // Every one of those layers words itself from result.Content, which is tool output and therefore
 // repo-controlled, so the finishDisplay seam is deferred rather than repeated: it runs on whichever
 // branch returns, and on any branch a later tool adds. Re-finishing the fields the call already
@@ -461,12 +523,12 @@ func bodyIsDiff(details []detailLine) bool {
 func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot) {
 	defer tv.finishDisplay(ws)
 	if result.IsError {
-		tv.Summary = detailLine{Text: "error: " + firstLine(result.Content)}
+		tv.Summary = namedSummary(detailLine{Text: "error: " + firstLine(result.Content)})
 		return
 	}
 	p, known := toolRegistry[tv.name]
 	if line, ok := summaryLine(result.Summary); ok {
-		tv.Summary = line
+		tv.Summary = namedSummary(line)
 		if known && p.body != nil {
 			tv.Details = tv.Details.with(p.body(result.Content))
 		}
@@ -619,6 +681,13 @@ func firstLineDetail(content string) toolOutcome {
 // act on this retained body (collapsedDetails, render.go), so expanding the block can show what
 // the compact shape hides. Only the per-line clip stays here — a 160-rune cap on one line, which
 // keeps a minified blob from flooding a row in either state and is not a truncation of the body.
+//
+// It respells nothing either, and the one-line half is where that has to be SAID rather than
+// merely done: those lines go into the summary slot, which otherwise holds the presenter's own
+// wording and is shortened against the workspace as such. Output promoted there is quoted content
+// exactly as the body beneath it is — one line of a file, one line of a log — so it is handed over
+// as promotedOutput and the shortening seam leaves it alone. "(no output)" is this function's own
+// phrase and goes the other way, as a named summary.
 func outputDetail(content string) toolOutcome {
 	lines := splitLines(strings.TrimRight(content, "\n"))
 	first := 0
@@ -630,7 +699,7 @@ func outputDetail(content string) toolOutcome {
 	}
 	body := lines[first:]
 	if len(body) == 1 {
-		return summaryOnly(clipDetail(body[0]))
+		return promotedOutput(clipDetail(body[0]))
 	}
 	details := make([]detailLine, 0, len(body))
 	for _, ln := range body {

@@ -442,8 +442,9 @@ func (t *transcript) finalizeNarration(depth int) {
 // view shows the call verbatim where it cannot summarise it (a malformed argument is rendered
 // as-is rather than hidden — the human approving a write must see exactly what was asked). What it
 // does restate is the SPELLING of the path the call names: the workspace root is shortened out of
-// the target and the summary (t.ws), which changes how the call reads and nothing about what was
-// requested — and never out of a quoted body, where a path is content the approver must see as it
+// the target and out of a summary the block worded itself (t.ws), which changes how the call reads
+// and nothing about what was requested — and never out of what the block quotes, neither a body nor
+// a one-line output promoted onto the branch, where a path is content the approver must see as it
 // stands (toolView.shortenPaths).
 func (t *transcript) addToolCall(call domain.ToolCall, depth int) {
 	t.entries = append(t.entries, entry{
