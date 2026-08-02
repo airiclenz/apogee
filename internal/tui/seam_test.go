@@ -351,6 +351,9 @@ type fakeSessionHost struct {
 	activeID string
 	minted   int   // ids handed out so far, so a rotated session gets a distinct one
 	saveErr  error // when non-nil, every Save fails with it (the ok→fail transition)
+	// renameErr scripts a Rename failure — the store's ENOENT when the record is not on disk yet,
+	// which is what a title answering inside the first Save's window actually hits.
+	renameErr error
 
 	// The browser-side store (item 7): the /sessions overlay lists/loads/deletes/renames these
 	// records. seed populates it; Load makes a record active, so a test can prove that resuming
@@ -431,10 +434,21 @@ func (h *fakeSessionHost) Delete(id string) error {
 	return nil
 }
 
+// failRenames scripts every subsequent Rename to fail with err (nil restores success). It takes the
+// lock because a write Cmd may be running when a test flips it.
+func (h *fakeSessionHost) failRenames(err error) {
+	h.mu.Lock()
+	h.renameErr = err
+	h.mu.Unlock()
+}
+
 func (h *fakeSessionHost) Rename(id, title string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.renames = append(h.renames, renameCall{id: id, title: title})
+	h.renames = append(h.renames, renameCall{id: id, title: title}) // recorded even when it fails
+	if h.renameErr != nil {
+		return h.renameErr
+	}
 	if rec, ok := h.stored[id]; ok {
 		rec.Meta.Title = title
 		h.stored[id] = rec

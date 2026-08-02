@@ -48,14 +48,21 @@ type Model struct {
 	sessions SessionHost   // persists the session per-Turn, at idle, and on quit; nil ⇒ off
 	notify   func(tea.Msg) // sends a Msg into the running program from the worker goroutine (the per-Turn snapshot)
 
-	// Session-save single-flight (the per-Turn pipeline). A save runs off the Update loop on a
-	// Cmd goroutine; saveBusy marks one in flight so a later snapshot coalesces into pendingSave
-	// (latest-wins) rather than overlapping. saveFailing tracks the last save's success so only
-	// the ok→fail and fail→ok transitions are noted — a save failure must never spam the
-	// transcript or interrupt the conversation.
-	saveBusy    bool
-	saveFailing bool
-	pendingSave *savePayload
+	// Session-record write single-flight (the per-Turn save pipeline AND the /sessions verbs).
+	// Every write to the store — Save, Rename, Delete — runs off the Update loop on a Cmd
+	// goroutine, and no two of them may overlap: Store.Rename is a read-modify-write of the whole
+	// record, so a Save running beside it is rolled back, taking a complete Turn off disk (audit
+	// 2026-08-01). writeBusy marks one write in flight; anything scheduled while it runs waits in
+	// pendingWrites, which coalesces saves (latest-wins — an older intermediate Turn is superseded
+	// by the newer snapshot) and keeps renames and deletes in the order they were asked for.
+	// saveFailing tracks the last save's success so only the ok→fail and fail→ok transitions are
+	// noted — a save failure must never spam the transcript or interrupt the conversation.
+	//
+	// pendingWrites is a slice in a value-copied Model, so it is REPLACED and re-sliced, never
+	// written through (the pendingRebind posture, ADR 0011).
+	writeBusy     bool
+	saveFailing   bool
+	pendingWrites []recordWrite
 
 	// sessionBrowser is the /sessions history-browser overlay's state (sessions.go): the loaded
 	// session metas, the current selection, the current-workspace ⇄ all toggle, and any inline
@@ -554,9 +561,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.persist(msg.Sess)
 
 	case saveDoneMsg:
-		// An async save returned. Clear the single-flight flag, note the ok↔fail transition once,
-		// and dispatch any save that coalesced while this one ran (saveComplete).
+		// An async save returned. Note the ok↔fail transition once, queue any title waiting for the
+		// record this save put on disk, and dispatch the next queued record write (saveComplete).
 		return m, m.saveComplete(msg.Err)
+
+	case recordWriteDoneMsg:
+		// The other two record writes — a Rename or a Delete — returned. Release the single-flight
+		// latch, dispatch whatever waited behind it, and re-list for the browser verbs that repaint
+		// over the result (foldRecordWrite).
+		return m, m.foldRecordWrite(msg)
 
 	case autoTitleMsg:
 		// The out-of-band naming call returned (autotitle.go). Rename the Session record to what it
@@ -1494,41 +1507,162 @@ func (m *Model) saveAtIdle() tea.Cmd {
 	return m.persist(sess)
 }
 
-// scheduleSave dispatches p through the SessionHost, coalescing when a save is already in flight:
-// the newest payload replaces any waiting one (latest-wins — an older intermediate Turn is
-// superseded by the newer snapshot) and is dispatched when the in-flight save's saveDoneMsg
-// lands. The persistence I/O runs off the Update loop on the returned Cmd's goroutine, so a
-// per-Turn save never stalls the conversation. Returns nil when the save was coalesced.
+// ----------------------------------------------------------------------------
+// The session-record write queue
+// ----------------------------------------------------------------------------
+//
+// One conversation writes its record three ways — the per-Turn/idle Save, the Rename that carries a
+// title (generated or typed), and the browser's Delete — and each of them runs off the Update loop
+// on its own Cmd goroutine. They MUST NOT overlap. Save replaces the record wholesale while Rename
+// is a read-modify-write of it, so a Rename that read the record before a Save replaced it writes
+// the pre-save version back, reverting the session by a whole Turn — engine state and scrollback
+// together — and breaking ADR 0022's "a crash loses at most one Turn" (audit 2026-08-01, probe:
+// 25% lost updates). Delete has the same shape against a save already in flight.
+//
+// So every write goes through ONE queue: scheduleWrite/queueWrite put it in, pumpWrites takes
+// exactly one out whenever nothing is running, and every fold that finishes a write ends in
+// pumpWrites. Two rules follow from that, and both were bugs before it existed: a fold must never
+// tea.Batch two writes (batch members run on separate goroutines — this is precisely how the title
+// flush came to race the coalesced save), and a write scheduled while the latch is held must WAIT
+// rather than dispatch.
+//
+// internal/session.Store holds a mutex over the same three calls, which is the floor under any
+// caller that does not come through here. This layer's job is ordering; the store's is atomicity.
+// Which of the two OWNS serialization long term is deliberately still open (C7).
+
+// recordWriteKind names which SessionHost call a queued write makes.
+type recordWriteKind int
+
+const (
+	writeSave   recordWriteKind = iota // SessionHost.Save — the per-Turn and idle snapshots
+	writeRename                        // SessionHost.Rename — a generated title, /rename, the browser's `r`
+	writeDelete                        // SessionHost.Delete — the browser's delete verb
+)
+
+// recordWrite is one queued write to the session record: what to do, and what the fold that lands
+// afterwards must do about it. Plain values only, so the value-copied Model carries it safely
+// (ADR 0011).
+type recordWrite struct {
+	kind recordWriteKind
+
+	// payload is the assembled save (writeSave only).
+	payload savePayload
+
+	// id addresses the record a rename or a delete acts on; title is the new name (writeRename).
+	id    string
+	title string
+
+	// relist re-reads the store once the write lands, so the /sessions overlay repaints over the
+	// result — what the browser's own verbs want, and what the QUIET title apply must not have
+	// (foldSessionList opens the overlay over every list it folds, so a generated title would pop
+	// the browser open partway through the first answer).
+	relist bool
+
+	// retryTitle marks a write whose title must not be lost when it fails: the quiet apply path
+	// (setSessionTitle). source records who asked for that title, which the never-clobber rule
+	// needs when the fold puts it back on the stash.
+	retryTitle bool
+	source     titleSource
+}
+
+// scheduleSave queues p as a record write and returns the Cmd to run — the save pipeline's entry to
+// the shared queue. Returns nil when a write was already running (the save waits, coalescing with
+// any save already queued: latest-wins).
 func (m *Model) scheduleSave(p savePayload) tea.Cmd {
-	if m.saveBusy {
-		m.pendingSave = &p
+	return m.scheduleWrite(recordWrite{kind: writeSave, payload: p})
+}
+
+// scheduleWrite queues w and dispatches it when nothing else is writing, returning the Cmd to run
+// (nil when it had to wait). It is the only way a record write is dispatched from an idle latch;
+// folds that already hold the latch queue with queueWrite and end in pumpWrites instead.
+func (m *Model) scheduleWrite(w recordWrite) tea.Cmd {
+	m.queueWrite(w)
+	return m.pumpWrites()
+}
+
+// queueWrite puts w in the pending queue, coalescing saves: a save already waiting is REPLACED by
+// the newer one (latest-wins — the newer snapshot supersedes the older intermediate Turn), while
+// renames and deletes each keep their place, being distinct instructions rather than restatements
+// of one. Without a wired host there is no record to write, so nothing is queued.
+//
+// The queue is rebuilt rather than written through, so the Model copy this Update started from
+// never sees the change (ADR 0011).
+func (m *Model) queueWrite(w recordWrite) {
+	if m.sessions == nil {
+		return
+	}
+	next := make([]recordWrite, 0, len(m.pendingWrites)+1)
+	coalesced := false
+	for _, q := range m.pendingWrites {
+		if w.kind == writeSave && q.kind == writeSave {
+			next = append(next, w)
+			coalesced = true
+			continue
+		}
+		next = append(next, q)
+	}
+	if !coalesced {
+		next = append(next, w)
+	}
+	m.pendingWrites = next
+}
+
+// pumpWrites dispatches the head of the queue when no write is in flight, returning its Cmd (nil
+// when one is already running or nothing is waiting). Every fold that finishes a write ends here,
+// which is what keeps exactly one record write outstanding at a time.
+func (m *Model) pumpWrites() tea.Cmd {
+	if m.writeBusy || len(m.pendingWrites) == 0 {
 		return nil
 	}
-	m.saveBusy = true
-	return m.saveCmd(p)
+	w := m.pendingWrites[0]
+	m.pendingWrites = m.pendingWrites[1:]
+	m.writeBusy = true
+	return m.writeCmd(w)
 }
 
-// saveCmd builds the Cmd that persists one payload and reports back as saveDoneMsg. It captures
-// the SessionHost and the payload by value, so the closure holds no pointer into the value-copied
-// Model.
-func (m Model) saveCmd(p savePayload) tea.Cmd {
+// writeCmd builds the Cmd that performs one record write off the Update loop and reports it back —
+// saveDoneMsg for a save (which carries the fail/recover notes and the title flush), otherwise
+// recordWriteDoneMsg. It captures the SessionHost and the write by value, so the closure holds no
+// pointer into the value-copied Model.
+func (m Model) writeCmd(w recordWrite) tea.Cmd {
 	sessions := m.sessions
+	if w.kind == writeSave {
+		p := w.payload
+		return func() tea.Msg {
+			return saveDoneMsg{Err: sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed)}
+		}
+	}
 	return func() tea.Msg {
-		return saveDoneMsg{Err: sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed)}
+		done := recordWriteDoneMsg{write: w}
+		switch w.kind {
+		case writeRename:
+			done.err = sessions.Rename(w.id, w.title)
+		case writeDelete:
+			done.err = sessions.Delete(w.id)
+		}
+		if w.relist {
+			// The re-list rides on the write's own goroutine, so the rows the browser repaints are
+			// read AFTER the write that changed them and the fold that lands has everything it needs
+			// in one Msg — leaving foldRecordWrite one Cmd to return rather than a tea.Batch, which
+			// on this path would be two record writes on two goroutines again.
+			metas, err := sessions.List()
+			done.list = sessionListMsg{metas: metas, err: err}
+		}
+		return done
 	}
 }
 
-// saveComplete folds a finished save: it clears the in-flight flag, notes the ok↔fail transition
-// exactly once (on the ok→fail edge and the fail→ok recovery edge, then swallows the error — a
-// save failure must never interrupt the conversation), applies any session title that was waiting
-// for this record to exist, and dispatches any payload that coalesced while the save ran
-// (latest-wins single-flight).
+// saveComplete folds a finished save: it notes the ok↔fail transition exactly once (on the ok→fail
+// edge and the fail→ok recovery edge, then swallows the error — a save failure must never interrupt
+// the conversation), queues any session title that was waiting for this record to exist, releases
+// the single-flight latch, and dispatches whatever waited behind this save.
 //
 // The title flush hangs off a SUCCESSFUL save because that is the moment the record is first on
 // disk with an id: the naming call (autotitle.go) routinely answers before the first save-complete,
-// and Rename — the only writer of a stored title — needs a stored record to rewrite.
+// and Rename — the only writer of a stored title — needs a stored record to rewrite. It runs while
+// the latch is still held so that it can only ever QUEUE: batching the title write beside the
+// coalesced save is what let a rename roll a Turn off disk.
 func (m *Model) saveComplete(err error) tea.Cmd {
-	m.saveBusy = false
 	switch {
 	case err != nil && !m.saveFailing:
 		m.saveFailing = true
@@ -1539,16 +1673,47 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 		m.transcript.addNote("session saving recovered")
 		m.refreshViewport()
 	}
-	var cmds []tea.Cmd
 	if err == nil {
-		cmds = append(cmds, m.flushPendingTitle())
+		m.flushPendingTitle()
 	}
-	if m.pendingSave != nil {
-		p := *m.pendingSave
-		m.pendingSave = nil
-		cmds = append(cmds, m.scheduleSave(p))
+	m.writeBusy = false
+	return m.pumpWrites()
+}
+
+// foldRecordWrite folds a finished Rename or Delete: it releases the single-flight latch, dispatches
+// whatever waited behind it, and re-lists for the browser verbs that asked to repaint over the
+// result. Both writes are best-effort — a rename that did not stick leaves the old title on the
+// re-list, a delete that did not leaves the row — so nothing is said about a failure.
+//
+// The one failure that is NOT simply swallowed is a quiet title write. Its apply path branches on
+// ActiveID(), which the host mints at the START of the first Save, before the atomic write has put
+// the file on disk; a title answering in that window — or any time saves have been failing — renames
+// a record that is not there, and used to be discarded on the spot. Re-stashing it applies it at the
+// next successful save instead (flushPendingTitle), so the window costs a delay rather than the name.
+func (m *Model) foldRecordWrite(msg recordWriteDoneMsg) tea.Cmd {
+	if msg.err != nil && msg.write.retryTitle {
+		m.restashTitle(msg.write.title, msg.write.source)
 	}
-	return tea.Batch(cmds...)
+	if msg.write.relist {
+		m.foldSessionList(msg.list) // repaint the overlay over the store as the write left it
+	}
+	m.writeBusy = false
+	return m.pumpWrites()
+}
+
+// restashTitle puts a title that could not be written back on the stash, so the next successful save
+// re-applies it rather than losing it. A stash already holding something wins — it is the newer
+// instruction — and the never-clobber rule holds here as everywhere else: an AUTOMATIC title is
+// dropped rather than re-stashed once a human has named the session.
+func (m *Model) restashTitle(name string, src titleSource) {
+	if m.pendingTitle != "" {
+		return
+	}
+	if src == titleAutomatic && m.titleTouched {
+		return
+	}
+	m.pendingTitle = name
+	m.pendingSource = src
 }
 
 // sessionTitleMax is the longest a derived session title runs before word-boundary truncation

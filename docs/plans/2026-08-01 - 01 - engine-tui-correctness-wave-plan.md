@@ -33,7 +33,19 @@ and the two mechanism-heuristic defects — each with a regression test.
 
 ---
 
-## 1. Serialize session-record writes
+## 1. Serialize session-record writes — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** took the item's second (b) option — queue `Rename`/`Delete` behind the save
+latch — rather than carrying the title on `savePayload`, so the `SessionHost` seam's "Save fixes the
+title at create, Rename is the only writer" contract is untouched. Two deviations from that option's
+literal wording: `saveBusy` is renamed `writeBusy` (it now latches all three writes, so the old name
+would lie), and `pendingSave *savePayload` becomes a `pendingWrites []recordWrite` FIFO — saves still
+coalesce latest-wins exactly as `pendingSave` did, but renames and deletes need to keep their order
+rather than replace one another. (c) is implemented as retry-on-failure: a quiet title write that the
+store refused goes back on the pending-title stash (`restashTitle`) and is applied at the next
+successful save, which also covers the "saves have been failing" case, not just the first-Save window.
+Also added a dated addendum to ADR 0022 (its Decision 1 claimed a crash loses at most one Turn, which
+this defect made false) and a CHANGELOG `Fixed` entry; no version identifier touched.
 
 **What:** Audit "Critical — Session-record writes are unserialized, so a title write can roll
 a whole Turn off disk" (probe: 50/200 lost updates). Two layers, one item:

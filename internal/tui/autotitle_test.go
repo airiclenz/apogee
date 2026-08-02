@@ -199,9 +199,16 @@ func TestAutoTitleAppliesThroughRename(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("a landed title with an active record dispatched no rename")
 	}
-	if msg := cmdMsg(cmd); msg != nil {
-		t.Errorf("the rename Cmd yielded %T; a quiet rename must report nothing (a sessionListMsg opens the browser)", msg)
+	// The write reports back so the queue can release its latch, but it carries NO re-list: a
+	// sessionListMsg would open the browser over a title nobody asked to see.
+	done, ok := cmdMsg(cmd).(recordWriteDoneMsg)
+	if !ok {
+		t.Fatalf("the rename Cmd yielded %T; want a recordWriteDoneMsg releasing the write latch", cmdMsg(cmd))
 	}
+	if done.write.relist || len(done.list.metas) != 0 {
+		t.Errorf("the quiet rename carried a re-list (%+v); it must add no UI chrome", done.list)
+	}
+	m = step(t, m, done)
 	if m.pendingTitle != "" {
 		t.Errorf("pendingTitle = %q, want empty (the title was applied, not stashed)", m.pendingTitle)
 	}
@@ -268,6 +275,105 @@ func TestAutoTitleStashSurvivesAFailedSave(t *testing.T) {
 	}
 	if got := host.renamedTitles(); len(got) != 0 {
 		t.Errorf("renames = %+v, want none: the record was never written", got)
+	}
+}
+
+// A title landing while a per-Turn save is in flight WAITS. Dispatching it there is what let a
+// record write roll a Turn off disk: Store.Rename re-reads the record and writes it back whole, so
+// one running beside a Save overwrites it with the pre-save version (audit 2026-08-01). The
+// assertions are at the fold layer — which Cmd went out, and what is still queued — because the
+// recording host serialises its own calls and so cannot witness the collision.
+func TestAutoTitleQueuesBehindAnInFlightSave(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1"})
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+	m.transcript.addUser("fix the broken parser in tokenizer.go", nil)
+
+	// A per-Turn save goes out and is left in flight: its Cmd is held rather than run.
+	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: []byte(`{"turn":2}`)}})
+	if saveCmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+
+	m, titleCmd := stepCmd(t, m, autoTitleMsg{title: "fix the broken parser"})
+	if titleCmd != nil {
+		t.Fatal("a title landing during an in-flight save dispatched a parallel record write")
+	}
+	if got := host.renamedTitles(); len(got) != 0 {
+		t.Fatalf("renames = %+v, want none until the save has finished", got)
+	}
+	if len(m.pendingWrites) != 1 || m.pendingWrites[0].kind != writeRename {
+		t.Fatalf("pending writes = %+v, want the title rename queued behind the save", m.pendingWrites)
+	}
+
+	// The save completes. Its fold dispatches the queued rename as ONE Cmd — never a tea.Batch,
+	// whose members would run on separate goroutines and put the two writes back in a race.
+	m, next := stepCmd(t, m, cmdMsg(saveCmd))
+	if next == nil {
+		t.Fatal("the save-complete dispatched no queued write")
+	}
+	msg := cmdMsg(next)
+	if _, batched := msg.(tea.BatchMsg); batched {
+		t.Fatal("the save-complete batched its writes; batch members run on separate goroutines")
+	}
+	if _, ok := msg.(recordWriteDoneMsg); !ok {
+		t.Fatalf("the save-complete dispatched %T, want the queued rename", msg)
+	}
+	m = step(t, m, msg)
+
+	if calls := host.savedCalls(); len(calls) != 1 {
+		t.Errorf("Save calls = %d, want the one in-flight save", len(calls))
+	}
+	want := []renameCall{{id: "s1", title: "fix the broken parser"}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want %+v after the save, never beside it", got, want)
+	}
+	if len(m.pendingWrites) != 0 {
+		t.Errorf("pending writes = %+v, want an empty queue", m.pendingWrites)
+	}
+}
+
+// The early window: the apply path branches on ActiveID(), which the host mints at the START of the
+// first Save — before the atomic write has put the file on disk — so a title answering inside that
+// window renames a record that is not there. It used to be discarded on the spot; now it goes back
+// on the stash and lands at the next successful save.
+func TestTitleSurvivesARenameOfARecordNotOnDiskYet(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1"}) // an id exists; the file behind it does not yet
+	host.failRenames(errors.New("no such file or directory"))
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, cmd := stepCmd(t, m, autoTitleMsg{title: "fix the broken parser"})
+	if cmd == nil {
+		t.Fatal("a landed title with an active id dispatched no rename")
+	}
+	m = step(t, m, cmdMsg(cmd)) // the rename runs, hits ENOENT, and folds back
+	if m.pendingTitle != "fix the broken parser" || m.pendingSource != titleAutomatic {
+		t.Fatalf("stash = %q from %v, want the unwritable title held for the next save", m.pendingTitle, m.pendingSource)
+	}
+
+	// The record reaches disk; the next successful save re-applies the title it could not write.
+	host.failRenames(nil)
+	m.transcript.addUser("fix the broken parser in tokenizer.go", nil)
+	m, cmd = stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{}})
+	if cmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+	m = runWrites(t, m, cmd)
+
+	want := []renameCall{
+		{id: "s1", title: "fix the broken parser"}, // the attempt that found no record
+		{id: "s1", title: "fix the broken parser"}, // the retry that stuck
+	}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want %+v (the failed write retried, not dropped)", got, want)
+	}
+	if m.pendingTitle != "" {
+		t.Errorf("pendingTitle = %q, want cleared once the retry landed", m.pendingTitle)
 	}
 }
 
@@ -447,9 +553,13 @@ func lastNote(m Model) string {
 }
 
 // idle returns the model to stateIdle after a submitted prompt, so the idle-only /rename may run.
+// The idle boundary schedules a save, and that save is driven to completion here: a record write
+// left in flight holds the single-flight latch, so a title scheduled afterwards would still be
+// waiting in the queue rather than at the host (model.go).
 func idle(t *testing.T, m Model) Model {
 	t.Helper()
-	return step(t, m, exchangeDoneMsg{})
+	m, cmd := stepCmd(t, m, exchangeDoneMsg{})
+	return runWrites(t, m, cmd)
 }
 
 // `/rename <text>` names the session outright: the tokens re-join with single spaces, run through
@@ -577,7 +687,7 @@ func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
 	m = idle(t, m)
 
 	m, cmd := sendPrompt(t, m, "/rename my own name")
-	cmdMsg(cmd)
+	m = runWrites(t, m, cmd)
 
 	m, cmd = sendPrompt(t, m, "/rename")
 	if cmd == nil {
@@ -588,7 +698,7 @@ func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
 		t.Fatal("bare /rename did not yield a manualTitleMsg")
 	}
 	m, cmd = stepCmd(t, m, msg)
-	cmdMsg(cmd)
+	m = runWrites(t, m, cmd)
 
 	want := []renameCall{{id: "s1", title: "my own name"}, {id: "s1", title: "the generated name"}}
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {

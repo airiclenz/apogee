@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -101,10 +102,22 @@ type Record struct {
 // Store persists session Records as id-addressed files under a directory (SessionsDir). It
 // owns the on-disk format and naming so its callers — the composition root's host adapter,
 // the history browser — never duplicate that knowledge. Writes are atomic (temp file +
-// rename), so a crash never leaves a truncated record behind.
+// rename), so a crash never leaves a truncated record behind, and serialized (mu), so two
+// concurrent writers never roll one another's record back.
 type Store struct {
 	dir string
 	now func() time.Time // injectable so a test controls Rename's UpdatedAt stamp
+
+	// mu serializes the three writers — Save, Rename and Delete — against each other. Rename is
+	// why it exists: its Load→retitle→Save is a read-modify-write over the WHOLE record, so a Save
+	// landing between its read and its write is silently rolled back, taking a complete Turn (the
+	// engine Session and the TUI transcript blob alike) off disk. The TUI serializes its own record
+	// writes at the fold layer as well; this is the floor under every caller in the process,
+	// including a store two goroutines reach without going through that fold.
+	//
+	// The readers (List, Load, LoadPath) stay unguarded: atomicWrite renames a complete file into
+	// place, so a reader sees either the whole old record or the whole new one, never a torn one.
+	mu sync.Mutex
 }
 
 // NewStore returns a Store rooted at dir. The directory is created lazily on the first Save
@@ -136,6 +149,14 @@ func newID(now time.Time, rand io.Reader) string {
 // filename component is refused with ErrInvalidID: the write must stay inside s.dir even when
 // the id travelled in from a record the user resumed by path.
 func (s *Store) Save(rec Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save(rec)
+}
+
+// save is Save's body without the store lock, so Rename can hold that lock across its whole
+// read-modify-write instead of dropping it between the read and the write. Callers must hold s.mu.
+func (s *Store) save(rec Record) error {
 	if err := validateID(rec.Meta.ID); err != nil {
 		return err
 	}
@@ -214,6 +235,8 @@ func (s *Store) Delete(id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := os.Remove(filepath.Join(s.dir, id+".json")); err != nil {
 		return fmt.Errorf("apogee: delete session %q: %w", id, err)
 	}
@@ -221,15 +244,24 @@ func (s *Store) Delete(id string) error {
 }
 
 // Rename sets a stored session's Title and re-stamps its UpdatedAt, persisting through the
-// same atomic Save. Renaming a legacy bare envelope upgrades it to a wrapped record.
+// same atomic write. Renaming a legacy bare envelope upgrades it to a wrapped record.
+//
+// The read and the write happen under ONE hold of the store lock, which is the point: a Save that
+// slipped between them would be overwritten by the record this call read before it — reverting the
+// session by a whole Turn, since Save replaces the record wholesale (audit 2026-08-01).
 func (s *Store) Rename(id, title string) error {
-	rec, err := s.Load(id)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, err := s.loadPath(filepath.Join(s.dir, id+".json"))
 	if err != nil {
 		return err
 	}
 	rec.Meta.Title = title
 	rec.Meta.UpdatedAt = s.now().UTC()
-	return s.Save(rec)
+	return s.save(rec)
 }
 
 // decodeRecord turns raw file bytes into a Record and refuses one whose id could not address a

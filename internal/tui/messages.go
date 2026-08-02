@@ -30,6 +30,7 @@ var (
 	_ tea.Msg = turnSnapshotMsg{}
 	_ tea.Msg = interjectedMsg{}
 	_ tea.Msg = saveDoneMsg{}
+	_ tea.Msg = recordWriteDoneMsg{}
 	_ tea.Msg = heartbeatTickMsg{}
 	_ tea.Msg = beatMsg{}
 )
@@ -161,8 +162,22 @@ type beatMsg struct {
 // saveDoneMsg reports the outcome of one asynchronous SessionHost.Save (the per-Turn and idle
 // save Cmds). Err is nil on success; a failure is noted once on the ok→fail transition and then
 // swallowed — a save failure must never interrupt the conversation. The Model clears its
-// single-flight busy flag on this Msg and dispatches any save that coalesced while it was in
-// flight (latest-wins).
+// single-flight busy flag on this Msg and dispatches the next queued record write (which may be a
+// save that coalesced while this one was in flight: latest-wins).
 type saveDoneMsg struct {
 	Err error
+}
+
+// recordWriteDoneMsg reports the outcome of the OTHER two record writes — one asynchronous
+// SessionHost.Rename or Delete. They share the save's single-flight latch (the record-write queue,
+// model.go), so this Msg is what releases it and lets the next write go out. write is the write
+// that finished, because the fold needs its shape: a browser verb re-lists over the result, and a
+// quiet title write that failed is re-stashed rather than lost. err is what the host reported; every
+// other failure here is deliberately swallowed, these being best-effort writes. list carries the
+// re-list the browser's verbs ask for (recordWrite.relist), read on the write's own goroutine right
+// after it landed.
+type recordWriteDoneMsg struct {
+	write recordWrite
+	err   error
+	list  sessionListMsg
 }

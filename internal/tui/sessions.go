@@ -233,7 +233,8 @@ func (m Model) sessionConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.transcript.addNote("current session's file deleted — it lives on in memory; the next turn saves it as a new session")
 			m.refreshViewport()
 		}
-		return m, m.deleteSession(id)
+		cmd := m.deleteSession(id) // queued: it mutates m, so it is sequenced before the return
+		return m, cmd
 	case "n", "esc":
 		m.sessionBrowser.confirming = false
 		return m, nil
@@ -262,7 +263,8 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// they typed when it lands (autotitle.go, Ratified design 5). The flag is set on the
 		// COMMIT, not on arming the edit: an abandoned rename changed nothing.
 		m.titleTouched = true
-		return m, m.renameSession(visible[m.sessionBrowser.selected].ID, title)
+		cmd := m.renameSession(visible[m.sessionBrowser.selected].ID, title) // queued: it mutates m
+		return m, cmd
 	case "backspace":
 		r := []rune(m.sessionBrowser.renameBuf)
 		if len(r) > 0 {
@@ -276,43 +278,35 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// deleteSession builds the Cmd that removes id off the Update loop and re-lists, so the browser
-// refreshes without the deleted row.
-func (m Model) deleteSession(id string) tea.Cmd {
-	sessions := m.sessions
-	return func() tea.Msg {
-		_ = sessions.Delete(id) // best-effort: a delete failure just leaves the row on the re-list
-		metas, err := sessions.List()
-		return sessionListMsg{metas: metas, err: err}
-	}
+// deleteSession queues the removal of id and the re-list that follows it, so the browser refreshes
+// without the deleted row. It goes through the record-write queue (model.go) rather than straight
+// onto a Cmd goroutine: a delete racing the per-Turn save can otherwise remove a record the
+// already-dispatched save then re-creates. The delete is best-effort — a failure just leaves the
+// row on the re-list.
+func (m *Model) deleteSession(id string) tea.Cmd {
+	return m.scheduleWrite(recordWrite{kind: writeDelete, id: id, relist: true})
 }
 
-// renameSession builds the Cmd that sets id's title off the Update loop and re-lists, so the
-// browser refreshes with the new title.
-func (m Model) renameSession(id, title string) tea.Cmd {
-	sessions := m.sessions
-	return func() tea.Msg {
-		_ = sessions.Rename(id, title) // best-effort: a rename failure leaves the old title on the re-list
-		metas, err := sessions.List()
-		return sessionListMsg{metas: metas, err: err}
-	}
+// renameSession queues the browser's rename of id and the re-list that follows it, so the browser
+// refreshes with the new title. Same queue and the same reason as deleteSession: Store.Rename
+// re-writes the whole record, so one running beside a save reverts a Turn.
+func (m *Model) renameSession(id, title string) tea.Cmd {
+	return m.scheduleWrite(recordWrite{kind: writeRename, id: id, title: title, relist: true})
 }
 
-// setSessionTitle is renameSession's QUIET twin: it sets id's title off the Update loop and reports
-// nothing back. It is the apply path for a title the model generated (autotitle.go), where the
-// re-list would be actively wrong — foldSessionList opens the overlay over every list it folds, so
-// reusing renameSession would make the /sessions browser appear unbidden partway through the first
-// answer. Nothing is displayed either way: a title surfaces in the browser the next time it is
-// opened, and in the resume note, and nowhere else.
+// setSessionTitle is renameSession's QUIET twin: it queues id's title and reports nothing back to
+// the human. It is the apply path for a title the model generated (autotitle.go), where the re-list
+// would be actively wrong — foldSessionList opens the overlay over every list it folds, so reusing
+// renameSession would make the /sessions browser appear unbidden partway through the first answer.
+// Nothing is displayed either way: a title surfaces in the browser the next time it is opened, and
+// in the resume note, and nowhere else.
 //
-// The rename is best-effort for the same reason the naming call is silent — the record already
-// carries a usable heuristic title, so a failure costs the session nothing.
-func (m Model) setSessionTitle(id, title string) tea.Cmd {
-	sessions := m.sessions
-	return func() tea.Msg {
-		_ = sessions.Rename(id, title)
-		return nil
-	}
+// It is the one write whose FAILURE is not simply swallowed (retryTitle): the title is put back on
+// the stash and applied at the next successful save, because the alternative — the behaviour this
+// replaced — is that a title answering before the first record reaches disk is silently discarded.
+// src rides along because the never-clobber rule is re-checked when the stash is remade.
+func (m *Model) setSessionTitle(id, title string, src titleSource) tea.Cmd {
+	return m.scheduleWrite(recordWrite{kind: writeRename, id: id, title: title, retryTitle: true, source: src})
 }
 
 // loadSession builds the Cmd that reads Sessions.Load(id) off the Update loop and reports it as a

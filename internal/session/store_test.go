@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -278,6 +279,103 @@ func TestRenamePersists(t *testing.T) {
 	}
 	if string(got.Session.State) != string(rec.Session.State) {
 		t.Errorf("Rename disturbed the Session payload")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Write serialization (audit 2026-08-01, "Session-record writes are unserialized")
+// ----------------------------------------------------------------------------
+
+// concurrentWriteRuns is how many times the two-writer probes race a pair of writes. The audit's
+// unguarded probe lost a payload in 50 of 200 runs, so 200 is kept as the regression's evidence
+// bar: a store that dropped the mutex fails this well inside one run.
+const concurrentWriteRuns = 200
+
+// raceTwo runs a and b concurrently, released together so they collide rather than queue.
+func raceTwo(a, b func()) {
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for _, f := range []func(){a, b} {
+		go func() {
+			defer wg.Done()
+			<-start
+			f()
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
+// A Rename running beside a Save must never roll the record back. Rename is a read-modify-write of
+// the WHOLE record — Load, retitle, Save — so without the store lock a Save landing between its read
+// and its write is silently overwritten by the pre-save record, costing a complete Turn: the engine
+// Session and the TUI transcript blob alike (the audit's probe, kept as a regression). Which of the
+// two writes wins the lock decides the TITLE, which the caller above owns; it must never decide the
+// PAYLOAD.
+func TestSaveAndRenameNeverLoseTheNewerPayload(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+	stamp := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+
+	for i := range concurrentWriteRuns {
+		id := fmt.Sprintf("20260801T090000Z-%08d", i)
+		turn1 := sampleRecord(id, stamp)
+		turn1.Session.State = json.RawMessage(`{"turn":1}`)
+		if err := st.Save(turn1); err != nil {
+			t.Fatalf("seeding turn 1: %v", err)
+		}
+		turn2 := turn1
+		turn2.Session.State = json.RawMessage(`{"turn":2}`)
+
+		raceTwo(
+			func() { _ = st.Save(turn2) },
+			func() { _ = st.Rename(id, "a better name") },
+		)
+
+		got, err := st.Load(id)
+		if err != nil {
+			t.Fatalf("run %d: Load after the race: %v", i, err)
+		}
+		if string(got.Session.State) != `{"turn":2}` {
+			t.Fatalf("run %d: stored payload = %s, want the newer {\"turn\":2} (a Rename rolled the Turn back)", i, got.Session.State)
+		}
+	}
+}
+
+// A Delete running beside a Save has the same shape: the two must not interleave, so the record
+// afterwards is either gone (the save landed first and the delete removed it) or the record the save
+// wrote (the delete landed first and the save re-created it). It is never the older payload, and
+// never a file that fails to decode.
+func TestSaveAndDeleteLeaveNoStaleRecord(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+	stamp := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+
+	for i := range concurrentWriteRuns {
+		id := fmt.Sprintf("20260801T090000Z-%08d", i)
+		turn1 := sampleRecord(id, stamp)
+		turn1.Session.State = json.RawMessage(`{"turn":1}`)
+		if err := st.Save(turn1); err != nil {
+			t.Fatalf("seeding turn 1: %v", err)
+		}
+		turn2 := turn1
+		turn2.Session.State = json.RawMessage(`{"turn":2}`)
+
+		raceTwo(
+			func() { _ = st.Save(turn2) },
+			func() { _ = st.Delete(id) },
+		)
+
+		got, err := st.Load(id)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			continue // the delete came last: the record is gone, which is what was asked for
+		case err != nil:
+			t.Fatalf("run %d: Load after the race: %v", i, err)
+		case string(got.Session.State) != `{"turn":2}`:
+			t.Fatalf("run %d: surviving payload = %s, want the newer {\"turn\":2}", i, got.Session.State)
+		}
 	}
 }
 

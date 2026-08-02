@@ -654,6 +654,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Naming a session can no longer roll the conversation back a whole turn.** Saving your session
+  and setting its name are two different writes to the same file, and they went out independently:
+  the per-turn save replaces the record wholesale, while setting a name *reads* the record, changes
+  the title and writes it back. Run both at once — which is exactly what happened, since automatic
+  naming is on by default and its answer lands beside a save — and the name write puts back the
+  version of the record it read a moment earlier, discarding the turn the save had just stored.
+  Your engine state and your scrollback both revert one turn, which is precisely what the per-turn
+  cadence exists to prevent; a probe over the store lost the newer record in a quarter of runs. The
+  same window was open to a `/rename` typed while a save was running, and to deleting a session from
+  `/sessions`, which could remove a record an already-dispatched save then re-created.
+  - **Every write to a session record now goes through one queue.** A save, a rename and a delete
+    can never overlap; saves still collapse latest-wins, so a burst of turns is still one write plus
+    one waiting. The store itself also serialises the three, so a rename's read-modify-write is
+    atomic against a save whoever asks for it.
+  - **A name that answered before your session first reached disk is no longer lost.** apogee mints
+    a session's id at the *start* of its first save, so a name arriving in the window before that
+    file exists was renaming a record that was not there yet — and was dropped without a word. It is
+    now held and applied at the next successful save.
+
 - **A mechanism that cannot be enabled no longer reports itself as `apogee: apogee: …`.** When a
   mechanism named for arming collides with one already in the registry — the same ID twice, or an ID
   a host had pre-registered itself — construction fails loudly, as it should. But the failure wrapped

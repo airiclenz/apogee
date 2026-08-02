@@ -1076,6 +1076,31 @@ func driveOneSave(t *testing.T, m Model, sess domain.Session) Model {
 	return step(t, m, cmdMsg(cmd)) // fold the saveDoneMsg
 }
 
+// maxWriteDrainSteps bounds runWrites so a queue that never settles fails the test instead of
+// hanging it. A handful of writes is the most any test stacks up.
+const maxWriteDrainSteps = 32
+
+// runWrites drives the record-write queue to quiescence: it runs cmd, folds the completion Msg that
+// comes back, and repeats with whatever that dispatched — the Update loop's job, done by hand.
+// Record writes are ONE serialized stream (model.go), so a test that asserts on the store has to
+// let the queue drain rather than run a single write Cmd in isolation: a rename scheduled while a
+// save is in flight is waiting, not lost.
+func runWrites(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	for range maxWriteDrainSteps {
+		if cmd == nil {
+			return m
+		}
+		msg := cmdMsg(cmd)
+		if msg == nil {
+			return m
+		}
+		m, cmd = stepCmd(t, m, msg)
+	}
+	t.Fatal("the record-write queue never settled")
+	return m
+}
+
 // saveNotes collects the transcript's save-pipeline notes (ok→fail failures and fail→ok
 // recoveries), so a test can assert exactly which transitions were surfaced.
 func saveNotes(m Model) []string {
@@ -1515,6 +1540,59 @@ func TestModelSaveSingleFlightCoalesces(t *testing.T) {
 	}
 	if string(calls[1].sess.State) != `{"n":3}` {
 		t.Errorf("second save = %q; want the latest coalesced s3 (s2 dropped)", calls[1].sess.State)
+	}
+}
+
+// The browser's own record writes join the same single-flight queue as the per-Turn save, because
+// they write the same file: Store.Rename re-reads and re-writes the whole record, and Delete removes
+// it, so either one running beside an in-flight Save loses a Turn (audit 2026-08-01). The queue is
+// asserted at the FOLD layer — which Cmd was dispatched and what is still waiting — because the
+// recording host serialises every call under one mutex of its own and so cannot see the collision.
+func TestSessionBrowserWritesQueueBehindAnInFlightSave(t *testing.T) {
+	host := &fakeSessionHost{}
+	storeMeta(host, "s1", "old title", "/ws", time.Now(), 0, nil)
+	m := newSessionModel(t, &fakeEngine{}, host)
+	m.transcript.addUser("hi", nil)
+
+	// A per-Turn save goes out and is left in flight: its Cmd is held rather than run.
+	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":1}`)}})
+	if saveCmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+
+	// Both browser verbs are asked for while it runs. Each must WAIT, in the order asked.
+	cmd := m.renameSession("s1", "a better name")
+	if cmd != nil {
+		t.Fatal("a browser rename during an in-flight save dispatched a parallel record write")
+	}
+	cmd = m.deleteSession("s2")
+	if cmd != nil {
+		t.Fatal("a browser delete during an in-flight save dispatched a parallel record write")
+	}
+	if len(host.renamedTitles()) != 0 {
+		t.Fatalf("renames = %+v; want none while a save is in flight", host.renamedTitles())
+	}
+	if len(m.pendingWrites) != 2 {
+		t.Fatalf("pending writes = %+v; want the rename and the delete both waiting", m.pendingWrites)
+	}
+	if m.pendingWrites[0].kind != writeRename || m.pendingWrites[1].kind != writeDelete {
+		t.Errorf("queue order = %+v; want the writes in the order they were asked for", m.pendingWrites)
+	}
+
+	// Finishing the save releases exactly one write, and finishing that one releases the next.
+	m, cmd = stepCmd(t, m, cmdMsg(saveCmd))
+	msg := cmdMsg(cmd)
+	if _, ok := msg.(recordWriteDoneMsg); !ok {
+		t.Fatalf("the save-complete dispatched %T; want the single queued rename", msg)
+	}
+	m, cmd = stepCmd(t, m, msg)
+	m = runWrites(t, m, cmd)
+	if len(m.pendingWrites) != 0 {
+		t.Errorf("pending writes after the drain = %+v; want an empty queue", m.pendingWrites)
+	}
+	want := []renameCall{{id: "s1", title: "a better name"}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want %+v once the save had finished", got, want)
 	}
 }
 

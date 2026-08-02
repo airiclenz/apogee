@@ -173,34 +173,40 @@ func (m *Model) applyTitle(name string, src titleSource) (cmd tea.Cmd, stashed b
 		m.pendingSource = src
 		return nil, true
 	}
-	return m.setSessionTitle(id, name), false
+	return m.setSessionTitle(id, name, src), false
 }
 
-// flushPendingTitle applies a stashed title once a Save has put the record on disk, clearing the
+// flushPendingTitle QUEUES a stashed title once a Save has put the record on disk, clearing the
 // stash. It is called from the save-complete fold on a SUCCESSFUL save: the rename reads and
 // rewrites a stored record, so a title applied before the file exists would simply be dropped by
 // the store. A save that failed leaves the stash for the next one.
+//
+// It queues rather than dispatching, and returns nothing to dispatch, deliberately. saveComplete
+// calls it while the record-write latch is still held, and the flush is a record WRITE like the
+// save it follows: handing a Cmd back would put a rename on one goroutine beside the coalesced save
+// on another, which is exactly the collision that could roll a Turn off disk (model.go, audit
+// 2026-08-01). The queue dispatches it next instead.
 //
 // The never-clobber rule is enforced here as well as at arrival, because a stash is the one way an
 // AUTOMATIC title can outlive the check foldAutoTitle already made: it can be waiting for an id at
 // the moment a human names the session (through the browser, or `/rename <name>` on a record that
 // does not exist yet), and flushing it then would overwrite the name they just chose. A stash the
 // human asked for flushes unconditionally — it IS what they chose.
-func (m *Model) flushPendingTitle() tea.Cmd {
+func (m *Model) flushPendingTitle() {
 	if m.pendingTitle == "" || m.sessions == nil {
-		return nil
+		return
 	}
 	if m.pendingSource == titleAutomatic && m.titleTouched {
 		m.pendingTitle = ""
-		return nil
+		return
 	}
 	id := m.sessions.ActiveID()
 	if id == "" {
-		return nil
+		return
 	}
-	name := m.pendingTitle
+	name, src := m.pendingTitle, m.pendingSource
 	m.pendingTitle = ""
-	return m.setSessionTitle(id, name)
+	m.queueWrite(recordWrite{kind: writeRename, id: id, title: name, retryTitle: true, source: src})
 }
 
 // renameUsage closes every /rename note that could not produce a title: the one form that always
