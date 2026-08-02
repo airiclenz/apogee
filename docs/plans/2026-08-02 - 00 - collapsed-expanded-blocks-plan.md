@@ -7,7 +7,7 @@
   collapse to their call block with a cascading summary, and a live block's header star
   blinks.
 - **Date:** 2026-08-02
-- **Status:** not started
+- **Status:** complete
 - **Authoritative source:** `layout.md` § "Collapsed and expanded blocks" is the ground
   truth for every item. If any item below disagrees with that section, the layout.md
   section wins and the deviation lands as a dated NOTES line under the item. The design
@@ -227,6 +227,16 @@ visible consequence of the spec as written: a finished run whose report is long 
 shows that report's first line twice when collapsed — once in the summary slot (`N tool calls · <first
 line>`) and once as the body's compact paint — since layout.md keeps the compact body shape unchanged
 in the collapsed state and separately gives the summary slot the report's first line.
+
+NOTES (2026-08-02, after the wave): the double print described in the paragraph above is history, not
+current behaviour — it was removed the same day (`fix(tui): a collapsed sub-agent run says its gist
+once`). A collapsed run now says its gist ONCE: `renderSubAgentRun` elides the head's own report body
+along with the span, and no `… +N more lines` marker takes its place, because the transitive count is
+what says there is work behind the header and `blockState.elides` keeps that header a toggle target
+however short the report is. layout.md § "Collapsed and expanded blocks" states this as the settled
+rule in both places it speaks — the two-states paragraph (the run is the one block whose collapsed
+paint goes further) and the run paragraph (the report body is elided along with the span; no block
+prints the same text twice in two adjacent rows).
 
 **What:** the run is a block; one rule at every depth.
 
