@@ -598,12 +598,15 @@ func (m Model) renderPicker() string {
 	if len(rows) > 0 {
 		selected = clampInt(m.picker.selected, 0, len(rows)-1)
 	}
+	// maxPickerRows is the taste; popupBudget is the screen's answer to it, so a long offering on a
+	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
+	_, shown := m.popupBudget(len(rows), maxPickerRows)
 	return renderPopup(m.th, popupSpec{
 		title:    m.pickerTitle(),
 		rows:     rows,
 		selected: selected,
 		hint:     pickerHint,
-		maxRows:  maxPickerRows,
+		maxRows:  shown,
 	}, m.width)
 }
 

@@ -39,11 +39,19 @@ import (
 // makes copy equal sight: the release slices the very lines the rule protected.
 //
 // Screen rows become content lines through ONE mapping, Model.contentLineAt (model.go), which the
-// mouse and the highlight both read. It is overlay-aware: the sticky header draws the owning
-// prompt over the viewport's top rows, so those rows name the header's own lines, not the reply
-// lines the scroll offset hides beneath them. A drag that starts on the header and runs down into
-// the reply therefore spans the content between the two — the lines the header covers included,
-// since a screen-space span stays a contiguous run of content lines.
+// mouse and the highlight both read. It is overlay-aware at BOTH ends of the transcript, and that
+// is what keeps copy equal to sight rather than merely close to it:
+//
+//   - At the top, the sticky header draws the owning prompt over the viewport's first rows, so
+//     those rows name the header's own lines, not the reply lines the scroll offset hides beneath
+//     them. A drag that starts on the header and runs down into the reply therefore spans the
+//     content between the two — the lines the header covers included, since a screen-space span
+//     stays a contiguous run of content lines.
+//   - At the bottom, the approval and ask popups, the /sessions browser, the picker, the
+//     autocomplete dropdown and the staged-interjection strip take their rows OFF the transcript
+//     (Model.transcriptRows composes the frame from what is left). Those rows map to no content
+//     line at all, so a click on a popup border or a session row arms nothing — the alternative,
+//     bounding by the height layout() stored, addressed reply lines that were not on screen.
 
 // cell is an absolute visual position inside the textarea content: row counts wrapped (visual)
 // lines from the top of the value; col is the display column within that row.
@@ -150,11 +158,20 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 // pointTranscriptRow maps a screen point to a content coordinate in the rendered transcript: the
 // line index into m.lines and the display cell within it. The viewport is top-anchored at the
 // screen origin (View stacks it first) and its content spans the width left of the scroll-bar
-// gutter. ok is false when the point falls outside the viewport rows or past the last rendered
+// gutter. ok is false when the point falls outside the transcript's rows or past the last rendered
 // line (the blank pad refreshViewport leaves below short content), so a click there selects
-// nothing. contentLineAt (model.go) resolves the row, folding in both the scroll offset and the
-// sticky-header overlay — so a click on a header row names the prompt line drawn there rather
-// than the reply line hidden beneath it, and the mapping holds at any scroll position.
+// nothing. contentLineAt (model.go) resolves the row, folding in the scroll offset, the
+// sticky-header overlay and the rows this frame's overlays took off the bottom
+// ([Model.transcriptRows]) — so a click on a header row names the prompt line drawn there rather
+// than the reply line hidden beneath it, a click on a popup row names nothing at all, and the
+// mapping holds at any scroll position.
+//
+// The vertical bound is that same derivation and NOT the stored viewport height, which is the whole
+// of what makes the arbitration honest: the height layout() stored is the transcript's only while
+// no overlay is open, and the rows between the drawn transcript and the input box are painted by an
+// approval popup or the /sessions browser. Bounding by the stored height let a click there arm a
+// selection over the reply lines the popup covers — invisible text, copied to the clipboard on
+// release.
 //
 // The column needs no conversion, and that is a CONSEQUENCE, not a coincidence. The terminal
 // reports x as a PAINTED cell index — the column the glyph under the pointer occupies on screen —
@@ -165,15 +182,11 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 // the CUTS that have to speak the authority — measure the line in one method and slice it in
 // another and the pointer names one glyph while the clipboard takes its neighbour.
 func (m Model) pointTranscriptRow(x, y int) (line, col int, ok bool) {
-	w, h := m.viewport.Width(), m.viewport.Height()
-	if h < 1 || y < 0 || y >= h {
-		return 0, 0, false
-	}
-	line = m.contentLineAt(y)
+	line = m.contentLineAt(y) // −1 off the transcript's own rows, overlay rows included
 	if line < 0 || line >= len(m.lines) {
 		return 0, 0, false
 	}
-	col = clampInt(x, 0, w)
+	col = clampInt(x, 0, m.viewport.Width())
 	return line, col, true
 }
 
@@ -502,11 +515,12 @@ func transcriptSelectionText(measure widthAuthority, lines []string, a, b conten
 
 // highlightTranscript overlays the transcript drag-selection's background on the viewport's
 // visible block, mirroring highlightInput: it shades the display cells between the selection's
-// two content-anchored ends on each visible line. contentLineAt (model.go) maps each visible row
-// back to the content line drawn on it, so the highlight tracks the selection through a mid-drag
-// wheel-scroll. It is applied after the sticky header and reads the same overlay mapping the mouse
-// does, so a header row highlights exactly when the header line under the span is the one drawn
-// there. With no active (non-empty) selection the view is returned unchanged.
+// two content-anchored ends on each visible line. It is handed the transcript block View composed,
+// so its rows are the transcript's by construction — it spends the frame's row budget
+// ([Model.transcriptRows]) once as a loop bound and maps each row through drawnLineAt, the same
+// mapping contentLineAt gives the mouse. So the highlight tracks the selection through a mid-drag
+// wheel-scroll, and a header row highlights exactly when the header line under the span is the one
+// drawn there. With no active (non-empty) selection the view is returned unchanged.
 func (m Model) highlightTranscript(view string) string {
 	if !m.transcriptSel.active || m.transcriptSel.anchor == m.transcriptSel.head {
 		return view
@@ -515,9 +529,13 @@ func (m Model) highlightTranscript(view string) string {
 	if bot.line < top.line || (bot.line == top.line && bot.col < top.col) {
 		top, bot = bot, top // normalise to reading order
 	}
+	drawn := m.transcriptRows()
 	lines := strings.Split(view, "\n")
 	for r := range lines {
-		absRow := m.contentLineAt(r)
+		if r >= drawn {
+			break // past the transcript: an overlay owns these rows, nothing of ours is drawn on them
+		}
+		absRow := m.drawnLineAt(r)
 		if absRow < top.line || absRow > bot.line {
 			continue
 		}

@@ -81,6 +81,27 @@ the glyph the pointer is on.
 
 ---
 
+## What "height" means: one row budget, and the transcript pays it
+
+**Every pane above the input box takes its rows from the transcript.** The approval and ask
+prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/` and `@` dropdown, and
+the staged-interjection band all sit in the frame between the session area and the bottom chrome,
+and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
+how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
+address in it, and the rows an overlay paints are the same three answers to one question — a click
+on a pane's border or on a session row selects nothing in the transcript, because there is no
+transcript there.
+
+**A short window shrinks the panes rather than pushing the box off-screen.** A pane never promises
+rows the frame cannot hold: it spends what the window can spare above the input box, so a long
+choice set on a half-height pane scrolls a smaller window around the selection, and on a window
+too short for both, the pane keeps its rows and the session area goes to nothing. The input box
+and the footer are never the ones that give way — they are the frame's floor. Below roughly a
+dozen rows a bordered pane and the fixed chrome cannot both fit at all, and the frame is as small
+as the two of them together.
+
+---
+
 ## The rules behind the tool-call sketch
 
 **The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a

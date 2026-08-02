@@ -408,9 +408,8 @@ func (m Model) renderSessionBrowser() string {
 		scope = "all workspaces"
 	}
 	spec := popupSpec{
-		title:   "saved sessions  (" + scope + ")",
-		hint:    sessionBrowserHint,
-		maxRows: maxSessionRows,
+		title: "saved sessions  (" + scope + ")",
+		hint:  sessionBrowserHint,
 	}
 	if len(b.visible(m.opts.Workspace)) == 0 {
 		spec.rows = singleCellRows([]string{"no sessions in this workspace — press a to see all"})
@@ -419,6 +418,10 @@ func (m Model) renderSessionBrowser() string {
 		spec.rows = sessionRows(b, m.opts.Workspace, time.Now())
 		spec.selected = b.selected
 	}
+	// The row window is the SCREEN's to grant, not the browser's to assume: maxSessionRows is this
+	// overlay's own taste, and popupBudget cuts it down to what the window can seat above the input
+	// box (D2) — on a short terminal that is fewer rows, or none at all.
+	_, spec.maxRows = m.popupBudget(len(spec.rows), maxSessionRows)
 	return renderPopup(m.th, spec, m.width)
 }
 

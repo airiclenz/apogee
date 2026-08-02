@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1163,6 +1164,135 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 			}
 			if !strings.Contains(m.View().Content, selectionBg) {
 				t.Fatal("a selection over the sticky-header row did not reach the rendered View")
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// One frame-row derivation: View, the mouse, and the overlays (item 7)
+// ----------------------------------------------------------------------------
+
+// TestMouseClickOnOverlayRowsArmsNoSelection is the audit's 80×24 repro. The approval popup is
+// painted over the BOTTOM rows of the transcript's slot, but the mouse used to bound a click by the
+// height layout() stored — the un-shrunk one — so a left-click on the popup's top border armed a
+// transcript selection anchored on the reply line hidden underneath it, and the release put text
+// nobody could see on the system clipboard over OSC 52. Every screen row an overlay occupies must
+// map to no transcript position at all.
+func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
+	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write the notes file"})
+	for i := range 40 { // a transcript deep enough that the covered rows all name real content
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+	}
+	m.refreshViewport()
+
+	drawn, laidOut := m.transcriptRows(), m.viewport.Height()
+	if drawn >= laidOut {
+		t.Fatalf("setup: the approval popup took no rows off the transcript (drawn %d, laid out %d)", drawn, laidOut)
+	}
+	if m.contentLineAt(drawn) >= 0 {
+		t.Errorf("the first overlay row still maps to content line %d", m.contentLineAt(drawn))
+	}
+	for y := drawn; y < laidOut; y++ {
+		if line, _, ok := m.pointTranscriptRow(4, y); ok {
+			t.Errorf("row %d is painted by the popup, yet it maps to content line %d", y, line)
+		}
+		if next := step(t, m, leftClick(4, y)); next.transcriptSel.active {
+			t.Errorf("a click on popup row %d armed a transcript selection", y)
+		}
+	}
+
+	// The whole gesture, not just the press: a drag across the popup copies nothing and flashes
+	// nothing, because it never anchored anywhere.
+	m = step(t, m, leftClick(4, drawn))
+	m = step(t, m, leftDrag(40, laidOut-1))
+	m, cmd := stepCmd(t, m, leftRelease(40, laidOut-1))
+	if cmd != nil {
+		t.Error("a drag over the popup returned a Cmd; nothing may reach the clipboard from there")
+	}
+	if m.flash != "" {
+		t.Errorf("flash = %q after a drag over the popup, want no copy confirmation", m.flash)
+	}
+}
+
+// TestFrameRowBoundaryAgreesWithTheMouseMapping is the seam itself, over a table of overlay
+// heights: the row at which View stops drawing the transcript and starts drawing the overlay is
+// exactly the row at which the mouse stops finding transcript content. One derivation, so the two
+// cannot drift — and the composed frame still fits the terminal.
+func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
+	deepTranscript := func(m *Model) {
+		for i := range 60 {
+			m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+		}
+		m.refreshViewport()
+	}
+	cases := []struct {
+		name  string
+		build func(t *testing.T) (Model, string) // the model, and the overlay block drawn below the transcript
+	}{
+		{"approval prompt, one-line reason", func(t *testing.T) (Model, string) {
+			m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "run", Reason: "go"})
+			deepTranscript(&m)
+			return m, m.frameOverlays().prompt
+		}},
+		{"approval prompt, a body that wraps", func(t *testing.T) (Model, string) {
+			m, _ := newApprovalModel(t, domain.ApprovalRequest{
+				Tool:   "write_file",
+				Reason: strings.Repeat("a rather long reason that has to wrap across several lines ", 4),
+			})
+			deepTranscript(&m)
+			return m, m.frameOverlays().prompt
+		}},
+		{"ask prompt with choices", func(t *testing.T) (Model, string) {
+			m := newTestModel(t)
+			deepTranscript(&m)
+			m = step(t, m, askReqMsg{
+				Request: domain.AskRequest{Question: "which one?", Choices: []string{"a", "b", "c", "d", "e"}},
+				Reply:   make(chan domain.AskAnswer, 1),
+			})
+			return m, m.frameOverlays().prompt
+		}},
+		{"sessions browser", func(t *testing.T) (Model, string) {
+			m := newTestModel(t)
+			deepTranscript(&m)
+			m.sessionBrowser = browserWithSessions(12)
+			return m, m.frameOverlays().browser
+		}},
+		{"no overlay at all", func(t *testing.T) (Model, string) {
+			m := newTestModel(t)
+			deepTranscript(&m)
+			return m, ""
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, overlay := c.build(t)
+			drawn := m.transcriptRows()
+
+			// The mouse's own boundary: the last transcript row maps, the first row past it does not.
+			if drawn > 0 {
+				if _, _, ok := m.pointTranscriptRow(0, drawn-1); !ok {
+					t.Errorf("row %d is the last transcript row but the mouse maps nothing there", drawn-1)
+				}
+			}
+			if line, _, ok := m.pointTranscriptRow(0, drawn); ok {
+				t.Errorf("row %d is past the transcript but the mouse maps it to content line %d", drawn, line)
+			}
+
+			// View's own boundary: the overlay's first line is painted on exactly that row.
+			frame := strings.Split(m.View().Content, "\n")
+			if overlay != "" {
+				want := strings.Split(overlay, "\n")[0]
+				if drawn >= len(frame) {
+					t.Fatalf("frame has %d rows, too short to hold the boundary row %d", len(frame), drawn)
+				}
+				if frame[drawn] != want {
+					t.Errorf("frame row %d = %q, want the overlay's first line %q",
+						drawn, ansiPattern.ReplaceAllString(frame[drawn], ""), ansiPattern.ReplaceAllString(want, ""))
+				}
+			}
+			if len(frame) > m.height {
+				t.Errorf("composed frame is %d rows on a %d-row terminal", len(frame), m.height)
 			}
 		})
 	}

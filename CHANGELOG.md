@@ -654,6 +654,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Clicking a pop-up pane no longer copies text you cannot see, and a short window no longer
+  pushes the input box off the screen.** The panes that open above the prompt — the approval and
+  ask prompts, `/sessions`, `/model`, `/server` — are painted over the bottom of the chat area, but
+  the mouse was still mapping those rows to the chat lines hidden underneath. On an 80×24 terminal
+  a click on the approval pane's top border quietly started a selection in the transcript, and
+  dragging down the pane put text that was nowhere on screen onto your clipboard with a
+  `copied 19 chars` confirmation — while eating the click you meant for the pane. Those rows now
+  belong to the pane and to nothing else. Separately, the `/sessions` browser and the pickers sized
+  themselves without asking what the window could spare: eight saved sessions on a 20-row terminal
+  composed a 21-row frame, and on a 12-row one a 21-row frame, shoving the input box and the footer
+  clean off the alternate screen — easy to hit in a split tmux pane. Every pane now takes its row
+  budget from the same place the prompts already did, and that budget can shrink to nothing: on a
+  short window the pane gets smaller and the chat area gives way, never the box you type into.
+
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it
   was delivered into — so a queued message that happened to go out in the seconds before you pressed

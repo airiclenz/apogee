@@ -246,7 +246,26 @@ rendezvous fakes already exist in the tui tests).
 
 **Commit:** `fix(tui): Esc never discards a staged interjection`
 
-## 7. One frame-row derivation for View, mouse and overlays
+## 7. One frame-row derivation for View, mouse and overlays — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** five deviations from the item's literal text, each forced by the fix.
+(1) `popup.go`'s documented `maxRows ≤ 0 = show every row` convention became `< 0 = every row,
+0 = none`: with the old reading a budget of zero silently showed the whole list, so routing the
+browser/picker through `popupBudget` would have been inert on exactly the short windows D2 is
+about. No existing caller passed 0 with rows present. (2) `popupBudget` gained a `rowCap`
+parameter — it hard-coded `maxAskChoiceRows`, which is the ask prompt's cap, not the browser's or
+the picker's. (3) `renderScrollbar` now takes the viewport it draws for instead of a height:
+`View` composes from a LOCAL copy so `m.viewport` keeps its laid-out height (that is what stops
+`transcriptRows` compounding its own shrink), and the bar's thumb must size against the drawn
+height. (4) `contentLineAt`'s mapping half was split out as `drawnLineAt` so the selection
+highlight spends the frame-row bound once per frame rather than once per row — measured, the
+per-row form cost 1.62 ms/frame against a 0.63 ms baseline with a live selection over an open
+popup; it is 0.72 ms now. One mapping and one bound throughout, only the bound's site differs.
+(5) The frame-height property is asserted from 12 rows up (the plan's own set): the fixed chrome
+below the transcript is 8 rows and a bordered pane's irreducible chrome is 4, so under 12 no
+arrangement fits — named as `smallestOverlayWindow` in the test. Also updated: `layout.md` gained
+a "What 'height' means" section stating the one-row-budget rule, and the CHANGELOG a Fixed entry.
+No version identifier touched.
 
 **What:** Audit "High — Mouse mapping and overlay rendering derive the frame's rows
 independently" (verified: overlay clicks arm hidden-text selections copied via OSC 52; a

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -2607,5 +2609,48 @@ func TestDisplayModel(t *testing.T) {
 		if got := displayModel(tc.in); got != tc.want {
 			t.Errorf("displayModel(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestPopupBudgetShrinksToNothing pins the D2 floor change (item 7). The budget used to bottom out
+// at six rows — `max(6, viewport.Height()-3)` — so on a window with four rows to give it promised a
+// pane the frame could not hold, and the surplus came off the bottom: the input box and the footer,
+// off the alternate screen. The floor is zero now, so a short window's budget shrinks to nothing
+// and the transcript is what gives way.
+func TestPopupBudgetShrinksToNothing(t *testing.T) {
+	cases := []struct {
+		height   int // the terminal's rows
+		wantRows int // the row window popupBudget grants an eight-row offering
+	}{
+		{8, 0},  // viewport 1 row: nothing to spend at all
+		{12, 0}, // viewport 4: the chrome alone is more than the budget
+		{16, 0}, // viewport 8: still short of the chrome + a row
+		{20, 4}, // viewport 12: four rows fit above the input box
+		{24, 8}, // viewport 16: the overlay's own cap binds first
+		{40, 8}, // roomy: the cap still binds
+	}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("%d rows", c.height), func(t *testing.T) {
+			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 80, Height: c.height})
+			body, rows := m.popupBudget(8, maxSessionRows)
+			if rows != c.wantRows {
+				t.Errorf("popupBudget row window = %d, want %d (viewport %d rows)", rows, c.wantRows, m.viewport.Height())
+			}
+			if body < 1 {
+				t.Errorf("popupBudget body budget = %d, want it to keep at least one row", body)
+			}
+			// A granted window of zero must mean NO rows, not every row: the pane's whole reason for
+			// asking is that the frame has no space for them.
+			pane := renderPopup(m.th, popupSpec{
+				title:   "saved sessions",
+				rows:    singleCellRows([]string{"a", "b", "c", "d", "e", "f", "g", "h"}),
+				hint:    "esc close",
+				maxRows: rows,
+			}, m.width)
+			const chrome = 4 // 2 borders + the title + the hint
+			if got, want := lipgloss.Height(pane), chrome+c.wantRows; got != want {
+				t.Errorf("pane is %d rows tall, want %d (chrome %d + %d granted rows)", got, want, chrome, c.wantRows)
+			}
+		})
 	}
 }

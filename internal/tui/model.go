@@ -2371,86 +2371,131 @@ func (m *Model) refreshViewport() {
 // View
 // ----------------------------------------------------------------------------
 
+// frameOverlays holds the blocks View stacks between the transcript and the input box: the
+// approval or ask prompt, the /sessions browser, the /model | /server picker, the autocomplete
+// dropdown, and the staged-interjection strip. Each field is "" when its overlay is closed.
+//
+// They are gathered as ONE value because two readers need them and must never disagree: View
+// composes them into the frame, and [Model.transcriptRows] measures them to say how many screen
+// rows the transcript still owns — which is what the mouse maps a click through.
+type frameOverlays struct {
+	prompt   string // the approval or the ask popup (they belong to different states, so never both)
+	browser  string // the /sessions history browser
+	picker   string // the /model | /server picker
+	dropdown string // the command / @file / skill autocomplete
+	queued   string // the staged-interjection strip (ADR 0025)
+}
+
+// height is the number of screen rows these overlays take from the transcript. An absent overlay
+// is the empty string, which costs nothing — lipgloss.Height("") is 1, so the emptiness is tested
+// rather than measured.
+func (o frameOverlays) height() int {
+	rows := 0
+	for _, block := range []string{o.prompt, o.browser, o.picker, o.dropdown, o.queued} {
+		if block != "" {
+			rows += lipgloss.Height(block)
+		}
+	}
+	return rows
+}
+
+// transcriptRows reports the rows the transcript keeps once these overlays have taken theirs out of
+// a viewport laid out at vpHeight rows. The floor is ZERO, not one: on a window too short to hold
+// both, the transcript goes away rather than the frame growing past the terminal's last row (D2).
+func (o frameOverlays) transcriptRows(vpHeight int) int {
+	return max(0, vpHeight-o.height())
+}
+
+// frameOverlays renders every overlay block of the frame as the Model stands. It is a pure function
+// of the Model — nothing here mutates and nothing depends on the frame being composed — so View and
+// the mouse mapping may each call it and are guaranteed the same answer.
+func (m Model) frameOverlays() frameOverlays {
+	var o frameOverlays
+	if m.state == stateAwaitingApproval && m.pending != nil {
+		o.prompt = m.approvalPrompt(m.pending.Request)
+	}
+	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
+		o.prompt = m.askPrompt(m.pendingAsk.Request)
+	}
+	o.browser = m.renderSessionBrowser()
+	o.picker = m.renderPicker()
+	o.dropdown = m.renderAutocomplete()
+	o.queued = m.renderPendingInterjections()
+	return o
+}
+
+// transcriptRows is THE derivation of how many screen rows the transcript occupies in the frame:
+// the viewport's laid-out height less the rows this frame's overlays take from it. View composes
+// the body at exactly this height, [Model.contentLineAt] refuses every row past it, and
+// pointTranscriptRow (mouse.go) bounds a click by it — one number, three readers, so a click on an
+// overlay row can no longer name the transcript line the overlay is drawn over.
+//
+// It stays honest only because View never writes the shrink back: the frame is composed from a
+// LOCAL copy of the viewport, so m.viewport.Height() is always the laid-out height and this
+// subtraction can never compound with itself.
+func (m Model) transcriptRows() int {
+	return m.frameOverlays().transcriptRows(m.viewport.Height())
+}
+
+// frameBlocks is the most blocks one frame stacks — the transcript, the five overlays, the blank
+// gap row, the ▔ hairline, the status line, the input box, and the footer — so the frame's slice is
+// allocated once at its worst case.
+const frameBlocks = 11
+
 // View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
 // the bordered input box, and the footer bar, filling the alternate screen (layout.md). Before
 // the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
-// approval or ask prompt, when one is pending, sits between the transcript and the blank line; the
-// viewport is shrunk on this local copy to make room (View has a value receiver, so the
-// stored layout is untouched). It also places the frame's cursor: the real terminal one, at the
-// prompt caret, wherever the box is editable (promptCursor).
+// approval or ask prompt, when one is pending, sits between the transcript and the blank line, as
+// do the /sessions browser and the picker; the autocomplete dropdown and the staged-interjection
+// strip sit just above the input box. Every one of them takes its rows from the transcript
+// (transcriptRows). It also places the frame's cursor: the real terminal one, at the prompt caret,
+// wherever the box is editable (promptCursor).
 func (m Model) View() tea.View {
 	if !m.ready {
 		return tea.NewView("apogee — starting…")
 	}
 
-	var prompt string
-	if m.state == stateAwaitingApproval && m.pending != nil {
-		prompt = m.approvalPrompt(m.pending.Request)
-	}
-	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
-		prompt = m.askPrompt(m.pendingAsk.Request)
-	}
-	// The autocomplete overlay (idle, and the "@file" region while running) and the staged
-	// interjection rows sit just above the input box. They, and the approval/ask prompt, each steal
-	// rows from the transcript viewport, so shrink it by their combined height before rendering.
-	dropdown := m.renderAutocomplete()
-	queued := m.renderPendingInterjections()
-	browser := m.renderSessionBrowser()
-	pick := m.renderPicker()
-	shrink := 0
-	if prompt != "" {
-		shrink += lipgloss.Height(prompt)
-	}
-	if browser != "" {
-		shrink += lipgloss.Height(browser)
-	}
-	if pick != "" {
-		shrink += lipgloss.Height(pick)
-	}
-	if dropdown != "" {
-		shrink += lipgloss.Height(dropdown)
-	}
-	if queued != "" {
-		shrink += lipgloss.Height(queued)
-	}
-	if shrink > 0 {
-		h := m.viewport.Height() - shrink
-		if h < 1 {
-			h = 1
-		}
-		m.viewport.SetHeight(h)
-	}
+	// Rendered once, then measured by the same derivation the mouse maps through, so what is drawn
+	// over the transcript and what a click may address are the same rows by construction.
+	ov := m.frameOverlays()
 
-	// Draw the transcript with its sticky header, then hang the scroll-bar gutter off its right
-	// edge. The bar's height matches the viewport's current height (already shrunk above when an
-	// overlay is shown), so the two columns line up row-for-row.
-	body := m.applyStickyHeader(m.viewport.View())
-	body = m.highlightTranscript(body) // overlay any transcript drag-selection on the composed rows
-	body = m.joinScrollbar(body, m.renderScrollbar(m.viewport.Height()))
-	rows := []string{body}
-	if prompt != "" {
-		rows = append(rows, prompt)
+	rows := make([]string, 0, frameBlocks)
+	// Draw the transcript at the height the overlays leave it, with its sticky header, then hang the
+	// scroll-bar gutter off its right edge — the bar is sized from the same local viewport, so the
+	// two columns line up row-for-row. The height goes on that LOCAL copy and is never written back:
+	// m.viewport keeps its laid-out height, which is what lets contentLineAt (via transcriptRows)
+	// measure this very shrink instead of compounding it. At zero rows the overlays have taken the
+	// whole viewport and the transcript is off the frame entirely.
+	if h := ov.transcriptRows(m.viewport.Height()); h > 0 {
+		vp := m.viewport
+		vp.SetHeight(h)
+		body := m.applyStickyHeader(vp.View())
+		body = m.highlightTranscript(body) // overlay any transcript drag-selection on the composed rows
+		rows = append(rows, m.joinScrollbar(body, m.renderScrollbar(vp)))
+	}
+	if ov.prompt != "" {
+		rows = append(rows, ov.prompt)
 	}
 	// The /sessions browser and the /model | /server picker share the approval/ask prompt's slot
 	// (none of them co-occur — both overlays are idle-only and modal, the prompts belong to busy
 	// states).
-	if browser != "" {
-		rows = append(rows, browser)
+	if ov.browser != "" {
+		rows = append(rows, ov.browser)
 	}
-	if pick != "" {
-		rows = append(rows, pick)
+	if ov.picker != "" {
+		rows = append(rows, ov.picker)
 	}
 	// The single blank line between chat content and the bottom chrome (layout.md), then the
 	// ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay (when
 	// open), the input box, and the footer.
 	rows = append(rows, "", m.topRule(), m.statusLine())
-	if dropdown != "" {
-		rows = append(rows, dropdown)
+	if ov.dropdown != "" {
+		rows = append(rows, ov.dropdown)
 	}
 	// The staged interjection rows sit closest to the box: they are what ⏎ just put there, and
 	// what Backspace on an empty box takes back (ADR 0025).
-	if queued != "" {
-		rows = append(rows, queued)
+	if ov.queued != "" {
+		rows = append(rows, ov.queued)
 	}
 	rows = append(rows, m.inputView(), m.footerView())
 
@@ -2524,14 +2569,32 @@ func (m Model) stickyHeaderSpan() (start, count int) {
 	return b.start + push, b.count - push // the still-visible (bottom) header rows
 }
 
-// contentLineAt maps a viewport row to the index into m.lines of the content ACTUALLY DRAWN there.
-// Off the header zone that is just the scroll offset plus the row; within it, it is the overlaid
-// header line — the sticky header covers the content the offset would otherwise put there, so
-// addressing that content by row would name text the human cannot see. Selection (the mouse maps a
-// click through here) and the selection highlight both go through this one mapping, which is what
-// keeps copy equal to sight on the header rows (mouse.go).
+// contentLineAt maps a viewport row to the index into m.lines of the content ACTUALLY DRAWN there,
+// or −1 when the row draws no transcript content at all. Off the header zone the mapping is just
+// the scroll offset plus the row; within it, it is the overlaid header line — the sticky header
+// covers the content the offset would otherwise put there, so addressing that content by row would
+// name text the human cannot see. Selection (the mouse maps a click through here) and the selection
+// highlight both go through this one mapping, which is what keeps copy equal to sight on the header
+// rows (mouse.go).
+//
+// The refusal is the OVERLAY half of the same rule: an approval popup, the /sessions browser or the
+// picker takes its rows off the bottom of the transcript (transcriptRows), and those rows draw the
+// overlay, not the reply lines the un-shrunk viewport would put there. Returning a line index for
+// them is what let a click on a popup border arm a selection over hidden text and copy it.
 func (m Model) contentLineAt(row int) int {
-	if start, count := m.stickyHeaderSpan(); row >= 0 && row < count {
+	if row < 0 || row >= m.transcriptRows() {
+		return -1
+	}
+	return m.drawnLineAt(row)
+}
+
+// drawnLineAt is contentLineAt's mapping half, for a row already established to be the
+// transcript's own. It exists so a caller drawing INSIDE the transcript block — the selection
+// highlight, walking rows it composed at exactly [Model.transcriptRows] — can bound itself once
+// instead of re-deriving the frame's row budget on every row of every frame. There is still one
+// mapping and one bound; only where the bound is spent differs.
+func (m Model) drawnLineAt(row int) int {
+	if start, count := m.stickyHeaderSpan(); row < count {
 		return start + row
 	}
 	return m.viewport.YOffset() + row
@@ -2559,13 +2622,19 @@ func (m Model) applyStickyHeader(view string) string {
 // renderScrollbar draws the one-column gutter reserved at the transcript's right edge (layout).
 // When the content overflows the viewport it shows a thumb sized to the visible fraction and
 // positioned by the scroll percent; when everything fits it is blank, so the bar appears only
-// while there is something to scroll. The returned block is exactly h rows tall so it lines up
-// with the viewport view it is joined to.
-func (m Model) renderScrollbar(h int) string {
+// while there is something to scroll. The returned block is exactly vp.Height() rows tall so it
+// lines up with the viewport view it is joined to.
+//
+// It takes the viewport it is drawing FOR rather than reading the Model's, because the frame is
+// composed at the height the overlays leave (transcriptRows) on a local copy: sizing the thumb
+// against the stored, un-shrunk height would draw a bar for a taller transcript than the one on
+// screen.
+func (m Model) renderScrollbar(vp viewport.Model) string {
+	h := vp.Height()
 	if h < 1 {
 		return ""
 	}
-	total := m.viewport.TotalLineCount()
+	total := vp.TotalLineCount()
 	rows := make([]string, h)
 	if total <= h { // nothing to scroll — keep the gutter blank
 		for i := range rows {
@@ -2574,7 +2643,7 @@ func (m Model) renderScrollbar(h int) string {
 		return strings.Join(rows, "\n")
 	}
 	thumb := max(1, h*h/total)
-	pos := int(m.viewport.ScrollPercent() * float64(h-thumb)) // 0 (top) … h-thumb (bottom)
+	pos := int(vp.ScrollPercent() * float64(h-thumb)) // 0 (top) … h-thumb (bottom)
 	for i := range rows {
 		if i >= pos && i < pos+thumb {
 			rows[i] = m.th.scrollThumb.Render("█")
@@ -3074,18 +3143,28 @@ func nonEmpty(parts ...string) []string {
 	return out
 }
 
-// popupBudget derives the screen-budget caps a pending prompt hands renderPopup so the bordered
-// pane never pushes the input box off-screen (D2). rows is the number of selectable choices on
-// offer (0 for the choiceless approval prompt); maxRows caps the scrolled row window (≥ 0) and
-// maxBody caps the wrapped body block (≥ 1). m.viewport.Height() here is the full, pre-shrink
-// layout height — View shrinks a local copy AFTER the prompt renders (verified View slot) — so it
-// is the true screen budget: keep ≥ 3 transcript rows visible, spend the chrome (the 2 borders +
-// the title + the hint), give the rows priority (they are what the human acts on), and let the
-// body keep ≥ 1 row and overflow into the explicit "… (+N more lines)" marker.
-func (m Model) popupBudget(rows int) (maxBody, maxRows int) {
-	avail := max(6, m.viewport.Height()-3)
+// popupBudget derives the screen-budget caps an overlay hands renderPopup so the bordered pane
+// never pushes the input box off-screen (D2). rows is how many selectable rows are on offer and
+// rowCap the overlay's own cap on how many of them it shows at once (both 0 for the choiceless
+// approval prompt); maxRows caps the scrolled row window (≥ 0) and maxBody caps the wrapped body
+// block (≥ 1). Every boxed overlay that steals transcript rows goes through it — the ask and
+// approval prompts, the /sessions browser and the /model | /server picker — so none of them can
+// promise the frame rows it does not have.
+//
+// m.viewport.Height() here is the laid-out height and always will be: View composes the frame from
+// a LOCAL copy of the viewport and never writes the shrink back ([Model.transcriptRows]). So it is
+// the true screen budget: keep 3 transcript rows where the window can spare them, spend the chrome
+// (the 2 borders + the title + the hint), give the rows priority (they are what the human acts on),
+// and let the body keep ≥ 1 row and overflow into the explicit "… (+N more lines)" marker.
+//
+// The floor is ZERO rather than a comfortable minimum, and that is the point of it: a floor of 6
+// on a window with 4 rows to give promised a pane the frame could not hold, and the surplus came
+// off the bottom — the input box and the footer, off the alt screen. A budget that shrinks to
+// nothing lets the TRANSCRIPT shrink to nothing instead, which is the outcome D2 asks for.
+func (m Model) popupBudget(rows, rowCap int) (maxBody, maxRows int) {
+	avail := max(0, m.viewport.Height()-3)
 	const chrome = 4 // the 2 borders + the title row + the hint row
-	maxRows = min(rows, maxAskChoiceRows, max(0, avail-chrome-1))
+	maxRows = min(rows, rowCap, max(0, avail-chrome-1))
 	maxBody = max(1, avail-chrome-maxRows)
 	return maxBody, maxRows
 }
@@ -3108,7 +3187,7 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		parts = append(parts, stripEscapes(args))
 	}
 
-	maxBodyRows, _ := m.popupBudget(0)
+	maxBodyRows, _ := m.popupBudget(0, 0) // no rows on the approval prompt, so no row budget either
 	spec := popupSpec{
 		title:       "approve " + stripEscapes(req.Tool) + "?",
 		body:        strings.Join(parts, "\n\n"), // reason and args separated by one blank line; no stray blanks when one is absent
@@ -3145,7 +3224,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 
 	// Budget against the live layout so a long question or choice set never pushes the input box
 	// off-screen (D2); the rows get priority and the body keeps ≥ 1 row (see popupBudget).
-	maxBodyRows, rowsShown := m.popupBudget(len(req.Choices))
+	maxBodyRows, rowsShown := m.popupBudget(len(req.Choices), maxAskChoiceRows)
 
 	spec := popupSpec{
 		title:       "the assistant is asking:",

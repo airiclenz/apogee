@@ -71,7 +71,8 @@ type popupRow []string
 // body is plain, escape-stripped prose the module word-wraps to the inner budget and caps at
 // maxBodyRows (an empty body adds no rows); rows are the escape-stripped cell rows the module
 // aligns into columns; selected indexes rows (−1 = no highlight); maxRows caps the scroll window
-// around the selection (≤ 0 shows every row).
+// around the selection — negative shows every row, and ZERO shows none, which is a window with no
+// rows left to spare saying so (popupBudget) rather than the pane quietly showing all of them.
 type popupSpec struct {
 	title       string
 	body        string
@@ -121,8 +122,8 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	rows := layoutPopupRows(spec.rows)
 
 	capRows := spec.maxRows
-	if capRows <= 0 {
-		capRows = len(rows) // ≤ 0 shows every row (popupRowWindow returns [0, total) when total ≤ cap)
+	if capRows < 0 {
+		capRows = len(rows) // negative shows every row (popupRowWindow returns [0, total) when total ≤ cap)
 	}
 	start, end := popupRowWindow(spec.selected, len(rows), capRows)
 	for i := start; i < end; i++ {

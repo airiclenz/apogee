@@ -664,3 +664,87 @@ func TestSessionRowsRenameIsOneCell(t *testing.T) {
 		t.Errorf("renaming row = %v, want %v", rows, want)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The overlay's screen budget: D2 on a short window (item 7)
+// ----------------------------------------------------------------------------
+
+// browserWithSessions builds an open /sessions overlay listing n sessions, all workspaces, so the
+// pane has more rows on offer than any short window can seat.
+func browserWithSessions(n int) sessionBrowser {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	metas := make([]session.Meta, 0, n)
+	for i := range n {
+		metas = append(metas, session.Meta{
+			ID:        fmt.Sprintf("sess-%02d", i),
+			Title:     fmt.Sprintf("session number %02d", i),
+			Workspace: "/ws/a",
+			UpdatedAt: now.Add(-time.Duration(i) * time.Minute),
+			UserMsgs:  i + 1,
+		})
+	}
+	return sessionBrowser{open: true, allWorkspaces: true, metas: metas}
+}
+
+// smallestOverlayWindow is the shortest terminal on which a boxed overlay and the frame's fixed
+// chrome can both fit: the gap row, the ▔ hairline, the status line, the input box (a border row
+// and one text row) and the three footer rows come to 8, and the pane's own irreducible chrome —
+// two borders, the title, the hint — to 4. Below that no arrangement fits, so the frame-height
+// property is asserted from here up; the transcript is what has already given way at this size.
+const smallestOverlayWindow = 12
+
+// TestFrameNeverExceedsTheTerminalHeight is the D2 property the audit measured broken: with eight
+// stored sessions the browser composed a 21-row frame on a 20-row terminal, and +5 / +9 rows on 16-
+// and 12-row ones — pushing the input box and the footer clean off the alternate screen, which is
+// plausible in a half-height tmux pane. The pane's row budget now comes from popupBudget, whose
+// floor shrinks to nothing rather than promising rows the frame has no space for, so the composed
+// frame fits every window a boxed overlay can be drawn in at all.
+func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
+	for _, height := range []int{smallestOverlayWindow, 13, 16, 20, 24, 30} {
+		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			m := newModel(context.Background(), &fakeEngine{}, Options{Workspace: "/ws/a"}, nil)
+			m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+			for i := range 40 {
+				m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+			}
+			m.refreshViewport()
+			m.sessionBrowser = browserWithSessions(8)
+
+			frame := strings.Split(m.View().Content, "\n")
+			if len(frame) > height {
+				t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
+					len(frame), height, len(frame)-height, ansiPattern.ReplaceAllString(m.View().Content, ""))
+			}
+			// The footer is the last thing View stacks, so its presence is the proof nothing was
+			// pushed past the last row.
+			if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
+				t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s",
+					ansiPattern.ReplaceAllString(m.View().Content, ""))
+			}
+		})
+	}
+}
+
+// The same property for the /model | /server picker, which shares the browser's slot and now
+// shares its budget.
+func TestFrameWithPickerNeverExceedsTheTerminalHeight(t *testing.T) {
+	for _, height := range []int{smallestOverlayWindow, 16, 20, 24} {
+		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			servers := make([]ServerChoice, 0, 12)
+			for i := range 12 {
+				servers = append(servers, ServerChoice{
+					Name:     fmt.Sprintf("host-%02d", i),
+					Endpoint: fmt.Sprintf("http://192.168.64.%d:1111", i+1),
+				})
+			}
+			m := newModel(context.Background(), &fakeEngine{}, Options{Workspace: "/ws/a", Servers: servers}, nil)
+			m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+			m.picker = picker{open: true, kind: pickerServer}
+
+			if frame := strings.Split(m.View().Content, "\n"); len(frame) > height {
+				t.Errorf("composed frame is %d rows on a %d-row terminal (+%d)",
+					len(frame), height, len(frame)-height)
+			}
+		})
+	}
+}
