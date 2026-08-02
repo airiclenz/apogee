@@ -300,8 +300,9 @@ func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
 	if m.ctxUsed != 1200 {
 		t.Errorf("ctxUsed = %d, want 1200 (the reported total)", m.ctxUsed)
 	}
-	if g := m.contextGauge(); !strings.Contains(g, "1k") {
-		t.Errorf("context gauge not lit by usage: %q", g)
+	// The gauge names the window it measures against: "<used>/<limit> <pct>%".
+	if g := ansi.Strip(m.contextGauge()); !strings.Contains(g, "1k/32k") {
+		t.Errorf("context gauge = %q, want the used/limit prefix %q", g, "1k/32k")
 	}
 	if m.tokPerSec <= 0 {
 		t.Errorf("tokPerSec = %v, want > 0 (completion timed against the token clock)", m.tokPerSec)
@@ -340,8 +341,8 @@ func TestContextGaugeBarRendering(t *testing.T) {
 
 	// 50% of a 10-cell bar lands on a whole-cell boundary: 5 full blocks, no partial.
 	half := contextUsage{Used: 16384, Limit: 32768}.view(th)
-	if !strings.Contains(half, "50%") {
-		t.Errorf("gauge missing percentage: %q", ansi.Strip(half))
+	if !strings.Contains(ansi.Strip(half), "16k/32k 50% ") {
+		t.Errorf("gauge = %q, want the used/limit prefix %q", ansi.Strip(half), "16k/32k 50% ")
 	}
 	if got := strings.Count(ansi.Strip(half), "█"); got != 5 {
 		t.Errorf("full blocks = %d, want 5 for 50%% of a %d-cell bar: %q", got, gaugeWidth, ansi.Strip(half))

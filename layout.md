@@ -47,7 +47,7 @@
   chat content and the bottom prompt/information section like displayed here.
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-  ⠉⠹ reading · main.go · 3s                                        16k 50% █████░░░░░
+  ⠉⠹ reading · main.go · 3s                                    16k/32k 50% █████░░░░░
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Send a message… [Shift] + [Enter] creates a line break                              │
 │ This text box can be multiline. The text edit area auto increases height to         │
@@ -475,10 +475,12 @@ turning it off is for.
 ## The status line's right slot
 
 **Where it ends.** The right end of the status line is one slot that its occupants take in turn —
-the context-usage gauge (`16k 50% █████░░░░░` in the sketch above, where `░` draws the empty half
-of the ten-cell track: on screen those cells are a painted dark-gray field carrying no glyph of
-their own), the key hint that stands in for it (`esc stop` while a turn runs, `enter dismiss`
-after an error, the primed-`ctrl+c` line), and the mouse-copy flash. Whichever one is showing, it
+the context-usage gauge (`16k/32k 50% █████░░░░░` in the sketch above — the tokens used out of the
+window they are measured against, because a fill only means something beside the limit it fills,
+and where `░` draws the empty half of the ten-cell track: on screen those cells are a painted
+dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc stop`
+while a turn runs, `enter dismiss` after an error, the primed-`ctrl+c` line), and the mouse-copy
+flash. Whichever one is showing, it
 ends **two columns short of the window edge** (`bodyIndent`) — the mirror of the two columns the
 left slot leads with, and the same column the footer's mode marker below it ends in, so the
 gauge's last track cell in the sketch sits directly above the last character of `ask-before`. The

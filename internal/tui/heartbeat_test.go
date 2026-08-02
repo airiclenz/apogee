@@ -548,8 +548,10 @@ func TestGaugePercentClamped(t *testing.T) {
 	if strings.Contains(got, "137%") {
 		t.Errorf("gauge = %q, want no over-100%% reading beside an already-clamped bar", got)
 	}
-	if !strings.Contains(got, formatTokens(45000)) {
-		t.Errorf("gauge = %q, want the unclamped token count still shown", got)
+	// The unclamped Used stands beside the window it overfills, so the overrun reads as the plain
+	// contradiction it is — "45k/32k 100%" — rather than as an impossible percentage.
+	if want := formatTokens(45000) + "/" + formatTokens(32768) + " 100%"; !strings.Contains(got, want) {
+		t.Errorf("gauge = %q, want the unclamped count beside its window: %q", got, want)
 	}
 }
 

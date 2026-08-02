@@ -3382,21 +3382,24 @@ const gaugeWidth = 10
 // granularity that makes the fill edge advance smoothly (llama-launcher's bar look).
 var gaugeEighths = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 
-// view renders the gauge as "<used> <pct>% <bar>", or "" when usage is unknown. The numeric
-// prefix is faint-on-black status text; the bar is a solid two-tone strip (renderGaugeBar)
-// carrying its own per-cell backgrounds, so the whole string is pre-styled and must be
-// concatenated raw by the caller (never re-wrapped in a background style).
+// view renders the gauge as "<used>/<limit> <pct>% <bar>", or "" when usage is unknown. The
+// gauge names the window it is measured against — the fill only means something beside the
+// limit it fills — so the window is a fact this row states rather than one read off elsewhere.
+// The numeric prefix is faint-on-black status text; the bar is a solid two-tone strip
+// (renderGaugeBar) carrying its own per-cell backgrounds, so the whole string is pre-styled and
+// must be concatenated raw by the caller (never re-wrapped in a background style).
 //
 // The percentage is clamped to 100 because the bar already is (renderGaugeBar): a conversation
 // carried across a switch to a smaller window overfills its new limit, and a full bar labelled
 // "137%" is a rendering bug, not a reading. The unclamped Used still shows beside it, so an
-// over-window fill is visible as the token count rather than as an impossible percentage.
+// over-window fill is visible as the token count rather than as an impossible percentage — and
+// with the limit spelled out it reads as the plain contradiction it is: "137k/98k 100%".
 func (c contextUsage) view(th theme) string {
 	if c.Used <= 0 || c.Limit <= 0 {
 		return ""
 	}
 	pct := min(c.Used*100/c.Limit, 100)
-	prefix := th.statusBar.Render(fmt.Sprintf("%s %d%% ", formatTokens(c.Used), pct))
+	prefix := th.statusBar.Render(fmt.Sprintf("%s/%s %d%% ", formatTokens(c.Used), formatTokens(c.Limit), pct))
 	return prefix + renderGaugeBar(th, c.Used, c.Limit)
 }
 

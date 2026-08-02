@@ -519,6 +519,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The context gauge names the window it measures against — `8k/98k 8%`.** The status line's
+  gauge used to state the tokens used and leave you to find the window they were used out of
+  somewhere else; it now spells both, because a fill only means something beside the limit it
+  fills. Nothing else about it moved: it stays dark until the first turn reports usage, the
+  percentage is still clamped to 100 beside an unclamped count — so a conversation carried into a
+  smaller window reads as the plain contradiction `137k/98k 100%` rather than an impossible
+  percentage — and the counts keep their honest lowercase SI `k`.
+
 - **A tool block now spells the paths it names relative to the workspace.** The target leading a
   branch line and the one-line summary beside it read `docs/plan.md`, not
   `/home/me/proj/docs/plan.md`, so a project's own files stop spending the row's width repeating a

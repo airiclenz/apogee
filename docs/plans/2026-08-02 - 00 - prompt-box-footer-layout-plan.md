@@ -50,7 +50,11 @@ chrome); any version bump.
 owner's own wording of the two issues this plan implements. Carrying that edit until item 4
 retires the bullets is expected; tell the Phase 0 dirty-tree stop to proceed.
 
-## 1. The context gauge names its window — `8k/98k 8% ▉…`
+## 1. The context gauge names its window — `8k/98k 8% ▉…` — ✅ DONE (2026-08-02)
+
+NOTES (2026-08-02): `docs/design/prompt-box-layout.md` was no longer untracked at execution time —
+commit `731246a` (the plan's own commit) already carries it — so this item's "commit the mockup
+with this item" clause was already satisfied and no change to that file was needed.
 
 **What:**
 
