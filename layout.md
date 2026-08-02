@@ -240,22 +240,31 @@ whatever produced it: a command whose whole output is one line rides the branch 
 (`┕ git rev-parse --short HEAD  9f2c1ab`), and only output that needs the `… +N more lines`
 remainder becomes a body.
 
-**Paths print relative to the workspace.** Every path a block paints is spelled relative to the
+**Paths print relative to the workspace.** The paths a block **names** are spelled relative to the
 workspace root: the target leading a branch (`┕ docs/plan.md 1 - 154`, never
-`┕ /home/me/proj/docs/plan.md 1 - 154`), the summary beside it, and every line of the body beneath.
-There is no leading `./` and no leading separator, and the workspace root itself reads `.` — the
-ordinary spelling of "here", which is what `pwd` therefore shows. Two things keep their absolute
-form on purpose. A path **outside** the workspace stays absolute, because it genuinely is
-elsewhere and a relative spelling would say it was not — which matters most on exactly the line it
-is most dangerous to misread, the write outside the project a human is deciding about. And a path
-that arrived relative is already in this form, so it is passed through untouched. The shortening is
-**presentation only**: the arguments the model sent and the output the tool returned are never
-rewritten, so the agent's view of a path and the transcript's differ in spelling and in nothing
-else. It is applied to the workspace root's own spelling wherever a line mentions it, so a line
-that merely contains a slash — a URL, a fraction, a regex — is not a path and is left alone, and a
-sibling directory whose name only opens with the root's spelling (`/home/me/proj-old`) stays
-whole. The status line's live phrase reads the same shortened path the block beneath it will, for
-the same reason it reads the same verb: both are worded from one view.
+`┕ /home/me/proj/docs/plan.md 1 - 154`) and the summary beside it. There is no leading `./` and no
+leading separator, and the workspace root itself reads `.` — the ordinary spelling of "here", which
+is what `pwd` therefore shows. Two things keep their absolute form on purpose. A path **outside**
+the workspace stays absolute, because it genuinely is elsewhere and a relative spelling would say
+it was not — which matters most on exactly the line it is most dangerous to misread, the write
+outside the project a human is deciding about. And a path that arrived relative is already in this
+form, so it is passed through untouched. The shortening is **presentation only**: the arguments the
+model sent and the output the tool returned are never rewritten, so the agent's view of a path and
+the transcript's differ in spelling and in nothing else. It is applied to the workspace root's own
+spelling wherever such a line mentions it, so a line that merely contains a slash — a URL, a
+fraction, a regex — is not a path and is left alone, and a sibling directory whose name only opens
+with the root's spelling (`/home/me/proj-old`) stays whole. The status line's live phrase reads the
+same shortened path the block beneath it will, for the same reason it reads the same verb: both are
+worded from one view.
+
+**A body is quoted, never respelled.** The rule above reaches the paths a block names and stops
+there: the **body** beneath the branch is text the block *quotes* — a diff's hunk lines, an edit's
+replacement string, a command's output, an unregistered tool's verbatim arguments — and it prints
+exactly as the tool wrote it, absolute paths included. An in-workspace path sitting inside file
+content is content, not a mention: shortened, it would show the human approving a write a spelling
+the file will not actually contain. Nothing decides this by looking at a line, because a content
+line can look exactly like a path; a body line is respelled only if the presenter that built it
+says it is a path.
 
 **What stays standalone.** A call is groupable when it has a target, an empty body, and a plain
 (non-diff) summary — which includes an `error: …` line, and an in-flight call whose result has not

@@ -119,15 +119,6 @@ func (b *toolBody) stripEscapes() {
 	}
 }
 
-// shortenPaths spells every path the body's lines name inside the workspace relative to it (the
-// finishDisplay seam's work on the body — workspaceRoot.shorten). Like stripEscapes it rewrites
-// only Text, so the kind newToolBody settled still describes what the body holds.
-func (b *toolBody) shortenPaths(w workspaceRoot) {
-	for i := range b.lines {
-		b.lines[i].Text = w.shorten(b.lines[i].Text)
-	}
-}
-
 // toolView is the presentation model of a tool call (later enriched by its result): a
 // friendly Label, the active Verb for the status line, the Target it acts on (a path, a
 // directory, a pattern), and the outcome split in two — the one-line Summary that rides the
@@ -348,8 +339,8 @@ var toolRegistry = map[string]toolPresenter{
 // truthful sentence fragment for a dynamic MCP tool nobody has a verb for.
 // Everything the header states traces back to the model's own JSON arguments — the target on every
 // registered tool, and the raw name behind an unknown tool's label, verb and pretty-printed body —
-// so both exits leave through finishDisplay, which escape-strips the view and spells the paths in
-// it relative to the workspace root ws names.
+// so both exits leave through finishDisplay, which escape-strips the view and spells the paths it
+// NAMES relative to the workspace root ws names.
 func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	p, ok := toolRegistry[call.Tool]
 	if !ok {
@@ -372,8 +363,9 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 
 // finishDisplay is the seam every freshly built or freshly enriched view leaves through, and it is
 // two acts in one order: escape-strip every display field (sanitize), then shorten the workspace
-// root out of the paths those fields name (shortenPaths). The order is load-bearing — an ESC byte
-// buried inside a path splits the root's spelling in two, so a shortener running first would not
+// root out of the paths the view NAMES (shortenPaths — the target and the summary; a body is text
+// the block quotes and keeps its own spelling). The order is load-bearing — an ESC byte buried
+// inside a path splits the root's spelling in two, so a shortener running first would not
 // recognise the mention and would leave the absolute path on screen, which is a repo that controls
 // a filename opting itself out of the rule.
 //
@@ -385,13 +377,22 @@ func (tv *toolView) finishDisplay(ws workspaceRoot) {
 	tv.shortenPaths(ws)
 }
 
-// shortenPaths spells every path the view's display fields name inside the workspace relative to it
-// — the target that leads the branch line, the one-line summary beside it, and every line of the
-// body beneath (workspaceRoot.shorten). It is presentation and nothing else: the model's arguments
-// and the tool's own result are untouched, so the agent's view of a path never changes with the
-// transcript's spelling of it.
+// shortenPaths spells the paths the view NAMES relative to the workspace — the target that leads
+// the branch line, and the one-line summary of the outcome beside it (workspaceRoot.shorten). It is
+// presentation and nothing else: the model's arguments and the tool's own result are untouched, so
+// the agent's view of a path never changes with the transcript's spelling of it.
 //
-// Label and Verb are deliberately left out. They name the TOOL — a friendly label, or an
+// The BODY is deliberately not shortened, and that boundary is the rule's whole point. A body is
+// text the block QUOTES rather than a path it names — a diff's hunk lines, an edit's replacement
+// string, an unregistered tool's verbatim arguments — so an absolute in-workspace path occurring
+// inside it is file CONTENT, and shortening it would show the human approving a write a spelling
+// the file will not contain. Nothing here reads the text to tell the two apart: a content line can
+// look exactly like a path, so the distinction is structural — it is the SLOT a string sits in.
+// Should a presenter ever build a body line that genuinely is a path (a listed file, a search hit's
+// file name), it must say so where it builds the line — a mark on detailLine, set by the producer,
+// which is the only place that knows — and this seam must read that mark rather than guess.
+//
+// Label and Verb are left out for their own reason. They name the TOOL — a friendly label, or an
 // unregistered tool's raw id behind "running <name>" — and a tool id is not a path, so shortening
 // them could only ever mangle a name that happened to read like one.
 func (tv *toolView) shortenPaths(ws workspaceRoot) {
@@ -400,7 +401,6 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 	}
 	tv.Target = ws.shorten(tv.Target)
 	tv.Summary.Text = ws.shorten(tv.Summary.Text)
-	tv.Details.shortenPaths(ws)
 }
 
 // sanitize escape-strips every DISPLAY field of the view — label, verb, target, the one-line

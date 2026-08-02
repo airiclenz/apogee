@@ -91,10 +91,9 @@ func TestWorkspaceRootIsCleanedOnce(t *testing.T) {
 	}
 }
 
-// The shortening reaches every half of a tool card, because a path is painted in all of them: the
-// target that leads the branch line, the one-line summary beside it, and every line of the body
-// beneath. The call's own arguments are the oracle for the first — what the model asked for is
-// untouched, only its spelling on screen changes.
+// The shortening reaches the two halves of a tool card that NAME a path: the target that leads the
+// branch line, and the one-line summary of the outcome beside it. The call's own arguments are the
+// oracle — what the model asked for is untouched, only its spelling on screen changes.
 func TestToolCardPaintsWorkspaceRelativePaths(t *testing.T) {
 	t.Parallel()
 
@@ -108,20 +107,6 @@ func TestToolCardPaintsWorkspaceRelativePaths(t *testing.T) {
 		t.Errorf("the call's own arguments were rewritten: %s", call.Arguments)
 	}
 
-	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: strings.Join([]string{
-		"/home/me/proj/docs/plan.md",
-		"/home/me/proj/docs/notes.md",
-		"/etc/hosts",
-	}, "\n")}, ws)
-	body := make([]string, 0, tv.Details.len())
-	for _, d := range tv.Details.all() {
-		body = append(body, d.Text)
-	}
-	want := []string{"docs/plan.md", "docs/notes.md", "/etc/hosts"}
-	if strings.Join(body, "\n") != strings.Join(want, "\n") {
-		t.Errorf("body = %q, want %q", body, want)
-	}
-
 	summarised := presentToolCall(domain.ToolCall{ID: "2", Tool: "single_find_and_replace",
 		Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)}, ws)
 	summarised.enrichWithResult(domain.ToolResult{CallID: "2", Content: "replaced text in /home/me/proj/main.go"}, ws)
@@ -133,10 +118,75 @@ func TestToolCardPaintsWorkspaceRelativePaths(t *testing.T) {
 	}
 }
 
-// An unregistered tool's verbatim arguments are a body like any other, so the paths in them are
-// shortened too — the human reads the same spelling there as on a registered call's branch. What
-// stays untouched is the tool's own id: it is a name, not a path.
-func TestUnregisteredToolCardShortensPathsInItsArguments(t *testing.T) {
+// A block's BODY is text it QUOTES, not a path it names, so the shortening stops at it. The case
+// that makes this a rule rather than a preference is the write a human is approving: a diff hunk
+// and an edit's replacement string are verbatim file content, and an in-workspace absolute path
+// inside that content is content too — displayed shortened, the block would show a spelling the
+// file will not actually contain. The same block's target still shortens, because that IS a path
+// the block names.
+func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
+	t.Parallel()
+
+	ws := newWorkspaceRoot("/home/me/proj")
+	cases := []struct {
+		name string
+		call domain.ToolCall
+		res  domain.ToolResult
+		want []string // the body, line for line, exactly as the tool wrote it
+	}{
+		{
+			name: "a diff hunk quoting a workspace path",
+			call: domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)},
+			res: domain.ToolResult{CallID: "1", Content: strings.Join([]string{
+				`  cfg, err := load(`,
+				`- 	"/home/me/proj/config/dev.yaml")`,
+				`+ 	"/home/me/proj/config/prod.yaml")`,
+			}, "\n"), Summary: domain.DiffStat{Added: 1, Removed: 1}},
+			want: []string{
+				`  cfg, err := load(`,
+				`- 	"/home/me/proj/config/dev.yaml")`,
+				`+ 	"/home/me/proj/config/prod.yaml")`,
+			},
+		},
+		{
+			name: "a command's output, which may itself be file content",
+			call: domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)},
+			res: domain.ToolResult{CallID: "2", Content: strings.Join([]string{
+				"/home/me/proj/docs/plan.md",
+				"/home/me/proj/docs/notes.md",
+				"/etc/hosts",
+			}, "\n")},
+			want: []string{"/home/me/proj/docs/plan.md", "/home/me/proj/docs/notes.md", "/etc/hosts"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := presentToolCall(tc.call, ws)
+			tv.enrichWithResult(tc.res, ws)
+
+			body := make([]string, 0, tv.Details.len())
+			for _, d := range tv.Details.all() {
+				body = append(body, d.Text)
+			}
+			if strings.Join(body, "\n") != strings.Join(tc.want, "\n") {
+				t.Errorf("body = %q, want it verbatim: %q", body, tc.want)
+			}
+		})
+	}
+
+	// The target of the diff above is the one path that block names, and it shortens.
+	diff := presentToolCall(cases[0].call, ws)
+	if diff.Target != "main.go" {
+		t.Errorf("target = %q, want %q — a named path still shortens beside a verbatim body", diff.Target, "main.go")
+	}
+}
+
+// An unregistered tool's arguments are the model's request quoted verbatim — the approval surface's
+// whole point — so they are shown exactly as they were sent, workspace paths included. What is
+// equally untouched is the tool's own id: it is a name, not a path.
+func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 	t.Parallel()
 
 	ws := newWorkspaceRoot("/home/me/proj")
@@ -146,8 +196,8 @@ func TestUnregisteredToolCardShortensPathsInItsArguments(t *testing.T) {
 		t.Errorf("view = %+v; want the raw-name fallback", tv)
 	}
 	got := detailsText(tv)
-	if !strings.Contains(got, `"docs/plan.md"`) {
-		t.Errorf("arguments body = %q; want the workspace path shortened", got)
+	if !strings.Contains(got, `"/home/me/proj/docs/plan.md"`) {
+		t.Errorf("arguments body = %q; want the argument quoted exactly as it was sent", got)
 	}
 	if !strings.Contains(got, `"/etc/hosts"`) {
 		t.Errorf("arguments body = %q; want the outside path left absolute", got)
