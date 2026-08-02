@@ -149,12 +149,20 @@ type Model struct {
 	// the next ⏎ (flushAfterCompletion / noteHeldQueue). Rows are session-ephemeral: sessions
 	// record what was committed (ADR 0022), never what is still waiting to be sent.
 	//
+	// deliveredInterjections is the third copy, and it exists for exactly one boundary: the rows
+	// THIS Exchange has already committed. A stop scraps the Exchange (AbortExchange drops
+	// everything committed into it, the interjections with it), so without this the delivered rows
+	// would survive only as transcript entries the conversation no longer contains — sent by nobody,
+	// held by nobody. The cancel fold puts them back on the queue (restageDelivered) and
+	// finishWorker forgets them, so they live no longer than the Exchange that read them.
+	//
 	// interjectSeq mints those ids — a plain counter, incremented on the Update goroutine and
 	// never reset, so an id names one row for the life of the session and a delivery report can
 	// never be reconciled against a row that merely reused a number.
-	box                  *interjectBox
-	pendingInterjections []queuedInterjection
-	interjectSeq         int
+	box                    *interjectBox
+	pendingInterjections   []queuedInterjection
+	deliveredInterjections []queuedInterjection
+	interjectSeq           int
 
 	// act is the live activity the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go). It is derived
@@ -494,8 +502,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A stop is NOT a completion, so a staged queue is held rather than flushed: Esc stops
 		// everything, including what was waiting to go out (ADR 0025). The note says so once, and
 		// ⏎ on the empty box is what sends it afterwards.
+		//
+		// "Held" has to cover what the worker already DELIVERED, too. The AbortExchange above drops
+		// those rows with the rest of the scrapped Exchange, so restageDelivered puts them back on
+		// the queue — before the note, which is what counts them — rather than leaving them as
+		// transcript entries the conversation no longer contains.
 		m.eng.AbortExchange()
 		m.transcript.addNote("cancelled")
+		m.restageDelivered()
 		cmd := m.finishWorker(stateIdle)
 		m.noteHeldQueue()
 		m.refreshViewport()
@@ -1363,7 +1377,13 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// happens to those rows next is the CALLER's ruling, not this one's: a natural completion
 	// flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds them for
 	// the next ⏎ (noteHeldQueue) — ADR 0025.
+	//
+	// The rows this Exchange DELIVERED are forgotten here for the same reason: they are undoable
+	// only while the Exchange that holds them can still be scrapped. A stop has already put them
+	// back on the queue by this point (restageDelivered); past this boundary they are committed
+	// history, and a later Exchange's stop must not resurrect them.
 	m.box = nil
+	m.deliveredInterjections = nil
 	m.setPlaceholder(idlePlaceholder) // nothing is running: ⏎ sends again
 	m.genStart = time.Time{}
 	// The worker has unwound, so the activity is over — including a sticky "stopping", which

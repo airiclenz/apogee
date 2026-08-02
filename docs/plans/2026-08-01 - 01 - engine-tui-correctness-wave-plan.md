@@ -210,7 +210,20 @@ passes; `make check` green; `internal/tui/doc.go:246-248`'s invariant is true ag
 
 **Commit:** `fix(tui): profile-load moves commit on the Update goroutine and never fork the beat chain`
 
-## 6. Esc never discards a staged interjection
+## 6. Esc never discards a staged interjection — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** "the rows this Exchange delivered" needs a place to live, so the Model gains a
+third, per-Exchange copy of the queue (`deliveredInterjections`, appended by `foldInterjected`, drained
+by the new `Model.restageDelivered`) — a plain slice, ADR-0011-safe. It is cleared in `finishWorker`
+beside `m.box`, which is the one boundary past which a delivered row is committed history: that is what
+stops a LATER Exchange's stop from resurrecting an earlier one's delivery (pinned by
+`TestNaturalCompletionKeepsDeliveredRowsDelivered`). The `errMsg` fold, which also calls
+`AbortExchange`, deliberately does NOT re-stage: it is documented in `model.go` as a no-op guard rather
+than a live path (a fault surfaces as an ErrorEvent at a boundary today, and the only reachable
+`errMsg` — a failed `Submit` — precedes every drain), and the item is scoped to Esc; if `Step` ever
+faults mid-Exchange that branch needs the same one-line call. ADR 0025 gets a dated amendment (its
+"Delivery has fates" consequence recorded only the engine's half of the fate, which is where the hole
+was) plus a `doc.go` narration fix and a CHANGELOG `Fixed` entry; no version identifier touched.
 
 **What:** Audit "High — Staged interjections are drained into an Exchange that is being
 cancelled". `internal/tui/worker.go:136` (`stepToBoundary`) drains and commits the

@@ -231,6 +231,22 @@ the feature.
   rides snapshot/resume with its marker intact. `AbortExchange` **discards** it with the rest of the
   scrapped Exchange — which is the point: the human threw the Exchange away. The transcript keeps the
   visual record either way.
+
+  > **Amended 2026-08-02.** "Discards it with the rest of the scrapped Exchange" was the engine's
+  > half of the fate, and the TUI never wrote the other half: a row the worker delivered a moment
+  > before an Esc was dropped from the conversation by `AbortExchange` *and* was already off the
+  > queue (the delivery report took it), so it was sent by nobody and held by nobody — surviving only
+  > as a `⧖` transcript entry claiming a delivery the model no longer remembered. That contradicted
+  > decision 7 ("Esc stops everything, **including what was waiting to go out**"), which only ever
+  > held for rows the worker had not reached yet. Two changes make the hold total, and neither moves
+  > a decision above: the worker **skips the drain outright when its ctx is already cancelled**
+  > (`deliverInterjections`), so rows at a doomed boundary stay in the mailbox the display queue
+  > mirrors; and the `cancelledMsg` fold **re-stages what this Exchange did deliver**
+  > (`Model.restageDelivered`), ahead of what is still queued, where the hold note counts it and the
+  > next `⏎` sends it. The engine's fate is unchanged — the Exchange is still scrapped whole — and so
+  > is the transcript, which keeps the `⧖` record beside the `cancelled` note exactly as it keeps a
+  > stopped Turn's streamed partial. A natural completion is untouched: past `finishWorker` a
+  > delivered row is committed history and no later stop can resurrect it (audit 2026-08-01).
 - **A row is never silently lost and never delivered twice.** The drain is unconditional and the
   Model's display copy is the queue of record: a row the delivery report does not name stays staged
   and goes out at the terminal boundary instead. The Backspace pop withdraws from the mailbox first

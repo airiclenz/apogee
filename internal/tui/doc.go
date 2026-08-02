@@ -189,7 +189,10 @@
 // mailbox first, and giving up if the worker already took it, so a message cannot be sent twice),
 // the delivery report moves exactly the rows that LANDED into the transcript as ⧖ blocks, and a
 // terminal boundary rules on whatever is left: flushed as ONE joined message on a natural
-// completion, HELD under a note after Esc or a fault, because Esc means stop everything. Keys reach
+// completion, HELD under a note after Esc or a fault, because Esc means stop everything. A stop
+// holds what was DELIVERED too — the worker skips a drain whose ctx is already cancelled, and the
+// cancel fold re-stages what it did deliver, since AbortExchange takes those rows out of the
+// conversation and nothing else would put them back (ADR 0025 decision 7, as amended). Keys reach
 // the box wherever [Model.inputEditable] says so — the same predicate the mouse arbitrates by, which
 // is what keeps the keyboard and the mouse from disagreeing about which states are live — and the
 // cost is the deliberate one the plan named: single-key transcript scrolling while running, with

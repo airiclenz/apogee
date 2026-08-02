@@ -224,6 +224,9 @@ func (m Model) popInterjection() (Model, bool) {
 // Reconciliation is by id and only by id: a row the report does not name stays queued, which is
 // what makes a refused delivery degrade to "held" instead of "lost". An empty report (a drain that
 // delivered nothing) therefore correctly changes nothing at all.
+//
+// The rows also go onto deliveredInterjections, which is what a STOP undoes with: they are in the
+// conversation now, but only for as long as this Exchange lasts (restageDelivered).
 func (m *Model) foldInterjected(items []queuedInterjection) {
 	if len(items) == 0 {
 		return
@@ -233,6 +236,7 @@ func (m *Model) foldInterjected(items []queuedInterjection) {
 		delivered[it.id] = true
 		m.transcript.addInterjected(it.input.Text, m.skillDisplayNames(it.input.SkillIDs))
 	}
+	m.deliveredInterjections = append(m.deliveredInterjections, items...)
 	kept := make([]queuedInterjection, 0, len(m.pendingInterjections))
 	for _, row := range m.pendingInterjections {
 		if !delivered[row.id] {
@@ -327,6 +331,32 @@ func (m Model) joinedInterjections(tail parsedInput) domain.UserInput {
 	}
 	add(tail.text, tail.fileRefs, tail.skillIDs)
 	return domain.UserInput{Text: strings.Join(texts, "\n\n"), FileRefs: refs, SkillIDs: ids}
+}
+
+// restageDelivered puts back on the queue what this Exchange already DELIVERED, and it is the stop's
+// half of "Esc discards nothing" (ADR 0025 decision 7). The cancel fold scraps the Exchange
+// (AbortExchange), which drops every message committed into it — the interjections included — so a
+// row the worker managed to deliver a moment before the stop would otherwise be sent by nobody and
+// held by nobody: gone from the conversation, gone from the queue, and visible only as a transcript
+// entry claiming a delivery the model no longer remembers. It goes back to being staged instead, so
+// the hold note counts it and the next ⏎ sends it.
+//
+// The re-staged rows go in FRONT of whatever is still queued: they were typed first, and delivery
+// order is the order the human wrote in. The transcript is deliberately left alone — the ⧖ block
+// stays in the scrollback beside the "cancelled" note, exactly as a stopped Turn's streamed partial
+// does, because the model DID read the remark before the Exchange was thrown away.
+//
+// It must run before the queue is ruled on (noteHeldQueue) and is a no-op on every path where the
+// Exchange delivered nothing, which is the overwhelmingly common one.
+func (m *Model) restageDelivered() {
+	if len(m.deliveredInterjections) == 0 {
+		return
+	}
+	restaged := make([]queuedInterjection, 0, len(m.deliveredInterjections)+len(m.pendingInterjections))
+	restaged = append(restaged, m.deliveredInterjections...)
+	restaged = append(restaged, m.pendingInterjections...)
+	m.pendingInterjections = restaged
+	m.deliveredInterjections = nil
 }
 
 // noteHeldQueue records that a stop or a loop error left the queue standing. It is called from the

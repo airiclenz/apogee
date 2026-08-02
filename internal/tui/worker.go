@@ -121,7 +121,9 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 //
 // Before each Step it also empties the interjection mailbox into the open Exchange
 // (deliverInterjections): the same between-Steps window Snapshot occupies, now carrying the human's
-// mid-task remarks into the conversation the next Step's request is built from (ADR 0025).
+// mid-task remarks into the conversation the next Step's request is built from (ADR 0025). ctx goes
+// with it because a cancel that has already landed makes this Exchange a doomed one — see
+// deliverInterjections.
 //
 // exchangeOpen says whether there is an Exchange to deliver into YET, and it exists because the two
 // drive paths differ exactly there: driveResume enters with the Exchange already open (false would
@@ -134,7 +136,7 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchangeOpen bool, notify func(tea.Msg)) tea.Msg {
 	for {
 		if exchangeOpen {
-			deliverInterjections(eng, box, notify)
+			deliverInterjections(ctx, eng, box, notify)
 		}
 		exchangeOpen = true // whatever the entry state, the Exchange is open from the first Step on
 		res, err := eng.Step(ctx)
@@ -167,6 +169,18 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 // landed go out as ONE interjectedMsg before the Step, so the Update loop moves exactly them into
 // the transcript; an empty mailbox sends nothing at all.
 //
+// A CANCELLED ctx skips the drain outright, and that is the first half of "Esc discards nothing"
+// (ADR 0025 decision 7). The Exchange this boundary would deliver into is about to be scrapped —
+// the model's cancelledMsg fold calls AbortExchange, which drops everything committed since the
+// Exchange opened, the interjections included — so committing rows here would take them out of the
+// mailbox to put them somewhere nothing survives. Skipping leaves them where the queue of record can
+// still see them: they never appear in a report, so the Model keeps them staged and the terminal
+// fold holds them for the next ⏎.
+//
+// The check narrows the window rather than closing it: a cancel landing after it still commits into
+// a doomed Exchange, and the rows it committed are re-staged by the cancelledMsg fold
+// (Model.restageDelivered) — the two halves together are what make the guarantee total.
+//
 // The first refusal STOPS the drain rather than skipping past it. An Interject error is a statement
 // about the Exchange (no open Exchange, or an input carrying nothing), not about that one row, so
 // pressing on would only produce more of the same — and delivering row 3 after row 2 was refused
@@ -175,7 +189,10 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 // Exchange on a natural completion, held for the next ⏎ after a stop (ADR 0025). In the shipped wiring
 // the error cannot fire at all — stepToBoundary drains only once the Exchange is open — so this is
 // the honest degradation, not a live path.
-func deliverInterjections(eng Engine, box *interjectBox, notify func(tea.Msg)) {
+func deliverInterjections(ctx context.Context, eng Engine, box *interjectBox, notify func(tea.Msg)) {
+	if ctx.Err() != nil {
+		return
+	}
 	staged := box.drainAll()
 	if len(staged) == 0 {
 		return

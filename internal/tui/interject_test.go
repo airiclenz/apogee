@@ -280,6 +280,40 @@ func TestResumeDrainsBeforeItsFirstStep(t *testing.T) {
 	}
 }
 
+// TestCancelledDriveSkipsTheDrain is the first half of "Esc discards nothing" (ADR 0025 decision 7):
+// a cancel that has already landed when the worker reaches a between-Steps boundary must not commit
+// the mailbox into the Exchange it is about to scrap — AbortExchange drops everything committed
+// there, so the rows would be sent by nobody and held by nobody. Skipped, they stay in the mailbox,
+// are never reported, and so are never taken off the display queue: the terminal fold holds them for
+// the next ⏎. The uncancelled counterpart is every other drain test above, which passes a live ctx.
+func TestCancelledDriveSkipsTheDrain(t *testing.T) {
+	t.Parallel()
+	box := newInterjectBox()
+	box.push(staged(1, "also check the tests"))
+	rec := &recorder{}
+	eng := &fakeEngine{inExchange: true}
+	eng.stepFn = func(context.Context, int) (domain.StepResult, error) {
+		return domain.StepResult{Status: domain.StatusCancelled}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Esc landed while the Turn ran: the worker reaches the boundary already cancelled
+
+	msg := driveResume(ctx, eng, box, rec.notify)
+
+	if _, ok := msg.(cancelledMsg); !ok {
+		t.Fatalf("terminal msg = %T; want cancelledMsg", msg)
+	}
+	if got := eng.interjections(); len(got) != 0 {
+		t.Errorf("Interject calls = %+v; want none — the Exchange is about to be scrapped", got)
+	}
+	if _, seen := rec.delivered(t); seen {
+		t.Error("a delivery was reported on a cancelled drive; the Model would take the row off the queue for it")
+	}
+	if left := box.drainAll(); len(left) != 1 || left[0].id != 1 {
+		t.Errorf("mailbox = %+v; want the row left staged, for the stop to hold", left)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Typing while the model works — routing, staging, the delivery fold (ADR 0025)
 // ----------------------------------------------------------------------------
@@ -1051,6 +1085,90 @@ func TestCancelHoldsWithSingleNote(t *testing.T) {
 	next = step(t, next, keyRune('x'))
 	if got := countNotes(next, note); got != 1 {
 		t.Errorf("hold note written %d times after a later keypress; want still once", got)
+	}
+}
+
+// TestCancelRestagesADeliveredRow is the second half of "Esc discards nothing": the cancel lands
+// AFTER the worker committed a row. The fold's AbortExchange drops that row from the conversation
+// with the rest of the scrapped Exchange, so it goes back onto the queue — ahead of what is still
+// staged, because it was typed first — where the hold note counts it and the next ⏎ sends it. The
+// transcript's ⧖ record stays put: the model did read the remark before the Exchange was thrown away.
+func TestCancelRestagesADeliveredRow(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	m = stageRow(t, m, "also check the tests")
+	m = stageRow(t, m, "and the docs")
+	m = step(t, m, interjectedMsg{items: m.pendingInterjections[:1]}) // the worker committed the first
+	if n := len(m.pendingInterjections); n != 1 {
+		t.Fatalf("precondition: staged rows = %d; want the delivered row off the queue", n)
+	}
+
+	next, _ := stepCmd(t, m, cancelledMsg{})
+
+	if n := len(next.pendingInterjections); n != 2 {
+		t.Fatalf("staged rows = %d; want the delivered row back beside the one still queued", n)
+	}
+	got := []string{next.pendingInterjections[0].raw, next.pendingInterjections[1].raw}
+	if want := []string{"also check the tests", "and the docs"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("queue = %q; want the re-staged row first — it was typed first", got)
+	}
+	if note := heldNote(2); countNotes(next, note) != 1 {
+		t.Errorf("hold note %q not written exactly once; the re-staged row must be counted by it", note)
+	}
+	var interjected int
+	for _, e := range next.transcript.entries {
+		if e.kind == entryInterjected {
+			interjected++
+		}
+	}
+	if interjected != 1 {
+		t.Errorf("interjected transcript blocks = %d; want the delivery record left standing", interjected)
+	}
+
+	sent, cmd := stepCmd(t, next, keyEnter()) // ⏎ on the empty box sends what the stop held
+	if sent.state != stateRunning {
+		t.Fatalf("state = %v; want running — the held queue sends on ⏎", sent.state)
+	}
+	drainCmd(t, sent, cmd)
+	const want = "also check the tests\n\nand the docs"
+	if n := len(eng.submitted); n != 1 || eng.submitted[0].Text != want {
+		t.Errorf("submitted = %+v; want both rows re-sent, oldest first (%q)", eng.submitted, want)
+	}
+}
+
+// TestNaturalCompletionKeepsDeliveredRowsDelivered is the boundary on that undo: a row committed
+// into an Exchange that ended under its own power is history. It is not re-staged, not re-sent, and
+// a LATER Exchange's stop cannot resurrect it — delivered rows are undoable only while the Exchange
+// holding them can still be scrapped.
+func TestNaturalCompletionKeepsDeliveredRowsDelivered(t *testing.T) {
+	eng := &fakeEngine{stepFn: scriptedSteps()}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	m = stageRow(t, m, "also check the tests")
+	m = step(t, m, interjectedMsg{items: m.pendingInterjections})
+
+	next, cmd := stepCmd(t, m, exchangeDoneMsg{})
+
+	if next.state != stateIdle {
+		t.Fatalf("state = %v; want idle — an empty queue flushes nothing", next.state)
+	}
+	if n := len(next.pendingInterjections); n != 0 {
+		t.Fatalf("staged rows = %+v; want none — the row was delivered, not held", next.pendingInterjections)
+	}
+	drainCmd(t, next, cmd)
+	if n := len(eng.submitted); n != 0 {
+		t.Errorf("Submit calls = %d; want none — a delivered row must not be sent a second time", n)
+	}
+
+	next.input.SetValue("next question") // a second Exchange, stopped with Esc
+	next, _ = stepCmd(t, next, keyEnter())
+	stopped, _ := stepCmd(t, next, cancelledMsg{})
+	if n := len(stopped.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %+v; want none — an earlier Exchange's delivery is not this stop's to undo",
+			stopped.pendingInterjections)
 	}
 }
 
