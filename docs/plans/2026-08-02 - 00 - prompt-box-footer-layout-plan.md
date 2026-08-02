@@ -141,7 +141,38 @@ put; `TestActuationFooterNarratesTheVerb` (`actuation_test.go:312`) likewise.
 
 **Commit:** `feat(tui): the footer names the workspace, not the window`
 
-## 3. The prompt box closes its frame; the footer sheds its
+## 3. The prompt box closes its frame; the footer sheds its — ✅ DONE (2026-08-02)
+
+NOTES (2026-08-02): the item gained a **bottom hairline** mid-run. The owner amended the authoritative
+mockup `docs/design/prompt-box-layout.md` to carry a full-width rule below the footer ("Now the status
+line … is printed at the very bottom of the session chat. That does not look very good. Could we add a
+hairline (just inverted for the bottom) below the status line?"), and the plan's precedence rule puts the
+mockup over the item's prose. So the footer stays frameless in the sense the item means — no box borders
+around it — and a `bottomRule` row closes the screen under it. Four consequences worth flagging:
+
+1. **The glyph is `▁`, not the mockup's `_`.** The mockup is a plain-text sketch (the same file writes
+   `8K/98K` and `30t/sek`, which ratified decisions 3 and 4 already say not to copy literally). The
+   owner's word was *inverted*, and `▁` (LOWER ONE EIGHTH BLOCK) is the exact inversion of the existing
+   `▔` (UPPER ONE EIGHTH BLOCK). Both render through ONE theme role, renamed `topDivider` → `hairline`
+   for that reason. A literal `_` is a one-line change if the owner meant the underscore.
+2. **Every row budget is unchanged from before this item.** The footer gave up two rows and the frame
+   gained two (the box's own bottom border, the hairline), so `frameFixedRows` is 5 + a 2-row box border,
+   `frameFloorRows` is **8** again, `smallestOverlayWindow` is **12** again, and `transcriptBudget` /
+   `draftRowsCeiling` land on their original values. The numeric re-anchoring an earlier pass made
+   (7-row floor, 11-row pane floor, the popup/band/draft-cap tables) has been reverted rather than kept.
+3. `ruleHeight` is split into `topRuleHeight` and `bottomRuleHeight` (both 1). They are the same number
+   under two names on purpose: what stands ABOVE the box and what stands BELOW it are different
+   questions, and `inputContentRect` asks only the second — a merged constant is exactly the off-by-one
+   that puts the caret on the wrong row.
+4. Smaller deviations from the item's literal text: `footerView`'s `w < 3` guard is gone (a frameless row
+   is exactly one line at every width, which is what makes `footerHeight` exact — the old guard returned
+   `""`, still one row, and so was already a fiction); `TestFooterViewThinRules` is rewritten AND renamed
+   to `TestFooterViewIsOneFramelessLine`, now forbidding every border glyph (the retired heavy rune
+   included), which subsumes the thin-rule property it held; and `layout.md`'s "The footer's upstream
+   slot" (item 2's section) gains two paragraphs — "What it is" and "And the hairline under it" — because
+   there was no other prose home for the footer's new shape. New tests: `TestBottomRuleHairlineRow` and
+   `TestClickOnBottomChromeSelectsNothing` (the box's bottom border, the footer line and the hairline,
+   asserted as one contiguous unaddressable run ending on the terminal's last row).
 
 Depends on item 2 (it reframes the footer line item 2 finished wording).
 

@@ -538,6 +538,20 @@ point is a **minor** bump, not a breaking change.
   word alone — the host and the workspace stay put behind them, since neither is a fact about a
   model nobody has named yet — and the `✦ offline` marker still closes the slot in the error tone.
 
+- **The prompt box closes its own frame, the footer sheds its, and a hairline closes the screen.**
+  The box used to stop at its side walls and borrow the footer's top divider for a bottom edge,
+  which drew the two as one boxed-in unit three rows deep. The box now draws its own `╰───╯`, and
+  the footer under it is a single frameless line: no `├──┤` divider, no `│` bars around the text,
+  no `╰──╯` rule beneath. It takes the status line's posture instead — the same two-column lead,
+  the same unbroken black field across the window, and the mode marker ending in the very column
+  the gauge above it ends in. Under the footer, a `▁` hairline closes the screen: the `▔` at the
+  top of the bottom chrome inverted, in the same recessive tone, so the whole section is bracketed
+  by one rule above the status line and its mirror below the footer rather than the footer sitting
+  flush against the terminal's last row. Nothing about what the footer says changed, and the frame
+  still spends the same eight rows on chrome — the two rows the footer gave up are exactly the
+  box's new bottom border and the new hairline — so every row budget, floor and pane threshold is
+  where it was. Specced in `layout.md`.
+
 - **A tool block now spells the paths it names relative to the workspace.** The target leading a
   branch line and the one-line summary beside it read `docs/plan.md`, not
   `/home/me/proj/docs/plan.md`, so a project's own files stop spending the row's width repeating a

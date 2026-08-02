@@ -124,10 +124,12 @@ func TestSelectionText(t *testing.T) {
 
 // TestClickPositionsCaret feeds a click through Update and checks the caret landed on the
 // clicked character. The content rectangle for an 80x24, single-row prompt starts at x=2
-// (border + padding) and the text row sits at y = height - footerHeight - 1 = 20.
+// (border + padding) and the text row sits at
+// y = height - bottomRuleHeight - footerHeight - inputBorderRows = 20 — the box's own bottom
+// border, the footer's single line and the ▁ hairline are what stand below it.
 func TestClickPositionsCaret(t *testing.T) {
 	m := modelWithInput(t, "hello world")
-	const textRowY = 24 - footerHeight - 1 // single content row, bottom-anchored above the footer
+	const textRowY = 24 - bottomRuleHeight - footerHeight - inputBorderRows // single content row, bottom-anchored above the footer
 
 	m = step(t, m, leftClick(2+6, textRowY)) // x0(2) + column 6 → the 'w'
 	if got := m.input.Line(); got != 0 {
@@ -145,8 +147,9 @@ func TestClickPositionsCaret(t *testing.T) {
 // two-row prompt.
 func TestClickPositionsCaretMultiline(t *testing.T) {
 	m := modelWithInput(t, "ab\ncd")
-	// Two content rows, bottom-anchored: row 1 ("cd") sits at y = height - footerHeight - 1.
-	const row1Y = 24 - footerHeight - 1
+	// Two content rows, bottom-anchored: the LAST one ("cd") sits at
+	// y = height - bottomRuleHeight - footerHeight - inputBorderRows, whatever the box's height.
+	const row1Y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
 	m = step(t, m, leftClick(2+1, row1Y)) // x0(2) + column 1 → the 'd'
 	if m.input.Line() != 1 || m.input.Column() != 1 {
@@ -161,7 +164,7 @@ func TestClickPositionsCaretMultiline(t *testing.T) {
 // copy Cmd, and the confirmation flash.
 func TestDragSelectsAndCopies(t *testing.T) {
 	m := modelWithInput(t, "hello world")
-	const y = 24 - footerHeight - 1
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y)) // anchor at column 0
 	m = step(t, m, leftDrag(2+5, y))  // drag head to column 5 → "hello"
@@ -185,7 +188,7 @@ func TestDragSelectsAndCopies(t *testing.T) {
 // nothing (no flash, no Cmd) and collapses the selection.
 func TestBareClickReleaseDoesNotCopy(t *testing.T) {
 	m := modelWithInput(t, "hello world")
-	const y = 24 - footerHeight - 1
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
 	m = step(t, m, leftClick(2+3, y))
 	m, cmd := stepCmd(t, m, leftRelease(2+3, y))
@@ -197,6 +200,62 @@ func TestBareClickReleaseDoesNotCopy(t *testing.T) {
 	}
 	if m.sel.active {
 		t.Fatal("a bare click+release should collapse the selection")
+	}
+}
+
+// TestClickOnBottomChromeSelectsNothing is the mouse half of the box closing its own frame. The
+// box grew a ╰──╯ bottom border row and the footer shed its three rows for one line plus the ▁
+// hairline under it, so below the prompt's last text row there are now exactly three chrome rows —
+// the box's bottom border, the footer's line, and the hairline — and none of them addresses
+// anything: a click on any one positions no caret, arms no prompt selection, and (being past the
+// drawn transcript) arms no transcript selection either. The box's TOP border is asserted beside
+// them because it is the same rule one row up.
+//
+// The rows are DERIVED from inputContentRect and the layout constants rather than counted by hand,
+// and the run below them is asserted CONTIGUOUS down to the terminal's last row — which is what
+// makes this catch a row the frame gains or loses rather than only the rows it has today.
+func TestClickOnBottomChromeSelectsNothing(t *testing.T) {
+	m := modelWithInput(t, "hello world")
+	m.input.MoveToEnd()
+	wantCol := m.input.Column()
+
+	_, y0, _, h := m.inputContentRect()
+	rows := []struct {
+		name string
+		y    int
+	}{
+		{"box top border", y0 - 1},
+		{"box bottom border", y0 + h},
+		{"footer line", m.height - bottomRuleHeight - footerHeight},
+		{"bottom hairline", m.height - bottomRuleHeight},
+	}
+	for i := 2; i < len(rows); i++ {
+		if rows[i].y != rows[i-1].y+1 {
+			t.Fatalf("the %s is at row %d and the %s at %d; the bottom chrome must be one contiguous run",
+				rows[i].name, rows[i].y, rows[i-1].name, rows[i-1].y)
+		}
+	}
+	if last := rows[len(rows)-1].y; last != m.height-1 {
+		t.Fatalf("the bottom chrome ends at row %d, want the terminal's last row %d", last, m.height-1)
+	}
+
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			live := m
+			live.sel = promptSel{active: true, anchorOff: 0, headOff: 5}
+
+			live = step(t, live, leftClick(2+3, r.y))
+
+			if live.sel.active {
+				t.Errorf("a click on the %s armed a prompt selection: %+v", r.name, live.sel)
+			}
+			if live.transcriptSel.active {
+				t.Errorf("a click on the %s armed a transcript selection: %+v", r.name, live.transcriptSel)
+			}
+			if got := live.input.Column(); got != wantCol {
+				t.Errorf("a click on the %s moved the caret to column %d, want it left at %d", r.name, got, wantCol)
+			}
+		})
 	}
 }
 
@@ -220,7 +279,7 @@ func TestClickPositionsCaretWhileRunning(t *testing.T) {
 	m.state = stateRunning
 	m.input.MoveToEnd()
 
-	m = step(t, m, leftClick(2+0, 24-footerHeight-1)) // column 0 of the single content row
+	m = step(t, m, leftClick(2+0, 24-bottomRuleHeight-footerHeight-inputBorderRows)) // column 0 of the single content row
 	if got := m.input.Column(); got != 0 {
 		t.Fatalf("click did not position the caret while running (col %d, want 0)", got)
 	}
@@ -274,7 +333,7 @@ const selectionBg = "48;2;58;95;205"
 // selection background appears in the whole-screen View — end-to-end, not just the helper.
 func TestViewRendersSelectionHighlight(t *testing.T) {
 	m := modelWithInput(t, "hello world")
-	const y = 24 - footerHeight - 1
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 	m = step(t, m, leftClick(2+0, y))
 	m = step(t, m, leftDrag(2+5, y))
 
@@ -381,7 +440,7 @@ func TestVisualSubline(t *testing.T) {
 // that column's numeric value (offset 4 = 't' under the buggy cell-as-rune path).
 func TestClickPositionsCaretCJK(t *testing.T) {
 	m := modelWithInput(t, "日本語 text")
-	const y = 24 - footerHeight - 1
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
 	m = step(t, m, leftClick(2+4, y)) // display cell 4 = the start of 語
 	if m.input.Line() != 0 || m.input.Column() != 2 {
@@ -398,7 +457,7 @@ func TestClickPositionsCaretCJK(t *testing.T) {
 // the buggy path copied "日本語 te" (six runes, treating the cell span as a rune span).
 func TestDragCopyCJKMatchesHighlight(t *testing.T) {
 	m := modelWithInput(t, "日本語 text")
-	const y = 24 - footerHeight - 1
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y)) // anchor at cell 0
 	m = step(t, m, leftDrag(2+6, y))  // head at cell 6 → the three wide glyphs
@@ -1222,7 +1281,7 @@ func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
 	}
 
 	// A click into the prompt arms the prompt selection and clears the transcript one.
-	const yInput = 24 - footerHeight - 1
+	const yInput = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 	m = step(t, m, leftClick(2, yInput))
 	if m.transcriptSel.active {
 		t.Fatal("a prompt click did not clear the transcript selection")
@@ -1262,7 +1321,7 @@ func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
 func TestPromptDragSelectsWhileRunning(t *testing.T) {
 	m := modelWithInput(t, "hello world")
 	m.state = stateRunning
-	const y = 24 - footerHeight - 1
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y)) // anchor at column 0
 	m = step(t, m, leftDrag(2+5, y))  // head at column 5 → "hello"
@@ -1334,7 +1393,7 @@ func TestPromptClickRefusedAtApprovalAndErrored(t *testing.T) {
 	for _, state := range []uiState{stateAwaitingApproval, stateErrored} {
 		m := modelWithInput(t, "hello world")
 		m.state = state
-		const y = 24 - footerHeight - 1
+		const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 		caret := m.input.Column() // SetValue leaves it after the text
 
 		m = step(t, m, leftClick(2+0, y))

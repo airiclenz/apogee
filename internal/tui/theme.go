@@ -125,7 +125,7 @@ type theme struct {
 	mdCode        lipgloss.Style // `inline code` span (orange)
 	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (orange)
 	mdRule        lipgloss.Style // the ─ run under a markdown table's header (faint: the rule frames the columns, it is not content)
-	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box (no bottom edge)
+	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box — a closed frame, bottom edge included
 	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
 	popupBorder   lipgloss.Style // selector-popup chrome (renderPopup): startupBorder's rounded shape, filled solid black so the pane reads as a distinct overlay
 	popupBody     lipgloss.Style // a popup's wrapped body block (renderPopup): normal white on black — between presentTitle (bold) and statusFaint (chrome) in the hierarchy
@@ -133,8 +133,8 @@ type theme struct {
 	statusBar     lipgloss.Style // status-line segments: faint on black
 	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
-	chromeRule    lipgloss.Style // the footer's border hairlines (dark gray on black): its runes, corners, and │ bars
-	topDivider    lipgloss.Style // the ▔ top-edge hairline above the status line — a dimmer rule (colDimGray) so it recedes
+	chromeRule    lipgloss.Style // the prompt box's own border hairline (dark gray on black): the rule runes and corners inputElisionEdge composes the box's top border row from
+	hairline      lipgloss.Style // both chrome hairlines — the ▔ above the status line and the ▁ under the footer — a dimmer rule (colDimGray) so they recede
 	footerText    lipgloss.Style // the footer's content (faint on black)
 	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
@@ -146,10 +146,10 @@ type theme struct {
 	gaugeTrack lipgloss.Style // the gauge's empty track (dark-gray background)
 }
 
-// newTheme builds the styles from the palette. The input border drops its bottom edge: the
-// footer's top rule is the shared divider, so the input box and footer read as one connected
-// unit (layout.md), and a single lipgloss.Border cannot produce the ├/┤ junction corners where
-// that divider meets the box — those rules are composed by hand in footerView.
+// newTheme builds the styles from the palette. The input border is a CLOSED rounded frame: the
+// box owns its own ╰─╯ bottom edge, and the footer below it is a frameless line rather than the
+// shared bottom half of the box's chrome (layout.md). That is why nothing here has to compose
+// junction corners by hand any more — one lipgloss.Border draws the whole box.
 func newTheme() theme {
 	return theme{
 		// The painter's own starting measure. It moves only when the terminal tells the program
@@ -179,8 +179,7 @@ func newTheme() theme {
 		mdCodeBlock:  lipgloss.NewStyle().Foreground(colCode),
 		mdRule:       lipgloss.NewStyle().Foreground(colFaint),
 		inputBorder: lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderBottom(false).
+			Border(lipgloss.RoundedBorder()). // all four edges: ╭ ╮ ╰ ╯ — the box closes its own frame
 			BorderForeground(colDarkGray).
 			BorderBackground(colBlack).
 			Background(colBlack).
@@ -201,7 +200,7 @@ func newTheme() theme {
 		spinnerBase: lipgloss.NewStyle().Background(colBlack), // match the status bar's black field
 		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
 		chromeRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
-		topDivider:  lipgloss.NewStyle().Foreground(colDimGray).Background(colBlack),
+		hairline:    lipgloss.NewStyle().Foreground(colDimGray).Background(colBlack),
 		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		scrollThumb: lipgloss.NewStyle().Foreground(colFaint),
 		scrollTrack: lipgloss.NewStyle().Foreground(colDarkGray),

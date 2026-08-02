@@ -128,14 +128,21 @@ func (m Model) inputEditable() bool {
 }
 
 // inputContentRect returns the textarea text area's on-screen rectangle: the top-left cell
-// (x0,y0) and its width and height in cells. The input box is bottom-anchored above the
-// three-row footer (View stacks the flexible viewport above it), so the rectangle follows from
-// the window height and the box's own height without tracking the overlays that float above it.
+// (x0,y0) and its width and height in cells. The input box is bottom-anchored above the footer's
+// single line and the ▁ hairline under it (View stacks the flexible viewport above them), so the
+// rectangle follows from the window height and the box's own height without tracking the overlays
+// that float above it.
+//
+// boxTop is stated in the LAYOUT's own constants rather than in literals, so the mapping cannot
+// drift from the arithmetic transcriptBudget spends: the box occupies its content rows plus
+// inputBorderRows (it closes its own rounded frame), and what stands below it is the footer line
+// and the bottom hairline. Every one of the three is named here — an omitted term is exactly the
+// off-by-one that puts the caret on the wrong row.
 func (m Model) inputContentRect() (x0, y0, w, h int) {
 	h = m.input.Height()
-	boxTop := m.height - footerHeight - (h + 1) // the box's top border row (the box has no bottom edge)
-	y0 = boxTop + 1                             // the first text row sits below that border
-	x0 = borderFrame/2 + inputPadding/2         // one border column + one padding column = 2 in from the left
+	boxTop := m.height - bottomRuleHeight - footerHeight - (h + inputBorderRows) // the box's top border row
+	y0 = boxTop + 1                                                              // the first text row sits below that border
+	x0 = borderFrame/2 + inputPadding/2                                          // one border column + one padding column = 2 in from the left
 	w = m.inputInnerWidth()
 	return x0, y0, w, h
 }

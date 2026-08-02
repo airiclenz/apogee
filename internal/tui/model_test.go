@@ -1958,17 +1958,42 @@ func TestModelStatusLine(t *testing.T) {
 	}
 }
 
-// TestFooterViewThinRules proves the footer's divider and bottom rule are drawn with the thin
-// light rune only — no heavy box-drawing rune survives from the old mixed-weight rule
-// composition (item 1 of the prompt-box chrome plan). The heavy rune is built from its code
-// point so this source file stays clear of the literal glyph. Styling is stripped first so the
-// assertion is over the runes, not the black-field escapes.
-func TestFooterViewThinRules(t *testing.T) {
-	heavyHorizontal := string(rune(0x2501)) // U+2501 HEAVY HORIZONTAL, the retired mixed-rule glyph
+// TestFooterViewIsOneFramelessLine pins the footer's shape once the prompt box took its own bottom
+// edge back. The footer used to be three rows of chrome — a ├──┤ divider standing in for the edge
+// the box was missing, the content line between two │ bars, and a ╰──╯ rule closing the pair — and
+// it is now ONE row carrying no border glyph of any kind. What it carries instead is the STATUS
+// LINE's posture, one row below the box rather than one row above it: a bodyIndent lead, the black
+// field filled to the window's full width, and the mode marker ending bodyIndent short of the edge
+// — the very column the gauge above it ends in (layout.md, "The status line's right slot").
+//
+// The heavy horizontal is still named here, built from its code point so this source file stays
+// clear of the literal glyph: it was the retired mixed-weight rule rune, and "no border glyphs at
+// all" is the stronger form of the thin-rule property this test used to hold.
+func TestFooterViewIsOneFramelessLine(t *testing.T) {
 	m := newTestModel(t)
-	got := ansiPattern.ReplaceAllString(m.footerView(), "")
-	if strings.Contains(got, heavyHorizontal) {
-		t.Errorf("footer rules contain a heavy horizontal rune; want the thin light rune only:\n%s", got)
+	view := m.footerView()
+
+	if got := lipgloss.Height(view); got != footerHeight {
+		t.Fatalf("footer is %d rows, want %d — the one frameless content line", got, footerHeight)
+	}
+
+	flat := ansiPattern.ReplaceAllString(view, "")
+	for _, glyph := range []string{"├", "┤", "╰", "╯", "│", "─", string(rune(0x2501))} {
+		if strings.Contains(flat, glyph) {
+			t.Errorf("footer row carries the border glyph %q; the box closes its own frame now: %q", glyph, flat)
+		}
+	}
+	if got, want := leadingColumns(t, view), len(bodyIndent); got != want {
+		t.Errorf("footer opens in column %d, want the %d-column body lead the status line leads with", got, want)
+	}
+	if got := m.th.measure.Width(view); got != m.width {
+		t.Errorf("footer renders %d columns, want the full %d — one unbroken black field", got, m.width)
+	}
+	if margin := m.th.footerText.Render(bodyIndent); !strings.HasSuffix(view, margin) {
+		t.Errorf("footer does not end with the styled %q margin: %q", bodyIndent, view)
+	}
+	if want := modeLabel(m.opts.Mode) + bodyIndent; !strings.HasSuffix(flat, want) {
+		t.Errorf("footer row = %q, want it to end %q — the column the gauge above it ends in", flat, want)
 	}
 }
 
@@ -2012,9 +2037,43 @@ func TestTopRuleHairlineRow(t *testing.T) {
 		t.Errorf("input box top border at row %d, want %d (▔ rule, then the status line, then the box)", boxTop, ruleRow+2)
 	}
 
-	want := m.height - ruleHeight - statusHeight - gapHeight - (m.inputRows() + 1) - footerHeight
+	want := m.height - topRuleHeight - statusHeight - gapHeight -
+		(m.inputRows() + inputBorderRows) - footerHeight - bottomRuleHeight
 	if got := m.viewport.Height(); got != want {
-		t.Errorf("viewport height = %d, want %d (window less rule, status, gap, input box, footer)", got, want)
+		t.Errorf("viewport height = %d, want %d (window less both rules, status, gap, input box, footer)", got, want)
+	}
+}
+
+// TestBottomRuleHairlineRow is the top rule's mirror. Losing the footer's ╰──╯ left the workdir
+// line flush against the terminal's last row with nothing under it, so a ▁ hairline — the ▔
+// INVERTED, upper one-eighth block against lower — closes the screen below it. The two are one
+// role and are asserted as one: the same recessive style, the same full width, and the frame's
+// LAST row is the bottom one, with the footer directly above it and no border glyph between them.
+func TestBottomRuleHairlineRow(t *testing.T) {
+	m := newTestModel(t)
+
+	if got, want := ansi.Strip(m.bottomRule()), strings.Repeat("▁", m.width); got != want {
+		t.Errorf("bottom rule = %q, want %d ▁ runes spanning the window", got, m.width)
+	}
+	// One role, two positions: a hairline that recedes differently at one end would read as chrome
+	// of two different weights rather than as one bracket around the bottom section.
+	if top, bot := m.th.hairline.Render("x"), m.th.hairline.Render("x"); top != bot {
+		t.Errorf("the two hairlines do not share a style: %q vs %q", top, bot)
+	}
+
+	lines := strings.Split(plain(m.View()), "\n")
+	last := len(lines) - 1
+	if got := lines[last]; strings.TrimRight(got, " ") != strings.Repeat("▁", m.width) {
+		t.Errorf("frame's last row = %q, want the full-width ▁ hairline", got)
+	}
+	// The footer is the row directly above it — the hairline closes the chrome, it does not re-box
+	// the footer, so nothing bordered may creep back in between the two.
+	footer := lines[last-1]
+	if strings.ContainsAny(footer, "╰╯│├┤") {
+		t.Errorf("footer row = %q, want it frameless under the hairline", footer)
+	}
+	if !strings.Contains(footer, modeLabel(m.opts.Mode)) {
+		t.Errorf("row above the bottom hairline = %q, want the footer's content line", footer)
 	}
 }
 

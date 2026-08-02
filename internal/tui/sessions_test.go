@@ -819,8 +819,9 @@ func browserWithSessions(n int) sessionBrowser {
 }
 
 // smallestOverlayWindow is the shortest terminal on which a boxed overlay and the frame's fixed
-// chrome can both fit: the gap row, the ▔ hairline, the status line, the input box (a border row
-// and one text row) and the three footer rows come to 8, and the pane's own irreducible chrome —
+// chrome can both fit: the gap row, the ▔ hairline, the status line, the input box (two border rows
+// and one text row), the footer's single line and the ▁ hairline under it come to 8, and the pane's
+// own irreducible chrome —
 // two borders, the title, the hint — to 4. Every pane shrinks to that four now, prose-bearing ones
 // included: a pane out of budget shows no body rather than the one row a `max(1, …)` floor used to
 // keep for it, which was five rows in a window with four. Below this no arrangement fits, so the
@@ -1037,7 +1038,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 							// The footer is the last thing View stacks, so its presence is the proof nothing was
 							// pushed past the last row.
 							if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-								t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+								t.Errorf("last frame row is blank, want the ▁ bottom-edge hairline:\n%s", plainFrame)
 							}
 							// The accounting properties below are about a pane that IS drawn. With the box at
 							// its one-row floor every pane fits every window it can be drawn in at all, so
@@ -1091,8 +1092,8 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 //     the fit is the chrome's alone.
 //   - Below the floor the frame is EXACTLY its floor and never a row more, whatever is open and
 //     however long the draft. That is the documented outcome (layout.md, "the frame's own floor"):
-//     the box's one content row, its border, the gap, the hairline, the status line and the footer
-//     are each something the layout forbids giving way, so there is nothing left to shed — and what
+//     the box's one content row, its two borders, the gap, both hairlines, the status line and the
+//     footer's line are each something the layout forbids giving way, so nothing is left to shed — and what
 //     the frame must not do is go on GROWING under a window it already does not fit, which is what a
 //     draft, a queue or a pane did before the allocation reached them.
 func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
@@ -1146,7 +1147,7 @@ func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
 							}
 							last := ansiPattern.ReplaceAllString(strings.Split(content, "\n")[rows-1], "")
 							if strings.TrimSpace(last) == "" {
-								t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+								t.Errorf("last frame row is blank, want the ▁ bottom-edge hairline:\n%s", plainFrame)
 							}
 						})
 					}
@@ -1271,7 +1272,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 								t.Errorf("the draft itself changed to %q; only the rows it is DRAWN on may give way", got)
 							}
 							if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-								t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+								t.Errorf("last frame row is blank, want the ▁ bottom-edge hairline:\n%s", plainFrame)
 							}
 						})
 					}

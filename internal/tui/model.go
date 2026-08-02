@@ -2412,34 +2412,41 @@ func (m Model) upstreamBlockNote() string {
 
 // The fixed chrome heights below the transcript. One blank gap row separates the transcript
 // from the chrome (layout.md); the ▔ top-edge hairline is one row; the status line is one row;
-// the footer is three rows (its top divider, its content line, its bottom rule). The input box
-// and the viewport take what remains — the box grows with its content, the viewport gets the rest.
+// the footer is ONE frameless content line — it has no divider above it and no bordered rule below
+// it, because the prompt box closes its own frame; and the ▁ bottom-edge hairline is one row,
+// closing the screen under the footer. The two hairlines are one role in two positions, which is
+// why they are the same height under two names rather than one shared constant: what stands ABOVE
+// the input box and what stands BELOW it are different questions, and the mouse mapping asks the
+// second one (mouse.go). The input box and the viewport take what remains — the box grows with its
+// content, the viewport gets the rest.
 const (
-	ruleHeight   = 1 // the ▔ top-edge hairline that caps the bottom chrome, above the status line
-	statusHeight = 1
-	gapHeight    = 1
-	footerHeight = 3 // divider + content + bottom rule
+	topRuleHeight    = 1 // the ▔ top-edge hairline that caps the bottom chrome, above the status line
+	statusHeight     = 1
+	gapHeight        = 1
+	footerHeight     = 1 // one frameless content line, the status line's posture one row below the box
+	bottomRuleHeight = 1 // the ▁ bottom-edge hairline that closes the screen under the footer
 
 	// frameFixedRows is what every frame spends below the transcript whatever is open: the blank gap
-	// row, the hairline, the status line and the footer. The input box sits on top of that (its
-	// content rows plus its own top border) and the viewport gets what is left (layout).
-	frameFixedRows = gapHeight + ruleHeight + statusHeight + footerHeight
+	// row, both hairlines, the status line and the footer. The input box sits on top of that (its
+	// content rows plus its own two border rows) and the viewport gets what is left (layout).
+	frameFixedRows = gapHeight + topRuleHeight + statusHeight + footerHeight + bottomRuleHeight
 
 	scrollbarWidth = 1 // the transcript's right-hand scroll-bar gutter (always reserved)
 
 	minInputRows    = 1
 	maxInputRows    = 10 // past this the textarea scrolls internally rather than growing further
-	inputBorderRows = 1  // the box's own top border (its bottom edge is the footer's divider)
+	inputBorderRows = 2  // the box's own top AND bottom borders — the frame it closes itself
 	borderFrame     = 2  // the input border's left + right columns
 	inputPadding    = 2  // the input border's left + right padding columns
 
 	// frameFloorRows is the shortest frame Apogee can compose: the blank gap row, the ▔ hairline,
-	// the status line, the input box at its one-row floor plus its top border, and the three footer
-	// rows. Every one of them is something layout.md forbids giving way — the box and the footer are
-	// the frame's floor, and the box keeps one content row so what the human is typing is on the
-	// screen — so there is nothing left to shed below this and the number is a FLOOR, not a budget.
-	// The transcript is already gone at it (transcriptBudget reaches zero), which is what makes the
-	// arithmetic tight: at exactly this many rows the frame is the chrome and nothing else.
+	// the status line, the input box at its one-row floor plus its top and bottom borders, the
+	// footer's single line, and the ▁ hairline under it — eight rows. Every one of them is something
+	// layout.md forbids giving way — the box and the footer are the frame's floor, and the box keeps
+	// one content row so what the human is typing is on the screen — so there is nothing left to shed
+	// below this and the number is a FLOOR, not a budget. The transcript is already gone at it
+	// (transcriptBudget reaches zero), which is what makes the arithmetic tight: at exactly this many
+	// rows the frame is the chrome and nothing else.
 	//
 	// Below it the frame composes its floor and the terminal has fewer rows than that — the one
 	// window size at which the frame does not fit, stated in layout.md rather than papered over with
@@ -2451,10 +2458,10 @@ const (
 // layout sizes the viewport and input box to the current window. The input box auto-grows with its
 // content, clamped by its own taste and by what the frame can pay for (draftRowsCeiling), and the
 // viewport gets the height left after the gap row, the ▔ top-edge hairline, the status row, the
-// input box (its content rows plus a top border — the divider below it belongs to the footer), and
-// the footer. A floor of one row keeps the WIDGET valid on a tiny window; the frame spends
-// transcriptBudget instead, which does not have that floor and so cannot compose a row the window
-// never paid for.
+// input box (its content rows plus its own top and bottom borders), the footer's single line and the
+// ▁ bottom-edge hairline under it. A floor of one row keeps the WIDGET valid on a tiny window; the
+// frame spends transcriptBudget instead, which does not have that floor and so cannot compose a row
+// the window never paid for.
 func (m *Model) layout() {
 	m.viewport.SetWidth(max(1, m.width-scrollbarWidth)) // reserve the scroll-bar gutter column
 	m.input.SetWidth(m.inputInnerWidth())
@@ -2471,8 +2478,8 @@ func (m *Model) layout() {
 	m.refreshViewport()
 }
 
-// inputBoxRows is the screen rows the input box occupies: its content rows and its own top border
-// (it has no bottom edge — the footer's top rule is the shared divider).
+// inputBoxRows is the screen rows the input box occupies: its content rows and the two border rows
+// of the rounded frame it closes itself (╭─╮ above, ╰─╯ below).
 func (m Model) inputBoxRows() int {
 	return m.input.Height() + inputBorderRows
 }
@@ -2715,12 +2722,13 @@ func (m Model) transcriptRows() int {
 }
 
 // frameBlocks is the most blocks one frame stacks — the transcript, the five overlays, the blank
-// gap row, the ▔ hairline, the status line, the input box, and the footer — so the frame's slice is
-// allocated once at its worst case.
-const frameBlocks = 11
+// gap row, the ▔ hairline, the status line, the input box, the footer, and the ▁ hairline — so the
+// frame's slice is allocated once at its worst case.
+const frameBlocks = 12
 
 // View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
-// the bordered input box, and the footer bar, filling the alternate screen (layout.md). Before
+// the bordered input box, the footer line and the ▁ bottom-edge hairline, filling the alternate
+// screen (layout.md). Before
 // the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
 // approval or ask prompt, when one is pending, sits between the transcript and the blank line, as
 // do the /sessions browser and the picker; the autocomplete dropdown and the staged-interjection
@@ -2765,7 +2773,7 @@ func (m Model) View() tea.View {
 	}
 	// The single blank line between chat content and the bottom chrome (layout.md), then the
 	// ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay (when
-	// open), the input box, and the footer.
+	// open), the input box, the footer, and the ▁ hairline closing the screen under it.
 	rows = append(rows, "", m.topRule(), m.statusLine())
 	if ov.dropdown != "" {
 		rows = append(rows, ov.dropdown)
@@ -2775,7 +2783,7 @@ func (m Model) View() tea.View {
 	if ov.queued != "" {
 		rows = append(rows, ov.queued)
 	}
-	rows = append(rows, m.inputView(), m.footerView())
+	rows = append(rows, m.inputView(), m.footerView(), m.bottomRule())
 
 	v := tea.NewView(m.joinFrame(rows))
 	v.AltScreen = true
@@ -2998,12 +3006,12 @@ func (m Model) joinFrame(blocks []string) string {
 	return strings.Join(lines, "\n")
 }
 
-// inputView renders the textarea inside the rounded, dark-gray, black-bg border (no bottom
-// edge — the footer's top rule is the shared divider). The style's Width sets the box's total
-// width including the border and padding, so the box always spans the window and the footer
-// below it aligns. The ▔ top-edge hairline that caps the bottom chrome is a separate row above
-// the status line (topRule), not part of this box, so the status line reads as sitting directly
-// above the input box.
+// inputView renders the textarea inside the rounded, dark-gray, black-bg border, a CLOSED frame:
+// the box draws its own ╰─╯ bottom edge, and the footer below it is a frameless line rather than
+// the bottom half of the box's chrome. The style's Width sets the box's total width including the
+// border and padding, so the box always spans the window and the footer below it aligns. The
+// ▔ top-edge hairline that caps the bottom chrome is a separate row above the status line
+// (topRule), not part of this box, so the status line reads as sitting directly above the box.
 //
 // Two overlays compose onto the widget's own block, and the ORDER is the contract: accentTokens
 // paints the resolving /skill and @file tokens first (inputaccent.go), then highlightInput paints
@@ -3061,44 +3069,54 @@ func (m Model) inputElisionEdge(hidden int) string {
 }
 
 // topRule renders the full-width ▔ hairline that marks the top edge of the bottom chrome: a
-// dim-gray hairline on a black field (topDivider, dimmer than the footer's chromeRule so it
-// recedes). It sits directly below the transcript's one blank gap row and above the status line
-// (layout.md), capping the whole bottom section while the status line stays directly above the
-// input box.
+// dim-gray hairline on a black field (hairline, dimmer than the prompt box's own chromeRule
+// border so it recedes). It sits directly below the transcript's one blank gap row and above the
+// status line (layout.md), capping the whole bottom section while the status line stays directly
+// above the input box.
 func (m Model) topRule() string {
-	return m.th.topDivider.Render(strings.Repeat("▔", m.width))
+	return m.th.hairline.Render(strings.Repeat("▔", m.width))
 }
 
-// footerView renders the footer bar: a thin top divider (the shared border with the input box
-// above), the content line, and a thin bottom rule. The content shows the host alias, model,
-// and workspace directory on the left and the autonomy mode on the right — string(Mode), so a
-// later rung (ModeAllowEdits, P3.4) appears for free. A window too narrow for a bordered bar
-// renders nothing rather than overflowing.
+// bottomRule renders the full-width ▁ hairline that closes the screen under the footer: the top
+// rule INVERTED — ▔ is the upper one-eighth block and ▁ the lower one — in the same recessive
+// dim-gray-on-black role, so the bottom chrome is bracketed by one hairline above the status line
+// and its mirror below the footer (layout.md).
+//
+// It is what the footer's ╰──╯ rule left behind. Losing the footer's frame put the workdir line
+// flush against the terminal's last row with nothing under it, which read as unfinished rather
+// than as light; a hairline closes the screen without re-boxing the footer, because a rule is not
+// a border — it belongs to the chrome as a whole, not to the one row above it.
+func (m Model) bottomRule() string {
+	return m.th.hairline.Render(strings.Repeat("▁", m.width))
+}
+
+// footerView renders the footer: ONE frameless line below the prompt box. It used to be three
+// rows — a ├──┤ divider standing in for the box's missing bottom edge, the content line between
+// two │ bars, and a ╰──╯ rule closing the whole unit — and the box now closes its own frame
+// instead, so the divider has nothing to join and the bottom rule nothing to close (layout.md).
+// What is left is the content line itself, which is why this is a one-line function rather than
+// a composition: the row IS the footer.
 func (m Model) footerView() string {
-	w := m.width
-	if w < 3 {
-		return ""
-	}
-	rule := func(left, right string) string {
-		return m.th.chromeRule.Render(left + strings.Repeat("─", w-2) + right)
-	}
-	return lipgloss.JoinVertical(lipgloss.Left,
-		rule("├", "┤"),
-		m.footerContent(w),
-		rule("╰", "╯"),
-	)
+	return m.footerContent(m.width)
 }
 
-// footerContent composes the footer's content line: host ✦ model ✦ workdir on the left, the mode
-// marker on the right, between two dark-gray │ borders on a black field. The mode marker takes
-// its own per-mode colour (modeColor), so the segments are styled independently and laid out by
-// hand — mirroring statusLine — rather than rendered under one style, which would let the mode's
+// footerContent composes the footer's single line: host ✦ model ✦ workdir on the left, the mode
+// marker on the right, over one unbroken black field. It takes the STATUS LINE's posture, one row
+// below the box rather than one row above it — a bodyIndent lead, the black field filled to the
+// full window width, and the mode marker ending bodyIndent short of the window edge, the very
+// column the gauge above it ends in (layout.md, "The status line's right slot"). The mode marker
+// takes its own per-mode colour (modeColor), so the segments are styled independently and laid out
+// by hand — mirroring statusLine — rather than rendered under one style, which would let the mode's
 // colour reset bleed the black field. The host falls back to the endpoint when no alias is
 // configured, and every segment nothing has named is dropped with its separator (nonEmpty).
 //
 // The workdir closes the run rather than opening it because the line reads outward-in — the server
 // this session talks to, the model it talks to there, and last the local directory it is pointed
 // at, the one fact of the three that no upstream state can change.
+//
+// A window too narrow to hold both ends keeps today's shape: the left info truncates with an
+// ellipsis and the mode marker drops WHOLE, because a clipped mode word would name a blast radius
+// the session is not in.
 func (m Model) footerContent(w int) string {
 	segments := append([]string{hostDisplay(m.opts)}, m.upstreamSegments()...)
 	info := strings.Join(nonEmpty(append(segments, m.workdir)...), " "+glyphAssistant+" ")
@@ -3106,28 +3124,28 @@ func (m Model) footerContent(w int) string {
 	if m.hb.offline {
 		offline = " " + glyphAssistant + " " + offlineLabel
 	}
-	mode := modeLabel(m.opts.Mode)
-	bar := m.th.chromeRule.Render("│")
-	field := w - 2 // content columns between the two │ borders (footerView guards w >= 3)
+	// footerText keeps the black background; only the foreground swaps to the mode's colour. The
+	// trailing bodyIndent is the slot's own margin, not the marker's — the same seam statusLine
+	// appends its right slot's margin at.
+	mode := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(modeLabel(m.opts.Mode)) +
+		m.th.footerText.Render(bodyIndent)
 
-	// One-column margins inside the borders; a black-bg gap justifies the mode marker right.
-	gap := field - 2 - m.th.measure.Width(info) - m.th.measure.Width(offline) - m.th.measure.Width(mode)
+	gap := w - m.th.measure.Width(bodyIndent) - m.th.measure.Width(info) -
+		m.th.measure.Width(offline) - m.th.measure.Width(mode)
 	if gap < 1 {
-		// Too narrow for both segments: keep the left info, truncate to the field, pad black.
-		body := m.th.measure.Truncate(" "+info+offline, field, "…")
-		body += strings.Repeat(" ", max(0, field-m.th.measure.Width(body)))
-		return bar + m.th.footerText.Render(body) + bar
+		// Too narrow for both ends: keep the left info, truncate to the window, pad the field black.
+		body := m.th.measure.Truncate(bodyIndent+info+offline, max(0, w), "…")
+		body += strings.Repeat(" ", max(0, w-m.th.measure.Width(body)))
+		return m.th.footerText.Render(body)
 	}
-	left := m.th.footerText.Render(" " + info)
+	left := m.th.footerText.Render(bodyIndent + info)
 	if offline != "" {
 		// Styled independently, like the mode marker: the segment carries the error tone on the
 		// footer's own black field, so the state reads at a glance without recolouring the line.
 		left += m.th.footerText.Foreground(colError).Render(offline)
 	}
 	fill := m.th.footerText.Render(strings.Repeat(" ", gap))
-	// footerText keeps the black background; only the foreground swaps to the mode's colour.
-	right := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(mode) + m.th.footerText.Render(" ")
-	return bar + left + fill + right + bar
+	return left + fill + mode
 }
 
 // The two words the footer says about the Upstream that are not facts about a model.

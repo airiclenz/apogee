@@ -54,9 +54,9 @@
 │ accomodate the bigger message. Clicking into this field should position the cursor  │
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│ host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                    ask-before │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
+  host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                    ask-before
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 
 ---
 
@@ -158,14 +158,15 @@ a quieter statement of the fact; it is a false one.
 
 **The frame's own floor is eight rows, and below it the frame is its floor and nothing more.** With
 the session area gone the frame is one blank gap row, the `▔` hairline, the status line, the input
-box (its top border and its one content row) and the footer's three — eight rows, every one of them
-something the rules above forbid giving way. At exactly eight the frame is that chrome and it fits.
-**Below eight it does not fit, and what it does there is deliberate:** it composes its floor and no
-more. A long draft, a queued message or an open pane cannot make it grow past eight on a seven-row
-terminal any more than on an eight-row one, so the overflow is bounded at one row per row the
-terminal is short and never compounds. Clipping the frame to the window instead was considered and
-rejected: it would make "the frame never exceeds the terminal" trivially true at every size, and
-the next real overflow would then arrive silently instead of failing a test.
+box (its two borders and its one content row), the footer's single line and the `▁` hairline under
+it — eight rows, every one of them something the rules above forbid giving way. At exactly eight the
+frame is that chrome and it fits. **Below eight it does not fit, and what it does there is
+deliberate:** it composes its floor and no more. A long draft, a queued message or an open pane
+cannot make it grow past eight on a seven-row terminal any more than on an eight-row one, so the
+overflow is bounded at one row per row the terminal is short and never compounds. Clipping the frame
+to the window instead was considered and rejected: it would make "the frame never exceeds the
+terminal" trivially true at every size, and the next real overflow would then arrive silently
+instead of failing a test.
 
 **A pane that gives way entirely leaves its fact on the status line.** That is the band's licence
 for disappearing — the `N queued` readout carries the count — and the status line therefore owes
@@ -506,6 +507,24 @@ two columns of room the phrase goes whole, separator and all, rather than readin
 workdir`, the sketch's `host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee` — and the autonomy
 mode on the right. The host falls back to the endpoint's own host when no alias is configured, and
 any segment nothing has named is dropped with its separator.
+
+**What it is.** ONE frameless row below the prompt box, which closes its own `╰─╯` frame. The
+footer used to be three rows of chrome — a `├──┤` divider standing in for the edge the box was
+missing, the content between two `│` bars, and a `╰──╯` rule under it — and it now takes the
+**status line's** posture instead, one row below the box rather than one row above it: the two-column
+`bodyIndent` lead, one unbroken black field to the window's full width, and the mode marker ending
+`bodyIndent` short of the edge — the same column the gauge ends in (above). A window too narrow for
+both ends keeps the older shape: the left info truncates with an ellipsis and the mode drops whole,
+because a clipped mode word would name a blast radius the session is not in.
+
+**And the hairline under it.** The footer is the last thing the frame *says*, but it is not the last
+row: a `▁` hairline closes the screen beneath it — the `▔` at the top of the bottom chrome
+**inverted** (upper one-eighth block against lower), in the same recessive dim tone, so the whole
+bottom section is bracketed by one rule above the status line and its mirror below the footer. It is
+what the footer's old `╰──╯` left behind, and it is deliberately a RULE rather than a border: it
+belongs to the chrome as a whole, not to the one row above it, which is why it closes the screen
+without re-boxing the footer. Without it the workdir line sat flush against the terminal's last row
+with nothing under it, and read as cut off rather than as light.
 
 **Where the window went.** The context window used to close that run, and it does not any more:
 the status line's gauge states it, beside what the conversation has actually spent
