@@ -278,6 +278,53 @@ is what keeps them from reading as one run.
 
 ---
 
+## Collapsed and expanded blocks
+
+**Two states, and the block is the unit.** Every block is either **collapsed** or **expanded** —
+never "folded": the fold is the Update loop's event act (ADR 0011) and the emergency fold is the
+overflow recovery (ADR 0018); neither word belongs to presentation. Collapsed *is* the compact
+shape specced above — nothing about that shape changes; expanded differs in exactly one way: the
+body renders in full. Truncation is thereby a **render-time act on retained facts**: the entry
+keeps every body line, and the collapsed caps — free-form output's first line plus its
+`… +N more lines` remainder, the diff body's cap with its remainder — apply at paint, not at
+build. Expanded shows everything, uncapped; the remainder markers exist only in the collapsed
+paint. A group is the degenerate case: its calls carry no bodies (that is what made them
+groupable), so both states paint identically and the rule never mentions groups.
+
+**Collapsed is the default, always** — including a call still in flight and a sub-agent run still
+working. Only a click changes a block's state, so nothing ever expands or collapses by itself: a
+block opened mid-flight streams its body live and stays open when the result lands. The state is
+the view's alone — it is never encoded with the transcript, a resumed session paints everything
+collapsed, and `/clear` forgets it with everything else.
+
+**What a click means.** A motionless click — press and release in the same cell — on a block's
+**header line** toggles that block; on a `… +N more lines` marker it expands the block the body
+belongs to. Everywhere else in the transcript a click keeps its selection meaning, and any drag
+is a drag-select wherever it starts, header lines included: motion is what arbitrates, exactly as
+it already separates click-to-position from drag in the prompt. Keyboard toggling is deliberately
+absent, on the same precedent that keeps transcript selection mouse-only; a block-cursor mode is
+its own future feature. After a toggle the clicked header keeps its screen row — content grows or
+shrinks *below* it, and the line under the cursor never moves.
+
+**A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
+block: collapsed, it stands alone and the whole railed span beneath it — every inner block, rail
+and all — is elided. Its summary line carries the run's gist in two tempi: while the run works,
+`N tool calls · ` plus the same activity phrase the status line shows for the run (`reading
+main.go`), ticking as inner calls land; once the report arrives, `N tool calls · ` plus the
+report's first line. The count is **transitive** — every call in the span counts, whatever its
+depth — so one number says how much work happened in there, at every nesting level by the same
+rule. Expanding the run reveals the inner blocks *in their own states*, each collapsed unless it
+was itself clicked open: the cascade is this one rule applied at every depth, not a special case.
+
+**The live star.** While a block still contains an open call — a call whose result has not
+landed, or a run whose report has not — its header glyph blinks: `✦` and `✧` alternate on the
+spinner's own tick, so the transcript carries no timer of its own. A selection spanning that
+header drops when the glyph flips, which is the keep-if-unchanged rule doing its ordinary job on
+a line that changed. When the result lands the glyph settles to `✦` and the block repaints once,
+final.
+
+---
+
 ## Markdown tables in assistant text
 
 **When a table is a table.** A pipe table in an answer renders as a table only once its delimiter
