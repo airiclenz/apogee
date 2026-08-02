@@ -654,6 +654,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Plan mode no longer offers the model two tools it then refuses.** In Plan, `git_diff_range` and
+  `diagnostics` were on the menu the model is shown — both honestly declare that they only read —
+  but both shell out to a program (the system `git`, the Go toolchain), and a call that leaves the
+  process is exactly what Plan does not allow, so the call came back refused. A small model reads
+  that as a broken tool and tries again, or works around it; either way the Turn is spent on
+  nothing. The menu and the refusal now decide from the same fact — what a tool actually reaches,
+  not what it says about itself — so Plan shows only the tools it will really run: reading files,
+  listing, searching, diffing what is already on disk, asking you a question, showing you a
+  document, and delegating to a sub-agent (which inherits Plan, so it is read-only too). Nothing
+  else changes: on every other rung the model still sees the whole toolbox, and no tool's
+  permission moved.
+
+  See the 2026-08-02 amendment to
+  [the confinement execution contract](docs/design/confinement-execution-contract.md) §4.
+
 - **Clicking a pop-up pane no longer copies text you cannot see, and a short window no longer
   pushes the input box off the screen.** The panes that open above the prompt — the approval and
   ask prompts, `/sessions`, `/model`, `/server` — are painted over the bottom of the chat area, but

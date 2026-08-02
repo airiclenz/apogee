@@ -228,9 +228,10 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		"terminal":    false,
 		"python_exec": false,
 		// Git tools (P3.9): branch/commit mutate the repo (write-capable); diff-range is a
-		// harmless read. Its read-only DECLARATION is what keeps it in Plan mode's menu — it
-		// no longer decides the class, because the subprocess marker outranks it (§4 amended
-		// 2026-07-26), so the call itself is confined/gated as a subprocess.
+		// harmless read. Its read-only DECLARATION is an honest statement about the tool, but it
+		// decides neither the class nor the Plan menu, because the subprocess marker outranks it
+		// (§4 amended 2026-07-26, menu 2026-08-02): the call is confined/gated as a subprocess
+		// and Plan does not offer it.
 		"git_branch":     false,
 		"git_commit":     false,
 		"git_diff_range": true,

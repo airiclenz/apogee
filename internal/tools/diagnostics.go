@@ -27,14 +27,15 @@ import (
 // clear "no diagnostics available" result when none is present (§3a — an
 // enhancement, never a hard dependency, never an error).
 //
-// The tool is ReadOnly() — it only inspects, never mutates — which keeps it in Plan
-// mode's menu. It is also a SubprocessTool (domain.SubprocessTool) because the go
-// vet / linter half shells out, and THAT marker is what classifies the call: the
-// unfakeable marker outranks the self-declaration (confinement-execution-contract
-// §4, amended 2026-07-26), so the call takes the subprocess row — confined in Auto
-// (the shared runSubprocess honours the handle the disposition installs), gated
-// below it — exactly like git_diff_range (P3.9). It is stateless across Turns (ADR
-// 0008): a fresh parse / a fresh process per call, no persistent state.
+// The tool is ReadOnly() — it only inspects, never mutates. It is also a
+// SubprocessTool (domain.SubprocessTool) because the go vet / linter half shells
+// out, and THAT marker is what classifies the call: the unfakeable marker outranks
+// the self-declaration (confinement-execution-contract §4, amended 2026-07-26), so
+// the call takes the subprocess row — confined in Auto (the shared runSubprocess
+// honours the handle the disposition installs), gated below it, and (since
+// 2026-08-02) neither offered nor run in Plan, because the Plan menu keys on that
+// same class — exactly like git_diff_range (P3.9). It is stateless across Turns
+// (ADR 0008): a fresh parse / a fresh process per call, no persistent state.
 
 // vetTimeout bounds a single go vet (or external linter) invocation. Vetting a
 // single package is local and quick, so a short ceiling is ample and a hung
@@ -76,9 +77,10 @@ func NewDiagnostics(root string) *Diagnostics {
 	return &Diagnostics{toolSpec: diagnosticsSpec, root: root}
 }
 
-// ReadOnly reports that diagnostics performs no writes — it only inspects — which is
-// what keeps it in Plan mode's tool menu. It is NOT what classifies the call: the
-// Subprocess marker below outranks this declaration.
+// ReadOnly reports that diagnostics performs no writes — it only inspects — an honest
+// statement about the tool, read by self-regulation's read/write tally. It is NOT what
+// classifies the call, and (since 2026-08-02) NOT what the Plan menu filters on: the
+// Subprocess marker below outranks this declaration in both.
 func (t *Diagnostics) ReadOnly() bool { return true }
 
 // Subprocess reports that diagnostics may launch an OS subprocess (go vet / an

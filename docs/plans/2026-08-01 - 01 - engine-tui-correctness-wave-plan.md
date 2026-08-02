@@ -289,7 +289,26 @@ mapping and View agree on the boundary row (table over overlay heights).
 
 **Commit:** `fix(tui): mouse mapping and overlay rendering share one frame-row derivation`
 
-## 8. One tool classification: the Plan menu keys on the ladder's fact
+## 8. One tool classification: the Plan menu keys on the ladder's fact — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** one deviation from the item's literal text — `toolClass`/`classifyTool` were
+NOT moved into `internal/domain`. That move is not available: `internal/tools` imports
+`internal/domain`, so a `domain` that classifies would close an import cycle, and 2 of the 5 markers
+(`workspaceScopedWriter`, `urlFilteredNetworker`) are UNEXPORTED interfaces in `internal/tools` whose
+whole security value is that no type outside that package can satisfy them (ADR 0012 D1, contract §3).
+Relocating them to `domain` would mean either exporting them (forgeable — a self-declaration again,
+the exact failure §4's 2026-07-26 amendment closed) or making them embeddable domain structs (forgeable
+by any package in the module). The architecture review's one-line "move `toolClass` into `domain` beside
+its markers" reads the markers as domain-owned; three of five are, two cannot be. Since BOTH consumers —
+the menu filter and the ladder — live in `internal/agent`, one source of truth needs no relocation at
+all: the classification stays in `resolution.go` and a new `planAdmits(tool)` predicate is the single
+expression both `resolveLadder`'s Plan row and `toolMenu` key on. Second, smaller deviation:
+`toolMenu` now reads `a.Mode()` ONCE before its loop instead of per tool — the filter is being rewritten
+on that line anyway, and a live mid-build tighten could otherwise compose a menu from two modes. Also
+updated: contract §4 fn 2 (rewritten as resolved) plus a dated §4 amendment, `technical-design.md`'s
+tool row, the four in-code comments that said the declaration "keeps it in Plan's menu"
+(`git.go`, `diagnostics.go`, `registry.go`, `resolution.go`), and a CHANGELOG `Fixed` entry; no version
+identifier touched. Suggested commit scope narrows to `fix(agent)` — no `domain` file changes.
 
 **What:** Review smaller-finding 3 + audit action-order item 7 (second half): the
 Resolution's `classifyTool` consults 5 markers across 3 packages, while the Plan tool-menu

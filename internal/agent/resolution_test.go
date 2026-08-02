@@ -127,9 +127,9 @@ func TestResolve_LadderTable(t *testing.T) {
 		{"3p/unknown-mode", tpw, badMode, true, true, true, resolveGate, "write", security.AuditAllowed},
 
 		// read-only DECLARATION + subprocess MARKER (git_diff_range / diagnostics) — the marker
-		// wins in all five columns: Plan refuses it (the menu still offers it, the ladder does
-		// not run it), the middle rungs gate it, Auto confines it (or gates it when the caps are
-		// insufficient), and "I am the sandbox" still runs everything.
+		// wins in all five columns: Plan refuses it (and since 2026-08-02 the menu does not offer
+		// it either — planmenu_test.go), the middle rungs gate it, Auto confines it (or gates it
+		// when the caps are insufficient), and "I am the sandbox" still runs everything.
 		{"RO+subproc/plan", roSub, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
 		{"RO+subproc/ask-before", roSub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
 		{"RO+subproc/allow-edits", roSub, domain.ModeAllowEdits, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},

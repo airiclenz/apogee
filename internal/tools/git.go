@@ -23,8 +23,9 @@ import (
 // fs-confinement is unavailable ("confine if you can, gate if you can't").
 // git_diff_range also declares ReadOnly(), but the unfakeable subprocess marker
 // outranks that self-declaration (confinement-execution-contract §4, amended
-// 2026-07-26) — the declaration only keeps it in Plan mode's menu, where a call
-// still refuses. All three are stateless across Turns (ADR 0008 — a fresh git
+// 2026-07-26) — and since 2026-08-02 the Plan tool menu keys on the same class the
+// ladder does, so git_diff_range is neither offered nor run in Plan. All three are
+// stateless across Turns (ADR 0008 — a fresh git
 // process per call), path-scope their inputs to the workspace root, and run with
 // a scrubbed, allowlisted environment so a stray inherited variable cannot change
 // git's behaviour.
@@ -449,8 +450,9 @@ func NewGitDiffRange(root string) *GitDiffRange {
 }
 
 // ReadOnly reports that git_diff_range performs no writes (a diff is harmless
-// inspection), which is what keeps it in Plan mode's tool menu. It is NOT what
-// classifies the call: the Subprocess marker below outranks this declaration.
+// inspection) — an honest statement about the tool, read by self-regulation's
+// read/write tally. It is NOT what classifies the call, and (since 2026-08-02) NOT
+// what the Plan menu filters on: the Subprocess marker below outranks it in both.
 func (t *GitDiffRange) ReadOnly() bool { return true }
 
 // Subprocess reports that git_diff_range launches an OS subprocess (the system

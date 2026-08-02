@@ -827,20 +827,30 @@ func (a *Agent) budget() domain.Budget {
 }
 
 // toolMenu builds the model's tool menu from the resolved registry (nil ⇒ no tools). In
-// Plan mode it offers only read-only tools — the model is never shown a write it cannot
-// run (ADR: Plan is read-only).
+// Plan mode it offers only the tools Plan can actually run — the model is never shown a call
+// it cannot make (ADR: Plan is read-only).
+//
+// The filter keys on planAdmits (resolution.go) — the SAME blast-radius classification the
+// ladder's Plan row keys on — not on the bare ReadOnly() self-declaration it read until
+// 2026-08-02. A declaration-based filter offered git_diff_range and diagnostics (read-only
+// declaration + OS-subprocess marker) in Plan and the ladder refused them on the call; keying
+// both on one fact means the menu can never offer what the ladder refuses (contract §4 fn 2).
+//
+// The mode is read ONCE, before the loop: a mid-build tighten must not compose a menu from two
+// different modes (Mode() is live — agent.go).
 func (a *Agent) toolMenu() []domain.ToolDef {
 	if a.tools == nil {
 		return nil
 	}
+	planMode := a.Mode() == domain.ModePlan
 	all := a.tools.All()
 	menu := make([]domain.ToolDef, 0, len(all))
 	for _, t := range all {
-		// Plan mode offers only read-only tools — EXCEPT the sub_agent recursion point, which
-		// is bounded one level down (a Plan sub-agent inherits Plan, so its children are
-		// read-only too). It is not a leaf write, so hiding it would wrongly deny a Plan-mode
-		// parent the ability to delegate read/research work (ADR 0013).
-		if a.Mode() == domain.ModePlan && !domain.IsReadOnly(t) && t.Name() != tools.SubAgentToolName {
+		// EXCEPT the sub_agent recursion point, which is bounded one level down (a Plan
+		// sub-agent inherits Plan, so its children are read-only too). It is not a leaf tool at
+		// all — resolve() Delegates it before the ladder — so hiding it would wrongly deny a
+		// Plan-mode parent the ability to delegate read/research work (ADR 0013).
+		if planMode && !planAdmits(t) && t.Name() != tools.SubAgentToolName {
 			continue
 		}
 		menu = append(menu, domain.ToolDef{

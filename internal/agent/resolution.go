@@ -30,7 +30,9 @@ import (
 // gathers the facts resolutionInput carries, calls resolve() once, and mechanically carries
 // out the verdict — it holds no ladder, guard-tier, or demote decision of its own. The
 // tool-classification the ladder keys on (classifyTool / toolClass) lives here too, beside the
-// table that consumes it.
+// table that consumes it, and it is the ONLY classification in the engine: the Plan-mode tool
+// menu (loop.go) keys on it through planAdmits rather than re-deriving one of its own, so the
+// menu can never offer a tool the ladder then refuses (2026-08-02).
 
 // Model-facing refusal text and human-facing Approval reasons carried on a resolution. They
 // reproduce today's exact strings (dispatch.go / disposition.go) so the rewire in item 2 is
@@ -241,9 +243,12 @@ const (
 // is classified by the subprocess it launches and is confined/gated accordingly; one declaring
 // itself read-only that also reaches the network takes a network class and is url-filtered or
 // gated. Otherwise a call could be both unsupervised and unbounded — the one thing ADR 0012's
-// core invariant forbids. The declaration keeps its own job: it is what Plan mode's menu filter
-// (loop.go) and Ask-Before's harmless-read skip read, and it still decides the floor for the
-// tools no marker claims (read_file, grep, view_diff, open_file, list_dir, ask_user).
+// core invariant forbids. The declaration keeps its own job: it decides the floor for the tools
+// no marker claims (read_file, grep, view_diff, open_file, list_dir, ask_user) and it is what
+// self-regulation's read/write tally reads (selfreg.go). It is NO LONGER what Plan mode's menu
+// filter reads (2026-08-02): the menu keys on this class through planAdmits, because a filter
+// on the bare declaration offered git_diff_range and diagnostics in Plan and the ladder below
+// then refused them.
 //
 // The network kind splits on the url-filter marker: an EffectNetwork tool that routes through
 // internal/tools' network funnel is classNetwork (Apogee vouches that every outbound URL passed
@@ -272,6 +277,23 @@ func classifyTool(tool domain.Tool) toolClass {
 	return classThirdPartyWrite
 }
 
+// planAdmits reports whether Plan mode admits tool — the ONE fact the Plan row of the ladder
+// (resolveLadder) and the Plan tool-menu filter (loop.go's toolMenu) both key on, so the menu
+// can never offer a tool the ladder then refuses.
+//
+// It is the blast-radius CLASS, never the bare ReadOnly() self-declaration: a tool that declares
+// itself read-only while carrying an unfakeable marker — git_diff_range and diagnostics declare
+// it and launch an OS subprocess — is classSubprocess, so Plan neither offers nor runs it
+// (contract §4 fn 2, resolved 2026-08-02; previously the menu read the declaration and offered
+// exactly that pair, which the ladder refused on the call).
+//
+// The sub_agent recursion point is NOT a leaf tool and never reaches this predicate: resolve()
+// Delegates it before the ladder (D3/ADR 0013), and toolMenu keeps it in the Plan menu for the
+// same reason — a Plan sub-agent inherits Plan, so its children are read-only too.
+func planAdmits(tool domain.Tool) bool {
+	return classifyTool(tool) == classReadOnly
+}
+
 // resolveLadder ports dispose()/disposeAuto() verbatim: the autonomy-ladder × tool-class ×
 // confine-to-workspace × backend-caps table, producing the BARE leaf verdict (kind only,
 // plus the box for a Confine). The leaf overlays — guard Tier-2, nil-Approver, gate
@@ -281,11 +303,10 @@ func resolveLadder(in resolutionInput) resolution {
 
 	switch in.mode {
 	case domain.ModePlan:
-		// Plan runs the read-only floor and nothing else. The menu filter (loop.go) keeps most
-		// other tools out of sight, but a tool that DECLARES itself read-only while carrying a
-		// marker — a read-only subprocess launcher, say — is still offered and is refused here:
-		// the class, not the self-declaration, is the boundary.
-		if class == classReadOnly {
+		// Plan runs the read-only floor and nothing else. The menu filter (loop.go) keys on the
+		// SAME predicate, so a refusal here is now defensive only: it catches a host-registered
+		// tool the model called without it being on the menu, never a tool Plan itself offered.
+		if planAdmits(in.tool) {
 			return resolution{kind: resolveRun}
 		}
 		return resolution{kind: resolveRefuse, reason: planRefusalReason}

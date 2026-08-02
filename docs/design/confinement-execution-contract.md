@@ -368,6 +368,17 @@ one level down (D2), for free, with no threading.
 > stay in Plan's read-only menu, which is a UX affordance; the class is the boundary). Tighten-only
 > in every cell; `confine=false` is unaffected.
 
+> **Amended 2026-08-02 (one classification: the Plan menu keys on the ladder's fact).** The
+> amendment above left the Plan **menu filter** reading `ReadOnly()` while the Plan **row** read the
+> class, and recorded the gap in footnote ² as deliberate. It was not sustainable: Plan advertised
+> `git_diff_range` and `diagnostics` and then refused the call, which reads to a small model as a
+> broken tool rather than as a mode boundary. Both now key on ONE predicate — `planAdmits`
+> (`internal/agent/resolution.go`), which is `classifyTool(tool) == RO` — so the menu can never
+> offer what the ladder refuses. **Plan drops those two tools from the menu**; the `sub_agent`
+> recursion point stays (it is `Delegate`d before the ladder, never a leaf). `ReadOnly()` keeps its
+> remaining jobs: it is the terminal-floor input to `classifyTool` and what self-regulation's
+> read/write tally reads. Menu-only change; no ladder cell moves, and no verdict changes.
+
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:
 
@@ -412,10 +423,13 @@ Ladder-leaf outcomes: **run** = execute directly, no gate, no `Confine`; **confi
 | **mcp** | refuse¹ | gate | gate | **gate** (server-grain allow-for-session) | run |
 | **3p-write** (can't vouch for scoping) | refuse | gate | gate | **gate** | run |
 
-¹ Plan filters to RO tools, so net / 3p-net / mcp tools are not even offered; a defensive call refuses.
-² A subprocess tool that also *declares* `ReadOnly()` (`git_diff_range`, `diagnostics`) **is** offered in
-Plan's menu — the filter reads the declaration — but its class is subproc, so the call refuses
-(amendment 2026-07-26). The menu is a UX affordance; the class is the boundary.
+¹ Plan filters on the **class**, so net / 3p-net / mcp tools are not even offered; a defensive call refuses.
+² **Resolved 2026-08-02 (the menu follows the ladder).** A subprocess tool that also *declares*
+`ReadOnly()` (`git_diff_range`, `diagnostics`) used to be **offered** in Plan's menu — the filter read the
+declaration while the ladder read the class — so Plan advertised two tools it then refused. Both sides now
+key on one predicate (`planAdmits`, `internal/agent/resolution.go`), which is the class: Plan **neither
+offers nor runs** them. The menu is no longer a UX affordance with its own rule; the class is the boundary
+on both sides, and `internal/agent/planmenu_test.go` pins the agreement over the whole registry.
 `confine=false` is global-config-only, VM-only, prints a per-session startup warning, and **never**
 escapes the dangerous-action floor.
 

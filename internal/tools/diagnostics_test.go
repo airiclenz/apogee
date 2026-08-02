@@ -67,9 +67,10 @@ func TestDiagnostics_Markers(t *testing.T) {
 	if !domain.IsReadOnly(d) {
 		t.Error("diagnostics must be read-only (it only inspects)")
 	}
-	// As with git_diff_range, the read-only declaration keeps diagnostics in Plan mode's menu
-	// while the subprocess marker is what classifies the call (§4 amended 2026-07-26 — the
-	// unfakeable marker outranks the self-declaration); TestClassifyTool pins the class.
+	// As with git_diff_range, the read-only declaration is an honest statement about the tool
+	// while the subprocess marker is what classifies the call — and, since 2026-08-02, what the
+	// Plan menu filters on (§4 amended 2026-07-26 — the unfakeable marker outranks the
+	// self-declaration); TestClassifyTool pins the class.
 	if !domain.IsSubprocessTool(d) {
 		t.Error("diagnostics must declare SubprocessTool (the go vet / linter half shells out)")
 	}
