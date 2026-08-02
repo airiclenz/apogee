@@ -600,7 +600,10 @@ func (m Model) renderPicker() string {
 	}
 	// maxPickerRows is the taste; popupBudget is the screen's answer to it, so a long offering on a
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
-	_, shown := m.popupBudget(len(rows), maxPickerRows)
+	_, shown, seated := m.popupBudget(panePicker, len(rows), maxPickerRows)
+	if !seated {
+		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
 	return renderPopup(m.th, popupSpec{
 		title:    m.pickerTitle(),
 		rows:     rows,

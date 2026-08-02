@@ -747,6 +747,22 @@ point is a **minor** bump, not a breaking change.
     room, the row you have arrowed onto always among the ones shown, and on a window with no rows to
     give, the menu counted onto the title row (`commands and skills  … +14`) instead of an empty
     pane under a hint still offering `↑/↓ select`.
+  - **…and now the panes size themselves against each other, not one at a time against the whole
+    window.** Every pane above was measuring the window as though it were the only thing in it —
+    which it usually is, and is not the moment you type `/` while messages are queued. The band of
+    staged messages above the box was not in the budget at all, so a dropdown plus that band composed
+    a frame four rows past the bottom of a 12-row terminal, an approval prompt plus the band one row
+    past a **20**-row one, and five queued messages overflowed a 12-row terminal with no pane open at
+    all. All of them now draw from one allocation made for the whole frame before anything is
+    painted, and they give way in a fixed order: the chat area first, then the staged band — a
+    reminder, whose count the status line carries anyway — then the `/` and `@` menu, then
+    `/sessions` and the pickers, and last the approval or ask prompt, which is what the run is
+    actually blocked on. The box you type into and the footer are never in the division. Whatever the
+    allocation makes the band hold back is counted in the band's own `… 4 more queued` marker, the
+    same one its three-row cap already used, and a window too short for even that leaves the count to
+    the status line's `N queued`. The upshot: no combination of panes, band and window size composes
+    a frame taller than your terminal — the property is now checked with every pane opened both alone
+    and beside a live queue.
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it

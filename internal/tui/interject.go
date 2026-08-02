@@ -379,33 +379,86 @@ func heldNote(n int) string {
 	return fmt.Sprintf("%d queued messages held — ⏎ sends them", n)
 }
 
-// maxQueuedRows caps how many staged rows the strip above the input box shows at once. The strip
-// steals its height from the transcript viewport (View's shrink accounting), so an unbounded queue
-// would squeeze the conversation off the screen — the maxAutocompleteItems / maxInputRows posture.
-// Past the cap the NEWEST rows are the ones shown, under a "… N more queued" marker: the row
+// maxQueuedRows caps how many staged rows the strip above the input box shows at once — the band's
+// own TASTE, the way maxAutocompleteItems is the dropdown's. The screen's answer to it is
+// [Model.frameRowPlan], which the band shares with every open pane: the strip steals its height
+// from the transcript viewport, so an unbounded queue — or a capped one on a short window — would
+// squeeze the conversation off the screen and then the input box off the frame. Past whichever
+// bound binds first the NEWEST rows are the ones shown, under a "… N more queued" marker: the row
 // nearest the box is the one Backspace takes back, and the count says nothing was dropped. The cap
-// counts CONTENT rows only, so the band's worst case is six rows on screen: the cap, the overflow
-// marker, and the two blank rows framing the group.
+// counts CONTENT rows only, so at the cap the band is six rows on screen — the cap, the overflow
+// marker, and the two blank rows framing the group — which is its worst case and not its promise:
+// the frame's grant cuts it further wherever the window cannot pay for six.
 const maxQueuedRows = 3
+
+// bandFrame is the band's two blank framing rows, one above the group and one below. They belong to
+// the band (layout.md), so they are part of what it spends its row grant on.
+const bandFrame = 2
+
+// bandPlan is the staged band's share of the frame's rows ([Model.frameRowPlan]): the staged rows
+// it draws and the rows it is holding back, which its one "… N more queued" marker states.
+type bandPlan struct {
+	shown  int
+	hidden int
+}
+
+// height is the rows the band occupies: its two framing rows, the staged rows it seats, and the
+// marker row when it is holding any back. A band with nothing to show and nothing to count is not
+// drawn at all — no rows, and no frame either.
+func (b bandPlan) height() int {
+	if b.shown == 0 && b.hidden == 0 {
+		return 0
+	}
+	h := bandFrame + b.shown
+	if b.hidden > 0 {
+		h++
+	}
+	return h
+}
+
+// bandShape spends a row budget on n staged messages. The NEWEST rows are the ones kept, capped by
+// the band's own taste (maxQueuedRows) and then by the budget; whatever is left over is counted on a
+// marker row, which costs one row more than the content it describes — so the marker outranks the
+// rows it is describing, and a grant that seats one row spends it on the count rather than on one of
+// five. Under three rows there is no honest band left (its frame, one row and a marker do not fit),
+// so it is not drawn at all and the status line's "N queued" readout carries the count instead.
+func bandShape(n, budget int) bandPlan {
+	if n <= 0 || budget < bandFrame+1 {
+		return bandPlan{}
+	}
+	shown := min(n, maxQueuedRows, budget-bandFrame)
+	if shown < n {
+		shown = max(0, min(shown, budget-bandFrame-1)) // the marker takes a row of the band's own
+	}
+	return bandPlan{shown: shown, hidden: n - shown}
+}
 
 // renderPendingInterjections draws the staged rows shown directly above the input box, as one band:
 // faint ⧖ lines in delivery order (oldest first, newest nearest the box), each indented into the
 // body column and painted edge to edge on black, framed by one blank band row above and one below
 // so the group separates from the chrome it sits between. It returns "" when nothing is queued —
 // no queue, no band, no frame — so View treats it exactly like the dropdown slot.
+//
+// How many of those rows it draws is the FRAME's call, not the queue's (bandShape): the band is one
+// of the surfaces sharing the viewport with whatever pane is open, and on a window that cannot seat
+// both it is the band that gives way — a passive reminder, against a pane the human is acting on.
+// Rows the budget drops are counted in the very same "… N more queued" marker the cap's are, one
+// wording for one fact; and a window with no rows at all for the band leaves the count to the status
+// line's "N queued" readout, which is in every frame the band could have been in.
 func (m Model) renderPendingInterjections() string {
-	n := len(m.pendingInterjections)
-	if n == 0 {
+	if len(m.pendingInterjections) == 0 {
 		return ""
 	}
-	shown := m.pendingInterjections
-	rows := make([]string, 0, maxQueuedRows+3)
-	rows = append(rows, m.queuedRow(""))
-	if n > maxQueuedRows {
-		shown = shown[n-maxQueuedRows:]
-		rows = append(rows, m.queuedRow(bodyIndent+fmt.Sprintf("… %d more queued", n-maxQueuedRows)))
+	band := m.frameRowPlan(m.openPanes()).band
+	if band.height() == 0 {
+		return ""
 	}
-	for _, it := range shown {
+	rows := make([]string, 0, band.height())
+	rows = append(rows, m.queuedRow(""))
+	if band.hidden > 0 {
+		rows = append(rows, m.queuedRow(bodyIndent+fmt.Sprintf("… %d more queued", band.hidden)))
+	}
+	for _, it := range m.pendingInterjections[len(m.pendingInterjections)-band.shown:] {
 		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+queuedRowText(it.raw)))
 	}
 	rows = append(rows, m.queuedRow(""))

@@ -2443,6 +2443,10 @@ func (m *Model) refreshViewport() {
 // They are gathered as ONE value because two readers need them and must never disagree: View
 // composes them into the frame, and [Model.transcriptRows] measures them to say how many screen
 // rows the transcript still owns — which is what the mouse maps a click through.
+//
+// How TALL each of them is drawn is settled before any of them is rendered, by the frame-wide row
+// allocation they all share ([Model.frameRowPlan]): they are siblings spending the same viewport,
+// not each the only thing in it.
 type frameOverlays struct {
 	prompt   string // the approval or the ask popup (they belong to different states, so never both)
 	browser  string // the /sessions history browser
@@ -3208,22 +3212,142 @@ func nonEmpty(parts ...string) []string {
 	return out
 }
 
-// popupBudget derives the screen-budget caps an overlay hands renderPopup so the bordered pane
-// never pushes the input box off-screen (D2). rows is how many selectable rows are on offer and
-// rowCap the overlay's own cap on how many of them it shows at once (both 0 for the choiceless
-// approval prompt); maxRows caps the scrolled row window and maxBody the wrapped body block, both
-// ≥ 0 and both in renderPopup's zero-means-none sense. Every boxed overlay that steals transcript
-// rows goes through it — the ask and approval prompts, the /sessions browser and the
-// /model | /server picker — so none of them can promise the frame rows it does not have.
+// ----------------------------------------------------------------------------
+// The frame's row allocation (layout.md, "What 'height' means")
+// ----------------------------------------------------------------------------
+
+// transcriptReserve is the transcript's SOFT claim on the frame's rows: rows kept for the
+// conversation wherever the window can spare them. It is the first thing spent — the transcript
+// gives way before any other surface does — so an open pane's floor and the staged band are both
+// taken out of it first.
+const transcriptReserve = 3
+
+// framePane identifies one boxed overlay in the frame's row allocation. The order of the constants
+// is the order the panes GIVE WAY in, last first: on a window that cannot seat every open pane the
+// dropdown loses its rows before the picker or the browser, and the modal approval or ask prompt —
+// the one the run is blocked on — keeps its rows last of all.
+type framePane int
+
+const (
+	panePrompt   framePane = iota // the approval or the ask prompt
+	paneBrowser                   // the /sessions history browser
+	panePicker                    // the /model | /server picker
+	paneDropdown                  // the command / @file / skill autocomplete
+	paneKinds                     // not a pane: the count, so a plan can hold one grant per kind
+)
+
+// framePaneSet is the set of boxed overlays open in one frame — the siblings an allocation has to
+// divide the window between.
+type framePaneSet uint8
+
+// with returns the set including p.
+func (s framePaneSet) with(p framePane) framePaneSet { return s | 1<<p }
+
+// has reports whether p is in the set.
+func (s framePaneSet) has(p framePane) bool { return s&(1<<p) != 0 }
+
+// openPanes is the set of boxed overlays this Model has open. Each member's predicate is the same
+// one its renderer returns "" on, so the allocation is divided between exactly the panes that will
+// be drawn.
+func (m Model) openPanes() framePaneSet {
+	var s framePaneSet
+	if (m.state == stateAwaitingApproval && m.pending != nil) ||
+		(m.state == stateAwaitingAsk && m.pendingAsk != nil) {
+		s = s.with(panePrompt)
+	}
+	if m.sessionBrowser.open {
+		s = s.with(paneBrowser)
+	}
+	if m.picker.open {
+		s = s.with(panePicker)
+	}
+	if m.autocomplete.active && len(m.autocomplete.items) > 0 {
+		s = s.with(paneDropdown)
+	}
+	return s
+}
+
+// frameRowPlan is the ONE row allocation every surface stacked above the input box shares: the
+// staged band and each open boxed overlay get their rows out of the same viewport, so the composed
+// frame fits the terminal whatever COMBINATION is open. Sizing each surface against the whole
+// viewport instead was right one surface at a time and wrong the moment two were open — a dropdown
+// beside a staged queue composed a 16-row frame on a 12-row terminal, pushing the input box and the
+// footer off the alternate screen.
+type frameRowPlan struct {
+	band  bandPlan
+	panes [paneKinds]int // rows granted to each pane, its own chrome included; 0 = not drawn
+}
+
+// frameRowPlan divides the viewport's rows between the frame's surfaces, in the order they give
+// way (layout.md): the transcript first, then the staged band, then the panes — and among the
+// panes, the dropdown before the browser or the picker, and the modal prompt last. The input box
+// and the footer are not in the division at all; layout() has already taken their rows out.
 //
-// m.viewport.Height() here is the laid-out height and always will be: View composes the frame from
-// a LOCAL copy of the viewport and never writes the shrink back ([Model.transcriptRows]). So it is
-// the true screen budget: keep 3 transcript rows where the window can spare them, spend the chrome
-// (the 2 borders + the title + the hint), give the rows priority (they are what the human acts on),
-// and let the body have what is left, overflowing into the explicit "… (+N more lines)" marker.
+// The order of the passes is the order of the guarantees. Every seated pane's irreducible chrome
+// comes off first, so a pane the human is acting on is never squeezed out by a passive band; the
+// band then takes what is left, up to what it wants, which is what makes it cost the TRANSCRIPT
+// rather than the pane beside it; the transcript keeps its soft reserve out of the remainder; and
+// only the surplus past all three grows the seated panes, split evenly when more than one is open.
 //
-// BOTH floors are ZERO rather than a comfortable minimum, and that is the point of them: a row
-// floor of 6 on a window with 4 rows to give promised a pane the frame could not hold, and the
+// m.viewport.Height() is the laid-out height and always will be: View composes the frame from a
+// LOCAL copy of the viewport and never writes the shrink back ([Model.transcriptRows]).
+func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
+	var plan frameRowPlan
+	left := max(0, m.viewport.Height())
+
+	seated := 0
+	for p := framePane(0); p < paneKinds; p++ {
+		if !open.has(p) {
+			continue
+		}
+		if left < popupChrome {
+			break // no room for another honest pane: the rest of the order gives way entirely
+		}
+		plan.panes[p] = popupChrome
+		left -= popupChrome
+		seated++
+	}
+
+	plan.band = bandShape(len(m.pendingInterjections), left)
+	left -= plan.band.height()
+
+	if growth := max(0, left-transcriptReserve); growth > 0 && seated > 0 {
+		share, extra := growth/seated, growth%seated
+		for p := framePane(0); p < paneKinds; p++ {
+			if plan.panes[p] == 0 {
+				continue
+			}
+			plan.panes[p] += share
+			if extra > 0 {
+				plan.panes[p]++
+				extra--
+			}
+		}
+	}
+	return plan
+}
+
+// popupBudget derives the screen-budget caps overlay p hands renderPopup so the bordered pane never
+// pushes the input box off-screen (D2). rows is how many selectable rows are on offer and rowCap
+// the overlay's own cap on how many of them it shows at once (both 0 for the choiceless approval
+// prompt); maxRows caps the scrolled row window and maxBody the wrapped body block, both ≥ 0 and
+// both in renderPopup's zero-means-none sense. seated is false when the frame's allocation left
+// this pane no rows at all — a window too short to seat it beside its siblings — and the overlay
+// renders nothing rather than a pane drawn past the terminal's last row.
+//
+// The budget comes from the frame-wide allocation (frameRowPlan) rather than from the viewport
+// directly, because the pane is never the only thing taking rows off the transcript: the staged
+// band shares the same rows, and so does any other pane open beside it. p is added to the open set
+// here rather than assumed to be in it, so a pane asking for its budget is always counted as one of
+// the siblings — which is what lets a renderer be called for a pane the Model's own flags have not
+// opened (the direct-call tests) and still be budgeted like the frame would budget it.
+//
+// Inside its grant the pane spends its chrome first (the 2 borders + the title + the hint), gives
+// the ROWS priority — they are what the human acts on — and lets the body have what is left,
+// overflowing into the explicit "… (+N more lines)" marker.
+//
+// BOTH caps floor at ZERO rather than at a comfortable minimum, and that is the point of them: a
+// row floor of 6 on a window with 4 rows to give promised a pane the frame could not hold, and the
 // surplus came off the bottom — the input box and the footer, off the alt screen. A body floor of
 // 1 was the same mistake one row smaller: it made a body-bearing pane's irreducible height 5 where
 // a boxed overlay's chrome is 4, so the ask and approval prompts overflowed the shortest window a
@@ -3233,12 +3357,15 @@ func nonEmpty(parts ...string) []string {
 // names itself in the title and says how to act in the hint — and when the zero budget dropped
 // prose, that title row also carries the "… (+N more lines)" marker (popupTitleLine), so shrinking
 // costs the body but never the fact that there is one.
-func (m Model) popupBudget(rows, rowCap int) (maxBody, maxRows int) {
-	avail := max(0, m.viewport.Height()-3)
-	const chrome = 4 // the 2 borders + the title row + the hint row
-	maxRows = min(rows, rowCap, max(0, avail-chrome-1))
-	maxBody = max(0, avail-chrome-maxRows)
-	return maxBody, maxRows
+func (m Model) popupBudget(p framePane, rows, rowCap int) (maxBody, maxRows int, seated bool) {
+	granted := m.frameRowPlan(m.openPanes().with(p)).panes[p]
+	if granted < popupChrome {
+		return 0, 0, false
+	}
+	avail := granted - popupChrome
+	maxRows = min(rows, rowCap, max(0, avail-1))
+	maxBody = max(0, avail-maxRows)
+	return maxBody, maxRows, true
 }
 
 // approvalPrompt renders the pending tool call the human must rule on as a bordered popup pane
@@ -3269,7 +3396,10 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		parts = append(parts, stripEscapes(args))
 	}
 
-	maxBodyRows, _ := m.popupBudget(0, 0) // no rows on the approval prompt, so no row budget either
+	maxBodyRows, _, seated := m.popupBudget(panePrompt, 0, 0) // no rows on the prompt, so no row budget either
+	if !seated {
+		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
 	spec := popupSpec{
 		title:       "approve " + stripEscapes(req.Tool) + "?",
 		body:        strings.Join(parts, "\n\n"), // reason and args separated by one blank line; no stray blanks when one is absent
@@ -3308,7 +3438,10 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 
 	// Budget against the live layout so a long question or choice set never pushes the input box
 	// off-screen (D2); the rows get priority and the body takes what is left (see popupBudget).
-	maxBodyRows, rowsShown := m.popupBudget(len(req.Choices), maxAskChoiceRows)
+	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, len(req.Choices), maxAskChoiceRows)
+	if !seated {
+		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
 
 	spec := popupSpec{
 		title:       "the assistant is asking:",

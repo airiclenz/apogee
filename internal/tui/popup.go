@@ -77,6 +77,13 @@ import (
 // approval prompts — now paints through this module; no boxed overlay renders its own chrome
 // (plan D3).
 
+// popupChrome is a pane's irreducible height: its two borders, its title row and its hint row. It
+// is what renderPopup draws for a spec whose every budget is zero — the smallest a pane can be and
+// still name itself and say how to act on it — so it is also the floor the frame's row allocation
+// hands out before any surface gets a comfortable row ([Model.frameRowPlan]). A pane the frame
+// cannot give this many rows is not drawn at all.
+const popupChrome = 4
+
 // popupRow is one row of a popup as its columns: the escape-stripped cells the module lays out
 // into vertically aligned columns. Every row of one spec follows that popup kind's fixed column
 // schema — an absent optional tier is an empty cell, which still pads, so the columns after it

@@ -840,6 +840,19 @@ const smallestOverlayWindow = 12
 // asserted here as well.
 const narrowOverlayWindow = 34
 
+// withStagedRows puts n staged interjections on the model — the state ⏎ leaves behind while the
+// agent works (ADR 0025) — so a frame property can open an overlay BESIDE a live queue. The band is
+// a pure function of that slice, so the rows need no worker and no mailbox behind them.
+func withStagedRows(m Model, n int) Model {
+	for i := range n {
+		m.pendingInterjections = append(m.pendingInterjections, queuedInterjection{
+			id:  i + 1,
+			raw: fmt.Sprintf("staged remark %02d", i),
+		})
+	}
+	return m
+}
+
 // modelWithOverlayRoom builds a laid-out model on a height-row terminal 80 columns wide, the width
 // the overlay properties use unless they are specifically about narrowness.
 func modelWithOverlayRoom(t *testing.T, height int, opts Options) Model {
@@ -949,44 +962,157 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 			return m
 		}},
+		// The band on its own. Six rows at its worst case — the cap, the overflow marker and the two
+		// framing rows — is more than the four a twelve-row terminal has to give, so the strip
+		// overflowed the frame with no pane open at all.
+		{"no pane", false, "", func(t *testing.T, width, height int) Model {
+			return modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
+		}},
 	}
 
+	// Every overlay is opened BESIDE a staged queue as well as alone: none of them is the only thing
+	// in the frame taking rows off the transcript, and a budget that sizes each surface against the
+	// whole viewport is exactly right one surface at a time and wrong the moment two are open. Two
+	// staged rows is a band under its cap and five is one over it (the "… N more queued" marker gets
+	// a row of its own), so both band shapes meet every pane.
 	for _, ov := range overlays {
-		for _, width := range []int{80, narrowOverlayWindow} {
-			for _, height := range []int{smallestOverlayWindow, 13, 16, 20, 24, 30} {
-				t.Run(fmt.Sprintf("%s/%d×%d", ov.name, width, height), func(t *testing.T) {
-					m := ov.open(t, width, height)
+		for _, staged := range []int{0, 2, 5} {
+			for _, width := range []int{80, narrowOverlayWindow} {
+				for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
+					t.Run(fmt.Sprintf("%s+%d staged/%d×%d", ov.name, staged, width, height), func(t *testing.T) {
+						m := withStagedRows(ov.open(t, width, height), staged)
 
-					content := m.View().Content
-					frame := strings.Split(content, "\n")
-					plainFrame := ansiPattern.ReplaceAllString(content, "")
+						content := m.View().Content
+						frame := strings.Split(content, "\n")
+						plainFrame := ansiPattern.ReplaceAllString(content, "")
 
-					if len(frame) > height {
-						t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
-							len(frame), height, len(frame)-height, plainFrame)
-					}
-					// The footer is the last thing View stacks, so its presence is the proof nothing was
-					// pushed past the last row.
-					if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-						t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
-					}
-					// …and it did not buy the fit by hiding prose quietly: either the body is on the
-					// screen to its last word, or the pane counts out the lines it is not showing —
-					// in its body block where it has a row for the marker, on its title row where the
-					// window leaves it none, and in whichever wording the width can pay for.
-					if ov.prose && !strings.Contains(plainFrame, proseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
-						t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
-					}
-					// The same holds for the ROWS. A window granted at least one row seats the first
-					// one (popupRowWindow windows around a selection that starts at the top), so the
-					// probe missing means the pane is showing NO choices and NO entries — the case the
-					// scroll cannot answer, and the one the pane has to count out on its title row.
-					if ov.rowProbe != "" && !strings.Contains(plainFrame, ov.rowProbe) &&
-						!elisionMarkerPattern.MatchString(plainFrame) {
-						t.Errorf("pane hid every one of its rows with no marker anywhere in the frame:\n%s", plainFrame)
-					}
-				})
+						if len(frame) > height {
+							t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
+								len(frame), height, len(frame)-height, plainFrame)
+						}
+						// The footer is the last thing View stacks, so its presence is the proof nothing was
+						// pushed past the last row.
+						if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
+							t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+						}
+						// …and it did not buy the fit by hiding prose quietly: either the body is on the
+						// screen to its last word, or the pane counts out the lines it is not showing —
+						// in its body block where it has a row for the marker, on its title row where the
+						// window leaves it none, and in whichever wording the width can pay for.
+						if ov.prose && !strings.Contains(plainFrame, proseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
+							t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
+						}
+						// The same holds for the ROWS. A window granted at least one row seats the first
+						// one (popupRowWindow windows around a selection that starts at the top), so the
+						// probe missing means the pane is showing NO choices and NO entries — the case the
+						// scroll cannot answer, and the one the pane has to count out on its title row.
+						if ov.rowProbe != "" && !strings.Contains(plainFrame, ov.rowProbe) &&
+							!elisionMarkerPattern.MatchString(plainFrame) {
+							t.Errorf("pane hid every one of its rows with no marker anywhere in the frame:\n%s", plainFrame)
+						}
+						// The band answers to the same allocation and owes the same accounting: whatever
+						// it is holding back rides its own "… N more queued" marker, cap-driven rows and
+						// budget-driven rows alike, in ONE wording.
+						assertBandAccountsForItsQueue(t, m, staged, plainFrame)
+					})
+				}
 			}
+		}
+	}
+}
+
+// assertBandAccountsForItsQueue holds the band to the popup panes' rule: a surface that drops rows
+// because the frame's allocation left it no room for them says how many, in its own one marker. The
+// band that is gone ENTIRELY is the one case with no row to say it on, and the status line's
+// "N queued" readout is what carries the count there (layout.md).
+func assertBandAccountsForItsQueue(t *testing.T, m Model, staged int, plainFrame string) {
+	t.Helper()
+	if staged == 0 {
+		return
+	}
+	shown := 0
+	for i := range staged {
+		if strings.Contains(plainFrame, fmt.Sprintf("staged remark %02d", i)) {
+			shown++
+		}
+	}
+	if shown == 0 || shown == staged {
+		return
+	}
+	if want := fmt.Sprintf("… %d more queued", staged-shown); !strings.Contains(plainFrame, want) {
+		t.Errorf("band shows %d of %d staged rows without the %q marker:\n%s", shown, staged, want, plainFrame)
+	}
+}
+
+// TestFrameSurfacesGiveWayInOrder pins the PRECEDENCE the shared allocation resolves ties by, which
+// the frame-height property alone cannot see: a frame that fits is satisfiable by dropping the wrong
+// thing. The order is the transcript, then the staged band, then the panes — dropdown first among
+// those, the modal prompt last — and never the input box or the footer (layout.md).
+//
+// The two-pane rows are the reason the allocation is a set rather than a subtraction: a dropdown
+// opened while the agent works survives into the approval or ask prompt that interrupts it (neither
+// fold closes it), so two boxed panes really can want the same four rows, and at twelve there are
+// four rows in the whole viewport.
+func TestFrameSurfacesGiveWayInOrder(t *testing.T) {
+	askPrompt := func(m Model) Model {
+		m.state = stateAwaitingAsk
+		m.pendingAsk = &askReqMsg{Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}}}
+		return m
+	}
+	dropdown := func(m Model) Model {
+		m.input.SetValue("/")
+		m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+		return m
+	}
+
+	cases := []struct {
+		name       string
+		height     int
+		staged     int
+		open       func(Model) Model
+		wantDrawn  []string // text that must be on the frame
+		wantAbsent []string // text the allocation must have given way on
+	}{
+		// The band gives way before the pane the human is acting on, even though it sits closer to
+		// the box: the dropdown is a live filter being typed into, the band a passive reminder whose
+		// count the status line repeats anyway.
+		{"band yields to the dropdown", 12, 2, dropdown,
+			[]string{"commands and skills", "2 queued"}, []string{"staged remark 01"}},
+		{"band yields to the prompt", 12, 2, askPrompt,
+			[]string{"the assistant is asking:"}, []string{"staged remark 01"}},
+		// …and both are seated the moment the window can pay for both.
+		{"both fit with room", 20, 2, dropdown,
+			[]string{"commands and skills", "staged remark 01"}, nil},
+		// Two panes wanting the same four rows: the dropdown is the one that gives way, because the
+		// prompt is what the run is blocked on.
+		{"dropdown yields to the prompt", 12, 0, func(m Model) Model { return dropdown(askPrompt(m)) },
+			[]string{"the assistant is asking:"}, []string{"commands and skills"}},
+		{"both panes fit with room", 20, 0, func(m Model) Model { return dropdown(askPrompt(m)) },
+			[]string{"the assistant is asking:", "commands and skills"}, nil},
+	}
+
+	for _, c := range cases {
+		for _, width := range []int{80, narrowOverlayWindow} {
+			t.Run(fmt.Sprintf("%s/%d×%d", c.name, width, c.height), func(t *testing.T) {
+				m := c.open(withStagedRows(modelWithOverlayRoomAt(t, width, c.height, testOpts), c.staged))
+
+				content := m.View().Content
+				plainFrame := ansiPattern.ReplaceAllString(content, "")
+				if got := len(strings.Split(content, "\n")); got > c.height {
+					t.Fatalf("composed frame is %d rows on a %d-row terminal (+%d):\n%s",
+						got, c.height, got-c.height, plainFrame)
+				}
+				for _, want := range c.wantDrawn {
+					if !strings.Contains(plainFrame, want) {
+						t.Errorf("%q is not on the frame — the wrong surface gave way:\n%s", want, plainFrame)
+					}
+				}
+				for _, absent := range c.wantAbsent {
+					if strings.Contains(plainFrame, absent) {
+						t.Errorf("%q is on the frame — it should have given way first:\n%s", absent, plainFrame)
+					}
+				}
+			})
 		}
 	}
 }

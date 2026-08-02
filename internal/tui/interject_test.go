@@ -644,6 +644,85 @@ func TestQueuedStripHeightCountsItsFrame(t *testing.T) {
 	}
 }
 
+// TestQueuedBandShrinksIntoTheFrameBudget is the band's half of the frame's ONE row allocation. The
+// band used to be off the budget entirely — a fixed band of up to six rows (the cap, its marker and
+// the two framing rows) taken from a viewport that had already promised those rows to whatever pane
+// was open — so a dropdown beside a staged queue composed a frame four rows past the terminal's
+// last row, and five staged messages overflowed a twelve-row terminal with no pane open at all.
+//
+// It now spends what [Model.frameRowPlan] leaves it, and the rows the BUDGET drops are counted in
+// the same "… N more queued" marker the CAP's are: one wording for one fact, so a shorter window
+// costs the band rows but never the knowledge that they are waiting. The marker outranks the content
+// it describes — a budget that can seat one row spends it on the count, not on one of five — and
+// under three rows the band is not drawn at all, the case the status line's "N queued" carries.
+func TestQueuedBandShrinksIntoTheFrameBudget(t *testing.T) {
+	cases := []struct {
+		height     int  // the terminal's rows (the viewport gets height − 8)
+		staged     int  // messages waiting to go out
+		dropdown   bool // a "/" menu open beside the band, taking its four rows first
+		wantHeight int  // the band's rows, framing rows included; 0 = not drawn
+		wantHidden int  // the count its marker must state; 0 = no marker
+	}{
+		// Nothing else in the frame: the band shrinks against the transcript alone.
+		{12, 2, false, 4, 0}, // viewport 4: two rows and their frame, exactly
+		{12, 5, false, 4, 4}, // …the same four rows spent on the marker and ONE row
+		{13, 5, false, 5, 3}, // viewport 5: one more row of content
+		{14, 5, false, 6, 2}, // viewport 6: the band's own cap binds again
+		{16, 5, false, 6, 2}, // roomier, and the cap still binds
+		{24, 2, false, 4, 0}, // the ordinary case is untouched
+		{12, 1, false, 3, 0}, // one row and its frame is the smallest band drawn
+		// …and beside a pane, which takes its irreducible four rows first.
+		{12, 2, true, 0, 0}, // viewport 4, all of it the dropdown's: no band at all
+		{13, 5, true, 0, 0}, // viewport 5: still nothing to spare
+		{14, 2, true, 0, 0}, // viewport 6: two rows is under the band's own floor of three
+		{16, 5, true, 4, 4}, // viewport 8: four rows left, spent on the marker and one row
+		{20, 5, true, 6, 2}, // viewport 12: the band gets its full worst case
+	}
+
+	for _, c := range cases {
+		name := fmt.Sprintf("%d rows/%d staged", c.height, c.staged)
+		if c.dropdown {
+			name += "/dropdown"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := withStagedRows(modelWithOverlayRoomAt(t, 80, c.height, testOpts), c.staged)
+			if c.dropdown {
+				m.input.SetValue("/")
+				m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+			}
+
+			band := m.renderPendingInterjections()
+			if band == "" {
+				if c.wantHeight != 0 {
+					t.Fatalf("band not drawn at all, want %d rows", c.wantHeight)
+				}
+				return
+			}
+			flat := ansi.Strip(band)
+			if got := lipgloss.Height(band); got != c.wantHeight {
+				t.Errorf("band is %d rows, want %d:\n%s", got, c.wantHeight, flat)
+			}
+			// Every row it did seat is a real staged message, newest kept: the marker replaces the
+			// OLDEST rows, so the row nearest the box is still the one Backspace takes back.
+			for i := c.staged - (c.wantHeight - 2 - min(c.wantHidden, 1)); i < c.staged; i++ {
+				if want := fmt.Sprintf("staged remark %02d", i); !strings.Contains(flat, want) {
+					t.Errorf("band is missing %q — the rows it seats must be the newest:\n%s", want, flat)
+				}
+			}
+			marker := fmt.Sprintf("… %d more queued", c.wantHidden)
+			if c.wantHidden == 0 {
+				if strings.Contains(flat, "more queued") {
+					t.Errorf("band counts rows it is not holding back:\n%s", flat)
+				}
+				return
+			}
+			if !strings.Contains(flat, marker) {
+				t.Errorf("band dropped %d rows without the %q marker:\n%s", c.wantHidden, marker, flat)
+			}
+		})
+	}
+}
+
 // TestQueuedStripEmptyWithoutAQueue: no queue, no band — not even the framing rows, which would
 // otherwise leak two blank black lines into every idle frame.
 func TestQueuedStripEmptyWithoutAQueue(t *testing.T) {

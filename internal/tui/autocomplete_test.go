@@ -131,20 +131,28 @@ func TestAutocompleteDropdownSpansFullWidth(t *testing.T) {
 // what holds it — the window scrolls around the selection rather than starting at row zero — and
 // this asserts it through the composed pane at every short height, for every position the selection
 // can take, so the guarantee is the drawn one and not the arithmetic's.
+//
+// The banded rows are the same property under the frame's SHARED allocation: a staged queue beside
+// the menu takes its rows out of the same viewport, so the granted window is smaller than the same
+// terminal gives an unaccompanied dropdown — and the row the human has arrowed onto is still in it.
 func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
-	for _, height := range []int{18, 20, 22, 24, 30} {
-		m := modelWithOverlayRoomAt(t, 80, height, Options{Workspace: "/ws/a"})
+	cases := []struct{ height, staged int }{
+		{18, 0}, {20, 0}, {22, 0}, {24, 0}, {30, 0},
+		{22, 2}, {24, 2}, {30, 2},
+	}
+	for _, c := range cases {
+		m := withStagedRows(modelWithOverlayRoomAt(t, 80, c.height, Options{Workspace: "/ws/a"}), c.staged)
 		m.input.SetValue("/") // the whole verb table: more rows than these windows can seat
 		m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 		if len(m.autocomplete.items) != len(commandSpecs) {
 			t.Fatalf("the \"/\" menu offered %d rows, want every verb (%d)", len(m.autocomplete.items), len(commandSpecs))
 		}
-		if _, shown := m.popupBudget(len(m.autocomplete.items), maxAutocompleteItems); shown < 1 {
-			t.Fatalf("a %d-row window granted no dropdown rows — test premise broken", height)
+		if _, shown, _ := m.popupBudget(paneDropdown, len(m.autocomplete.items), maxAutocompleteItems); shown < 1 {
+			t.Fatalf("a %d-row window with %d staged granted no dropdown rows — test premise broken", c.height, c.staged)
 		}
 
 		for i, it := range m.autocomplete.items {
-			t.Run(fmt.Sprintf("%d rows/select %s", height, it.value), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%d rows/%d staged/select %s", c.height, c.staged, it.value), func(t *testing.T) {
 				sel := m
 				sel.autocomplete.selected = i
 				flat := ansiPattern.ReplaceAllString(sel.renderAutocomplete(), "")
@@ -152,8 +160,8 @@ func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
 				// is the proof the highlighted row is the one drawn — not merely that the text is
 				// somewhere in the pane.
 				if want := glyphUser + " /" + it.value; !strings.Contains(flat, want) {
-					t.Errorf("row %d (%q) selected but not on the screen at %d rows; want a row leading %q:\n%s",
-						i, it.value, height, want, flat)
+					t.Errorf("row %d (%q) selected but not on the screen at %d rows with %d staged; want a row leading %q:\n%s",
+						i, it.value, c.height, c.staged, want, flat)
 				}
 			})
 		}

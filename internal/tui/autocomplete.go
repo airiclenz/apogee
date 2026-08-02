@@ -725,7 +725,10 @@ func (m Model) renderAutocomplete() string {
 	for i, it := range ac.items {
 		rows[i] = it.cells
 	}
-	_, shown := m.popupBudget(len(rows), maxAutocompleteItems)
+	_, shown, seated := m.popupBudget(paneDropdown, len(rows), maxAutocompleteItems)
+	if !seated {
+		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
 	spec := popupSpec{
 		title:    autocompleteTitle(ac.kind),
 		rows:     rows,

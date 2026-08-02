@@ -98,6 +98,31 @@ choice set on a half-height pane scrolls a smaller window around the selection, 
 too short for both, the pane keeps its rows and the session area goes to nothing. The input box
 and the footer are never the ones that give way — they are the frame's floor.
 
+**The budget is the FRAME's, not each surface's.** All of them are spending the same rows, so they
+are allotted them together, once, before any of them is drawn — never each against the whole window
+as though it were the only thing in it. A budget sized that way is exactly right one surface at a
+time and wrong the moment two are open: a `/` menu typed while messages are queued asked for its
+rows and the band asked for its six, and the frame that came out was four rows past the terminal's
+last one, with the input box and the footer off the alternate screen. Which is a thing the human
+does on purpose — the band is up because they are typing while the agent works, and the dropdown is
+up because they are typing.
+
+**So the surfaces give way in a fixed order, and the order is a claim about what the human is
+doing.** The **session area** goes first and goes to nothing; then the **staged band**, which is a
+reminder rather than a control, and whose count the status line is carrying anyway; then the
+**`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the **`/sessions`
+browser and the picker**; and last the **approval or ask prompt**, which the run itself is blocked
+on. The input box and the footer are not in the division at all. Two panes can want the same rows —
+a dropdown opened while the agent works is still open when an approval prompt interrupts it — and
+on a window that cannot seat both, the one further down that order is not drawn.
+
+**A surface still gets its irreducible rows before any other surface gets a comfortable one.** Each
+open pane's four (below) come off the top of the budget, so a passive band can never squeeze out the
+pane being acted on; the band then takes what it wants out of what is left, which is why it costs
+the session area rather than the pane beside it; the session area keeps a three-row reserve out of
+the remainder; and only the surplus past all three makes a pane taller than its floor, split evenly
+when more than one is open.
+
 **The smallest honest pane is four rows: its two borders, its title, and its key hint.** That is
 the floor for every pane alike — a pane out of budget shows no rows AND no prose, rather than
 keeping one row back for either. It still says what it is and how to act, which is the least a
@@ -372,6 +397,15 @@ conversation off the screen. Past the cap the **newest** rows are the ones kept 
 `  … N more queued` marker rides at the top of the group, inside the frame and indented and painted
 like every other row, so the count says nothing was dropped. The worst case on screen is six rows:
 the cap, the marker, and the two framing rows.
+
+**The cap is the band's taste; the frame's row budget is the answer to it** (the section on height
+above). The band is one of the surfaces sharing the rows above the input box, and it gives way
+before any pane does, so a short window — or an open pane beside it — cuts it below three rows and
+sometimes to none. What the budget drops is counted in **the same** `… N more queued` marker the cap
+overflows into, one wording for one fact, and the marker outranks the rows it describes: a band with
+one row to spend spends it on the count, not on one of five. Below three rows there is no honest
+band left — its frame, one row and a marker do not fit — so it is not drawn at all, and the status
+line's `N queued` readout is what carries the count, as it does in every frame the band appears in.
 
 **What the band is not.** Once a staged message is delivered it leaves the band and appears in the
 transcript as its own ⧖ block, which keeps the transcript's own look. The status line's `N queued`

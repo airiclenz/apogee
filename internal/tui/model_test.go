@@ -904,7 +904,7 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 
 				// On a window with no body budget the marker has nowhere to go but the title row, which
 				// is exactly the case the finding was about — assert the placement, not just presence.
-				if maxBody, _ := m.popupBudget(0, 0); maxBody == 0 {
+				if maxBody, _, _ := m.popupBudget(panePrompt, 0, 0); maxBody == 0 {
 					if got, want := len(rows), 4; got != want { // 2 borders + title + hint
 						t.Fatalf("pane with no body budget is %d rows, want %d:\n%s", got, want, flat)
 					}
@@ -2844,7 +2844,7 @@ func TestPopupBudgetShrinksToNothing(t *testing.T) {
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("%d rows", c.height), func(t *testing.T) {
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 80, Height: c.height})
-			body, rows := m.popupBudget(8, maxSessionRows)
+			body, rows, _ := m.popupBudget(paneBrowser, 8, maxSessionRows)
 			if rows != c.wantRows {
 				t.Errorf("popupBudget row window = %d, want %d (viewport %d rows)", rows, c.wantRows, m.viewport.Height())
 			}
