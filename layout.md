@@ -123,14 +123,49 @@ was outside the order entirely: a three-line draft grew the box by two rows, the
 give above it, and the prompt fell off the allocation with `a`/`d`/`s` still answering it — the
 whole of what the frame then said about the decision being `approval needed` on the status line, no
 tool name. So the box's **extra draft rows** join the order, at the very end of it: the box always
-keeps one content row, and the rows a draft grew it past that give way to the prompt and to nothing
-else. "The input box never gives way" is about the box, not about every row a draft grew it to —
+keeps one content row, and the rows a draft grew it past that give way to the prompt — and, past the
+order entirely, to the frame itself (below). "The input box never gives way" is about the box, not
+about every row a draft grew it to —
 the box is on the frame at every window size, and what the human was typing is still in it, drawn
 on as many rows as the frame can pay for. The dropdown, the browser and the picker never take the
 box's rows: the browser and the picker own the keyboard while they are open, so no draft can be
 growing beside them, and the dropdown is a completion of the very draft it would be shrinking.
 Below twelve rows there is no pane at all (see the four-row floor below), which is the floor of the
-whole arrangement rather than an exception to this rule.
+pane arrangement rather than an exception to this rule; the frame has a lower floor of its own, and
+it is the last thing this section states.
+
+**The box's extra rows give way to the FRAME as well, which is not a place in the order at all.**
+The order above divides the rows the window can spare; the frame bound is about the window itself.
+Every row a draft grows the box is a row taken out of the same window everything else is spending,
+so past a point the box alone — no pane, no queue, nothing open — composes a frame past the
+terminal's last line, and it did: a six-line message on a 12-row terminal put the footer two rows
+off the screen, and a ten-line one did it to every terminal under eighteen rows. So the box is
+capped at whatever leaves the frame inside the terminal, whether or not a prompt is up: five rows on
+a 12-row terminal, one row on an 8-row one. The session area is what pays for those rows, exactly as
+it pays for a pane's — it is first in the order and it goes to nothing.
+
+**A capped box is a window onto the draft, and it says how much of it is out of sight.** The box
+scrolls to keep the line the caret is on in view, and the draft ITSELF is never cut: it is what the
+human typed, not prose apogee derived, and it is the one kind of content in the frame that cannot be
+recovered from anywhere else. What the box is not drawing is counted on the box's own **top
+border**, in the same `… (+N more lines)` marker every pane uses and on the same narrow ladder
+(`… +3` where the full phrase does not fit). The border is the row the box always owns and that
+carries nothing else — the box's title row in every way that counts — so the count costs the draft
+no row. It differs from a pane's title row in one place only, at the bottom of the width ladder: a
+pane sheds its NAME to keep its number, and this row has no name to shed, so under the width even
+`… +3` needs, it stays a plain border rather than drawing a clipped count. `… +1` of `… +19` is not
+a quieter statement of the fact; it is a false one.
+
+**The frame's own floor is eight rows, and below it the frame is its floor and nothing more.** With
+the session area gone the frame is one blank gap row, the `▔` hairline, the status line, the input
+box (its top border and its one content row) and the footer's three — eight rows, every one of them
+something the rules above forbid giving way. At exactly eight the frame is that chrome and it fits.
+**Below eight it does not fit, and what it does there is deliberate:** it composes its floor and no
+more. A long draft, a queued message or an open pane cannot make it grow past eight on a seven-row
+terminal any more than on an eight-row one, so the overflow is bounded at one row per row the
+terminal is short and never compounds. Clipping the frame to the window instead was considered and
+rejected: it would make "the frame never exceeds the terminal" trivially true at every size, and the
+next real overflow would then arrive silently instead of failing a test.
 
 **A pane that gives way entirely leaves its fact on the status line.** That is the band's licence
 for disappearing — the `N queued` readout carries the count — and the status line therefore owes

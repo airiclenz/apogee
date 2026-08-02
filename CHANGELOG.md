@@ -760,9 +760,10 @@ point is a **minor** bump, not a breaking change.
     actually blocked on. The box you type into and the footer are never in the division. Whatever the
     allocation makes the band hold back is counted in the band's own `… 4 more queued` marker, the
     same one its three-row cap already used, and a window too short for even that leaves the count to
-    the status line's `N queued`. The upshot: no combination of panes, band and window size composes
-    a frame taller than your terminal — the property is now checked with every pane opened both alone
-    and beside a live queue.
+    the status line's `N queued`. The upshot: no combination of panes, band, window size and message
+    length composes a frame taller than your terminal, at any size the frame fits in at all (its own
+    floor is eight rows — see below) — the property is now checked with every pane opened both alone
+    and beside a live queue, at every draft length.
   - **…and an approval you are being asked for is never missing from the screen.** That one
     allocation had one thing outside it: the editor box, which grows with what you type. So a
     half-written three-line message plus a 12- or 13-row terminal left the frame under four rows
@@ -787,6 +788,35 @@ point is a **minor** bump, not a breaking change.
     showed neither. The line is now fitted to the window in the order you read it, exactly as a
     pane's title row is: the count keeps its place and the phrase shortens around it
     (`⣾ read… · 5 queued`).
+  - **…and neither does the message you are typing, however long it gets.** Everything above put the
+    panes, the band and the chat area into one row budget and left the **editor box** out of it
+    except when a decision prompt was up. So with nothing open at all, a six-line message on a 12-row
+    terminal composed a 14-row frame and a ten-line one overflowed every terminal under eighteen
+    rows — the input box and the footer pushed off the alternate screen by the very thing you were
+    typing into. The box is now bounded by the window as well: five rows on a 12-row terminal, one
+    row on an 8-row one, with the chat area paying for them exactly as it pays for a pane's.
+    **Nothing you typed is touched** — past the cap the box is a window onto your message that
+    scrolls with the cursor, so the line you are writing is always the one you can see, and what is
+    out of sight is counted on the box's own top border in the same marker the panes use
+    (`╭─ … (+5 more lines) ───╮`, and `… +5` where the window is too narrow for the words).
+  - **…and the frame now fits every terminal down to its own floor, which is eight rows.** Below
+    twelve rows no pane is drawn, but the frame itself went on being one row too tall all the way
+    down: on an 8-row terminal it composed nine rows while completely idle, because the chat
+    viewport was floored at one row whether or not the window had paid for it. Eight rows is what is
+    left when the chat area is gone — the blank line, the `▔` rule, the status line, the box's
+    border and its one row, and the footer's three — and none of them may give way, so eight is the
+    floor rather than a budget. At eight the frame fits exactly; below eight it composes its floor
+    and stops there, so a long message, a queue or an open pane can no longer make an already-too-
+    small window worse. It is stated in `layout.md` rather than papered over by clipping the frame,
+    which would have made the whole property trivially true and hidden the next real overflow.
+
+- **A question from the model no longer eats the message you were half-way through typing.** When a
+  tool asks you something, apogee borrows the input box for your answer and empties it first — and
+  what it emptied out was simply gone, even though it was the one thing in the interface that cannot
+  be reconstructed from anywhere. Whatever you had typed is now put aside and handed straight back
+  the moment the question lets go of the box: after you answer it, and after a question that dies
+  with its exchange (an `esc` stop, a fault) too. On that second path a half-typed answer is kept as
+  well, below the message it interrupted — neither half of what you typed is thrown away.
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it

@@ -129,9 +129,15 @@ type Model struct {
 	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
 	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
 	askSel     int                // the highlighted ask_user choice index while awaitingAsk (D5); bare int, no no-copy type (ADR 0011)
-	lastErr    error              // the error behind stateErrored, shown in the status line
-	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
-	quitting   bool               // a quit whose exit is deferred: to the worker's terminal Msg while busy (C4), else to the closing flush reaching disk (quit)
+	// askDraft holds what was in the input box when an ask_user question BORROWED it: the question
+	// empties the box for the answer (D5 pre-selects the first choice on an empty box), and an
+	// unsent message the human was part-way through typing is not the question's to throw away.
+	// restoreAskDraft hands it back the moment the box stops being borrowed. A plain string, so it
+	// rides the value-copied Model (ADR 0011).
+	askDraft  string
+	lastErr   error     // the error behind stateErrored, shown in the status line
+	lastCtrlC time.Time // when the last Ctrl+C landed; a second within the window quits
+	quitting  bool      // a quit whose exit is deferred: to the worker's terminal Msg while busy (C4), else to the closing flush reaching disk (quit)
 
 	// The interjection queue — what the human typed while the model worked (ADR 0025). It is
 	// kept in two reconciled copies, which is what lets one goroutine own each half:
@@ -469,6 +475,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingAsk = &msg
 		m.askSel = 0            // first choice pre-selected while the input is empty (D5); no-op when there are no choices
 		m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
+		// The box is BORROWED, not repossessed: whatever the human was part-way through typing is
+		// stashed and handed back when the question lets go of it (restoreAskDraft). Emptying it
+		// without that stash discarded an unsent message outright.
+		m.askDraft = m.input.Value()
 		m.input.Reset()
 		// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend must say so
 		// for as long as the question stands (submitAnswer swaps it back when the answer is away).
@@ -1336,11 +1346,39 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
 	m.pendingAsk = nil
 	m.input.Reset()
+	m.restoreAskDraft() // the question has let go of the box: the message it interrupted comes back
 	m.state = stateRunning
 	m.setPlaceholder(runningPlaceholder) // the box is the human's own again — ⏎ queues from here
 	m.layout()
 	tick := m.spin.arm()
 	return m, tick
+}
+
+// restoreAskDraft hands the input box back the message an ask_user question borrowed it from: the
+// unsent draft the human was typing when the question arrived, which the askReqMsg fold stashed
+// before emptying the box for the answer. It runs on BOTH ways the box stops being borrowed — the
+// answer going out (submitAnswer) and the Exchange ending under the question (finishWorker) — so no
+// route leaves the stash behind, and it is a no-op on every path where nothing was borrowed.
+//
+// Whatever is in the box when it runs is the ANSWER. On the answered path that is already gone
+// (submitAnswer resets first). On the abandoned path it is a half-typed answer to a question that no
+// longer exists — the human's own keystrokes just the same — so it is KEPT rather than clobbered:
+// the draft goes back above it, one line apart, with the caret at the end. Neither half of what was
+// typed is discarded on either path, which is the whole point of the stash.
+//
+// The caller re-lays the frame out: both of them do it a few statements later, for their own
+// reasons, and the box has to regrow around the restored draft exactly once.
+func (m *Model) restoreAskDraft() {
+	draft := m.askDraft
+	m.askDraft = ""
+	if draft == "" {
+		return
+	}
+	if answer := m.input.Value(); answer != "" {
+		draft += "\n" + answer
+	}
+	m.input.SetValue(draft)
+	m.input.MoveToEnd()
 }
 
 // stopWorker cancels the in-flight worker. The worker honours the cancel at the next
@@ -1385,6 +1423,9 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.cancel = nil
 	m.pending = nil
 	m.pendingAsk = nil
+	// A question that dies with its Exchange — a stop, a fault — lets go of the box exactly as an
+	// answered one does, so the message it borrowed the box from comes back here too.
+	m.restoreAskDraft()
 	// The Exchange is over, so its mailbox has no reader left: drop it, and with it any row the
 	// worker had not drained by the time it unwound. Nothing is lost — the display queue
 	// (pendingInterjections) is the queue of record and still holds every undelivered row. What
@@ -2345,17 +2386,34 @@ const (
 
 	scrollbarWidth = 1 // the transcript's right-hand scroll-bar gutter (always reserved)
 
-	minInputRows = 1
-	maxInputRows = 10 // past this the textarea scrolls internally rather than growing further
-	borderFrame  = 2  // the input border's left + right columns
-	inputPadding = 2  // the input border's left + right padding columns
+	minInputRows    = 1
+	maxInputRows    = 10 // past this the textarea scrolls internally rather than growing further
+	inputBorderRows = 1  // the box's own top border (its bottom edge is the footer's divider)
+	borderFrame     = 2  // the input border's left + right columns
+	inputPadding    = 2  // the input border's left + right padding columns
+
+	// frameFloorRows is the shortest frame Apogee can compose: the blank gap row, the ▔ hairline,
+	// the status line, the input box at its one-row floor plus its top border, and the three footer
+	// rows. Every one of them is something layout.md forbids giving way — the box and the footer are
+	// the frame's floor, and the box keeps one content row so what the human is typing is on the
+	// screen — so there is nothing left to shed below this and the number is a FLOOR, not a budget.
+	// The transcript is already gone at it (transcriptBudget reaches zero), which is what makes the
+	// arithmetic tight: at exactly this many rows the frame is the chrome and nothing else.
+	//
+	// Below it the frame composes its floor and the terminal has fewer rows than that — the one
+	// window size at which the frame does not fit, stated in layout.md rather than papered over with
+	// a clip, because a clip would make the frame-height property trivially true at every size and
+	// hide the next real overflow (docs/plans, FOLLOW-UP-K).
+	frameFloorRows = frameFixedRows + inputBorderRows + minInputRows
 )
 
-// layout sizes the viewport and input box to the current window. The input box auto-grows
-// with its content (clamped), and the viewport gets the height left after the gap row, the
-// ▔ top-edge hairline, the status row, the input box (its content rows plus a top border — the
-// divider below it belongs to the footer), and the footer. A floor of one row keeps the
-// viewport valid on a tiny window.
+// layout sizes the viewport and input box to the current window. The input box auto-grows with its
+// content, clamped by its own taste and by what the frame can pay for (draftRowsCeiling), and the
+// viewport gets the height left after the gap row, the ▔ top-edge hairline, the status row, the
+// input box (its content rows plus a top border — the divider below it belongs to the footer), and
+// the footer. A floor of one row keeps the WIDGET valid on a tiny window; the frame spends
+// transcriptBudget instead, which does not have that floor and so cannot compose a row the window
+// never paid for.
 func (m *Model) layout() {
 	m.viewport.SetWidth(max(1, m.width-scrollbarWidth)) // reserve the scroll-bar gutter column
 	m.input.SetWidth(m.inputInnerWidth())
@@ -2365,13 +2423,31 @@ func (m *Model) layout() {
 		m.reseatInput() // the box grew/shrank: re-clamp a scroll offset SetHeight left stale (ISSUES #2)
 	}
 
-	inputBoxHeight := m.input.Height() + 1 // content rows + top border (no bottom — it is the footer's divider)
-	vpHeight := m.height - frameFixedRows - inputBoxHeight
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
-	m.viewport.SetHeight(vpHeight)
+	// The WIDGET floors at one row: a zero-height viewport is not a usable scroll surface. That floor
+	// is a lie about the frame on a window too short to pay for it, so the frame spends
+	// transcriptBudget instead — see there.
+	m.viewport.SetHeight(max(1, m.transcriptBudget()))
 	m.refreshViewport()
+}
+
+// inputBoxRows is the screen rows the input box occupies: its content rows and its own top border
+// (it has no bottom edge — the footer's top rule is the shared divider).
+func (m Model) inputBoxRows() int {
+	return m.input.Height() + inputBorderRows
+}
+
+// transcriptBudget is the FRAME's row budget for the transcript block: the window less the fixed
+// chrome below it and the input box above it, floored at ZERO. Everything that spends the frame's
+// rows — View, the mouse mapping ([Model.transcriptRows]) and the surface allocation
+// ([Model.frameRowPlan]) — reads it, so the rows the transcript is drawn on and the rows the frame
+// believes it has are one number.
+//
+// It is deliberately NOT m.viewport.Height(). layout() floors the WIDGET at one row because a
+// zero-height viewport is not a scrollable surface, and on a window too short to pay for that row
+// the frame composed it anyway — one row past the terminal's last line, with the footer off the
+// alternate screen. The widget keeps its floor; the frame stops believing it.
+func (m Model) transcriptBudget() int {
+	return max(0, m.height-frameFixedRows-m.inputBoxRows())
 }
 
 // transcriptWidth is the column budget the transcript body wraps to: the viewport's own width
@@ -2398,29 +2474,51 @@ func (m *Model) inputRows() int {
 }
 
 // draftRowsCeiling is the tallest the input box may grow in THIS frame, and it is the one place the
-// box gives way to anything. In an ordinary frame it is maxInputRows and the box grows freely; while
-// a DECISION SURFACE is up — the approval or the ask prompt, the pane the run itself is blocked on
-// and the only pane whose keys are live in a state where the box is inert or borrowed — it is
-// whatever leaves that pane its irreducible four rows, floored at the box's own one.
+// box gives way to anything. Two bounds meet here, and the tighter one wins.
+//
+// The FRAME's bound binds always: past it the transcript's row budget goes negative, layout()'s
+// widget floor invents the row back, and the composed frame is one row taller than the terminal for
+// every further row the draft grew — which is what an unbounded draft did on every window under
+// eighteen rows, prompt or no prompt (FOLLOW-UP-K). The transcript may go to nothing for a draft —
+// it is first in the give-way order — but nothing past it may.
+//
+// The PROMPT's bound binds while a DECISION SURFACE is up — the approval or the ask prompt, the
+// pane the run itself is blocked on and the only pane whose keys are live in a state where the box
+// is inert or borrowed — and leaves that pane its irreducible four rows. Both floor at the box's
+// own one row.
 //
 // "The input box never gives way" (layout.md) is about the BOX, not about every row a draft grew it
-// to: the box is always on the frame and always at least one row of it. What a three-line draft may
-// not do is push the pane the human is being asked to rule on off the frame entirely — which is
-// exactly what it did between 12 and 13 rows, where the frame's allocation found under four rows to
-// give and drew no prompt at all, while a/d/s stayed live and the status line's "approval needed"
-// was the whole of what the frame said about the decision.
+// to: the box is always on the frame and always at least one row of it, it always keeps the row the
+// caret is on (layout's reseatInput re-clamps the widget's scroll onto it), and the draft itself is
+// never touched — the rows it cannot draw are counted out on the box's own top border
+// ([Model.inputElisionEdge]), the way a pane counts out prose it cannot seat. What a three-line
+// draft may not do is push the pane the human is being asked to rule on off the frame entirely —
+// which is exactly what it did between 12 and 13 rows, where the frame's allocation found under
+// four rows to give and drew no prompt at all, while a/d/s stayed live and the status line's
+// "approval needed" was the whole of what the frame said about the decision.
 //
-// It binds for the modal prompt ALONE. The dropdown, the /sessions browser and the picker are all
-// further down the give-way order than the prompt, and none of them can be open beside a draft the
-// human is still growing: the browser and the picker claim every keypress while they are open
-// (handleKey), and the dropdown is a completion of the very draft it would be shrinking.
+// The prompt bound is for the modal prompt ALONE. The dropdown, the /sessions browser and the
+// picker are all further down the give-way order than the prompt, and none of them can be open
+// beside a draft the human is still growing: the browser and the picker claim every keypress while
+// they are open (handleKey), and the dropdown is a completion of the very draft it would be
+// shrinking. They still fit, because the frame bound above is not about panes at all.
 func (m Model) draftRowsCeiling() int {
-	if !m.openPanes().has(panePrompt) {
-		return maxInputRows
+	ceiling := m.height - frameFixedRows - inputBorderRows
+	if m.openPanes().has(panePrompt) {
+		// The prompt needs popupChrome of the transcript's budget to be seated at all (frameRowPlan),
+		// so the rows the draft may keep are what is left after it.
+		ceiling = min(ceiling, m.height-frameFixedRows-popupChrome-inputBorderRows)
 	}
-	// layout gives the viewport m.height - frameFixedRows - (rows + 1); the prompt needs popupChrome
-	// of that to be seated at all (frameRowPlan), so the rows the draft may keep are what is left.
-	return max(minInputRows, m.height-frameFixedRows-popupChrome-1)
+	return max(minInputRows, ceiling)
+}
+
+// hiddenDraftRows is how many of the draft's wrapped rows the box is not drawing this frame: what
+// the widget scrolls out of sight once the content outgrows the height the frame could pay for
+// (draftRowsCeiling) or the box's own taste (maxInputRows). It measures the draft through the same
+// mirror of the widget's wrap that sizes the box (inputContentRows), so the count is the box's own
+// arithmetic rather than a second guess at it.
+func (m Model) hiddenDraftRows() int {
+	return max(0, inputContentRows(m.input.Value(), m.inputInnerWidth())-m.input.Height())
 }
 
 // refreshViewport re-renders the transcript into the viewport and, unless the human has
@@ -2508,10 +2606,11 @@ func (o frameOverlays) height() int {
 }
 
 // transcriptRows reports the rows the transcript keeps once these overlays have taken theirs out of
-// a viewport laid out at vpHeight rows. The floor is ZERO, not one: on a window too short to hold
-// both, the transcript goes away rather than the frame growing past the terminal's last row (D2).
-func (o frameOverlays) transcriptRows(vpHeight int) int {
-	return max(0, vpHeight-o.height())
+// the frame's budget ([Model.transcriptBudget]). The floor is ZERO, not one: on a window too short
+// to hold both, the transcript goes away rather than the frame growing past the terminal's last
+// row (D2).
+func (o frameOverlays) transcriptRows(budget int) int {
+	return max(0, budget-o.height())
 }
 
 // frameOverlays renders every overlay block of the frame as the Model stands. It is a pure function
@@ -2539,10 +2638,11 @@ func (m Model) frameOverlays() frameOverlays {
 // overlay row can no longer name the transcript line the overlay is drawn over.
 //
 // It stays honest only because View never writes the shrink back: the frame is composed from a
-// LOCAL copy of the viewport, so m.viewport.Height() is always the laid-out height and this
-// subtraction can never compound with itself.
+// LOCAL copy of the viewport, so the budget below is always the laid-out one and this subtraction
+// can never compound with itself. The budget is transcriptBudget rather than the widget's own
+// height, which layout() floors at one row the frame may not have (see there).
 func (m Model) transcriptRows() int {
-	return m.frameOverlays().transcriptRows(m.viewport.Height())
+	return m.frameOverlays().transcriptRows(m.transcriptBudget())
 }
 
 // frameBlocks is the most blocks one frame stacks — the transcript, the five overlays, the blank
@@ -2572,9 +2672,10 @@ func (m Model) View() tea.View {
 	// scroll-bar gutter off its right edge — the bar is sized from the same local viewport, so the
 	// two columns line up row-for-row. The height goes on that LOCAL copy and is never written back:
 	// m.viewport keeps its laid-out height, which is what lets contentLineAt (via transcriptRows)
-	// measure this very shrink instead of compounding it. At zero rows the overlays have taken the
-	// whole viewport and the transcript is off the frame entirely.
-	if h := ov.transcriptRows(m.viewport.Height()); h > 0 {
+	// measure this very shrink instead of compounding it. At zero rows the transcript is off the
+	// frame entirely — the overlays took the whole budget, a draft grew the box into it, or the
+	// window is too short to pay for a transcript row at all (transcriptBudget).
+	if h := ov.transcriptRows(m.transcriptBudget()); h > 0 {
 		vp := m.viewport
 		vp.SetHeight(h)
 		body := m.applyStickyHeader(vp.View())
@@ -2839,8 +2940,55 @@ func (m Model) joinFrame(blocks []string) string {
 // paints the resolving /skill and @file tokens first (inputaccent.go), then highlightInput paints
 // the drag-selection over whatever it covers. shadeCells strips the span it re-renders, so the last
 // pass wins on any overlap — and a selection must read as selected even across an accented token.
+//
+// A third pass writes the elision marker onto the box's own TOP BORDER when the frame could not pay
+// for every row the draft wraps to (inputElisionEdge). It is last because it addresses the BORDER
+// row, which the two content overlays never touch.
 func (m Model) inputView() string {
-	return m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.accentTokens(m.input.View())))
+	box := m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.accentTokens(m.input.View())))
+	edge := m.inputElisionEdge(m.hiddenDraftRows())
+	if edge == "" {
+		return box
+	}
+	lines := strings.Split(box, "\n")
+	lines[0] = edge // the rounded border's top row; the widget's content starts at lines[1]
+	return strings.Join(lines, "\n")
+}
+
+// inputEdgeChrome is what the marker's row spends besides the marker itself: the two rounded
+// corners, the ─ segment leading into it, and the space either side of it (╭─ … +3 ────╮).
+const inputEdgeChrome = 5
+
+// inputElisionEdge composes the input box's top border row carrying the count of draft rows the box
+// is not drawing, or "" when there are none to count (or no width to count them in) and the box
+// keeps its plain border.
+//
+// HIDING IS NEVER SILENT, and a draft is the case where that matters most: it is what the HUMAN
+// typed, not prose a tool authored, so the box may window it but may never let rows of it go missing
+// without saying so. The box has no title row to put the fact on, so it goes on the one row the box
+// always owns and that carries nothing else — its top border, which is the box's title row in every
+// way that counts. The wording is popupElisionMarkerFitting's, unchanged: one phrase for "there is
+// content here you cannot see", shedding its noun before its number exactly as a pane's does, so a
+// windowed draft and a shrunken pane state the same fact in the same words.
+//
+// Under the width even the short form needs, the row stays plain. That is the one place this differs
+// from a pane's title, and deliberately: a pane sheds its NAME to keep the number, while this row
+// has no name to shed — clipping the marker itself would leave "… +1" of "… +12", which is not a
+// quieter statement of the count but a WRONG one.
+func (m Model) inputElisionEdge(hidden int) string {
+	if hidden <= 0 {
+		return ""
+	}
+	budget := m.width - inputEdgeChrome
+	marker := popupElisionMarkerFitting(hidden, budget)
+	fill := budget - m.th.measure.Width(marker)
+	if fill < 0 {
+		return ""
+	}
+	border := lipgloss.RoundedBorder()
+	return m.th.chromeRule.Render(border.TopLeft+border.Top+" ") +
+		m.th.statusBar.Render(marker) +
+		m.th.chromeRule.Render(" "+strings.Repeat(border.Top, fill)+border.TopRight)
 }
 
 // topRule renders the full-width ▔ hairline that marks the top edge of the bottom chrome: a
@@ -3365,11 +3513,13 @@ type frameRowPlan struct {
 // rather than the pane beside it; the transcript keeps its soft reserve out of the remainder; and
 // only the surplus past all three grows the seated panes, split evenly when more than one is open.
 //
-// m.viewport.Height() is the laid-out height and always will be: View composes the frame from a
-// LOCAL copy of the viewport and never writes the shrink back ([Model.transcriptRows]).
+// transcriptBudget is the laid-out budget and always will be: View composes the frame from a LOCAL
+// copy of the viewport and never writes the shrink back ([Model.transcriptRows]). It is the frame's
+// budget rather than the widget's height, so a window too short to pay for the viewport's one-row
+// floor allocates ZERO rows here instead of handing a surface a row the frame has not got.
 func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 	var plan frameRowPlan
-	left := max(0, m.viewport.Height())
+	left := m.transcriptBudget()
 
 	seated := 0
 	for p := framePane(0); p < paneKinds; p++ {

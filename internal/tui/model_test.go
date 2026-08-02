@@ -1000,6 +1000,77 @@ func TestModelAskCancelClearsPrompt(t *testing.T) {
 	}
 }
 
+// TestAskGivesTheBorrowedDraftBack pins the stash an ask_user question owes the box it BORROWS.
+// The question empties the box so its choices are pre-selectable (D5), and until now that emptying
+// simply threw away whatever unsent message the human was part-way through typing — no stash, no
+// route back, the one kind of content in the whole TUI that cannot be re-derived from anything.
+//
+// Both ways the box stops being borrowed are covered, because they close the question through
+// different seams: submitAnswer for an answer that goes out, and finishWorker for a question whose
+// Exchange dies under it (Esc). On that second path the half-typed ANSWER is the human's too, so it
+// is kept rather than clobbered — the draft goes back above it.
+func TestAskGivesTheBorrowedDraftBack(t *testing.T) {
+	const draft = "the message the question interrupted"
+
+	raise := func(t *testing.T, typed string) (Model, chan domain.AskAnswer) {
+		t.Helper()
+		m := typeInput(t, newTestModel(t), typed)
+		reply := make(chan domain.AskAnswer, 1)
+		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which way?"}, Reply: reply})
+		if m.state != stateAwaitingAsk {
+			t.Fatalf("state = %v, want awaitingAsk", m.state)
+		}
+		if got := m.input.Value(); got != "" {
+			t.Fatalf("the borrowed box holds %q, want it emptied for the answer (D5)", got)
+		}
+		return m, reply
+	}
+
+	t.Run("the answer goes out", func(t *testing.T) {
+		m, reply := raise(t, draft)
+
+		m = typeInput(t, m, "teal")
+		m, _ = stepCmd(t, m, keyEnter())
+
+		if got := takeAnswer(t, reply); got != "teal" {
+			t.Errorf("answer = %q, want %q — the stash must not reach the model", got, "teal")
+		}
+		if got := m.input.Value(); got != draft {
+			t.Errorf("box = %q, want the draft %q back once the question let go of it", got, draft)
+		}
+	})
+
+	t.Run("the exchange dies under the question", func(t *testing.T) {
+		m, _ := raise(t, draft)
+		m.cancel = func() {}
+
+		m = typeInput(t, m, "tea")
+		m = step(t, m, keyEsc())
+		m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+
+		if want := draft + "\ntea"; m.input.Value() != want {
+			t.Errorf("box = %q, want %q — neither half of what was typed may be discarded",
+				m.input.Value(), want)
+		}
+	})
+
+	// A question that borrowed an EMPTY box owes it nothing back: no phantom text, and the answer
+	// path is byte-identical to what it always was.
+	t.Run("nothing was borrowed", func(t *testing.T) {
+		m, reply := raise(t, "")
+
+		m = typeInput(t, m, "teal")
+		m, _ = stepCmd(t, m, keyEnter())
+
+		if got := takeAnswer(t, reply); got != "teal" {
+			t.Errorf("answer = %q, want %q", got, "teal")
+		}
+		if got := m.input.Value(); got != "" {
+			t.Errorf("box = %q, want it empty — nothing was borrowed", got)
+		}
+	})
+}
+
 // takeAnswer reads the one reply the model sends on submit, failing if none was sent.
 func takeAnswer(t *testing.T, reply chan domain.AskAnswer) string {
 	t.Helper()
@@ -2669,6 +2740,126 @@ func TestPromptScrollClampAtMaxHeight(t *testing.T) {
 	}
 	if got, want := m.input.ScrollYOffset(), rows-maxInputRows; got != want {
 		t.Errorf("ScrollYOffset at max = %d, want %d (contentRows %d - height %d)", got, want, rows, maxInputRows)
+	}
+}
+
+// TestInputBoxCountsTheDraftRowsItCannotShow is the box's half of "hiding is never silent"
+// (FOLLOW-UP-K). The box is now bounded by the FRAME as well as by its own ten-row taste, so on a
+// short terminal it draws a WINDOW onto the draft — and a window the human cannot see the edges of
+// is exactly the silence every pane above the box was fixed for. The count therefore rides the one
+// row the box always owns and that carries nothing else, its top border, in the SAME marker and the
+// same narrow ladder a pane's title row uses: full phrase where the width pays for it, the short
+// "… +N" where it does not.
+//
+// The two caps are both here because they are one rule: the box shows what the frame lets it and
+// says how much it is not showing, whether the bound came from the window or from maxInputRows.
+func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
+	cases := []struct {
+		name       string
+		width      int
+		height     int
+		draft      int
+		wantHidden int
+		wantMarker string
+	}{
+		// Room to spare: the box draws the whole draft and its border says nothing.
+		{"draft fits", 80, 30, 4, 0, ""},
+		// The box's own taste is the bound — a 30-row window can pay for far more than ten rows.
+		{"box at its ten-row taste cap", 80, 30, 15, 5, "… (+5 more lines)"},
+		// The FRAME is the bound: at twelve rows the box may keep five, and this is the case that
+		// composed a 14-row frame on a 12-row terminal before the cap existed.
+		{"box at the frame's cap", 80, 12, 8, 3, "… (+3 more lines)"},
+		// The frame's floor, where the box is one row and the draft is eleven rows of nowhere.
+		{"box at its one-row floor", 80, frameFloorRows, 12, 11, "… (+11 more lines)"},
+		// A short window is usually a narrow one: the phrase sheds its noun rather than the row
+		// shedding the count off its end.
+		{"too narrow for the phrase", 20, 12, 8, 3, "… +3"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := withDraft(t, modelWithOverlayRoomAt(t, c.width, c.height, testOpts), c.draft)
+
+			if got := m.hiddenDraftRows(); got != c.wantHidden {
+				t.Fatalf("hiddenDraftRows = %d, want %d (box %d rows)", got, c.wantHidden, m.input.Height())
+			}
+			// The marker goes on the box's TOP BORDER — the box's title row in every way that counts —
+			// so it costs the draft no row of its own.
+			edge := ansi.Strip(strings.Split(m.inputView(), "\n")[0])
+			if c.wantMarker == "" {
+				if elisionMarkerPattern.MatchString(edge) {
+					t.Errorf("box border = %q, want no marker: the draft is fully drawn", edge)
+				}
+			} else if !strings.Contains(edge, c.wantMarker) {
+				t.Errorf("box border = %q, want it to carry %q", edge, c.wantMarker)
+			}
+			// The border row is still a border row: exactly the window's width, corner to corner.
+			if got := m.th.measure.Width(edge); got != c.width {
+				t.Errorf("box border is %d cells wide, want %d", got, c.width)
+			}
+			if !strings.HasPrefix(edge, "╭") || !strings.HasSuffix(edge, "╮") {
+				t.Errorf("box border = %q, want it to keep its rounded corners", edge)
+			}
+			// The DRAFT itself is untouched — it is what the human typed, not prose apogee derived.
+			// Which rows of it the box draws is the caret's business
+			// (TestInputBoxWindowFollowsTheCaret); that it still holds all of them is this one's.
+			if got := m.input.Value(); got != draftLines(c.draft) {
+				t.Errorf("the draft changed to %q; only the rows it is DRAWN on may give way", got)
+			}
+		})
+	}
+}
+
+// TestInputBoxWindowFollowsTheCaret is the other half of the box's contract under the frame's cap: a
+// capped box is a WINDOW onto the draft, and a window that does not move is a box that hides the
+// line being typed on. The frame's cap can put the box at one row on a short terminal, so the rule
+// has to hold at the tightest bound there is, not just at the ten-row taste cap.
+//
+// It types the draft rather than assigning it, which is both how a human makes one and what makes
+// the assertion meaningful: the widget re-clamps its own scroll on each edit, and layout's re-seat
+// (reseatInput, ISSUES #2) re-clamps it whenever the cap changes the box's height under it.
+func TestInputBoxWindowFollowsTheCaret(t *testing.T) {
+	for _, height := range []int{frameFloorRows, 10, smallestOverlayWindow, 16, 24} {
+		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			m := modelWithOverlayRoomAt(t, 80, height, testOpts)
+			iw := m.inputInnerWidth()
+			m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows: past every cap these windows allow
+
+			rows := inputContentRows(m.input.Value(), iw)
+			if rows <= m.input.Height() {
+				t.Fatalf("the box drew all %d rows at %d rows of terminal — test premise broken", rows, height)
+			}
+			// The caret is at the end of the value, so the least scroll that keeps it visible puts the
+			// LAST row on the box's bottom line — the widget's own clamp, at whichever height the cap
+			// left the box.
+			if got, want := m.input.ScrollYOffset(), rows-m.input.Height(); got != want {
+				t.Errorf("ScrollYOffset = %d, want %d (%d content rows in a %d-row box)",
+					got, want, rows, m.input.Height())
+			}
+			// …and what scrolled out of sight is exactly what the border row counts.
+			if got, want := m.hiddenDraftRows(), rows-m.input.Height(); got != want {
+				t.Errorf("hiddenDraftRows = %d, want %d", got, want)
+			}
+			if frame := strings.Split(m.View().Content, "\n"); len(frame) > height {
+				t.Errorf("composed frame is %d rows on a %d-row terminal (+%d)", len(frame), height, len(frame)-height)
+			}
+		})
+	}
+}
+
+// TestInputBoxTooNarrowForTheCountKeepsAPlainBorder pins the ONE place the box's marker differs
+// from a pane's title row. A pane sheds its NAME to keep its number; this row has no name to shed,
+// so under the width even "… +N" needs it stays a plain border rather than drawing a clipped count —
+// "… +1" of "… +19" is not a quieter statement of the fact, it is a false one.
+func TestInputBoxTooNarrowForTheCountKeepsAPlainBorder(t *testing.T) {
+	m := withDraft(t, modelWithOverlayRoomAt(t, 9, 12, testOpts), 8)
+
+	if m.hiddenDraftRows() == 0 {
+		t.Fatalf("the box drew the whole draft at 9 columns — test premise broken (height %d)", m.input.Height())
+	}
+	edge := ansi.Strip(strings.Split(m.inputView(), "\n")[0])
+	if strings.ContainsAny(edge, "…+") {
+		t.Errorf("box border = %q, want a plain border: no honest count fits this width", edge)
 	}
 }
 

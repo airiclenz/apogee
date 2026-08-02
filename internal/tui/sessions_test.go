@@ -1011,9 +1011,16 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 	// whole viewport is exactly right one surface at a time and wrong the moment two are open. Two
 	// staged rows is a band under its cap and five is one over it (the "… N more queued" marker gets
 	// a row of its own), so both band shapes meet every pane.
+	//
+	// The DRAFT is the fourth dimension, and it was the one still missing (FOLLOW-UP-K): six rows is
+	// a draft the frame cannot pay for under eighteen rows and twelve is one past the box's own taste
+	// cap, where the widget scrolls instead of the box growing. With the box outside the frame's
+	// arithmetic a six-row draft composed a 14-row frame on a 12-row terminal with nothing open at
+	// all — the same overflow the panes were fixed for, arriving through the one surface that was
+	// never in the allocation.
 	for _, ov := range overlays {
 		for _, staged := range []int{0, 2, 5} {
-			for _, draft := range []int{1, 3} {
+			for _, draft := range []int{1, 3, 6, 12} {
 				for _, width := range []int{80, narrowOverlayWindow} {
 					for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
 						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", ov.name, staged, draft, width, height), func(t *testing.T) {
@@ -1062,6 +1069,85 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 							// it is holding back rides its own "… N more queued" marker, cap-driven rows and
 							// budget-driven rows alike, in ONE wording.
 							assertBandAccountsForItsQueue(t, m, staged, plainFrame)
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestFrameFitsEveryHeightDownToItsFloor covers the window sizes the property above deliberately
+// starts ABOVE (FOLLOW-UP-K). smallestOverlayWindow is the shortest terminal a PANE can be drawn
+// in; it is not the shortest terminal the frame can be composed on, and between the two the frame
+// was overflowing at idle with nothing open at all — a 9-row frame on an 8-row terminal, because
+// layout() floors the viewport WIDGET at one row and the frame composed that row whether or not the
+// window had paid for it.
+//
+// Two properties, on either side of frameFloorRows:
+//
+//   - At and above the floor the frame FITS, at every draft length and with the band and every pane
+//     open beside it. The transcript is what has already gone to nothing here (transcriptBudget), so
+//     the fit is the chrome's alone.
+//   - Below the floor the frame is EXACTLY its floor and never a row more, whatever is open and
+//     however long the draft. That is the documented outcome (layout.md, "the frame's own floor"):
+//     the box's one content row, its border, the gap, the hairline, the status line and the footer
+//     are each something the layout forbids giving way, so there is nothing left to shed — and what
+//     the frame must not do is go on GROWING under a window it already does not fit, which is what a
+//     draft, a queue or a pane did before the allocation reached them.
+func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
+	openers := []struct {
+		name string
+		open func(Model) Model
+	}{
+		{"nothing open", func(m Model) Model { return m }},
+		{"session browser", func(m Model) Model {
+			m.sessionBrowser = browserWithSessions(8)
+			return m
+		}},
+		{"ask prompt", func(m Model) Model {
+			m.state = stateAwaitingAsk
+			m.pendingAsk = &askReqMsg{Request: domain.AskRequest{
+				Question: "which way?",
+				Choices:  []string{"left", "right"},
+			}}
+			return m
+		}},
+	}
+
+	for _, o := range openers {
+		for _, staged := range []int{0, 5} {
+			for _, draft := range []int{1, 3, 6, 12} {
+				for _, width := range []int{80, narrowOverlayWindow} {
+					for _, height := range []int{1, 4, 6, 7, frameFloorRows, 9, 10, 11, smallestOverlayWindow} {
+						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", o.name, staged, draft, width, height), func(t *testing.T) {
+							m := withStagedRows(modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), staged)
+							m = withDraft(t, o.open(m), draft)
+
+							content := m.View().Content
+							plainFrame := ansiPattern.ReplaceAllString(content, "")
+							rows := len(strings.Split(content, "\n"))
+
+							if height >= frameFloorRows && rows > height {
+								t.Fatalf("composed frame is %d rows on a %d-row terminal (+%d):\n%s",
+									rows, height, rows-height, plainFrame)
+							}
+							if height < frameFloorRows && rows != frameFloorRows {
+								t.Fatalf("composed frame is %d rows on a %d-row terminal, want the %d-row floor:\n%s",
+									rows, height, frameFloorRows, plainFrame)
+							}
+							// The floor is a floor because of what is standing on it: the box the human types
+							// into, with a row of their draft on it, and the footer under it (layout.md).
+							if !strings.Contains(plainFrame, "draft line") {
+								t.Errorf("the input box shows none of the draft:\n%s", plainFrame)
+							}
+							if got := m.input.Height(); got < minInputRows {
+								t.Errorf("input box is %d rows, want at least %d", got, minInputRows)
+							}
+							last := ansiPattern.ReplaceAllString(strings.Split(content, "\n")[rows-1], "")
+							if strings.TrimSpace(last) == "" {
+								t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+							}
 						})
 					}
 				}
