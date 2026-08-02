@@ -5,7 +5,7 @@
   through the existing Rename path; add a `/rename` command — bare form regenerates via
   the LLM, `/rename <text>` sets the title manually; the automatic call is gated by a new
   `auto-title` config key (default on).
-- **Date:** 2026-07-31 · **Status:** not started
+- **Date:** 2026-07-31 · **Status:** complete
 - **Authoritative sources:**
   - The **Ratified design** block below — settled with the owner in the 2026-07-31 grill
     session. Where any other document (including the ADR addendum item 1 writes)

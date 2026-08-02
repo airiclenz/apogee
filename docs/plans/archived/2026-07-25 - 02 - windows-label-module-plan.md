@@ -1,7 +1,7 @@
 # Plan — Split the Windows Confiner: the label mechanism becomes a module
 
 **Date:** 2026-07-25
-**Status:** READY (shape resolved with the owner 2026-07-25 — **a new package**, not a file split).
+**Status:** complete (shape resolved with the owner 2026-07-25 — **a new package**, not a file split).
 Runs in `internal/platform`, the new `internal/platform/winlabel`, and the docs
 (`internal/platform/doc.go`, `docs/design/technical-design.md`, `TODO.md`).
 **No public API change.** Everything moved is `internal/`; `apogee probe host`, the TUI, the

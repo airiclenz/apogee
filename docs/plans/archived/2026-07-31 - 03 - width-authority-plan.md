@@ -4,7 +4,7 @@
   actually paints, so the scroll bar, the mouse selection, the input-box caret mirror and
   the absolute width cap stay correct on lines containing emoji and other graphemes where
   the two prevailing measures disagree.
-- **Date:** 2026-07-31 · **Status:** not started
+- **Date:** 2026-07-31 · **Status:** complete
 - **Authoritative sources:**
   - Verified survey of the problem: the **Findings** section below (pinned 2026-07-31
     against the versions in `go.mod` at commit `16bc94e`). It is ground truth for this

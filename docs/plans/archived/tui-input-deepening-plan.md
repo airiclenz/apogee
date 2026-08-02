@@ -1,7 +1,7 @@
 # Plan — TUI input deepening: fix the prompt-box scroll, lift the promptEditor, transcript drag-select
 
 **Date:** 2026-07-03
-**Status:** READY (design grilled 2026-07-03; all D-items resolved, **no needs-design-call
+**Status:** complete (design grilled 2026-07-03; all D-items resolved, **no needs-design-call
 escalation should be needed** — the one contingency is flagged in item 1). Runs **entirely inside
 `internal/tui`** (+ docs), so it is safe to execute in parallel with the parser/prompt-seam
 smoke-test follow-through (any fix commits from that land in `internal/processing` /

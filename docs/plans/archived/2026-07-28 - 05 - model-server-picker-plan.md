@@ -1,7 +1,7 @@
 # Plan — The `/model` and `/server` pickers over the heartbeat's prepared seams
 
 **Date:** 2026-07-28
-**Status:** READY (not owner-grilled — the *Design decisions* below derive from ADR 0024's
+**Status:** complete (not owner-grilled — the *Design decisions* below derive from ADR 0024's
 explicit preparation for exactly this work, the TODO entry's own scoping, and the provider
 client's documented contract; each call records its reasoning so the owner can veto before the
 run).

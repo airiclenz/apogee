@@ -1,7 +1,7 @@
 # Plan — ask_user multiple-choice + ask/approval prompts onto the popup module
 
 **Date:** 2026-07-24
-**Status:** READY (design grilled 2026-07-24; all forks owner-resolved — no needs-design-call
+**Status:** complete (design grilled 2026-07-24; all forks owner-resolved — no needs-design-call
 escalation expected). Touches `internal/tui`, `internal/domain/ask.go`,
 `internal/tools/ask_user.go` (+ CHANGELOG).
 **Source:** handoff `docs/handoffs/archived/2026-07-24 - 00 - ask-prompt-popup-adoption-design.md` +

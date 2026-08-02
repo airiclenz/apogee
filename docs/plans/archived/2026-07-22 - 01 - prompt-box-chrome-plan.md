@@ -1,6 +1,6 @@
 # Plan — prompt-box chrome: top-edge row + uniform thin rules
 
-**Date:** 2026-07-22. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
+**Date:** 2026-07-22. **Status: complete.** Execute with `/implement-plan` in a fresh
 session, forwarding skills: `coding-standards`. Two small owner-requested visual changes to the
 TUI's bottom chrome:
 

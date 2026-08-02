@@ -2,7 +2,7 @@
 
 - **Goal:** Fix ISSUES.md line 16 — (a) the "resumed: <title>" notice (and its siblings emitted at resume time) must be display-only, never saved into the session record, where today they accumulate on every resume; (b) harden the already-designed guarantee that a resumed session never receives the system prompt twice.
 - **Date:** 2026-08-01
-- **Status:** TODO
+- **Status:** complete
 - **Authoritative sources (ground truth — if an item disagrees with these, follow these):**
   - `ISSUES.md:16` — the issue text.
   - `docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md` — governs what the transcript blob contains and the per-Turn save cadence.

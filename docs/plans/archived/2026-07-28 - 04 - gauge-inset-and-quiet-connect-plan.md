@@ -1,7 +1,7 @@
 # Plan — Status-line right-slot inset + quiet first-contact "connected:" note
 
 **Date:** 2026-07-28
-**Status:** READY (not grilled — both items are small, issue-driven behaviour changes; the
+**Status:** complete (not grilled — both items are small, issue-driven behaviour changes; the
 *Design decisions* below derive from the two ISSUES entries, a measured render probe of the
 current status line, and the heartbeat/rebind orchestration as committed at `238fd2c`).
 **Source:**

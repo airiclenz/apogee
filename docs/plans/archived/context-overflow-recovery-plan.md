@@ -1,7 +1,7 @@
 # Plan — Context-overflow recovery: the emergency fold and one retry
 
 **Date:** 2026-07-21
-**Status:** NOT STARTED
+**Status:** complete
 **Track:** post-`v1.5.0`, structural (`internal/agent` + docs). No new Event variant, no facade
 change — the public API is untouched, so this is a **minor** bump at most (CHANGELOG rule,
 ADR 0001 §consequences).

@@ -1,7 +1,7 @@
 # Plan — The public Mechanism enable surface (`Config.EnableMechanisms`, ADR 0015)
 
 **Date:** 2026-07-05
-**Status:** ready to implement — not started.
+**Status:** complete.
 **Track:** post-`v1.2.0` public-surface extension motivated by the bench campaign (the
 2026-07-05 handoff's path (b)). Purely **additive** under v1 semver; no breaking change to
 any exported name. This plan ends with an external module able to arm any catalogued

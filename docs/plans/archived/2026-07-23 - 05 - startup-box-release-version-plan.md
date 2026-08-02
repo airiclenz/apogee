@@ -1,7 +1,7 @@
 # Plan — Start-up box shows the release version only (no build provenance)
 
 **Date:** 2026-07-23
-**Status:** **READY TO IMPLEMENT** — not started.
+**Status:** complete.
 **Track:** post-`v1.8.0` follow-up to the build-number work
 (`docs/plans/2026-07-23 - 04 - version-build-number-plan.md`). Touches `version.go`, the TUI
 `Options` seam + start-up seed, the two `cmd/apogee` wiring sites, and their tests. No public

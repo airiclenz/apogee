@@ -1,7 +1,7 @@
 # Plan — Cross the parser seam: wire the dormant processing/ module into the loop
 
 **Date:** 2026-07-02
-**Status:** READY — design settled in a `grill-with-docs` session on 2026-07-02 (all D-items below
+**Status:** complete — design settled in a `grill-with-docs` session on 2026-07-02 (all D-items below
 are resolved; **no needs-design-call escalation should be needed**). Items are ordered; work them
 in sequence, one commit per item.
 **Source:** architecture-review candidate **#2** (`docs/architecture-review-20260629-110828.html`),

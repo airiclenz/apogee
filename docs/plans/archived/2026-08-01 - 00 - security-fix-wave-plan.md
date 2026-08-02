@@ -1,7 +1,7 @@
 # Plan — security & crash fix wave (audit 2026-08-01, Waves 0+1)
 
 **Date:** 2026-08-01
-**Status:** not started
+**Status:** complete
 **Goal:** land every mechanical security/crash fix from the 2026-08-01 findings merge — the
 confirmed hookrun panic plus the audit's exploitable holes — each with a regression test that
 survives the later architecture refactors.

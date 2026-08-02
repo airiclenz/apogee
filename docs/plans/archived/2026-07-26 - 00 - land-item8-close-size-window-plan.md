@@ -1,7 +1,7 @@
 # Plan — Land item 8 honestly, then make its claim true: one pinned handle from size bound to read
 
 **Date:** 2026-07-26
-**Status:** READY (investigation completed 2026-07-26 against the working tree; the payload it
+**Status:** complete (investigation completed 2026-07-26 against the working tree; the payload it
 lands is the uncommitted item-8 implementation already in the tree, verified green today —
 `gofmt -l` clean, `go vet` clean, `go test ./internal/tools/... ./internal/security/...` pass).
 **Source:** item 8 of `docs/plans/2026-07-25 - 03 - architecture-review-closeout-plan.md` —

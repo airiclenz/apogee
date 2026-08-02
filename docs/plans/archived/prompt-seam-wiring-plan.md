@@ -1,7 +1,7 @@
 # Plan — Cross the prompt seam: tool menu + format instructions for non-native profiles
 
 **Date:** 2026-07-02
-**Status:** READY (design grilled 2026-07-02; all D-items resolved, **no needs-design-call
+**Status:** complete (design grilled 2026-07-02; all D-items resolved, **no needs-design-call
 escalation should be needed**) — but **QUEUED behind `parser-seam-wiring-plan.md`** finishing:
 both plans touch `internal/agent/loop.go`, and this one consumes `processing.ParserFor` /
 `domain.ModelProfile` from that plan. Do not start until the seam-wiring run has committed all

@@ -1,7 +1,7 @@
 # Plan — Selector popups: one shared painter, full chat-area width
 
 **Date:** 2026-07-24
-**Status:** READY (design grilled 2026-07-24; both forks resolved by the owner — no
+**Status:** complete (design grilled 2026-07-24; both forks resolved by the owner — no
 needs-design-call escalation expected). Runs **entirely inside `internal/tui`** (+ CHANGELOG).
 **Source:** owner request 2026-07-24 — (a) the /sessions popup box must use the complete
 available width of the chat area (minus the right gutter); (b) the same base module that paints

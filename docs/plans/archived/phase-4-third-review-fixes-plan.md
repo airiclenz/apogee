@@ -1,7 +1,7 @@
 # Plan — Phase-4 third-review fixes (second-review-fixes wave findings)
 
 **Date:** 2026-07-05
-**Status:** ready to run.
+**Status:** complete.
 **How to run:** `implement-plan docs/plans/phase-4-third-review-fixes-plan.md with skills: coding-standards`
 (the broad plan's standing requirement #1 makes `coding-standards` mandatory for every item).
 **Source of direction:** the 2026-07-05 four-lens review of the phase-4 second-review fixes wave

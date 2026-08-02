@@ -1,7 +1,7 @@
 # Plan — Upstream Heartbeat: live model/context/server state, async startup, full rebind
 
 **Date:** 2026-07-27
-**Status:** READY (grilled with the owner 2026-07-27 — ten decisions recorded below; ground verified against the working tree same day)
+**Status:** complete (grilled with the owner 2026-07-27 — ten decisions recorded below; ground verified against the working tree same day)
 **Source:** ISSUES.md — "model-, context and server information need to be updated on a timer of 10 sec … start apogee without a running server … model/server selection stays possible later."
 **Track:** rides **v0.9.0** (current `VERSION` v0.8.6; minor — additive public surface, one behavioral change: startup no longer blocks or hard-fails on discovery).
 **Public API:** additive (ADR 0010): `Agent.Rebind(RebindSpec) error` + `apogee.RebindSpec` alias on the root facade. New internal package `internal/heartbeat`. `tui.Options` gains two nil-able seam fields. `provider.Client` gains `SetModel`. Deleted: `provider.ServerManager` (dead code, item 6).

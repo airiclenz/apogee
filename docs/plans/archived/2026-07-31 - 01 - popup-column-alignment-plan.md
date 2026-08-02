@@ -4,7 +4,7 @@
   pickers, session browser) render their fields as vertically aligned columns instead of
   ad-hoc concatenated strings, closing ISSUES.md's "items in the pop-up module are
   currently terribly alligned" entry.
-- **Date:** 2026-07-31 · **Status:** not started
+- **Date:** 2026-07-31 · **Status:** complete
 - **Authoritative sources:**
   - Ticket: `ISSUES.md:7`.
   - Layout ground truth: `layout.md` — `## The prompt box's mini-language` (dropdown

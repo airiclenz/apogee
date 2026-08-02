@@ -1,7 +1,7 @@
 # Plan — Staged-interjection strip styling (indent + full-width black band)
 
 **Date:** 2026-07-28
-**Status:** READY (not grilled — the *Design decisions* below derive from the ISSUES entry,
+**Status:** complete (not grilled — the *Design decisions* below derive from the ISSUES entry,
 the theme's existing full-width-band posture (the status line), and CONTEXT.md's interjection
 vocabulary; the mechanical design is grounded against the working tree at `97552a3` + the
 in-flight plan-00 edits, which touch no file this plan touches).

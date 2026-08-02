@@ -1,7 +1,7 @@
 # Plan — Collapse the dispatch decision into one Resolution verdict
 
 **Date:** 2026-07-02
-**Status:** READY — not started. Items are ordered; work them in sequence, one commit per item.
+**Status:** complete. Items are ordered; work them in sequence, one commit per item.
 **Source:** architecture-review candidate #1 (`docs/architecture-review-20260629-110828.html`),
 design settled in a `grill-with-docs` session on 2026-07-02. **All design calls are
 pre-resolved** — the Design record below is authoritative; no item should need a

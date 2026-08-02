@@ -2,7 +2,7 @@
 
 - **Goal:** A completely new/empty session must not appear in the session history until a prompt has been sent. Today any non-ephemeral transcript entry — a `/confine` status note, a `/skills` catalogue, a `/model` actuation note, a "no saved sessions" browser note, an error note — flips the save gate, so quitting (or `/clear`) after merely poking at slash commands files a record titled "Session YYYY-MM-DD" with `UserMsgs: 0`. The save gate must become: **a committed user prompt exists**.
 - **Date:** 2026-08-01
-- **Status:** TODO
+- **Status:** complete
 - **Authoritative sources (ground truth — if an item disagrees with these, follow these):**
   - The owner's directive (2026-08-01): "a completely empty / new session should not be saved in the session history until a prompt was sent off."
   - `docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md` — governs the record shape, the per-Turn save cadence, and the ephemeral-entry mechanism (as amended 2026-08-01).

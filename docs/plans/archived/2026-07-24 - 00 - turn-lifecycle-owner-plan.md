@@ -1,7 +1,7 @@
 # Plan — Give the Turn a lifecycle owner (depth-review candidate 01)
 
 **Date:** 2026-07-24
-**Status:** **DRAFT — grounded, not yet grilled.** Drafted from
+**Status:** complete. Drafted from
 `docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md` (candidate 01, the review's
 top recommendation). Every claim below was re-verified at file level this session; the design
 decisions are the drafter's calls and are listed as the grill agenda. If the owner ratifies

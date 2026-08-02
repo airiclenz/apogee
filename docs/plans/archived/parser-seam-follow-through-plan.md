@@ -1,7 +1,7 @@
 # Plan — Parser-seam follow-through: verify live, close the prompt-side gap, release, pick the next track
 
 **Date:** 2026-07-02
-**Status:** IN PROGRESS 2026-07-03 — items 1 & 2 done; executing items 3–4 (release + track decision).
+**Status:** complete.
 **NOT an `implement-plan` target:** items 1, 3 and 4 are user-in-the-loop (live model, tagging,
 a track decision) and item 2 starts as a `grill-with-docs` design session, not code. Work this
 plan interactively, top to bottom.

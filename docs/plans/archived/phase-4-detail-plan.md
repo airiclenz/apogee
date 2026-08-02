@@ -1,8 +1,7 @@
 # Plan — Phase 4: merge the apogee-sim Mechanisms into the loop
 
 **Date:** 2026-07-04
-**Status:** items 1–6 done (2026-07-04, including the review-fixes pass — see the
-addendum under "Where things stand"); ready to resume at item 7.
+**Status:** complete.
 **How to run:** `implement-plan docs/plans/phase-4-detail-plan.md with skills: coding-standards`
 (the broad plan's standing requirement #1 makes `coding-standards` mandatory for every item).
 **Source of direction:** `docs/plans/implementation-plan-apogee-merge.md` §4 "Phase 4" +

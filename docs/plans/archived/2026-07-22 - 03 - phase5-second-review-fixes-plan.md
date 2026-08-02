@@ -1,6 +1,6 @@
 # Implementation plan — Phase 5 second review fixes (journal edge symmetry, probe claim parity)
 
-**Date:** 2026-07-22. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
+**Date:** 2026-07-22. **Status: complete.** Execute with `/implement-plan` in a fresh
 session **on the owner's Windows machine** (native toolchain, NOT WSL — most items carry
 windows-tagged tests that must run natively), forwarding skills: `coding-standards` (mandatory
 for all new Go). One sub-agent per numbered work item, verifier before commit, items marked done

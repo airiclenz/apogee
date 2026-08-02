@@ -1,7 +1,7 @@
 # Apogee — Implementation Plan (apogee-code + apogee-sim merge)
 
 **Date:** 2026-06-22 (revised 2026-06-23)
-**Status:** Broad plan — revised 2026-06-22 after a `grill-with-docs` session, then
+**Status:** complete. Broad plan — revised 2026-06-22 after a `grill-with-docs` session, then
 2026-06-23 after a `grill-me` session (see §6, "Resolved in the 2026-06-23 grill-me
 session"). Those decisions have now been propagated into the ADRs/CONTEXT (ADRs 0006–0009
 added; 0001/0003/0004 amended) — see the "Doc propagation — APPLIED" note at the end of §6.

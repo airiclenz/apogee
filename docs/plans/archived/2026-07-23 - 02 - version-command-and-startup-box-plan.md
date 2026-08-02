@@ -1,6 +1,6 @@
 # Plan — `/version` command, a single build-version source, and a one-time start-up box
 
-**Date:** 2026-07-23. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
+**Date:** 2026-07-23. **Status: complete.** Execute with `/implement-plan` in a fresh
 session, forwarding skills: `coding-standards`. Three owner-requested additions:
 
 1. **A `/version` command** in the TUI that prints the current version number into the chat area.

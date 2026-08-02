@@ -1,7 +1,7 @@
 # Plan — Upstream API key: the `api-key` config key, wired to every provider client
 
 **Date:** 2026-07-27
-**Status:** READY (not grilled — mechanical decisions recorded below with rationale; ground verified against the working tree 2026-07-27)
+**Status:** complete (not grilled — mechanical decisions recorded below with rationale; ground verified against the working tree 2026-07-27)
 **Source:** Owner question 2026-07-27: "How can I define an API key for the LLM server in the apogee config?" — today you cannot. `provider.WithAPIKey` exists, sets `Authorization: Bearer <key>`, and redacts the key from server-echoed errors (`internal/provider/client.go:68,305-322`, tested in `reliability_test.go:161-193` and `discovery_test.go:238,278`), but **nothing calls it**: none of the four `provider.NewClient` construction sites passes a key, and there is no config key, flag, or env var. A server that requires a bearer token (llama.cpp `--api-key`, LM Studio, remote vLLM, any keyed OpenAI-compatible proxy) cannot be used.
 **Track:** rides `[Unreleased]` (current `VERSION` v0.8.7; additive).
 **Public API:** additive (ADR 0010): exported field `domain.Config.APIKey` (public automatically via the `apogee.Config` alias, `apogee.go:74`). Internal-only signature changes: `heartbeat.NewMonitor` and `probe.Discover` gain an apiKey parameter; `probe.Inputs`/`probe.Host` gain a field.

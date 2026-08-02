@@ -4,7 +4,7 @@
   continuous through the blank spacer lines inside a sub-agent run, never bridges two
   distinct consecutive sub-agent calls, and is painted in the tool-header orange.
 - **Date:** 2026-07-31
-- **Status:** not started
+- **Status:** complete
 - **Authoritative sources:**
   - The ISSUES.md entry this plan implements, quoted verbatim below (the entry itself is
     removed by item 3, so the quote here is the pinned requirement). If any item's prose

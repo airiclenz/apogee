@@ -1,7 +1,7 @@
 # Plan — The configurable system prompt
 
 **Date:** 2026-07-26
-**Status:** READY (grilled with the owner 2026-07-26 — see *Owner decisions*; the mechanical
+**Status:** complete (grilled with the owner 2026-07-26 — see *Owner decisions*; the mechanical
 design below is grounded against the working tree).
 **Source:** owner request 2026-07-26, closing the parked "General system-prompt / template
 story" (`TODO.md:219-243`, parked 2026-07-02 by the prompt-seam grill's scope guard).

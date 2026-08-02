@@ -1,7 +1,7 @@
 # Plan — One choke point for url-safety: the network funnel carries the marker
 
 **Date:** 2026-07-25
-**Status:** READY (design grilled 2026-07-25; all five forks resolved by the owner — no
+**Status:** complete (design grilled 2026-07-25; all five forks resolved by the owner — no
 needs-design-call escalation expected). Runs in `internal/tools` + `internal/agent` (+ ADR 0012,
 CONTEXT.md, CHANGELOG, TODO.md). **Public API unchanged** — no ADR 0010 version bump.
 **Source:** candidate **02** of `docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md`

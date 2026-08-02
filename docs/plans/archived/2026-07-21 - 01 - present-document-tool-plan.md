@@ -1,6 +1,6 @@
 # Implementation plan — `present_document`: a tool that shows a finished document to the user
 
-**Date:** 2026-07-21. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
+**Date:** 2026-07-21. **Status: complete.** Execute with `/implement-plan` in a fresh
 session: one sub-agent per numbered work item below, verifier before commit, mark items done in
 this file. This plan does not supersede `2026-07-21 - 00` (the release-cut handoff) — the two are
 independent; the owner sequences them. Reconciled against

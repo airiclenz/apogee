@@ -1,7 +1,7 @@
 # Plan — One slash namespace: direct skill invocation, inline tokens, caret-aware completion
 
 **Date:** 2026-07-28
-**Status:** READY (grilled 2026-07-28 — every *Design decision* below is an owner answer from
+**Status:** complete (grilled 2026-07-28 — every *Design decision* below is an owner answer from
 the grill session, or a consequence derived from one and marked as such; the mechanical design
 is grounded against the working tree at `7c1941e` + uncommitted edits).
 **Source:** `ISSUES.md:12` — "slash command like /skills do not work when typing a message to

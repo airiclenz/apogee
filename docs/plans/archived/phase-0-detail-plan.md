@@ -1,6 +1,6 @@
 # Apogee — Phase-0 Detail Plan (P0.3)
 
-**Date:** 2026-06-23 · **Status:** 🟢 active — the task-level breakdown of Phase 0.
+**Date:** 2026-06-23 · **Status:** complete — the task-level breakdown of Phase 0.
 **Parent:** [`implementation-plan-apogee-merge.md`](./implementation-plan-apogee-merge.md) §4
 (Phase 0 is intentionally coarse there). **Backlog item:** TDD
 [§8 P0.3](../design/technical-design.md). **Standing Requirements** (plan §, "⚠️ Standing

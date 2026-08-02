@@ -111,11 +111,11 @@ up because they are typing.
 **So the surfaces give way in a fixed order, and the order is a claim about what the human is
 doing.** The **session area** goes first and goes to nothing; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
-**`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the **`/sessions`
-browser and the picker**; and last the **approval or ask prompt**, which the run itself is blocked
-on. The footer is not in the division at all, and the input box is in it only at its very end, and
-only for the prompt (below). Two panes can want the same rows, and on a window that cannot seat
-both, the one further down that order is not drawn.
+**`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
+**`/sessions` browser and the picker**; and last the **approval or ask prompt**, which the run
+itself is blocked on. The footer is not in the division at all, and the input box is in it only at
+its very end, and only for the prompt (below). Two panes can want the same rows, and on a window
+that cannot seat both, the one further down that order is not drawn.
 
 **A decision surface is never invisible while its keys are live.** The approval and ask prompts are
 the two, and being last in the give-way order is not enough on its own, because the **input box**
@@ -123,9 +123,9 @@ was outside the order entirely: a three-line draft grew the box by two rows, the
 give above it, and the prompt fell off the allocation with `a`/`d`/`s` still answering it — the
 whole of what the frame then said about the decision being `approval needed` on the status line, no
 tool name. So the box's **extra draft rows** join the order, at the very end of it: the box always
-keeps one content row, and the rows a draft grew it past that give way to the prompt — and, past the
-order entirely, to the frame itself (below). "The input box never gives way" is about the box, not
-about every row a draft grew it to —
+keeps one content row, and the rows a draft grew it past that give way to the prompt — and, past
+the order entirely, to the frame itself (below). "The input box never gives way" is about the box,
+not about every row a draft grew it to —
 the box is on the frame at every window size, and what the human was typing is still in it, drawn
 on as many rows as the frame can pay for. The dropdown, the browser and the picker never take the
 box's rows: the browser and the picker own the keyboard while they are open, so no draft can be
@@ -140,14 +140,14 @@ Every row a draft grows the box is a row taken out of the same window everything
 so past a point the box alone — no pane, no queue, nothing open — composes a frame past the
 terminal's last line, and it did: a six-line message on a 12-row terminal put the footer two rows
 off the screen, and a ten-line one did it to every terminal under eighteen rows. So the box is
-capped at whatever leaves the frame inside the terminal, whether or not a prompt is up: five rows on
-a 12-row terminal, one row on an 8-row one. The session area is what pays for those rows, exactly as
-it pays for a pane's — it is first in the order and it goes to nothing.
+capped at whatever leaves the frame inside the terminal, whether or not a prompt is up: five rows
+on a 12-row terminal, one row on an 8-row one. The session area is what pays for those rows,
+exactly as it pays for a pane's — it is first in the order and it goes to nothing.
 
 **A capped box is a window onto the draft, and it says how much of it is out of sight.** The box
 scrolls to keep the line the caret is on in view, and the draft ITSELF is never cut: it is what the
-human typed, not prose apogee derived, and it is the one kind of content in the frame that cannot be
-recovered from anywhere else. What the box is not drawing is counted on the box's own **top
+human typed, not prose apogee derived, and it is the one kind of content in the frame that cannot
+be recovered from anywhere else. What the box is not drawing is counted on the box's own **top
 border**, in the same `… (+N more lines)` marker every pane uses and on the same narrow ladder
 (`… +3` where the full phrase does not fit). The border is the row the box always owns and that
 carries nothing else — the box's title row in every way that counts — so the count costs the draft
@@ -164,8 +164,8 @@ something the rules above forbid giving way. At exactly eight the frame is that 
 more. A long draft, a queued message or an open pane cannot make it grow past eight on a seven-row
 terminal any more than on an eight-row one, so the overflow is bounded at one row per row the
 terminal is short and never compounds. Clipping the frame to the window instead was considered and
-rejected: it would make "the frame never exceeds the terminal" trivially true at every size, and the
-next real overflow would then arrive silently instead of failing a test.
+rejected: it would make "the frame never exceeds the terminal" trivially true at every size, and
+the next real overflow would then arrive silently instead of failing a test.
 
 **A pane that gives way entirely leaves its fact on the status line.** That is the band's licence
 for disappearing — the `N queued` readout carries the count — and the status line therefore owes
@@ -174,11 +174,11 @@ composed **to** the window rather than composed long and clipped to it, so a nar
 the activity phrase around the count and never the count off the end of the row.
 
 **A surface still gets its irreducible rows before any other surface gets a comfortable one.** Each
-open pane's four (below) come off the top of the budget, so a passive band can never squeeze out the
-pane being acted on; the band then takes what it wants out of what is left, which is why it costs
-the session area rather than the pane beside it; the session area keeps a three-row reserve out of
-the remainder; and only the surplus past all three makes a pane taller than its floor, split evenly
-when more than one is open.
+open pane's four (below) come off the top of the budget, so a passive band can never squeeze out
+the pane being acted on; the band then takes what it wants out of what is left, which is why it
+costs the session area rather than the pane beside it; the session area keeps a three-row reserve
+out of the remainder; and only the surplus past all three makes a pane taller than its floor, split
+evenly when more than one is open.
 
 **The smallest honest pane is four rows: its two borders, its title, and its key hint.** That is
 the floor for every pane alike — a pane out of budget shows no rows AND no prose, rather than
@@ -255,8 +255,8 @@ header carrying no target.
   and that summary (`┕ main.go 1 - 154`, `┕ main.go +2 -2`); an in-flight call has no summary yet
   and shows the bare target, the whole block repainting when its result lands. Its body, if it has
   one, lays out beneath the branch, indented to the branch marker's own width — the `Run`'s output,
-  the diff's lines under their `+2 -2`. Those are not `┝`/`┕` branches of their own; only calls are.
-  A body of one line lays out exactly like a body of ten.
+  the diff's lines under their `+2 -2`. Those are not `┝`/`┕` branches of their own; only calls
+  are. A body of one line lays out exactly like a body of ten.
 - **A call with no target** — the one shape with no target line: the header stands alone and the
   lines are themselves the `┝`/`┕` branches, the summary closing the list since it has no branch
   line to ride (an unregistered tool's pretty-printed arguments, then the `error: …` it earned; a
@@ -284,17 +284,17 @@ is what keeps them from reading as one run.
 never "folded": the fold is the Update loop's event act (ADR 0011) and the emergency fold is the
 overflow recovery (ADR 0018); neither word belongs to presentation. Collapsed *is* the compact
 shape specced above — nothing about that shape changes; expanded differs in exactly one way: the
-body renders in full. The sub-agent run is the one block whose collapsed paint goes further, eliding
-its report body along with the whole span behind it (below). Truncation is thereby a **render-time
-act on retained facts**: the entry keeps every body line, and the collapsed caps — free-form
-output's first line plus its `… +N more lines` remainder, the diff body's cap with its remainder —
-apply at paint, not at build. Expanded shows everything, uncapped; the remainder markers exist only
-in the collapsed paint. A group is the degenerate case: its calls carry no bodies (that is what
-made them groupable), so both states paint identically and the rule never mentions groups. A call
-with **no target** is the other shape the two states pass over: its lines are the block's own
-`┝`/`┕` branches rather than a body — an unregistered tool's verbatim arguments, a stray `result` —
-and what the model actually asked for is never hidden from the human approving it, so those lines
-are uncapped in both states.
+body renders in full. The sub-agent run is the one block whose collapsed paint goes further,
+eliding its report body along with the whole span behind it (below). Truncation is thereby a
+**render-time act on retained facts**: the entry keeps every body line, and the collapsed caps —
+free-form output's first line plus its `… +N more lines` remainder, the diff body's cap with its
+remainder — apply at paint, not at build. Expanded shows everything, uncapped; the remainder
+markers exist only in the collapsed paint. A group is the degenerate case: its calls carry no
+bodies (that is what made them groupable), so both states paint identically and the rule never
+mentions groups. A call with **no target** is the other shape the two states pass over: its lines
+are the block's own `┝`/`┕` branches rather than a body — an unregistered tool's verbatim
+arguments, a stray `result` — and what the model actually asked for is never hidden from the human
+approving it, so those lines are uncapped in both states.
 
 **Collapsed is the default, always** — including a call still in flight and a sub-agent run still
 working. Only a click changes a block's state, so nothing ever expands or collapses by itself: a
@@ -357,8 +357,8 @@ width authority like every width in this document — that sets the column, neve
 so markup characters and the bytes of a colour escape never push a column open. The **last** column
 is padded like every other one, so every line of a table — header, rule and body rows alike — ends
 in the same column and the block shows one straight right edge to whatever sits beside it. A row
-that stopped at its last word instead would leave a wider gap to the scroll-bar gutter than the rule
-above it does, which reads as the bar stepping inward beside the body.
+that stopped at its last word instead would leave a wider gap to the scroll-bar gutter than the
+rule above it does, which reads as the bar stepping inward beside the body.
 
 **The header and its rule.** The header row's cells are bold, the same weight `**bold**` earns
 anywhere else. The delimiter row renders as a **single unbroken run of `─`** spanning the whole
@@ -517,21 +517,22 @@ whitespace collapse to one space) as a preview. The message itself is untouched;
 waiting row is shown.
 
 **Order and cap.** Rows are in delivery order, oldest first — so the row nearest the input box is
-the newest, the one Backspace takes back. At most three content rows show at once (`maxQueuedRows`);
-the strip steals its height from the transcript viewport, so an unbounded queue would squeeze the
-conversation off the screen. Past the cap the **newest** rows are the ones kept and a
-`  … N more queued` marker rides at the top of the group, inside the frame and indented and painted
-like every other row, so the count says nothing was dropped. The worst case on screen is six rows:
-the cap, the marker, and the two framing rows.
+the newest, the one Backspace takes back. At most three content rows show at once
+(`maxQueuedRows`); the strip steals its height from the transcript viewport, so an unbounded queue
+would squeeze the conversation off the screen. Past the cap the **newest** rows are the ones kept
+and a `  … N more queued` marker rides at the top of the group, inside the frame and indented and
+painted like every other row, so the count says nothing was dropped. The worst case on screen is
+six rows: the cap, the marker, and the two framing rows.
 
 **The cap is the band's taste; the frame's row budget is the answer to it** (the section on height
 above). The band is one of the surfaces sharing the rows above the input box, and it gives way
 before any pane does, so a short window — or an open pane beside it — cuts it below three rows and
-sometimes to none. What the budget drops is counted in **the same** `… N more queued` marker the cap
-overflows into, one wording for one fact, and the marker outranks the rows it describes: a band with
-one row to spend spends it on the count, not on one of five. Below three rows there is no honest
-band left — its frame, one row and a marker do not fit — so it is not drawn at all, and the status
-line's `N queued` readout is what carries the count, as it does in every frame the band appears in.
+sometimes to none. What the budget drops is counted in **the same** `… N more queued` marker the
+cap overflows into, one wording for one fact, and the marker outranks the rows it describes: a band
+with one row to spend spends it on the count, not on one of five. Below three rows there is no
+honest band left — its frame, one row and a marker do not fit — so it is not drawn at all, and the
+status line's `N queued` readout is what carries the count, as it does in every frame the band
+appears in.
 
 **What the band is not.** Once a staged message is delivered it leaves the band and appears in the
 transcript as its own ⧖ block, which keeps the transcript's own look. The status line's `N queued`
@@ -557,11 +558,11 @@ can be scanned without knowing the table behind it, and every verb the parser kn
 in their names, and a verb the human cannot discover is a verb they will not find.
 
 **Its rows are columns, not sentences.** A dropdown row is not one concatenated string. The name
-and its one-line summary render as **vertically aligned columns**, each padded to the widest cell in
-it, so every summary in the pane starts at the same screen column however long the verbs and skill
-names beside them run — and in the merged `/` menu a skill's description is aligned against the
-command summaries above it, so the two kinds read as one table rather than two lists stacked. The
-busy-state `— idle only` tag is a column of its own after the summary, and it costs the pane
+and its one-line summary render as **vertically aligned columns**, each padded to the widest cell
+in it, so every summary in the pane starts at the same screen column however long the verbs and
+skill names beside them run — and in the merged `/` menu a skill's description is aligned against
+the command summaries above it, so the two kinds read as one table rather than two lists stacked.
+The busy-state `— idle only` tag is a column of its own after the summary, and it costs the pane
 nothing while the engine is idle, because a column no row fills collapses away. `@`'s file rows
 have one field and so no columns to align: they render exactly as they always did. The full rule
 is the **Column contract** under "One overlay for 'which one?'" below, which governs every pop-up
@@ -577,8 +578,8 @@ everything on either side is untouched.
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
 follows them are the exception and complete instead: the three that take arguments — `/confine`,
 `/model` and `/server` (and arguments are only ever read from a whole-line invocation) —
-plus `/skill`, which chains into the picker over the catalog. Accepting a skill row writes that skill's
-own `/id ` token into the text.
+plus `/skill`, which chains into the picker over the catalog. Accepting a skill row writes that
+skill's own `/id ` token into the text.
 
 **One overlay for "which one?".** `/model` and `/server` with nothing after them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight, `↑/↓
@@ -604,27 +605,28 @@ profile already loaded — the answer is one honest line in the transcript and n
 **The Column contract.** Every one of those grammars is a row of **cells**, and the pop-up module —
 not the code that produced the row — owns the alignment, alongside its marker, highlight, windowing
 and truncation. A column is as wide as its widest cell measured in painted display cells (the width
-authority again, so CJK and emoji count for what they occupy on screen, not for their runes), and it
-is measured over **all** of the pane's rows rather than the eight in the window, so the columns never
-shift under the eye while the selection scrolls. Adjacent columns are separated by a **two-space**
-gutter — the same minimum gap a markdown table keeps. Each separator glyph leads the cell it
-introduces rather than trailing the one before it — `— backend`, `· 32k`, `(:8080)` — so the `—`, the
-`·` and the `(` line up down the pane as well as the words after them. Every pop-up kind has a
-**fixed schema**: a tier a row does not state is an *empty cell*, which pads like any other, so an
-unstated context window or a nameless backend cannot slide the tiers after it sideways; and a column
-**no** row in the pane fills collapses away entirely, costing it neither width nor gutter. The
-composed line is right-trimmed and then goes through the pane's ordinary pipeline — the two-cell
-selection marker in front, the highlight bar across it, truncation to the inner width with a trailing
-`…`. That truncation is **whole-row**, never column by column, so a narrow terminal loses the
-rightmost tiers rather than scrambling the alignment of the ones still on screen. A row with a single
-cell has no columns to align and renders exactly as it did before columns existed: `@`'s file
-suggestions, an armed rename buffer in the `/sessions` browser, and the ask and approval prompts.
+authority again, so CJK and emoji count for what they occupy on screen, not for their runes), and
+it is measured over **all** of the pane's rows rather than the eight in the window, so the columns
+never shift under the eye while the selection scrolls. Adjacent columns are separated by a
+**two-space** gutter — the same minimum gap a markdown table keeps. Each separator glyph leads the
+cell it introduces rather than trailing the one before it — `— backend`, `· 32k`, `(:8080)` — so
+the `—`, the `·` and the `(` line up down the pane as well as the words after them. Every pop-up
+kind has a **fixed schema**: a tier a row does not state is an *empty cell*, which pads like any
+other, so an unstated context window or a nameless backend cannot slide the tiers after it
+sideways; and a column **no** row in the pane fills collapses away entirely, costing it neither
+width nor gutter. The composed line is right-trimmed and then goes through the pane's ordinary
+pipeline — the two-cell selection marker in front, the highlight bar across it, truncation to the
+inner width with a trailing `…`. That truncation is **whole-row**, never column by column, so a
+narrow terminal loses the rightmost tiers rather than scrambling the alignment of the ones still on
+screen. A row with a single cell has no columns to align and renders exactly as it did before
+columns existed: `@`'s file suggestions, an armed rename buffer in the `/sessions` browser, and the
+ask and approval prompts.
 
-**`/model`'s launcher accept is the one that does not finish on the spot.** Picking a Launch profile
-takes the actuation latch and hands the pane's decision to a blocking launcher verb: the overlay
-closes, the footer's model slot says `loading <profile>…`, and the launcher's steps arrive as
-transcript notes until the beat completes the move. While that latch is held, the paths that would
-open an Exchange (a send, `/continue`, `/compact`) and the four switching verbs (`/model`,
+**`/model`'s launcher accept is the one that does not finish on the spot.** Picking a Launch
+profile takes the actuation latch and hands the pane's decision to a blocking launcher verb: the
+overlay closes, the footer's model slot says `loading <profile>…`, and the launcher's steps arrive
+as transcript notes until the beat completes the move. While that latch is held, the paths that
+would open an Exchange (a send, `/continue`, `/compact`) and the four switching verbs (`/model`,
 `/server`, `/unload-model`, `/stop-server`) are each refused with one line instead of acting; Esc
 does not cancel an actuation, because the launcher's own cancel is `/stop-server` once the verb
 returns.

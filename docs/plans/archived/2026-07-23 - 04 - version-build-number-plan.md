@@ -1,7 +1,7 @@
 # Plan — A build number in the version string
 
 **Date:** 2026-07-23
-**Status:** **READY TO IMPLEMENT** — not started.
+**Status:** complete.
 **Track:** post-`v1.7.1` version-string affordance. Touches `version.go`, the `Makefile`,
 the two version tests, and `CHANGELOG.md`. No public Go API change.
 

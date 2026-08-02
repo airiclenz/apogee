@@ -1,6 +1,6 @@
 # Plan — the session system: per-Turn persistence, history browser, in-TUI resume
 
-**Date:** 2026-07-24. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
+**Date:** 2026-07-24. **Status: complete.** Execute with `/implement-plan` in a fresh
 session, forwarding skills: `coding-standards`.
 
 Owner request: build the session handling system — the TODO.md P1 item ("in-TUI *new session*

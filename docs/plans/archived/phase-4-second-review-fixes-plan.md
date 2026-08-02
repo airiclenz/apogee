@@ -1,7 +1,7 @@
 # Plan — Phase-4 second-review fixes (full-phase review findings)
 
 **Date:** 2026-07-04
-**Status:** ready to run.
+**Status:** complete.
 **How to run:** `implement-plan docs/plans/phase-4-second-review-fixes-plan.md with skills: coding-standards`
 (the broad plan's standing requirement #1 makes `coding-standards` mandatory for every item).
 **Source of direction:** the 2026-07-04 six-lens review of the complete Phase 4

@@ -1,7 +1,7 @@
 # Plan — Phase-4 wave-1 review fixes (items 2–6 findings)
 
 **Date:** 2026-07-04
-**Status:** ready to run.
+**Status:** complete.
 **How to run:** `implement-plan docs/plans/phase-4-review-fixes-plan.md with skills: coding-standards`
 **Source of direction:** the 2026-07-04 four-agent review of Phase-4 items 1–6
 (commits `9e328d0`..`af0647d`), owner-ratified decisions below;

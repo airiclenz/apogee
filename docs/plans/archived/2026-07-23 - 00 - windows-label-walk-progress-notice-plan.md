@@ -1,6 +1,6 @@
 # Implementation plan — Windows label-walk progress notice (keep semantics, tell the user)
 
-**Date:** 2026-07-23. **Status: NOT STARTED.** Owner decision recorded 2026-07-23 (the point-2
+**Date:** 2026-07-23. **Status: complete.** Owner decision recorded 2026-07-23 (the point-2
 "OWNER CALL" from `docs/handoffs/2026-07-23 - 01 - linux-closeout-...md` and `TODO.md`
 §"Phase-5 verification leftovers"): **"Notice, keep semantics."** Keep the ratified full-tree Low
 labelling exactly as-is; add a user-visible notice so the one-time walk stops being a silent hang.

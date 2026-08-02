@@ -1,13 +1,7 @@
 # Plan — llama-launcher as a library: /load, /unload, /stop
 
 **Date:** 2026-07-29
-**Status:** IN PROGRESS (design grilled 2026-07-29; all four TODO forks resolved by the owner —
-no needs-design-call escalation expected). Items 1–15 landed 2026-07-29, item 8's owner-run live
-pass included — six of its seven scenarios exercised on hardware, (7) waived by the owner, and its
-NOTES record which. Item 16 was added 2026-07-29 from item 15's own verifier and a live probe on
-the owner's host (see the fourth addendum, above item 8) and is the only open item: the residual
-half of item 15's defect, at the one site that BUILDS an endpoint out of a launcher address, where
-a genuine move still hands the wire the bind spelling.
+**Status:** complete.
 **Prerequisite — MET 2026-07-29:** llama-launcher **v1.6.1** (the portability release — its
 plan `docs/plans/2026-07-29-portability-release-plan.md` *in that repo*) is tagged and pushed;
 it builds on linux/darwin/windows and exports `ErrUnsupported` + `ErrStartupTimeout`. The

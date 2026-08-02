@@ -1,6 +1,6 @@
 # Markdown tables in the transcript — implementation plan
 
-**Date:** 2026-07-31. **Status:** ready to execute. Origin: `ISSUES.md` line 9 — "markdown
+**Date:** 2026-07-31. **Status:** complete. Origin: `ISSUES.md` line 9 — "markdown
 tables emitted by the model are not properly rendered as a table in the apogee chat."
 **Ground truth:** this plan's Decisions section, plus `layout.md` as amended by item 1 (the
 look spec of record — after item 1 lands, `layout.md` is the visual authority wherever an

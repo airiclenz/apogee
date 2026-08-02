@@ -1,7 +1,7 @@
 # Plan — engine & TUI correctness wave (audit 2026-08-01, Wave 2)
 
 **Date:** 2026-08-01
-**Status:** not started
+**Status:** complete
 **Goal:** land the audit's correctness and concurrency fixes — the Critical session-record
 lost-update race, the composing-state holes in the engine, the TUI/launcher concurrency pair,
 and the two mechanism-heuristic defects — each with a regression test.

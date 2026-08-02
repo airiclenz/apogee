@@ -1,7 +1,7 @@
 # Plan — Post-v1.3.0 review fixes (guided-decomposition substrate + enable-surface hardening)
 
 **Date:** 2026-07-06
-**Status:** ready to run.
+**Status:** complete.
 **How to run:** `implement-plan docs/plans/post-v1.3.0-review-fixes-plan.md with skills: coding-standards`
 **Source of direction:** the 2026-07-06 four-lens review of `v1.2.0...HEAD`
 (`docs/code-review-2026-07-06.md`) — 5 High / 10 Medium findings, no Critical. Binding ground

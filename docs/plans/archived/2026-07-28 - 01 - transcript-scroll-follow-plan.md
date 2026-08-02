@@ -1,7 +1,7 @@
 # Plan — Transcript scroll-follow (stick-to-bottom with positional detach)
 
 **Date:** 2026-07-28
-**Status:** READY (not grilled — the *Design decisions* below derive from the ISSUES entry,
+**Status:** complete (not grilled — the *Design decisions* below derive from the ISSUES entry,
 layout.md, and behavioural parity with the reference implementation in apogee-code; the
 mechanical design is grounded against the working tree at `3893639` + the in-flight plan-00
 edits, which touch no file this plan touches).

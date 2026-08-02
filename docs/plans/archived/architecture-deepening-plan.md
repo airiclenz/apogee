@@ -1,7 +1,7 @@
 # Plan — Architecture deepening (the Exchange seam, the Mechanism-author surface, the tool-definition module)
 
 **Date:** 2026-07-06
-**Status:** READY — the blocking `post-v1.3.0-review-fixes-plan.md` completed and was archived
+**Status:** complete — the blocking `post-v1.3.0-review-fixes-plan.md` completed and was archived
 (`docs/plans/archived/`, 2026-07-07). That plan's tests are this plan's behaviour contract.
 **How to run:** `implement-plan docs/plans/architecture-deepening-plan.md with skills: coding-standards`
 **Source of direction:** the 2026-07-06 architecture review

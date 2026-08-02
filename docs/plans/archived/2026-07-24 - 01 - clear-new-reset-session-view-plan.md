@@ -1,6 +1,6 @@
 # Plan — `/clear` and `/new` reset the session view and reprint the start-up box
 
-**Date:** 2026-07-24. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
+**Date:** 2026-07-24. **Status: complete.** Execute with `/implement-plan` in a fresh
 session, forwarding skills: `coding-standards`.
 
 Owner request: when `/clear` or `/new` is submitted, the **session view is completely cleared** and

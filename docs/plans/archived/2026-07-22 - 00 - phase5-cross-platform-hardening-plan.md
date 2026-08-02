@@ -1,6 +1,6 @@
 # Implementation plan — merge-plan Phase 5: cross-platform hardening & retirement
 
-**Date:** 2026-07-22. **Status: PLAN — not started.** Execute with `/implement-plan` in a fresh
+**Date:** 2026-07-22. **Status: complete.** Execute with `/implement-plan` in a fresh
 session **on the owner's Windows machine** (decided 2026-07-22 — see the dated NOTES under Ground
 truth), forwarding skills: `coding-standards` (merge-plan Standing Requirement 1 — mandatory for
 any new Go). One sub-agent per numbered work item below, verifier before commit, mark items done

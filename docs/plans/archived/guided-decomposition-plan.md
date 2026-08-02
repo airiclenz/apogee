@@ -1,7 +1,7 @@
 # Plan — Guided decomposition (`guided_decomposition`, ADR 0014)
 
 **Date:** 2026-07-05
-**Status:** ready to implement — not started.
+**Status:** complete.
 **Track:** post-`v1.0.0` Mechanism-catalogue extension (the same track as the phase-4 waves).
 Purely **additive**; no freeze break. Default **off** (D1) — this plan ends with the Mechanism
 implemented, tested, and enable-able; flipping it on is the bench's call, not this plan's.

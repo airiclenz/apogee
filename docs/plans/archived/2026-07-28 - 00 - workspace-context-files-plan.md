@@ -1,7 +1,7 @@
 # Plan — Workspace context files (AGENTS.md into the system prompt)
 
 **Date:** 2026-07-28
-**Status:** READY (grilled with the owner 2026-07-28 — see *Owner decisions*; the mechanical
+**Status:** complete (grilled with the owner 2026-07-28 — see *Owner decisions*; the mechanical
 design below is grounded against the working tree at `3893639`).
 **Source:** owner request 2026-07-28 — "make certain files part of the initial system prompt
 when a new session is started (the way CLAUDE.md is consumed by Claude Code), configurable

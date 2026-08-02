@@ -1,7 +1,7 @@
 # Plan — Resolve the 2026-07-24 review's two parked items, then archive the review
 
 **Date:** 2026-07-26
-**Status:** READY
+**Status:** complete
 **Source:** the two items the (now otherwise empty) ledger of
 `docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md` deliberately parks: the
 `/code-audit` on the **live** url-safety gap (card 02's own note — the 2026-07-25 funnel fixed

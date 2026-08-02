@@ -1,7 +1,7 @@
 # Plan — Close the live url-safety gap (the 2026-07-26 audit's findings)
 
 **Date:** 2026-07-26
-**Status:** READY *with three open design calls* — items **1 (H-1)**, **2 (H-2)** and **14 (M-10)**
+**Status:** complete — items **1 (H-1)**, **2 (H-2)** and **14 (M-10)**
 carry a `**Design call:**` line. The executing coordinator **stops and asks the owner** before
 dispatching those three; the other eleven items are pre-decided by the audit and need no
 escalation. *(This line describes items 1–14 as the plan was written; all three calls were

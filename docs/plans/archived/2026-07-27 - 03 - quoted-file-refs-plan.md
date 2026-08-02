@@ -1,7 +1,7 @@
 # Plan — Quoted `@`-refs: file references whose paths contain spaces
 
 **Date:** 2026-07-27
-**Status:** READY (not grilled — mechanical decisions recorded below with rationale; ground verified against the working tree 2026-07-27)
+**Status:** complete (not grilled — mechanical decisions recorded below with rationale; ground verified against the working tree 2026-07-27)
 **Source:** ISSUES.md `[A]` (line 8): `@"docs/plans/2026-07-23 - 04 - version-build-number-plan.md"` fails with `loop: @"docs/plans/2026-07-23 could not be resolved and was ignored: statat "docs/plans/2026-07-23: no such file or directory`. The extractor (`internal/tui/command.go:172`) tokenizes on whitespace only, so a quoted path splits at its first space **and** the leading `"` rides along into the ref — the resolver then stats a file literally named `"docs/plans/2026-07-23`. There is no way today to reference any workspace file whose name contains a space, and this repo's own plan filenames all do.
 **Track:** rides `[Unreleased]` (current `VERSION` v0.9.0; a fix + a small TUI affordance).
 **Public API:** none — every change is inside `internal/tui`; `domain.UserInput.FileRefs` already carries plain workspace-relative paths and keeps doing exactly that. The agent-side resolver (`internal/agent/loop.go:657-732`) is untouched: `security.SafeOpen` has no problem with spaces — the failure is purely the parse.

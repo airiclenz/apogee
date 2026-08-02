@@ -1,9 +1,7 @@
 # Plan — Post-v1.0.0 review remediation (fix before the next stage)
 
 **Date:** 2026-07-02
-**Status:** IN PROGRESS — items 1–6 done (item 1 commit `8dc295e`; item 2 code + item 3 tests
-+ item 4 docs + item 5 mouse/paste + item 6 compact-budget 2026-07-02); items 7–8 open. Ordered
-action list from the 2026-07-02 code review of
+**Status:** complete. Ordered action list from the 2026-07-02 code review of
 `v1.0.0..HEAD` (the apogee-code feature-parity track: mini-language, skills, quick-wins
 bundle, `/props` discovery, gauge restyle, mouse support, un-wedge fix, `/compact` reducer).
 **Source:** six-specialist review (mission/security/bugs/concurrency/health/tests) + a docs

@@ -1,7 +1,7 @@
 # Plan — Collapse the 21× Mechanism registration ritual: the registry holds rows
 
 **Date:** 2026-07-25
-**Status:** READY (design resolved with the owner 2026-07-25; both forks answered — shape **B**
+**Status:** complete (design resolved with the owner 2026-07-25; both forks answered — shape **B**
 (registry holds rows) and candidate **07** folded in as item 2). Runs in `internal/domain`,
 `internal/mechanisms`, `internal/agent`, `internal/validated` and the root facade (+ ADR 0003,
 ADR 0015, CONTEXT.md, CHANGELOG, TODO.md).
