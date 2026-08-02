@@ -897,8 +897,9 @@ func runCall(tr *transcript, id, command, output string, depth int) {
 }
 
 // TestSubAgentRunCollapsesToItsCallBlock is the item's acceptance golden, in both directions. By
-// default the whole run is ONE block: the ⤷ descent label, the rail, the inner blocks and every
-// spacer among them are gone, and the head's summary slot carries the cascading count and gist.
+// default the whole run is ONE block reading as ONE summarised line: the ⤷ descent label, the rail,
+// the inner blocks and every spacer among them are gone, the report body is gone with them, and the
+// head's summary slot carries the cascading count and gist.
 // Expanded, the head shows the report it actually returned and the railed span comes back exactly
 // as it has always painted — with each inner block in its OWN state, which is why the Run inside it
 // is still collapsed to its first line and a remainder marker.
@@ -912,8 +913,6 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	collapsed := strings.Join([]string{
 		"✦ Sub-Agent",
 		"  ┕ survey the tests 2 tool calls · Found 4 gaps",
-		"    Found 4 gaps",
-		"    … +2 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("collapsed run mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
@@ -951,6 +950,46 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	}
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("re-collapsed run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+	}
+}
+
+// TestCollapsedRunSaysItsGistOnce pins the no-repetition rule: a collapsed run's head reads as ONE
+// summarised line, so the report's first line — which the summary slot carries — is never painted a
+// second time as the block's compact body. The rule holds whichever half of the outcome the report's
+// own size filled: a long report that became a body used to say its first line twice in adjacent
+// rows, and a one-line report that became a summary has no body to repeat it with.
+func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
+	const gist = "Found 4 gaps"
+	cases := []struct {
+		name   string
+		report string
+	}{
+		{name: "a long report, which the outcome kept as a body", report: gist + "\nin the suite\nhere they are"},
+		{name: "a one-line report, which the outcome kept as a summary", report: gist},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			subAgentCall(tr, "s1", "survey the tests", 0)
+			readCall(tr, "c1", "a.go", 1, 5, 1)
+			subAgentReport(tr, "s1", tc.report, 0)
+
+			painted := renderPlain(tr, 80)
+
+			lines := strings.Split(painted, "\n")
+			hits := 0
+			for _, ln := range lines {
+				if strings.Contains(ln, gist) {
+					hits++
+				}
+			}
+			if hits != 1 {
+				t.Errorf("the gist %q appears on %d lines; want 1 (the summary slot alone):\n%s", gist, hits, painted)
+			}
+			if len(lines) != 2 {
+				t.Errorf("collapsed run = %d lines; want 2 (the header and its one summarised line):\n%s", len(lines), painted)
+			}
+		})
 	}
 }
 

@@ -284,7 +284,8 @@ is what keeps them from reading as one run.
 never "folded": the fold is the Update loop's event act (ADR 0011) and the emergency fold is the
 overflow recovery (ADR 0018); neither word belongs to presentation. Collapsed *is* the compact
 shape specced above — nothing about that shape changes; expanded differs in exactly one way: the
-body renders in full. Truncation is thereby a **render-time act on retained facts**: the entry
+body renders in full. The sub-agent run is the one block whose collapsed paint goes further, eliding
+its report body along with the whole span behind it (below). Truncation is thereby a **render-time act on retained facts**: the entry
 keeps every body line, and the collapsed caps — free-form output's first line plus its
 `… +N more lines` remainder, the diff body's cap with its remainder — apply at paint, not at
 build. Expanded shows everything, uncapped; the remainder markers exist only in the collapsed
@@ -320,8 +321,14 @@ and all — is elided. Its summary line carries the run's gist in two tempi: whi
 main.go`), ticking as inner calls land; once the report arrives, `N tool calls · ` plus the
 report's first line. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
-rule. Expanding the run reveals the inner blocks *in their own states*, each collapsed unless it
-was itself clicked open: the cascade is this one rule applied at every depth, not a special case.
+rule. A collapsed run is thereby the one block that reads as a single summarised line: its own
+**report body is elided along with the span**, because the summary slot already says that report's
+first line and no block prints the same text twice in two adjacent rows. It grows no
+`… +N more lines` marker either — the transitive count is what says there is work behind the
+header, and the header is a toggle target however short the report is, so nothing is unreachable.
+Expanding the run reveals the report in full and the inner blocks *in their own states*, each
+collapsed unless it was itself clicked open: the cascade is this one rule applied at every depth,
+not a special case.
 
 **The live star.** While a block still contains an open call — a call whose result has not
 landed, or a run whose report has not — its header glyph blinks: `✦` and `✧` alternate on the

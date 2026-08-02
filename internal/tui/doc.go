@@ -50,9 +50,11 @@
 // ✦ tool markers. That whole frame is what a COLLAPSED run elides: by default a sub_agent call
 // block and the span of deeper entries behind it are ONE block ([subAgentSpan],
 // [renderSubAgentRun]), its summary slot carrying the run's transitive tool-call count and its gist
-// — the live phrase of whatever the span has open, then the report's first line — and the framing
-// above is what expanding it reveals, each inner block in its own state (layout.md, "Collapsed and
-// expanded blocks"). While anything behind a block's header is still waiting for a result, that
+// — the live phrase of whatever the span has open, then the report's first line. The head's own
+// report body is elided with that frame, so a collapsed run reads as ONE summarised line and never
+// repeats in a body row what the summary slot just said; the framing and the full report are what
+// expanding it reveals, each inner block in its own state (layout.md, "Collapsed and expanded
+// blocks"). While anything behind a block's header is still waiting for a result, that
 // header's ✦ blinks against ✧ ([blockState.star]) on the STATUS SPINNER's frame parity
 // ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick repaints
 // the viewport only while [transcript.hasOpenToolCall] holds, so an idle chain costs no repaints.

@@ -320,8 +320,15 @@ func subAgentSpan(entries []entry, i int) int {
 // cascading summary of the work behind it; expanded, the head is an ordinary block with its full
 // report and the span paints as it always has.
 //
-// The head's view is COPIED before its summary is replaced, so the substitution is a paint-time act
-// on a fact the entry keeps whole — the same discipline the body's truncation follows
+// A COLLAPSED run's head is ONE summarised line: the report body is elided along with the span,
+// because the summary slot already carries that report's first line and no block says the same
+// thing twice in two adjacent rows (layout.md, "A sub-agent run collapses to its call block"). The
+// count in that line is what says work is hidden behind the header, so the run needs no
+// "… +N more lines" marker to say it too — and the header is a target however short the report is
+// (blockState.elides), so nothing is unreachable.
+//
+// The head's view is COPIED before its summary is replaced and its body dropped, so both are
+// paint-time acts on facts the entry keeps whole — the same discipline the body's truncation follows
 // (collapsedDetails), and the reason expanding shows the report the run actually returned.
 // A run is live until its REPORT lands, and its span is asked as well as its head: a report that
 // never arrived (a child cancelled mid-tool) leaves the head open, and — the mirror case — a head
@@ -332,6 +339,7 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 	view := head.tool
 	if !head.expanded {
 		view.Summary = subAgentSummary(head, span)
+		view.Details = nil
 	}
 	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
 		expanded: head.expanded,
