@@ -2575,6 +2575,33 @@ func (m *Model) refreshViewport() {
 	m.viewport.GotoBottom() // on padded short content the bottom IS the prompt row; otherwise the real tail
 }
 
+// refreshViewportAnchored re-renders the transcript and then holds ONE content line on the screen
+// row it was already drawn on — the line a motionless click landed on (mouse.go). It is the
+// anchoring half of the block-toggle rule: a block grows and shrinks BELOW its header, so pinning
+// the clicked line's row is the whole of what keeps the line under the cursor still while the body
+// appears or goes (layout.md, "Collapsed and expanded blocks").
+//
+// The repaint itself goes through refreshViewport, so the stash, the keep-if-unchanged rule and the
+// short-content padding stay stated once; what this overrides is where that path PARKED the view.
+// Its attached path ends at GotoBottom, which would yank the transcript to the tail on every
+// toggle — the human clicked a header halfway up the scrollback, not the bottom of it. The offset
+// is drawnLineAt's mapping read backwards (line = offset + row), so the clicked line lands back on
+// its own row; SetYOffset clamps, so a collapse that took the content out from under the anchor
+// settles at the bottom rather than scrolling into blank. That mapping's OTHER branch — the rows
+// the sticky header is overlaid on — can never be the one a toggle arrived through: those rows draw
+// a user block's lines, and a user block marks no click surface at all (render.go), so a resolved
+// target's line is always the offset's own.
+//
+// detached is then re-derived from where the view actually ended up, exactly as a wheel scroll
+// derives it (scrollViewport), which keeps "detached ⇔ off the bottom" total: an anchor holding the
+// view off the tail IS the human looking away from it, and following the stream again would move
+// the very line the toggle promised to keep still.
+func (m *Model) refreshViewportAnchored(line, row int) {
+	m.refreshViewport()
+	m.viewport.SetYOffset(line - row)
+	m.detached = !m.viewport.AtBottom()
+}
+
 // ----------------------------------------------------------------------------
 // View
 // ----------------------------------------------------------------------------

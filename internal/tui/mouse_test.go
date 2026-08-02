@@ -590,20 +590,258 @@ func TestTranscriptDragSelectsAndCopies(t *testing.T) {
 }
 
 // TestTranscriptBareClickCopiesNothing checks a click without a drag copies nothing (no flash, no
-// Cmd) and collapses the selection — the same bare-click rule the prompt follows.
+// Cmd) and collapses the selection — the same bare-click rule the prompt follows. It holds on a
+// block's header too: a motionless click there toggles the block (its own tests below), and
+// toggling is not copying — nothing reaches the clipboard and no confirmation is flashed.
 func TestTranscriptBareClickCopiesNothing(t *testing.T) {
-	m := modelWithTranscript(t, "hello world")
+	cases := []struct {
+		name  string
+		build func(t *testing.T) (Model, int, int) // the model and the screen cell the click lands on
+	}{
+		{"on an ordinary line", func(t *testing.T) (Model, int, int) {
+			return modelWithTranscript(t, "hello world"), 2, 0
+		}},
+		{"on a block header", func(t *testing.T) (Model, int, int) {
+			m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
+			return m, 2, screenRow(t, m, markedLine(t, m, targetHeader))
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, x, y := c.build(t)
 
-	m = step(t, m, leftClick(2, 0))
-	m, cmd := stepCmd(t, m, leftRelease(2, 0))
-	if cmd != nil {
-		t.Fatal("a bare transcript click+release should not copy, got a Cmd")
+			m = step(t, m, leftClick(x, y))
+			m, cmd := stepCmd(t, m, leftRelease(x, y))
+			if cmd != nil {
+				t.Fatal("a bare transcript click+release should not copy, got a Cmd")
+			}
+			if m.flash != "" {
+				t.Fatalf("flash = %q, want empty after a bare click", m.flash)
+			}
+			if m.transcriptSel.active {
+				t.Fatal("a bare transcript click+release should collapse the selection")
+			}
+		})
 	}
-	if m.flash != "" {
-		t.Fatalf("flash = %q, want empty after a bare click", m.flash)
+}
+
+// ----------------------------------------------------------------------------
+// A motionless click toggles the block under it (mouse.go, layout.md "Collapsed and expanded
+// blocks")
+// ----------------------------------------------------------------------------
+
+// modelWithToolBlock builds a ready idle model holding one user prompt and one tool block whose
+// result is output. A multi-line body is what gives the block something to reveal, and therefore
+// what makes its header and its `… +N more lines` marker click targets at all (render.go's target
+// rule). The seeded start-up box is dropped so the block sits high enough to be on screen at any
+// scroll position the tests park at.
+func modelWithToolBlock(t *testing.T, output string) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("run the tests", nil)
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: output}})
+	m.refreshViewport()
+	return m
+}
+
+// markedLine returns the index of the first rendered line the painter marked with kind, failing
+// when the paint carries none — the fixture no longer exercises the surface under test.
+func markedLine(t *testing.T, m Model, kind targetKind) int {
+	t.Helper()
+	for i, target := range m.lineTargets {
+		if target.kind == kind {
+			return i
+		}
 	}
-	if m.transcriptSel.active {
-		t.Fatal("a bare transcript click+release should collapse the selection")
+	t.Fatalf("no rendered line is marked %v", kind)
+	return -1
+}
+
+// blockExpanded reports the state of the block the marked line at index belongs to, read off the
+// entry the painter's mark names.
+func blockExpanded(t *testing.T, m Model, line int) bool {
+	t.Helper()
+	if line < 0 || line >= len(m.lineTargets) {
+		t.Fatalf("line %d is outside the stashed target map (%d lines)", line, len(m.lineTargets))
+	}
+	return m.transcript.entries[m.lineTargets[line].entry].expanded
+}
+
+// clickCell drives a motionless click — press and release in the same cell, which is what the rule
+// is written in terms of — and returns the model it left behind.
+func clickCell(t *testing.T, m Model, x, y int) Model {
+	t.Helper()
+	m = step(t, m, leftClick(x, y))
+	return step(t, m, leftRelease(x, y))
+}
+
+// TestTranscriptClickTogglesTheBlock is the rule itself: a motionless click on a header line
+// toggles that block in both directions, a click on the remainder marker opens it, and a click on
+// a body line — a line the painter marked as nothing — leaves the state alone.
+func TestTranscriptClickTogglesTheBlock(t *testing.T) {
+	const output = "ok   a\nok   b\nok   c\nPASS"
+
+	t.Run("a header toggles, and toggles back", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		header := markedLine(t, m, targetHeader)
+		if blockExpanded(t, m, header) {
+			t.Fatal("setup: the block is expanded before any click; collapsed is the default")
+		}
+
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+		if !blockExpanded(t, m, header) {
+			t.Fatal("a click on the header did not expand the block")
+		}
+		if body := strings.Join(m.lines, "\n"); !strings.Contains(body, "PASS") || strings.Contains(body, "more line") {
+			t.Fatalf("the expanded paint did not reach the viewport lines:\n%s", body)
+		}
+
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+		if blockExpanded(t, m, header) {
+			t.Fatal("a second click on the header did not collapse the block")
+		}
+		if body := strings.Join(m.lines, "\n"); !strings.Contains(body, "more line") {
+			t.Fatalf("the re-collapsed paint kept no remainder marker:\n%s", body)
+		}
+	})
+
+	t.Run("a remainder marker expands", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		marker := markedLine(t, m, targetMarker)
+
+		m = clickCell(t, m, 6, screenRow(t, m, marker))
+		if !blockExpanded(t, m, markedLine(t, m, targetHeader)) {
+			t.Fatal("a click on the `… +N more lines` marker did not expand the block")
+		}
+		for _, target := range m.lineTargets {
+			if target.kind == targetMarker {
+				t.Fatal("the expanded paint still carries a remainder marker")
+			}
+		}
+	})
+
+	t.Run("a body line is no target", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		header := markedLine(t, m, targetHeader)
+		body := header + 2 // header, branch line, then the body's first line
+		if m.lineTargets[body].kind != targetNone {
+			t.Fatalf("setup: line %d is marked %v, not the body line this case needs",
+				body, m.lineTargets[body].kind)
+		}
+
+		before := strings.Join(m.lines, "\n")
+		m = clickCell(t, m, 6, screenRow(t, m, body))
+		if blockExpanded(t, m, header) {
+			t.Fatal("a click on a body line expanded the block")
+		}
+		if got := strings.Join(m.lines, "\n"); got != before {
+			t.Fatalf("a click on a body line repainted the transcript:\n--- got ---\n%s\n--- want ---\n%s", got, before)
+		}
+	})
+}
+
+// TestTranscriptDragFromHeaderStillSelects is the arbitration: MOTION decides. A drag that starts
+// on a header line is a drag-select like any other — it copies the text it ran over and the block
+// it started on keeps its state — because a toggle is a click that never moved.
+func TestTranscriptDragFromHeaderStillSelects(t *testing.T) {
+	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
+	header := markedLine(t, m, targetHeader)
+	row := screenRow(t, m, header)
+
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(m.viewport.Width(), row))
+	m, cmd := stepCmd(t, m, leftRelease(m.viewport.Width(), row))
+	if cmd == nil {
+		t.Fatal("a drag across the header returned no copy Cmd")
+	}
+	if !strings.Contains(m.flash, "copied") {
+		t.Fatalf("flash = %q, want a copy confirmation", m.flash)
+	}
+	if blockExpanded(t, m, header) {
+		t.Fatal("a drag that started on the header toggled the block; motion must win")
+	}
+}
+
+// TestTranscriptToggleKeepsTheClickedHeaderRow is the anchoring invariant: the line under the
+// cursor never moves. The body grows and shrinks BELOW the header, so the header must be painted on
+// the same screen row after the toggle as before it — in both directions, whether the view was
+// following the tail or parked where the human scrolled it.
+func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
+	const output = "ok   a\nok   b\nok   c\nPASS"
+	cases := []struct {
+		name  string
+		build func(t *testing.T) Model
+	}{
+		{"following the tail", func(t *testing.T) Model {
+			// Deep enough that the tail is a real scroll position: this is the case the anchoring
+			// exists for, since refreshViewport's attached path ends at GotoBottom and would slide
+			// the header up by every line the expansion added.
+			m := newTestModel(t)
+			m.transcript.reset()
+			m.transcript.addUser("run the tests", nil)
+			for i := range 20 {
+				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+			}
+			m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+				ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+			m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: output}})
+			for i := range 5 { // the block stays on screen at the tail, with room below it
+				m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+			}
+			m.refreshViewport()
+			if m.detached || m.viewport.YOffset() == 0 {
+				t.Fatalf("setup: want the view following the tail at a real offset, got detached=%v offset=%d",
+					m.detached, m.viewport.YOffset())
+			}
+			return m
+		}},
+		{"scrolled up, detached", func(t *testing.T) Model {
+			m := newTestModel(t)
+			m.transcript.reset()
+			m.transcript.addUser("run the tests", nil)
+			for i := range 20 { // scrollback above the block, so it can be scrolled up TO
+				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+			}
+			m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+				ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+			m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: output}})
+			for i := range 40 { // depth below it, so the parked offset has somewhere to hold
+				m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+			}
+			m.refreshViewport()
+			m.detached = true
+			m.viewport.SetYOffset(markedLine(t, m, targetHeader) - 5) // park the header five rows down
+			if m.viewport.AtBottom() {
+				t.Fatal("setup: the parked view is still at the tail; the detached case tests nothing")
+			}
+			return m
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := c.build(t)
+			header := markedLine(t, m, targetHeader)
+			row := screenRow(t, m, header)
+
+			m = clickCell(t, m, 2, row)
+			if !blockExpanded(t, m, header) {
+				t.Fatal("the click did not expand the block")
+			}
+			if got := screenRow(t, m, markedLine(t, m, targetHeader)); got != row {
+				t.Errorf("expanding moved the clicked header from screen row %d to %d", row, got)
+			}
+
+			m = clickCell(t, m, 2, row)
+			if blockExpanded(t, m, header) {
+				t.Fatal("the second click did not collapse the block")
+			}
+			if got := screenRow(t, m, markedLine(t, m, targetHeader)); got != row {
+				t.Errorf("collapsing moved the clicked header from screen row %d to %d", row, got)
+			}
+		})
 	}
 }
 

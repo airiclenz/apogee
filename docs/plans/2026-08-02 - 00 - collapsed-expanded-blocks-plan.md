@@ -163,9 +163,19 @@ render.go (grep shows no second producer).
 
 **Commit:** `feat(tui): the painter records each block's header and marker lines`
 
-## 4. A motionless click on a header or marker toggles the block
+## 4. A motionless click on a header or marker toggles the block — ✅ DONE (2026-08-02)
 
 Depends on item 3.
+
+NOTES (2026-08-02): one file beyond the two the item names — `transcript.go` gained `setExpanded(index,
+bool)`, and `toggleExpanded` now delegates to it. The marker's rule ("expand, never collapse") needs a
+write that is not a flip, and the alternative was reaching into `transcript.entries` from mouse.go to
+read the state before flipping, duplicating the kind/range guard outside its owner. `setExpanded` is
+now the one writer of `entry.expanded` (item 2's invariant, restated on the new method). Anchoring
+landed as the item's second option — `refreshViewportAnchored` (model.go) calls `refreshViewport` and
+then overrides where it parked the view, re-deriving `detached` from the result exactly as
+`scrollViewport` does, so "detached ⇔ off the bottom" stays total when the anchor holds the view off
+the tail.
 
 **What:**
 

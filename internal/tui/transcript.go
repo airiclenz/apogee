@@ -485,24 +485,39 @@ func (t *transcript) hasOpenToolCall() bool {
 	return false
 }
 
-// toggleExpanded flips one block between its collapsed and expanded paint and reports whether it
-// found a block to flip. index addresses t.entries, and only a tool-call entry has a block state:
-// every other kind — a user send, an assistant answer, a note — paints one way whatever is asked
-// of it, and an index outside the slice is a caller resolving a click against a paint the
-// transcript has already grown past. Both answer false and change nothing, because this sits on
-// the repaint path where a panic is the whole session.
+// setExpanded puts one block into the collapsed or the expanded paint and reports whether it found
+// a block to set. index addresses t.entries, and only a tool-call entry has a block state: every
+// other kind — a user send, an assistant answer, a note — paints one way whatever is asked of it,
+// and an index outside the slice is a caller resolving a click against a paint the transcript has
+// already grown past. Both answer false and change nothing, because this sits on the repaint path
+// where a panic is the whole session.
 //
 // It is the one writer of entry.expanded, and it writes THROUGH the entries slice exactly as
 // addToolResult marks done: the Model is copied by value on every Update (ADR 0011), so per-entry
 // state on the shared backing array is how a view fact survives the copy without a map or a
 // no-copy type on the Model. Nothing here touches the engine, the call/result pairing, or the
 // session record — an expanded block is a way of looking at the scrollback, not a change to it.
-func (t *transcript) toggleExpanded(index int) bool {
+//
+// It is stated as a SET rather than only a flip because the two click surfaces mean different
+// things (layout.md, "Collapsed and expanded blocks"): a header toggles its block, while a
+// `… +N more lines` marker asks to see the rest and can only ever open one.
+func (t *transcript) setExpanded(index int, expanded bool) bool {
 	if index < 0 || index >= len(t.entries) || t.entries[index].kind != entryToolCall {
 		return false
 	}
-	t.entries[index].expanded = !t.entries[index].expanded
+	t.entries[index].expanded = expanded
 	return true
+}
+
+// toggleExpanded flips one block between its collapsed and expanded paint and reports whether it
+// found a block to flip — the meaning of a click on a block's header line. The kind and range
+// guards are setExpanded's, so an index that names no block answers false from one place; the
+// bound here only makes the READ of the current state safe.
+func (t *transcript) toggleExpanded(index int) bool {
+	if index < 0 || index >= len(t.entries) {
+		return false
+	}
+	return t.setExpanded(index, !t.entries[index].expanded)
 }
 
 // addApproval records an Approval observationally — the decision already came back through

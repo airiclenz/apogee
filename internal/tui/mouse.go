@@ -377,6 +377,11 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 // it. A bare click (anchor == head) is not a selection and just leaves the caret/anchor where it
 // landed. The prompt copies the exact typed runes; the transcript copies the rendered text under
 // the span.
+//
+// A bare click in the TRANSCRIPT has one further meaning: on a block's click surface it toggles
+// that block (toggleBlockUnder). MOTION is what arbitrates, exactly as it already separates
+// click-to-position from drag in the prompt — a drag that starts on a header line is a
+// drag-select like any other, because it never reaches this branch.
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.sel.active:
@@ -393,7 +398,7 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 	case m.transcriptSel.active:
 		if m.transcriptSel.anchor == m.transcriptSel.head {
 			m.transcriptSel.active = false
-			return m, nil
+			return m.toggleBlockUnder(msg.X, msg.Y)
 		}
 		text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 		if strings.TrimSpace(text) == "" {
@@ -402,6 +407,46 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 		}
 		return m.copyFlash(text)
 	}
+	return m, nil
+}
+
+// toggleBlockUnder resolves a MOTIONLESS click to the block whose click surface it landed on and
+// changes that block's state (layout.md, "Collapsed and expanded blocks"): a header line toggles
+// its block, and a `… +N more lines` marker expands the block whose body it is counting for —
+// never collapses it, because the marker is a line of the collapsed paint alone, so a click there
+// can only mean "show me the rest". A line that is neither is left exactly as it was: everywhere
+// else in the transcript a click keeps its selection meaning, which is the overwhelmingly common
+// case and the one this returns on first.
+//
+// The lookup reads the PAINT'S OWN accounting — m.lineTargets, which refreshViewport stashes from
+// the marks the painter made as it emitted each line (render.go) — through the very mapping the
+// selection resolves a click by (pointTranscriptRow). One accounting for what is drawn where, so
+// the block that flips is the block under the cursor and never its neighbour; the length check is
+// the same defence the stash's builder states, since a target index that outlived its line would
+// be a click toggling some other block.
+//
+// Nothing here re-derives the transcript: an index the entry list has grown past, or one naming a
+// kind with no block state, answers false from the transcript's own guard and this changes
+// nothing at all.
+func (m Model) toggleBlockUnder(x, y int) (tea.Model, tea.Cmd) {
+	line, _, ok := m.pointTranscriptRow(x, y)
+	if !ok || line >= len(m.lineTargets) {
+		return m, nil
+	}
+	target := m.lineTargets[line]
+	switch target.kind {
+	case targetHeader:
+		if !m.transcript.toggleExpanded(target.entry) {
+			return m, nil
+		}
+	case targetMarker:
+		if !m.transcript.setExpanded(target.entry, true) {
+			return m, nil
+		}
+	default:
+		return m, nil
+	}
+	m.refreshViewportAnchored(line, y)
 	return m, nil
 }
 
