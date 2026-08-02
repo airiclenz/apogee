@@ -2,9 +2,11 @@ A: Activated / Active
 P: Planned
 X: Executed
 
-- [ ] work-dir path needs to be displayed
+- [ ] Currently I cannot see how much ot it's context a sub agent has used.
 
-- [X] we need a possibility to klick on tool calls to see al the details /e.g. "+22 more line" extend to show the lines. This should be a global module that can be re-used for all tools including sub-agents (e.g. all below and including `⤷ sub-agent` is collapsed). It should also by defualt display the tool name, a summary about the tool (like now) and maybe even an in-progress indicator (the very left bullet point as a blinking star). The summary will be more complex for complex tools like sub-agents which could include many tool calls in itself (cascading). This will need deeper grilling / planning.  
+- [ ] Clicking on the header of a tool for collapsing/expanding is not very responsive 
+
+- [ ] work-dir path needs to be displayed
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.
 
