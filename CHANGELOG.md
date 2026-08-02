@@ -738,6 +738,15 @@ point is a **minor** bump, not a breaking change.
     (`saved sessions  (all workspaces)  … (+8 more lines)`), shedding its words on the same narrow
     ladder. Entries merely scrolled out of a window the pane *did* get are untouched: they are one
     keypress away, and a marker for them would cost a row of the very list it describes.
+  - **…and the `/` and `@` suggestion menu, the last pane still exempt from all of it.** Every other
+    pane now asks the window what it can spare; the dropdown still asked for its eight rows whatever
+    the window had. So a bare `/` on a 12-row terminal — the whole verb table, in a pane wanting 12
+    rows for itself with 8 rows of chrome underneath it — pushed the input box you were typing into
+    clean off the screen, which is the one pane you are most likely to have open on a small window,
+    because it opens while you type. It now shrinks like the rest: fewer rows where there is less
+    room, the row you have arrowed onto always among the ones shown, and on a window with no rows to
+    give, the menu counted onto the title row (`commands and skills  … +14`) instead of an empty
+    pane under a hint still offering `↑/↓ select`.
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it

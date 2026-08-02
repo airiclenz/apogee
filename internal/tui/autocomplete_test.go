@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -117,6 +118,44 @@ func TestAutocompleteDropdownSpansFullWidth(t *testing.T) {
 	for i, ln := range popupLines(m.renderAutocomplete()) {
 		if w := lipgloss.Width(ln); w != wantWidth {
 			t.Errorf("dropdown line %d is %d cells, want %d: %q", i, w, wantWidth, strip(ln))
+		}
+	}
+}
+
+// The dropdown's window shrank to the frame's budget (renderAutocomplete → popupBudget), and this
+// is the property that shrinking may not cost: the row the human is ON stays on the screen. A menu
+// is a live filter over a moving list — every keystroke re-derives the rows and the arrow keys walk
+// them — so a pane that seated the FIRST n rows of a fourteen-verb menu would leave the selection
+// invisible from the third ↓ onwards on any window short enough to matter, which is worse than the
+// overflow the budget fixed: the human would be accepting a row they cannot see. popupRowWindow is
+// what holds it — the window scrolls around the selection rather than starting at row zero — and
+// this asserts it through the composed pane at every short height, for every position the selection
+// can take, so the guarantee is the drawn one and not the arithmetic's.
+func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
+	for _, height := range []int{18, 20, 22, 24, 30} {
+		m := modelWithOverlayRoomAt(t, 80, height, Options{Workspace: "/ws/a"})
+		m.input.SetValue("/") // the whole verb table: more rows than these windows can seat
+		m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+		if len(m.autocomplete.items) != len(commandSpecs) {
+			t.Fatalf("the \"/\" menu offered %d rows, want every verb (%d)", len(m.autocomplete.items), len(commandSpecs))
+		}
+		if _, shown := m.popupBudget(len(m.autocomplete.items), maxAutocompleteItems); shown < 1 {
+			t.Fatalf("a %d-row window granted no dropdown rows — test premise broken", height)
+		}
+
+		for i, it := range m.autocomplete.items {
+			t.Run(fmt.Sprintf("%d rows/select %s", height, it.value), func(t *testing.T) {
+				sel := m
+				sel.autocomplete.selected = i
+				flat := ansiPattern.ReplaceAllString(sel.renderAutocomplete(), "")
+				// The marker is on the selected row and nowhere else, so finding the verb BESIDE it
+				// is the proof the highlighted row is the one drawn — not merely that the text is
+				// somewhere in the pane.
+				if want := glyphUser + " /" + it.value; !strings.Contains(flat, want) {
+					t.Errorf("row %d (%q) selected but not on the screen at %d rows; want a row leading %q:\n%s",
+						i, it.value, height, want, flat)
+				}
+			})
 		}
 	}
 }

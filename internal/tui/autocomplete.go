@@ -29,9 +29,12 @@ import (
 // invoked from the middle of a half-written message without destroying it. The two verbs that need
 // what follows them — /confine (arguments) and the menu-only /skill (a picker) — complete instead.
 
-// maxAutocompleteItems caps how many suggestions the overlay shows (and how far the file
-// walk runs) — enough to be useful, small enough that the popup never crowds the transcript
-// off a short terminal and a large workspace walk stays cheap. Type more to narrow further.
+// maxAutocompleteItems caps how many suggestions the overlay OFFERS (and how far the file walk
+// runs) — enough to be useful, small enough that a large workspace walk stays cheap. Type more to
+// narrow further. It is a cap on the menu's length, not a promise about the frame: how many of the
+// offered rows a given window can actually seat is popupBudget's call, which this cap is spent
+// inside of (renderAutocomplete). Reading it as the frame's guard is what let the "/" menu — whose
+// rows come from commandSpecs and so outnumber it — push the input box off a short terminal.
 const maxAutocompleteItems = 8
 
 // acKind tags what an open overlay is completing.
@@ -698,6 +701,21 @@ func autocompleteTitle(kind acKind) string {
 // truncation, and scroll windowing — so a menu mixing "/clear" with "✦ /clean-code" still starts
 // every summary at one column. It returns "" when the overlay is inactive, so View treats it like
 // the approval-prompt slot.
+//
+// The row window is the SCREEN's to grant, exactly as it is for the /sessions browser and the
+// picker: maxAutocompleteItems is this overlay's own taste — how long a menu is worth reading —
+// and popupBudget is the window's answer to it (D2). Asking for the taste outright is what the
+// audit measured: the fourteen-verb "/" menu composed a 20-row frame on a 12-row terminal, +8 rows
+// of input box and footer pushed off the alternate screen. A dropdown is the pane MOST likely to
+// be open on a short window, because it opens while the human is typing, which is the one thing
+// they are always doing.
+//
+// Shrinking costs rows, never the selection and never silence. A window granted at least one row
+// scrolls around the selected item (popupRowWindow), so arrowing through a live filter keeps the
+// highlight on the screen however few rows the frame can spare; a window granted NONE is counted
+// out on the title row in the module's one marker (popupTitleLine), the same wording the browser
+// and the ask prompt use — a menu that quietly showed nothing while its hint still read "↑/↓
+// select" would be the browser's silent-drop defect wearing this pane's title.
 func (m Model) renderAutocomplete() string {
 	ac := m.autocomplete
 	if !ac.active || len(ac.items) == 0 {
@@ -707,12 +725,13 @@ func (m Model) renderAutocomplete() string {
 	for i, it := range ac.items {
 		rows[i] = it.cells
 	}
+	_, shown := m.popupBudget(len(rows), maxAutocompleteItems)
 	spec := popupSpec{
 		title:    autocompleteTitle(ac.kind),
 		rows:     rows,
 		selected: ac.selected,
 		hint:     autocompleteHint,
-		maxRows:  maxAutocompleteItems,
+		maxRows:  shown,
 	}
 	return renderPopup(m.th, spec, m.width)
 }

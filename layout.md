@@ -386,7 +386,11 @@ bordered, titled pane the `/sessions` browser and the approval prompt use, in th
 shrinks the transcript to make room. It is titled `commands and skills` and it lists both:
 commands first, prefix-matched, each with its one-line summary; then skills, matched on id and
 display name, each row led by the `✦` skill glyph so the two kinds never read alike. `@` opens the
-same pane over workspace files. At most eight rows show; the hint line under them reads
+same pane over workspace files. At most eight rows show — and fewer than eight when the window
+cannot spare eight, because the dropdown answers to the same row budget every pane does (the
+section above): a short terminal scrolls a smaller window around the selected row, and one with no
+rows to give counts the whole menu onto the title row rather than opening an empty pane under a
+hint still offering `↑/↓ select`. The hint line under the rows reads
 `↑/↓ select · ⏎/tab accept · esc dismiss`. The command rows read **alphabetically**, so the menu
 can be scanned without knowing the table behind it, and every verb the parser knows is in it —
 `/stop-server` and `/unload-model` included. Those two act on the session's own server and say so

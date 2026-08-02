@@ -831,7 +831,11 @@ const smallestOverlayWindow = 12
 // narrowOverlayWindow is a terminal too NARROW to seat a pane's name beside the full
 // "… (+N more lines)" phrase: the approval prompt's title and that phrase come to 38 cells with the
 // gutter, so 42 columns is the last width that fits them and anything under it makes the pane trade
-// wording for width (popupElisionMarkerFitting). A short window is usually a narrow one too — one
+// wording for width (popupElisionMarkerFitting). Those 38 cells measure a SINGLE-DIGIT count — the
+// "+3" of popup_test.go's example — and each further digit costs one more, so the two-digit "+12"
+// that popup.go and layout.md walk through trades down a column sooner, at 42 itself. Both readings
+// are the one ladder at two counts, and this constant sits well under either threshold, which is
+// all it is asked to do. A short window is usually a narrow one too — one
 // split pane, not two coincidences — so every property asserted at the standard 80 columns is
 // asserted here as well.
 const narrowOverlayWindow = 34
@@ -864,10 +868,14 @@ func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model
 // floors shrink to nothing rather than promising rows the frame has no space for, so the composed
 // frame fits every window a boxed overlay can be drawn in at all.
 //
-// The property runs over every boxed overlay, not the browser alone: the /model | /server picker
+// The property runs over EVERY boxed overlay, not the browser alone: the /model | /server picker
 // shares the browser's slot, and the two prose-bearing panes — the approval and ask prompts — were
 // the ones still overflowing by exactly one row at smallestOverlayWindow after the row floor
-// dropped, because their body floor had not.
+// dropped, because their body floor had not. The "/" and "@" dropdown is here because it was the
+// LAST pane off the budget and so the last one this property did not cover: it asked for a fixed
+// maxAutocompleteItems window whatever the window could spare, so the fourteen-verb "/" menu
+// composed a 20-row frame on a 12-row terminal — the browser's own defect, one pane along, and
+// invisible for as long as the pane that still had it was the pane not being asserted on.
 //
 // It carries a SECOND property for the prose-bearing panes, because the two are only ever true
 // together: a pane that fits the frame by dropping its question or its approval reason must still
@@ -929,6 +937,16 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 				Question: longProse,
 				Choices:  []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"},
 			}}
+			return m
+		}},
+		// A bare "/" is the whole verb table (commandSpecs — fourteen rows), which is more than any
+		// of these windows can seat: the dropdown's own maxAutocompleteItems cap is a taste, and the
+		// window is what it has to be spent inside of. The probe is the first row's verb, which a
+		// granted window always seats and no other part of the frame writes.
+		{"autocomplete dropdown", false, "/clear", func(t *testing.T, width, height int) Model {
+			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
+			m.input.SetValue("/")
+			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 			return m
 		}},
 	}
@@ -1001,6 +1019,15 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 		{"session browser", "session number 00", 8, 0, func(m Model) string {
 			m.sessionBrowser = browserWithSessions(8)
 			return m.renderSessionBrowser()
+		}},
+		// The dropdown owes the same accounting in the same marker, and it is the pane where a silent
+		// drop reads worst: the human is mid-keystroke and the hint under the empty pane still offers
+		// "↑/↓ select · ⏎/tab accept", so nothing distinguishes a menu the window swallowed from a
+		// filter that matched nothing.
+		{"command dropdown", "/clear", len(commandSpecs), 0, func(m Model) string {
+			m.input.SetValue("/")
+			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+			return m.renderAutocomplete()
 		}},
 	}
 

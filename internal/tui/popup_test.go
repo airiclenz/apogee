@@ -443,7 +443,10 @@ func TestRenderPopupNarrowTitleKeepsTheElisionCount(t *testing.T) {
 	}
 
 	// The full phrase is 17 cells and the name 19, so with the two-space gutter the row seats both
-	// from 38 inner cells — 42 columns — up. Below that the ladder takes over.
+	// from 38 inner cells — 42 columns — up. Below that the ladder takes over. Those 17 cells are
+	// THIS case's single-digit "+3": every further digit costs one more, so the two-digit "+12" that
+	// popup.go and layout.md walk through starts trading a column sooner — at 42 and below, not 41.
+	// One ladder, one threshold per count width.
 	cases := []struct {
 		width int
 		want  string // "" = the name is clipped at this width, so only the properties below are asserted
