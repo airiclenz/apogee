@@ -246,6 +246,52 @@ func TestToolCardSummaryQuotesPromotedOutputOnly(t *testing.T) {
 	}
 }
 
+// ask_user shares firstLineDetail's SHAPE — one clipped line on the branch — but not its sense of
+// whose words that line is: its result is the answer the human typed, quoted content the block must
+// not respell. Someone who answers a question with an absolute path wrote that path, and a
+// transcript that shortens it puts words in their mouth.
+//
+// The second row is the contrast that makes the split a fact about the SLOT rather than the text:
+// a tool reporting a sentence that NAMES a path still shortens, through the very same extractor
+// shape. Both answers here read exactly like a path, which is why neither can be judged by reading
+// it (branchSummary).
+func TestAskUserAnswerIsQuotedAndAPathReportStillShortens(t *testing.T) {
+	t.Parallel()
+
+	ws := newWorkspaceRoot("/home/me/proj")
+	cases := []struct {
+		name        string
+		call        domain.ToolCall
+		res         domain.ToolResult
+		wantSummary string
+	}{
+		{
+			name:        "the user's own answer keeps the spelling they typed",
+			call:        domain.ToolCall{ID: "1", Tool: "ask_user", Arguments: []byte(`{"question":"Which file?"}`)},
+			res:         domain.ToolResult{CallID: "1", Content: "/home/me/proj/docs/plan.md"},
+			wantSummary: "/home/me/proj/docs/plan.md",
+		},
+		{
+			name:        "a tool's own sentence about a path still shortens",
+			call:        domain.ToolCall{ID: "2", Tool: "single_find_and_replace", Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)},
+			res:         domain.ToolResult{CallID: "2", Content: "replaced text in /home/me/proj/docs/plan.md"},
+			wantSummary: "replaced text in docs/plan.md",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := presentToolCall(tc.call, ws)
+			tv.enrichWithResult(tc.res, ws)
+
+			if tv.Summary.Text != tc.wantSummary {
+				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
+			}
+		})
+	}
+}
+
 // An unregistered tool's arguments are the model's request quoted verbatim — the approval surface's
 // whole point — so they are shown exactly as they were sent, workspace paths included. What is
 // equally untouched is the tool's own id: it is a name, not a path.

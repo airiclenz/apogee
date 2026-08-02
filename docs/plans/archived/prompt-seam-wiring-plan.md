@@ -2,10 +2,9 @@
 
 **Date:** 2026-07-02
 **Status:** complete (design grilled 2026-07-02; all D-items resolved, **no needs-design-call
-escalation should be needed**) — but **QUEUED behind `parser-seam-wiring-plan.md`** finishing:
-both plans touch `internal/agent/loop.go`, and this one consumes `processing.ParserFor` /
-`domain.ModelProfile` from that plan. Do not start until the seam-wiring run has committed all
-three items.
+escalation should be needed**) — it was **QUEUED behind `parser-seam-wiring-plan.md`**: both plans
+touch `internal/agent/loop.go`, and this one consumes `processing.ParserFor` /
+`domain.ModelProfile` from that plan.
 **Source:** item 2 of `docs/plans/parser-seam-follow-through-plan.md` — the parity gap found
 reviewing the parser-seam plan: the parse side without the emit side is half a feature.
 **Track:** post-`v1.0.0` **feature-parity** — additive, engine-internal (no new public domain

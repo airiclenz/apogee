@@ -67,10 +67,12 @@ type detailLine struct {
 // fact the shortening seam depends on: WHOSE words it is. Most summaries are the presenter's own —
 // a typed phrase worded by summaryLine ("1 - 154", "+2 -2"), a tool's own report sentence
 // ("replaced text in <path>"), an "error: …" line — and the workspace root is shortened out of the
-// paths those NAME (toolView.shortenPaths). One is not: output that came to exactly one line is
-// PROMOTED into this slot as it stands (promotedOutput, outputDetail), and that line is quoted
-// content, no different from a body — a `cat` printing an in-workspace path must show the spelling
-// the file holds, not the transcript's shorter one for it.
+// paths those NAME (toolView.shortenPaths). Some are not: a line the block did not word is PROMOTED
+// into this slot as it stands (promotedOutput), and it is quoted content, no different from a body.
+// Output that came to exactly one line is one such line (outputDetail) — a `cat` printing an
+// in-workspace path must show the spelling the file holds, not the transcript's shorter one for it
+// — and so is the answer a human typed into an ask_user question (quotedFirstLineDetail), which is
+// their words and not a report about a path.
 //
 // The mark travels WITH the text, the way a body's kind travels with its lines (toolBody): the
 // summary a prose extractor builds and the summary the view carries are one type, so the fact
@@ -201,10 +203,12 @@ func summaryOnly(text string) toolOutcome {
 	return toolOutcome{Summary: namedSummary(detailLine{Text: text})}
 }
 
-// promotedOutput is the outcome of a tool whose OUTPUT came to exactly one line: the line is
-// promoted into the summary slot and rides the branch beside the target. Promotion moves where the
-// text sits and changes nothing about whose text it is — it is the tool's own line, quoted, so it
-// is marked as such and reaches the screen with the spelling the tool wrote (branchSummary).
+// promotedOutput is the outcome of a tool whose one-line result is text it did not WORD — a
+// command's whole output when that came to one line (outputDetail), the answer a human typed into
+// an ask_user question (quotedFirstLineDetail): the line is promoted into the summary slot and
+// rides the branch beside the target. Promotion moves where the text sits and changes nothing about
+// whose text it is — it is quoted, so it is marked as such and reaches the screen with the spelling
+// it was written with (branchSummary).
 func promotedOutput(text string) toolOutcome {
 	return toolOutcome{Summary: quotedSummary(detailLine{Text: text})}
 }
@@ -247,7 +251,9 @@ type toolPresenter struct {
 // transcript. The rest quote their fixed sentence or hand free-form output (a command run, a
 // sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
 // to a first line plus a remainder count until the block is expanded, and the model gets the
-// full text either way.
+// full text either way. One tool's result is nobody's words but the human's — ask_user's, which is
+// the answer they typed — so it takes quotedFirstLineDetail and the block quotes that line rather
+// than respelling it.
 var toolRegistry = map[string]toolPresenter{
 	"read_file": {
 		label:  "Read File",
@@ -368,7 +374,7 @@ var toolRegistry = map[string]toolPresenter{
 		label:  "Ask User",
 		verb:   "asking",
 		target: firstLineArg("question"),
-		detail: firstLineDetail, // the user's own answer
+		detail: quotedFirstLineDetail, // the user's own answer — quoted, never respelled
 	},
 	"present_document": {
 		label:  "Present",
@@ -435,10 +441,10 @@ func (tv *toolView) finishDisplay(ws workspaceRoot) {
 // quoted text rather than a path the block names — a diff's hunk lines, an edit's replacement
 // string, an unregistered tool's verbatim arguments — so an absolute in-workspace path occurring
 // inside it is file CONTENT, and shortening it would show the human approving a write a spelling
-// the file will not contain. The SUMMARY is quoted in that same sense whenever a tool's whole
-// output came to one line, because that line is promoted into the slot as it stands
-// (promotedOutput): `cat` printing one path names nothing — it prints a file's contents, which
-// happen to fit on the branch.
+// the file will not contain. The SUMMARY is quoted in that same sense whenever the line was
+// promoted into the slot as it stands rather than worded there (promotedOutput): `cat` printing
+// one path names nothing — it prints a file's contents, which happen to fit on the branch — and an
+// ask_user answer names nothing either, being what the human typed.
 //
 // Nothing here reads the text to tell the two apart: a line of output can look exactly like a path,
 // so the distinction is structural — it is what the SLOT was filled with, marked by the presenter
@@ -665,8 +671,21 @@ func methodURLTarget(args map[string]any) string {
 // firstLineDetail summarises a result to its first line, clipped — for tools whose result
 // is a short fixed sentence ("updated main.go") or opens with a status header ("HTTP 200
 // OK"): one line carries the outcome, the rest is the model's food, not the chat's.
+//
+// That line is the tool's REPORT — the block's own words in the sense the shortening seam means —
+// so a path it names is spelled relative to the workspace. A tool whose first line is not a report
+// but text handed back verbatim takes quotedFirstLineDetail instead.
 func firstLineDetail(content string) toolOutcome {
 	return summaryOnly(clipDetail(firstLine(content)))
+}
+
+// quotedFirstLineDetail is firstLineDetail's other half: the same shortening to one clipped line,
+// for the tool whose result is not a sentence about what it did but content it hands back as it
+// stands — ask_user, whose result IS the answer the human typed. The line is marked quoted
+// (promotedOutput), so the workspace root is not spelled out of it: a human who answers with an
+// absolute path wrote that path, and the block quotes people the way it quotes files.
+func quotedFirstLineDetail(content string) toolOutcome {
+	return promotedOutput(clipDetail(firstLine(content)))
 }
 
 // outputDetail splits free-form output (a command run, a diagnostics report, a sub-agent

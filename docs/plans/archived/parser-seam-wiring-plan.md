@@ -2,8 +2,7 @@
 
 **Date:** 2026-07-02
 **Status:** complete — design settled in a `grill-with-docs` session on 2026-07-02 (all D-items below
-are resolved; **no needs-design-call escalation should be needed**). Items are ordered; work them
-in sequence, one commit per item.
+are resolved; **no needs-design-call escalation should be needed**).
 **Source:** architecture-review candidate **#2** (`docs/architecture-review-20260629-110828.html`),
 the natural second move after candidate #1 (Resolution refactor) shipped. Also the deferred
 Phase-3 residual **P3.5** (handoff `docs/handoffs/2026-06-25 - 00 - …`): *"the loop adapt-seam

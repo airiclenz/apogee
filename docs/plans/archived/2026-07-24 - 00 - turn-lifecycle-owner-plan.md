@@ -4,8 +4,7 @@
 **Status:** complete. Drafted from
 `docs/reviews/2026-07-24 - 00 - architecture-deepening-review.md` (candidate 01, the review's
 top recommendation). Every claim below was re-verified at file level this session; the design
-decisions are the drafter's calls and are listed as the grill agenda. If the owner ratifies
-them (or after a grill session amends them), `/implement-plan` executes item-by-item.
+decisions are the drafter's calls and are listed as the grill agenda.
 **Track:** architecture deepening. `internal/agent` only — no public Go API change, no
 session-schema change (`agentState` JSON stays byte-compatible), no ADR conflict. Every code
 item is **behavior-preserving**: the existing test suite is the harness and must stay green

@@ -519,6 +519,36 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A tool block now spells the paths it names relative to the workspace.** The target leading a
+  branch line and the one-line summary beside it read `docs/plan.md`, not
+  `/home/me/proj/docs/plan.md`, so a project's own files stop spending the row's width repeating a
+  prefix you already know. There is no leading `./` and no leading separator, the workspace root
+  itself reads `.` — the ordinary spelling of "here", which is therefore what `pwd` shows — and the
+  status line's live phrase reads the same shortened path the block beneath it will, because both
+  are worded from one view.
+  - **A path that genuinely is elsewhere keeps its absolute form.** Anything outside the workspace
+    prints in full, because a relative spelling would say it was not — and that matters most on
+    exactly the line it is most dangerous to misread, the write outside the project you are being
+    asked to approve. A path that arrived relative is already in this form and passes through
+    untouched. Only the root's own spelling is recognised, so a line that merely contains a slash — a
+    URL, a fraction, a regex — is left alone, and a sibling directory whose name only opens with the
+    root's (`/home/me/proj-old`) stays whole.
+  - **What a block quotes is never respelled.** The rule reaches the paths a block *names* and stops
+    there. The body beneath the branch — a diff's hunk lines, an edit's replacement string, a
+    command's output, an unregistered tool's verbatim arguments — prints exactly as it was written,
+    absolute paths included: an in-workspace path sitting inside file content *is* content, and
+    shortening it would show you a spelling the file will not actually contain. A one-line output
+    promoted onto the branch is quoted in that same sense — one row lower the identical line would
+    have been a body — and so is the answer you type to an `Ask User` question, which is your words
+    and not the block's. Nothing decides this by reading a line, because a content line can look
+    exactly like a path; a line is respelled only where the presenter that put it there says it is
+    the block's own wording.
+  - **It is presentation and nothing else.** The arguments the model sent and the output a tool
+    returned are never rewritten, so the agent's view of a path and the transcript's differ in
+    spelling and in nothing else.
+
+  Specced in `layout.md` ("The rules behind the tool-call sketch").
+
 - **Bare `/rename` now names a session for what it has become, not for how it opened.** Typed late
   in a long session it re-derived a title from the very first thing you said and nothing else, so a
   session that opened on one task and moved to another stayed listed under the task it left. The

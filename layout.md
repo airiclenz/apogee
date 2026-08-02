@@ -264,12 +264,14 @@ verbatim arguments — and it prints exactly as the tool wrote it, absolute path
 **summary that was promoted rather than worded** is quoted in the very same sense: a command whose
 whole output is a single line puts that line on the branch beside the target
 (`┕ cat paths.txt  /home/me/proj/docs/plan.md`), and promotion changes where the text sits, never
-whose text it is — one row lower the identical line would have been a body. An in-workspace path
-sitting inside file content is content, not a mention: shortened, it would show the human approving
-a write a spelling the file will not actually contain. Nothing decides this by looking at a line,
-because a content line can look exactly like a path; a line is respelled only where the presenter
-that put it there says it is the block's own words — a path it names, or a summary it wrote itself
-(`1 - 154`, `replaced text in docs/plan.md`, `(no output)`).
+whose text it is — one row lower the identical line would have been a body. The answer to an
+`Ask User` question rides the branch on the same footing: it is the human's own words, not a report
+the block wrote, so it prints exactly as they typed it. An in-workspace path sitting inside file
+content is content, not a mention: shortened, it would show the human approving a write a spelling
+the file will not actually contain. Nothing decides this by looking at a line, because a content
+line can look exactly like a path; a line is respelled only where the presenter that put it there
+says it is the block's own words — a path it names, or a summary it wrote itself (`1 - 154`,
+`replaced text in docs/plan.md`, `(no output)`).
 
 **What stays standalone.** A call is groupable when it has a target, an empty body, and a plain
 (non-diff) summary — which includes an `error: …` line, and an in-flight call whose result has not
