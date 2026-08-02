@@ -106,6 +106,16 @@ got. Under the eight rows of fixed chrome below the session area, that puts the 
 a pane can be drawn in at all at **twelve rows** — and at twelve the session area is already gone,
 so the frame is exactly the pane and the chrome together.
 
+**What shrinking never buys is silence.** Prose a pane cannot seat is counted out in the
+`… (+N more lines)` marker, and that marker outranks the prose itself: with one body row left it
+IS the body, and with none left — the twelve-to-fifteen-row case, where the four-row floor is the
+whole pane — it moves onto the **title row**, after the pane's name. So the approval prompt on a
+half-height tmux pane reads `approve write_file?  … (+12 more lines)`: the tool the decision turns
+on, and the fact that there is more to read than the window can show. A pane may lose the text; it
+may not lose the reader's knowledge that there was text. (Width is the one thing prior to this:
+a line still truncates to the pane's inner width, and if the title cannot hold both, the tool name
+keeps the row.)
+
 ---
 
 ## The rules behind the tool-call sketch

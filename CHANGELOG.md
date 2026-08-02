@@ -713,9 +713,15 @@ point is a **minor** bump, not a breaking change.
   kept one line back for the question or the approval reason no matter how little room was left,
   which made them one row taller than the smallest window a pane fits in at all, so on a 12-row
   terminal the input box went off the bottom again while `/sessions` fitted. A pane with nothing
-  left to spend now shows no prose rather than a line saying the prose is hidden, and shrinks to
-  the four rows every pane shares — its border, the tool name or the question's heading, and the
-  key legend you act on.
+  left to spend now shows no prose at all and shrinks to the four rows every pane shares — its
+  border, the tool name or the question's heading, and the key legend you act on.
+  - **It still tells you what it is not showing.** Shrinking to those four rows briefly meant that
+    on a 12-to-15-row terminal an approval prompt appeared with its reason and its arguments simply
+    gone and nothing saying so — you were ruling on what a tool may do against text the pane had
+    dropped quietly. The `… (+12 more lines)` count now outranks the prose it counts: with one row
+    left it is the whole body, and with none left it moves up beside the pane's name, so a
+    half-height tmux pane reads `approve write_file?  … (+12 more lines)`. The window can take the
+    text away; it cannot take away your knowing there was some.
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it

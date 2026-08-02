@@ -363,9 +363,14 @@ func TestRenderPopupBodyMaxRows(t *testing.T) {
 // mean and what made a body-bearing pane one row taller than the shortest window it fits in. The
 // title and the hint survive: they are the pane's irreducible chrome, and a budget of nothing is
 // popupBudget saying the frame has no room for prose.
-func TestRenderPopupBodyBudgetOfZeroShowsNoBody(t *testing.T) {
+//
+// What zero does NOT buy is silence. The dropped lines are counted onto the title row, so the pane
+// is still four rows tall and still says there are three lines it is not showing — the approval
+// prompt is a security surface, and a body that vanishes without a word is a decision taken against
+// text the human was never told existed.
+func TestRenderPopupBodyBudgetOfZeroShowsNoBodyButSaysSo(t *testing.T) {
 	th := newTheme()
-	const width = 40
+	const width = 60 // wide enough to seat the title and the marker; the narrow case is truncation, tested above
 
 	lines := popupLines(renderPopup(th, popupSpec{
 		title:       "approve write_file?",
@@ -377,8 +382,38 @@ func TestRenderPopupBodyBudgetOfZeroShowsNoBody(t *testing.T) {
 	if got := len(lines); got != 2+1+1 { // 2 borders + the title + the hint, and no body at all
 		t.Fatalf("zero body budget rendered %d physical lines, want 4:\n%s", got, strip(strings.Join(lines, "\n")))
 	}
-	if joined := strip(strings.Join(lines, "\n")); strings.Contains(joined, "l0") || strings.Contains(joined, "more lines") {
-		t.Errorf("zero body budget leaked body content or an overflow marker:\n%s", joined)
+	joined := strip(strings.Join(lines, "\n"))
+	if strings.Contains(joined, "l0") {
+		t.Errorf("zero body budget leaked body content:\n%s", joined)
+	}
+	if title := popupInterior(lines[1]); title != "approve write_file?  … (+3 more lines)" {
+		t.Errorf("title row = %q, want the tool name plus the elision marker", title)
+	}
+
+	// A body the block CAN seat leaves the title alone: the marker rides the title only as the
+	// fallback for a pane with no body row to put it on.
+	seated := popupLines(renderPopup(th, popupSpec{
+		title:       "approve write_file?",
+		body:        strings.Join([]string{"l0", "l1", "l2"}, "\n"),
+		maxBodyRows: 3,
+		hint:        "a allow · d deny",
+	}, width))
+	if title := popupInterior(seated[1]); title != "approve write_file?" {
+		t.Errorf("title row with the body seated = %q, want the bare title", title)
+	}
+
+	// One body row is enough to hold the marker itself, which is where it belongs when it fits.
+	oneRow := popupLines(renderPopup(th, popupSpec{
+		title:       "approve write_file?",
+		body:        strings.Join([]string{"l0", "l1", "l2"}, "\n"),
+		maxBodyRows: 1,
+		hint:        "a allow · d deny",
+	}, width))
+	if title := popupInterior(oneRow[1]); title != "approve write_file?" {
+		t.Errorf("title row with a body row to spare = %q, want the bare title", title)
+	}
+	if marker := popupInterior(oneRow[2]); marker != "… (+3 more lines)" {
+		t.Errorf("body row = %q, want the elision marker", marker)
 	}
 }
 

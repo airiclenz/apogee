@@ -3230,7 +3230,9 @@ func nonEmpty(parts ...string) []string {
 // pane fits in at all (12 rows — the fixed chrome below the transcript is 8) by exactly one row
 // while the browser fitted. A budget that shrinks to nothing lets the TRANSCRIPT shrink to nothing
 // instead, which is the outcome D2 asks for; a pane that can spare neither rows nor body still
-// names itself in the title and says how to act in the hint.
+// names itself in the title and says how to act in the hint — and when the zero budget dropped
+// prose, that title row also carries the "… (+N more lines)" marker (popupTitleLine), so shrinking
+// costs the body but never the fact that there is one.
 func (m Model) popupBudget(rows, rowCap int) (maxBody, maxRows int) {
 	avail := max(0, m.viewport.Height()-3)
 	const chrome = 4 // the 2 borders + the title row + the hint row
@@ -3245,11 +3247,17 @@ func (m Model) popupBudget(rows, rowCap int) (maxBody, maxRows int) {
 // human sees exactly the tool that will run), the body carries a non-empty Reason then the
 // pretty-printed Arguments, and the hint carries the decision legend. Every model-authored string
 // (tool name, reason, args) is escape-stripped at this call site; stripEscapes removes only the
-// ESC byte, so the raw tool name is preserved verbatim. Empty/null arguments add no body, and the
-// module wraps the reason so it can never be silently truncated on this security surface. Only the
-// top-level (Depth == 0) prompt is rendered this phase. On a window with no rows to spare for
-// prose the body drops away entirely rather than the pane overflowing the frame (popupBudget); the
-// title still carries the tool name, which is the identity the decision turns on.
+// ESC byte, so the raw tool name is preserved verbatim. Empty/null arguments add no body. Only the
+// top-level (Depth == 0) prompt is rendered this phase.
+//
+// The guarantee this security surface holds is NOT that the whole reason is always on the screen —
+// no pane can promise that on a terminal with four rows to give. It is that the human is never
+// asked to decide against text the pane hid WITHOUT SAYING SO: the module word-wraps the reason
+// rather than clipping it, and whatever it cannot seat it counts out in the "… (+N more lines)"
+// marker — the body block's last row while it has one, and the TITLE row when the window leaves the
+// pane its irreducible four (popupBudget grants no body rows between 12 and 15 rows, where a fifth
+// would push the input box off the frame). So the title always carries the identity the decision
+// turns on, and says when there is more to read than it is showing.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
 	if req.Reason != "" {
@@ -3284,7 +3292,7 @@ const maxAskChoiceRows = 8
 // question or a long choice set never pushes the input box off-screen: rows get priority (they
 // are what the human acts on), the body takes what is left and overflows into the explicit
 // "… (+N more lines)" marker, and on a window that can spare neither the pane shrinks to its
-// title and hint (D2).
+// title and hint — with that title naming the question lines it could not seat (D2).
 func (m Model) askPrompt(req domain.AskRequest) string {
 	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
 

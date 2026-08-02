@@ -56,6 +56,13 @@ import (
 //     explicit faint "… (+N more lines)" marker counting the hidden lines, so the body never
 //     exceeds its cap and truncation is never silent. wrapText is ANSI-unaware, so body arrives
 //     PLAIN and escape-stripped — the module wraps first and styles after.
+//   - HIDING PROSE IS NEVER SILENT, at any budget. A cap of zero leaves no row for the marker
+//     either, so the pane says it on the row it always has: the marker moves onto the TITLE row
+//     (popupTitleLine) rather than the body vanishing without a word. That is what lets a pane
+//     shrink to its irreducible four rows on a 12-row terminal (popupBudget) and still be honest —
+//     the approval prompt is a security surface, and a decision must never be taken against text
+//     the pane dropped quietly. The marker rides the title only when the body block got NO rows;
+//     with one row it is the body's own last line, exactly as before.
 //
 // Every overlay pane — the /sessions browser, the command/file/skill dropdowns, and the ask and
 // approval prompts — now paints through this module; no boxed overlay renders its own chrome
@@ -75,7 +82,9 @@ type popupRow []string
 // around the selection. The two caps read the same way: negative shows everything, and ZERO shows
 // nothing — a window with no rows left to spare saying so (popupBudget) rather than the pane
 // quietly showing all of them. Zero is the reading that keeps a pane inside the shortest window it
-// can be drawn in at all, where its border, title and hint are the whole budget.
+// can be drawn in at all, where its border, title and hint are the whole budget — and where a
+// dropped body is reported on the title row instead (popupTitleLine), so the cap costs the prose
+// but never the knowledge that there is prose.
 type popupSpec struct {
 	title       string
 	body        string
@@ -111,13 +120,16 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	blackFill := lipgloss.NewStyle().Background(colBlack).Width(inner)
 
 	lines := make([]string, 0, len(spec.rows)+2) //nolint:mnd // +2: the optional title and hint rows
-	if spec.title != "" {
-		lines = append(lines, blackFill.Render(th.presentTitle.Render(truncateToWidth(spec.title, inner))))
-	}
 
-	if spec.body != "" {
-		lines = append(lines, popupBodyLines(th, spec.body, spec.maxBodyRows, inner, blackFill)...)
+	// The body is composed BEFORE the title row is written, because what it could not fit changes
+	// what that row says: a pane granted no body rows at all reports the elision on its title, the
+	// one row it still has (popupTitleLine). Composing in the other order would mean either a silent
+	// drop or a fifth row the frame has not got.
+	body, hiddenBody := popupBodyLines(th, spec.body, spec.maxBodyRows, inner, blackFill)
+	if title := popupTitleLine(spec.title, len(body) == 0, hiddenBody); title != "" {
+		lines = append(lines, blackFill.Render(th.presentTitle.Render(truncateToWidth(title, inner))))
 	}
+	lines = append(lines, body...)
 
 	// The columns are measured and padded over the WHOLE row list before any windowing, so a row
 	// scrolled out of view still holds its column open and the alignment never shifts as the
@@ -234,20 +246,24 @@ func singleCellRows(labels []string) []popupRow {
 }
 
 // popupBodyLines word-wraps spec.body into styled, black-filled content lines for the pane, sitting
-// between the title and the rows. Each embedded newline is layout the caller composed (the approval
-// args' JSON indentation and its blank separator lines), so the block is split on "\n" and each
-// segment is word-wrapped to inner independently — an empty segment yields one blank row. When the
-// flattened line count exceeds maxBodyRows (> 0), the block keeps the first maxBodyRows−1 lines and
-// appends a faint "… (+N more lines)" marker counting the hidden lines, so it never exceeds
-// maxBodyRows rows and the truncation is never silent; a NEGATIVE maxBodyRows shows every wrapped
-// line and ZERO shows none at all. Body lines render normal (th.popupBody) — the marker faint
-// (th.statusFaint) — each padded on the same black field as every other content line and clipped to
-// inner so, like every popup line, none can wrap the box.
-func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lipgloss.Style) []string {
-	if maxBodyRows == 0 {
-		// A window with nothing left to spend on prose (popupBudget), not an invitation to show all
-		// of it: honouring the budget is what keeps the pane inside the frame it is drawn in.
-		return nil
+// between the title and the rows, and reports how many wrapped lines it is NOT showing. Each
+// embedded newline is layout the caller composed (the approval args' JSON indentation and its blank
+// separator lines), so the block is split on "\n" and each segment is word-wrapped to inner
+// independently — an empty segment yields one blank row. When the flattened line count exceeds
+// maxBodyRows (> 0), the block keeps the first maxBodyRows−1 lines and appends a faint
+// "… (+N more lines)" marker counting the hidden lines, so it never exceeds maxBodyRows rows and
+// the truncation is never silent; a NEGATIVE maxBodyRows shows every wrapped line and ZERO shows
+// none at all. Body lines render normal (th.popupBody) — the marker faint (th.statusFaint) — each
+// padded on the same black field as every other content line and clipped to inner so, like every
+// popup line, none can wrap the box.
+//
+// The hidden count is returned rather than kept private because a budget of ZERO leaves no row to
+// put the marker on: the block is empty, the count is the whole body, and renderPopup carries the
+// marker up to the title row (popupTitleLine). So "hidden > 0 with no lines" is the pane's signal
+// that it owes the human a word about prose it cannot show, not a licence to drop it quietly.
+func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lipgloss.Style) ([]string, int) {
+	if body == "" {
+		return nil, 0
 	}
 
 	var wrapped []string
@@ -255,11 +271,19 @@ func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lip
 		wrapped = append(wrapped, wrapText(th, seg, inner)...)
 	}
 
+	if maxBodyRows == 0 {
+		// A window with nothing left to spend on prose (popupBudget), not an invitation to show all
+		// of it: honouring the budget is what keeps the pane inside the frame it is drawn in. The
+		// lines are still COUNTED — dropping them is the budget's call, hiding the fact is nobody's.
+		return nil, len(wrapped)
+	}
+
 	marker := ""
+	hidden := 0
 	if maxBodyRows > 0 && len(wrapped) > maxBodyRows {
-		hidden := len(wrapped) - (maxBodyRows - 1)
+		hidden = len(wrapped) - (maxBodyRows - 1)
 		wrapped = wrapped[:maxBodyRows-1]
-		marker = fmt.Sprintf("… (+%d more lines)", hidden)
+		marker = popupElisionMarker(hidden)
 	}
 
 	out := make([]string, 0, len(wrapped)+1)
@@ -269,7 +293,37 @@ func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lip
 	if marker != "" {
 		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(marker, inner))))
 	}
-	return out
+	return out, hidden
+}
+
+// popupElisionMarker is the ONE phrase a pane uses to say prose it holds is not on the screen,
+// wherever that phrase has to be shown — the body block's last row, or the title row when the body
+// block has no rows at all. One wording, so the same fact never reads as two different ones.
+func popupElisionMarker(hidden int) string {
+	return fmt.Sprintf("… (+%d more lines)", hidden)
+}
+
+// popupTitleLine composes the pane's title row: the spec's title, plus the elision marker when the
+// body block got NO rows and there is prose behind it. This is the fallback that keeps a hidden
+// body from ever being silent. On a 12–15-row terminal popupBudget grants a prose-bearing pane a
+// body budget of zero — a fifth row would push the input box off the frame (D2) — so the marker has
+// to ride a row the pane already owns, and the title is the row every pane draws. It is
+// deliberately not the hint: the hint is how the human acts on the pane, and on the approval prompt
+// that legend is the decision itself.
+//
+// A title-less spec with hidden prose gets the marker AS its title row rather than losing it: no
+// caller composes one today (every body-bearing pane titles itself), and if one ever does, the
+// honest row is worth more than the row it costs. The composed row is truncated to the pane's inner
+// width like every other line, so on a pane too NARROW for both the tool name keeps the row — the
+// width contract is prior to this one, and the identity the decision turns on outranks the count.
+func popupTitleLine(title string, bodyEmpty bool, hidden int) string {
+	if !bodyEmpty || hidden == 0 {
+		return title
+	}
+	if title == "" {
+		return popupElisionMarker(hidden)
+	}
+	return title + popupGutter + popupElisionMarker(hidden)
 }
 
 // popupRowWindow returns the [start, end) slice of a list of total rows to show at once, capped

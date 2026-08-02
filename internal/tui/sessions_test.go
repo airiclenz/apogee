@@ -853,6 +853,12 @@ func modelWithOverlayRoom(t *testing.T, height int, opts Options) Model {
 // shares the browser's slot, and the two prose-bearing panes — the approval and ask prompts — were
 // the ones still overflowing by exactly one row at smallestOverlayWindow after the row floor
 // dropped, because their body floor had not.
+//
+// It carries a SECOND property for the prose-bearing panes, because the two are only ever true
+// together: a pane that fits the frame by dropping its question or its approval reason must still
+// account for the lines it dropped. Fitting is otherwise trivially satisfiable — hide everything,
+// say nothing — which is what a zero body budget did before the marker learned to ride the title
+// row, on a surface where the human is ruling on what a tool is about to do.
 func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 	servers := make([]ServerChoice, 0, 12)
 	for i := range 12 {
@@ -861,23 +867,27 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			Endpoint: fmt.Sprintf("http://192.168.64.%d:1111", i+1),
 		})
 	}
-	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12)
+	// The tail word is the proof the prose is on the screen IN FULL: it is the only place it
+	// appears, so the frame either holds it or is holding lines back and must say how many.
+	const proseTail = "END-OF-PROSE"
+	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12) + proseTail
 
 	overlays := []struct {
-		name string
-		open func(t *testing.T, height int) Model
+		name  string
+		prose bool // the pane carries a body, so it owes an accounting of whatever it cannot seat
+		open  func(t *testing.T, height int) Model
 	}{
-		{"session browser", func(t *testing.T, height int) Model {
+		{"session browser", false, func(t *testing.T, height int) Model {
 			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
 			m.sessionBrowser = browserWithSessions(8)
 			return m
 		}},
-		{"server picker", func(t *testing.T, height int) Model {
+		{"server picker", false, func(t *testing.T, height int) Model {
 			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a", Servers: servers})
 			m.picker = picker{open: true, kind: pickerServer}
 			return m
 		}},
-		{"approval prompt", func(t *testing.T, height int) Model {
+		{"approval prompt", true, func(t *testing.T, height int) Model {
 			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
 			m.state = stateAwaitingApproval
 			m.pending = &approvalReqMsg{Request: domain.ApprovalRequest{
@@ -887,7 +897,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			}}
 			return m
 		}},
-		{"ask prompt", func(t *testing.T, height int) Model {
+		{"ask prompt", true, func(t *testing.T, height int) Model {
 			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
 			m.state = stateAwaitingAsk
 			m.pendingAsk = &askReqMsg{Request: domain.AskRequest{
@@ -905,16 +915,23 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 
 				content := m.View().Content
 				frame := strings.Split(content, "\n")
+				plainFrame := ansiPattern.ReplaceAllString(content, "")
 
 				if len(frame) > height {
 					t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
-						len(frame), height, len(frame)-height, ansiPattern.ReplaceAllString(content, ""))
+						len(frame), height, len(frame)-height, plainFrame)
 				}
 				// The footer is the last thing View stacks, so its presence is the proof nothing was
 				// pushed past the last row.
 				if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-					t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s",
-						ansiPattern.ReplaceAllString(content, ""))
+					t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+				}
+				// …and it did not buy the fit by hiding prose quietly: either the body is on the
+				// screen to its last word, or the pane counts out the lines it is not showing —
+				// in its body block where it has a row for the marker, on its title row where the
+				// window leaves it none.
+				if ov.prose && !strings.Contains(plainFrame, proseTail) && !strings.Contains(plainFrame, "more lines)") {
+					t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
 				}
 			})
 		}
