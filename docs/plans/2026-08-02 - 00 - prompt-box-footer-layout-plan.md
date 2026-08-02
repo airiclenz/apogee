@@ -87,7 +87,15 @@ prefix.
 
 **Commit:** `feat(tui): the context gauge names its window (8k/98k 8%)`
 
-## 2. The footer names the workspace, not the window
+## 2. The footer names the workspace, not the window — ✅ DONE (2026-08-02)
+
+NOTES (2026-08-02): two small extensions past the item's literal rules for `workdirDisplay`, both to
+keep it consistent with `newWorkspaceRoot` in the same file. (a) A degenerate home of `/` (or a bare
+volume root) is treated as a boundary match rather than falling into "anything else": `/proj` against
+home `/` reads `~/proj`. The literal "home + separator + rest" test would need a doubled separator
+there and so would leave the path unchanged. (b) `path`/`home` are `strings.TrimSpace`d first, so a
+whitespace-only workspace names nothing, exactly as `newWorkspaceRoot` treats one. Both cases are
+pinned as rows in `TestWorkdirDisplay`.
 
 Depends on item 1 (the window must already read in the gauge before it leaves the footer).
 

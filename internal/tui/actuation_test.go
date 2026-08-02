@@ -321,6 +321,15 @@ func TestActuationFooterNarratesTheVerb(t *testing.T) {
 	if view := plain(m.View()); !strings.Contains(view, "loading alpha…") {
 		t.Errorf("the footer does not say what is loading:\n%s", view)
 	}
+	// The verb replaces the model segment alone: the host it is loading on stays named beside it,
+	// and so would the workspace — a local fact no launcher verb touches.
+	footer := ansiPattern.ReplaceAllString(m.footerContent(80), "")
+	if !strings.Contains(footer, "test-host") {
+		t.Errorf("footer = %q, want the host kept beside the verb", footer)
+	}
+	if strings.Contains(footer, formatTokens(m.opts.ContextWindow)) {
+		t.Errorf("footer = %q, want no context window in it — the gauge states it now", footer)
+	}
 
 	// The unbound cold start would say "connecting…"; the actuation is the more specific truth.
 	unboundModel := m

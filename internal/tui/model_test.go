@@ -1931,20 +1931,30 @@ func TestSessionTitle(t *testing.T) {
 // Layout: the status line and resizing
 // ----------------------------------------------------------------------------
 
-// The footer carries the host alias, model, static context window, and mode. The full endpoint
-// URL is no longer shown — the footer uses the host alias. (The status line's own left slot is
-// the live activity, covered by TestModelStatusLineActivity; at idle it is empty.)
+// The footer carries the host alias, model, workspace directory, and mode. The full endpoint
+// URL is no longer shown — the footer uses the host alias — and neither is the context window:
+// that is the gauge's fact now, measured live against what the conversation has spent, so the
+// footer's last segment is the local directory the session is rooted in. (The status line's own
+// left slot is the live activity, covered by TestModelStatusLineActivity; at idle it is empty.)
 func TestModelStatusLine(t *testing.T) {
-	m := newTestModel(t)
+	opts := testOpts
+	opts.Workspace = "/ws/proj"
+	m := step(t, newModel(context.Background(), &fakeEngine{}, opts, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
+
 	got := plain(m.View())
 	// The footer renders the mode as a friendly, spaced label (ask-before → "ask before").
-	for _, want := range []string{"test-host", "test-model", "32k", "ask before"} {
+	for _, want := range []string{"test-host", "test-model", "/ws/proj", "ask before"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("status/footer missing %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "http://localhost:1234") {
 		t.Errorf("footer shows the full endpoint URL; want the host alias instead:\n%s", got)
+	}
+	// The start-up box still states the window, so the window's departure is asserted against the
+	// footer line itself rather than the whole view.
+	if footer := ansiPattern.ReplaceAllString(m.footerContent(m.width), ""); strings.Contains(footer, formatTokens(opts.ContextWindow)) {
+		t.Errorf("footer = %q, want the context window gone — the gauge states it now", footer)
 	}
 }
 

@@ -527,6 +527,17 @@ point is a **minor** bump, not a breaking change.
   smaller window reads as the plain contradiction `137k/98k 100%` rather than an impossible
   percentage — and the counts keep their honest lowercase SI `k`.
 
+- **The footer names the workspace you are in, not the window you already read in the gauge.** Its
+  left slot now closes on the directory this session is rooted in — `host ✦ model ✦ ~/Repos/apogee`
+  — written with your home directory as `~`, and only where `~` really is a whole path component,
+  so a sibling like `/Users/you-other/proj` stays spelled out rather than being abbreviated into a
+  directory you are not in. It sits after the model because the line reads outward-in: the server,
+  the model on it, and last the place here. The context window left that slot for the gauge above,
+  which states it beside what has actually been spent; it is still a session fact and a change to
+  it is still noted in the transcript. `connecting…` and `loading <profile>…` now replace the model
+  word alone — the host and the workspace stay put behind them, since neither is a fact about a
+  model nobody has named yet — and the `✦ offline` marker still closes the slot in the error tone.
+
 - **A tool block now spells the paths it names relative to the workspace.** The target leading a
   branch line and the one-line summary beside it read `docs/plan.md`, not
   `/home/me/proj/docs/plan.md`, so a project's own files stop spending the row's width repeating a

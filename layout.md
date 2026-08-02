@@ -55,7 +55,7 @@
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│ host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ 32k                               ask-before │
+│ host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                    ask-before │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
 
 ---
@@ -503,13 +503,27 @@ two columns of room the phrase goes whole, separator and all, rather than readin
 ## The footer's upstream slot
 
 **What it carries.** The footer's content row states the upstream on the left — `host ✦ model ✦
-window`, the sketch's `host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ 32k` — and the autonomy mode on the
-right. The host falls back to the endpoint's own host when no alias is configured, and the window
-is dropped when nothing has named one.
+workdir`, the sketch's `host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee` — and the autonomy
+mode on the right. The host falls back to the endpoint's own host when no alias is configured, and
+any segment nothing has named is dropped with its separator.
 
-**The words that stand in for a model.** The model and its window are replaced **together**
-whenever there is no binding to report — a context window is not a fact about a model nobody has
-named yet — and only ever by one word:
+**Where the window went.** The context window used to close that run, and it does not any more:
+the status line's gauge states it, beside what the conversation has actually spent
+(`8k/98k 8% █░░░░░`), which is the only place the number tells the reader something that changes.
+The window is still a session fact — a change to it is still noted in the transcript — it simply
+has one home in the chrome now.
+
+**The workdir the slot ends on.** The last segment is the local directory this session is rooted
+in, written with the home directory as `~` (`~/Repos/apogee`). The substitution happens only at a
+component boundary, so a sibling that merely opens with home's spelling stays whole — the same
+boundary rule the tool cards' workspace shortening uses. It is resolved once, at start-up, and is
+the one fact in the slot that no upstream state can change: it sits **after** the model precisely
+so the line reads outward-in — the server, the model on it, and last the directory here.
+
+**The words that stand in for a model.** The model is replaced whenever there is no binding to
+report, and only ever by one word. It is the **model segment alone** that gives way: the host is
+where the session is still trying to reach, and the workdir is a local fact, so both stay put
+behind the stand-in word.
 
 - `connecting…` while a wired heartbeat has not bound a model: the seconds between the first paint
   and the first landed beat, and again after a `/server` switch until the new server answers.
@@ -521,7 +535,8 @@ named yet — and only ever by one word:
 
 The slot holds one word at a time and says nothing else: an actuation's own progress steps are
 transcript notes, not chrome. The `✦ offline` marker is separate again — it is *appended* to the
-left slot in the error tone once the offline crossing is made, beside whatever the slot is showing.
+**end** of the left slot in the error tone once the offline crossing is made, after the workdir and
+whatever the model segment is showing, so it closes the line rather than displacing a fact.
 
 ---
 

@@ -508,11 +508,16 @@ func TestSubmitBlockedBeforeFirstBind(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // The footer says both upstream states in words: "offline" beside the model, and "connecting…" in
-// place of the model and its window while no model is bound yet.
+// place of the model while no model is bound yet. The stand-in word replaces the MODEL SEGMENT
+// ALONE — the host is where the session is still trying to reach, and the workspace is a local
+// fact no upstream state can touch, so both stay put behind the word.
 func TestFooterShowsOfflineAndConnecting(t *testing.T) {
 	t.Parallel()
 
-	offline := wireHeartbeat(t, testOpts, &fakeHeartbeat{})
+	base := testOpts
+	base.Workspace = "/ws/proj"
+
+	offline := wireHeartbeat(t, base, &fakeHeartbeat{})
 	offline = foldBeatMsg(t, offline, downBeat("connection refused"))
 	if got := plain(offline.View()); !strings.Contains(got, offlineLabel) {
 		t.Errorf("the view does not say %q while offline:\n%s", offlineLabel, got)
@@ -521,15 +526,20 @@ func TestFooterShowsOfflineAndConnecting(t *testing.T) {
 		t.Errorf("footer = %q, want the bound model still named beside the offline marker", got)
 	}
 
-	opts := testOpts
+	opts := base
 	opts.Model = ""
 	connecting := wireHeartbeat(t, opts, &fakeHeartbeat{})
 	footer := ansiPattern.ReplaceAllString(connecting.footerContent(80), "")
 	if !strings.Contains(footer, connectingLabel) {
 		t.Errorf("footer = %q, want %q while no model is bound", footer, connectingLabel)
 	}
+	for _, want := range []string{"test-host", "/ws/proj"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("footer = %q, want %q kept — %q replaces the model segment alone", footer, want, connectingLabel)
+		}
+	}
 	if strings.Contains(footer, formatTokens(opts.ContextWindow)) {
-		t.Errorf("footer = %q, want the window dropped with the model — it is not a fact about a model nobody has named", footer)
+		t.Errorf("footer = %q, want the window nowhere in it — the gauge states it now", footer)
 	}
 	if got := plain(connecting.View()); !strings.Contains(got, connectingLabel) {
 		t.Errorf("the view does not say %q before the first bind:\n%s", connectingLabel, got)

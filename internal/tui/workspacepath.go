@@ -137,6 +137,42 @@ func (w workspaceRoot) mentionAt(s string, start, end int) (text string, next in
 	return "", rest, true
 }
 
+// workdirDisplay respells the workspace path the way the footer names it: the cleaned path with
+// the home directory written as `~`. The footer has one line to say where this session is rooted,
+// and `~/Repos/apogee` is both the spelling a human recognises their own project by and the one
+// that leaves the mode marker its room (layout.md, "The footer's upstream slot").
+//
+// home is a parameter rather than an os.UserHomeDir call so the respelling is a pure function that
+// can be proven off the real environment; the one caller resolves it once per session.
+//
+// The substitution happens only at a COMPONENT boundary — the path IS home, or home is followed by
+// a separator — so a sibling whose name merely opens with home's spelling (`/Users/username-other`
+// against home `/Users/username`) is left whole, the same false match mentionAt refuses above.
+// Anything else, an empty home included, comes back cleaned but unrespelled, and an empty path
+// comes back empty so the footer drops the segment rather than printing filepath.Clean's ".".
+func workdirDisplay(path, home string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return ""
+	}
+	p = filepath.Clean(p)
+	h := strings.TrimSpace(home)
+	if h == "" {
+		return p
+	}
+	h = filepath.Clean(h)
+	if p == h {
+		return "~"
+	}
+	// A filesystem-root home cleans to a bare separator, which the boundary test below would
+	// otherwise have to see doubled; trimming it lets the shared test cover that degenerate case too.
+	h = strings.TrimSuffix(h, string(filepath.Separator))
+	if rest, ok := strings.CutPrefix(p, h); ok && rest != "" && pathSepByte(rest[0]) {
+		return "~" + rest
+	}
+	return p
+}
+
 // pathSepByte reports whether b separates two path components. Both spellings count on every OS:
 // the root is cleaned to the host separator, but a tool's own output (a command's, a compiler's)
 // routinely prints the other one, and a boundary test that missed it would refuse a real mention.

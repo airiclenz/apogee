@@ -91,6 +91,45 @@ func TestWorkspaceRootIsCleanedOnce(t *testing.T) {
 	}
 }
 
+// The footer's own respelling of the workspace is the `~` substitution and nothing else, and the
+// row that makes it a rule rather than a string trim is the sibling: `/home/me-other/proj` merely
+// OPENS with home's spelling, and abbreviating it would name a directory the session is not in.
+// The degenerate inputs are pinned beside it because the footer's segment is dropped on "" and the
+// home lookup is allowed to fail (newModel passes "" when it does).
+func TestWorkdirDisplay(t *testing.T) {
+	t.Parallel()
+
+	const home = "/home/me"
+	cases := []struct {
+		name string
+		path string
+		home string
+		want string
+	}{
+		{"a path under home is abbreviated", "/home/me/repos/apogee", home, "~/repos/apogee"},
+		{"a child of home is abbreviated", "/home/me/proj", home, "~/proj"},
+		{"home itself reads as the tilde alone", "/home/me", home, "~"},
+		{"a trailing separator is still home", "/home/me/", home, "~"},
+		{"a sibling opening with home's spelling stays whole", "/home/me-other/proj", home, "/home/me-other/proj"},
+		{"a sibling of home stays whole", "/home/you/proj", home, "/home/you/proj"},
+		{"a path outside home stays whole", "/srv/build/apogee", home, "/srv/build/apogee"},
+		{"a path is cleaned on the way to the screen", "/home/me/repos/../proj/", home, "~/proj"},
+		{"an unknown home leaves the path alone", "/home/me/proj", "", "/home/me/proj"},
+		{"no workspace names nothing", "", home, ""},
+		{"blank workspace names nothing", "   ", home, ""},
+		{"a relative workspace is passed through cleaned", "./proj", home, "proj"},
+		{"a root home abbreviates the whole machine", "/proj", "/", "~/proj"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := workdirDisplay(tc.path, tc.home); got != tc.want {
+				t.Errorf("workdirDisplay(%q, %q) = %q, want %q", tc.path, tc.home, got, tc.want)
+			}
+		})
+	}
+}
+
 // The shortening reaches the two halves of a tool card that NAME a path: the target that leads the
 // branch line, and the one-line summary of the outcome beside it. The call's own arguments are the
 // oracle — what the model asked for is untouched, only its spelling on screen changes.

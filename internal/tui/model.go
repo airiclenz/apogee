@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -198,7 +199,14 @@ type Model struct {
 	flash string
 
 	// Content & layout.
-	transcript    transcript
+	transcript transcript
+	// workdir is the footer's workspace fact: Options.Workspace respelled for display
+	// (workdirDisplay), resolved ONCE at construction rather than per repaint because it reads the
+	// home directory off the environment and neither input can change while the session runs — the
+	// workspace is fixed at launch and /clear opens the next session in the same one. A plain
+	// string, so it rides the value-copied Model (ADR 0011); "" means there is nothing to name and
+	// the footer drops the segment.
+	workdir       string
 	th            theme // the palette and reusable styles, built once at construction
 	width, height int
 	ready         bool // a WindowSizeMsg has sized the layout at least once
@@ -256,6 +264,16 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// on the Model because the fold that records a call reaches no Model, and reset preserves it —
 	// /clear opens a new session in the same workspace.
 	m.transcript.ws = newWorkspaceRoot(opts.Workspace)
+
+	// Resolve the footer's spelling of that same workspace once, for the same reason: the home
+	// lookup is an environment read, and neither it nor the workspace changes for the life of the
+	// session. A failed lookup leaves home "", which simply returns the path unrespelled — a footer
+	// that says the long form is right, one that guesses a home is not.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	m.workdir = workdirDisplay(opts.Workspace, home)
 
 	// Seed the one-time start-up box as entries[0]. Seeding it here (rather than on the first
 	// WindowSizeMsg) makes it a normal transcript entry: it renders fresh at the live width on
@@ -3053,7 +3071,7 @@ func (m Model) topRule() string {
 
 // footerView renders the footer bar: a thin top divider (the shared border with the input box
 // above), the content line, and a thin bottom rule. The content shows the host alias, model,
-// and static context window on the left and the autonomy mode on the right — string(Mode), so a
+// and workspace directory on the left and the autonomy mode on the right — string(Mode), so a
 // later rung (ModeAllowEdits, P3.4) appears for free. A window too narrow for a bordered bar
 // renders nothing rather than overflowing.
 func (m Model) footerView() string {
@@ -3071,14 +3089,19 @@ func (m Model) footerView() string {
 	)
 }
 
-// footerContent composes the footer's content line: host ✦ model ✦ ctx on the left, the mode
+// footerContent composes the footer's content line: host ✦ model ✦ workdir on the left, the mode
 // marker on the right, between two dark-gray │ borders on a black field. The mode marker takes
 // its own per-mode colour (modeColor), so the segments are styled independently and laid out by
 // hand — mirroring statusLine — rather than rendered under one style, which would let the mode's
 // colour reset bleed the black field. The host falls back to the endpoint when no alias is
-// configured, and the context window is omitted when unknown (0).
+// configured, and every segment nothing has named is dropped with its separator (nonEmpty).
+//
+// The workdir closes the run rather than opening it because the line reads outward-in — the server
+// this session talks to, the model it talks to there, and last the local directory it is pointed
+// at, the one fact of the three that no upstream state can change.
 func (m Model) footerContent(w int) string {
-	info := strings.Join(nonEmpty(append([]string{hostDisplay(m.opts)}, m.upstreamSegments()...)...), " "+glyphAssistant+" ")
+	segments := append([]string{hostDisplay(m.opts)}, m.upstreamSegments()...)
+	info := strings.Join(nonEmpty(append(segments, m.workdir)...), " "+glyphAssistant+" ")
 	offline := ""
 	if m.hb.offline {
 		offline = " " + glyphAssistant + " " + offlineLabel
@@ -3109,22 +3132,26 @@ func (m Model) footerContent(w int) string {
 
 // The two words the footer says about the Upstream that are not facts about a model.
 const (
-	// connectingLabel stands where the model and its window go while a wired heartbeat has not
-	// bound a model yet — the honest word for the seconds between the first paint and the first
-	// landed beat (startup discovery is now that beat).
+	// connectingLabel stands where the model goes while a wired heartbeat has not bound one yet —
+	// the honest word for the seconds between the first paint and the first landed beat (startup
+	// discovery is now that beat).
 	connectingLabel = "connecting…"
 	// offlineLabel is the footer's own word for the state a send is refused in.
 	offlineLabel = "offline"
 )
 
-// upstreamSegments are the footer's upstream facts: the display model and its context window, or
-// the single word "connecting…" while a wired heartbeat has not bound a model yet. The two are
-// replaced TOGETHER — a context-window pin is not a fact about a model nobody has named yet — and
-// with the monitor unwired the pair is rendered exactly as it always was.
+// upstreamSegments is the footer's upstream fact: the display model, or the single word
+// "connecting…" while a wired heartbeat has not bound one yet. The context window used to travel
+// beside it and no longer does — it is stated live by the status line's gauge, which measures it
+// against what the conversation has actually spent — so a stand-in word now replaces the model
+// alone and there is no second word to pair it with.
 //
 // An actuation in flight outranks both (ADR 0029 D6): "loading <profile>…" is the more specific
 // truth than "connecting…", and while a model is still bound it is the honest replacement for a
 // binding the launcher is in the middle of invalidating.
+//
+// It stays a slice because the caller joins it into a run of ✦-separated segments and a stand-in
+// word may yet be more than one; the callers never index it.
 func (m Model) upstreamSegments() []string {
 	if label := m.actuationLabel(); label != "" {
 		return []string{label}
@@ -3132,7 +3159,7 @@ func (m Model) upstreamSegments() []string {
 	if m.opts.Model == "" && m.opts.Heartbeat != nil {
 		return []string{connectingLabel}
 	}
-	return []string{displayModel(m.opts.Model), formatTokens(m.opts.ContextWindow)}
+	return []string{displayModel(m.opts.Model)}
 }
 
 // newStartupView builds the one-time start-up box's facts from the resolved display Options — the

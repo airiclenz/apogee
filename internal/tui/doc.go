@@ -27,10 +27,13 @@
 // viewport's soft-wrap so the last user prompt sticks to the top while a reply streams). The
 // transcript now groups a tool call with its result by ToolCall ID, the input box is a rounded,
 // auto-growing black field, and the chrome is a braille status line plus a footer bar (host-alias
-// ✦ model ✦ context-window, mode). The live token gauge (reserved at P2.7) is now wired: the post-v1
-// track folds each top-level UsageEvent's total into the status-line context-fill gauge,
-// measured against the discovered context window ([Model.contextGauge] / [Model.statusRight]). The
-// red/green diff detail reserved there has its producer: the Phase-3 view_diff tool (diffBody).
+// ✦ model ✦ workdir, mode — the workspace written with the home directory as `~`,
+// [workdirDisplay], resolved once at construction). The live token gauge (reserved at P2.7) is now
+// wired: the post-v1 track folds each top-level UsageEvent's total into the status-line
+// context-fill gauge, measured against the discovered context window ([Model.contextGauge] /
+// [Model.statusRight]) — which is why the window is stated THERE and no longer in the footer, since
+// the gauge is the one place the number moves. The red/green diff detail reserved there has its
+// producer: the Phase-3 view_diff tool (diffBody).
 //
 // P3.14 turns the Depth-tolerating renderer into a Depth-rendering one: a sub-agent (Depth > 0)
 // run is framed as a vertical-ruled sub-section — each line carries one "│ " rail gutter per
