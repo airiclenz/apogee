@@ -425,9 +425,20 @@ func pathWithin(abs, root string) bool {
 // oversized result to the structural floor (clampToolResult). The clamp lands here, at the ONE
 // seam every tool result crosses on its way into history, so no route — a plain call, a Confine
 // verdict's, an approved gate's, a sub-agent delegation's, an error result — can bypass it.
+//
+// The same one-seam property is why the IsError flag is projected onto the committed message
+// here (domain.ToolOutcomeOf): the flag is the only authority on whether a call failed, and it
+// used to die at this line, leaving a history-scanning Mechanism to guess from the result text —
+// which for a successful read IS a file body, error strings and all. Every route committing a
+// result gets the marker, so the guess is now only ever a legacy-record fallback.
 func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
 	result.Content = a.clampToolResult(result.Content)
-	a.conv.Append(domain.Message{Role: domain.RoleTool, Content: result.Content, ToolCallID: result.CallID})
+	a.conv.Append(domain.Message{
+		Role:        domain.RoleTool,
+		Content:     result.Content,
+		ToolCallID:  result.CallID,
+		ToolOutcome: domain.ToolOutcomeOf(result.IsError),
+	})
 	a.cfg.Events.Emit(domain.ToolResultEvent{EventBase: a.base(turn), Result: result})
 }
 

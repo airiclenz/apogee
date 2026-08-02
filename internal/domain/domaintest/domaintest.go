@@ -35,8 +35,30 @@ func AssistantCallsMessage(calls ...domain.ToolCall) domain.Message {
 // callID. The tool name and arguments live only on the originating ToolCall
 // (ConversationView's pairing contract), so the result carries just the linkage ID
 // and the content.
+//
+// It records NO outcome marker, which makes it the LEGACY-record shape: a message
+// restored from a snapshot written before domain.Message.ToolOutcome existed. Live
+// history never looks like this — the engine's commit seam marks every result — so a
+// test about the marker path wants SucceededToolResultMessage or
+// FailedToolResultMessage instead.
 func ToolResultMessage(callID, content string) domain.Message {
 	return domain.Message{Role: domain.RoleTool, ToolCallID: callID, Content: content}
+}
+
+// SucceededToolResultMessage is a tool-result message marked as a SUCCESS — the shape
+// the engine commits for a result whose IsError was false.
+func SucceededToolResultMessage(callID, content string) domain.Message {
+	m := ToolResultMessage(callID, content)
+	m.ToolOutcome = domain.ToolOutcomeSucceeded
+	return m
+}
+
+// FailedToolResultMessage is a tool-result message marked as a FAILURE — the shape the
+// engine commits for a result whose IsError was true.
+func FailedToolResultMessage(callID, content string) domain.Message {
+	m := ToolResultMessage(callID, content)
+	m.ToolOutcome = domain.ToolOutcomeFailed
+	return m
 }
 
 // ----------------------------------------------------------------------------
@@ -91,9 +113,24 @@ func (b *ConversationBuilder) AssistantCalls(calls ...domain.ToolCall) *Conversa
 	return b
 }
 
-// ToolResult appends the tool-result message paired to callID.
+// ToolResult appends the tool-result message paired to callID, carrying no outcome
+// marker — the legacy-record shape (see ToolResultMessage).
 func (b *ConversationBuilder) ToolResult(callID, content string) *ConversationBuilder {
 	b.messages = append(b.messages, ToolResultMessage(callID, content))
+	return b
+}
+
+// SucceededToolResult appends a tool-result message paired to callID and marked as a
+// success — what the engine commits when IsError was false.
+func (b *ConversationBuilder) SucceededToolResult(callID, content string) *ConversationBuilder {
+	b.messages = append(b.messages, SucceededToolResultMessage(callID, content))
+	return b
+}
+
+// FailedToolResult appends a tool-result message paired to callID and marked as a
+// failure — what the engine commits when IsError was true.
+func (b *ConversationBuilder) FailedToolResult(callID, content string) *ConversationBuilder {
+	b.messages = append(b.messages, FailedToolResultMessage(callID, content))
 	return b
 }
 

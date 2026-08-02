@@ -277,6 +277,19 @@ text. In apogee the tool reports `IsError` authoritatively. Error *classificatio
 (syntax/import/missing-file — `classifyError` `error_enrichment.go:31`) stays
 mechanism-internal, not a field on the type.
 
+> **Amended 2026-08-02 (the flag now survives the commit).** The paragraph above was only half
+> true, and the half that was false cost real behaviour. `IsError` was authoritative on the
+> **live** seam — `PostToolResult` receives the `*ToolResult` — but the commit into history
+> (`appendToolResult`) copied only `Content`, so every **cross-Turn** Mechanism asking "did that
+> earlier call fail?" was back to apogee-sim's string matching, over a body that for a successful
+> `read_file` is the file itself. `read_loop` therefore read any source file mentioning `error:`
+> or "does not exist" as a failed read and told the model to write the file it had just read.
+> The committed message now carries the verdict as `domain.Message.ToolOutcome` (a tri-state:
+> `ok` / `error` / unrecorded), stamped at that one seam and persisted through the session
+> snapshot as an `omitempty` sibling like `Interjected`. Text sniffing survives only as the
+> fallback for a record snapshotted before the marker existed, anchored to the result's first
+> line. Classification stays mechanism-internal as stated.
+
 ---
 
 ## 6. `Conversation` — history-rewrite hook

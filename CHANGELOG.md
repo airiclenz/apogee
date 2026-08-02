@@ -654,6 +654,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Reading a file that talks about errors is no longer mistaken for a file that is missing.** The
+  optional `read_loop` Mechanism watches for the model hunting for a file that does not exist, and
+  it worked out which reads had failed by looking for words like `error:`, "not found" and "does not
+  exist" **anywhere in the result** — but the result of a *successful* read is the file itself, and
+  the files a coding agent reads are full of exactly those words. So one successful read of a
+  perfectly ordinary source file counted as a miss, the workspace still looked empty, and the model
+  was told: *"STOP. The workspace is empty. The file `store.go` does not exist because nothing has
+  been created yet. Call write_file now."* — an invitation to overwrite a real file with a
+  reconstruction from memory. Apogee now records, beside each tool result it commits, whether the
+  tool actually reported a failure, and the Mechanism reads that instead of guessing from the text.
+  Sessions saved before this release carry no such record, so their history is still read the old
+  way, but only from the result's **first line**, where a failure message actually is. The
+  Mechanism is off by default, so a stock session was never affected.
+
 - **The syntax check no longer calls correct Python and Ruby broken.** The optional `syntax`
   Mechanism — and `autofix`, which judges a formatter's repair against the same check — read `//`
   as the start of a comment in *every* language and stopped reading the line there. In Python `//`

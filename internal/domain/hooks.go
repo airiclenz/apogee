@@ -36,6 +36,39 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// ToolOutcome is the committed record of whether the tool call a RoleTool message answers
+// succeeded or failed — the persisted half of ToolResult.IsError. The flag itself lives only
+// on the live result the tool stage passes around; once the result is committed to history all
+// that survives is its Content, and a successful read_file's Content IS a file body. So a
+// Mechanism asking "did that earlier call fail?" had nothing but the text to sniff, and file
+// bodies are full of error strings. This marker is that missing fact.
+//
+// It is a tri-state on purpose: Unrecorded is distinct from Succeeded, so a reader can tell a
+// message that was never marked (a snapshot written before the marker existed) from one marked
+// as a success, and fall back to text sniffing only for the former.
+type ToolOutcome string
+
+const (
+	// ToolOutcomeUnrecorded is the zero value — no outcome was committed with this message.
+	// Every non-tool message carries it, as does a tool-result message restored from a
+	// snapshot written before the marker existed.
+	ToolOutcomeUnrecorded ToolOutcome = ""
+	// ToolOutcomeSucceeded records a tool result whose IsError was false.
+	ToolOutcomeSucceeded ToolOutcome = "ok"
+	// ToolOutcomeFailed records a tool result whose IsError was true.
+	ToolOutcomeFailed ToolOutcome = "error"
+)
+
+// ToolOutcomeOf projects a live ToolResult.IsError flag onto the marker committed beside the
+// result's text. It never returns Unrecorded: a result crossing the commit seam always knows
+// which way it went.
+func ToolOutcomeOf(isError bool) ToolOutcome {
+	if isError {
+		return ToolOutcomeFailed
+	}
+	return ToolOutcomeSucceeded
+}
+
 // Message is a read-only snapshot of one conversation message handed to hooks. A hook
 // reads Messages and mutates by index against the owning container (Request /
 // Conversation); it never holds the loop's backing storage.
@@ -44,6 +77,16 @@ type Message struct {
 	Content    string
 	ToolCalls  []ToolCall // RoleAssistant only
 	ToolCallID string     // RoleTool only — links the result to its ToolCall.ID
+
+	// ToolOutcome records whether the tool call this RoleTool message answers failed. It is
+	// stamped at the ONE seam every tool result crosses into history (internal/agent
+	// appendToolResult) from the result's IsError, so no route — a plain call, a refusal, a
+	// gate denial, a sub-agent delegation — commits an unmarked result.
+	//
+	// Like Interjected it is Apogee-owned and process-local: it rides the session snapshot,
+	// and the wire projection maps fields explicitly, so the marker never reaches a provider
+	// request.
+	ToolOutcome ToolOutcome
 
 	// Interjected marks a RoleUser message the human interjected INTO a running Exchange
 	// rather than one that opens an Exchange. It is set ONLY by Agent.Interject; every
@@ -102,11 +145,17 @@ type messageJSON struct {
 	// snapshot simply lacks the key (decoding false) and an older binary round-trips it as
 	// an unknown sibling.
 	Interjected bool `json:"interjected,omitempty"`
+
+	// ToolOutcome is Apogee-owned on the same terms as Interjected, and needs no
+	// SessionVersion bump for the same reason: omitempty keeps it off every non-tool message,
+	// an older snapshot lacks the key (decoding ToolOutcomeUnrecorded, which routes a reader
+	// to its legacy text fallback), and an older binary round-trips it as an unknown sibling.
+	ToolOutcome ToolOutcome `json:"tool_outcome,omitempty"`
 }
 
 // messageKnownKeys are the top-level JSON keys messageJSON owns; UnmarshalJSON strips them
 // so only genuinely-unknown siblings land in extra. Kept in sync with messageJSON's tags.
-var messageKnownKeys = []string{"role", "content", "tool_calls", "tool_call_id", "interjected"}
+var messageKnownKeys = []string{"role", "content", "tool_calls", "tool_call_id", "interjected", "tool_outcome"}
 
 // isKnownMessageKey reports whether key is one messageJSON owns (so a same-named extra entry
 // is skipped on encode — the known field always wins a collision).
@@ -135,6 +184,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		ToolCalls:   m.ToolCalls,
 		ToolCallID:  m.ToolCallID,
 		Interjected: m.Interjected,
+		ToolOutcome: m.ToolOutcome,
 	})
 	if err != nil {
 		return nil, err
@@ -186,6 +236,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.ToolCalls = known.ToolCalls
 	m.ToolCallID = known.ToolCallID
 	m.Interjected = known.Interjected
+	m.ToolOutcome = known.ToolOutcome
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {

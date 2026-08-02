@@ -538,3 +538,54 @@ func TestNewID(t *testing.T) {
 		t.Errorf("ids not chronological: %q !< %q", earlier, later)
 	}
 }
+
+// The read-error marker on a committed tool result (domain.Message.ToolOutcome) is what stops
+// read_loop reading a file body's error strings as a failed read, so it has to survive the store:
+// a resumed session's Mechanisms scan restored history, not live history. The Store keeps
+// Session.State opaque, so this pins the whole path — the engine's conversation payload marshalled
+// in, written, read back, and unmarshalled out with the marker intact.
+func TestSaveLoadPreservesTheToolOutcomeMarker(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+
+	conv := domain.NewConversation([]domain.Message{
+		{Role: domain.RoleUser, Content: "read store.go"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: "package store", ToolOutcome: domain.ToolOutcomeSucceeded},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c2", Content: "gone.go", ToolOutcome: domain.ToolOutcomeFailed},
+	})
+	state, err := json.Marshal(conv)
+	if err != nil {
+		t.Fatalf("marshal conversation: %v", err)
+	}
+
+	rec := sampleRecord("20260802T120000Z-dddddddd", time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC))
+	rec.Session = domain.Session{Version: domain.SessionVersion, State: state}
+	if err := st.Save(rec); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := st.Load(rec.Meta.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	var restored domain.Conversation
+	if err := json.Unmarshal(got.Session.State, &restored); err != nil {
+		t.Fatalf("unmarshal restored conversation: %v", err)
+	}
+	if restored.Len() != conv.Len() {
+		t.Fatalf("restored %d messages, want %d", restored.Len(), conv.Len())
+	}
+	if want := domain.ToolOutcomeSucceeded; restored.At(2).ToolOutcome != want {
+		t.Errorf("successful result restored as ToolOutcome %q, want %q", restored.At(2).ToolOutcome, want)
+	}
+	if want := domain.ToolOutcomeFailed; restored.At(4).ToolOutcome != want {
+		t.Errorf("failed result restored as ToolOutcome %q, want %q", restored.At(4).ToolOutcome, want)
+	}
+	// The marker is omitempty, so a message that never carried one stays unmarked — the
+	// legacy-record signal the read-error fallback keys on.
+	if got := restored.At(0).ToolOutcome; got != domain.ToolOutcomeUnrecorded {
+		t.Errorf("user message restored as ToolOutcome %q, want it unrecorded", got)
+	}
+}

@@ -367,7 +367,24 @@ green.
 
 **Commit:** `fix(mechanisms): the syntax checker treats // as a comment only where it is one`
 
-## 10. Read-error detection reads a persisted marker, not the file body
+## 10. Read-error detection reads a persisted marker, not the file body — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** one deviation from the item's literal text — the marker is a dedicated
+tri-state field, `domain.Message.ToolOutcome` (`""` unrecorded / `"ok"` / `"error"`, wire key
+`tool_outcome,omitempty`), rather than the parenthetical's `Message.Extra` flag. Two reasons, both
+load-bearing: (a) the fallback clause requires telling "unmarked, so sniff" from "marked
+successful, so do not" — a bool cannot, and an `Extra` key would have to carry `false` explicitly
+on every successful result to say the same thing, which is the tri-state with a weaker type; (b)
+`Interjected` is the exact precedent for an Apogee-owned marker that rides the snapshot as an
+omitempty sibling and never reaches a provider (the wire projection maps fields explicitly), so
+this needs no SessionVersion bump in either direction and no new mechanism for encode/decode. The
+seam is `appendToolResult` — already documented as the ONE seam every tool result crosses into
+history, so no route commits an unmarked result. Not touched: `error_enrichment`'s
+`generalErrorSignals` sniff (`errorenrich.go:161`), which looks like the same defect but is not —
+it scans only WRITE-tool results, never a file body. Also added: a dated amendment to
+`docs/design/hook-mutation-api.md` §5 (its "in apogee the tool reports `IsError` authoritatively"
+was the claim this defect falsified for every cross-Turn reader), two `domaintest` builders for
+marked results, and a CHANGELOG `Fixed` entry; no version identifier touched.
 
 **What:** Audit "High — Read-error sniffing over whole file bodies makes `read_loop` tell
 the model to overwrite existing files". `internal/mechanisms/historyhints.go:51/:72` +
