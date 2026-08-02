@@ -3294,7 +3294,8 @@ const maxAskChoiceRows = 8
 // question or a long choice set never pushes the input box off-screen: rows get priority (they
 // are what the human acts on), the body takes what is left and overflows into the explicit
 // "… (+N more lines)" marker, and on a window that can spare neither the pane shrinks to its
-// title and hint — with that title naming the question lines it could not seat (D2).
+// title and hint — with that title counting BOTH the question lines and the choices it could not
+// seat (D2), so a hint still offering ↑↓ is never the only trace of an offering the pane dropped.
 func (m Model) askPrompt(req domain.AskRequest) string {
 	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
 

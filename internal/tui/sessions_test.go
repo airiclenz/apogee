@@ -873,7 +873,11 @@ func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model
 // together: a pane that fits the frame by dropping its question or its approval reason must still
 // account for the lines it dropped. Fitting is otherwise trivially satisfiable — hide everything,
 // say nothing — which is what a zero body budget did before the marker learned to ride the title
-// row, on a surface where the human is ruling on what a tool is about to do.
+// row, on a surface where the human is ruling on what a tool is about to do. The accounting is
+// asserted for the ROWS on the same terms: a pane showing none of its choices or entries owes the
+// count just as a pane showing none of its prose does, which is what a zero ROW budget was still
+// getting away with after the body's was fixed — /sessions dropped all eight entries in silence,
+// and the ask prompt all four answers while its hint went on offering ↑↓ to pick between them.
 //
 // Both properties run at narrowOverlayWindow as well as at the standard 80 columns: the marker that
 // rides the title row was composed long and clipped to the pane's width, so the accounting survived
@@ -893,21 +897,22 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12) + proseTail
 
 	overlays := []struct {
-		name  string
-		prose bool // the pane carries a body, so it owes an accounting of whatever it cannot seat
-		open  func(t *testing.T, width, height int) Model
+		name     string
+		prose    bool   // the pane carries a body, so it owes an accounting of whatever it cannot seat
+		rowProbe string // the label of the pane's FIRST row — the one a granted window always seats
+		open     func(t *testing.T, width, height int) Model
 	}{
-		{"session browser", false, func(t *testing.T, width, height int) Model {
+		{"session browser", false, "session number 00", func(t *testing.T, width, height int) Model {
 			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 			m.sessionBrowser = browserWithSessions(8)
 			return m
 		}},
-		{"server picker", false, func(t *testing.T, width, height int) Model {
+		{"server picker", false, "host-00", func(t *testing.T, width, height int) Model {
 			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a", Servers: servers})
 			m.picker = picker{open: true, kind: pickerServer}
 			return m
 		}},
-		{"approval prompt", true, func(t *testing.T, width, height int) Model {
+		{"approval prompt", true, "", func(t *testing.T, width, height int) Model {
 			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 			m.state = stateAwaitingApproval
 			m.pending = &approvalReqMsg{Request: domain.ApprovalRequest{
@@ -917,12 +922,12 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			}}
 			return m
 		}},
-		{"ask prompt", true, func(t *testing.T, width, height int) Model {
+		{"ask prompt", true, "yes, go ahead", func(t *testing.T, width, height int) Model {
 			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 			m.state = stateAwaitingAsk
 			m.pendingAsk = &askReqMsg{Request: domain.AskRequest{
 				Question: longProse,
-				Choices:  []string{"yes", "no", "ask me again later", "stop and let me drive"},
+				Choices:  []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"},
 			}}
 			return m
 		}},
@@ -953,6 +958,82 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 					// window leaves it none, and in whichever wording the width can pay for.
 					if ov.prose && !strings.Contains(plainFrame, proseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
 						t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
+					}
+					// The same holds for the ROWS. A window granted at least one row seats the first
+					// one (popupRowWindow windows around a selection that starts at the top), so the
+					// probe missing means the pane is showing NO choices and NO entries — the case the
+					// scroll cannot answer, and the one the pane has to count out on its title row.
+					if ov.rowProbe != "" && !strings.Contains(plainFrame, ov.rowProbe) &&
+						!elisionMarkerPattern.MatchString(plainFrame) {
+						t.Errorf("pane hid every one of its rows with no marker anywhere in the frame:\n%s", plainFrame)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestOverlayNamesTheRowsItCannotShow is the row half of what the approval prompt's
+// TestModelApprovalNamesTheProseItCannotShow pins for prose, and it pins the placement rather than
+// the mere presence the frame property above settles for. Between 12 and 16 rows popupBudget grants
+// a row-bearing pane a window of ZERO, and until now that pane simply rendered without its list: the
+// ask prompt showed none of its four answers — with the hint still reading "↑↓ select", so the
+// human was invited to choose between choices that were nowhere on the screen — and /sessions showed
+// none of its eight entries. Off-window rows are one keypress away and need no marker; rows there is
+// no window for at all are hidden, and hidden is what this pane may never be silent about.
+//
+// It runs at narrowOverlayWindow as well as at 80 columns for the same reason the prose property
+// does: the marker rides the title row here too, and a title row is where a narrow pane loses the
+// count if it is composed long and clipped.
+func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
+	choices := []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"}
+
+	panes := []struct {
+		name      string
+		probe     string // a label that appears only in the pane's rows
+		rows      int    // the entries on offer, every one of which these windows drop
+		bodyLines int    // the pane's wrapped body, one line at both widths — 0 where it has none
+		render    func(m Model) string
+	}{
+		{"ask prompt", "ask me again later", len(choices), 1, func(m Model) string {
+			return m.askPrompt(domain.AskRequest{Question: "which way?", Choices: choices})
+		}},
+		{"session browser", "session number 00", 8, 0, func(m Model) string {
+			m.sessionBrowser = browserWithSessions(8)
+			return m.renderSessionBrowser()
+		}},
+	}
+
+	for _, p := range panes {
+		for _, width := range []int{80, narrowOverlayWindow} {
+			for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16} {
+				t.Run(fmt.Sprintf("%s/%d×%d", p.name, width, height), func(t *testing.T) {
+					m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
+					pane := p.render(m)
+					flat := ansiPattern.ReplaceAllString(pane, "")
+					rows := strings.Split(flat, "\n")
+
+					if got := lipgloss.Height(pane); got > m.viewport.Height() {
+						t.Errorf("pane is %d rows on a %d-row viewport (+%d): the input box goes off the frame\n%s",
+							got, m.viewport.Height(), got-m.viewport.Height(), flat)
+					}
+					if strings.Contains(flat, p.probe) {
+						t.Fatalf("the pane seated a row at %d×%d — test premise broken:\n%s", width, height, flat)
+					}
+
+					// Everything past the pane's four irreducible rows (two borders, title, hint) is
+					// body it managed to seat; the rest of the body, and every row, is what the title
+					// owes a count for — one marker for everything the pane is holding back.
+					bodyShown := len(rows) - 4
+					if bodyShown < 0 || bodyShown > p.bodyLines {
+						t.Fatalf("pane seated %d body rows of %d — test premise broken:\n%s", bodyShown, p.bodyLines, flat)
+					}
+					title := strings.Trim(rows[1], "│ ")
+					if !elisionMarkerPattern.MatchString(title) {
+						t.Fatalf("title row = %q, want the marker for the rows the pane is not showing", title)
+					}
+					if want := p.rows + p.bodyLines - bodyShown; !strings.Contains(title, fmt.Sprintf("+%d", want)) {
+						t.Errorf("title row = %q, want it to count the %d lines the pane is holding back", title, want)
 					}
 				})
 			}

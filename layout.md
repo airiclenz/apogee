@@ -114,12 +114,21 @@ half-height tmux pane reads `approve write_file?  … (+12 more lines)`: the too
 on, and the fact that there is more to read than the window can show. A pane may lose the text; it
 may not lose the reader's knowledge that there was text.
 
+**The rows are counted the same way, when there is no window for them at all.** A row window the
+pane did get scrolls around the selection, so the entries outside it are one keypress away and need
+no marker. A window of **zero** rows is the other thing entirely — every choice or entry gone, and
+the key hint still offering `↑↓ select` to pick between them — so those rows are counted onto the
+title row too, in the **same** marker: `saved sessions  (all workspaces)  … (+8 more lines)`, and
+the ask prompt at twelve rows counts its four answers there beside the question line it also
+dropped. One marker states the whole of what the pane is holding back, because a title row too
+narrow to seat one count has no room for two.
+
 **Narrowness does not buy silence either.** A half-height pane is usually a half-width one too, and
 the title row is composed **to** the pane's width rather than composed long and clipped to it — a
 clipped row would drop the count off its end and put the silence straight back. The width is spent
 in the order the row is read for: the pane's name, then the count, then the words around the count.
-So the marker sheds its noun before it sheds its number (`approve write_file?  … +12` under about
-43 columns), and past that the **name** is what gives way to an ellipsis (`approve writ…  … +12`),
+So the marker sheds its noun before it sheds its number (`approve write_file?  … +12` at 42 columns
+and below), and past that the **name** is what gives way to an ellipsis (`approve writ…  … +12`),
 never the number. On a pane too narrow for even a clipped name, the count is the whole row.
 
 ---

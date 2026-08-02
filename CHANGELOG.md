@@ -723,12 +723,21 @@ point is a **minor** bump, not a breaking change.
     half-height tmux pane reads `approve write_file?  … (+12 more lines)`. The window can take the
     text away; it cannot take away your knowing there was some.
   - **…on a narrow pane as well as a short one.** A half-height pane is usually a half-width pane
-    too, and the count moved onto the title row only to be cut off the end of it: under about 43
-    columns the tool name filled the row and the elision was silent again, on exactly the split
+    too, and the count moved onto the title row only to be cut off the end of it: at 42 columns and
+    below the tool name filled the row and the elision was silent again, on exactly the split
     terminal the whole arrangement is for. The title row is now fitted to the pane's width instead
     of being cut down to it, and it gives way in the order you read it in — the count keeps its
     place and loses its wording first (`approve write_file?  … +12`), and only past that does the
     **name** shorten (`approve writ…  … +12`). The number is the last thing on the row to go.
+  - **…and it says what it is not showing about the CHOICES too, not just the prose.** The count
+    covered the text a pane dropped but never the entries: on a 12-to-16-row terminal the ask
+    prompt appeared with all four of its answers gone — while the key legend still read
+    `↑↓ select`, inviting you to pick between choices that were nowhere on the screen — and
+    `/sessions` listed none of its eight saved sessions with nothing to say it was holding any
+    back. Both now count them on the title row in the same marker the prose uses
+    (`saved sessions  (all workspaces)  … (+8 more lines)`), shedding its words on the same narrow
+    ladder. Entries merely scrolled out of a window the pane *did* get are untouched: they are one
+    keypress away, and a marker for them would cost a row of the very list it describes.
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it

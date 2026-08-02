@@ -436,7 +436,10 @@ func (m Model) renderSessionBrowser() string {
 	}
 	// The row window is the SCREEN's to grant, not the browser's to assume: maxSessionRows is this
 	// overlay's own taste, and popupBudget cuts it down to what the window can seat above the input
-	// box (D2) — on a short terminal that is fewer rows, or none at all.
+	// box (D2) — on a short terminal that is fewer rows, or none at all. A window of none is the one
+	// case the pane has to speak up about: the module counts the dropped entries onto the title row
+	// (popupTitleLine), because a browser showing no sessions at all would otherwise be
+	// indistinguishable from a workspace that has none.
 	_, spec.maxRows = m.popupBudget(len(spec.rows), maxSessionRows)
 	return renderPopup(m.th, spec, m.width)
 }

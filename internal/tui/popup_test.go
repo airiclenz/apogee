@@ -481,6 +481,97 @@ func TestRenderPopupNarrowTitleKeepsTheElisionCount(t *testing.T) {
 	}
 }
 
+// A row budget of ZERO shows NO rows — and, exactly like the body budget above it, does not buy
+// silence with the space it saves. A pane whose window granted it no rows had been dropping every
+// choice or entry it held without a word, on the same 12-to-15-row terminal the body's title-row
+// fallback was built for: the ask prompt showed none of its four answers while its hint still
+// offered "↑↓ select", and /sessions showed none of its entries. The count now rides the title row
+// with the body's, in the same marker and the same wording.
+//
+// A window that granted at least ONE row is deliberately NOT the same case: it scrolls around the
+// selection, so its off-window rows are one keypress away rather than hidden, and a marker counting
+// them would cost a row of the list it describes.
+func TestRenderPopupRowBudgetOfZeroShowsNoRowsButSaysSo(t *testing.T) {
+	th := newTheme()
+	const width = 60 // wide enough to seat the title and the phrase in full; the narrow ladder is below
+	const title = "the assistant is asking:"
+	choices := []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"}
+
+	base := popupSpec{
+		title:    title,
+		rows:     singleCellRows(choices),
+		selected: 0,
+		hint:     "↑↓ select · ⏎ send",
+	}
+
+	t.Run("no rows shown", func(t *testing.T) {
+		spec := base
+		spec.maxRows = 0
+		lines := popupLines(renderPopup(th, spec, width))
+		if got := len(lines); got != 2+1+1 { // 2 borders + the title + the hint, and no rows at all
+			t.Fatalf("zero row budget rendered %d physical lines, want 4:\n%s", got, strip(strings.Join(lines, "\n")))
+		}
+		if joined := strip(strings.Join(lines, "\n")); strings.Contains(joined, "ask me again later") {
+			t.Errorf("zero row budget leaked a row:\n%s", joined)
+		}
+		if got := popupInterior(lines[1]); got != title+"  … (+4 more lines)" {
+			t.Errorf("title row = %q, want the pane's name plus the count of its four hidden rows", got)
+		}
+	})
+
+	t.Run("body and rows both hidden", func(t *testing.T) {
+		spec := base
+		spec.body = "l0\nl1\nl2"
+		spec.maxBodyRows = 0
+		spec.maxRows = 0
+		lines := popupLines(renderPopup(th, spec, width))
+		if got := len(lines); got != 2+1+1 {
+			t.Fatalf("zero budget rendered %d physical lines, want 4:\n%s", got, strip(strings.Join(lines, "\n")))
+		}
+		// One fact, one marker: a title row too narrow to seat one count has no room for two, so the
+		// hidden body lines and the hidden rows are counted together.
+		if got := popupInterior(lines[1]); got != title+"  … (+7 more lines)" {
+			t.Errorf("title row = %q, want one marker counting the 3 body lines and the 4 rows", got)
+		}
+	})
+
+	t.Run("a scrolling window stays quiet", func(t *testing.T) {
+		spec := base
+		spec.maxRows = 2
+		lines := popupLines(renderPopup(th, spec, width))
+		if got := len(lines); got != 2+1+2+1 { // borders + title + the two windowed rows + hint
+			t.Fatalf("row budget of 2 rendered %d physical lines, want 6:\n%s", got, strip(strings.Join(lines, "\n")))
+		}
+		if got := popupInterior(lines[1]); got != title {
+			t.Errorf("title row = %q, want the bare title: the rows outside a scrolling window are reachable", got)
+		}
+	})
+
+	t.Run("an empty offering owes nothing", func(t *testing.T) {
+		spec := base
+		spec.rows = nil
+		spec.selected = -1
+		spec.maxRows = 0
+		lines := popupLines(renderPopup(th, spec, width))
+		if got := popupInterior(lines[1]); got != title {
+			t.Errorf("title row = %q, want the bare title: there is no list to hide", got)
+		}
+	})
+
+	// The count survives the narrow pane too — the same ladder the body's marker sheds words on
+	// (popupElisionMarkerFitting), because the module has ONE marker and not a second convention.
+	for _, width := range []int{42, 41, 34, 24, 12} {
+		t.Run(fmt.Sprintf("%d columns", width), func(t *testing.T) {
+			spec := base
+			spec.maxRows = 0
+			row := popupInterior(popupLines(renderPopup(th, spec, width))[1])
+			if !strings.Contains(row, "+4") {
+				t.Errorf("title row on a %d-column pane = %q: the count of hidden rows is not on it", width, row)
+			}
+		})
+	}
+}
+
 // Composition order is title / body / rows / hint: the body sits below the title and above the
 // rows, the rows still truncate (never wrap) and keep their selected-row highlight, and an empty
 // body adds no rows.

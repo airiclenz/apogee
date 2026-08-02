@@ -870,8 +870,8 @@ func TestModelApprovalLongArgsCapsBody(t *testing.T) {
 //
 // It runs at narrowOverlayWindow as well as at 80 columns, because the title row was the one place
 // the accounting could still be lost: composed at full length and clipped to the pane's width, it
-// dropped the count off its end on anything under about 43 columns, so a terminal that was short
-// AND narrow — the same split pane — silently went back to the state this test exists to forbid.
+// dropped the count off its end at 42 columns and below, so a terminal that was short AND narrow —
+// the same split pane — silently went back to the state this test exists to forbid.
 func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 	req := domain.ApprovalRequest{
 		Tool:      "write_file",
