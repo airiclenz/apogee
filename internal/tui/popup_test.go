@@ -280,7 +280,7 @@ func TestPopupRowWindow(t *testing.T) {
 func TestRenderPopupBodyWraps(t *testing.T) {
 	th := newTheme()
 	const width = 40
-	out := renderPopup(th, popupSpec{body: strings.Repeat("word ", 40)}, width)
+	out := renderPopup(th, popupSpec{body: strings.Repeat("word ", 40), maxBodyRows: -1}, width)
 	lines := popupLines(out)
 	if len(lines) <= 2+1 { // 2 borders + more than one body row
 		t.Fatalf("body did not wrap to multiple rows: %d physical lines:\n%s", len(lines), strip(out))
@@ -296,7 +296,7 @@ func TestRenderPopupBodyWraps(t *testing.T) {
 // rows with a blank middle row — the approval reason/args separator case.
 func TestRenderPopupBodyPreservesNewlines(t *testing.T) {
 	th := newTheme()
-	lines := popupLines(renderPopup(th, popupSpec{body: "a\n\nb"}, 40))
+	lines := popupLines(renderPopup(th, popupSpec{body: "a\n\nb", maxBodyRows: -1}, 40))
 	if len(lines) != 2+3 { // 2 borders + 3 body rows
 		t.Fatalf("body \"a\\n\\nb\" produced %d physical lines, want 5:\n%s", len(lines), strip(strings.Join(lines, "\n")))
 	}
@@ -316,7 +316,7 @@ func TestRenderPopupBodyPreservesNewlines(t *testing.T) {
 func TestRenderPopupBodyHardBreaksLongToken(t *testing.T) {
 	th := newTheme()
 	const width = 20
-	out := renderPopup(th, popupSpec{body: strings.Repeat("x", 100)}, width)
+	out := renderPopup(th, popupSpec{body: strings.Repeat("x", 100), maxBodyRows: -1}, width)
 	lines := popupLines(out)
 	if len(lines) <= 2+1 {
 		t.Fatalf("over-long token did not hard-break: %d physical lines:\n%s", len(lines), strip(out))
@@ -330,7 +330,8 @@ func TestRenderPopupBodyHardBreaksLongToken(t *testing.T) {
 
 // maxBodyRows caps the wrapped block: past the cap it keeps maxBodyRows−1 lines plus a faint
 // "… (+N more lines)" marker (N = hidden lines) for exactly maxBodyRows body rows; a body at the cap
-// shows every line with no marker; maxBodyRows ≤ 0 shows everything.
+// shows every line with no marker; a NEGATIVE cap shows everything. Zero is the separate case
+// below.
 func TestRenderPopupBodyMaxRows(t *testing.T) {
 	th := newTheme()
 	const width = 40
@@ -352,9 +353,32 @@ func TestRenderPopupBodyMaxRows(t *testing.T) {
 		t.Errorf("body exactly at cap emitted an overflow marker:\n%s", joined)
 	}
 
-	uncapped := popupLines(renderPopup(th, popupSpec{body: tenLines, maxBodyRows: 0}, width))
+	uncapped := popupLines(renderPopup(th, popupSpec{body: tenLines, maxBodyRows: -1}, width))
 	if got := len(uncapped) - 2; got != 10 {
-		t.Errorf("maxBodyRows 0 rendered %d body rows, want all 10", got)
+		t.Errorf("maxBodyRows -1 rendered %d body rows, want all 10", got)
+	}
+}
+
+// A body budget of ZERO shows NO body rows — not every row, which is what "≤ 0 = uncapped" used to
+// mean and what made a body-bearing pane one row taller than the shortest window it fits in. The
+// title and the hint survive: they are the pane's irreducible chrome, and a budget of nothing is
+// popupBudget saying the frame has no room for prose.
+func TestRenderPopupBodyBudgetOfZeroShowsNoBody(t *testing.T) {
+	th := newTheme()
+	const width = 40
+
+	lines := popupLines(renderPopup(th, popupSpec{
+		title:       "approve write_file?",
+		body:        strings.Join([]string{"l0", "l1", "l2"}, "\n"),
+		maxBodyRows: 0,
+		hint:        "a allow · d deny",
+	}, width))
+
+	if got := len(lines); got != 2+1+1 { // 2 borders + the title + the hint, and no body at all
+		t.Fatalf("zero body budget rendered %d physical lines, want 4:\n%s", got, strip(strings.Join(lines, "\n")))
+	}
+	if joined := strip(strings.Join(lines, "\n")); strings.Contains(joined, "l0") || strings.Contains(joined, "more lines") {
+		t.Errorf("zero body budget leaked body content or an overflow marker:\n%s", joined)
 	}
 }
 
@@ -364,12 +388,13 @@ func TestRenderPopupBodyMaxRows(t *testing.T) {
 func TestRenderPopupBodyComposition(t *testing.T) {
 	th := newTheme()
 	spec := popupSpec{
-		title:    "the assistant is asking:",
-		body:     "one line of body",
-		rows:     singleCellRows([]string{"yes", strings.Repeat("verylongword ", 12)}),
-		selected: 0,
-		hint:     "esc cancel",
-		maxRows:  8,
+		title:       "the assistant is asking:",
+		body:        "one line of body",
+		maxBodyRows: -1,
+		rows:        singleCellRows([]string{"yes", strings.Repeat("verylongword ", 12)}),
+		selected:    0,
+		hint:        "esc cancel",
+		maxRows:     8,
 	}
 	const width = 50
 	lines := popupLines(renderPopup(th, spec, width))
@@ -404,7 +429,7 @@ func TestRenderPopupBodyComposition(t *testing.T) {
 // / chrome faint).
 func TestRenderPopupBodyIsNotFaint(t *testing.T) {
 	th := newTheme()
-	lines := popupLines(renderPopup(th, popupSpec{body: "body text here", hint: "esc cancel"}, 50))
+	lines := popupLines(renderPopup(th, popupSpec{body: "body text here", maxBodyRows: -1, hint: "esc cancel"}, 50))
 	bodyLine, hintLine := lines[1], lines[2] // borders + body + hint
 
 	faint := th.statusFaint.Render("x")

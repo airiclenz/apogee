@@ -689,62 +689,102 @@ func browserWithSessions(n int) sessionBrowser {
 // smallestOverlayWindow is the shortest terminal on which a boxed overlay and the frame's fixed
 // chrome can both fit: the gap row, the ▔ hairline, the status line, the input box (a border row
 // and one text row) and the three footer rows come to 8, and the pane's own irreducible chrome —
-// two borders, the title, the hint — to 4. Below that no arrangement fits, so the frame-height
-// property is asserted from here up; the transcript is what has already given way at this size.
+// two borders, the title, the hint — to 4. Every pane shrinks to that four now, prose-bearing ones
+// included: a pane out of budget shows no body rather than the one row a `max(1, …)` floor used to
+// keep for it, which was five rows in a window with four. Below this no arrangement fits, so the
+// frame-height property is asserted from here up; the transcript is what has already given way at
+// this size.
 const smallestOverlayWindow = 12
+
+// modelWithOverlayRoom builds a laid-out model on a height-row terminal with a transcript long
+// enough that the viewport is full — the state in which an overlay has to take its rows from
+// something already occupying them.
+func modelWithOverlayRoom(t *testing.T, height int, opts Options) Model {
+	t.Helper()
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+	for i := range 40 {
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+	}
+	m.refreshViewport()
+	return m
+}
 
 // TestFrameNeverExceedsTheTerminalHeight is the D2 property the audit measured broken: with eight
 // stored sessions the browser composed a 21-row frame on a 20-row terminal, and +5 / +9 rows on 16-
 // and 12-row ones — pushing the input box and the footer clean off the alternate screen, which is
-// plausible in a half-height tmux pane. The pane's row budget now comes from popupBudget, whose
-// floor shrinks to nothing rather than promising rows the frame has no space for, so the composed
+// plausible in a half-height tmux pane. Every pane's budget now comes from popupBudget, whose
+// floors shrink to nothing rather than promising rows the frame has no space for, so the composed
 // frame fits every window a boxed overlay can be drawn in at all.
+//
+// The property runs over every boxed overlay, not the browser alone: the /model | /server picker
+// shares the browser's slot, and the two prose-bearing panes — the approval and ask prompts — were
+// the ones still overflowing by exactly one row at smallestOverlayWindow after the row floor
+// dropped, because their body floor had not.
 func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
-	for _, height := range []int{smallestOverlayWindow, 13, 16, 20, 24, 30} {
-		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
-			m := newModel(context.Background(), &fakeEngine{}, Options{Workspace: "/ws/a"}, nil)
-			m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
-			for i := range 40 {
-				m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
-			}
-			m.refreshViewport()
-			m.sessionBrowser = browserWithSessions(8)
-
-			frame := strings.Split(m.View().Content, "\n")
-			if len(frame) > height {
-				t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
-					len(frame), height, len(frame)-height, ansiPattern.ReplaceAllString(m.View().Content, ""))
-			}
-			// The footer is the last thing View stacks, so its presence is the proof nothing was
-			// pushed past the last row.
-			if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-				t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s",
-					ansiPattern.ReplaceAllString(m.View().Content, ""))
-			}
+	servers := make([]ServerChoice, 0, 12)
+	for i := range 12 {
+		servers = append(servers, ServerChoice{
+			Name:     fmt.Sprintf("host-%02d", i),
+			Endpoint: fmt.Sprintf("http://192.168.64.%d:1111", i+1),
 		})
 	}
-}
+	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12)
 
-// The same property for the /model | /server picker, which shares the browser's slot and now
-// shares its budget.
-func TestFrameWithPickerNeverExceedsTheTerminalHeight(t *testing.T) {
-	for _, height := range []int{smallestOverlayWindow, 16, 20, 24} {
-		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
-			servers := make([]ServerChoice, 0, 12)
-			for i := range 12 {
-				servers = append(servers, ServerChoice{
-					Name:     fmt.Sprintf("host-%02d", i),
-					Endpoint: fmt.Sprintf("http://192.168.64.%d:1111", i+1),
-				})
-			}
-			m := newModel(context.Background(), &fakeEngine{}, Options{Workspace: "/ws/a", Servers: servers}, nil)
-			m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+	overlays := []struct {
+		name string
+		open func(t *testing.T, height int) Model
+	}{
+		{"session browser", func(t *testing.T, height int) Model {
+			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
+			m.sessionBrowser = browserWithSessions(8)
+			return m
+		}},
+		{"server picker", func(t *testing.T, height int) Model {
+			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a", Servers: servers})
 			m.picker = picker{open: true, kind: pickerServer}
+			return m
+		}},
+		{"approval prompt", func(t *testing.T, height int) Model {
+			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
+			m.state = stateAwaitingApproval
+			m.pending = &approvalReqMsg{Request: domain.ApprovalRequest{
+				Tool:      "write_file",
+				Reason:    longProse,
+				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+			}}
+			return m
+		}},
+		{"ask prompt", func(t *testing.T, height int) Model {
+			m := modelWithOverlayRoom(t, height, Options{Workspace: "/ws/a"})
+			m.state = stateAwaitingAsk
+			m.pendingAsk = &askReqMsg{Request: domain.AskRequest{
+				Question: longProse,
+				Choices:  []string{"yes", "no", "ask me again later", "stop and let me drive"},
+			}}
+			return m
+		}},
+	}
 
-			if frame := strings.Split(m.View().Content, "\n"); len(frame) > height {
-				t.Errorf("composed frame is %d rows on a %d-row terminal (+%d)",
-					len(frame), height, len(frame)-height)
-			}
-		})
+	for _, ov := range overlays {
+		for _, height := range []int{smallestOverlayWindow, 13, 16, 20, 24, 30} {
+			t.Run(fmt.Sprintf("%s/%d rows", ov.name, height), func(t *testing.T) {
+				m := ov.open(t, height)
+
+				content := m.View().Content
+				frame := strings.Split(content, "\n")
+
+				if len(frame) > height {
+					t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
+						len(frame), height, len(frame)-height, ansiPattern.ReplaceAllString(content, ""))
+				}
+				// The footer is the last thing View stacks, so its presence is the proof nothing was
+				// pushed past the last row.
+				if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
+					t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s",
+						ansiPattern.ReplaceAllString(content, ""))
+				}
+			})
+		}
 	}
 }

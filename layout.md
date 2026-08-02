@@ -96,9 +96,15 @@ transcript there.
 rows the frame cannot hold: it spends what the window can spare above the input box, so a long
 choice set on a half-height pane scrolls a smaller window around the selection, and on a window
 too short for both, the pane keeps its rows and the session area goes to nothing. The input box
-and the footer are never the ones that give way — they are the frame's floor. Below roughly a
-dozen rows a bordered pane and the fixed chrome cannot both fit at all, and the frame is as small
-as the two of them together.
+and the footer are never the ones that give way — they are the frame's floor.
+
+**The smallest honest pane is four rows: its two borders, its title, and its key hint.** That is
+the floor for every pane alike — a pane out of budget shows no rows AND no prose, rather than
+keeping one row back for either. It still says what it is and how to act, which is the least a
+pane can be and still be worth drawing; what it cannot do is claim a fifth row the frame has not
+got. Under the eight rows of fixed chrome below the session area, that puts the shortest terminal
+a pane can be drawn in at all at **twelve rows** — and at twelve the session area is already gone,
+so the frame is exactly the pane and the chrome together.
 
 ---
 

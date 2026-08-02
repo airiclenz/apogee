@@ -2695,22 +2695,35 @@ func TestDisplayModel(t *testing.T) {
 	}
 }
 
-// TestPopupBudgetShrinksToNothing pins the D2 floor change (item 7). The budget used to bottom out
-// at six rows — `max(6, viewport.Height()-3)` — so on a window with four rows to give it promised a
-// pane the frame could not hold, and the surplus came off the bottom: the input box and the footer,
-// off the alternate screen. The floor is zero now, so a short window's budget shrinks to nothing
-// and the transcript is what gives way.
+// TestPopupBudgetShrinksToNothing pins the D2 floor change (item 7) and the body floor that
+// followed it. The row budget used to bottom out at six rows — `max(6, viewport.Height()-3)` — so
+// on a window with four rows to give it promised a pane the frame could not hold, and the surplus
+// came off the bottom: the input box and the footer, off the alternate screen. The BODY budget
+// then repeated the mistake one row smaller, bottoming out at one: a pane carrying prose was five
+// rows tall where a boxed overlay's chrome is four, so the ask and approval prompts overflowed the
+// shortest window a pane fits in at all while the row-only browser fitted. Both floors are zero
+// now, so a short window's budget shrinks to nothing and the transcript is what gives way.
 func TestPopupBudgetShrinksToNothing(t *testing.T) {
+	// The body's forty wrapped lines always exceed the granted budget, so a body-bearing pane is
+	// exactly as tall as its budget allows and the arithmetic below is an equality, not a bound.
+	bodyLines := make([]string, 40)
+	for i := range bodyLines {
+		bodyLines[i] = fmt.Sprintf("body line %02d", i)
+	}
+	longBody := strings.Join(bodyLines, "\n")
+	eightRows := singleCellRows([]string{"a", "b", "c", "d", "e", "f", "g", "h"})
+
 	cases := []struct {
 		height   int // the terminal's rows
 		wantRows int // the row window popupBudget grants an eight-row offering
+		wantBody int // the body rows it grants alongside them
 	}{
-		{8, 0},  // viewport 1 row: nothing to spend at all
-		{12, 0}, // viewport 4: the chrome alone is more than the budget
-		{16, 0}, // viewport 8: still short of the chrome + a row
-		{20, 4}, // viewport 12: four rows fit above the input box
-		{24, 8}, // viewport 16: the overlay's own cap binds first
-		{40, 8}, // roomy: the cap still binds
+		{8, 0, 0},   // viewport 1 row: nothing to spend at all
+		{12, 0, 0},  // viewport 4: the chrome alone is the whole budget — no rows, no prose
+		{16, 0, 1},  // viewport 8: short of the chrome + a row, but one body row fits
+		{20, 4, 1},  // viewport 12: four rows fit above the input box
+		{24, 8, 1},  // viewport 16: the overlay's own cap binds first
+		{40, 8, 17}, // roomy: the row cap still binds and the body takes the rest
 	}
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("%d rows", c.height), func(t *testing.T) {
@@ -2719,20 +2732,40 @@ func TestPopupBudgetShrinksToNothing(t *testing.T) {
 			if rows != c.wantRows {
 				t.Errorf("popupBudget row window = %d, want %d (viewport %d rows)", rows, c.wantRows, m.viewport.Height())
 			}
-			if body < 1 {
-				t.Errorf("popupBudget body budget = %d, want it to keep at least one row", body)
+			if body != c.wantBody {
+				t.Errorf("popupBudget body budget = %d, want %d (viewport %d rows)", body, c.wantBody, m.viewport.Height())
 			}
-			// A granted window of zero must mean NO rows, not every row: the pane's whole reason for
-			// asking is that the frame has no space for them.
-			pane := renderPopup(m.th, popupSpec{
+
+			// A granted window of zero must mean NO rows and NO body, not every row and every line:
+			// the pane's whole reason for asking is that the frame has no space for them.
+			const chrome = 4 // 2 borders + the title + the hint
+			rowPane := renderPopup(m.th, popupSpec{
 				title:   "saved sessions",
-				rows:    singleCellRows([]string{"a", "b", "c", "d", "e", "f", "g", "h"}),
+				rows:    eightRows,
 				hint:    "esc close",
 				maxRows: rows,
 			}, m.width)
-			const chrome = 4 // 2 borders + the title + the hint
-			if got, want := lipgloss.Height(pane), chrome+c.wantRows; got != want {
-				t.Errorf("pane is %d rows tall, want %d (chrome %d + %d granted rows)", got, want, chrome, c.wantRows)
+			if got, want := lipgloss.Height(rowPane), chrome+c.wantRows; got != want {
+				t.Errorf("row-only pane is %d rows tall, want %d (chrome %d + %d granted rows)", got, want, chrome, c.wantRows)
+			}
+			bodyPane := renderPopup(m.th, popupSpec{
+				title:       "approve write_file?",
+				body:        longBody,
+				maxBodyRows: body,
+				rows:        eightRows,
+				hint:        "a allow · d deny",
+				maxRows:     rows,
+			}, m.width)
+			if got, want := lipgloss.Height(bodyPane), chrome+c.wantBody+c.wantRows; got != want {
+				t.Errorf("body-bearing pane is %d rows tall, want %d (chrome %d + %d body + %d rows)",
+					got, want, chrome, c.wantBody, c.wantRows)
+			}
+
+			// The finding this closes: on every window a pane can be drawn in at all, a pane carrying
+			// prose fits the viewport just as the row-only one does.
+			if c.height >= smallestOverlayWindow && lipgloss.Height(bodyPane) > m.viewport.Height() {
+				t.Errorf("body-bearing pane is %d rows tall on a %d-row viewport (+%d)",
+					lipgloss.Height(bodyPane), m.viewport.Height(), lipgloss.Height(bodyPane)-m.viewport.Height())
 			}
 		})
 	}

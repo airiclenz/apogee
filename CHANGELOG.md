@@ -709,6 +709,13 @@ point is a **minor** bump, not a breaking change.
   clean off the alternate screen — easy to hit in a split tmux pane. Every pane now takes its row
   budget from the same place the prompts already did, and that budget can shrink to nothing: on a
   short window the pane gets smaller and the chat area gives way, never the box you type into.
+  That last part now holds for the panes that carry prose too — the approval and ask prompts. They
+  kept one line back for the question or the approval reason no matter how little room was left,
+  which made them one row taller than the smallest window a pane fits in at all, so on a 12-row
+  terminal the input box went off the bottom again while `/sessions` fitted. A pane with nothing
+  left to spend now shows no prose rather than a line saying the prose is hidden, and shrinks to
+  the four rows every pane shares — its border, the tool name or the question's heading, and the
+  key legend you act on.
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it

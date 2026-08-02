@@ -51,10 +51,11 @@ import (
 //     question or an approval reason/args body must break across lines instead of losing its tail
 //     to an ellipsis. Embedded newlines are honoured as layout (the pretty-printed args'
 //     indentation and blank separators survive), each segment is word-wrapped to the inner budget,
-//     and the flattened block is capped at spec.maxBodyRows (≤ 0 = uncapped): past the cap the last
-//     row becomes an explicit faint "… (+N more lines)" marker counting the hidden lines, so the
-//     body never exceeds its cap and truncation is never silent. wrapText is ANSI-unaware, so body
-//     arrives PLAIN and escape-stripped — the module wraps first and styles after.
+//     and the flattened block is capped at spec.maxBodyRows — negative = uncapped, ZERO = no body
+//     rows at all, the same sense maxRows carries. Past a positive cap the last row becomes an
+//     explicit faint "… (+N more lines)" marker counting the hidden lines, so the body never
+//     exceeds its cap and truncation is never silent. wrapText is ANSI-unaware, so body arrives
+//     PLAIN and escape-stripped — the module wraps first and styles after.
 //
 // Every overlay pane — the /sessions browser, the command/file/skill dropdowns, and the ask and
 // approval prompts — now paints through this module; no boxed overlay renders its own chrome
@@ -71,8 +72,10 @@ type popupRow []string
 // body is plain, escape-stripped prose the module word-wraps to the inner budget and caps at
 // maxBodyRows (an empty body adds no rows); rows are the escape-stripped cell rows the module
 // aligns into columns; selected indexes rows (−1 = no highlight); maxRows caps the scroll window
-// around the selection — negative shows every row, and ZERO shows none, which is a window with no
-// rows left to spare saying so (popupBudget) rather than the pane quietly showing all of them.
+// around the selection. The two caps read the same way: negative shows everything, and ZERO shows
+// nothing — a window with no rows left to spare saying so (popupBudget) rather than the pane
+// quietly showing all of them. Zero is the reading that keeps a pane inside the shortest window it
+// can be drawn in at all, where its border, title and hint are the whole budget.
 type popupSpec struct {
 	title       string
 	body        string
@@ -236,11 +239,17 @@ func singleCellRows(labels []string) []popupRow {
 // segment is word-wrapped to inner independently — an empty segment yields one blank row. When the
 // flattened line count exceeds maxBodyRows (> 0), the block keeps the first maxBodyRows−1 lines and
 // appends a faint "… (+N more lines)" marker counting the hidden lines, so it never exceeds
-// maxBodyRows rows and the truncation is never silent; maxBodyRows ≤ 0 shows every wrapped line.
-// Body lines render normal (th.popupBody) — the marker faint (th.statusFaint) — each padded on the
-// same black field as every other content line and clipped to inner so, like every popup line, none
-// can wrap the box.
+// maxBodyRows rows and the truncation is never silent; a NEGATIVE maxBodyRows shows every wrapped
+// line and ZERO shows none at all. Body lines render normal (th.popupBody) — the marker faint
+// (th.statusFaint) — each padded on the same black field as every other content line and clipped to
+// inner so, like every popup line, none can wrap the box.
 func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lipgloss.Style) []string {
+	if maxBodyRows == 0 {
+		// A window with nothing left to spend on prose (popupBudget), not an invitation to show all
+		// of it: honouring the budget is what keeps the pane inside the frame it is drawn in.
+		return nil
+	}
+
 	var wrapped []string
 	for _, seg := range strings.Split(body, "\n") {
 		wrapped = append(wrapped, wrapText(th, seg, inner)...)

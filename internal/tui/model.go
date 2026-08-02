@@ -3178,26 +3178,31 @@ func nonEmpty(parts ...string) []string {
 // popupBudget derives the screen-budget caps an overlay hands renderPopup so the bordered pane
 // never pushes the input box off-screen (D2). rows is how many selectable rows are on offer and
 // rowCap the overlay's own cap on how many of them it shows at once (both 0 for the choiceless
-// approval prompt); maxRows caps the scrolled row window (≥ 0) and maxBody caps the wrapped body
-// block (≥ 1). Every boxed overlay that steals transcript rows goes through it — the ask and
-// approval prompts, the /sessions browser and the /model | /server picker — so none of them can
-// promise the frame rows it does not have.
+// approval prompt); maxRows caps the scrolled row window and maxBody the wrapped body block, both
+// ≥ 0 and both in renderPopup's zero-means-none sense. Every boxed overlay that steals transcript
+// rows goes through it — the ask and approval prompts, the /sessions browser and the
+// /model | /server picker — so none of them can promise the frame rows it does not have.
 //
 // m.viewport.Height() here is the laid-out height and always will be: View composes the frame from
 // a LOCAL copy of the viewport and never writes the shrink back ([Model.transcriptRows]). So it is
 // the true screen budget: keep 3 transcript rows where the window can spare them, spend the chrome
 // (the 2 borders + the title + the hint), give the rows priority (they are what the human acts on),
-// and let the body keep ≥ 1 row and overflow into the explicit "… (+N more lines)" marker.
+// and let the body have what is left, overflowing into the explicit "… (+N more lines)" marker.
 //
-// The floor is ZERO rather than a comfortable minimum, and that is the point of it: a floor of 6
-// on a window with 4 rows to give promised a pane the frame could not hold, and the surplus came
-// off the bottom — the input box and the footer, off the alt screen. A budget that shrinks to
-// nothing lets the TRANSCRIPT shrink to nothing instead, which is the outcome D2 asks for.
+// BOTH floors are ZERO rather than a comfortable minimum, and that is the point of them: a row
+// floor of 6 on a window with 4 rows to give promised a pane the frame could not hold, and the
+// surplus came off the bottom — the input box and the footer, off the alt screen. A body floor of
+// 1 was the same mistake one row smaller: it made a body-bearing pane's irreducible height 5 where
+// a boxed overlay's chrome is 4, so the ask and approval prompts overflowed the shortest window a
+// pane fits in at all (12 rows — the fixed chrome below the transcript is 8) by exactly one row
+// while the browser fitted. A budget that shrinks to nothing lets the TRANSCRIPT shrink to nothing
+// instead, which is the outcome D2 asks for; a pane that can spare neither rows nor body still
+// names itself in the title and says how to act in the hint.
 func (m Model) popupBudget(rows, rowCap int) (maxBody, maxRows int) {
 	avail := max(0, m.viewport.Height()-3)
 	const chrome = 4 // the 2 borders + the title row + the hint row
 	maxRows = min(rows, rowCap, max(0, avail-chrome-1))
-	maxBody = max(1, avail-chrome-maxRows)
+	maxBody = max(0, avail-chrome-maxRows)
 	return maxBody, maxRows
 }
 
@@ -3209,7 +3214,9 @@ func (m Model) popupBudget(rows, rowCap int) (maxBody, maxRows int) {
 // (tool name, reason, args) is escape-stripped at this call site; stripEscapes removes only the
 // ESC byte, so the raw tool name is preserved verbatim. Empty/null arguments add no body, and the
 // module wraps the reason so it can never be silently truncated on this security surface. Only the
-// top-level (Depth == 0) prompt is rendered this phase.
+// top-level (Depth == 0) prompt is rendered this phase. On a window with no rows to spare for
+// prose the body drops away entirely rather than the pane overflowing the frame (popupBudget); the
+// title still carries the tool name, which is the identity the decision turns on.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
 	if req.Reason != "" {
@@ -3242,8 +3249,9 @@ const maxAskChoiceRows = 8
 // is always visible in the chrome. Every model-authored string (question, choices) is
 // escape-stripped at this call site. The screen budget is derived from the live layout so a long
 // question or a long choice set never pushes the input box off-screen: rows get priority (they
-// are what the human acts on), the body keeps ≥ 1 row and overflows into the explicit
-// "… (+N more lines)" marker (D2).
+// are what the human acts on), the body takes what is left and overflows into the explicit
+// "… (+N more lines)" marker, and on a window that can spare neither the pane shrinks to its
+// title and hint (D2).
 func (m Model) askPrompt(req domain.AskRequest) string {
 	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
 
@@ -3255,7 +3263,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	}
 
 	// Budget against the live layout so a long question or choice set never pushes the input box
-	// off-screen (D2); the rows get priority and the body keeps ≥ 1 row (see popupBudget).
+	// off-screen (D2); the rows get priority and the body takes what is left (see popupBudget).
 	maxBodyRows, rowsShown := m.popupBudget(len(req.Choices), maxAskChoiceRows)
 
 	spec := popupSpec{
