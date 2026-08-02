@@ -604,6 +604,71 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	}
 }
 
+// TestCollapsedPaintTruncatesRetainedBodies pins the relocation itself: the entry KEEPS every
+// body line it was given and the collapsed paint is the only thing that truncates, synthesizing
+// the "… +N more lines" remainder the outcome builders used to bake in (layout.md, "Collapsed
+// and expanded blocks" — truncation is a render-time act on retained facts). Both flavours are
+// asserted, because the cap is read off the body's own line kinds: a diff body paints
+// diffDetailCap lines, any other multi-line body paints its first, and a body already inside its
+// cap paints whole with no marker at all.
+func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
+	diffLines := func(n int) string {
+		return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n")
+	}
+	cases := []struct {
+		name      string
+		build     func(tr *transcript)
+		wantKept  int      // body lines the entry retains
+		wantPaint []string // the body the collapsed block paints, marker included
+	}{
+		{
+			name: "free-form output paints its first line and counts the rest",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
+			},
+			wantKept:  4,
+			wantPaint: []string{"    ok   a", "    … +3 more lines"},
+		},
+		{
+			name: "a diff body paints diffDetailCap lines and counts the rest",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
+					Content: diffLines(diffDetailCap + 3), Summary: domain.DiffStat{Added: diffDetailCap + 3}}})
+			},
+			wantKept: diffDetailCap + 3,
+			wantPaint: append(strings.Split(strings.TrimSuffix(strings.Repeat("    + added\n", diffDetailCap), "\n"), "\n"),
+				"    … +3 more lines"),
+		},
+		{
+			name: "a body inside its cap paints whole, with no marker",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
+					Content: "- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1}}})
+			},
+			wantKept:  2,
+			wantPaint: []string{"    - old line", "    + new line"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+			if got := len(tr.entries[0].tool.Details); got != tc.wantKept {
+				t.Errorf("retained body = %d lines, want the whole %d", got, tc.wantKept)
+			}
+			// The block is a header, a branch line, then its body: everything past the branch is
+			// what the collapsed paint made of the retained lines.
+			lines := strings.Split(renderPlain(tr, 80), "\n")
+			if got, want := strings.Join(lines[2:], "\n"), strings.Join(tc.wantPaint, "\n"); got != want {
+				t.Errorf("collapsed body mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
 // A command whose output is a single line puts that line where every other one-line outcome goes:
 // on the branch, beside the command. Nothing hangs beneath — a one-line result is a summary, not a
 // body, and only a command with more to say than one line reshapes into the Run block above.

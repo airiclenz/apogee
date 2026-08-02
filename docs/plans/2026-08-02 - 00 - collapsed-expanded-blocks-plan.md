@@ -36,7 +36,23 @@
     different wording, different mechanism, untouched.
   - An ADR (offered and declined; layout.md is the record).
 
-## 1. Tool outcomes retain full bodies; truncation becomes a paint-time act
+## 1. Tool outcomes retain full bodies; truncation becomes a paint-time act — ✅ DONE (2026-08-02)
+
+NOTES (2026-08-02): the collapsed cap landed at the BODY seam only — `renderToolBranch` truncates
+the Details laid out beneath a branch line (`collapsedDetails`, render.go); `branchDetails` /
+`renderDetails` (the targetless shape, where the detail lines ARE the block's ┝/┕ branches) is
+deliberately untouched, because capping there would hide an unregistered tool's verbatim arguments
+and an orphan result's lines — contradicting this item's byte-identical-paint requirement and
+layout.md (collapsed IS today's compact shape; the approval surface never hides the model's
+request). One consequence is not byte-identical: a registered body-producing tool whose target
+argument is missing (e.g. `sub_agent` with an empty task) now paints its whole body as branches
+instead of a first line plus marker. Item 3's target rule follows the same line — a targetless
+block hides nothing and is therefore no toggle target.
+
+NOTES (2026-08-02): two test edits beyond the three the item lists — `TestDiffStatSpansTheWholeDiff`
+(its body-length assertion was the moved cap) and `TestPresentToolCall`'s docstring oracle. Per-line
+`clipDetail` stays in both builders (it is a one-line display cap, not a body truncation), so
+`outputDetail` now clips every retained line as `diffBody` always has.
 
 **What:** Move body truncation from presentation-build time to paint time, with paint
 output byte-identical to today (no expanded state exists yet — this item is pure

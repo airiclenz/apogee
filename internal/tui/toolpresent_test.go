@@ -31,7 +31,10 @@ func detailsText(tv toolView) string {
 // the line comes from the typed outcome rather than from the prose beside it; the "no summary"
 // rows pin the D6 floor, where the same result with no summary degrades to its verbatim first
 // line instead of to a raw dump. Every wantDetail here is unchanged from when the view parsed
-// the prose — that the two agree, character for character, is this card's acceptance oracle.
+// the prose — that the two agree, character for character, is this card's acceptance oracle —
+// except on the three free-form-output rows, whose outcome now RETAINS every line it was given:
+// the "… +N more lines" remainder those rows used to assert is the collapsed paint's, and it is
+// asserted where it is now composed (TestCollapsedPaintTruncatesRetainedBodies, render_test.go).
 func TestPresentToolCall(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -154,12 +157,12 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "POST https://api.example.com", wantDetail: "HTTP 201 Created",
 		},
 		{
-			name:       "terminal → Run + first output line and remainder count",
+			name:       "terminal → Run + the whole output body (the paint compresses it, not the view)",
 			call:       domain.ToolCall{ID: "24", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
 			result:     domain.ToolResult{CallID: "24", Content: "ok   pkg/a 0.1s\nok   pkg/b 0.2s\nok   pkg/c 0.3s"},
 			wantLabel:  "Run",
 			wantVerb:   "running",
-			wantTarget: "go test ./...", wantDetail: "… +2 more lines",
+			wantTarget: "go test ./...", wantDetail: "ok   pkg/c 0.3s",
 		},
 		{
 			name:       "terminal with empty output → (no output)",
@@ -199,7 +202,7 @@ func TestPresentToolCall(t *testing.T) {
 			result:     domain.ToolResult{CallID: "29", Content: "diff --git a/x b/x\n+added"},
 			wantLabel:  "Git Diff",
 			wantVerb:   "diffing",
-			wantTarget: "main...feature-x", wantDetail: "… +1 more line",
+			wantTarget: "main...feature-x", wantDetail: "+added",
 		},
 		{
 			name:       "edit_existing_file → Edit File + fixed result line",
@@ -262,12 +265,12 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "main.go", wantDetail: "No changes detected",
 		},
 		{
-			name:       "sub_agent → task first line as target, report gist as detail",
+			name:       "sub_agent → task first line as target, the whole report as the body",
 			call:       domain.ToolCall{ID: "33", Tool: "sub_agent", Arguments: []byte(`{"task":"Survey the tests.\nReport gaps."}`)},
 			result:     domain.ToolResult{CallID: "33", Content: "The suite covers A and B.\nGap: C is untested."},
 			wantLabel:  "Sub-Agent",
 			wantVerb:   "delegating",
-			wantTarget: "Survey the tests.", wantDetail: "… +1 more line",
+			wantTarget: "Survey the tests.", wantDetail: "Gap: C is untested.",
 		},
 		{
 			name:       "ask_user → question as target, answer as detail",
@@ -336,10 +339,10 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 // TestPresentToolCallOutcomeSplit pins which half of the outcome each kind of producer fills —
 // the split the block's shape is read off. A fixed result header is summary-only (it rides the
 // branch beside the target). Free-form command output fills the half its own size dictates:
-// output that compresses to one line (including none at all) rides the branch like any other
-// one-line outcome, while output needing the "… +N more lines" remainder is a body beneath the
-// command (layout.md's Run sketch). view_diff is the one producer filling both, a diffstat on
-// the branch over a coloured body.
+// output of one line (including none at all) rides the branch like any other one-line outcome,
+// while output with more to say is a body beneath the command (layout.md's Run sketch) — and
+// that body now holds every line, since the collapsed shape's remainder is the painter's act.
+// view_diff is the one producer filling both, a diffstat on the branch over a coloured body.
 func TestPresentToolCallOutcomeSplit(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -360,7 +363,7 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			call:        domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
 			result:      domain.ToolResult{CallID: "2", Content: "ok   apogee/internal/tui   0.412s\nok   apogee/internal/agent   1.203s\nPASS"},
 			wantSummary: "",
-			wantBody:    []string{"ok   apogee/internal/tui   0.412s", "… +2 more lines"},
+			wantBody:    []string{"ok   apogee/internal/tui   0.412s", "ok   apogee/internal/agent   1.203s", "PASS"},
 		},
 		{
 			name:        "one-line terminal output is summary-only",
@@ -414,8 +417,10 @@ func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
 }
 
 // TestDiffBody proves view_diff's body renderer is the diff kinds' producer: "+ " lines are
-// detailDiffAdded, "- " lines detailDiffRemoved, context plain — and a diff longer than the
-// cap is truncated with a remainder count instead of flooding the chat.
+// detailDiffAdded, "- " lines detailDiffRemoved, context plain — and that it RETAINS the whole
+// diff, however long. The cap that keeps a rewrite from flooding the chat is the collapsed
+// paint's (TestCollapsedPaintTruncatesRetainedBodies, render_test.go), so expanding the block
+// can show the lines it hides; nothing here counts or truncates.
 func TestDiffBody(t *testing.T) {
 	details := diffBody("  ctx\n- old line\n+ new line")
 	wantKinds := []detailKind{detailPlain, detailDiffRemoved, detailDiffAdded}
@@ -429,19 +434,22 @@ func TestDiffBody(t *testing.T) {
 	}
 
 	long := strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n")
-	capped := diffBody(long)
-	if len(capped) != diffDetailCap+1 {
-		t.Fatalf("capped diff has %d lines, want %d", len(capped), diffDetailCap+1)
+	whole := diffBody(long)
+	if len(whole) != diffDetailCap+5 {
+		t.Fatalf("retained diff has %d lines, want every one of the %d", len(whole), diffDetailCap+5)
 	}
-	if last := capped[len(capped)-1].Text; !strings.Contains(last, "+5 more lines") {
-		t.Errorf("cap line = %q, want the remainder count", last)
+	for i, d := range whole {
+		if d.Kind != detailDiffAdded {
+			t.Errorf("line %d (%q): kind = %v, want %v (no synthesized marker line)", i, d.Text, d.Kind, detailDiffAdded)
+		}
 	}
 }
 
 // TestDiffStatSpansTheWholeDiff: the diffstat riding the branch describes the whole diff even
-// when the body stops at diffDetailCap — a truncated body cannot tell you how big the change
-// was, and the stat no longer comes from the body's lines at all but from the tool's
-// domain.DiffStat, counted over the diff operations themselves (internal/tools).
+// when the collapsed paint stops at diffDetailCap — a truncated paint cannot tell you how big
+// the change was, and the stat no longer comes from the body's lines at all but from the tool's
+// domain.DiffStat, counted over the diff operations themselves (internal/tools). The outcome
+// itself keeps every line, so what the paint hides is only hidden.
 func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 	long := strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n")
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)})
@@ -450,8 +458,8 @@ func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 	if want := "+" + strconv.Itoa(diffDetailCap+5) + " -0"; tv.Summary.Text != want {
 		t.Errorf("diffstat = %q, want %q", tv.Summary.Text, want)
 	}
-	if len(tv.Details) != diffDetailCap+1 {
-		t.Errorf("body has %d lines, want the capped %d", len(tv.Details), diffDetailCap+1)
+	if len(tv.Details) != diffDetailCap+5 {
+		t.Errorf("body has %d lines, want the whole %d", len(tv.Details), diffDetailCap+5)
 	}
 }
 

@@ -396,9 +396,11 @@ func renderToolBlock(th theme, views []toolView, width int) []string {
 //   - a call WITH a target — the branch is the target, and when the call has a Summary, the
 //     target padded to the block's column, one space, then that summary ("┕ main.go 1 - 154",
 //     "┕ main.go +2 -2"). A call still in flight has no summary yet and shows the bare target;
-//     the block repaints whole once the result folds in. Its Details, if any, lay out beneath
-//     the branch at the branch marker's own width — not as ┝/┕ branches of their own, because
-//     only calls are (a Run's output, a diff body under its diffstat).
+//     the block repaints whole once the result folds in. Its Details, if any, are the block's
+//     body and lay out beneath the branch at the branch marker's own width — not as ┝/┕ branches
+//     of their own, because only calls are (a Run's output, a diff body under its diffstat) —
+//     truncated to what the collapsed shape shows, which is the one place that truncation
+//     happens (collapsedDetails).
 //   - a call with NO target — the only shape with no target line: the header stands alone and
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
 //     line to ride (an unregistered tool's pretty-printed arguments then its "error: …"
@@ -419,7 +421,53 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 		style = detailStyle(th, tv.Summary.Kind)
 	}
 	out := hangingWrap(th, style, marker, text, width)
-	return append(out, renderSubDetails(th, tv.Details, th.measure.Width(marker), width)...)
+	return append(out, renderSubDetails(th, collapsedDetails(tv.Details), th.measure.Width(marker), width)...)
+}
+
+// diffDetailCap bounds how many diff lines a COLLAPSED block paints — enough to read a focused
+// change, not enough for a rewrite to flood the transcript. It is a paint-time cap on a body
+// the entry keeps in full (layout.md, "Collapsed and expanded blocks"), which is why it lives
+// beside the painter and not beside diffBody, the producer that used to apply it.
+const diffDetailCap = 20
+
+// collapsedDetails is the collapsed paint of a retained body: the lines the compact shape shows,
+// closed by the synthesized "… +N more lines" marker counting what it hides. Truncation is a
+// render-time act on facts the entry keeps whole (layout.md), so the marker is composed here on
+// every repaint and never stored — which is also what makes it identifiable as a paint artefact
+// rather than a body line.
+//
+// Two flavours, told apart by the body's own line kinds: a diff body — recognised by carrying at
+// least one tagged line, which every body diffBody produces does — keeps diffDetailCap lines, so
+// a focused change reads in place; any other multi-line body keeps its first line alone, the
+// gist a Run's output is worth in the chat. A body already inside its cap paints whole and grows
+// no marker.
+//
+// It is the BODY's rule, not every detail line's: the targetless shape has no body — its detail
+// lines ARE the block's ┝/┕ branches (renderDetails), an unregistered tool's verbatim arguments
+// among them — and hiding those would hide what the model asked for, which no block does.
+func collapsedDetails(details []detailLine) []detailLine {
+	limit := 1
+	if hasDiffLine(details) {
+		limit = diffDetailCap
+	}
+	if len(details) <= limit {
+		return details
+	}
+	out := make([]detailLine, 0, limit+1)
+	out = append(out, details[:limit]...)
+	return append(out, detailLine{Text: "… +" + plural(len(details)-limit, "more line")})
+}
+
+// hasDiffLine reports whether a body carries a red/green diff line — the painter's exact test
+// for a diff body, since diffBody is the diff kinds' only producer and never emits an untagged
+// body ("No changes detected" carries no diff at all and never reaches it).
+func hasDiffLine(details []detailLine) bool {
+	for _, d := range details {
+		if d.Kind == detailDiffAdded || d.Kind == detailDiffRemoved {
+			return true
+		}
+	}
+	return false
 }
 
 // branchDetails is what a targetless call hangs off its header: the body, plus the summary as

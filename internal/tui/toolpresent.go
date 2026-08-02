@@ -30,9 +30,9 @@ import (
 // The two halves stay independent. The wording is the view's own — that several of these
 // lines read like the tool's own header today is what makes the change checkable, not a
 // contract — and a result carrying NO summary still renders from prose exactly as before:
-// the registry's detail extractor quotes a fixed first line, or compresses free-form output
-// to a first line plus a remainder count. Quoting or compressing is rendering; re-deriving a
-// number from a sentence was not.
+// the registry's detail extractor quotes a fixed first line, or hands free-form output on as
+// the block's body (which the collapsed paint compresses to a first line plus a remainder
+// count). Quoting or compressing is rendering; re-deriving a number from a sentence was not.
 //
 // The label+extractor map is an OPEN, name-keyed registry, not a closed switch: the Phase-3
 // tool fan-out (P3.7–P3.11, ~30 tools, ADR 0002) adds one entry per tool (terminal→"Run",
@@ -86,8 +86,8 @@ type toolView struct {
 
 // toolOutcome is what a prose extractor returns: the one-line Summary that rides the branch
 // line beside the target, and the Details body laid out beneath it. Either half may be empty
-// — a fixed result sentence is summary-only ("HTTP 200 OK") and free-form output is body-only
-// (its first line plus the remainder count). A tool whose result carries a domain.ToolSummary
+// — a fixed result sentence is summary-only ("HTTP 200 OK") and multi-line free-form output is
+// body-only (every one of its lines). A tool whose result carries a domain.ToolSummary
 // does not come through here at all: summaryLine words the branch line and the presenter's
 // body renderer (view_diff's alone) fills the half beneath it.
 type toolOutcome struct {
@@ -136,9 +136,10 @@ type toolPresenter struct {
 // (read_file, write_file, list_dir, grep, view_diff, web_search, open_file) get their branch
 // line from summaryLine instead, and keep firstLineDetail as the floor for a result that
 // carries none — a degraded card is that tool's own first line, never a file dumped into the
-// transcript. The rest quote their fixed sentence or compress free-form output (a command
-// run, a sub-agent report) to its first line plus a remainder count: the chat shows the gist,
-// the model still gets the full text.
+// transcript. The rest quote their fixed sentence or hand free-form output (a command run, a
+// sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
+// to a first line plus a remainder count until the block is expanded, and the model gets the
+// full text either way.
 var toolRegistry = map[string]toolPresenter{
 	"read_file": {
 		label:  "Read File",
@@ -482,14 +483,18 @@ func firstLineDetail(content string) toolOutcome {
 	return summaryOnly(clipDetail(firstLine(content)))
 }
 
-// outputDetail compresses free-form output (a command run, a diagnostics report, a
-// sub-agent report) to its first non-empty line plus a remainder count. Which half it fills
-// follows the same rule as every other extractor: output that compresses to exactly ONE line
-// — a single-line result, or none at all — is that call's whole outcome and rides the branch
-// beside the target ("┕ true (no output)"), which is also what keeps such calls grouping;
-// output that needs the "… +N more lines" remainder is a body and lays out beneath the target
-// instead, because two lines cannot share a branch (layout.md's Run sketch). The full text
-// still reaches the model; the chat shows the gist.
+// outputDetail splits free-form output (a command run, a diagnostics report, a sub-agent
+// report) into the half its own size dictates, keeping EVERY line it was given. Which half it
+// fills follows the same rule as every other extractor: output that comes to exactly ONE
+// non-empty-led line — a single-line result, or none at all — is that call's whole outcome and
+// rides the branch beside the target ("┕ true (no output)"), which is also what keeps such
+// calls grouping; output with more to say is a body and lays out beneath the target instead,
+// because two lines cannot share a branch (layout.md's Run sketch).
+//
+// It truncates NOTHING. The collapsed paint's "first line plus … +N more lines" is a render-time
+// act on this retained body (collapsedDetails, render.go), so expanding the block can show what
+// the compact shape hides. Only the per-line clip stays here — a 160-rune cap on one line, which
+// keeps a minified blob from flooding a row in either state and is not a truncation of the body.
 func outputDetail(content string) toolOutcome {
 	lines := splitLines(strings.TrimRight(content, "\n"))
 	first := 0
@@ -499,40 +504,33 @@ func outputDetail(content string) toolOutcome {
 	if first == len(lines) {
 		return summaryOnly("(no output)")
 	}
-	head := clipDetail(lines[first])
-	rest := len(lines) - first - 1
-	if rest == 0 {
-		return summaryOnly(head)
+	body := lines[first:]
+	if len(body) == 1 {
+		return summaryOnly(clipDetail(body[0]))
 	}
-	return toolOutcome{Details: []detailLine{
-		{Text: head},
-		{Text: "… +" + plural(rest, "more line")},
-	}}
+	details := make([]detailLine, 0, len(body))
+	for _, ln := range body {
+		details = append(details, detailLine{Text: clipDetail(ln)})
+	}
+	return toolOutcome{Details: details}
 }
 
-// diffDetailCap bounds how many diff lines reach the chat — enough to read a focused
-// change, not enough for a rewrite to flood the transcript.
-const diffDetailCap = 20
-
 // diffBody renders view_diff's unified output as the coloured body beneath the branch — "+ "
-// lines green, "- " lines red, context plain — capped at diffDetailCap with a remainder count
-// (layout.md's Update File sketch). Tagging on the leading "+"/"-" is exact here because
-// internal/tools' unifiedLineDiff tags every line "  ", "- " or "+ " and emits no "+++ b/…" /
-// "--- a/…" file header, so a content line that itself starts with "+" always arrives behind
-// a tag.
+// lines green, "- " lines red, context plain (layout.md's Update File sketch). Tagging on the
+// leading "+"/"-" is exact here because internal/tools' unifiedLineDiff tags every line "  ",
+// "- " or "+ " and emits no "+++ b/…" / "--- a/…" file header, so a content line that itself
+// starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's
+// diffDetailCap and its remainder marker are the painter's (collapsedDetails, render.go).
 //
 // It counts NOTHING. The "+A -R" diffstat riding the branch above it comes from the tool's
 // domain.DiffStat, counted from the diff operations themselves — which is why the stat still
-// describes the whole diff when this body stops at the cap, and why a "No changes detected"
-// result (no diff, hence no stat) never reaches here at all.
+// describes the whole diff when the collapsed paint stops at the cap, and why a "No changes
+// detected" result (no diff, hence no stat) never reaches here at all. That last rule is also
+// what makes the painter's kind-sniffing exact: a body from here always carries a tagged line.
 func diffBody(content string) []detailLine {
 	lines := splitLines(strings.TrimRight(content, "\n"))
-	body := make([]detailLine, 0, min(len(lines), diffDetailCap+1))
-	for i, ln := range lines {
-		if i == diffDetailCap {
-			body = append(body, detailLine{Text: "… +" + plural(len(lines)-i, "more line")})
-			break
-		}
+	body := make([]detailLine, 0, len(lines))
+	for _, ln := range lines {
 		kind := detailPlain
 		switch {
 		case strings.HasPrefix(ln, "+"):
