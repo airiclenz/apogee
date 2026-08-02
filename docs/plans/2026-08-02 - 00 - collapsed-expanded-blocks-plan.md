@@ -122,9 +122,20 @@ Model).
 
 **Commit:** `feat(tui): blocks carry an expanded state and paint their full bodies`
 
-## 3. The painter records each block's header and marker lines
+## 3. The painter records each block's header and marker lines — ✅ DONE (2026-08-02)
 
 Depends on item 2.
+
+NOTES (2026-08-02): "built in lockstep with line emission" landed as a type rather than a
+convention — `blockPaint` (lines + a parallel `targetKind` per line, grown only through `add`/`join`)
+is what `renderEntryLines` / `renderToolBlock` / `renderToolBranch` now return, and `renderView`
+alone stamps the head-entry index onto the marks as it lays each block down (a block painter says
+WHAT each line is, the transcript says WHOSE). `collapsedDetails` accordingly returns
+`(shown, remainder, truncated)` instead of one concatenated slice, so the marker's lines are laid
+out — and marked — on their own, and `truncated` doubles as the target rule's oracle
+(`blockHidesWhenCollapsed`). Two mechanical call-site edits followed the return-type change:
+`model_test.go`'s `TestStatusLineAlignsWithTranscriptText` and `render_test.go`'s
+`TestToolHeaderLabelStyled` now take `.lines`.
 
 **What:** the hit-test map, built by the one width authority (ADR 0030) in lockstep with
 line emission — never re-derived elsewhere.

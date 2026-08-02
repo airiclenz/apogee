@@ -32,14 +32,86 @@ import (
 type userBlock struct{ start, count int }
 
 // renderedTranscript is the renderer's output: the physical lines, the index of the last user
-// prompt's first line (-1 when the transcript holds no user prompt), and the line range of
-// every user block. The caller measures the last prompt's offset to pad the lines below a short
-// reply (so the bottom lands on the prompt row), follows the tail unless the human has scrolled
-// away, and overlays the user block owning the top row as a sticky header (model.go).
+// prompt's first line (-1 when the transcript holds no user prompt), the line range of
+// every user block, and what each line is to a motionless click. The caller measures the last
+// prompt's offset to pad the lines below a short reply (so the bottom lands on the prompt row),
+// follows the tail unless the human has scrolled away, overlays the user block owning the top row
+// as a sticky header, and resolves a click through targets (model.go).
 type renderedTranscript struct {
 	lines         []string
 	lastUserStart int
 	userBlocks    []userBlock
+	// targets is PARALLEL to lines — one entry per physical line, the zero value for every line
+	// that is not part of a block's click surface. It is built in lockstep with line emission by
+	// the painter itself and is never re-derived by a second reader: a click resolves against the
+	// exact accounting the paint used (ADR 0030's rule, one authority per measurement).
+	targets []lineTarget
+}
+
+// targetKind says what one rendered line is to a motionless click (layout.md, "Collapsed and
+// expanded blocks"): nothing at all — the overwhelmingly common case, and the zero value — a
+// block HEADER line, or a synthesized remainder MARKER line. A click on a header toggles its
+// block; a click on a marker expands the block whose body the marker is counting for.
+type targetKind int
+
+const (
+	targetNone targetKind = iota
+	targetHeader
+	targetMarker
+)
+
+// lineTarget is one rendered line's click surface: what the line is, and the index into
+// transcript.entries of the block's HEAD entry — the entry whose expanded state a click there
+// flips (transcript.toggleExpanded). The zero value is "no target", which is what every line
+// outside a toggleable block's header and marker carries, so a lookup needs no second sentinel.
+type lineTarget struct {
+	kind  targetKind
+	entry int
+}
+
+// blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
+// a click. A block painter says WHAT each of its lines is; [transcript.renderView] alone says
+// WHOSE, stamping the head entry's index as it lays the block into the transcript — which is why
+// the kinds here carry no entry index and no painter needs to know where in the entry list it sits.
+//
+// The two slices are grown only through [blockPaint.add] and [blockPaint.join], so they cannot
+// drift out of lockstep: every line that is appended is marked in the same call that appends it.
+type blockPaint struct {
+	lines   []string
+	targets []targetKind
+}
+
+// plainPaint is the paint of a block that carries no click surface at all — a user send, an
+// assistant answer, a note, a start-up box, a ⤷ descent label, a stray result. Everything the
+// renderer emits that is not a tool block goes through here, so "no target" is stated once rather
+// than spelled out at each producer.
+func plainPaint(lines []string) blockPaint {
+	return blockPaint{lines: lines, targets: make([]targetKind, len(lines))}
+}
+
+// add appends lines that all carry the same target kind. A WRAPPED header is the reason it takes a
+// slice rather than a line: every physical line a header occupies is part of the same click
+// surface (layout.md — the click lands on the header, not on its first row), and the same holds
+// for a remainder marker narrow enough to wrap.
+func (p *blockPaint) add(lines []string, kind targetKind) {
+	p.lines = append(p.lines, lines...)
+	for range lines {
+		p.targets = append(p.targets, kind)
+	}
+}
+
+// join appends another paint whole — its lines and its own target marks — so a block composed of
+// sub-paints (a tool block of one branch or of many) keeps their marks without re-deriving them.
+func (p *blockPaint) join(q blockPaint) {
+	p.lines = append(p.lines, q.lines...)
+	p.targets = append(p.targets, q.targets...)
+}
+
+// railed frames the paint for its sub-agent depth (railLines) while carrying its target marks
+// through untouched: the rail prefixes each line in place and adds none, so the marks stay in
+// lockstep with the lines they belong to.
+func (p blockPaint) railed(th theme, depth int) blockPaint {
+	return blockPaint{lines: railLines(th, p.lines, depth), targets: p.targets}
 }
 
 // renderView renders the committed entries plus any in-progress assistant buffer into the
@@ -51,6 +123,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		width = 1
 	}
 	var lines []string
+	var targets []lineTarget
 	var userBlocks []userBlock
 	lastUserStart := -1
 
@@ -59,15 +132,30 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 	// prevDepth below): the ⤷ label blocks the descent loop emits carry depths of their own,
 	// and a spacer's rail follows the blocks it actually sits between.
 	prevBlockDepth := 0
-	appendBlock := func(isUser bool, depth int, block []string) {
+	// head is the index into t.entries of the entry whose block state a click on this block
+	// toggles. It is stamped only onto the lines the block itself marked as a click surface, so a
+	// block that marks none — every kind but a tool block — may pass whatever index it sits at.
+	appendBlock := func(isUser bool, depth, head int, block blockPaint) {
 		if len(lines) > 0 {
 			lines = append(lines, railSpacer(th, min(prevBlockDepth, depth)))
+			targets = append(targets, lineTarget{}) // a separator belongs to neither block
 		}
 		if isUser {
 			lastUserStart = len(lines)
-			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block)})
+			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block.lines)})
 		}
-		lines = append(lines, block...)
+		// The line and its mark are appended in ONE loop, and the mark is read defensively, so the
+		// map is exactly as long as the lines whatever a painter handed over. That length is the
+		// mouse's whole safety: a target index that outlived its line is a click toggling some
+		// other block, on a path where the alternative to a rule is a panic mid-repaint.
+		for i, ln := range block.lines {
+			lines = append(lines, ln)
+			target := lineTarget{}
+			if i < len(block.targets) && block.targets[i] != targetNone {
+				target = lineTarget{kind: block.targets[i], entry: head}
+			}
+			targets = append(targets, target)
+		}
 		prevBlockDepth = depth
 	}
 
@@ -79,7 +167,7 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// per level, until the stream climbs back out (P3.14).
 		if e.depth > prevDepth {
 			for d := prevDepth + 1; d <= e.depth; d++ {
-				appendBlock(false, d, renderSubAgentLabel(th, d, width))
+				appendBlock(false, d, i, plainPaint(renderSubAgentLabel(th, d, width)))
 			}
 		}
 		// Consecutive same-label tool calls fold into one block at render time, so a batch of
@@ -87,10 +175,11 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// call that arrives mid-stream joins its group on the next repaint for free, and a run
 		// is same-depth by construction, so the label logic above fires exactly as before.
 		if run := toolCallRun(t.entries, i); len(run) > 1 {
-			appendBlock(false, e.depth, railLines(th, renderToolBlock(th, run, railedWidth(width, e.depth), e.expanded), e.depth))
+			block := renderToolBlock(th, run, railedWidth(width, e.depth), e.expanded).railed(th, e.depth)
+			appendBlock(false, e.depth, i, block)
 			i += len(run) - 1
 		} else {
-			appendBlock(e.kind == entryUser, e.depth, renderEntryLines(th, e, width))
+			appendBlock(e.kind == entryUser, e.depth, i, renderEntryLines(th, e, width))
 		}
 		prevDepth = e.depth
 	}
@@ -99,9 +188,10 @@ func (t *transcript) renderView(th theme, width int) renderedTranscript {
 		// buffer keeps them (a mid-stream "\n\n" may be a paragraph break about to be continued),
 		// but the preview must not grow a wobbling gap above the footer. An empty buffer still
 		// renders its lone marker line, so the human sees that streaming has begun.
-		appendBlock(false, 0, renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width))
+		preview := renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width)
+		appendBlock(false, 0, len(t.entries), preview)
 	}
-	return renderedTranscript{lines: lines, lastUserStart: lastUserStart, userBlocks: userBlocks}
+	return renderedTranscript{lines: lines, lastUserStart: lastUserStart, userBlocks: userBlocks, targets: targets}
 }
 
 // renderLines is the line slice alone — the viewport content and the substring-test surface.
@@ -110,39 +200,44 @@ func (t *transcript) renderLines(th theme, width int) []string {
 }
 
 // renderEntryLines renders one committed entry into its physical lines, framed for its
-// sub-agent depth. The user prompt is a full-width block; everything else hangs off a marker.
-// A Depth > 0 entry is wrapped to the narrower column left of its rail gutter, then each line
-// is prefixed by the rail (P3.14) so the nested block reads as a framed sub-section.
-func renderEntryLines(th theme, e entry, width int) []string {
+// sub-agent depth, plus what each of those lines is to a click. The user prompt is a full-width
+// block; everything else hangs off a marker. A Depth > 0 entry is wrapped to the narrower column
+// left of its rail gutter, then each line is prefixed by the rail (P3.14) so the nested block
+// reads as a framed sub-section.
+//
+// Only a tool call has a click surface — it is the only kind with two states to toggle between —
+// so every other kind comes back as plainPaint: a note or an answer paints one way whatever is
+// asked of it, and a click there keeps its selection meaning.
+func renderEntryLines(th theme, e entry, width int) blockPaint {
 	inner := railedWidth(width, e.depth)
 	switch e.kind {
 	case entryUser:
-		return railLines(th, renderUserBlock(th, glyphUser+" ", e.text, e.skills, inner), e.depth)
+		return plainPaint(railLines(th, renderUserBlock(th, glyphUser+" ", e.text, e.skills, inner), e.depth))
 	case entryInterjected:
 		// The human's mid-Exchange remark: the same block the prompt gets — it is the same voice —
 		// under the ⧖ marker that says it arrived while the model was already working (ADR 0025).
 		// Its chip row is the sent block's, for the same reason: a skill rides an interjection
 		// (ADR 0027), and the record of what the model was given must not depend on whether the
 		// remark was delivered mid-run or flushed into a new Exchange.
-		return railLines(th, renderUserBlock(th, glyphInterject+" ", e.text, e.skills, inner), e.depth)
+		return plainPaint(railLines(th, renderUserBlock(th, glyphInterject+" ", e.text, e.skills, inner), e.depth))
 	case entryAssistant:
 		marker := glyphAssistant + " "
 		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
-		return railLines(th, withMarker(th, marker, body), e.depth)
+		return plainPaint(railLines(th, withMarker(th, marker, body), e.depth))
 	case entryToolCall:
-		return railLines(th, renderToolBlock(th, []toolView{e.tool}, inner, e.expanded), e.depth)
+		return renderToolBlock(th, []toolView{e.tool}, inner, e.expanded).railed(th, e.depth)
 	case entryToolResult:
-		return railLines(th, renderOrphanResult(th, e.text, inner), e.depth)
+		return plainPaint(railLines(th, renderOrphanResult(th, e.text, inner), e.depth))
 	case entryError:
-		return railLines(th, hangingWrap(th, th.errorText, glyphAssistant+" ", e.text, inner), e.depth)
+		return plainPaint(railLines(th, hangingWrap(th, th.errorText, glyphAssistant+" ", e.text, inner), e.depth))
 	case entryNote:
-		return railLines(th, hangingWrap(th, th.noteText, "· ", e.text, inner), e.depth)
+		return plainPaint(railLines(th, hangingWrap(th, th.noteText, "· ", e.text, inner), e.depth))
 	case entryPresented:
-		return railLines(th, renderPresentedBlock(th, e.presented, inner), e.depth)
+		return plainPaint(railLines(th, renderPresentedBlock(th, e.presented, inner), e.depth))
 	case entryStartup:
-		return railLines(th, renderStartupBox(th, e.startup, inner), e.depth)
+		return plainPaint(railLines(th, renderStartupBox(th, e.startup, inner), e.depth))
 	default:
-		return nil
+		return blockPaint{}
 	}
 }
 
@@ -382,19 +477,54 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // carry no body by definition (groupable), so both states paint identically and the head entry's
 // state is passed only so the two callers share one call shape (layout.md, "Collapsed and expanded
 // blocks").
-func renderToolBlock(th theme, views []toolView, width int, expanded bool) []string {
+//
+// It also marks the block's CLICK SURFACE as it emits it — every physical line of the header, and
+// any remainder marker a branch synthesized — because the lines and the marks have to be one act:
+// a second pass over the finished lines would be a second derivation of the same accounting, and
+// the two would drift the first time the shape changed (ADR 0030's rule). The header is marked
+// only when the collapsed paint HIDES something (blockHidesWhenCollapsed) — a block with nothing
+// to reveal has nothing to toggle, so a body-less group's header keeps a click's selection meaning.
+// The mark is state-independent by design: an expanded block still marks its header, which is what
+// lets the same click collapse it again.
+func renderToolBlock(th theme, views []toolView, width int, expanded bool) blockPaint {
 	if len(views) == 0 {
-		return nil
+		return blockPaint{}
 	}
-	out := hangingWrap(th, th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width)
+	header := targetNone
+	if blockHidesWhenCollapsed(views) {
+		header = targetHeader
+	}
+	var out blockPaint
+	out.add(hangingWrap(th, th.toolHeader, glyphAssistant+" ", th.toolLabel.Render(views[0].Label), width), header)
 	column := 0
 	for _, tv := range views {
 		column = max(column, th.measure.Width(tv.Target))
 	}
 	for i, tv := range views {
-		out = append(out, renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, expanded)...)
+		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, expanded))
 	}
 	return out
+}
+
+// blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the
+// whole of the toggle-target rule: a header is a click target exactly when there is something
+// behind it. It asks collapsedDetails, the function that does the hiding, rather than re-deriving
+// the caps, so the rule cannot answer differently from the paint.
+//
+// A call with no target hides nothing however long its body is: its detail lines ARE the block's
+// ┝/┕ branches (renderToolBranch's targetless shape), and an unregistered tool's verbatim
+// arguments or a stray result's lines are never capped. One call in a block with something to
+// reveal makes the whole block a target — the header belongs to the block, not to a branch.
+func blockHidesWhenCollapsed(views []toolView) bool {
+	for _, tv := range views {
+		if tv.Target == "" {
+			continue
+		}
+		if _, _, truncated := collapsedDetails(tv.Details); truncated {
+			return true
+		}
+	}
+	return false
 }
 
 // renderToolBranch renders one call of a tool block as its branch line (plus whatever hangs
@@ -421,9 +551,14 @@ func renderToolBlock(th theme, views []toolView, width int, expanded bool) []str
 // retained and grows no remainder marker, a collapsed one paints collapsedDetails. The targetless
 // shape ignores the state entirely, because it hides nothing in either — its detail lines ARE the
 // block's branches.
-func renderToolBranch(th theme, tv toolView, column int, marker string, width int, expanded bool) []string {
+//
+// The synthesized remainder marker is marked as a click target as it is laid out, and it is laid
+// out on its own so the mark lands on exactly the marker's physical lines (all of them, should it
+// ever wrap) and on nothing else. Neither the branch line nor a body line is a target: a click on
+// what is already shown keeps its selection meaning.
+func renderToolBranch(th theme, tv toolView, column int, marker string, width int, expanded bool) blockPaint {
 	if tv.Target == "" {
-		return renderDetails(th, branchDetails(tv), width)
+		return plainPaint(renderDetails(th, branchDetails(tv), width))
 	}
 	text, style := tv.Target, th.toolDetail
 	if tv.Summary.Text != "" {
@@ -431,12 +566,20 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 		text += pad + " " + tv.Summary.Text
 		style = detailStyle(th, tv.Summary.Kind)
 	}
-	body := tv.Details
-	if !expanded {
-		body = collapsedDetails(tv.Details)
+	indent := th.measure.Width(marker)
+
+	var out blockPaint
+	out.add(hangingWrap(th, style, marker, text, width), targetNone)
+	if expanded {
+		out.add(renderSubDetails(th, tv.Details, indent, width), targetNone)
+		return out
 	}
-	out := hangingWrap(th, style, marker, text, width)
-	return append(out, renderSubDetails(th, body, th.measure.Width(marker), width)...)
+	shown, remainder, truncated := collapsedDetails(tv.Details)
+	out.add(renderSubDetails(th, shown, indent, width), targetNone)
+	if truncated {
+		out.add(renderSubDetails(th, []detailLine{remainder}, indent, width), targetMarker)
+	}
+	return out
 }
 
 // diffDetailCap bounds how many diff lines a COLLAPSED block paints — enough to read a focused
@@ -445,11 +588,16 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 // beside the painter and not beside diffBody, the producer that used to apply it.
 const diffDetailCap = 20
 
-// collapsedDetails is the collapsed paint of a retained body: the lines the compact shape shows,
-// closed by the synthesized "… +N more lines" marker counting what it hides. Truncation is a
-// render-time act on facts the entry keeps whole (layout.md), so the marker is composed here on
-// every repaint and never stored — which is also what makes it identifiable as a paint artefact
-// rather than a body line.
+// collapsedDetails is the collapsed paint of a retained body, split at the seam a click cares
+// about: the lines the compact shape SHOWS, and the synthesized "… +N more lines" marker counting
+// what it hides (truncated says whether it hides anything at all; the marker is meaningless when
+// it does not). Truncation is a render-time act on facts the entry keeps whole (layout.md), so the
+// marker is composed here on every repaint and never stored — which is what makes it identifiable
+// as a paint artefact rather than a body line, and lets the painter mark it as its own click
+// target instead of sniffing the finished lines for the wording.
+//
+// The split is also the toggle-target rule's oracle: truncated is exactly "the collapsed paint
+// hides something", which is what makes a header clickable (blockHidesWhenCollapsed).
 //
 // Two flavours, told apart by the body's own line kinds: a diff body — recognised by carrying at
 // least one tagged line, which every body diffBody produces does — keeps diffDetailCap lines, so
@@ -460,17 +608,15 @@ const diffDetailCap = 20
 // It is the BODY's rule, not every detail line's: the targetless shape has no body — its detail
 // lines ARE the block's ┝/┕ branches (renderDetails), an unregistered tool's verbatim arguments
 // among them — and hiding those would hide what the model asked for, which no block does.
-func collapsedDetails(details []detailLine) []detailLine {
+func collapsedDetails(details []detailLine) (shown []detailLine, remainder detailLine, truncated bool) {
 	limit := 1
 	if hasDiffLine(details) {
 		limit = diffDetailCap
 	}
 	if len(details) <= limit {
-		return details
+		return details, detailLine{}, false
 	}
-	out := make([]detailLine, 0, limit+1)
-	out = append(out, details[:limit]...)
-	return append(out, detailLine{Text: "… +" + plural(len(details)-limit, "more line")})
+	return details[:limit], detailLine{Text: "… +" + plural(len(details)-limit, "more line")}, true
 }
 
 // hasDiffLine reports whether a body carries a red/green diff line — the painter's exact test
@@ -562,13 +708,14 @@ func groupable(tv toolView) bool {
 // no-target shape. The caller frames it for depth — width is already the railed inner column.
 //
 // It paints collapsed and stays that way: the targetless shape hides nothing (its lines are the
-// branches themselves), so a stray result has no second state to show and is no toggle target.
+// branches themselves), so a stray result has no second state to show and is no toggle target —
+// which is why it takes the block's lines alone and leaves its (empty) click surface behind.
 func renderOrphanResult(th theme, text string, width int) []string {
 	details := make([]detailLine, 0)
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
 	}
-	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width, false)
+	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width, false).lines
 }
 
 // renderDetails renders tool-detail lines as ┝/┕ tree branches (the last line gets ┕),

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"math/rand"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -345,7 +346,7 @@ func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
 	th := newTheme()
-	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80, false)
+	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80, false).lines
 	head := block[0]
 
 	if got, want := ansi.Strip(head), "✦ Read File"; got != want {
@@ -757,6 +758,219 @@ func TestExpandedGroupPaintsIdentically(t *testing.T) {
 
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("expanded group repainted:\n--- got ---\n%s\n--- want (unchanged) ---\n%s", got, collapsed)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The click surface: which rendered lines toggle a block (layout.md, "Collapsed and expanded
+// blocks")
+// ----------------------------------------------------------------------------
+
+// blockMark is one line the painter marked as a block's click surface: where the line sits, what
+// it is, whose block a click there toggles, and the text painted on it. The text is carried so a
+// failure names the line that moved rather than reporting a bare index mismatch — and so the
+// assertion pins the mark to the shape, not merely to a number.
+type blockMark struct {
+	line  int
+	kind  targetKind
+	entry int
+	text  string
+}
+
+// blockMarks renders tr and returns its marked lines in order. It first asserts the map's standing
+// invariant — exactly one target per rendered line — which is what makes an index into the lines
+// safe to use as an index into the targets on the mouse path (model.go).
+func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
+	t.Helper()
+	rendered := tr.renderView(newTheme(), width)
+	if len(rendered.targets) != len(rendered.lines) {
+		t.Fatalf("targets and lines out of lockstep: %d targets for %d lines",
+			len(rendered.targets), len(rendered.lines))
+	}
+	var marks []blockMark
+	for i, target := range rendered.targets {
+		if target.kind == targetNone {
+			continue
+		}
+		marks = append(marks, blockMark{
+			line:  i,
+			kind:  target.kind,
+			entry: target.entry,
+			text:  strings.TrimRight(ansiPattern.ReplaceAllString(rendered.lines[i], ""), " "),
+		})
+	}
+	return marks
+}
+
+// TestRenderMarksHeaderAndMarkerLines pins the whole target rule in one table: the painter marks a
+// block's header lines and its synthesized remainder marker, each carrying the index of the entry
+// a click there toggles, and it marks NOTHING when the collapsed paint hides nothing. Every case
+// asserts the complete set of marks, so a line that quietly became clickable fails here.
+func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
+	// run folds a terminal call and its multi-line output — the block with a body, and therefore
+	// the block with something to reveal.
+	run := func(tr *transcript, id, command, output string, depth int) {
+		base := domain.EventBase{Depth: depth}
+		tr.apply(domain.ToolCallEvent{EventBase: base,
+			Call: domain.ToolCall{ID: id, Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
+		tr.apply(domain.ToolResultEvent{EventBase: base,
+			Result: domain.ToolResult{CallID: id, Content: output}})
+	}
+	cases := []struct {
+		name  string
+		width int
+		build func(t *testing.T, tr *transcript)
+		want  []blockMark
+	}{
+		{
+			// ❯ run the tests | (spacer) | ✦ Run | ┕ go test ./... | ok   a | … +3 more lines
+			name:  "a truncated body marks its header and its remainder marker",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				tr.addUser("run the tests", nil)
+				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
+			},
+			want: []blockMark{
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"},
+				{line: 5, kind: targetMarker, entry: 1, text: "    … +3 more lines"},
+			},
+		},
+		{
+			// The state does not decide the target: an expanded block keeps its header marked —
+			// that is the click that collapses it again — and has no marker left to mark.
+			name:  "an expanded block keeps its header and loses its marker",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				tr.addUser("run the tests", nil)
+				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
+				if !tr.toggleExpanded(1) {
+					t.Fatal("toggleExpanded(1) = false; want the tool-call entry expanded")
+				}
+			},
+			want: []blockMark{{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"}},
+		},
+		{
+			// A group's calls carry no bodies (that is what made them groupable), so the block
+			// hides nothing and its header keeps a click's selection meaning.
+			name:  "a body-less group is no target at all",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				readCall(tr, "c1", "main.go", 1, 154, 0)
+				readCall(tr, "c2", "util.go", 1, 42, 0)
+			},
+			want: nil,
+		},
+		{
+			// The targetless shape hides nothing however long its body is — an unregistered tool's
+			// verbatim arguments ARE its branches — so nothing about it is clickable.
+			name:  "a targetless block hides nothing and marks nothing",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "weird_tool", Arguments: []byte(`{"a":1,"b":2,"c":3}`)}})
+			},
+			want: nil,
+		},
+		{
+			// Narrow enough that both the header and the marker wrap: the click lands on the
+			// header, not on its first row, so EVERY physical line of each is marked.
+			name:  "a wrapped header and a wrapped marker mark all their physical lines",
+			width: 11,
+			build: func(t *testing.T, tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "python_exec", Arguments: []byte(`{"code":"print(1)"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "1\n2\n3"}})
+			},
+			want: []blockMark{
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  Python"},
+				{line: 5, kind: targetMarker, entry: 0, text: "    … +2"},
+				{line: 6, kind: targetMarker, entry: 0, text: "    more"},
+				{line: 7, kind: targetMarker, entry: 0, text: "    lines"},
+			},
+		},
+		{
+			// Two blocks of the same shape: each header and marker names its OWN head entry, which
+			// is the whole of what the index is for.
+			name:  "each block's marks carry its own entry index",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				run(tr, "c1", "go build ./...", "a\nb\nc", 0)
+				run(tr, "c2", "go vet ./...", "x\ny", 0)
+			},
+			want: []blockMark{
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
+				{line: 3, kind: targetMarker, entry: 0, text: "    … +2 more lines"},
+				{line: 5, kind: targetHeader, entry: 1, text: "✦ Run"},
+				{line: 8, kind: targetMarker, entry: 1, text: "    … +1 more line"},
+			},
+		},
+		{
+			// A railed sub-agent block is marked exactly like a flat one — the rail prefixes lines
+			// and adds none — and the ⤷ descent label the run opens with is no target.
+			name:  "a nested block keeps its marks behind the rail",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				run(tr, "c1", "go test", "a\nb\nc", 1)
+			},
+			want: []blockMark{
+				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run"},
+				{line: 5, kind: targetMarker, entry: 0, text: "│     … +2 more lines"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(t, tr)
+
+			if got := blockMarks(t, tr, tc.width); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("marked lines mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBlockMarksAgreeWithTheMouseMapping walks the seam the toggle will use: the row a header is
+// PAINTED on is the row the mouse resolves to that header's content line, and the mark stashed
+// beside those lines names a tool-call entry. One accounting, so a click can never toggle a block
+// other than the one under the cursor — the map's whole reason for being built by the painter.
+func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
+	m := newTestModel(t)
+	m.transcript.reset() // drop the seeded start-up box: the block under test opens at line 0
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
+	m.refreshViewport()
+
+	if len(m.lineTargets) != len(m.lines) {
+		t.Fatalf("stashed targets and lines out of lockstep: %d targets for %d lines",
+			len(m.lineTargets), len(m.lines))
+	}
+	for _, want := range []targetKind{targetHeader, targetMarker} {
+		marked := -1
+		for i, target := range m.lineTargets {
+			if target.kind == want {
+				marked = i
+				break
+			}
+		}
+		if marked < 0 {
+			t.Fatalf("no line marked %v in the stashed map", want)
+		}
+
+		line, _, ok := m.pointTranscriptRow(2, screenRow(t, m, marked))
+		if !ok {
+			t.Fatalf("the mouse maps nothing to the row line %d is painted on", marked)
+		}
+		if line != marked {
+			t.Errorf("a click on line %d's row resolved to content line %d", marked, line)
+		}
+		if entry := m.lineTargets[line].entry; m.transcript.entries[entry].kind != entryToolCall {
+			t.Errorf("line %d is marked %v but names entry %d, a %v", line, want, entry,
+				m.transcript.entries[entry].kind)
+		}
 	}
 }
 

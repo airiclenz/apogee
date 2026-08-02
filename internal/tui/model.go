@@ -209,10 +209,15 @@ type Model struct {
 	// ADR 0011: the Model is copied by value on every Update.
 	detached bool
 
-	// Last render output, stashed by refreshViewport for View's sticky-header overlay: the
-	// physical lines the viewport holds and the line range of every user block.
-	lines      []string
-	userBlocks []userBlock
+	// Last render output, stashed by refreshViewport for View's sticky-header overlay and the
+	// mouse: the physical lines the viewport holds, the line range of every user block, and — one
+	// entry per line, the zero value where a line is no click target — what each line is to a
+	// motionless click (render.go). lineTargets is the paint's OWN accounting, carried across
+	// rather than re-derived, so a click resolves against exactly the lines that were drawn; it is
+	// a plain slice of plain values, so ADR 0011's copy rule needs no exception.
+	lines       []string
+	userBlocks  []userBlock
+	lineTargets []lineTarget
 }
 
 // newModel builds the initial idle Model. parent is the program context the worker derives
@@ -2543,6 +2548,7 @@ func (m *Model) refreshViewport() {
 	}
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.userBlocks = rendered.userBlocks
+	m.lineTargets = rendered.targets // the paint's own click surface, for the mouse (render.go)
 	if m.detached {
 		m.viewport.SetContentLines(rendered.lines)
 		// Content that SHRANK under the held offset is clamped back to the bottom by

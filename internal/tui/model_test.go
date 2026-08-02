@@ -2076,7 +2076,7 @@ func leadingColumns(t *testing.T, line string) int {
 // change to the marker or the hanging indent fails here rather than drifting silently.
 func TestStatusLineAlignsWithTranscriptText(t *testing.T) {
 	const wrapWidth = 8 // narrow enough that "alpha beta" wraps onto a continuation line
-	body := renderEntryLines(newTheme(), entry{kind: entryAssistant, text: "alpha beta"}, wrapWidth)
+	body := renderEntryLines(newTheme(), entry{kind: entryAssistant, text: "alpha beta"}, wrapWidth).lines
 	if len(body) < 2 {
 		t.Fatalf("assistant block did not wrap at width %d: %q", wrapWidth, body)
 	}
