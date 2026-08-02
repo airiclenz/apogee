@@ -87,6 +87,61 @@ func TestEmergencyFoldRunsMidExchangeAndBridges(t *testing.T) {
 	assertTemplateLegal(t, a)
 }
 
+// TestEmergencyFoldUnknownWindowStillBoundsTheSummaryCall drives the wedge the audit found: with no
+// window known (neither discovery nor `context-window:`) the transcript used to be rendered WHOLE,
+// so the fold's own summary call overflowed exactly like the request it was rescuing — every
+// message cost two failed round-trips and the session stayed stuck until /clear. windowResponder
+// overflows iff the prompt exceeds its window, so a fold that RUNS here is proof the summary call
+// was bounded by the unknown-window default rather than by a window nobody knows.
+func TestEmergencyFoldUnknownWindowStillBoundsTheSummaryCall(t *testing.T) {
+	const serverWindow = 8192 // the server's real window; apogee is not told it
+	sink := &recordingSink{}
+	up := &windowResponder{window: serverWindow, reply: "EMERGENCY-SUMMARY"}
+	cfg := baseConfig(sink)
+	cfg.Context.CompactionEnabled = true // recovery is on; MaxContextTokens is deliberately left 0
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedLargeConv(a) // ~42k chars ≈ 10.5k tokens — an unbounded render overflows the server
+	rawChars := convContentChars(a)
+	if rawChars/4 <= serverWindow {
+		t.Fatalf("test setup: conversation (%d chars) fits the server window; it must overflow unbudgeted", rawChars)
+	}
+	a.turns.inExchange = true
+	a.turns.exchangeStart = 1
+
+	if !a.emergencyFold(context.Background(), 0) {
+		t.Fatal("emergencyFold = false with an unknown window; the default bound must let the fold run")
+	}
+
+	if a.conv.Len() != 3 {
+		t.Fatalf("conv.Len() = %d after the fold, want 3 (prefix + summary + bridge)", a.conv.Len())
+	}
+	if got := a.conv.At(1); got.Role != domain.RoleAssistant || !strings.Contains(got.Content, "EMERGENCY-SUMMARY") {
+		t.Errorf("message 1 is not the assistant summary: %+v", got)
+	}
+	if hasEvent[domain.ErrorEvent](sink.events) {
+		t.Errorf("a successful emergency fold emitted an ErrorEvent: %v", errorEvents(sink.events))
+	}
+
+	// The captured summary request is sized by compactUnknownWindowTranscriptTokens, not by the
+	// conversation. The slack covers what the budget does not: the summarizer's system prompt and
+	// trailing instruction, plus the protected prefix and the most recent message, which
+	// renderBudgetedTranscript keeps whatever the budget says.
+	reqChars := 0
+	for _, m := range up.last.Messages {
+		reqChars += len(m.Content)
+	}
+	bound := int(float64(compactUnknownWindowTranscriptTokens) * a.budget().CharsPerToken)
+	if reqChars > bound+2048 {
+		t.Errorf("summary request = %d chars, want it within the unknown-window bound of %d (+slack)", reqChars, bound)
+	}
+	if reqChars >= rawChars {
+		t.Errorf("summary request was not reduced at all: %d chars >= raw %d", reqChars, rawChars)
+	}
+}
+
 // TestEmergencyFoldSkipsWhenNothingToFold pins the "recovery is impossible" answer: with only one
 // message past the protected prefix the reducer skips (minCompactTail), so there is nothing to shed
 // and a retry would overflow identically — false, no upstream call, conversation untouched.

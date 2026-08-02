@@ -37,6 +37,8 @@ window themselves keeps the pre-recovery abandon behaviour, unchanged and unsurp
 shipped config template stays behaviour-neutral — nothing here is a new default to enable.
 
 **2. A wire overflow is its own Turn outcome, and giving up is byte-identical to before.**
+*(Amended 2026-08-02 — see the Amendment section below: byte-identical still holds whenever a
+window is known; with NO window known the give-up appends the remedy that ends the wedge.)*
 `turnOverflowed` joins `turnOK` / `turnCancelled` / `turnFailed`. `respondAndReview` deliberately
 *withholds* the `ErrorEvent` for it and carries the sanitized message to the caller, because an
 overflow is the one Upstream fault the loop can act on and a recovered Turn must stay quiet. The
@@ -105,7 +107,9 @@ cannot classify as an overflow — there the stream yields a plain `DeltaError` 
 path never fires. Damping rather than gating is what keeps that cover on the Turns most at risk.
 
 **8. A structural floor on a single oversized tool result lives in the LOOP, not in the
-Mechanism.** A tool result whose estimated tokens exceed the ENTIRE History allocation is clamped
+Mechanism.** *(Amended 2026-08-02 — the `window - 4608` transcript budget below is the KNOWN-window
+arithmetic; an unknown window now budgets a flat default instead of rendering everything. See the
+Amendment section.)* A tool result whose estimated tokens exceed the ENTIRE History allocation is clamped
 to a head/tail-plus-marker elision as it enters the conversation (`appendToolResult` — the one
 seam every result crosses, so no route bypasses it). A result bigger than everything History may
 hold can never survive any reducer, and it can doom the Turn outright: the emergency fold's own
@@ -183,3 +187,32 @@ changes nothing — ended on 2026-07-27, when
 **active** `system-prompt-text:` key in that template (its §8), deliberately and for fresh installs
 only. The Decision text above is left exactly as written; this note is the pointer, so a reader
 does not take the aside for a still-standing invariant of the template as a whole.
+
+## Amendment (2026-08-02) — an unknown window bounds the fold, and the give-up names the remedy
+
+The recovery this ADR designs was inert in exactly the configuration whose comment calls it "the
+only protection": a server whose `/v1/models` omits the context length, with no `context-window:`
+pin. There the Budget is empty, so the predictive guard (§7) never fires, boundary compaction never
+triggers, the structural clamp (§8) is disabled — and `compactTranscriptChars` returned 0, which
+the reducer reads as *render the whole conversation*. Once the history alone exceeded the server's
+real window, the emergency fold's own summary call overflowed just as surely as the request it was
+rescuing: every user message cost two rejected round-trips, emitted one `ErrorEvent` and abandoned
+the Exchange, permanently, until `/clear` (audit 2026-08-01; `/compact` failed identically). Two
+narrow changes, neither of which moves a decision above:
+
+- **An unknown window budgets the summarizer transcript by a conservative default**
+  (`compactUnknownWindowTranscriptTokens` = 3072 tokens through the calibrated chars→token ratio)
+  instead of by nothing. The value is pessimistic on purpose — it fits inside llama.cpp's 4096-token
+  default `n_ctx`, the smallest window a locally hosted server realistically runs, so the fold can
+  shed history against *any* unknown window while still summarizing a substantial tail. §8's
+  `window - 4608` arithmetic and its crossover argument are unchanged for a KNOWN window; with an
+  unknown one the clamp it is compared against is disabled anyway, so the two are not in a race.
+- **The give-up `ErrorEvent` names `context-window:` when — and only when — no window is known**
+  (`overflowGiveUpErr`). §2's "byte-identical to before" holds wherever a window IS known: same
+  `Source`, same text, same ordering. Where none is known the user is the only one who can end the
+  failure, and every later message will fail the same way, so the provider's sanitized message
+  still LEADS unchanged and the remedy is appended after it. Silence there was the wedge.
+
+Neither half is a new gate, a new Event variant, or a config surface: recovery stays structural,
+`auto-compact: false` stays its only opt-out, and a session that knows its window behaves exactly
+as it did before.

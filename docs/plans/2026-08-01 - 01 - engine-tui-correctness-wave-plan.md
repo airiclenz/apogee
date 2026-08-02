@@ -128,7 +128,20 @@ cancelled child keeps its existing `StatusCancelled` handling.
 
 **Commit:** `fix(agent): a faulted sub-agent delegation reports as an error, not success`
 
-## 4. Emergency compaction works when the context window is unknown
+## 4. Emergency compaction works when the context window is unknown — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** the named constant is a TRANSCRIPT-token bound (`compactUnknownWindowTranscriptTokens`
+= 3072, sized to fit llama.cpp's 4096-token default `n_ctx`) rather than an assumed window fed through the
+`window - compactMaxTokens - compactPromptOverheadTokens` arithmetic — an assumed window would silently
+collapse to the 256-token floor if either reserve were ever raised, whereas the direct bound is independent
+of both. Two things the item's text does not spell out: (a) the give-up remedy is appended ONLY when the
+window is unknown, which is what the item's own "a known-window session's behavior is unchanged" test
+requires, and (b) `TestStepOverflowStillAbandonsTheTurnUnchanged` — the existing pin on the give-up being
+byte-identical — runs on a config with NO window, so its assertion is narrowed to "leads with the provider's
+message" and the amendment is recorded in its doc comment; byte-identity is still pinned for a known window
+by `TestOverflowRecoveryGivesUpAfterASecondOverflow`. ADR 0018 gets a dated amendment because its decision 2
+("giving up is byte-identical") and §8 (the `window - 4608` transcript arithmetic) both encoded the old
+contract, plus a CHANGELOG `Fixed` entry; no version identifier touched.
 
 **What:** Audit "Medium — With an unknown context window every growth bound is inert and the
 session wedges". `internal/agent/compact.go:234-238/:150`: when neither discovery nor

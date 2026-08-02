@@ -139,11 +139,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 			// A plain Upstream fault (respondAndReview already surfaced it), or an overflow with
 			// this Turn's one fold already spent. The overflow's ErrorEvent is withheld at the
 			// seam so a RECOVERED Turn can stay quiet, which makes this the give-up path that owns
-			// it: the carried message surfaces verbatim — same Source, same text, same ordering as
-			// a plain fault — and the Turn degrades to a clean boundary. No re-queue: the abandoned
-			// Exchange clears the deferred queue regardless (end → closeExchange → F6).
+			// it: the carried message surfaces with the same Source and ordering as a plain fault
+			// (and the same text, unless no window is known — overflowGiveUpErr) and the Turn
+			// degrades to a clean boundary. No re-queue: the abandoned Exchange clears the deferred
+			// queue regardless (end → closeExchange → F6).
 			if outcome == turnOverflowed {
-				a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
+				a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: a.overflowGiveUpErr(overflowMsg)})
 			}
 			return a.turns.end(t, endAbandoned), nil
 		}
@@ -163,7 +164,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 			// surfaced that one from source "compaction") — so the same request would overflow
 			// identically. Give up exactly as above; the corrections went back on the queue inside
 			// refold, and the abandoned Exchange clears them (F6).
-			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: overflowMsg})
+			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: a.overflowGiveUpErr(overflowMsg)})
 			return a.turns.end(t, endAbandoned), nil
 		case foldFolded:
 			// The fold rewrote the conversation and refold re-derived every stale local (rollback,
@@ -259,6 +260,27 @@ func (a *Agent) refold(ctx context.Context, t *turnRun) foldOutcome {
 		return foldFolded
 	}
 	return foldDeclined
+}
+
+// unknownWindowRemedy is appended to the overflow give-up message when no context window is
+// known. Without one the Budget is empty, so the bounds that keep a session inside its window are
+// all inert — the predictive guard never fires, automatic compaction never triggers, and the
+// structural tool-result clamp is disabled — and every message from here on will overflow the same
+// way. The remedy is a config key, so the event names it rather than leaving the user with a
+// session that fails identically until /clear (audit 2026-08-01).
+const unknownWindowRemedy = "no context window is known for this model, so apogee cannot bound " +
+	"what it sends: set `context-window:` (in tokens) in your config, or use a server that reports " +
+	"the window, and the growth bounds come back"
+
+// overflowGiveUpErr builds the give-up ErrorEvent's text from the sanitized message the provider
+// produced. The provider's message always LEADS, unchanged, so a give-up stays what it always was
+// (ADR 0018 decision 2); the remedy is appended only when the window is unknown, which is the one
+// case where the user can act and where doing nothing wedges the session.
+func (a *Agent) overflowGiveUpErr(overflowMsg string) string {
+	if a.cfg.Context.MaxContextTokens > 0 {
+		return overflowMsg
+	}
+	return overflowMsg + " — " + unknownWindowRemedy
 }
 
 // turnOutcome classifies how the stream → parse → post-response phase ended.

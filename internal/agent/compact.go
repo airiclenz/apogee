@@ -26,6 +26,19 @@ const (
 	// compactMinTranscriptTokens floors the transcript budget so a very small window still
 	// sends a useful (if heavily elided) tail rather than collapsing to nothing.
 	compactMinTranscriptTokens = 256
+
+	// compactUnknownWindowTranscriptTokens bounds the summarizer's transcript when NO window is
+	// known — neither discovery nor `context-window:` reported one. Rendering the whole
+	// conversation there (what a zero budget means to the reducer) overflows exactly like the
+	// request the emergency fold is rescuing, so the fold faults on every attempt and the session
+	// wedges until /clear (audit 2026-08-01). The value is deliberately pessimistic rather than
+	// accurate: at ~3k tokens the summary call still fits, with room left for the summary itself,
+	// inside the smallest window a locally hosted server realistically runs (llama.cpp's 4096-token
+	// default n_ctx), so the fold can shed history against ANY unknown window — while staying large
+	// enough that the summary is written from a substantial tail rather than the last message alone.
+	// A real window always beats it, which is why the give-up event names `context-window:`
+	// (overflowGiveUpErr, loop.go).
+	compactUnknownWindowTranscriptTokens = 3072
 )
 
 // Compact triggers generative Compaction on demand — the engine half of the /compact command.
@@ -228,17 +241,21 @@ func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
 // call carries, derived from the discovered context window so the call itself cannot overflow at
 // exactly the high fill /compact exists to relieve (post-v1 remediation item 6). The window (in
 // tokens) minus the response reserve (compactMaxTokens) minus prompt overhead is the transcript's
-// token budget, converted to characters via the budget's chars→token estimate. It returns 0
-// (unbounded — render the whole conversation) when the window is unknown: neither discovery nor
-// config reported one, so there is no safe basis to bound, and the pre-item-6 full render stands.
+// token budget, converted to characters via the budget's chars→token estimate.
+//
+// With an UNKNOWN window (neither discovery nor `context-window:` reported one) it falls back to
+// compactUnknownWindowTranscriptTokens through the same ratio rather than returning 0. A zero
+// budget means "render the whole conversation" to the reducer, which is precisely what overflows
+// the emergency fold's own summary call on the long session that needed the fold — the give-up
+// then repeats for every message and the session wedges (audit 2026-08-01). The result is always
+// positive, so the summary call is bounded on every path.
 func (a *Agent) compactTranscriptChars() int {
-	window := a.cfg.Context.MaxContextTokens
-	if window <= 0 {
-		return 0
-	}
-	transcriptTokens := window - compactMaxTokens - compactPromptOverheadTokens
-	if transcriptTokens < compactMinTranscriptTokens {
-		transcriptTokens = compactMinTranscriptTokens
+	transcriptTokens := compactUnknownWindowTranscriptTokens
+	if window := a.cfg.Context.MaxContextTokens; window > 0 {
+		transcriptTokens = window - compactMaxTokens - compactPromptOverheadTokens
+		if transcriptTokens < compactMinTranscriptTokens {
+			transcriptTokens = compactMinTranscriptTokens
+		}
 	}
 	return int(float64(transcriptTokens) * a.budget().CharsPerToken)
 }

@@ -43,8 +43,10 @@ const minCompactTail = 2
 // cannot overflow at exactly the high context fill /compact exists to relieve (a full-transcript
 // request near n_ctx overflows deterministically). When the rendering exceeds the budget the
 // middle is elided — the protected prefix and a budgeted tail of the most recent messages are
-// kept, with a marker where history was dropped (renderBudgetedTranscript). A non-positive
-// budget renders the whole conversation (the window is unknown, so there is no basis to bound).
+// kept, with a marker where history was dropped (renderBudgetedTranscript). A non-positive budget
+// renders the whole conversation — which is what a caller asks for by passing one, and never what
+// the agent asks for: it budgets against the discovered window, or against a conservative default
+// when no window is known (agent.compactTranscriptChars).
 //
 // conv is mutated only on success: a Completer error, a cancelled ctx, or an empty summary all
 // return with conv untouched, so a failed /compact never corrupts the history. The result is a
@@ -141,12 +143,11 @@ func renderMessage(m domain.Message) string {
 
 // renderBudgetedTranscript renders the transcript within a character budget so the summary call
 // cannot overflow at high context fill. A non-positive budget renders the whole conversation
-// (renderTranscript) — the window is unknown, so there is no basis to bound. Otherwise the
-// protected prefix (msgs[:prefixEnd]) is kept verbatim and the most recent messages are kept
-// backwards until the next would exceed the budget; the most recent message is always kept (the
-// next turn depends on it) even if it alone is over budget. When any middle messages are
-// dropped, an elision notice marks the gap so the summarizer treats the prefix and tail as
-// non-contiguous rather than one continuous history.
+// (renderTranscript) — no bound was asked for. Otherwise the protected prefix (msgs[:prefixEnd])
+// is kept verbatim and the most recent messages are kept backwards until the next would exceed
+// the budget; the most recent message is always kept (the next turn depends on it) even if it
+// alone is over budget. When any middle messages are dropped, an elision notice marks the gap so
+// the summarizer treats the prefix and tail as non-contiguous rather than one continuous history.
 func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) string {
 	if maxChars <= 0 {
 		return renderTranscript(msgs)

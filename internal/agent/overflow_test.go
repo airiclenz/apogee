@@ -116,9 +116,14 @@ func TestRespondAndReviewSplitsOverflowFromPlainFault(t *testing.T) {
 // TestStepOverflowStillAbandonsTheTurnUnchanged pins the observable contract the seam must not
 // move: where recovery cannot run — baseConfig leaves `auto-compact` off, the decision-4 opt-out —
 // an overflowed request degrades the Turn exactly as before: one ErrorEvent from source "loop"
-// carrying the provider's message verbatim, a clean Exchange-complete boundary, and no assistant
+// LEADING with the provider's message, a clean Exchange-complete boundary, and no assistant
 // message committed. Recovery is quiet on SUCCESS (overflowrecovery_test.go); it may never change
 // what the GIVE-UP looks like, and this is the anchor for that.
+//
+// The one amendment (2026-08-02): baseConfig knows no window, and a session with no window wedges
+// — every later message overflows identically — so the give-up appends the remedy that ends it.
+// The provider's message still leads unchanged; the suffix and its window-gating are pinned by
+// TestOverflowGiveUpNamesTheWindowRemedy below.
 func TestStepOverflowStillAbandonsTheTurnUnchanged(t *testing.T) {
 	sink := &recordingSink{}
 	a, err := newAgent(baseConfig(sink), faultResponder{kind: provider.DeltaContextOverflow, msg: overflowFaultMsg})
@@ -145,8 +150,8 @@ func TestStepOverflowStillAbandonsTheTurnUnchanged(t *testing.T) {
 	if errs[0].Source != "loop" {
 		t.Errorf("ErrorEvent.Source = %q, want %q", errs[0].Source, "loop")
 	}
-	if errs[0].Err != overflowFaultMsg {
-		t.Errorf("ErrorEvent.Err = %q, want the provider's message verbatim %q", errs[0].Err, overflowFaultMsg)
+	if !strings.HasPrefix(errs[0].Err, overflowFaultMsg) {
+		t.Errorf("ErrorEvent.Err = %q, want it to lead with the provider's message %q", errs[0].Err, overflowFaultMsg)
 	}
 	if hasEvent[domain.MessageEvent](sink.events) {
 		t.Error("a MessageEvent was emitted for a Turn that produced no assistant message")
@@ -159,5 +164,55 @@ func TestStepOverflowStillAbandonsTheTurnUnchanged(t *testing.T) {
 		}
 		t.Errorf("conv.Len() = %d (roles %s), want 1 — only the user message survives an abandoned Turn",
 			got, strings.Join(roles, ","))
+	}
+}
+
+// TestOverflowGiveUpNamesTheWindowRemedy pins the give-up message's one window-dependent half: with
+// NO window known every growth bound is inert, so the session repeats this failure on every message
+// until /clear — the event therefore names the config key that ends it. With a window known the
+// user has nothing to set, so the provider's message surfaces byte-identically, exactly as ADR 0018
+// decision 2 requires. Both rows drive the full Step give-up path, not the helper alone.
+func TestOverflowGiveUpNamesTheWindowRemedy(t *testing.T) {
+	tests := []struct {
+		name       string
+		window     int
+		wantRemedy bool
+	}{
+		{name: "an unknown window names `context-window:`", window: 0, wantRemedy: true},
+		{name: "a known window keeps the provider's message verbatim", window: 8192, wantRemedy: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			cfg := baseConfig(sink)
+			cfg.Context.MaxContextTokens = tc.window // 0 ⇒ neither discovery nor `context-window:` reported one
+			a, err := newAgent(cfg, faultResponder{kind: provider.DeltaContextOverflow, msg: overflowFaultMsg})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := a.Submit(domain.UserInput{Text: "summarize the repository"}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+
+			if _, err := a.Step(context.Background()); err != nil {
+				t.Fatalf("Step: %v", err)
+			}
+
+			errs := errorEvents(sink.events)
+			if len(errs) != 1 || errs[0].Source != "loop" {
+				t.Fatalf("ErrorEvents = %v, want exactly one from source %q", errs, "loop")
+			}
+			if !strings.HasPrefix(errs[0].Err, overflowFaultMsg) {
+				t.Errorf("ErrorEvent.Err = %q, want it to lead with the provider's message %q", errs[0].Err, overflowFaultMsg)
+			}
+			if got := strings.Contains(errs[0].Err, "`context-window:`"); got != tc.wantRemedy {
+				t.Errorf("ErrorEvent names `context-window:` = %v, want %v; message: %q", got, tc.wantRemedy, errs[0].Err)
+			}
+			if !tc.wantRemedy && errs[0].Err != overflowFaultMsg {
+				t.Errorf("ErrorEvent.Err = %q, want the provider's message verbatim %q with a window known",
+					errs[0].Err, overflowFaultMsg)
+			}
+		})
 	}
 }

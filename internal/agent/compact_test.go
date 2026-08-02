@@ -23,9 +23,9 @@ import (
 // overflowResponder is the fake for the "prompt too long" path: it answers every stream with a
 // single terminal DeltaContextOverflow, the 400 the server sends when the request itself exceeds
 // the context window — unconditionally, regardless of prompt size. It stands for the unbudgetable
-// case (no discovered window, so the transcript is rendered in full) and a server that rejects
-// even a minimal prompt: item 6's transcript budget cannot help either, so the fault must still
-// surface cleanly and leave the conversation untouched.
+// case: a server that rejects even a minimal prompt, where no transcript budget can help (item 6's
+// window-derived one or the unknown-window default), so the fault must still surface cleanly and
+// leave the conversation untouched.
 type overflowResponder struct{}
 
 func (overflowResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
@@ -72,9 +72,9 @@ func seedFoldable(a *Agent) {
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "done"})
 }
 
-// TestCompactUnbudgetableOverflowErrorsAndLeavesConvUntouched pins the residual fault: when the
-// transcript budget cannot help — no discovered window (baseConfig sets none, so the render is
-// unbounded) and a server that overflows unconditionally — the summary call still overflows, so
+// TestCompactUnbudgetableOverflowErrorsAndLeavesConvUntouched pins the residual fault: when no
+// transcript budget can help — a server that overflows unconditionally, even under the
+// unknown-window default baseConfig now renders through — the summary call still overflows, so
 // Compact surfaces the error, reports skipped=false (a fault is not a skip), and leaves the
 // conversation untouched. This is the "budget can't save it" backstop; the survivable high-fill
 // case is TestCompactSurvivesHighFillViaTranscriptBudget below.
@@ -173,6 +173,56 @@ func TestCompactSurvivesHighFillViaTranscriptBudget(t *testing.T) {
 	}
 	if reqChars >= rawChars {
 		t.Errorf("summary prompt was not reduced by the budget: %d chars >= raw %d", reqChars, rawChars)
+	}
+}
+
+// TestCompactTranscriptCharsIsAlwaysBounded pins the summary call's char budget across the three
+// window regimes it has to serve. The unknown-window row is the one the audit's wedge turned on: a
+// zero budget means "render the whole conversation" to the reducer, so it must never be returned —
+// the conservative default stands in until a window is known. A known window's arithmetic is
+// unchanged, floor included.
+func TestCompactTranscriptCharsIsAlwaysBounded(t *testing.T) {
+	tests := []struct {
+		name       string
+		window     int
+		wantTokens int
+	}{
+		{
+			name:       "an unknown window falls back to the conservative default",
+			window:     0,
+			wantTokens: compactUnknownWindowTranscriptTokens,
+		},
+		{
+			name:       "a known window keeps the window-derived budget",
+			window:     32768,
+			wantTokens: 32768 - compactMaxTokens - compactPromptOverheadTokens,
+		},
+		{
+			name:       "a window smaller than the reserves floors instead of going negative",
+			window:     2048,
+			wantTokens: compactMinTranscriptTokens,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseConfig(&recordingSink{})
+			cfg.Context.MaxContextTokens = tc.window
+			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			got := a.compactTranscriptChars()
+
+			if want := int(float64(tc.wantTokens) * a.budget().CharsPerToken); got != want {
+				t.Errorf("compactTranscriptChars() = %d, want %d (%d tokens × %.1f chars/token)",
+					got, want, tc.wantTokens, a.budget().CharsPerToken)
+			}
+			if got <= 0 {
+				t.Error("compactTranscriptChars() = 0, which renders the WHOLE conversation into the summary call")
+			}
+		})
 	}
 }
 

@@ -654,6 +654,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A session on a server that does not advertise its context window no longer wedges when the
+  history gets long.** When apogee cannot discover the window and you have not set `context-window:`
+  yourself, none of the size bounds can do arithmetic — and the last line of defence, the emergency
+  fold that summarizes the history after the server rejects an oversized request, was rendering the
+  *whole* conversation into its own summary request. That request then overflowed exactly like the
+  one it was sent to rescue, so every message you typed cost two rejected round-trips, printed a
+  "context window exceeded" error and abandoned the turn, for the rest of the session — the only way
+  out was `/clear` (and `/compact` failed the same way). With no window known the summary now carries
+  a conservative fixed budget of history — small enough to fit even a 4k-token server, large enough
+  to summarize from — so the fold works and the task continues. Nothing changes for a session whose
+  window is known.
+  - **And when recovery genuinely cannot help, the error says what to do about it.** Where no window
+    is known, the give-up message now ends by naming the remedy — set `context-window:` (in tokens)
+    in your config, or use a server that reports the window — instead of leaving you with an error
+    that will repeat identically on every message. The server's own message still comes first, and a
+    session that knows its window keeps the exact wording it had.
+
+  See the 2026-08-02 amendment to
+  [ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
+
 - **A sub-agent that dies mid-task now says so, instead of reporting success.** When a delegated
   sub-agent was cut off by the server — a local model restarting, a connection dropping, a context
   overflow it could not recover from — the delegation still came back to the main model as a
