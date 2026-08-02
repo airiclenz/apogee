@@ -654,6 +654,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The syntax check no longer calls correct Python and Ruby broken.** The optional `syntax`
+  Mechanism — and `autofix`, which judges a formatter's repair against the same check — read `//`
+  as the start of a comment in *every* language and stopped reading the line there. In Python `//`
+  is floor division, so `print(xs[len(xs) // 2])` looked like a line whose brackets were never
+  closed, and the Mechanism handed the model back a correction saying its working code had an
+  unclosed parenthesis — spending up to three extra requests in the turn inviting it to "fix" code
+  that was already right, and leaving `autofix` unable to improve anything because the errors were
+  never there. Ruby's `//` empty regex literal was the same, in the bracket count and in the
+  "looks truncated" check. `//` now opens a comment only in the languages where it does, `/* … */`
+  blocks are skipped instead of having their commented-out braces counted against the file, and
+  the checker has valid-code coverage for every language it claims to understand. Both Mechanisms
+  are off by default, so a stock session was never affected.
+
 - **Plan mode no longer offers the model two tools it then refuses.** In Plan, `git_diff_range` and
   `diagnostics` were on the menu the model is shown — both honestly declare that they only read —
   but both shell out to a program (the system `git`, the Go toolchain), and a call that leaves the

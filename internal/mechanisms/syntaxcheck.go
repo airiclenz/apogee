@@ -80,6 +80,33 @@ func detectLanguage(path string) string {
 	}
 }
 
+// hasCStyleComments reports whether lang comments with `//` to end of line and `/* … */` blocks.
+// The gate matters because `//` is not a comment everywhere: in Python it is floor division
+// (`n // 2`) and in Ruby an empty regex literal, so breaking out of the line scan there abandons a
+// valid line before its closing bracket and invents an "unclosed bracket" — a false positive that
+// fires ActionRetry against correct code, which the Bypass floor forbids.
+func hasCStyleComments(lang string) bool {
+	switch lang {
+	case "javascript", "typescript", "go", "rust", "java", "c", "cpp", "csharp", "swift", "kotlin", "php":
+		return true
+	default:
+		return false
+	}
+}
+
+// hasHashComments reports whether lang's line comment is `#`. Elsewhere `#` is code — a C
+// preprocessor directive, a JavaScript private field — so it must not end the line scan. PHP is
+// deliberately absent even though `#` comments there: `#[Attr(…)]` is an attribute, and ending the
+// scan at `#` would drop a multi-line attribute's opening paren while still seeing its closer.
+func hasHashComments(lang string) bool {
+	switch lang {
+	case "python", "ruby":
+		return true
+	default:
+		return false
+	}
+}
+
 // checkGoSyntax parses Go source with the standard parser and reports exact syntax errors.
 func checkGoSyntax(content string) syntaxResult {
 	fset := token.NewFileSet()
@@ -111,12 +138,25 @@ func checkBrackets(content, lang string) syntaxResult {
 	var stack []bracketInfo
 	inString := rune(0)
 	escaped := false
+	inBlockComment := false
 
 	for lineNum, line := range lines {
 		lineNo := lineNum + 1
 		for i := 0; i < len(line); {
 			r, size := utf8.DecodeRuneInString(line[i:])
 			i += size
+
+			// A block comment spans lines and holds no code: only `*/` is read inside it, so a
+			// commented-out bracket can never reach the stack.
+			if inBlockComment {
+				if r == '*' && i < len(line) {
+					if next, nextSize := utf8.DecodeRuneInString(line[i:]); next == '/' {
+						i += nextSize
+						inBlockComment = false
+					}
+				}
+				continue
+			}
 
 			if escaped {
 				escaped = false
@@ -133,12 +173,18 @@ func checkBrackets(content, lang string) syntaxResult {
 				continue
 			}
 
-			if r == '#' && (lang == "python" || lang == "ruby") {
+			if r == '#' && hasHashComments(lang) {
 				break
 			}
-			if r == '/' && i < len(line) {
-				if next, _ := utf8.DecodeRuneInString(line[i:]); next == '/' {
+			if r == '/' && i < len(line) && hasCStyleComments(lang) {
+				next, nextSize := utf8.DecodeRuneInString(line[i:])
+				if next == '/' {
 					break
+				}
+				if next == '*' {
+					i += nextSize
+					inBlockComment = true
+					continue
 				}
 			}
 
@@ -192,7 +238,7 @@ func checkBrackets(content, lang string) syntaxResult {
 		result.errors = append(result.errors, syntaxError{line: stack[i].line, message: fmt.Sprintf("unclosed %s", name)})
 	}
 
-	checkTruncation(lines, &result)
+	checkTruncation(lines, lang, &result)
 	if lang == "python" {
 		checkPythonIndent(lines, &result)
 	}
@@ -203,13 +249,13 @@ func checkBrackets(content, lang string) syntaxResult {
 
 // checkTruncation flags a file whose last non-blank line ends on an incomplete expression — the
 // shape a truncated generation leaves.
-func checkTruncation(lines []string, result *syntaxResult) {
+func checkTruncation(lines []string, lang string, result *syntaxResult) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "" {
 			continue
 		}
-		trimmed = strings.TrimSpace(stripTrailingComment(trimmed))
+		trimmed = strings.TrimSpace(stripTrailingComment(trimmed, lang))
 		if trimmed == "" {
 			continue
 		}
@@ -226,9 +272,11 @@ func checkTruncation(lines []string, result *syntaxResult) {
 	}
 }
 
-// stripTrailingComment drops a trailing // or # line comment outside of string literals, so
-// truncation detection reads the real last token.
-func stripTrailingComment(s string) string {
+// stripTrailingComment drops a trailing line comment outside of string literals, so truncation
+// detection reads the real last token. Which marker opens a comment is language-dependent (see
+// hasCStyleComments): stripping Ruby's `SEP = //` down to `SEP =` would report a complete file as
+// truncated.
+func stripTrailingComment(s, lang string) string {
 	inStr := rune(0)
 	escaped := false
 	for i, r := range s {
@@ -250,10 +298,10 @@ func stripTrailingComment(s string) string {
 			inStr = r
 			continue
 		}
-		if r == '#' {
+		if r == '#' && hasHashComments(lang) {
 			return s[:i]
 		}
-		if r == '/' && i+1 < len(s) && s[i+1] == '/' {
+		if r == '/' && i+1 < len(s) && s[i+1] == '/' && hasCStyleComments(lang) {
 			return s[:i]
 		}
 	}

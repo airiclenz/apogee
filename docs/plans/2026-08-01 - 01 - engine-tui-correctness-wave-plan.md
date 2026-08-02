@@ -333,7 +333,20 @@ passes; `make check` green; contract §4 fn 2 updated.
 
 **Commit:** `fix(agent,domain): the Plan tool menu and the resolution ladder key on one tool classification`
 
-## 9. The syntax checker treats `//` as a comment only where it is one
+## 9. The syntax checker treats `//` as a comment only where it is one — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** one extension beyond the item's literal text. The same "`//` is a comment"
+assumption also lives in `stripTrailingComment`, which the truncation check runs over the last
+non-blank line: a Ruby file ending `SEP = //` was stripped to `SEP =` and reported as truncated, the
+identical false positive one function along. `lang` is now threaded through `checkTruncation` into
+it and both markers are gated there too (pinned by its own table row, which fails without the gate);
+no other plan item owns that line. Two deliberate non-changes: PHP's second comment marker `#` stays
+treated as code, because `#[Attr(…)]` is a PHP attribute and ending the scan at `#` would drop a
+multi-line attribute's opening paren while still counting its closer — the very defect this item
+removes (recorded in `hasHashComments`' doc comment); and an unclosed `/*` now swallows the rest of
+the file rather than raising a new error class, keeping the file's "reports only unambiguous
+breakage" contract (pinned by `TestCheckSyntaxUnclosedBlockCommentReportsNothing`). Also added a
+CHANGELOG `Fixed` entry; no version identifier touched.
 
 **What:** Audit "High — The syntax checker treats `//` as a comment in every language".
 `internal/mechanisms/syntaxcheck.go:139`: gate the `//` line-break-out to languages where
