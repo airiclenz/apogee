@@ -2,11 +2,19 @@ A: Activated / Active
 P: Planned
 X: Executed
 
+
+
 - [ ] Currently I cannot see how much ot it's context a sub agent has used.
 
-- [ ] Clicking on the header of a tool for collapsing/expanding is not very responsive 
+- [ ] Clicking on the header of a tool for collapsing/expanding is not very responsive (very often nothing happens at all) - this seems to be connected to 100% GPU usage when an agent is running. When no local session is in progress the expansion/collapse response is snappy.
 
-- [ ] work-dir path needs to be displayed
+- [ ] work-dir path needs to be displayed in the bottom instead of the context size (e.g. `/workspace/repos/apogee` for this project, the home dir shoulod be replaced with `~` so that `/Users/username/Repos/apogee` would be displayed as `~/Repos/apogee` instead). The context size should move to the context gauge and be diaplyed like this: `8K/98K 8%`
+
+- [ ] I'd like to remove the frame from the lower part of the promt box as well. THe new layout is outlined in ./docs/design/prompt-box-layout.md
+
+- [ ] pop-up lists like /sessions, /skills or @file are painted inconsistent. Some have an empty row between the bottom prompt/status section and some have not:
+  - server: unwanted spacer row
+  - session: unwanted spacer row
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.
 
