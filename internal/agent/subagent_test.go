@@ -354,6 +354,153 @@ func TestSubAgent_ChildPanicRecoversAtParentBoundary(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// A faulted delegation is reported as a failure, never as a result
+// ---------------------------------------------------------------------------
+
+// staleChildText is the mid-task narration a child commits BEFORE the fault that abandons its
+// Exchange — the text finalMessageText scans back to, and which must never stand in for a
+// delegated result that was never produced.
+const staleChildText = "starting on it — reading the entry point first"
+
+// contentThenToolCallScript emits one content chunk AND one tool call in the same stream: the
+// shape of a model that narrates before acting, so the committed assistant message carries
+// mid-task text.
+func contentThenToolCallScript(text, id, name, args string) []provider.Delta {
+	return append([]provider.Delta{{Kind: provider.DeltaContent, Content: text}},
+		toolCallScript(id, name, args)...)
+}
+
+// faultedDelegationScripts drives one delegation whose child narrates, calls a tool, and then
+// hits an Upstream fault on its next Turn — the child's Exchange is ABANDONED, which closes on
+// the same StatusExchangeComplete a real completion returns. The parent then finishes.
+func faultedDelegationScripts() [][]provider.Delta {
+	return [][]provider.Delta{
+		subAgentCallScript("c1", "summarise the repo"),
+		contentThenToolCallScript(staleChildText, "c2", "read_thing", `{}`),
+		errorScript("upstream: connection reset by peer"), // the child's next Turn faults
+		contentScript("parent done"),
+	}
+}
+
+// TestSubAgent_FaultedDelegationReportsAsError proves a child Exchange abandoned by an Upstream
+// fault reaches the parent model as an ERROR result naming the fault — not as a success carrying
+// the child's stale mid-task text (which is what an abandoned Turn's StatusExchangeComplete,
+// indistinguishable from a real completion, used to produce).
+func TestSubAgent_FaultedDelegationReportsAsError(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: faultedDelegationScripts()})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// The child's fault is localised to the delegation: the PARENT's Exchange still completes.
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Errorf("parent result = %+v, want a clean exchange-complete (the child's fault must not fault the parent)", res)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if !sub.IsError {
+		t.Errorf("sub_agent result IsError = false for a faulted delegation; content = %q", sub.Content)
+	}
+	if strings.Contains(sub.Content, staleChildText) {
+		t.Errorf("sub_agent result = %q — stale mid-task text passed off as the delegated result", sub.Content)
+	}
+	if !strings.Contains(strings.ToLower(sub.Content), "fault") {
+		t.Errorf("sub_agent result = %q, want a message naming the child fault", sub.Content)
+	}
+	// The human still sees the cause: the child's own ErrorEvent reached the shared sink at Depth 1.
+	if !hasErrorContaining(sink.events, 1, "connection reset") {
+		t.Error("expected the child's Upstream fault to surface as an ErrorEvent at Depth 1")
+	}
+}
+
+// TestSubAgent_FaultedDelegationBooksNoProductiveWrite proves the second half of the same defect:
+// a failed delegation must not feed self-regulation the PRODUCTIVE signal (sub_agent is not
+// read-only, so a non-error result booked noteWrite), which cleared every strike, re-opened every
+// suppressed Mechanism and lifted the Turn Budget on the strength of a failure (R3).
+func TestSubAgent_FaultedDelegationBooksNoProductiveWrite(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: faultedDelegationScripts()})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// Seed a Session that has been going badly: the Turn Budget is tripped and a Mechanism
+	// carries strikes. Only a PRODUCTIVE Turn clears those (selfRegulator.endTurn).
+	const probe = domain.MechanismID("probe")
+	a.tracker.harmfulStreak = turnBudgetLimit
+	a.tracker.budgetTripped = true
+	a.tracker.strikes[probe] = adaptiveSuppressStrikes - 1
+
+	_ = a.Submit(domain.UserInput{Text: "please research"})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	view := a.tracker.observed()
+	if !view.BudgetTripped {
+		t.Error("the Turn Budget was lifted by a FAILED delegation — a fault is not a productive write")
+	}
+	if view.HarmfulStreak < turnBudgetLimit {
+		t.Errorf("harmful streak = %d, want it held at or above %d (a fault never resets it)", view.HarmfulStreak, turnBudgetLimit)
+	}
+	if view.Strikes[probe] != adaptiveSuppressStrikes-1 {
+		t.Errorf("strikes[probe] = %d, want %d (a failed delegation clears nothing)", view.Strikes[probe], adaptiveSuppressStrikes-1)
+	}
+}
+
+// TestSubAgent_CancelledChildRollsTheParentTurnBack pins the neighbouring row the fault marker
+// must not disturb: a CANCELLED child still unwinds the parent Turn wholesale (D2) — no tool
+// result is surfaced at all, and the cancel is not reported as a fault.
+func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
+	sink := &recordingSink{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The human presses Esc while the child is working: the tool's ctx is cancelled mid-call.
+	interrupted := fakeTool{name: "read_thing", readOnly: true, execute: func(c context.Context, _ domain.ToolCall) (domain.ToolResult, error) {
+		cancel()
+		return domain.ToolResult{}, c.Err()
+	}}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, interrupted)
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "summarise the repo"),
+		toolCallScript("c2", "read_thing", `{}`), // the child's call is cancelled mid-flight
+	}})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: "please research"})
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusCancelled {
+		t.Errorf("parent status = %q, want %q (a cancelled child rolls the parent Turn back)", res.Status, domain.StatusCancelled)
+	}
+	if res.Faulted {
+		t.Error("a cancelled delegation reported as a fault; a cancel is a re-attemptable rollback")
+	}
+	if sub, ok := lastSubAgentResult(sink.events); ok {
+		t.Errorf("a cancelled delegation surfaced a tool result (%+v); no partial result may reach the parent", sub)
+	}
+}
+
 // TestSubAgent_DepthLimitConstant guards the recursion bound's value so a careless change is
 // caught (the orchestrator and its tests assume this ceiling).
 func TestSubAgent_DepthLimitConstant(t *testing.T) {

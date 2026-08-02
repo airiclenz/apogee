@@ -654,6 +654,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A sub-agent that dies mid-task now says so, instead of reporting success.** When a delegated
+  sub-agent was cut off by the server — a local model restarting, a connection dropping, a context
+  overflow it could not recover from — the delegation still came back to the main model as a
+  completed tool call. What it carried was whatever the sub-agent happened to have said last, which
+  is typically its opening narration (*"starting on it — reading the entry point first"*), or a bare
+  *"completed with no final message"* placeholder. The main model then built on work that was never
+  done. A cut-off delegation is now reported as a failure that names the fault, so the model can
+  retry or tell you, and the error you already saw in the transcript matches what the model was
+  told. The same failure also used to count as *productive* work for the self-regulation machinery,
+  clearing every mechanism strike and lifting a tripped Turn Budget on the strength of a request
+  that failed; it now counts as the failure it is. A sub-agent that genuinely finishes, and one you
+  stop with Esc, behave exactly as before.
+
 - **Tightening the mode mid-run now reaches sub-agents of sub-agents.** Shift+Tab down to Plan
   while a delegation is running is meant to reach everything still working: a sub-agent runs a whole
   exchange inside one of the parent's tool calls, so the mode you set has to catch it in flight. It

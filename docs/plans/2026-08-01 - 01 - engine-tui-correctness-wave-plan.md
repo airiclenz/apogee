@@ -98,7 +98,15 @@ green; ADR 0013 amendment present.
 
 **Commit:** `fix(agent): grandchildren compose the parent's effective mode`
 
-## 3. A faulted delegation reports as an error
+## 3. A faulted delegation reports as an error — ✅ DONE (2026-08-02)
+
+**NOTES (2026-08-02):** took the item's first option — a fault marker (`StepResult.Faulted`, set by
+`end()`'s `endAbandoned` row) — rather than an `endAbandoned`-specific status, so every existing
+`Status` reader (Run's loop, the TUI worker's switch) keeps behaving identically and only a reader
+that reports the Exchange's outcome onward consults the new field. The item's third test case ("a
+genuinely completed child still returns its final message unchanged") is covered by the pre-existing
+`TestSubAgent_DelegatesAndReportsBack` plus new `Faulted`-is-false rows added to the
+`TestTurnEnd_Table` exit table, so no duplicate test was written.
 
 **What:** Audit "High — A faulted sub-agent delegation is reported to the parent as
 success". `internal/agent/subagent.go:94` + `internal/agent/dispatch.go:60`: an abandoned

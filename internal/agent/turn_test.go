@@ -75,6 +75,9 @@ func TestTurnEnd_Table(t *testing.T) {
 		if res.Elapsed <= 0 {
 			t.Errorf("Elapsed = %v, want > 0", res.Elapsed)
 		}
+		if res.Faulted {
+			t.Error("Faulted set on a completed tool-call Turn")
+		}
 		if l.index != 6 {
 			t.Errorf("index = %d, want 6 (advanced)", l.index)
 		}
@@ -98,6 +101,9 @@ func TestTurnEnd_Table(t *testing.T) {
 
 		if res.Status != domain.StatusExchangeComplete {
 			t.Errorf("Status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+		}
+		if res.Faulted {
+			t.Error("Faulted set on a real final answer; only an abandoned Turn is faulted")
 		}
 		if l.index != 6 {
 			t.Errorf("index = %d, want 6 (advanced)", l.index)
@@ -126,6 +132,12 @@ func TestTurnEnd_Table(t *testing.T) {
 
 		if res.Status != domain.StatusExchangeComplete {
 			t.Errorf("Status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+		}
+		// The marker that distinguishes this row from endExchangeDone, which returns the SAME
+		// status: without it a reader reporting the Exchange's outcome onward (the sub-agent
+		// orchestrator) cannot tell a fault from an answer.
+		if !res.Faulted {
+			t.Error("Faulted not set; an abandoned Turn closes on StatusExchangeComplete and is otherwise indistinguishable from a completion")
 		}
 		if l.index != 6 {
 			t.Errorf("index = %d, want 6 (advanced)", l.index)
@@ -157,6 +169,9 @@ func TestTurnEnd_Table(t *testing.T) {
 
 		if res.Status != domain.StatusCancelled {
 			t.Errorf("Status = %q, want %q", res.Status, domain.StatusCancelled)
+		}
+		if res.Faulted {
+			t.Error("Faulted set on a cancelled Turn; a cancel is a re-attemptable rollback, not a fault")
 		}
 		if res.TurnIndex != 7 {
 			t.Errorf("TurnIndex = %d, want 7", res.TurnIndex)

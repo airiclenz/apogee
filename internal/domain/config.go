@@ -358,6 +358,15 @@ type StepResult struct {
 	Status    StepStatus
 	TurnIndex int           // 0-based index of the Turn just completed
 	Elapsed   time.Duration // wall time for this Turn
+	// Faulted marks a Turn ABANDONED rather than completed: it produced no usable outcome (an
+	// Upstream fault, a recovered extension panic, or an overflow the loop could not fold its way
+	// out of), so the loop degraded it to a clean boundary. It is deliberately ORTHOGONAL to
+	// Status — an abandoned Turn ends its Exchange, so it reports StatusExchangeComplete exactly
+	// as a real final answer does, and this flag is the only thing that tells the two apart.
+	// A host that merely resumes at the boundary can ignore it; anything that reports the
+	// Exchange's RESULT onward — a sub-agent delegation answering its parent — must not present a
+	// faulted Exchange as a success. The fault itself was already surfaced as an ErrorEvent.
+	Faulted bool
 }
 
 // StepStatus is the disposition of a completed Step. The set is open (additively

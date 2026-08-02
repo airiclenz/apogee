@@ -48,7 +48,10 @@ func isSubAgentCall(call domain.ToolCall) bool {
 // runSubAgent is the recursion point: it parses the delegated task, constructs a nested Agent
 // bounded by this Agent's privileges (ADR 0005/0013), drives it to its Exchange boundary, and
 // returns the sub-agent's final message as this call's tool result. A cancellation propagates
-// out as dispatchCancelled so the parent rolls the whole Turn back (atomic-within-the-Turn).
+// out as dispatchCancelled so the parent rolls the whole Turn back (atomic-within-the-Turn);
+// a FAULTED child Exchange — abandoned rather than completed, which closes on the same
+// StatusExchangeComplete a real completion does — returns an ERROR result naming the fault
+// instead of the child's last assistant text (StepResult.Faulted).
 //
 // The nested loop's events already reached the parent's EventSink at Depth+1 as they ran; the
 // returned ToolResult is what the PARENT model sees on its next Turn (the delegated work
@@ -89,6 +92,20 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		// Turn must now roll back wholesale (D2: the recovery point is the pre-sub_agent
 		// boundary — the sub-agent's progress is discarded, no partial result surfaced).
 		return domain.ToolResult{}, dispatchCancelled
+	}
+	if res.Faulted {
+		// The nested Exchange was ABANDONED, not completed — an Upstream fault, a recovered
+		// extension panic, or an overflow the child's one fold could not rescue. It closes on
+		// StatusExchangeComplete exactly as a real completion does, so the fault marker is the
+		// only thing that tells them apart, and reporting it as a success would hand the parent
+		// model a placeholder — or, worse, stale mid-task text from an earlier child Turn
+		// (finalMessageText scans backwards for the last assistant message) — as the delegated
+		// result. An error result also books the delegation as HARMFUL rather than as a
+		// productive write for self-regulation (noteToolProductivity, R3), so a failure can no
+		// longer clear the parent's strikes and Turn Budget. The child's own ErrorEvent already
+		// reached the shared EventSink at Depth+1, so the human sees the cause.
+		return errorToolResult(call.ID, "sub-agent faulted before finishing the delegated task: "+
+			"its exchange was abandoned (see the preceding error), so no result was produced"), dispatchDone
 	}
 
 	return domain.ToolResult{CallID: call.ID, Content: sub.finalMessageText(), IsError: false}, dispatchDone
@@ -177,7 +194,9 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 // finalMessageText returns the text of the last assistant message in the sub-agent's
 // conversation — the delegated result reported back to the parent. An empty conversation (or
 // one with no assistant text) yields a neutral note rather than an empty string, so the parent
-// model always receives an intelligible result.
+// model always receives an intelligible result. It is reached only for a COMPLETED Exchange:
+// runSubAgent answers a faulted one with an error result before it gets here, so neither that
+// note nor a stale mid-task message can stand in for a delegation that never finished.
 func (a *Agent) finalMessageText() string {
 	for _, m := range reverseMessages(a.conv.Messages()) {
 		if m.Role == domain.RoleAssistant && m.Content != "" {

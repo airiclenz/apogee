@@ -47,16 +47,18 @@ type turnEnd int
 const (
 	endTurnDone     turnEnd = iota // judged · advance · Exchange stays open   · StatusTurnComplete
 	endExchangeDone                // judged · advance · Exchange closes       · StatusExchangeComplete
-	endAbandoned                   // discarded · advance · Exchange closes    · StatusExchangeComplete
+	endAbandoned                   // discarded · advance · Exchange closes    · StatusExchangeComplete + Faulted
 	endCancelled                   // discarded · roll back + restore deferred · no advance · Exchange stays open · StatusCancelled
 )
 
 // end exits the Turn t on the row how names — the single table that replaced the three exit
 // helpers (completeTurn / abandonTurn / cancelTurn). Each dimension is expressed once: judge
-// (tracker.endTurn) vs discard (tracker.discardTurn), whether the Exchange closes, and whether
-// the Turn counter advances. It returns the boundary StepResult (ADR 0007).
+// (tracker.endTurn) vs discard (tracker.discardTurn), whether the Exchange closes, whether
+// the Turn counter advances, and whether the Turn FAULTED. It returns the boundary StepResult
+// (ADR 0007).
 func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 	var status domain.StepStatus
+	var faulted bool
 	switch how {
 	case endTurnDone, endExchangeDone:
 		// Resolve the completed Turn for self-regulation (R3, next-Turn judgment): this Turn's
@@ -87,7 +89,14 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		// with the faulted Exchange (F6), so any correction drained this Turn dies here.
 		l.closeExchange()
 		l.index++
+		// The Exchange closed with NOTHING to show for it, yet the status it closes on is the
+		// same StatusExchangeComplete a real final answer returns (a closed Exchange is a closed
+		// Exchange, and a resuming host must treat both the same). Mark the result faulted so a
+		// reader that reports the Exchange's OUTCOME onward — the sub-agent orchestrator
+		// answering its parent — can tell a fault from an answer instead of passing off a
+		// placeholder, or stale mid-task text, as the delegated result.
 		status = domain.StatusExchangeComplete
+		faulted = true
 	case endCancelled:
 		// The Turn is rolled back and re-attempted on resume, so self-regulation discards it
 		// WITHOUT judging — the re-attempt repopulates the fired-this-Turn set and the proxy
@@ -115,7 +124,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		// "re-attempt"), opening that exact hole.
 		status = domain.StatusCancelled
 	}
-	return domain.StepResult{Status: status, TurnIndex: t.turn, Elapsed: time.Since(t.start)}
+	return domain.StepResult{Status: status, TurnIndex: t.turn, Elapsed: time.Since(t.start), Faulted: faulted}
 }
 
 // closeExchange ends the open Exchange — the ONE engine-side owner of Exchange end (ADR 0017
