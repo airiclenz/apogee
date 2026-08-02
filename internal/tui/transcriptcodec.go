@@ -208,9 +208,9 @@ func toWireToolView(tv toolView) *wireToolView {
 		Name:    tv.name,
 		Summary: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 	}
-	if len(tv.Details) > 0 {
-		w.Details = make([]wireDetailLine, 0, len(tv.Details))
-		for _, d := range tv.Details {
+	if tv.Details.len() > 0 {
+		w.Details = make([]wireDetailLine, 0, tv.Details.len())
+		for _, d := range tv.Details.all() {
 			w.Details = append(w.Details, wireDetailLine{Kind: int(d.Kind), Text: d.Text})
 		}
 	}
@@ -253,12 +253,13 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 }
 
 // fromWireToolView rebuilds a toolView from the wire and finishes it through the presenter's own
-// seam: sanitize escape-strips every rendered field and settles the body's kind, which is derived
-// and never stored — the wire carries each line's own Kind and nothing above it, so a resumed diff
-// body would come back capped at one line if decode skipped the seam. name is stripped here
-// instead, because sanitize leaves it alone by design (it is the registry key enrichWithResult
-// reads, never rendered) and it still has to be restored for that lookup. A nil Details stays nil
-// (never a non-nil empty slice) so a not-yet-enriched call round-trips exactly.
+// seams: the stored lines become a body through newToolBody, which settles the kind the wire never
+// carried (each line keeps its own Kind and nothing stands above them, so a resumed diff would come
+// back capped at one line if decode built the body any other way), and sanitize escape-strips every
+// rendered field. name is stripped here instead, because sanitize leaves it alone by design (it is
+// the registry key enrichWithResult reads, never rendered) and it still has to be restored for that
+// lookup. A body-less card stays body-less (never a non-nil empty line slice) so a not-yet-enriched
+// call round-trips exactly.
 func fromWireToolView(w *wireToolView) toolView {
 	tv := toolView{
 		Label:   w.Label,
@@ -268,10 +269,11 @@ func fromWireToolView(w *wireToolView) toolView {
 		Summary: detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text},
 	}
 	if len(w.Details) > 0 {
-		tv.Details = make([]detailLine, 0, len(w.Details))
+		lines := make([]detailLine, 0, len(w.Details))
 		for _, d := range w.Details {
-			tv.Details = append(tv.Details, detailLine{Kind: detailKind(d.Kind), Text: d.Text})
+			lines = append(lines, detailLine{Kind: detailKind(d.Kind), Text: d.Text})
 		}
+		tv.Details = newToolBody(lines)
 	}
 	tv.sanitize()
 	return tv

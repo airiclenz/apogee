@@ -666,7 +666,7 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := &transcript{}
 			tc.build(tr)
-			if got := len(tr.entries[0].tool.Details); got != tc.wantKept {
+			if got := tr.entries[0].tool.Details.len(); got != tc.wantKept {
 				t.Errorf("retained body = %d lines, want the whole %d", got, tc.wantKept)
 			}
 			// The block is a header, a branch line, then its body: everything past the branch is

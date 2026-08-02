@@ -63,6 +63,62 @@ type detailLine struct {
 	Text string
 }
 
+// toolBody is a tool call's retained body — the detail lines that lay out beneath its branch line
+// — bound to the one fact the collapsed paint's cap depends on: whether those lines are a DIFF (a
+// body carrying at least one red/green line). A diff body keeps diffDetailCap lines when the block
+// is collapsed, any other multi-line body keeps its first (collapsedDetails, render.go).
+//
+// The lines and their kind travel as ONE value, and newToolBody is the only thing that puts lines
+// in, so the pair cannot be written stale: there is no way to hand a painter a diff body that says
+// it is plain, because saying so is not a thing a caller does — the kind is derived from the lines
+// it is derived WITH. That is deliberate, and it is what keeps the cap correct without re-deriving
+// the kind at paint: the body is retained whole (layout.md) and capped only when it is drawn, so a
+// rule read off the lines at that seam would walk a command's whole output on every repaint.
+//
+// The kind is never persisted — the wire carries each line's own Kind, from which decode builds the
+// body through this same constructor (fromWireToolView).
+type toolBody struct {
+	lines []detailLine
+	diff  bool
+}
+
+// newToolBody is the ONE place a body's lines and its kind are paired, and so the one place the
+// kind is derived. The zero toolBody needs no constructor and is consistent by construction: no
+// lines, no diff.
+func newToolBody(lines []detailLine) toolBody {
+	return toolBody{lines: lines, diff: bodyIsDiff(lines)}
+}
+
+// all is the body's lines, in order — what the painter lays out.
+func (b toolBody) all() []detailLine { return b.lines }
+
+// len is how many lines the body retains. It says nothing about the block's shape: that follows
+// from which halves of the outcome are filled, never from how many lines there are (render.go).
+func (b toolBody) len() int { return len(b.lines) }
+
+// isDiff reports the kind newToolBody settled: true when the body carries a red/green line.
+func (b toolBody) isDiff() bool { return b.diff }
+
+// with returns the body extended by more lines — a result folding into a view that already has one
+// (enrichWithResult). It goes back through the constructor, so the grown body's kind describes what
+// it now holds rather than what it held before. Adding nothing returns the body untouched, which is
+// what keeps a not-yet-enriched call's nil body nil.
+func (b toolBody) with(more []detailLine) toolBody {
+	if len(more) == 0 {
+		return b
+	}
+	return newToolBody(append(b.lines, more...))
+}
+
+// stripEscapes removes the ESC byte from every line's text in place (the sanitize seam's work on
+// the body). It cannot disturb the settled kind: a line's Kind is set by its producer and the strip
+// only ever rewrites Text.
+func (b *toolBody) stripEscapes() {
+	for i := range b.lines {
+		b.lines[i].Text = stripEscapes(b.lines[i].Text)
+	}
+}
+
 // toolView is the presentation model of a tool call (later enriched by its result): a
 // friendly Label, the active Verb for the status line, the Target it acts on (a path, a
 // directory, a pattern), and the outcome split in two — the one-line Summary that rides the
@@ -79,19 +135,13 @@ type toolView struct {
 	Verb    string
 	Target  string
 	Summary detailLine
-	Details []detailLine
+
+	// Details is the body laid out beneath the branch line, carrying its own kind (toolBody):
+	// the painter asks the body what it is rather than the view keeping a second, separately
+	// assignable answer that a new body path could leave stale.
+	Details toolBody
 
 	name string
-
-	// hasDiffBody is the retained body's KIND — true when Details carries a red/green line —
-	// and it is the one fact the collapsed paint's cap depends on: a diff body keeps
-	// diffDetailCap lines, any other multi-line body keeps its first (collapsedDetails,
-	// render.go). It is SETTLED ONCE, at the sanitize seam every path that can give a view a
-	// body passes through, and read from there on: the body is retained whole and capped only
-	// at paint, so a rule re-derived from the lines would walk a command's whole output on
-	// every repaint. It is never persisted — the wire carries each line's own Kind, from which
-	// decode settles this again through the same seam (fromWireToolView).
-	hasDiffBody bool
 }
 
 // toolOutcome is what a prose extractor returns: the one-line Summary that rides the branch
@@ -297,7 +347,7 @@ func presentToolCall(call domain.ToolCall) toolView {
 			Label:   call.Tool,
 			Verb:    "running " + call.Tool,
 			name:    call.Tool,
-			Details: prettyJSONDetails(call.Arguments),
+			Details: newToolBody(prettyJSONDetails(call.Arguments)),
 		}
 		tv.sanitize()
 		return tv
@@ -327,26 +377,22 @@ func presentToolCall(call domain.ToolCall) toolView {
 // name is deliberately left alone: it is the registry lookup key enrichWithResult reads, never
 // rendered — Label carries the displayed copy of it, and Label is stripped.
 //
-// It also SETTLES the body's kind (hasDiffBody), which is a second act only in name: the set of
-// places that can hand a view a body is exactly the set that must strip it, and this seam is the
-// one none of them may skip. Deriving the kind anywhere else would be a rule a new body path could
-// forget; deriving it at paint would re-walk a retained body once a frame.
+// The body's KIND is not this seam's business and never was a rule a body path had to remember: a
+// body carries its own kind (toolBody), settled where its lines were, and the strip below rewrites
+// only line text — so a sanitized body says exactly what it said before.
 func (tv *toolView) sanitize() {
 	tv.Label = stripEscapes(tv.Label)
 	tv.Verb = stripEscapes(tv.Verb)
 	tv.Target = stripEscapes(tv.Target)
 	tv.Summary.Text = stripEscapes(tv.Summary.Text)
-	for i := range tv.Details {
-		tv.Details[i].Text = stripEscapes(tv.Details[i].Text)
-	}
-	tv.hasDiffBody = bodyIsDiff(tv.Details)
+	tv.Details.stripEscapes()
 }
 
-// bodyIsDiff reports whether a body carries a red/green diff line — the exact test for a diff
+// bodyIsDiff reports whether a body's lines carry a red/green diff line — the exact test for a diff
 // body, since diffBody is the diff kinds' only producer and never emits an untagged body ("No
-// changes detected" carries no diff at all and never reaches it). It runs once per view, at the
-// sanitize seam; the painter reads its answer off the view (toolView.hasDiffBody) rather than
-// asking again.
+// changes detected" carries no diff at all and never reaches it). It runs once per body, in
+// newToolBody; the painter reads the answer off the body (toolBody.isDiff) rather than asking
+// again.
 func bodyIsDiff(details []detailLine) bool {
 	for _, d := range details {
 		if d.Kind == detailDiffAdded || d.Kind == detailDiffRemoved {
@@ -377,20 +423,23 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult) {
 	if line, ok := summaryLine(result.Summary); ok {
 		tv.Summary = line
 		if known && p.body != nil {
-			tv.Details = append(tv.Details, p.body(result.Content)...)
+			tv.Details = tv.Details.with(p.body(result.Content))
 		}
 		return
 	}
 	if known && p.detail != nil {
 		out := p.detail(result.Content)
 		tv.Summary = out.Summary
-		tv.Details = append(tv.Details, out.Details...)
+		tv.Details = tv.Details.with(out.Details)
 		return
 	}
 	// Unknown (or summary-less) tool: surface the raw result so it is never silently dropped.
-	for _, ln := range splitLines(strings.TrimRight(result.Content, "\n")) {
-		tv.Details = append(tv.Details, detailLine{Text: ln})
+	raw := splitLines(strings.TrimRight(result.Content, "\n"))
+	lines := make([]detailLine, 0, len(raw))
+	for _, ln := range raw {
+		lines = append(lines, detailLine{Text: ln})
 	}
+	tv.Details = tv.Details.with(lines)
 }
 
 // summaryLine words a tool's structured outcome as the one-line summary that rides the

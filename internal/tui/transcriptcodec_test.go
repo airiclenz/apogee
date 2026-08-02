@@ -19,19 +19,20 @@ import (
 // a standalone tool result, a recovered error, a neutral note, and a presented document with a
 // domain Method. It is the fixture behind the round-trip and exclusion tests.
 //
-// The tool card is finished through sanitize rather than left a bare literal, because that seam is
-// where a view's body kind is settled (toolView.hasDiffBody) — a fixture that skipped it would
-// describe a view the presenter never produces, and the round-trip's DeepEqual would then pass or
-// fail on the fixture's shortcut instead of on the codec.
+// The tool card's body is built through newToolBody and the card finished through sanitize rather
+// than left a bare literal, because those are the seams a real view passes: the body's kind is
+// settled where its lines are (toolBody), and a fixture that skipped them would describe a view the
+// presenter never produces — the round-trip's DeepEqual would then pass or fail on the fixture's
+// shortcut instead of on the codec.
 func mixedEntries() []entry {
 	toolCard := toolView{
 		Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
 		Summary: detailLine{Text: "1 - 100"},
-		Details: []detailLine{
+		Details: newToolBody([]detailLine{
 			{Kind: detailDiffAdded, Text: "+ added line"},
 			{Kind: detailDiffRemoved, Text: "- removed line"},
 			{Kind: detailPlain, Text: "  context"},
-		},
+		}),
 	}
 	toolCard.sanitize()
 	return []entry{
@@ -253,7 +254,7 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 			tool: toolView{
 				Label: "Read" + esc + "File", Target: "ma" + esc + "in.go", name: "read" + esc + "_file",
 				Summary: detailLine{Text: "1" + esc + "2"},
-				Details: []detailLine{{Kind: detailDiffAdded, Text: "+a" + esc + "dd"}},
+				Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+a" + esc + "dd"}}),
 			},
 		},
 		{
@@ -285,7 +286,7 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 		assertNoESC(t, e.tool.Target)
 		assertNoESC(t, e.tool.name)
 		assertNoESC(t, e.tool.Summary.Text)
-		for _, d := range e.tool.Details {
+		for _, d := range e.tool.Details.all() {
 			assertNoESC(t, d.Text)
 		}
 		assertNoESC(t, e.presented.Title)
@@ -313,7 +314,7 @@ func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
 		kind: entryToolCall, callID: "c1", done: true,
 		tool: toolView{
 			Label: "View Diff", Verb: "diffing", Target: "main.go", name: "view_diff",
-			Summary: detailLine{Text: "+23 -0"}, Details: body,
+			Summary: detailLine{Text: "+23 -0"}, Details: newToolBody(body),
 		},
 	}}}
 
@@ -328,10 +329,10 @@ func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("decoded %d entries; want the one tool call", len(got))
 	}
-	if !got[0].tool.hasDiffBody {
+	if !got[0].tool.Details.isDiff() {
 		t.Error("decoded diff body did not settle as a diff body")
 	}
-	shown, _, truncated := collapsedDetails(got[0].tool)
+	shown, _, truncated := collapsedDetails(got[0].tool.Details)
 	if !truncated || len(shown) != diffDetailCap {
 		t.Errorf("decoded diff body paints %d lines (truncated=%v); want the diff cap of %d",
 			len(shown), truncated, diffDetailCap)
@@ -362,7 +363,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 			tool: toolView{
 				Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
 				Summary: detailLine{Text: "1 - 10"},
-				Details: []detailLine{{Kind: detailDiffAdded, Text: "+x"}},
+				Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+x"}}),
 			},
 		},
 		entry{kind: entryPresented, presented: presentedView{Title: "Report", Path: "out/report.md", Method: domain.PresentShown}},

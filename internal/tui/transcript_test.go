@@ -85,7 +85,7 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	if tool.tool.Label != "Read File" || tool.tool.Target != "main.go" {
 		t.Errorf("tool view = %+v; want a Read File / main.go header", tool.tool)
 	}
-	if tool.tool.Summary.Text != "1 - 1" || len(tool.tool.Details) != 0 {
+	if tool.tool.Summary.Text != "1 - 1" || tool.tool.Details.len() != 0 {
 		t.Errorf("tool outcome = %+v / %+v; want a \"1 - 1\" summary and no body", tool.tool.Summary, tool.tool.Details)
 	}
 
@@ -423,7 +423,7 @@ func entryDisplayStrings(e entry) []string {
 		e.startup.Host, e.startup.Model,
 	}
 	out = append(out, e.skills...)
-	for _, d := range e.tool.Details {
+	for _, d := range e.tool.Details.all() {
 		out = append(out, d.Text)
 	}
 	return out
@@ -516,7 +516,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 			Arguments: escapedArgs(t, "note", "bo"+osc52+"dy"),
 		}})
 		assertTranscriptNoESC(t, tr)
-		if len(tr.entries[0].tool.Details) == 0 {
+		if tr.entries[0].tool.Details.len() == 0 {
 			t.Fatal("the unknown-tool fallback rendered no argument body to strip")
 		}
 	})
@@ -532,7 +532,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 			Content: "out" + osc52 + "put\nsecond" + csi + " line\nthird line",
 		}})
 		assertTranscriptNoESC(t, tr)
-		if len(tr.entries[0].tool.Details) == 0 {
+		if tr.entries[0].tool.Details.len() == 0 {
 			t.Fatal("the multi-line output rendered no detail lines to strip")
 		}
 	})
@@ -1133,7 +1133,7 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	if !b.done {
 		t.Fatal("call b's result did not fold into it")
 	}
-	if b.tool.Summary.Text != "1 - 10" || len(b.tool.Details) != 0 {
+	if b.tool.Summary.Text != "1 - 10" || b.tool.Details.len() != 0 {
 		t.Errorf("call b outcome = %+v / %+v; want a \"1 - 10\" summary and no body", b.tool.Summary, b.tool.Details)
 	}
 

@@ -339,7 +339,7 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 	view := head.tool
 	if !head.expanded {
 		view.Summary = subAgentSummary(head, span)
-		view.Details = nil
+		view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
 	}
 	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
 		expanded: head.expanded,
@@ -384,8 +384,8 @@ func subAgentGist(head entry, span []entry) string {
 		if head.tool.Summary.Text != "" {
 			return head.tool.Summary.Text
 		}
-		if len(head.tool.Details) > 0 {
-			return head.tool.Details[0].Text
+		if body := head.tool.Details; body.len() > 0 {
+			return body.all()[0].Text
 		}
 		return ""
 	}
@@ -717,7 +717,7 @@ func blockHidesWhenCollapsed(views []toolView) bool {
 		if tv.Target == "" {
 			continue
 		}
-		if _, _, truncated := collapsedDetails(tv); truncated {
+		if _, _, truncated := collapsedDetails(tv.Details); truncated {
 			return true
 		}
 	}
@@ -768,10 +768,10 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	var out blockPaint
 	out.add(hangingWrap(th, style, marker, text, width), targetNone)
 	if expanded {
-		out.add(renderSubDetails(th, tv.Details, indent, width), targetNone)
+		out.add(renderSubDetails(th, tv.Details.all(), indent, width), targetNone)
 		return out
 	}
-	shown, remainder, truncated := collapsedDetails(tv)
+	shown, remainder, truncated := collapsedDetails(tv.Details)
 	out.add(renderSubDetails(th, shown, indent, width), targetNone)
 	if truncated {
 		out.add(renderSubDetails(th, []detailLine{remainder}, indent, width), targetMarker)
@@ -796,30 +796,31 @@ const diffDetailCap = 20
 // The split is also the toggle-target rule's oracle: truncated is exactly "the collapsed paint
 // hides something", which is what makes a header clickable (blockHidesWhenCollapsed).
 //
-// Two flavours, told apart by the kind the view settled when its body was produced
-// (toolView.hasDiffBody, toolpresent.go): a diff body — one carrying at least one tagged line,
-// which every body diffBody produces does — keeps diffDetailCap lines, so a focused change reads
-// in place; any other multi-line body keeps its first line alone, the gist a Run's output is
-// worth in the chat. A body already inside its cap paints whole and grows no marker.
+// Two flavours, told apart by the kind the body settled when its lines were paired with it
+// (toolBody, toolpresent.go): a diff body — one carrying at least one tagged line, which every
+// body diffBody produces does — keeps diffDetailCap lines, so a focused change reads in place; any
+// other multi-line body keeps its first line alone, the gist a Run's output is worth in the chat.
+// A body already inside its cap paints whole and grows no marker.
 //
 // The kind is READ, never re-derived here. This runs on every repaint and twice per call — the
 // toggle-target rule asks it as well as the branch — over a body the entry now retains whole, so
 // sniffing the lines at this seam would walk a command's whole output once a frame. It takes the
-// VIEW rather than its Details for the same reason the rule and the paint share one function: the
-// body and the kind that caps it cannot be passed in disagreeing.
+// BODY, which is why reading rather than deriving is safe: the lines and the kind that caps them
+// are one value and cannot be handed in disagreeing.
 //
 // It is the BODY's rule, not every detail line's: the targetless shape has no body — its detail
 // lines ARE the block's ┝/┕ branches (renderDetails), an unregistered tool's verbatim arguments
 // among them — and hiding those would hide what the model asked for, which no block does.
-func collapsedDetails(tv toolView) (shown []detailLine, remainder detailLine, truncated bool) {
+func collapsedDetails(body toolBody) (shown []detailLine, remainder detailLine, truncated bool) {
 	limit := 1
-	if tv.hasDiffBody {
+	if body.isDiff() {
 		limit = diffDetailCap
 	}
-	if len(tv.Details) <= limit {
-		return tv.Details, detailLine{}, false
+	lines := body.all()
+	if len(lines) <= limit {
+		return lines, detailLine{}, false
 	}
-	return tv.Details[:limit], detailLine{Text: "… +" + plural(len(tv.Details)-limit, "more line")}, true
+	return lines[:limit], detailLine{Text: "… +" + plural(len(lines)-limit, "more line")}, true
 }
 
 // branchDetails is what a targetless call hangs off its header: the body, plus the summary as
@@ -828,10 +829,10 @@ func collapsedDetails(tv toolView) (shown []detailLine, remainder detailLine, tr
 // always sat, after the arguments that provoked it.
 func branchDetails(tv toolView) []detailLine {
 	if tv.Summary.Text == "" {
-		return tv.Details
+		return tv.Details.all()
 	}
-	out := make([]detailLine, 0, len(tv.Details)+1)
-	out = append(out, tv.Details...)
+	out := make([]detailLine, 0, tv.Details.len()+1)
+	out = append(out, tv.Details.all()...)
 	return append(out, tv.Summary)
 }
 
@@ -889,7 +890,7 @@ func toolCallRun(entries []entry, i int) []toolView {
 // room it needs. It never counts detail lines: the block's shape does not depend on how many
 // there are, and neither may this.
 func groupable(tv toolView) bool {
-	return tv.Target != "" && len(tv.Details) == 0 && tv.Summary.Kind == detailPlain
+	return tv.Target != "" && tv.Details.len() == 0 && tv.Summary.Kind == detailPlain
 }
 
 // renderOrphanResult renders a tool result that matched no pending call (a defensive
@@ -906,7 +907,7 @@ func renderOrphanResult(th theme, text string, width int) []string {
 	for _, ln := range splitLines(text) {
 		details = append(details, detailLine{Text: ln})
 	}
-	return renderToolBlock(th, []toolView{{Label: "result", Details: details}}, width, blockState{}).lines
+	return renderToolBlock(th, []toolView{{Label: "result", Details: newToolBody(details)}}, width, blockState{}).lines
 }
 
 // renderDetails renders tool-detail lines as ┝/┕ tree branches (the last line gets ┕),

@@ -1,6 +1,12 @@
 package tui
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"maps"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,11 +17,11 @@ import (
 // detailsText joins a view's whole outcome — the branch-riding summary, then the body beneath
 // it — for substring assertions that do not care which half a line landed in.
 func detailsText(tv toolView) string {
-	parts := make([]string, 0, len(tv.Details)+1)
+	parts := make([]string, 0, tv.Details.len()+1)
 	if tv.Summary.Text != "" {
 		parts = append(parts, tv.Summary.Text)
 	}
-	for _, d := range tv.Details {
+	for _, d := range tv.Details.all() {
 		parts = append(parts, d.Text)
 	}
 	return strings.Join(parts, "\n")
@@ -328,7 +334,7 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 	if got := tv.Summary.Text; got != "error: file not found: missing" {
 		t.Errorf("error summary = %q; want the error text", got)
 	}
-	if len(tv.Details) != 0 {
+	if tv.Details.len() != 0 {
 		t.Errorf("error body = %+v; want nothing beneath the branch", tv.Details)
 	}
 	if !groupable(tv) {
@@ -393,8 +399,8 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			if tv.Summary.Text != tc.wantSummary {
 				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
 			}
-			body := make([]string, 0, len(tv.Details))
-			for _, d := range tv.Details {
+			body := make([]string, 0, tv.Details.len())
+			for _, d := range tv.Details.all() {
 				body = append(body, d.Text)
 			}
 			if strings.Join(body, "\n") != strings.Join(tc.wantBody, "\n") {
@@ -408,7 +414,7 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 // it groups with its finished neighbours rather than breaking their block.
 func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)})
-	if tv.Summary.Text != "" || len(tv.Details) != 0 {
+	if tv.Summary.Text != "" || tv.Details.len() != 0 {
 		t.Errorf("in-flight outcome = %+v / %+v; want both halves empty", tv.Summary, tv.Details)
 	}
 	if !groupable(tv) {
@@ -445,12 +451,12 @@ func TestDiffBody(t *testing.T) {
 	}
 }
 
-// TestBodyKindIsSettledAtTheViewSeam pins the mechanism the collapsed paint's cap reads: the
-// body's kind is decided ONCE, where the view is finished (sanitize), and kept on the view — not
-// re-derived from the lines on every repaint, over a body the entry retains whole. Both flavours
-// and both edges are covered: an empty body and a single line never truncate whatever their kind,
-// so they are exactly the shapes where a wrong answer would hide until the body grew.
-func TestBodyKindIsSettledAtTheViewSeam(t *testing.T) {
+// TestBodyKindIsSettledWhereTheLinesAre pins the mechanism the collapsed paint's cap reads: the
+// body's kind is decided ONCE, where the lines are put into a body (newToolBody), and carried by
+// that body — not re-derived from the lines on every repaint, over a body the entry retains whole.
+// Both flavours and both edges are covered: an empty body and a single line never truncate whatever
+// their kind, so they are exactly the shapes where a wrong answer would hide until the body grew.
+func TestBodyKindIsSettledWhereTheLinesAre(t *testing.T) {
 	tests := []struct {
 		name    string
 		details []detailLine
@@ -478,10 +484,10 @@ func TestBodyKindIsSettledAtTheViewSeam(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tv := toolView{Label: "Tool", Target: "main.go", Details: tc.details}
+			tv := toolView{Label: "Tool", Target: "main.go", Details: newToolBody(tc.details)}
 			tv.sanitize()
-			if tv.hasDiffBody != tc.want {
-				t.Errorf("hasDiffBody = %v, want %v for %+v", tv.hasDiffBody, tc.want, tc.details)
+			if tv.Details.isDiff() != tc.want {
+				t.Errorf("body kind = %v, want %v for %+v", tv.Details.isDiff(), tc.want, tc.details)
 			}
 		})
 	}
@@ -489,21 +495,141 @@ func TestBodyKindIsSettledAtTheViewSeam(t *testing.T) {
 
 // TestBodyKindFollowsTheProducer proves the seam is reached on the paths that actually make
 // bodies: view_diff's tagged body settles as a diff, free-form output settles as plain. Together
-// with TestBodyKindIsSettledAtTheViewSeam this is the whole contract collapsedDetails relies on.
+// with TestBodyKindIsSettledWhereTheLinesAre this is the whole contract collapsedDetails relies on.
 func TestBodyKindFollowsTheProducer(t *testing.T) {
 	diff := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)})
 	diff.enrichWithResult(domain.ToolResult{
 		CallID: "1", Content: "  ctx\n- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1},
 	})
-	if !diff.hasDiffBody {
+	if !diff.Details.isDiff() {
 		t.Errorf("a view_diff body must settle as a diff body: %+v", diff.Details)
 	}
 
 	run := presentToolCall(domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)})
 	run.enrichWithResult(domain.ToolResult{CallID: "2", Content: "ok   a\nok   b\nPASS"})
-	if run.hasDiffBody {
+	if run.Details.isDiff() {
 		t.Errorf("free-form output must settle as a plain body: %+v", run.Details)
 	}
+}
+
+// TestBodyKindMatchesItsLinesEverywhere is the behavioural half of the invariant collapsedDetails
+// trusts: whatever a body says about itself must be what a fresh scan of its own lines says, for
+// every view the presenter produces and for every view that comes back off the wire. It walks the
+// whole registry (plus the unregistered fallback) rather than a chosen few, so a tool added with a
+// new body path is covered the day it is registered — and each view is round-tripped through the
+// codec, the second producer of views, whose decode has to settle a kind the wire never carried.
+//
+// The staleness this guards is silent by nature: a diff body that says it is plain paints one line
+// and a "… +N more lines" marker where twenty lines of change belong, and nothing else goes wrong.
+func TestBodyKindMatchesItsLinesEverywhere(t *testing.T) {
+	t.Parallel()
+
+	// One argument blob covering every registered target extractor, so each tool gets a realistic
+	// header, and results in both flavours: a tagged diff and free-form prose.
+	const args = `{"path":"main.go","paths":["main.go"],"pattern":"TODO","command":"go test ./...",` +
+		`"query":"go slices","url":"https://example.test","task":"tidy up","question":"which one?",` +
+		`"content":"x","find":"a","replace":"b","edits":[{"find":"a","replace":"b"}]}`
+	results := []domain.ToolResult{
+		{CallID: "1", Content: "  ctx\n- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1}},
+		{CallID: "1", Content: "ok   a\nok   b\nPASS"},
+		{CallID: "1", Content: "boom", IsError: true},
+	}
+
+	names := slices.Sorted(maps.Keys(toolRegistry))
+	names = append(names, "not_a_registered_tool")
+	for _, name := range names {
+		for i, result := range results {
+			t.Run(name+"/"+strconv.Itoa(i), func(t *testing.T) {
+				tv := presentToolCall(domain.ToolCall{ID: "1", Tool: name, Arguments: []byte(args)})
+				assertBodyKindMatchesLines(t, tv, "before the result")
+				tv.enrichWithResult(result)
+				assertBodyKindMatchesLines(t, tv, "after the result")
+				assertBodyKindMatchesLines(t, fromWireToolView(toWireToolView(tv)), "off the wire")
+			})
+		}
+	}
+}
+
+// assertBodyKindMatchesLines fails when a view's body disagrees with a fresh scan of the very lines
+// it holds — the stale pairing the body type exists to make unwritable.
+func assertBodyKindMatchesLines(t *testing.T, tv toolView, when string) {
+	t.Helper()
+	if want := bodyIsDiff(tv.Details.all()); tv.Details.isDiff() != want {
+		t.Errorf("%s: body says isDiff=%v, its lines say %v: %+v", when, tv.Details.isDiff(), want, tv.Details.all())
+	}
+}
+
+// toolBodyType and toolBodyConstructor are the names the literal guard watches: the retained body
+// and the only function allowed to pair its lines with their kind.
+const (
+	toolBodyType        = "toolBody"
+	toolBodyConstructor = "newToolBody"
+)
+
+// TestToolBodyIsBuiltOnlyByItsConstructor closes the last door on a stale body. The type makes the
+// natural mistake impossible — a bare []detailLine is not a body, so no caller can hand the painter
+// lines with no kind — but a composite literal could still name the fields and pair them wrongly.
+// This reads the whole package off disk and fails on any toolBody literal with elements outside
+// newToolBody; the zero literal (no lines, no diff) is consistent by construction and stays legal.
+//
+// It is parsed rather than reflected over because the defect is a line of source that does not exist
+// yet: reflection can only see the pairings a run produced, and this one would ship as a paint bug.
+func TestToolBodyIsBuiltOnlyByItsConstructor(t *testing.T) {
+	t.Parallel()
+
+	dir, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package directory: %v", err)
+	}
+	fset := token.NewFileSet()
+	scanned, allowed := 0, 0
+	for _, de := range dir {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, de.Name(), nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", de.Name(), err)
+		}
+		scanned++
+		ctor := funcDeclNamed(file, toolBodyConstructor)
+		// Everything in the file, not only function bodies: a package-level var could pair a
+		// body's fields just as wrongly as a statement can.
+		ast.Inspect(file, func(n ast.Node) bool {
+			lit, ok := n.(*ast.CompositeLit)
+			if !ok || len(lit.Elts) == 0 {
+				return true
+			}
+			if id, ok := lit.Type.(*ast.Ident); !ok || id.Name != toolBodyType {
+				return true
+			}
+			if ctor != nil && lit.Pos() > ctor.Pos() && lit.End() < ctor.End() {
+				allowed++
+				return true
+			}
+			t.Errorf("%s: a %s literal with its own fields; build it with %s so its kind is derived from the lines it is paired with",
+				fset.Position(lit.Pos()), toolBodyType, toolBodyConstructor)
+			return true
+		})
+	}
+	// A guard that parsed nothing, or that no longer finds the one literal it permits, proves
+	// nothing: the type or its constructor was renamed and this test stopped watching anything.
+	if scanned == 0 {
+		t.Fatal("no Go files were parsed; the body-literal guard proved nothing")
+	}
+	if allowed == 0 {
+		t.Fatalf("%s builds no %s literal; the guard is watching for a shape that no longer exists", toolBodyConstructor, toolBodyType)
+	}
+}
+
+// funcDeclNamed returns the file's declaration of the named function, or nil when it declares none.
+func funcDeclNamed(file *ast.File, name string) *ast.FuncDecl {
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == name {
+			return fn
+		}
+	}
+	return nil
 }
 
 // TestDiffStatSpansTheWholeDiff: the diffstat riding the branch describes the whole diff even
@@ -519,8 +645,8 @@ func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 	if want := "+" + strconv.Itoa(diffDetailCap+5) + " -0"; tv.Summary.Text != want {
 		t.Errorf("diffstat = %q, want %q", tv.Summary.Text, want)
 	}
-	if len(tv.Details) != diffDetailCap+5 {
-		t.Errorf("body has %d lines, want the whole %d", len(tv.Details), diffDetailCap+5)
+	if tv.Details.len() != diffDetailCap+5 {
+		t.Errorf("body has %d lines, want the whole %d", tv.Details.len(), diffDetailCap+5)
 	}
 }
 
@@ -534,7 +660,7 @@ func TestViewDiffNoChangesRendersAsProse(t *testing.T) {
 	if tv.Summary.Text != "No changes detected" || tv.Summary.Kind != detailPlain {
 		t.Errorf("the no-changes sentinel must be one plain summary line: %+v", tv.Summary)
 	}
-	if len(tv.Details) != 0 {
+	if tv.Details.len() != 0 {
 		t.Errorf("the no-changes sentinel must hang nothing beneath the branch: %+v", tv.Details)
 	}
 }
