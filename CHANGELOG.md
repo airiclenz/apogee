@@ -849,6 +849,20 @@ point is a **minor** bump, not a breaking change.
     session** — so `/sessions` listed the conversation you had just closed twice, and the fresh
     session then carried on updating the duplicate under the old one's name and start time. The
     retirement now waits its turn in the same queue, so one conversation is one record.
+  - **Resuming a session can no longer overwrite it with the one you were leaving.** Picking a
+    session in `/sessions` switches which file gets saved from then on, and that switch used to
+    happen the instant the record loaded — ahead of any save still on its way to disk. That save then
+    landed in the file you had *just resumed*, replacing its conversation with the one you had left
+    and taking its scrollback with it. The switch now waits its turn behind the writes it belongs
+    after, so the outgoing conversation finishes saving into its own file first. Nothing you see
+    changes: the resumed session paints straight away, as it always did.
+  - **Deleting the session you are in no longer leaves a duplicate of it behind.** Deleting the
+    *current* session's file keeps the conversation alive in memory and gives it a fresh id for the
+    next turn. That renumbering also went straight through, so a save already on its way to disk
+    arrived after it and filed the live conversation as a **second** session — and the deletion then
+    removed the wrong one of the two, leaving the copy you meant to delete in the list. It is queued
+    now, in the order you asked for it: everything still pending, then the renumbering, then the
+    deletion.
 
 - **A mechanism that cannot be enabled no longer reports itself as `apogee: apogee: …`.** When a
   mechanism named for arming collides with one already in the registry — the same ID twice, or an ID

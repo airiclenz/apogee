@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -40,6 +41,15 @@ func openBrowser(t *testing.T, m Model) Model {
 		t.Fatal("/sessions dispatched no List Cmd")
 	}
 	return step(t, m, cmdMsg(cmd))
+}
+
+// foldResume folds a sessionLoadedMsg and drains the record writes behind it. The resume adopts the
+// loaded id through the write queue now (sessions.go), so a test that asserts on the host's active
+// session — or drives a save against it — has to let the queue settle first.
+func foldResume(t *testing.T, m Model, loadCmd tea.Cmd) Model {
+	t.Helper()
+	m, cmd := stepCmd(t, m, cmdMsg(loadCmd))
+	return runWrites(t, m, cmd)
 }
 
 // storeMeta seeds one record into the fake host with the given browsable metadata and transcript
@@ -153,7 +163,7 @@ func TestSessionBrowserResumeHappyPath(t *testing.T) {
 	if m.sessionBrowser.open {
 		t.Error("browser stayed open after enter; want it closed while the record loads")
 	}
-	m = step(t, m, cmdMsg(cmd)) // fold sessionLoadedMsg → resumeLoaded
+	m = foldResume(t, m, cmd) // fold sessionLoadedMsg → resumeLoaded, then land its queued Activate
 
 	if got := eng.restores(); len(got) != 1 || string(got[0].State) != `{"k":1}` {
 		t.Fatalf("RestoreSession calls = %v, want exactly the loaded record's Session", got)
@@ -213,7 +223,7 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 		if cmd == nil {
 			t.Fatalf("round %d: enter dispatched no Load Cmd", round)
 		}
-		m = step(t, m, cmdMsg(cmd)) // fold sessionLoadedMsg → resumeLoaded
+		m = foldResume(t, m, cmd) // fold sessionLoadedMsg → resumeLoaded, then land its queued Activate
 		if !hasEntry(m, entryNote, "resumed: france question") {
 			t.Fatalf("round %d: the human was not shown the resume notice", round)
 		}
@@ -261,7 +271,7 @@ func TestSessionBrowserResumeInterruptedNote(t *testing.T) {
 	m = openBrowser(t, m)
 
 	m, cmd := stepCmd(t, m, keyEnter())
-	m = step(t, m, cmdMsg(cmd))
+	m = foldResume(t, m, cmd)
 
 	if !hasEntry(m, entryNote, interruptedNote) {
 		t.Error("a mid-Exchange resume did not append the interrupted note")
@@ -311,7 +321,7 @@ func TestSessionBrowserResumeErrorLeavesActiveSessionUntouched(t *testing.T) {
 
 	m = openBrowser(t, m)
 	m, cmd := stepCmd(t, m, keyEnter())
-	m = step(t, m, cmdMsg(cmd)) // fold sessionLoadedMsg → resumeLoaded, RestoreSession fails
+	m = foldResume(t, m, cmd) // fold sessionLoadedMsg → resumeLoaded, RestoreSession fails
 
 	if host.ActiveID() != "current" {
 		t.Errorf("active session after a failed restore = %q, want the untouched %q", host.ActiveID(), "current")
@@ -343,20 +353,142 @@ func TestSessionBrowserDeleteActiveRotates(t *testing.T) {
 	}
 	m, cmd := stepCmd(t, m, keyRune('y'))
 	if cmd == nil {
-		t.Fatal("y dispatched no delete Cmd")
-	}
-	if host.rotateCount() != 1 {
-		t.Errorf("Rotate calls after deleting the active session = %d, want 1", host.rotateCount())
+		t.Fatal("y dispatched no record write")
 	}
 	if !hasEntry(m, entryNote, "current session's file deleted — it lives on in memory; the next turn saves it as a new session") {
 		t.Error("deleting the active session did not note that the conversation lives on")
 	}
-	m = step(t, m, cmdMsg(cmd)) // fold the re-list
+	m = runWrites(t, m, cmd) // the rotate, then the delete, then the re-list it carries
+	if host.rotateCount() != 1 {
+		t.Errorf("Rotate calls after deleting the active session = %d, want 1", host.rotateCount())
+	}
 	if _, gone := host.stored["sess-1"]; gone {
 		t.Error("the deleted session still exists in the store")
 	}
 	if !m.sessionBrowser.open {
 		t.Error("the browser closed even though sess-2 remains")
+	}
+}
+
+// Deleting the ACTIVE session retires its id through the write queue, not on the keypress. Run
+// straight through, the Rotate overtook whatever the queue was holding: a save already in flight
+// reached an already-inactive host and minted a SECOND record for the live conversation — the same
+// duplicate `/clear` used to file — and the delete then removed the wrong one of the two (audit
+// 2026-08-01 follow-up, action item 1). Asserted at the fold layer, because the recording host
+// serialises its own calls under one mutex and so cannot see the collision: the rotate must WAIT for
+// the in-flight save and still precede the delete.
+func TestSessionBrowserDeleteActiveQueuesTheRotate(t *testing.T) {
+	host := &fakeSessionHost{}
+	now := time.Now()
+	storeMeta(host, "sess-1", "the active one", "/ws/a", now, 0, nil)
+	storeMeta(host, "sess-2", "another one", "/ws/a", now.Add(-time.Hour), 0, nil)
+	host.activeID = "sess-1" // sess-1 is the live conversation's file
+
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	seedConversation(&m)
+	m = openBrowser(t, m) // sess-1 is newest, so it is selected first
+
+	// A per-Turn save goes out and is left in flight: its Cmd is held rather than run.
+	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":1}`)}})
+	if saveCmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+
+	m = step(t, m, keyRune('d'))
+	m, cmd := stepCmd(t, m, keyRune('y'))
+	if cmd != nil {
+		t.Fatal("deleting the active session dispatched a record write beside the in-flight save")
+	}
+	if host.rotateCount() != 0 {
+		t.Fatalf("Rotate calls while a save was in flight = %d; want 0 — the rotate is a queued write", host.rotateCount())
+	}
+	if len(m.pendingWrites) != 2 || m.pendingWrites[0].kind != writeRotate || m.pendingWrites[1].kind != writeDelete {
+		t.Fatalf("pending writes = %+v; want the rotate then the delete, both behind the save", m.pendingWrites)
+	}
+
+	// Draining lands the save under the id it was dispatched against, then the retirement, then the
+	// removal — one record for the conversation being deleted, not two.
+	m, cmd = stepCmd(t, m, cmdMsg(saveCmd))
+	m = runWrites(t, m, cmd)
+	if n := len(m.pendingWrites); n != 0 {
+		t.Errorf("pending writes after the drain = %d; want an empty queue", n)
+	}
+	calls := host.savedCalls()
+	if len(calls) != 1 || calls[0].id != "sess-1" {
+		t.Fatalf("saves = %+v; want the single in-flight one, under the active id it was dispatched against", calls)
+	}
+	if host.rotateCount() != 1 {
+		t.Errorf("Rotate calls once the queue drained = %d; want 1", host.rotateCount())
+	}
+	if host.ActiveID() != "" {
+		t.Errorf("active id after the drain = %q; want the deleted session's id retired", host.ActiveID())
+	}
+	if _, ok := host.stored["sess-1"]; ok {
+		t.Error("the deleted session is still in the store")
+	}
+}
+
+// A resume adopts the loaded record's id through the write queue too. Applied on the Update
+// goroutine, the Activate jumped every write the queue was holding, so the OUTGOING conversation's
+// coalesced save then went out against the record just resumed — the loaded session's transcript and
+// engine state overwritten by the conversation the human was leaving (audit 2026-08-01 follow-up,
+// action item 1). The queued save must land in the OUTGOING file, and only then may the loaded id
+// become the one saves resolve against.
+func TestSessionBrowserResumeQueuesTheActivate(t *testing.T) {
+	var src transcript
+	src.addUser("what is the capital of france", nil)
+	blob, err := encodeTranscript(&src)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	host := &fakeSessionHost{}
+	host.activeID = "outgoing" // the conversation being left; its saves must keep targeting it
+	storeMeta(host, "sess-1", "france question", "/ws/a", time.Now(), 0, blob)
+
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	seedConversation(&m)
+	m = openBrowser(t, m)
+
+	// Two saves of the OUTGOING conversation: the first in flight, the second coalesced behind it.
+	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":1}`)}})
+	if saveCmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+	m, queued := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":2}`)}})
+	if queued != nil {
+		t.Fatal("a snapshot while a save was in flight dispatched instead of coalescing")
+	}
+
+	// Resume sess-1 while both are outstanding.
+	m, loadCmd := stepCmd(t, m, keyEnter())
+	if loadCmd == nil {
+		t.Fatal("enter dispatched no Load Cmd")
+	}
+	m, cmd := stepCmd(t, m, cmdMsg(loadCmd)) // fold sessionLoadedMsg → resumeLoaded
+	if cmd != nil {
+		t.Fatal("the resume dispatched an Activate beside the in-flight save")
+	}
+	if host.ActiveID() != "outgoing" {
+		t.Fatalf("active id during the drain = %q; want the outgoing session until the queue reaches the Activate", host.ActiveID())
+	}
+	if len(m.pendingWrites) != 2 || m.pendingWrites[0].kind != writeSave || m.pendingWrites[1].kind != writeActivate {
+		t.Fatalf("pending writes = %+v; want the coalesced save then the Activate", m.pendingWrites)
+	}
+
+	// Draining lands both outgoing saves in the outgoing file; only then does the resume take effect.
+	m, cmd = stepCmd(t, m, cmdMsg(saveCmd))
+	m = runWrites(t, m, cmd)
+	calls := host.savedCalls()
+	if len(calls) != 2 {
+		t.Fatalf("saves = %+v; want the in-flight one and the coalesced one", calls)
+	}
+	for i, c := range calls {
+		if c.id != "outgoing" {
+			t.Errorf("save %d landed in %q; want the outgoing conversation's own record", i, c.id)
+		}
+	}
+	if host.ActiveID() != "sess-1" {
+		t.Errorf("active id after the drain = %q; want the resumed sess-1", host.ActiveID())
 	}
 }
 

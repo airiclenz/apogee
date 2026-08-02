@@ -1681,6 +1681,61 @@ func TestSessionBrowserWritesQueueBehindAnInFlightSave(t *testing.T) {
 	}
 }
 
+// Saves coalesce latest-wins, but never ACROSS a retarget. Rotate and Activate move which record
+// later saves resolve against, so a save queued before one and a save queued after it describe
+// DIFFERENT records: letting the newer supersede the older would write the incoming conversation
+// into the outgoing record and drop the outgoing conversation's own last state entirely (audit
+// 2026-08-01 follow-up). Within one segment the coalescing is exactly as it was.
+func TestSavesDoNotCoalesceAcrossARetarget(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+	m.transcript.addUser("hi", nil)
+
+	// One save in flight, a second coalescing behind it, then the retarget, then a third save — which
+	// belongs to the session the retarget opens, not to the one the first two describe.
+	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":1}`)}})
+	if saveCmd == nil {
+		t.Fatal("the first snapshot scheduled no save")
+	}
+	m, _ = stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":2}`)}})
+	m.queueWrite(recordWrite{kind: writeRotate})
+	m, _ = stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":3}`)}})
+
+	wantKinds := []recordWriteKind{writeSave, writeRotate, writeSave}
+	if len(m.pendingWrites) != len(wantKinds) {
+		t.Fatalf("pending writes = %+v; want a save, the rotate, and a second save", m.pendingWrites)
+	}
+	for i, want := range wantKinds {
+		if got := m.pendingWrites[i].kind; got != want {
+			t.Fatalf("pending write %d = kind %d; want kind %d (queue %+v)", i, got, want, m.pendingWrites)
+		}
+	}
+	if got := string(m.pendingWrites[0].payload.sess.State); got != `{"n":2}` {
+		t.Errorf("pre-rotate save = %s; want the latest of the two that precede it", got)
+	}
+	if got := string(m.pendingWrites[2].payload.sess.State); got != `{"n":3}` {
+		t.Errorf("post-rotate save = %s; want the snapshot taken after the retarget", got)
+	}
+
+	// Drained, that is one record per conversation: the outgoing one keeps its own last save, and the
+	// save taken after the rotate mints a fresh id rather than overwriting it.
+	m, cmd := stepCmd(t, m, cmdMsg(saveCmd))
+	m = runWrites(t, m, cmd)
+	calls := host.savedCalls()
+	if len(calls) != 3 {
+		t.Fatalf("saves = %+v; want three (n1, the coalesced n2, then n3)", calls)
+	}
+	if calls[0].id != "s1" || calls[1].id != "s1" {
+		t.Errorf("pre-rotate save ids = %q/%q; want both under the outgoing record", calls[0].id, calls[1].id)
+	}
+	if string(calls[1].sess.State) != `{"n":2}` {
+		t.Errorf("last pre-rotate save = %s; want n2", calls[1].sess.State)
+	}
+	if calls[2].id == "s1" || string(calls[2].sess.State) != `{"n":3}` {
+		t.Errorf("post-rotate save = %s under %q; want n3 under a freshly minted id", calls[2].sess.State, calls[2].id)
+	}
+}
+
 // A save failure is soft: the ok→fail edge and the fail→ok recovery each note exactly once, and
 // nothing else interrupts the conversation.
 func TestModelSaveFailureNotesTransitions(t *testing.T) {

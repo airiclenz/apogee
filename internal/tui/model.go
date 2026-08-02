@@ -15,6 +15,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // ----------------------------------------------------------------------------
@@ -580,9 +581,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.saveComplete(msg.Err)
 
 	case recordWriteDoneMsg:
-		// The other two record writes — a Rename or a Delete — returned. Release the single-flight
-		// latch, dispatch whatever waited behind it, and re-list for the browser verbs that repaint
-		// over the result (foldRecordWrite).
+		// The other record writes — a Rename, a Delete, or one of the two retargets (Rotate,
+		// Activate) — returned. Release the single-flight latch, dispatch whatever waited behind it,
+		// and re-list for the browser verbs that repaint over the result (foldRecordWrite).
 		return m, m.foldRecordWrite(msg)
 
 	case autoTitleMsg:
@@ -1552,13 +1553,15 @@ func (m *Model) saveAtIdle() tea.Cmd {
 // flush came to race the coalesced save), and a write scheduled while the latch is held must WAIT
 // rather than dispatch.
 //
-// Rotate joins them as a fourth kind although it writes no file at all: it retires the host's active
-// session, so a save that overtakes it is written under the OLD id and a save it overtakes mints a
-// NEW one — ordering against the same stream is the whole of what it needs. The two closing flushes
-// (quit, /clear) queue for the same reason rather than writing through, which is what leaves the
-// exit waiting on the drain (pumpOrQuit).
+// Rotate and Activate join them although they write no file at all: they RETARGET the stream, moving
+// the active session every later Save resolves against. A save that overtakes a Rotate is written
+// under the OLD id and a save it overtakes mints a NEW one; a save that a resume's Activate overtakes
+// is written into the RESUMED record, replacing the loaded conversation with the outgoing one.
+// Ordering against the same stream is the whole of what either needs. The two closing flushes (quit,
+// /clear) queue for the same reason rather than writing through, which is what leaves the exit
+// waiting on the drain (pumpOrQuit).
 //
-// internal/session.Store holds a mutex over the same three calls, which is the floor under any
+// internal/session.Store holds a mutex over the file-writing calls, which is the floor under any
 // caller that does not come through here. This layer's job is ordering; the store's is atomicity.
 // Which of the two OWNS serialization long term is deliberately still open (C7).
 
@@ -1566,11 +1569,19 @@ func (m *Model) saveAtIdle() tea.Cmd {
 type recordWriteKind int
 
 const (
-	writeSave   recordWriteKind = iota // SessionHost.Save — the per-Turn and idle snapshots
-	writeRename                        // SessionHost.Rename — a generated title, /rename, the browser's `r`
-	writeDelete                        // SessionHost.Delete — the browser's delete verb
-	writeRotate                        // SessionHost.Rotate — /clear|/new retiring the closed session's id
+	writeSave     recordWriteKind = iota // SessionHost.Save — the per-Turn and idle snapshots
+	writeRename                          // SessionHost.Rename — a generated title, /rename, the browser's `r`
+	writeDelete                          // SessionHost.Delete — the browser's delete verb
+	writeRotate                          // SessionHost.Rotate — /clear|/new, and deleting the ACTIVE record, retiring its id
+	writeActivate                        // SessionHost.Activate — a /sessions resume adopting the loaded record's id
 )
+
+// retargets reports whether this kind moves the active session — which record subsequent Saves
+// resolve against — rather than writing the current one. Saves on opposite sides of a retarget
+// describe DIFFERENT records, which is why they must not coalesce across one (queueWrite).
+func (k recordWriteKind) retargets() bool {
+	return k == writeRotate || k == writeActivate
+}
 
 // recordWrite is one queued write to the session record: what to do, and what the fold that lands
 // afterwards must do about it. Plain values only, so the value-copied Model carries it safely
@@ -1584,6 +1595,10 @@ type recordWrite struct {
 	// id addresses the record a rename or a delete acts on; title is the new name (writeRename).
 	id    string
 	title string
+
+	// meta is the loaded record's browsable metadata a resume adopts (writeActivate only). A
+	// session.Meta is plain values throughout, so the value-copied Model carries it safely.
+	meta session.Meta
 
 	// relist re-reads the store once the write lands, so the /sessions overlay repaints over the
 	// result — what the browser's own verbs want, and what the QUIET title apply must not have
@@ -1615,8 +1630,15 @@ func (m *Model) scheduleWrite(w recordWrite) tea.Cmd {
 
 // queueWrite puts w in the pending queue, coalescing saves: a save already waiting is REPLACED by
 // the newer one (latest-wins — the newer snapshot supersedes the older intermediate Turn), while
-// renames and deletes each keep their place, being distinct instructions rather than restatements
-// of one. Without a wired host there is no record to write, so nothing is queued.
+// renames, deletes and the two retargets each keep their place, being distinct instructions rather
+// than restatements of one. Without a wired host there is no record to write, so nothing is queued.
+//
+// Coalescing stops at a retarget. A save queued BEFORE a Rotate or an Activate belongs to the
+// session that was live then, and one queued after belongs to whatever the retarget made live — two
+// different records, so the newer is no restatement of the older. Letting it supersede one across
+// that line would write the incoming conversation into the outgoing record and lose the outgoing
+// one's closing state entirely. Only a save in the queue's LAST segment can be superseded, which is
+// the whole queue whenever no retarget is waiting — the ordinary case, unchanged.
 //
 // The queue is rebuilt rather than written through, so the Model copy this Update started from
 // never sees the change (ADR 0011).
@@ -1624,17 +1646,26 @@ func (m *Model) queueWrite(w recordWrite) {
 	if m.sessions == nil {
 		return
 	}
+	supersede := -1
+	if w.kind == writeSave {
+		for i, q := range m.pendingWrites {
+			switch {
+			case q.kind.retargets():
+				supersede = -1 // a new segment opens; nothing before it describes w's record
+			case q.kind == writeSave:
+				supersede = i
+			}
+		}
+	}
 	next := make([]recordWrite, 0, len(m.pendingWrites)+1)
-	coalesced := false
-	for _, q := range m.pendingWrites {
-		if w.kind == writeSave && q.kind == writeSave {
+	for i, q := range m.pendingWrites {
+		if i == supersede {
 			next = append(next, w)
-			coalesced = true
 			continue
 		}
 		next = append(next, q)
 	}
-	if !coalesced {
+	if supersede < 0 {
 		next = append(next, w)
 	}
 	m.pendingWrites = next
@@ -1674,6 +1705,8 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 			done.err = sessions.Delete(w.id)
 		case writeRotate:
 			sessions.Rotate() // reports nothing: closing a session cannot fail
+		case writeActivate:
+			sessions.Activate(w.meta) // reports nothing: adopting a loaded id cannot fail
 		}
 		if w.relist {
 			// The re-list rides on the write's own goroutine, so the rows the browser repaints are
@@ -1715,11 +1748,11 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 	return m.pumpOrQuit()
 }
 
-// foldRecordWrite folds a finished Rename, Delete or Rotate: it releases the single-flight latch,
-// dispatches whatever waited behind it, and re-lists for the browser verbs that asked to repaint
-// over the result. All three are best-effort — a rename that did not stick leaves the old title on
-// the re-list, a delete that did not leaves the row, a rotate cannot fail — so nothing is said about
-// a failure.
+// foldRecordWrite folds a finished Rename, Delete, Rotate or Activate: it releases the single-flight
+// latch, dispatches whatever waited behind it, and re-lists for the browser verbs that asked to
+// repaint over the result. All of them are best-effort — a rename that did not stick leaves the old
+// title on the re-list, a delete that did not leaves the row, and neither retarget can fail — so
+// nothing is said about a failure.
 //
 // The one failure that is NOT simply swallowed is a quiet title write. Its apply path branches on
 // ActiveID(), which the host mints at the START of the first Save, before the atomic write has put

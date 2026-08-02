@@ -219,6 +219,13 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // cancels back to the row. Deleting the ACTIVE session first rotates the host so the live
 // conversation keeps saving under a fresh id, and notes that its old file is gone (the
 // conversation itself lives on in memory).
+//
+// That rotate is QUEUED ahead of the delete rather than run on the spot (audit 2026-08-01 follow-up).
+// Run synchronously it overtook whatever the queue was holding: a save already in flight or waiting
+// reached an already-inactive host and minted a SECOND record for the live conversation — the same
+// duplicate /clear used to file — and the delete then removed the wrong one of the two. Queued, the
+// order the human asked for is the order the host sees: everything already pending, then the
+// retirement, then the removal.
 func (m Model) sessionConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
@@ -229,7 +236,9 @@ func (m Model) sessionConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		id := visible[m.sessionBrowser.selected].ID
 		if m.sessions != nil && m.sessions.ActiveID() == id {
-			m.sessions.Rotate()
+			// queueWrite, not scheduleWrite: the delete below pumps, so the two verbs leave this fold
+			// as ONE dispatched Cmd (a fold may never batch two record writes — model.go).
+			m.queueWrite(recordWrite{kind: writeRotate})
 			m.transcript.addNote("current session's file deleted — it lives on in memory; the next turn saves it as a new session")
 			m.refreshViewport()
 		}
@@ -323,8 +332,9 @@ func (m Model) loadSession(id string) tea.Cmd {
 // resumeLoaded restores a loaded record into the live engine and repaints its scrollback. On a
 // restore error the view AND the host's active session are left untouched (the locked "a fresh view
 // must never lie about the engine" rule) and the failure is noted — because Load did not activate,
-// the outgoing conversation keeps saving to its own file. Only on success does it activate the
-// loaded session (redirecting future saves) and reset the view like startNewSession — reseed the start-up box, repaint the stored scrollback (a decode failure or a
+// the outgoing conversation keeps saving to its own file. Only on success does it QUEUE the
+// activation of the loaded session (redirecting future saves, once everything already queued against
+// the outgoing record has landed) and reset the view like startNewSession — reseed the start-up box, repaint the stored scrollback (a decode failure or a
 // legacy empty blob degrades to an honest no-scrollback note), relight the gauge from the stored
 // fill, and re-arm the same field set startNewSession resets. A session restored mid-task gets the
 // interrupted note (item 8 supplies the step-only /continue drive that finishes it).
@@ -352,9 +362,15 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// The restore succeeded, so it is now safe to redirect saves at the loaded session's file
 	// (Load deliberately left the active session untouched — see resumeLoaded's doc). A failed
 	// RestoreSession above returns before this, leaving the outgoing conversation's file active.
-	if m.sessions != nil {
-		m.sessions.Activate(msg.rec.Meta)
-	}
+	//
+	// The redirect is QUEUED, not applied here (audit 2026-08-01 follow-up). Applied on the Update
+	// goroutine it jumped every write the queue was already holding, so the OUTGOING conversation's
+	// coalesced save then went out against the record just resumed — the loaded session's transcript
+	// and engine state overwritten by the conversation the human was leaving. Behind the queue the
+	// outgoing save lands in its own file first, and only then does the loaded record become the one
+	// saves resolve against. Nothing else in this fold waits on it: the view below repaints from the
+	// record already in hand, not from the host.
+	cmd := m.scheduleWrite(recordWrite{kind: writeActivate, meta: msg.rec.Meta})
 	// Saves now target a record that already HAS a name, so the automatic naming call is latched off
 	// for the rest of this session exactly as it is for a --resume start (replayResumed), and a title
 	// still waiting for an id is dropped: it was stashed for the session this restore just replaced.
@@ -383,7 +399,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
 	m.layout()
-	return nil
+	return cmd // the queued Activate, when this fold's schedule found the queue idle
 }
 
 // ----------------------------------------------------------------------------

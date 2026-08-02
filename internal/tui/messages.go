@@ -170,13 +170,13 @@ type saveDoneMsg struct {
 }
 
 // recordWriteDoneMsg reports the outcome of the OTHER record writes — one asynchronous
-// SessionHost.Rename, Delete or Rotate. They share the save's single-flight latch (the record-write
-// queue, model.go), so this Msg is what releases it and lets the next write go out. write is the
-// write that finished, because the fold needs its shape: a browser verb re-lists over the result, and a
-// quiet title write that failed is re-stashed rather than lost. err is what the host reported; every
-// other failure here is deliberately swallowed, these being best-effort writes. list carries the
-// re-list the browser's verbs ask for (recordWrite.relist), read on the write's own goroutine right
-// after it landed.
+// SessionHost.Rename, Delete, Rotate or Activate. They share the save's single-flight latch (the
+// record-write queue, model.go), so this Msg is what releases it and lets the next write go out.
+// write is the write that finished, because the fold needs its shape: a browser verb re-lists over
+// the result, and a quiet title write that failed is re-stashed rather than lost. err is what the
+// host reported; every other failure here is deliberately swallowed, these being best-effort writes.
+// list carries the re-list the browser's verbs ask for (recordWrite.relist), read on the write's own
+// goroutine right after it landed.
 type recordWriteDoneMsg struct {
 	write recordWrite
 	err   error
