@@ -10,6 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -162,6 +164,60 @@ func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
 				if want := glyphUser + " /" + it.value; !strings.Contains(flat, want) {
 					t.Errorf("row %d (%q) selected but not on the screen at %d rows with %d staged; want a row leading %q:\n%s",
 						i, it.value, c.height, c.staged, want, flat)
+				}
+			})
+		}
+	}
+}
+
+// TestModalPromptDismissesTheDropdown closes the CO-OCCURRENCE the frame's row allocation was
+// having to arbitrate: a "/" or "@" menu left open while the agent works survived, stale, into the
+// modal prompt that interrupts it. Neither the approval fold nor the ask fold cleared it, and the
+// menu is only ever re-derived at idle and running (recomputeAutocomplete), so what stayed on the
+// screen beside the decision was frozen — no keystroke there filters it, dismisses it or accepts
+// from it, because handleKey has given those keys to the decision — while it went on competing for
+// the same four rows as the pane the run is blocked on.
+func TestModalPromptDismissesTheDropdown(t *testing.T) {
+	arrivals := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{"approval", approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites"}}},
+		{"ask", askReqMsg{Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}}}},
+	}
+	// Both regions the box opens while a worker runs, since both survive into the prompt the same way.
+	drafts := []struct{ name, value string }{
+		{"slash menu", "/"},
+		{"file menu", "@"},
+	}
+
+	for _, a := range arrivals {
+		for _, d := range drafts {
+			t.Run(a.name+"/"+d.name, func(t *testing.T) {
+				m := modelWithOverlayRoomAt(t, 80, 30, Options{Workspace: "."})
+				m.state = stateRunning
+				m.input.SetValue(d.value)
+				m = m.recomputeAutocomplete()
+				m.layout()
+				if !m.autocomplete.active {
+					t.Fatalf("the %q menu did not open — test premise broken", d.value)
+				}
+				before := plain(m.View())
+				if !strings.Contains(before, "╭") {
+					t.Fatalf("the menu is not on the frame — test premise broken:\n%s", before)
+				}
+
+				m = step(t, m, a.msg)
+
+				if m.autocomplete.active {
+					t.Errorf("the %q menu survived the %s prompt: a stale menu may not share the frame with a decision surface",
+						d.value, a.name)
+				}
+				if got := m.frameOverlays().dropdown; got != "" {
+					t.Errorf("the frame still draws the dropdown beside the prompt:\n%s", got)
+				}
+				if got := m.frameRowPlan(m.openPanes()).panes[paneDropdown]; got != 0 {
+					t.Errorf("the row allocation still seats %d dropdown rows beside the prompt", got)
 				}
 			})
 		}

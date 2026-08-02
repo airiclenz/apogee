@@ -96,7 +96,8 @@ transcript there.
 rows the frame cannot hold: it spends what the window can spare above the input box, so a long
 choice set on a half-height pane scrolls a smaller window around the selection, and on a window
 too short for both, the pane keeps its rows and the session area goes to nothing. The input box
-and the footer are never the ones that give way — they are the frame's floor.
+and the footer are never the ones that give way — they are the frame's floor. (The box's floor is
+the box, not every row a draft grew it to: see the decision-surface rule below.)
 
 **The budget is the FRAME's, not each surface's.** All of them are spending the same rows, so they
 are allotted them together, once, before any of them is drawn — never each against the whole window
@@ -112,9 +113,30 @@ doing.** The **session area** goes first and goes to nothing; then the **staged 
 reminder rather than a control, and whose count the status line is carrying anyway; then the
 **`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the **`/sessions`
 browser and the picker**; and last the **approval or ask prompt**, which the run itself is blocked
-on. The input box and the footer are not in the division at all. Two panes can want the same rows —
-a dropdown opened while the agent works is still open when an approval prompt interrupts it — and
-on a window that cannot seat both, the one further down that order is not drawn.
+on. The footer is not in the division at all, and the input box is in it only at its very end, and
+only for the prompt (below). Two panes can want the same rows, and on a window that cannot seat
+both, the one further down that order is not drawn.
+
+**A decision surface is never invisible while its keys are live.** The approval and ask prompts are
+the two, and being last in the give-way order is not enough on its own, because the **input box**
+was outside the order entirely: a three-line draft grew the box by two rows, the frame had four to
+give above it, and the prompt fell off the allocation with `a`/`d`/`s` still answering it — the
+whole of what the frame then said about the decision being `approval needed` on the status line, no
+tool name. So the box's **extra draft rows** join the order, at the very end of it: the box always
+keeps one content row, and the rows a draft grew it past that give way to the prompt and to nothing
+else. "The input box never gives way" is about the box, not about every row a draft grew it to —
+the box is on the frame at every window size, and what the human was typing is still in it, drawn
+on as many rows as the frame can pay for. The dropdown, the browser and the picker never take the
+box's rows: the browser and the picker own the keyboard while they are open, so no draft can be
+growing beside them, and the dropdown is a completion of the very draft it would be shrinking.
+Below twelve rows there is no pane at all (see the four-row floor below), which is the floor of the
+whole arrangement rather than an exception to this rule.
+
+**A pane that gives way entirely leaves its fact on the status line.** That is the band's licence
+for disappearing — the `N queued` readout carries the count — and the status line therefore owes
+that readout the same width discipline a pane's title row owes its count (below): the left slot is
+composed **to** the window rather than composed long and clipped to it, so a narrow window sheds
+the activity phrase around the count and never the count off the end of the row.
 
 **A surface still gets its irreducible rows before any other surface gets a comfortable one.** Each
 open pane's four (below) come off the top of the budget, so a passive band can never squeeze out the
@@ -336,6 +358,14 @@ and nothing in the slot ever touches the edge. The black field runs past it to t
 regardless — the row is one unbroken band, as it is on the left. In a window too narrow to hold
 both slots the right one is dropped whole rather than squeezed, two columns sooner than it used
 to be.
+
+**And what the left slot sheds.** The left slot carries the state's own words — the running phrase
+and its clock, `approval needed`, `answer needed`, `error` — and after them the `N queued` count of
+what is waiting to go out. It is composed **to** the window's width, in the order it is read for,
+exactly as a pane's title row is: the **count** is the last thing it gives up and the **phrase** is
+what is trimmed around it (`⣾ read… · 5 queued` at 20 columns), because on the short windows where
+the band has been dropped that count is the only thing the whole frame says about the queue. Below
+two columns of room the phrase goes whole, separator and all, rather than reading as an ellipsis.
 
 ---
 

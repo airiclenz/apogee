@@ -853,6 +853,28 @@ func withStagedRows(m Model, n int) Model {
 	return m
 }
 
+// draftLines is the input box's content for an n-row draft — the multi-line message a human types
+// while the agent works. It is the frame dimension the row allocation forgot: every row the box
+// grows is a row the frame no longer has for a pane, and at 12 and 13 rows a three-line draft left
+// under four for the approval prompt, which then was not drawn at all. The lines are numbered
+// because a box clamped back to its one-row floor shows only the one the caret is on.
+func draftLines(n int) string {
+	lines := make([]string, 0, n)
+	for i := range n {
+		lines = append(lines, fmt.Sprintf("draft line %d", i+1))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// withDraft puts an n-row draft in the box and re-lays the frame out around it, exactly as the edit
+// path does (handleKey hands the key to the textarea, then calls layout).
+func withDraft(t *testing.T, m Model, n int) Model {
+	t.Helper()
+	m.input.SetValue(draftLines(n))
+	m.layout()
+	return m
+}
+
 // modelWithOverlayRoom builds a laid-out model on a height-row terminal 80 columns wide, the width
 // the overlay properties use unless they are specifically about narrowness.
 func modelWithOverlayRoom(t *testing.T, height int, opts Options) Model {
@@ -919,54 +941,68 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 
 	overlays := []struct {
 		name     string
-		prose    bool   // the pane carries a body, so it owes an accounting of whatever it cannot seat
-		rowProbe string // the label of the pane's FIRST row — the one a granted window always seats
-		open     func(t *testing.T, width, height int) Model
+		prose    bool                       // the pane carries a body, so it owes an accounting of whatever it cannot seat
+		rowProbe string                     // the label of the pane's FIRST row — the one a granted window always seats
+		block    func(frameOverlays) string // this pane's own block, "" when the allocation seated nothing
+		open     func(t *testing.T, width, height, draft int) Model
 	}{
-		{"session browser", false, "session number 00", func(t *testing.T, width, height int) Model {
-			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
-			m.sessionBrowser = browserWithSessions(8)
-			return m
-		}},
-		{"server picker", false, "host-00", func(t *testing.T, width, height int) Model {
-			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a", Servers: servers})
-			m.picker = picker{open: true, kind: pickerServer}
-			return m
-		}},
-		{"approval prompt", true, "", func(t *testing.T, width, height int) Model {
-			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
-			m.state = stateAwaitingApproval
-			m.pending = &approvalReqMsg{Request: domain.ApprovalRequest{
-				Tool:      "write_file",
-				Reason:    longProse,
-				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
-			}}
-			return m
-		}},
-		{"ask prompt", true, "yes, go ahead", func(t *testing.T, width, height int) Model {
-			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
-			m.state = stateAwaitingAsk
-			m.pendingAsk = &askReqMsg{Request: domain.AskRequest{
-				Question: longProse,
-				Choices:  []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"},
-			}}
-			return m
-		}},
+		{"session browser", false, "session number 00", func(o frameOverlays) string { return o.browser },
+			func(t *testing.T, width, height, draft int) Model {
+				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
+				m.sessionBrowser = browserWithSessions(8)
+				return m
+			}},
+		{"server picker", false, "host-00", func(o frameOverlays) string { return o.picker },
+			func(t *testing.T, width, height, draft int) Model {
+				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a", Servers: servers}), draft)
+				m.picker = picker{open: true, kind: pickerServer}
+				return m
+			}},
+		{"approval prompt", true, "", func(o frameOverlays) string { return o.prompt },
+			func(t *testing.T, width, height, draft int) Model {
+				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
+				m.state = stateAwaitingApproval
+				m.pending = &approvalReqMsg{Request: domain.ApprovalRequest{
+					Tool:      "write_file",
+					Reason:    longProse,
+					Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+				}}
+				m.layout() // the prompt is up: the box gives back the rows the pane needs (draftRowsCeiling)
+				return m
+			}},
+		{"ask prompt", true, "yes, go ahead", func(o frameOverlays) string { return o.prompt },
+			func(t *testing.T, width, height, draft int) Model {
+				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
+				m.state = stateAwaitingAsk
+				m.pendingAsk = &askReqMsg{Request: domain.AskRequest{
+					Question: longProse,
+					Choices:  []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"},
+				}}
+				m.layout()
+				return m
+			}},
 		// A bare "/" is the whole verb table (commandSpecs — fourteen rows), which is more than any
 		// of these windows can seat: the dropdown's own maxAutocompleteItems cap is a taste, and the
 		// window is what it has to be spent inside of. The probe is the first row's verb, which a
-		// granted window always seats and no other part of the frame writes.
-		{"autocomplete dropdown", false, "/clear", func(t *testing.T, width, height int) Model {
-			m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
-			m.input.SetValue("/")
-			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
-			return m
-		}},
+		// granted window always seats and no other part of the frame writes. The draft sits ABOVE the
+		// "/" being typed — the menu is a completion of the last line, not of the whole box.
+		{"autocomplete dropdown", false, "/clear", func(o frameOverlays) string { return o.dropdown },
+			func(t *testing.T, width, height, draft int) Model {
+				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
+				value := "/"
+				if draft > 1 {
+					value = draftLines(draft-1) + "\n/"
+				}
+				m.input.SetValue(value)
+				m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+				m.layout()
+				return m
+			}},
 		// The band on its own. Six rows at its worst case — the cap, the overflow marker and the two
 		// framing rows — is more than the four a twelve-row terminal has to give, so the strip
 		// overflowed the frame with no pane open at all.
-		{"no pane", false, "", func(t *testing.T, width, height int) Model {
-			return modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
+		{"no pane", false, "", nil, func(t *testing.T, width, height, draft int) Model {
+			return withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 		}},
 	}
 
@@ -977,44 +1013,57 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 	// a row of its own), so both band shapes meet every pane.
 	for _, ov := range overlays {
 		for _, staged := range []int{0, 2, 5} {
-			for _, width := range []int{80, narrowOverlayWindow} {
-				for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
-					t.Run(fmt.Sprintf("%s+%d staged/%d×%d", ov.name, staged, width, height), func(t *testing.T) {
-						m := withStagedRows(ov.open(t, width, height), staged)
+			for _, draft := range []int{1, 3} {
+				for _, width := range []int{80, narrowOverlayWindow} {
+					for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
+						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", ov.name, staged, draft, width, height), func(t *testing.T) {
+							m := withStagedRows(ov.open(t, width, height, draft), staged)
 
-						content := m.View().Content
-						frame := strings.Split(content, "\n")
-						plainFrame := ansiPattern.ReplaceAllString(content, "")
+							content := m.View().Content
+							frame := strings.Split(content, "\n")
+							plainFrame := ansiPattern.ReplaceAllString(content, "")
 
-						if len(frame) > height {
-							t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
-								len(frame), height, len(frame)-height, plainFrame)
-						}
-						// The footer is the last thing View stacks, so its presence is the proof nothing was
-						// pushed past the last row.
-						if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
-							t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
-						}
-						// …and it did not buy the fit by hiding prose quietly: either the body is on the
-						// screen to its last word, or the pane counts out the lines it is not showing —
-						// in its body block where it has a row for the marker, on its title row where the
-						// window leaves it none, and in whichever wording the width can pay for.
-						if ov.prose && !strings.Contains(plainFrame, proseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
-							t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
-						}
-						// The same holds for the ROWS. A window granted at least one row seats the first
-						// one (popupRowWindow windows around a selection that starts at the top), so the
-						// probe missing means the pane is showing NO choices and NO entries — the case the
-						// scroll cannot answer, and the one the pane has to count out on its title row.
-						if ov.rowProbe != "" && !strings.Contains(plainFrame, ov.rowProbe) &&
-							!elisionMarkerPattern.MatchString(plainFrame) {
-							t.Errorf("pane hid every one of its rows with no marker anywhere in the frame:\n%s", plainFrame)
-						}
-						// The band answers to the same allocation and owes the same accounting: whatever
-						// it is holding back rides its own "… N more queued" marker, cap-driven rows and
-						// budget-driven rows alike, in ONE wording.
-						assertBandAccountsForItsQueue(t, m, staged, plainFrame)
-					})
+							if len(frame) > height {
+								t.Errorf("composed frame is %d rows on a %d-row terminal (+%d): the input box is off-screen\n%s",
+									len(frame), height, len(frame)-height, plainFrame)
+							}
+							// The footer is the last thing View stacks, so its presence is the proof nothing was
+							// pushed past the last row.
+							if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
+								t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+							}
+							// The accounting properties below are about a pane that IS drawn. With the box at
+							// its one-row floor every pane fits every window it can be drawn in at all, so
+							// giving way there would be a regression, not a give-way; past that floor a draft
+							// really can cost a pane its rows, which is the documented outcome for everything
+							// but the two DECISION panes (TestDecisionSurfaceStaysOnTheFrame owns those).
+							if ov.block != nil && ov.block(m.frameOverlays()) == "" {
+								if draft == minInputRows {
+									t.Fatalf("the pane gave way with the box at its one-row floor:\n%s", plainFrame)
+								}
+								return
+							}
+							// …and it did not buy the fit by hiding prose quietly: either the body is on the
+							// screen to its last word, or the pane counts out the lines it is not showing —
+							// in its body block where it has a row for the marker, on its title row where the
+							// window leaves it none, and in whichever wording the width can pay for.
+							if ov.prose && !strings.Contains(plainFrame, proseTail) && !elisionMarkerPattern.MatchString(plainFrame) {
+								t.Errorf("pane hid prose with no marker anywhere in the frame:\n%s", plainFrame)
+							}
+							// The same holds for the ROWS. A window granted at least one row seats the first
+							// one (popupRowWindow windows around a selection that starts at the top), so the
+							// probe missing means the pane is showing NO choices and NO entries — the case the
+							// scroll cannot answer, and the one the pane has to count out on its title row.
+							if ov.rowProbe != "" && !strings.Contains(plainFrame, ov.rowProbe) &&
+								!elisionMarkerPattern.MatchString(plainFrame) {
+								t.Errorf("pane hid every one of its rows with no marker anywhere in the frame:\n%s", plainFrame)
+							}
+							// The band answers to the same allocation and owes the same accounting: whatever
+							// it is holding back rides its own "… N more queued" marker, cap-driven rows and
+							// budget-driven rows alike, in ONE wording.
+							assertBandAccountsForItsQueue(t, m, staged, plainFrame)
+						})
+					}
 				}
 			}
 		}
@@ -1024,7 +1073,8 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 // assertBandAccountsForItsQueue holds the band to the popup panes' rule: a surface that drops rows
 // because the frame's allocation left it no room for them says how many, in its own one marker. The
 // band that is gone ENTIRELY is the one case with no row to say it on, and the status line's
-// "N queued" readout is what carries the count there (layout.md).
+// "N queued" readout is what carries the count there (layout.md) — so that readout has to be on the
+// frame, not merely composed into a slot the window then clipped.
 func assertBandAccountsForItsQueue(t *testing.T, m Model, staged int, plainFrame string) {
 	t.Helper()
 	if staged == 0 {
@@ -1036,11 +1086,112 @@ func assertBandAccountsForItsQueue(t *testing.T, m Model, staged int, plainFrame
 			shown++
 		}
 	}
-	if shown == 0 || shown == staged {
+	if shown == staged {
+		return
+	}
+	if shown == 0 {
+		if want := fmt.Sprintf("%d queued", staged); !strings.Contains(plainFrame, want) {
+			t.Errorf("the band is gone and the status line does not carry %q either:\n%s", want, plainFrame)
+		}
 		return
 	}
 	if want := fmt.Sprintf("… %d more queued", staged-shown); !strings.Contains(plainFrame, want) {
 		t.Errorf("band shows %d of %d staged rows without the %q marker:\n%s", shown, staged, want, plainFrame)
+	}
+}
+
+// TestDecisionSurfaceStaysOnTheFrame is the rule the frame-wide row allocation broke on its way in
+// (FOLLOW-UP-I): a surface whose KEYS ARE LIVE may not be missing from the frame. The approval and
+// ask prompts are the two, and they are the case that matters most — the run is blocked on them,
+// a/d/s and ↑↓/⏎ answer them from anywhere, and what an approval authorises is a tool call.
+//
+// Under the new allocation the SOLE prompt was simply not drawn whenever the viewport came out
+// under four rows, and a multi-line draft in the input box is enough to do that well above the
+// documented twelve-row floor: at 12 and 13 rows a three-line draft left the frame two or three
+// rows above the box, the pane fell off the allocation, and the whole of what the frame then said
+// about the decision was the status line's "approval needed" — no tool name, with the decision keys
+// still live. So the box's EXTRA draft rows now give way to the prompt (draftRowsCeiling) — the box
+// itself never does, which is what the assertions after the probe pin: it keeps a content row, it
+// keeps the draft verbatim, and the footer under it is still the frame's last line.
+//
+// The draft reaches the two prompts by different routes because the states differ: an approval
+// interrupts a draft the human was typing at the agent, while an ask BORROWS the box and empties
+// it, so its draft is the answer being typed INTO it — the question pane has to survive the box it
+// is being answered in.
+func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
+	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12)
+
+	prompts := []struct {
+		name  string
+		probe string // the identity the decision turns on; only the pane writes it
+		raise func(t *testing.T, m Model, draft int) Model
+	}{
+		{"approval prompt", "approve write_file?", func(t *testing.T, m Model, draft int) Model {
+			t.Helper()
+			m.state = stateRunning
+			m = withDraft(t, m, draft)
+			return step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{
+				Tool:      "write_file",
+				Reason:    longProse,
+				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+			}})
+		}},
+		// The ask prompt's identity is its title, and a title is the one thing a NARROW pane is
+		// allowed to shed an ellipsis off the end of (popupTitleLine) — so the probe is the lead of
+		// it, which survives every width a pane is drawn at.
+		{"ask prompt", "the assistant is", func(t *testing.T, m Model, draft int) Model {
+			t.Helper()
+			m.state = stateRunning
+			m = step(t, m, askReqMsg{Request: domain.AskRequest{
+				Question: longProse,
+				Choices:  []string{"yes, go ahead", "no", "ask me again later"},
+			}})
+			return withDraft(t, m, draft) // the answer being typed into the borrowed box
+		}},
+	}
+
+	for _, p := range prompts {
+		for _, staged := range []int{0, 5} {
+			for _, draft := range []int{1, 2, 3, 5, 8} {
+				for _, width := range []int{80, narrowOverlayWindow} {
+					for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16, 20, 24} {
+						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", p.name, staged, draft, width, height), func(t *testing.T) {
+							m := withStagedRows(modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), staged)
+							m = p.raise(t, m, draft)
+
+							content := m.View().Content
+							frame := strings.Split(content, "\n")
+							plainFrame := ansiPattern.ReplaceAllString(content, "")
+							if len(frame) > height {
+								t.Fatalf("composed frame is %d rows on a %d-row terminal (+%d):\n%s",
+									len(frame), height, len(frame)-height, plainFrame)
+							}
+							if m.frameOverlays().prompt == "" {
+								t.Fatalf("the frame seated no prompt pane at all while its keys are live:\n%s", plainFrame)
+							}
+							if !strings.Contains(plainFrame, p.probe) {
+								t.Errorf("the frame does not carry %q — the decision's own identity:\n%s", p.probe, plainFrame)
+							}
+							// The box gave rows back; it did not go away. It is still drawn, still holds the
+							// draft (the widget scrolls what it cannot seat), and still has its floor of one
+							// content row — "the input box never gives way" is about the BOX.
+							if !strings.Contains(plainFrame, "draft line") {
+								t.Errorf("the input box shows none of the draft — the box itself must never give way:\n%s", plainFrame)
+							}
+							if got := m.input.Height(); got < minInputRows {
+								t.Errorf("input box is %d rows, want at least %d", got, minInputRows)
+							}
+							if got := m.input.Value(); got != draftLines(draft) {
+								t.Errorf("the draft itself changed to %q; only the rows it is DRAWN on may give way", got)
+							}
+							if last := ansiPattern.ReplaceAllString(frame[len(frame)-1], ""); strings.TrimSpace(last) == "" {
+								t.Errorf("last frame row is blank, want the footer's bottom rule:\n%s", plainFrame)
+							}
+						})
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -1049,10 +1200,12 @@ func assertBandAccountsForItsQueue(t *testing.T, m Model, staged int, plainFrame
 // thing. The order is the transcript, then the staged band, then the panes — dropdown first among
 // those, the modal prompt last — and never the input box or the footer (layout.md).
 //
-// The two-pane rows are the reason the allocation is a set rather than a subtraction: a dropdown
-// opened while the agent works survives into the approval or ask prompt that interrupts it (neither
-// fold closes it), so two boxed panes really can want the same four rows, and at twelve there are
-// four rows in the whole viewport.
+// The two-pane rows keep the allocation a set rather than a subtraction. A dropdown used to reach a
+// modal prompt by simply surviving into it — no fold closed it — and that is now closed at the
+// source (TestModalPromptDismissesTheDropdown), so these rows are constructed rather than driven.
+// They stay: the ORDER is the contract, and every renderer is callable for a pane the Model's own
+// flags have not opened (popupBudget), so the arbitration has to be right whether or not today's
+// folds can produce the pair.
 func TestFrameSurfacesGiveWayInOrder(t *testing.T) {
 	askPrompt := func(m Model) Model {
 		m.state = stateAwaitingAsk

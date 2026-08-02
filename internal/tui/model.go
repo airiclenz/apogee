@@ -457,6 +457,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// on msg.Reply (the C3 rendezvous; P2.4).
 		m.state = stateAwaitingApproval
 		m.pending = &msg
+		m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
+		m.layout()              // the pane the decision turns on outranks the draft's extra rows
 		return m, nil
 
 	case askReqMsg:
@@ -465,7 +467,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the question; submitAnswer replies on msg.Reply when the human submits (P3.11).
 		m.state = stateAwaitingAsk
 		m.pendingAsk = &msg
-		m.askSel = 0 // first choice pre-selected while the input is empty (D5); no-op when there are no choices
+		m.askSel = 0            // first choice pre-selected while the input is empty (D5); no-op when there are no choices
+		m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 		m.input.Reset()
 		// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend must say so
 		// for as long as the question stands (submitAnswer swaps it back when the answer is away).
@@ -889,6 +892,7 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.pending.Reply <- decision
 		m.pending = nil
 		m.state = stateRunning
+		m.layout() // the pane is gone: a draft the prompt had clamped grows back (draftRowsCeiling)
 		tick := m.spin.arm()
 		return m, tick
 	}
@@ -1011,7 +1015,7 @@ func (m Model) commandRunnable(parsed parsedInput) bool {
 // was just refused would only invite the same refusal again. Typing on re-opens it, tag and all.
 func (m Model) refuseIdleOnlyCommand() (tea.Model, tea.Cmd) {
 	m.transcript.addNote(commandsAtIdleNote)
-	m.autocomplete = autocompleteState{}
+	m.dismissAutocomplete()
 	m.layout()
 	return m, nil
 }
@@ -1400,6 +1404,9 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// only this path clears (activity.go). Idle renders an empty left slot.
 	m.act = activity{}
 	m.state = next
+	// The prompt cleared above may have been clamping a multi-line draft to leave itself its four
+	// rows (draftRowsCeiling); with it gone the box grows back to what the draft asks for.
+	m.layout()
 	if m.quitting {
 		// A quit was requested while busy (quit deferred the exit to here); the worker has now
 		// returned its terminal Msg, so its goroutine has unwound and the teardown cannot race it.
@@ -2331,6 +2338,11 @@ const (
 	gapHeight    = 1
 	footerHeight = 3 // divider + content + bottom rule
 
+	// frameFixedRows is what every frame spends below the transcript whatever is open: the blank gap
+	// row, the hairline, the status line and the footer. The input box sits on top of that (its
+	// content rows plus its own top border) and the viewport gets what is left (layout).
+	frameFixedRows = gapHeight + ruleHeight + statusHeight + footerHeight
+
 	scrollbarWidth = 1 // the transcript's right-hand scroll-bar gutter (always reserved)
 
 	minInputRows = 1
@@ -2354,7 +2366,7 @@ func (m *Model) layout() {
 	}
 
 	inputBoxHeight := m.input.Height() + 1 // content rows + top border (no bottom — it is the footer's divider)
-	vpHeight := m.height - ruleHeight - statusHeight - gapHeight - inputBoxHeight - footerHeight
+	vpHeight := m.height - frameFixedRows - inputBoxHeight
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
@@ -2378,10 +2390,37 @@ func (m *Model) inputInnerWidth() int {
 }
 
 // inputRows is the textarea's height in visual rows at the current window width — the editor's
-// own rows() clamp, fed the width the Model derives (inputInnerWidth). The box grows as the human
-// types a multi-line message and stops growing at the cap, where the textarea scrolls internally.
+// own rows() clamp, fed the width the Model derives (inputInnerWidth), and then the FRAME's
+// (draftRowsCeiling). The box grows as the human types a multi-line message and stops growing at
+// the cap, where the textarea scrolls internally.
 func (m *Model) inputRows() int {
-	return m.promptEditor.rows(m.inputInnerWidth())
+	return min(m.promptEditor.rows(m.inputInnerWidth()), m.draftRowsCeiling())
+}
+
+// draftRowsCeiling is the tallest the input box may grow in THIS frame, and it is the one place the
+// box gives way to anything. In an ordinary frame it is maxInputRows and the box grows freely; while
+// a DECISION SURFACE is up — the approval or the ask prompt, the pane the run itself is blocked on
+// and the only pane whose keys are live in a state where the box is inert or borrowed — it is
+// whatever leaves that pane its irreducible four rows, floored at the box's own one.
+//
+// "The input box never gives way" (layout.md) is about the BOX, not about every row a draft grew it
+// to: the box is always on the frame and always at least one row of it. What a three-line draft may
+// not do is push the pane the human is being asked to rule on off the frame entirely — which is
+// exactly what it did between 12 and 13 rows, where the frame's allocation found under four rows to
+// give and drew no prompt at all, while a/d/s stayed live and the status line's "approval needed"
+// was the whole of what the frame said about the decision.
+//
+// It binds for the modal prompt ALONE. The dropdown, the /sessions browser and the picker are all
+// further down the give-way order than the prompt, and none of them can be open beside a draft the
+// human is still growing: the browser and the picker claim every keypress while they are open
+// (handleKey), and the dropdown is a completion of the very draft it would be shrinking.
+func (m Model) draftRowsCeiling() int {
+	if !m.openPanes().has(panePrompt) {
+		return maxInputRows
+	}
+	// layout gives the viewport m.height - frameFixedRows - (rows + 1); the prompt needs popupChrome
+	// of that to be seated at all (frameRowPlan), so the rows the draft may keep are what is left.
+	return max(minInputRows, m.height-frameFixedRows-popupChrome-1)
 }
 
 // refreshViewport re-renders the transcript into the viewport and, unless the human has
@@ -3011,21 +3050,11 @@ func (m Model) throughputSuffix() string {
 // short of the window edge, the column the footer's mode marker below it ends in, so nothing in
 // the slot ever touches the terminal's last column. It reads only display values off Options and
 // the model's own state — never off the Engine mid-step.
+//
+// The LEFT slot is composed to the window's width rather than composed long and clipped to it
+// (statusLeft) — the popupTitleLine posture, one row down.
 func (m Model) statusLine() string {
-	left := m.th.statusBar.Render(bodyIndent)
-	switch m.state {
-	case stateRunning:
-		left += m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
-	case stateAwaitingApproval:
-		left += m.th.statusBar.Render("approval needed")
-	case stateAwaitingAsk:
-		left += m.th.statusBar.Render("answer needed")
-	case stateErrored:
-		left += m.th.statusError.Render("error")
-	}
-	// What is waiting to go out rides the same slot, in every state: a queue that survives a stop
-	// or an error (it does) must keep saying so at idle too, where the slot is otherwise empty.
-	left += m.queuedSegment(m.state != stateIdle)
+	left := m.statusLeft()
 	// Fill the whole width with black-bg cells — segments, the justify gap and the right slot's
 	// trailing margin alike — so the info line reads as one solid black bar joined to the prompt
 	// box below it. A plain justify gap (or a bare-space margin) would show the terminal's default
@@ -3044,6 +3073,51 @@ func (m Model) statusLine() string {
 		return m.th.measure.Truncate(left, max(0, m.width), "")
 	}
 	return left + m.th.statusBar.Render(strings.Repeat(" ", gap)) + right
+}
+
+// statusLeft composes the status line's left slot to the window's WIDTH: the two-column body lead,
+// the state's own words, and then the "N queued" readout of what is waiting to go out — in every
+// state, because a queue that survives a stop or an error (it does) must keep saying so at idle
+// too, where the slot is otherwise empty.
+//
+// The width is spent in the order the slot is READ for, exactly as a pane's title row spends its
+// own (popupTitleLine, layout.md): the count is the last thing the slot gives up, and the state's
+// phrase is the thing trimmed around it. That is not a nicety — the band the count belongs to is
+// the first surface the frame's row allocation drops, and on the short windows where it is gone the
+// status line is the ONLY place the frame says anything about a queue at all. Composing the slot
+// long and clipping it to the window put the count on the end of the clip, so at 20 columns a
+// running turn's phrase pushed it off the row and the queue vanished from the frame entirely.
+//
+// Below two columns of room the phrase would be an ellipsis and nothing else, so it is dropped
+// whole and its separator with it — the slot never reads " · 2 queued" with no phrase in front of
+// the separator.
+func (m Model) statusLeft() string {
+	lead := m.th.statusBar.Render(bodyIndent)
+
+	var phrase string
+	switch m.state {
+	case stateRunning:
+		phrase = m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
+	case stateAwaitingApproval:
+		phrase = m.th.statusBar.Render("approval needed")
+	case stateAwaitingAsk:
+		phrase = m.th.statusBar.Render("answer needed")
+	case stateErrored:
+		phrase = m.th.statusError.Render("error")
+	}
+	if phrase == "" {
+		return lead + m.queuedSegment(false)
+	}
+
+	queued := m.queuedSegment(true)
+	room := m.width - m.th.measure.Width(lead) - m.th.measure.Width(queued)
+	if m.th.measure.Width(phrase) <= room {
+		return lead + phrase + queued
+	}
+	if room <= 1 {
+		return lead + m.queuedSegment(false)
+	}
+	return lead + m.th.measure.Truncate(phrase, room, "…") + queued
 }
 
 // runningPhrase composes the running left slot's text: the activity phrase and the clock
@@ -3281,7 +3355,9 @@ type frameRowPlan struct {
 // frameRowPlan divides the viewport's rows between the frame's surfaces, in the order they give
 // way (layout.md): the transcript first, then the staged band, then the panes — and among the
 // panes, the dropdown before the browser or the picker, and the modal prompt last. The input box
-// and the footer are not in the division at all; layout() has already taken their rows out.
+// and the footer are not in the division at all; layout() has already taken their rows out — and
+// what it took for the box is itself capped when a modal prompt is up, which is the one place the
+// box gives way and the last step of the same order (draftRowsCeiling).
 //
 // The order of the passes is the order of the guarantees. Every seated pane's irreducible chrome
 // comes off first, so a pane the human is acting on is never squeezed out by a passive band; the
@@ -3335,6 +3411,12 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // this pane no rows at all — a window too short to seat it beside its siblings — and the overlay
 // renders nothing rather than a pane drawn past the terminal's last row.
 //
+// For the MODAL prompt that outcome is reachable only below twelve rows, where no pane is drawn at
+// all: the prompt is last in the give-way order and the input box's draft rows now give way to it
+// (draftRowsCeiling), so on every window a pane can be drawn in the decision the run is blocked on
+// is on the frame. It is not "seated or silent" — a decision surface must never be invisible while
+// its keys are live.
+//
 // The budget comes from the frame-wide allocation (frameRowPlan) rather than from the viewport
 // directly, because the pane is never the only thing taking rows off the transcript: the staged
 // band shares the same rows, and so does any other pane open beside it. p is added to the open set
@@ -3387,6 +3469,11 @@ func (m Model) popupBudget(p framePane, rows, rowCap int) (maxBody, maxRows int,
 // full phrase the count is stated in fewer words rather than clipped off the row (popupTitleLine),
 // because the terminal that is short is usually the one that is narrow. So the title always carries
 // the identity the decision turns on, and says when there is more to read than it is showing.
+//
+// "Always" is total because the PANE is: the frame seats it last of all the surfaces and the input
+// box's draft rows give way to it (draftRowsCeiling), so there is no window a pane can be drawn in
+// where a/d/s are live and this pane is not on the frame. The "" below is the sub-twelve-row case,
+// where the frame draws no pane at all.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
 	if req.Reason != "" {

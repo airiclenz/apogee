@@ -723,6 +723,71 @@ func TestQueuedBandShrinksIntoTheFrameBudget(t *testing.T) {
 	}
 }
 
+// TestSuppressedBandKeepsItsCountOnTheStatusLine is the other half of the band's give-way contract.
+// The band is the FIRST surface the frame's row allocation drops, and layout.md's licence for
+// dropping it is that "the status line's N queued readout is what carries the count instead" — so
+// on the windows where the band is gone that readout is the only thing the frame says about the
+// queue, and it has to actually be ON the frame.
+//
+// It was not. The status line composed its left slot at full length and clipped the whole thing to
+// the window, which puts the count on the END of the clip: at 20 columns a running turn's activity
+// phrase pushed it off the row, so a short AND narrow terminal — one split pane, the same terminal
+// the band is being dropped for — showed neither the band nor its count. The slot now spends its
+// width in the order it is read for (statusLeft), so the phrase is what gives way to the count.
+func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
+	// Each state opens a pane beside the queue, because a pane is what takes the rows the band would
+	// otherwise have had: at twelve and thirteen rows its four leave the band nothing at all.
+	dropdown := func(m Model) Model {
+		m.input.SetValue("/")
+		m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+		m.layout()
+		return m
+	}
+	states := []struct {
+		name  string
+		place func(t *testing.T, m Model) Model
+	}{
+		{"running, a / menu open", func(t *testing.T, m Model) Model {
+			t.Helper()
+			m.state = stateRunning
+			m.setActivity(actTool, "reading · internal/tui/model.go", 0)
+			return dropdown(m)
+		}},
+		{"awaiting approval", func(t *testing.T, m Model) Model {
+			t.Helper()
+			m.state = stateRunning
+			return step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file"}})
+		}},
+		{"idle, held over a stop", func(t *testing.T, m Model) Model { return dropdown(m) }},
+	}
+
+	// 20 columns is the width the band's own frame properties do not reach and the one a half-height
+	// tmux pane really is; the wider two are there to pin that nothing regressed above it.
+	for _, s := range states {
+		for _, width := range []int{20, narrowOverlayWindow, 80} {
+			for _, height := range []int{smallestOverlayWindow, 13} {
+				t.Run(fmt.Sprintf("%s/%d×%d", s.name, width, height), func(t *testing.T) {
+					m := withStagedRows(modelWithOverlayRoomAt(t, width, height, testOpts), 5)
+					m = s.place(t, m)
+
+					view := plain(m.View())
+					if strings.Contains(view, "staged remark") {
+						t.Fatalf("the band seated a row at %d×%d — test premise broken:\n%s", width, height, view)
+					}
+					if !strings.Contains(view, "5 queued") {
+						t.Errorf("the band is gone and the status line does not carry %q either:\n%s", "5 queued", view)
+					}
+					for _, row := range strings.Split(view, "\n") {
+						if got := m.th.measure.Width(row); got > width {
+							t.Errorf("row %q is %d cells on a %d-column terminal", row, got, width)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 // TestQueuedStripEmptyWithoutAQueue: no queue, no band — not even the framing rows, which would
 // otherwise leak two blank black lines into every idle frame.
 func TestQueuedStripEmptyWithoutAQueue(t *testing.T) {

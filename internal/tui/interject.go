@@ -444,7 +444,9 @@ func bandShape(n, budget int) bandPlan {
 // both it is the band that gives way — a passive reminder, against a pane the human is acting on.
 // Rows the budget drops are counted in the very same "… N more queued" marker the cap's are, one
 // wording for one fact; and a window with no rows at all for the band leaves the count to the status
-// line's "N queued" readout, which is in every frame the band could have been in.
+// line's "N queued" readout, which is in every frame the band could have been in — and which is
+// composed TO the window's width so that a narrow one sheds the activity phrase around the count
+// rather than the count off the end of the row ([Model.statusLeft]).
 func (m Model) renderPendingInterjections() string {
 	if len(m.pendingInterjections) == 0 {
 		return ""

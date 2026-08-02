@@ -500,10 +500,24 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		nm, cmd := m.acceptAutocomplete()
 		return true, nm, cmd
 	case "esc":
-		m.autocomplete = autocompleteState{}
+		m.dismissAutocomplete()
 		return true, m, nil
 	}
 	return false, m, nil
+}
+
+// dismissAutocomplete closes the "/" | "@" | skill dropdown.
+//
+// Besides the keystrokes that dismiss it, it is what a MODAL PROMPT arriving does to a menu the
+// human left open while the agent worked. The dropdown is only ever DERIVED at the two states where
+// the box is the human's own — recomputeAutocomplete runs at idle and running and nowhere else — so
+// a menu that survives into the approval or ask fold is frozen: no keystroke there filters it,
+// dismisses it or accepts from it (handleKey gives those keys to the decision), yet it went on
+// sharing the frame with the decision surface and competing with it for the same rows. Neither fold
+// cleared it, so a "/" typed a moment before the gate opened was still on the screen, still
+// highlighting a row that could no longer be chosen.
+func (m *Model) dismissAutocomplete() {
+	m.autocomplete = autocompleteState{}
 }
 
 // autocompleteExactMatch reports whether ⏎ should fall THROUGH to submit instead of accepting the
@@ -623,7 +637,7 @@ func (m Model) removeCompletionToken() Model {
 	}
 	m.input.SetValue(head + tail)
 	m.caretToOffset(len(head))
-	m.autocomplete = autocompleteState{}
+	m.dismissAutocomplete()
 	m.layout()
 	return m
 }

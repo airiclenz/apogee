@@ -763,6 +763,30 @@ point is a **minor** bump, not a breaking change.
     the status line's `N queued`. The upshot: no combination of panes, band and window size composes
     a frame taller than your terminal — the property is now checked with every pane opened both alone
     and beside a live queue.
+  - **…and an approval you are being asked for is never missing from the screen.** That one
+    allocation had one thing outside it: the editor box, which grows with what you type. So a
+    half-written three-line message plus a 12- or 13-row terminal left the frame under four rows
+    above the box, and the approval prompt — last in the give-way order, and the one thing that
+    order exists to protect — was not drawn **at all**. All you saw was `approval needed` on the
+    status line, without even the name of the tool, while `a`, `d` and `s` were live and would
+    answer a prompt that was nowhere on the screen. The editor's **extra** rows now give way to it:
+    the box always keeps a row, always shows what you were typing, and everything it grew past that
+    is the prompt's if the prompt needs it. Nothing else takes the box's rows — `/sessions` and the
+    pickers own the keyboard while they are open, and the `/` menu is completing the very draft it
+    would shrink. The same holds for the answer you type into a question's borrowed box: the
+    question stays on the screen however long the answer gets.
+  - **…and a suggestion menu no longer sits, frozen, beside that decision.** A `/` or `@` menu left
+    open while the model worked survived into the approval or question that interrupted it, where
+    nothing could filter it, dismiss it or accept from it — those keys belong to the decision — yet
+    it went on taking rows from the pane that decision is drawn in. It is now closed when the prompt
+    arrives.
+  - **…and a queue the window is too small to show still says so at any width.** When the band of
+    staged messages is dropped entirely, the status line's `N queued` is the only thing left saying
+    anything is waiting — and that line was composed at full length and then cut to the window, so
+    at 20 columns the running phrase pushed the count off the end and a short, narrow terminal
+    showed neither. The line is now fitted to the window in the order you read it, exactly as a
+    pane's title row is: the count keeps its place and the phrase shortens around it
+    (`⣾ read… · 5 queued`).
 
 - **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
   message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it
