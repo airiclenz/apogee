@@ -77,7 +77,7 @@ default config (auto-title on).
 
 **Commit:** `fix(session,tui): serialize record writes so a rename can never roll back a turn`
 
-## 2. Grandchildren compose the parent's effective mode
+## 2. Grandchildren compose the parent's effective mode — ✅ DONE (2026-08-02)
 
 **What:** Audit "High — Sub-agent mode tightening stops composing at depth 1".
 `internal/agent/subagent.go:141`: `child.liveMode = a.Mode` captures the direct parent's own

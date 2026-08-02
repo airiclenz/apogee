@@ -65,10 +65,13 @@ type Agent struct {
 	confineToWorkspace bool // live confine-to-workspace flag; seeded from cfg.ConfineToWorkspace, swappable via SetConfineToWorkspace
 
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
-	// parent's modeMu-guarded Mode accessor, captured at spawn (ADR 0013). The per-call
+	// parent's effectiveMode accessor, captured at spawn (ADR 0013). The per-call
 	// Resolution takes the TIGHTER of this and the child's own spawn mode, so a parent that
 	// tightens mid-delegation (Shift+Tab down from Auto to Plan) gates/refuses the still-running
-	// child's next call, while a parent loosening can never loosen it. It is a closure over the
+	// child's next call, while a parent loosening can never loosen it. Because the captured
+	// accessor is the parent's EFFECTIVE mode, the view COMPOSES transitively: at depth 2 it
+	// already folds in the top-level agent's live mode, so a tightening reaches every descendant
+	// and no child's privileges can exceed its parent's. It is a closure over the
 	// accessor — NOT the shared mode field/mutex — so the child observes the parent's mode
 	// race-free but cannot mutate it. nil for a top-level Agent, which then behaves exactly as
 	// before (its own mode governs).

@@ -99,8 +99,8 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // (Shift+Tab and /confine can move either mid-session — the child inherits what the parent
 // actually has NOW, never a stale construction seed) / Approver / Confiner verbatim (never
 // loosened beyond the parent's current privileges), PLUS a tighten-only
-// live view of the parent's mode (child.liveMode) so a mid-delegation tightening reaches the
-// still-running child, a Guards bundle that isolates live state but shares the dangerous
+// live view of the parent's EFFECTIVE mode (child.liveMode) so a mid-delegation tightening
+// reaches the still-running child at ANY depth, a Guards bundle that isolates live state but shares the dangerous
 // floor read-only (Guards.ForSubAgent), a tool set that is a SUBSET of this Agent's tools
 // (defaultSubAgentTools — never an expansion, and withholding sub_agent at the depth bound),
 // the SAME Upstream responder and EventSink, the parent session's context-file content
@@ -134,11 +134,15 @@ func (a *Agent) newChildAgent() (*Agent, error) {
 	// bytes: copy the cache over the one its own construction just read. A sub-agent is not a
 	// session boundary, so an AGENTS.md edited (or deleted) mid-delegation must not reach it.
 	child.contextFiles = a.contextFiles
-	// A tighten-only view of the parent's live mode (ADR 0013): the child's disposition takes
-	// TighterMode(parentLive, spawnMode), so a parent tightening mid-delegation reaches the child
-	// while a parent loosening cannot loosen it. Capture the parent's modeMu-guarded accessor, not
-	// the raw field/mutex, so the child can read the parent's mode race-free but never mutate it.
-	child.liveMode = a.Mode
+	// A tighten-only view of the parent's EFFECTIVE mode (ADR 0013): the child's disposition takes
+	// TighterMode(parentEffective, spawnMode), so a parent tightening mid-delegation reaches the
+	// child while a parent loosening cannot loosen it. It is the parent's effectiveMode accessor —
+	// not its own Mode — so the view COMPOSES down the chain: a depth-2 grandchild reads its
+	// parent's effective mode, which already folds in the top-level agent's live mode, and a
+	// top-level tightening therefore reaches every descendant rather than stopping at depth 1.
+	// Capturing an accessor (not the raw field/mutex) keeps every read modeMu-guarded at the agent
+	// that owns the field, so the child reads race-free but has no seam to mutate anything.
+	child.liveMode = a.effectiveMode
 	return child, nil
 }
 

@@ -91,6 +91,87 @@ func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
 	}
 }
 
+// TestSubAgentTighteningComposesToGrandchild proves the tighten-only view COMPOSES down the whole
+// chain, not just one level: with parent→child→grandchild all spawned in Auto, a tighten on the
+// TOP-LEVEL agent must reach the depth-2 grandchild. Capturing the direct parent's own mode would
+// stop the tightening at depth 1 and leave the grandchild running looser than the user's current
+// mode — the tighten-direction failure ADR 0005/0013 forbid.
+func TestSubAgentTighteningComposesToGrandchild(t *testing.T) {
+	sink := &recordingSink{}
+	write := fakeTool{name: "w"} // readOnly:false, no markers ⇒ third-party write class
+	cfg := configWithTools(sink, write)
+	cfg.Mode = domain.ModeAuto
+	cfg.Confiner = eligibleConfiner{} // Auto needs a Confiner at construction (ADR 0012)
+	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (resolveRun)
+	top, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := top.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent (depth 1): %v", err)
+	}
+	grandchild, err := child.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent (depth 2): %v", err)
+	}
+	if grandchild.depth != 2 {
+		t.Fatalf("grandchild depth = %d, want 2", grandchild.depth)
+	}
+	call := domain.ToolCall{ID: "c1", Tool: "w"}
+
+	// Spawned in Auto under an Auto chain, the grandchild auto-runs the write — no refusal yet.
+	if got := grandchild.effectiveMode(); got != domain.ModeAuto {
+		t.Fatalf("grandchild effectiveMode before tightening = %q, want auto", got)
+	}
+	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call))).kind; got == resolveRefuse {
+		t.Fatalf("grandchild spawned in Auto refused a write before any tightening (got %s)", got)
+	}
+
+	// The TOP-LEVEL user tightens to Plan mid-delegation (Shift+Tab down). The intermediate child
+	// is untouched — the tightening must still compose through it to the grandchild.
+	top.SetMode(domain.ModePlan)
+	if got := child.effectiveMode(); got != domain.ModePlan {
+		t.Fatalf("child effectiveMode after top tightened = %q, want plan", got)
+	}
+	if got := grandchild.effectiveMode(); got != domain.ModePlan {
+		t.Fatalf("grandchild effectiveMode after top tightened = %q, want plan — the tightening stopped at depth 1", got)
+	}
+	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call))).kind; got != resolveRefuse {
+		t.Fatalf("after the top-level agent tightened to Plan, grandchild write ladder = %s, want resolveRefuse", got)
+	}
+}
+
+// TestSubAgentGrandchildLooseningStaysImpossible is the composing view's other half: a top-level
+// LOOSENING must not raise a depth-2 grandchild above the mode it was spawned under.
+func TestSubAgentGrandchildLooseningStaysImpossible(t *testing.T) {
+	sink := &recordingSink{}
+	write := fakeTool{name: "w"}
+	cfg := configWithTools(sink, write)
+	cfg.Mode = domain.ModePlan
+	top, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := top.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent (depth 1): %v", err)
+	}
+	grandchild, err := child.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent (depth 2): %v", err)
+	}
+	call := domain.ToolCall{ID: "c1", Tool: "w"}
+
+	top.SetMode(domain.ModeAuto)
+	if got := grandchild.effectiveMode(); got != domain.ModePlan {
+		t.Fatalf("grandchild effectiveMode after top loosened = %q, want plan (its spawn mode is the ceiling)", got)
+	}
+	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call))).kind; got != resolveRefuse {
+		t.Fatalf("after the top-level agent loosened to Auto, grandchild (spawned Plan) write ladder = %s, want resolveRefuse", got)
+	}
+}
+
 // TestSubAgentParentLooseningCannotLoosenChild proves the other half of tighten-only: a parent
 // LOOSENING mid-delegation never loosens a child spawned tighter. A child spawned in Plan keeps
 // refusing writes even after the parent cycles up to Auto — loosening mid-flight stays impossible.
@@ -121,9 +202,10 @@ func TestSubAgentParentLooseningCannotLoosenChild(t *testing.T) {
 }
 
 // TestSubAgentEffectiveModeConcurrent runs the parent's SetMode (the UI side) against the child's
-// worker-side effectiveMode/dispose, proving the parent's modeMu covers the child's cross-agent
-// read of the live mode through the captured accessor. It asserts nothing beyond "no data race" —
-// the tighten-only view must be observed race-free while the parent's mode is being cycled.
+// AND the grandchild's worker-side effectiveMode/dispose, proving the parent's modeMu covers the
+// cross-agent read of the live mode through the captured accessors — including the depth-2 read,
+// which walks two accessors up the chain. It asserts nothing beyond "no data race" — the
+// tighten-only view must be observed race-free while the parent's mode is being cycled.
 func TestSubAgentEffectiveModeConcurrent(t *testing.T) {
 	sink := &recordingSink{}
 	write := fakeTool{name: "w"}
@@ -137,25 +219,30 @@ func TestSubAgentEffectiveModeConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
+	grandchild, err := child.newChildAgent()
+	if err != nil {
+		t.Fatalf("newChildAgent (depth 2): %v", err)
+	}
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 	ladder := []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto}
 
 	const iters = 2000
+	read := func(a *Agent) {
+		for i := 0; i < iters; i++ {
+			_ = a.effectiveMode()
+			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call)))
+		}
+	}
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
 			parent.SetMode(ladder[i%len(ladder)])
 		}
 	}()
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iters; i++ {
-			_ = child.effectiveMode()
-			_ = resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call)))
-		}
-	}()
+	go func() { defer wg.Done(); read(child) }()
+	go func() { defer wg.Done(); read(grandchild) }()
 	wg.Wait()
 }
 

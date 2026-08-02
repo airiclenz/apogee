@@ -654,6 +654,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Tightening the mode mid-run now reaches sub-agents of sub-agents.** Shift+Tab down to Plan
+  while a delegation is running is meant to reach everything still working: a sub-agent runs a whole
+  exchange inside one of the parent's tool calls, so the mode you set has to catch it in flight. It
+  did — but only one level down. A sub-agent that had itself delegated further kept running on the
+  mode it was spawned in, so the deepest worker went on auto-approving writes after you had already
+  put the session in Plan, and its privileges ended up wider than those of the agent that spawned it.
+  Each level now composes its parent's *effective* mode rather than the parent's own, so a tightening
+  anywhere above reaches every level below it, at any depth. Loosening is unchanged and still
+  impossible mid-flight: no sub-agent can rise above the mode it was spawned under, whatever you
+  cycle the top-level session to. See the 2026-08-02 amendment to
+  [ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md).
+
 - **Naming a session can no longer roll the conversation back a whole turn.** Saving your session
   and setting its name are two different writes to the same file, and they went out independently:
   the per-turn save replaces the record wholesale, while setting a name *reads* the record, changes

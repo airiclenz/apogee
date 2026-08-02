@@ -157,8 +157,11 @@ The realisation refines — it does not change — the Decision: privileges are 
 and loosening mid-flight is still impossible. It closes the tighten gap by making "≤ parent"
 track the parent's *live* mode, not just its spawn-time snapshot:
 
-- **`newChildAgent` injects a tighten-only live view.** The child captures the parent's
-  `modeMu`-guarded `Mode` accessor as a closure (`Agent.liveMode`), **not** the shared mode field
+- **`newChildAgent` injects a tighten-only live view.**
+  *(Amended 2026-08-02 — see the Amendment section below: the captured accessor is the parent's
+  `effectiveMode`, not its own `Mode`. Capturing `Mode` composed only one level and left a
+  depth-2 grandchild on a stale mode.)* The child captures the parent's
+  `modeMu`-guarded mode accessor as a closure (`Agent.liveMode`), **not** the shared mode field
   or mutex pointer — the child reads the parent's live mode race-free but has no seam to mutate it
   (the same "read-only view, no re-derivation" shape §3 uses for the shared dangerous floor). A
   top-level agent has a nil view and behaves exactly as before.
@@ -191,3 +194,33 @@ collapsing the dispatch decision into the Resolution verdict:
 
 This is a rule of the Resolution table (leaf verdicts honour force-approval; `Delegate` does
 not), pinned by a table-test row, not an accident of check ordering.
+
+## Amendment (2026-08-02) — the live view composes on the parent's EFFECTIVE mode
+
+The Post-v1 realisation above says the child "captures the parent's `modeMu`-guarded `Mode`
+accessor." That wording encoded a hole, and the code matched it: `Mode()` is an agent's **own**
+live mode, so the tighten-only view stopped composing at depth 1. A depth-2 grandchild saw its
+parent's frozen spawn mode and nothing above it — a mid-run Shift+Tab from Auto down to Plan by
+the top-level user reached the depth-1 child and left the grandchild auto-approving writes for the
+rest of its Exchange. A descendant's effective privileges therefore **exceeded its parent's**,
+which is exactly the tighten-direction failure this ADR and [ADR
+0005](0005-sub-agent-privileges-are-bounded-by-the-parent.md) forbid (audit 2026-08-01).
+
+Neither the Decision nor the realisation's rule changes — only which accessor is captured:
+
+- **The captured accessor is `Agent.effectiveMode`, not `Agent.Mode`.** Because
+  `effectiveMode` already folds in whatever view *its* agent holds, the tighten-only rule becomes
+  **transitive by construction**: at depth 2 it is
+  `TighterMode(spawnMode, TighterMode(parentSpawn, topLive))`, and the recursion terminates at the
+  top-level agent, whose `liveMode` is nil. A tightening anywhere up the chain reaches every
+  descendant; a loosening still cannot raise anyone above their own spawn mode (each level's
+  `TighterMode` re-applies its own ceiling). "Privileges ≤ parent" now holds at **every** depth
+  rather than only the first.
+- **Race-freedom is unchanged.** The chain is still a walk of `modeMu`-guarded accessors, each
+  read under the lock of the agent that owns the field, and each child still holds a read-only
+  closure with no seam to mutate an ancestor. The walk is bounded by `maxSubAgentDepth`.
+
+**Acceptance:** with parent→child→grandchild all spawned in Auto, tightening the **top-level**
+agent to Plan mid-run refuses the grandchild's next write and its `effectiveMode()` reads Plan;
+a grandchild spawned in Plan stays refusing after the top-level agent cycles up to Auto; the
+depth-2 read is race-free under `-race` (`internal/agent/setmode_test.go`).

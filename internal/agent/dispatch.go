@@ -369,11 +369,14 @@ func (a *Agent) runTool(ctx context.Context, tool domain.Tool, call domain.ToolC
 
 // effectiveMode is the autonomy mode the per-call Resolution runs under. For a top-level Agent
 // it is simply the Agent's own live mode. For a sub-agent (liveMode != nil) it is the TIGHTER of
-// the child's spawn mode and the parent's live mode (ADR 0013), so a parent tightening
+// the child's spawn mode and the parent's EFFECTIVE mode (ADR 0013), so a parent tightening
 // mid-delegation (Shift+Tab from Auto down to Plan) gates/refuses the still-running child's next
-// call, while a parent loosening never loosens the child. Both modes are read under their own
-// modeMu locks (Mode() and the captured accessor), so a concurrent SetMode on either agent is
-// observed race-free.
+// call, while a parent loosening never loosens the child. Composing on the parent's effective
+// mode rather than its own makes the rule transitive: a depth-2 grandchild folds in the top-level
+// agent's live mode through its parent, so no descendant can ever run looser than an ancestor.
+// The recursion terminates at the top-level agent, whose liveMode is nil. Every mode is read
+// under the modeMu of the agent that owns it (Mode(), reached through the captured accessors), so
+// a concurrent SetMode anywhere on the chain is observed race-free.
 func (a *Agent) effectiveMode() domain.Mode {
 	own := a.Mode()
 	if a.liveMode == nil {
