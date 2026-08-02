@@ -1103,6 +1103,32 @@ func runWrites(t *testing.T, m Model, cmd tea.Cmd) Model {
 	return m
 }
 
+// isQuit reports whether cmd is tea.Quit (running it is safe — it only yields its Msg).
+func isQuit(cmd tea.Cmd) bool {
+	_, ok := cmdMsg(cmd).(tea.QuitMsg)
+	return ok
+}
+
+// drainToQuit drives the record-write queue the way runWrites does, but for a quit whose exit is
+// waiting on it: it fails unless the drain ends in tea.Quit. That is the clean quit's contract — the
+// closing flush is a queued write now, so the program exits from the fold that finds the queue
+// empty, not from the keypress.
+func drainToQuit(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	for range maxWriteDrainSteps {
+		if cmd == nil {
+			t.Fatal("the record-write queue settled without firing the deferred quit")
+		}
+		msg := cmdMsg(cmd)
+		if _, quit := msg.(tea.QuitMsg); quit {
+			return m
+		}
+		m, cmd = stepCmd(t, m, msg)
+	}
+	t.Fatal("the deferred quit never fired")
+	return m
+}
+
 // saveNotes collects the transcript's save-pipeline notes (ok→fail failures and fail→ok
 // recoveries), so a test can assert exactly which transitions were surfaced.
 func saveNotes(m Model) []string {
@@ -1319,7 +1345,8 @@ func TestContinueAfterLiveCancelStaysCanned(t *testing.T) {
 }
 
 // A clean quit (idle, with a non-empty conversation) flushes the Engine snapshot and the derived
-// metadata through the SessionHost seam, then quits.
+// metadata through the SessionHost seam, then quits. The flush is a queued record write like any
+// other, so the exit fires from the fold that finds the queue drained rather than from the keypress.
 func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {
 	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"saved":true}`)}
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
@@ -1327,7 +1354,17 @@ func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {
 	m := newSessionModel(t, eng, host)
 	m.transcript.addUser("hello", nil) // give it content worth saving
 
-	_, cmd := ctrlCQuit(t, m)
+	next, cmd := ctrlCQuit(t, m)
+	// quit() only arms quitting on the branch that does NOT return tea.Quit, so this is the
+	// deferred exit — asserted without running cmd, which is the flush itself.
+	if !next.quitting {
+		t.Fatal("a clean quit exited before its flush had reached the host")
+	}
+	if n := len(host.savedCalls()); n != 0 {
+		t.Fatalf("Save calls before the flush Cmd ran = %d; want 0 — the flush is a queued write", n)
+	}
+	drainToQuit(t, next, cmd)
+
 	calls := host.savedCalls()
 	if len(calls) != 1 {
 		t.Fatalf("Save calls on a clean quit = %d; want 1", len(calls))
@@ -1338,8 +1375,50 @@ func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {
 	if calls[0].title != "hello" {
 		t.Errorf("flushed title = %q; want the first user message", calls[0].title)
 	}
-	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
-		t.Error("a clean quit did not quit the program")
+}
+
+// The clean quit's flush is SERIALIZED against the writes already in flight, which is the whole
+// reason it stopped calling the host directly: the synchronous Save read the host's active session
+// while a Rename was between its store write and mirroring the new title onto it, and wrote the
+// pre-rename title straight back over the name the human had just chosen (audit 2026-08-01
+// follow-up). Asserted at the fold layer — the recording host serialises its own calls under one
+// mutex, so it cannot see the collision — by proving the flush WAITS for the rename rather than
+// going out beside it, and that the exit waits for both.
+func TestQuitFlushWaitsForAnInFlightRename(t *testing.T) {
+	host := &fakeSessionHost{}
+	storeMeta(host, "s1", "old title", "/ws", time.Now(), 0, nil)
+	m := newSessionModel(t, &fakeEngine{}, host)
+	m.transcript.addUser("hello", nil)
+
+	// A rename goes out and is left in flight: its Cmd is held rather than run.
+	renameCmd := m.renameSession("s1", "a better name")
+	if renameCmd == nil {
+		t.Fatal("the rename dispatched nothing")
+	}
+
+	next, cmd := ctrlCQuit(t, m)
+	if cmd != nil {
+		t.Fatal("the quit flush dispatched a Save beside the in-flight rename instead of queueing")
+	}
+	if !next.quitting {
+		t.Fatal("the quit exited while a record write was still in flight")
+	}
+	if len(host.savedCalls()) != 0 {
+		t.Fatalf("Saves during the in-flight rename = %+v; want none", host.savedCalls())
+	}
+	if len(next.pendingWrites) != 1 || next.pendingWrites[0].kind != writeSave {
+		t.Fatalf("pending writes = %+v; want the closing flush waiting behind the rename", next.pendingWrites)
+	}
+
+	// Finishing the rename releases the flush, and finishing the flush fires the exit.
+	next, cmd = stepCmd(t, next, cmdMsg(renameCmd))
+	drainToQuit(t, next, cmd)
+	if n := len(host.savedCalls()); n != 1 {
+		t.Errorf("Save calls once the queue drained = %d; want the single closing flush", n)
+	}
+	want := []renameCall{{id: "s1", title: "a better name"}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v; want %+v — the quit must not skip a write it was asked for", got, want)
 	}
 }
 
@@ -1362,9 +1441,9 @@ func TestModelEmptyTranscriptNeverSaves(t *testing.T) {
 }
 
 // A pre-prompt note is not a conversation. A launch spent on a slash command leaves a persisted,
-// non-ephemeral note in the scrollback, but no prompt was ever sent — so neither the quit flush
-// (saveSession) nor an idle boundary (saveAtIdle) may file a record, or the history fills with
-// "Session <date>" entries reading 0 messages. Sending a prompt opens both boundaries.
+// non-ephemeral note in the scrollback, but no prompt was ever sent — so neither the quit flush nor
+// an idle boundary (both saveAtIdle) may file a record, or the history fills with "Session <date>"
+// entries reading 0 messages. Sending a prompt opens both boundaries.
 func TestModelPrePromptNoteNeverSaves(t *testing.T) {
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
@@ -1373,7 +1452,10 @@ func TestModelPrePromptNoteNeverSaves(t *testing.T) {
 	if cmd := m.saveAtIdle(); cmd != nil {
 		t.Error("an idle boundary scheduled a save before the first prompt")
 	}
-	m.saveSession()
+	// The quit exits on the spot: with nothing to flush there is no write to wait for.
+	if _, cmd := ctrlCQuit(t, m); !isQuit(cmd) {
+		t.Error("the quit flush scheduled a save before the first prompt")
+	}
 	if n := len(host.savedCalls()); n != 0 {
 		t.Errorf("Save calls before the first prompt = %d; want 0 — a slash-command note is not a conversation", n)
 	}
@@ -1384,8 +1466,9 @@ func TestModelPrePromptNoteNeverSaves(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("an idle boundary scheduled no save after the first prompt")
 	}
-	cmdMsg(cmd) // run the save Cmd so its Save reaches the host
-	m.saveSession()
+	m = step(t, m, cmdMsg(cmd)) // run the save Cmd so its Save reaches the host, and fold it
+	m, quitCmd := ctrlCQuit(t, m)
+	drainToQuit(t, m, quitCmd)
 	if n := len(host.savedCalls()); n != 2 {
 		t.Errorf("Save calls after the first prompt = %d; want 2 (the idle boundary and the quit flush)", n)
 	}

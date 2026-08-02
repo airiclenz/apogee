@@ -241,7 +241,7 @@ func (t *transcript) replay(entries []entry) {
 }
 
 // hasPrompt reports whether the transcript holds at least one committed user message. It is THE
-// save-gate predicate — saveSession, persist and saveAtIdle all funnel through it — so a session
+// save-gate predicate — persist and saveAtIdle (the closing flushes with it) both funnel through it — so a session
 // earns a history record only once a prompt was actually sent. Everything this program can put on
 // screen by itself leaves the gate shut: the one-time start-up box, slash-command notes (/confine's
 // status line, the /skills catalogue, a /model actuation note, the /sessions browser's notices),

@@ -159,19 +159,20 @@ type beatMsg struct {
 	beat heartbeat.Beat
 }
 
-// saveDoneMsg reports the outcome of one asynchronous SessionHost.Save (the per-Turn and idle
-// save Cmds). Err is nil on success; a failure is noted once on the ok→fail transition and then
-// swallowed — a save failure must never interrupt the conversation. The Model clears its
-// single-flight busy flag on this Msg and dispatches the next queued record write (which may be a
-// save that coalesced while this one was in flight: latest-wins).
+// saveDoneMsg reports the outcome of one asynchronous SessionHost.Save (the per-Turn snapshot, the
+// idle boundary, and the closing flushes a quit and a /clear schedule through the same queue — the
+// last of which is what a deferred exit waits for). Err is nil on success; a failure is noted once
+// on the ok→fail transition and then swallowed — a save failure must never interrupt the
+// conversation. The Model clears its single-flight busy flag on this Msg and dispatches the next
+// queued record write (which may be a save that coalesced while this one was in flight: latest-wins).
 type saveDoneMsg struct {
 	Err error
 }
 
-// recordWriteDoneMsg reports the outcome of the OTHER two record writes — one asynchronous
-// SessionHost.Rename or Delete. They share the save's single-flight latch (the record-write queue,
-// model.go), so this Msg is what releases it and lets the next write go out. write is the write
-// that finished, because the fold needs its shape: a browser verb re-lists over the result, and a
+// recordWriteDoneMsg reports the outcome of the OTHER record writes — one asynchronous
+// SessionHost.Rename, Delete or Rotate. They share the save's single-flight latch (the record-write
+// queue, model.go), so this Msg is what releases it and lets the next write go out. write is the
+// write that finished, because the fold needs its shape: a browser verb re-lists over the result, and a
 // quiet title write that failed is re-stashed rather than lost. err is what the host reported; every
 // other failure here is deliberately swallowed, these being best-effort writes. list carries the
 // re-list the browser's verbs ask for (recordWrite.relist), read on the write's own goroutine right

@@ -174,7 +174,8 @@ the engine only under one of two conditions.
   `errMsg`, i.e. *after* the worker has returned its terminal `Msg` and handed the engine back
   (the post-Esc / post-fault un-wedge — without it the Agent stays in-Exchange and the next
   `/clear` or message is refused with `ErrInputPending`); `Snapshot` runs from `quit` only on the
-  `!busy()` path (`saveSession`). The single-goroutine contract forbids *concurrent* use, not a
+  `!busy()` path (`saveSession`; since 2026-08-02 that closing flush is `saveAtIdle`, which takes
+  the same Snapshot on the same goroutine and then queues the write). The single-goroutine contract forbids *concurrent* use, not a
   synchronous call made once the sole driver has already returned — so all four are safe by
   construction, each guarded by the **state machine** rather than by a lock.
 

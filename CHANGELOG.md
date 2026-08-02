@@ -811,6 +811,19 @@ point is a **minor** bump, not a breaking change.
     a session's id at the *start* of its first save, so a name arriving in the window before that
     file exists was renaming a record that was not there yet — and was dropped without a word. It is
     now held and applied at the next successful save.
+  - **Quitting and `/clear` write through that queue too, so a name you just set survives them.** The
+    closing save both do — the one that catches the notes made after your last turn — went straight
+    at the file, outside the queue. Landing in the instant after a rename it wrote the *old* title
+    back, so a session you had just named through `/sessions` or `/rename` could be back under its
+    first-line name the moment you quit. A quit now waits for the writes it asked for to land before
+    the program exits, which also means a rename or a delete you requested on the way out is no
+    longer abandoned half-done.
+  - **`/clear` no longer files the outgoing conversation twice.** Closing a session and starting a
+    fresh one is a save followed by retiring the old session's id. If a save was still on its way to
+    disk when you typed `/clear`, it arrived after that retirement and was written as a **brand-new
+    session** — so `/sessions` listed the conversation you had just closed twice, and the fresh
+    session then carried on updating the duplicate under the old one's name and start time. The
+    retirement now waits its turn in the same queue, so one conversation is one record.
 
 - **A mechanism that cannot be enabled no longer reports itself as `apogee: apogee: …`.** When a
   mechanism named for arming collides with one already in the registry — the same ID twice, or an ID

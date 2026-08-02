@@ -228,7 +228,8 @@ func (h *uiHarness) runExchange(t *testing.T, ctx context.Context, m Model, eng 
 	go func() { h.Send(cmd()) }() // run the worker; its terminal Msg arrives like any other
 
 	for msg := range h.inbox {
-		m = step(t, m, msg)
+		next, cmd := stepCmd(t, m, msg)
+		m = next
 		switch msg.(type) {
 		case approvalReqMsg:
 			if m.state != stateAwaitingApproval {
@@ -239,7 +240,12 @@ func (h *uiHarness) runExchange(t *testing.T, ctx context.Context, m Model, eng 
 			// the rendezvous reply channel and unblocks the worker's Approve.
 			m = step(t, m, tea.KeyPressMsg{Code: 'a'})
 		case exchangeDoneMsg, cancelledMsg, errMsg:
-			return m, msg
+			// The terminal fold schedules the closing per-session save (finishWorker → saveAtIdle),
+			// so drive the record-write queue to quiescence the way the Update loop would: left
+			// dispatched-but-unrun it holds the single-flight latch, and everything after it —
+			// a quit's own closing flush included — would wait behind a write that never lands.
+			// A run with no SessionHost wired schedules nothing, so this is a no-op there.
+			return runWrites(t, m, cmd), msg
 		}
 	}
 	return m, nil
@@ -518,11 +524,10 @@ func TestE2ESnapshotResumeContinues(t *testing.T) {
 	}
 
 	// A clean quit (idle, non-empty transcript) flushes the snapshot through the seam and exits.
-	// The quit gesture is Ctrl+C twice within the window; Esc no longer ends the program.
-	_, quitCmd := ctrlCQuit(t, m1)
-	if _, isQuit := cmdMsg(quitCmd).(tea.QuitMsg); !isQuit {
-		t.Fatal("ctrl+c×2 at idle did not quit")
-	}
+	// The quit gesture is Ctrl+C twice within the window; Esc no longer ends the program. The flush
+	// is a queued record write, so the exit fires once the queue drains (drainToQuit).
+	m1, quitCmd := ctrlCQuit(t, m1)
+	drainToQuit(t, m1, quitCmd)
 	calls := host.savedCalls()
 	if len(calls) == 0 {
 		t.Fatal("a clean quit flushed no snapshot")

@@ -130,7 +130,7 @@ type Model struct {
 	askSel     int                // the highlighted ask_user choice index while awaitingAsk (D5); bare int, no no-copy type (ADR 0011)
 	lastErr    error              // the error behind stateErrored, shown in the status line
 	lastCtrlC  time.Time          // when the last Ctrl+C landed; a second within the window quits
-	quitting   bool               // a quit requested while busy; the exit waits for the worker's terminal Msg (C4)
+	quitting   bool               // a quit whose exit is deferred: to the worker's terminal Msg while busy (C4), else to the closing flush reaching disk (quit)
 
 	// The interjection queue — what the human typed while the model worked (ADR 0025). It is
 	// kept in two reconciled copies, which is what lets one goroutine own each half:
@@ -1074,21 +1074,27 @@ func (m Model) skillDisplayNames(ids []string) []string {
 // is byte-identical to a fresh launch at this window size. This IS the session-system wrap the reset
 // seam was built for; without a wired host it degrades to the pure view/engine reset it always was.
 //
-// Ordering: the save runs BEFORE ClearContext so the snapshot reflects the conversation being closed,
-// not an emptied one. An interrupted session (InExchange) is then aborted between the save and the
-// clear — ClearContext refuses mid-Exchange with ErrInputPending, so the save keeps its mid-task
-// state in history and the abort lets the clear accept the boundary. Rotate runs only AFTER
-// ClearContext succeeds — a refused clear leaves the old session open and its id live, so no rotate
-// happens on the error path. On success Rotate is unconditional and idempotent on an already-inactive
-// session, so a stale active id can never leak into the fresh conversation even when the outgoing view
-// held nothing worth saving.
+// Ordering: the save is scheduled BEFORE ClearContext so the snapshot it carries reflects the
+// conversation being closed, not an emptied one. An interrupted session (InExchange) is then aborted
+// between the save and the clear — ClearContext refuses mid-Exchange with ErrInputPending, so the save
+// keeps its mid-task state in history and the abort lets the clear accept the boundary. Rotate is
+// queued only AFTER ClearContext succeeds — a refused clear leaves the old session open and its id
+// live, so no rotate happens on the error path. On success Rotate is unconditional and idempotent on
+// an already-inactive session, so a stale active id can never leak into the fresh conversation even
+// when the outgoing view held nothing worth saving.
+//
+// Both of those go through the record-write queue rather than straight at the host, and the rotate
+// rides BEHIND the flush there for a reason the synchronous form could not honour: a save already in
+// flight (or waiting) when /clear lands would otherwise reach an already-rotated host and mint a
+// SECOND id for the outgoing conversation — a duplicate record that the fresh session then keeps
+// updating as its own.
 //
 // Reached only from runCommand at stateIdle (no worker owns the engine), so ClearContext and the
 // Snapshot the flush takes are safe. On a ClearContext error the view is left untouched and the failure
 // is noted — a fresh-looking view must never lie about an engine that still remembers the old
-// conversation; the already-completed save is harmless (the session was closing anyway).
+// conversation; the save already on the queue is harmless (the session was closing anyway).
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
-	m.saveSession() // flush the outgoing session into history before it closes (best-effort, gated)
+	cmd := m.saveAtIdle() // flush the outgoing session into history before it closes (queued, gated)
 	if m.eng.InExchange() {
 		// A session interrupted mid-task cannot be cleared — ClearContext refuses mid-Exchange with
 		// ErrInputPending — so scrap the open Exchange first. The save above already captured its
@@ -1099,10 +1105,13 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if err := m.eng.ClearContext(); err != nil {
 		m.transcript.addNote("could not clear context: " + err.Error())
 		m.layout()
-		return m, nil
+		return m, cmd // the flush above still runs: the queue must not be left holding a dispatched write
 	}
-	if m.sessions != nil {
-		m.sessions.Rotate() // the next Turn's save mints a fresh id; a no-op when nothing was saved
+	// Close the outgoing session so the next Turn's save mints a fresh id. Queued, so it can never
+	// overtake the flush above; a no-op when there is no host. At most one of the two Cmds is
+	// non-nil — the queue dispatches one write at a time — so this can only ever REPLACE a nil.
+	if rotate := m.scheduleWrite(recordWrite{kind: writeRotate}); rotate != nil {
+		cmd = rotate
 	}
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
@@ -1118,14 +1127,14 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.tokPerSec = 0    // …the same reason compactDoneMsg zeroes them on a fold
 	m.genStart = time.Time{}
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
-	// The Rotate above opened a fresh Session record, and a fresh record names itself: unlatch the
-	// naming call, forget that the CLOSED session was named by hand, and drop any title still
+	// The Rotate queued above opens a fresh Session record, and a fresh record names itself: unlatch
+	// the naming call, forget that the CLOSED session was named by hand, and drop any title still
 	// waiting for an id — it was stashed for the session that just went into history.
 	m.autoTitleFired = false
 	m.titleTouched = false
 	m.pendingTitle = ""
 	m.layout()
-	return m, nil
+	return m, cmd
 }
 
 // runCommand handles a recognised local /command. /continue and /compact open a worker: /continue
@@ -1420,6 +1429,15 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 // worker's single terminal Msg fire tea.Quit via finishWorker, once the goroutine has
 // unwound. Snapshotting the last boundary mid-run stays deferred (plan §6.1; handoff 16).
 //
+// The clean quit's closing flush is DEFERRED too, for a second reason: it is scheduled on the
+// record-write queue like every other save rather than written straight at the host. A synchronous
+// Save beside an in-flight Rename reads the host's active session before that rename has mirrored
+// the new title onto it, so the exit could write the pre-rename title back over the name the human
+// just chose (audit 2026-08-01 follow-up). So a quit with anything on the queue arms quitting and
+// exits from the fold that finds the queue drained (pumpOrQuit) — which is also the point at which
+// the browser writes asked for on the way out have landed. With nothing to flush and an idle queue
+// it still exits on the spot.
+//
 // Staged interjections do not hold the exit up and are not sent on the way out: they are
 // session-ephemeral by decision (ADR 0025 — a session records what was committed), so a quit
 // requested with rows queued simply exits, and the deferred exit beats the terminal fold's flush
@@ -1430,35 +1448,12 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, nil
 	}
-	m.saveSession()
+	cmd := m.saveAtIdle() // the closing flush joins the queue; nil when there is nothing worth saving
+	if m.writeBusy || len(m.pendingWrites) > 0 {
+		m.quitting = true
+		return m, cmd
+	}
 	return m, tea.Quit
-}
-
-// saveSession best-effort persists the conversation through the SessionHost — the synchronous flush
-// that captures any post-last-turn transcript changes (notes, /confine output) the per-Turn saves did
-// not. Two callers use it: a clean quit, and startNewSession closing the outgoing session on /clear|
-// /new (which then Rotates so the next Turn opens a fresh id). It is a no-op without a wired host or
-// before the session's first prompt (hasPrompt): a launch that only ran slash commands has produced
-// notes and chrome but nothing anyone would resume, so quitting it — or clearing it — must not file a
-// record reading 0 messages. Both Snapshot and the Save are best-effort: a quit
-// must never fail and a session close must never block, so an error is swallowed rather than
-// interrupting. Both callers guarantee no worker is running, so calling Snapshot here respects the
-// Agent's single-goroutine contract (C1). Unlike the per-Turn path this is synchronous — the outgoing
-// session must reach disk before the caller Rotates or the program exits, and there is no Update loop
-// left (or wanted) to deliver a saveDoneMsg to.
-func (m Model) saveSession() {
-	if m.sessions == nil || !m.transcript.hasPrompt() {
-		return
-	}
-	sess, err := m.eng.Snapshot()
-	if err != nil {
-		return
-	}
-	p, ok := m.snapshotPayload(sess)
-	if !ok {
-		return
-	}
-	_ = m.sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed)
 }
 
 // ----------------------------------------------------------------------------
@@ -1514,8 +1509,19 @@ func (m *Model) persist(sess domain.Session) tea.Cmd {
 
 // saveAtIdle persists the current conversation taking the Model's OWN engine Snapshot — valid
 // because every caller is a terminal boundary at which the worker has returned and the Update
-// loop owns the engine again (C1). Best-effort like persist: a Snapshot error, an unwired host,
-// or a transcript that holds no prompt yet simply schedules nothing.
+// loop owns the engine again (C1). Three callers share it: the idle finisher (finishWorker), the
+// clean quit's closing flush, and the /clear|/new close of the outgoing session. Best-effort like
+// persist: a Snapshot error, an unwired host, or a transcript that holds no prompt yet simply
+// schedules nothing — a launch that only ran slash commands has produced notes and chrome but
+// nothing anyone would resume, so quitting it, or clearing it, must not file a record reading 0
+// messages (hasPrompt).
+//
+// The two closing callers used to call the host synchronously instead, on the reasoning that the
+// record must be on disk before the program exits or the host rotates. It bought that at the cost of
+// a write outside the queue: a Save beside an in-flight Rename or Delete is exactly the collision the
+// queue exists to prevent, and a rotate that overtakes its own flush mints a second id for the
+// session it was closing. Both now schedule here and wait for the queue instead (quit,
+// startNewSession).
 func (m *Model) saveAtIdle() tea.Cmd {
 	if m.sessions == nil || !m.transcript.hasPrompt() {
 		return nil
@@ -1541,10 +1547,16 @@ func (m *Model) saveAtIdle() tea.Cmd {
 //
 // So every write goes through ONE queue: scheduleWrite/queueWrite put it in, pumpWrites takes
 // exactly one out whenever nothing is running, and every fold that finishes a write ends in
-// pumpWrites. Two rules follow from that, and both were bugs before it existed: a fold must never
+// pumpOrQuit. Two rules follow from that, and both were bugs before it existed: a fold must never
 // tea.Batch two writes (batch members run on separate goroutines — this is precisely how the title
 // flush came to race the coalesced save), and a write scheduled while the latch is held must WAIT
 // rather than dispatch.
+//
+// Rotate joins them as a fourth kind although it writes no file at all: it retires the host's active
+// session, so a save that overtakes it is written under the OLD id and a save it overtakes mints a
+// NEW one — ordering against the same stream is the whole of what it needs. The two closing flushes
+// (quit, /clear) queue for the same reason rather than writing through, which is what leaves the
+// exit waiting on the drain (pumpOrQuit).
 //
 // internal/session.Store holds a mutex over the same three calls, which is the floor under any
 // caller that does not come through here. This layer's job is ordering; the store's is atomicity.
@@ -1557,6 +1569,7 @@ const (
 	writeSave   recordWriteKind = iota // SessionHost.Save — the per-Turn and idle snapshots
 	writeRename                        // SessionHost.Rename — a generated title, /rename, the browser's `r`
 	writeDelete                        // SessionHost.Delete — the browser's delete verb
+	writeRotate                        // SessionHost.Rotate — /clear|/new retiring the closed session's id
 )
 
 // recordWrite is one queued write to the session record: what to do, and what the fold that lands
@@ -1659,6 +1672,8 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 			done.err = sessions.Rename(w.id, w.title)
 		case writeDelete:
 			done.err = sessions.Delete(w.id)
+		case writeRotate:
+			sessions.Rotate() // reports nothing: closing a session cannot fail
 		}
 		if w.relist {
 			// The re-list rides on the write's own goroutine, so the rows the browser repaints are
@@ -1697,13 +1712,14 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 		m.flushPendingTitle()
 	}
 	m.writeBusy = false
-	return m.pumpWrites()
+	return m.pumpOrQuit()
 }
 
-// foldRecordWrite folds a finished Rename or Delete: it releases the single-flight latch, dispatches
-// whatever waited behind it, and re-lists for the browser verbs that asked to repaint over the
-// result. Both writes are best-effort — a rename that did not stick leaves the old title on the
-// re-list, a delete that did not leaves the row — so nothing is said about a failure.
+// foldRecordWrite folds a finished Rename, Delete or Rotate: it releases the single-flight latch,
+// dispatches whatever waited behind it, and re-lists for the browser verbs that asked to repaint
+// over the result. All three are best-effort — a rename that did not stick leaves the old title on
+// the re-list, a delete that did not leaves the row, a rotate cannot fail — so nothing is said about
+// a failure.
 //
 // The one failure that is NOT simply swallowed is a quiet title write. Its apply path branches on
 // ActiveID(), which the host mints at the START of the first Save, before the atomic write has put
@@ -1718,7 +1734,23 @@ func (m *Model) foldRecordWrite(msg recordWriteDoneMsg) tea.Cmd {
 		m.foldSessionList(msg.list) // repaint the overlay over the store as the write left it
 	}
 	m.writeBusy = false
-	return m.pumpWrites()
+	return m.pumpOrQuit()
+}
+
+// pumpOrQuit ends every fold that finished a record write: it dispatches the next write, and when
+// the queue has run dry it fires the exit a clean quit was waiting for (quit). A quit deferred while
+// a WORKER runs is deliberately NOT fired here — that one belongs to finishWorker, once the
+// goroutine has unwound, because exiting first would let the composition root's teardown race a Step
+// still in flight (C4). The busy() guard is what keeps the two apart, including when a human quits
+// at idle and then sends one more message while the flush is still on its way to disk.
+func (m *Model) pumpOrQuit() tea.Cmd {
+	if cmd := m.pumpWrites(); cmd != nil {
+		return cmd
+	}
+	if m.quitting && !m.busy() {
+		return tea.Quit
+	}
+	return nil
 }
 
 // restashTitle puts a title that could not be written back on the stash, so the next successful save

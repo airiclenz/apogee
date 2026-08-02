@@ -155,14 +155,16 @@ func transcriptHasUser(entries []entry, want string) bool {
 
 // With a wired SessionHost, /clear closes the outgoing session into history: one final Save carrying
 // the outgoing conversation, then a Rotate so the NEXT Turn opens a fresh session id rather than
-// clobbering the one just closed (session-system plan §6).
+// clobbering the one just closed (session-system plan §6). Both ride the record-write queue, so the
+// test drains it exactly as the Update loop would.
 func TestClearClosesSessionIntoHistoryAndRotates(t *testing.T) {
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 	seedConversation(&m)
 
 	m.input.SetValue("/clear")
-	m = step(t, m, keyEnter())
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = runWrites(t, m, cmd)
 
 	calls := host.savedCalls()
 	if len(calls) != 1 {
@@ -198,13 +200,66 @@ func TestClearWithoutConversationRotatesButDoesNotSave(t *testing.T) {
 	m := newSessionModel(t, &fakeEngine{}, host)
 
 	m.input.SetValue("/clear")
-	m = step(t, m, keyEnter())
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = runWrites(t, m, cmd)
 
 	if n := len(host.savedCalls()); n != 0 {
 		t.Errorf("Save calls with only the start-up box = %d; want 0", n)
 	}
 	if got := host.rotateCount(); got != 1 {
 		t.Errorf("Rotate calls = %d; want 1 (unconditional so no stale id leaks into the next session)", got)
+	}
+}
+
+// A save already in flight when /clear lands must not outlive the Rotate that closes the session it
+// belongs to. With the Rotate written straight through, that save reached an already-inactive host
+// and minted a SECOND id for the outgoing conversation — a duplicate record the fresh session then
+// went on updating as its own (audit 2026-08-01 follow-up). Queued behind the flush, it cannot:
+// one conversation, one id. Asserted at the fold layer, because the recording host serialises its
+// own calls and so cannot see the ordering the Model is responsible for.
+func TestClearRotateWaitsForAnInFlightSave(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, &fakeEngine{}, host)
+	seedConversation(&m)
+
+	// A per-Turn save goes out and is left in flight: its Cmd is held rather than run, so the host
+	// has not even minted the session's id yet when /clear arrives.
+	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{}})
+	if saveCmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+
+	m.input.SetValue("/clear")
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd != nil {
+		t.Fatal("/clear dispatched a record write beside the in-flight save")
+	}
+	if got := host.rotateCount(); got != 0 {
+		t.Fatalf("Rotate calls while a save was in flight = %d; want 0 — that save would mint a second id", got)
+	}
+
+	// Drain the queue the way the Update loop does: the in-flight save lands, then the closing
+	// flush, then the rotate.
+	m, cmd = stepCmd(t, m, cmdMsg(saveCmd))
+	m = runWrites(t, m, cmd)
+	if got := host.rotateCount(); got != 1 {
+		t.Fatalf("Rotate calls after the drain = %d; want 1", got)
+	}
+
+	ids := map[string]bool{}
+	for _, c := range host.savedCalls() {
+		ids[c.id] = true
+	}
+	if len(ids) != 1 {
+		t.Errorf("the outgoing conversation was filed under %d ids (%v); want exactly one", len(ids), ids)
+	}
+
+	// …and the rotate still took effect: the next Turn's save opens a fresh id.
+	seedConversation(&m)
+	m = driveOneSave(t, m, domain.Session{})
+	calls := host.savedCalls()
+	if newID := calls[len(calls)-1].id; ids[newID] {
+		t.Errorf("next Turn save id = %q; want one distinct from the closed session's %v", newID, ids)
 	}
 }
 
@@ -219,7 +274,8 @@ func TestClearErrorDoesNotRotate(t *testing.T) {
 	before := len(m.transcript.entries)
 
 	m.input.SetValue("/clear")
-	m = step(t, m, keyEnter())
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = runWrites(t, m, cmd)
 
 	if got := host.rotateCount(); got != 0 {
 		t.Errorf("Rotate calls after a failed clear = %d; want 0 (the session stays open)", got)
