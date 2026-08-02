@@ -77,7 +77,7 @@ func TestModeColorDistinct(t *testing.T) {
 }
 
 // TestFooterModeMarkerLeadsWithTheModeSymbol pins the footer's mode marker on every rung of the
-// ladder: the word is led by that rung's own glyph — ⬡ plan, ⊘ ask before, ✔ allow edits, ▸▸ auto
+// ladder: the word is led by that rung's own glyph — ⬡ plan, ◐ ask before, ✔ allow edits, ▸▸ auto
 // — and the glyph is part of the SAME styled run as the word rather than a separately coloured
 // badge beside it. The styled assertion is the point: a glyph rendered under its own style would
 // read identically once the escapes are stripped, and is the exact defect this forbids.
@@ -87,7 +87,7 @@ func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
 		symbol, label string
 	}{
 		{domain.ModePlan, "⬡", "plan"},
-		{domain.ModeAskBefore, "⊘", "ask before"},
+		{domain.ModeAskBefore, "◐", "ask before"},
 		{domain.ModeAllowEdits, "✔", "allow edits"},
 		{domain.ModeAuto, "▸▸", "auto"},
 	} {

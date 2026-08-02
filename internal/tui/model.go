@@ -3256,7 +3256,7 @@ func modeLabel(m domain.Mode) string {
 }
 
 // modeSymbol maps an autonomy mode to the glyph that leads its footer marker (the glyphs in
-// theme.go): ⬡ plan, ⊘ ask before, ✔ allow edits, ▸▸ auto. An unknown mode has no glyph — an
+// theme.go): ⬡ plan, ◐ ask before, ✔ allow edits, ▸▸ auto. An unknown mode has no glyph — an
 // off-ladder value states its word alone rather than borrowing another rung's shape.
 //
 // It is display-only and deliberately separate from modeLabel: the label is also read aloud in
@@ -3278,7 +3278,7 @@ func modeSymbol(m domain.Mode) string {
 }
 
 // modeMarker is the footer's mode marker as one string — the mode's symbol, a space, and its
-// friendly label ("⊘ ask before"). It is composed here rather than at the call site so the two
+// friendly label ("◐ ask before"). It is composed here rather than at the call site so the two
 // halves are rendered under a SINGLE style: the glyph carries the mode's colour because it is
 // part of the same styled run as the word, not because it was coloured to match (footerContent).
 // A mode with no symbol (off the ladder) renders its label alone, with no leading space.

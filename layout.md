@@ -55,7 +55,7 @@
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
-  host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                  ⊘ ask before
+  host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                  ◐ ask before
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 
 ---
@@ -509,7 +509,7 @@ mode on the right. The host falls back to the endpoint's own host when no alias 
 any segment nothing has named is dropped with its separator.
 
 **The mode marker's symbol.** The mode is stated as a glyph and its word, one rung per shape:
-`⬡ plan`, `⊘ ask before`, `✔ allow edits`, `▸▸ auto`. The glyph is rendered in the SAME styled run
+`⬡ plan`, `◐ ask before`, `✔ allow edits`, `▸▸ auto`. The glyph is rendered in the SAME styled run
 as the word, so it carries the mode's own colour by construction rather than by being coloured to
 match — there is no separately toned badge here, and no way for the two halves to drift apart. The
 symbol belongs to the marker alone: everywhere the mode is said in a sentence instead (the

@@ -76,7 +76,7 @@ const (
 // acts without asking, and the doubled chevron is what "running ahead" looks like.
 const (
 	glyphModePlan       = "⬡"  // plan — an outline, nothing filled in yet
-	glyphModeAskBefore  = "⊘"  // ask before — the barred circle of a held action
+	glyphModeAskBefore  = "◐"  // ask before — the barred circle of a held action
 	glyphModeAllowEdits = "✔"  // allow edits — edits pass
 	glyphModeAuto       = "▸▸" // auto — fast-forward, no gate
 )
