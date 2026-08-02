@@ -69,6 +69,18 @@ const (
 	glyphTableRule       = "─" // one cell of the rule under a markdown table's header row (mdtable.go)
 )
 
+// The autonomy-mode glyphs, one per rung of the ladder (modeSymbol). They lead the footer's mode
+// marker in the mode's OWN colour — the glyph and the word are one styled run, not a coloured
+// badge beside a label — so the rung reads at a glance from the shape before the word is read.
+// Each is one terminal cell wide except ▸▸, which is deliberately two: auto is the one rung that
+// acts without asking, and the doubled chevron is what "running ahead" looks like.
+const (
+	glyphModePlan       = "⬡"  // plan — an outline, nothing filled in yet
+	glyphModeAskBefore  = "⊘"  // ask before — the barred circle of a held action
+	glyphModeAllowEdits = "✔"  // allow edits — edits pass
+	glyphModeAuto       = "▸▸" // auto — fast-forward, no gate
+)
+
 // subAgentLabel is the one-line header that opens each contiguous run of sub-agent
 // (Depth > 0) blocks, announcing the nested section (P3.14).
 const subAgentLabel = "sub-agent"

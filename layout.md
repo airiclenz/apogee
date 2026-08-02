@@ -55,7 +55,7 @@
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
-  host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                    ask-before
+  host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                  ⊘ ask before
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 
 ---
@@ -484,7 +484,7 @@ while a turn runs, `enter dismiss` after an error, the primed-`ctrl+c` line), an
 flash. Whichever one is showing, it
 ends **two columns short of the window edge** (`bodyIndent`) — the mirror of the two columns the
 left slot leads with, and the same column the footer's mode marker below it ends in, so the
-gauge's last track cell in the sketch sits directly above the last character of `ask-before`. The
+gauge's last track cell in the sketch sits directly above the last character of `ask before`. The
 margin belongs to the slot, not to any one occupant: the gauge and every hint end in that column,
 and nothing in the slot ever touches the edge. The black field runs past it to the edge
 regardless — the row is one unbroken band, as it is on the left. In a window too narrow to hold
@@ -507,6 +507,15 @@ two columns of room the phrase goes whole, separator and all, rather than readin
 workdir`, the sketch's `host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee` — and the autonomy
 mode on the right. The host falls back to the endpoint's own host when no alias is configured, and
 any segment nothing has named is dropped with its separator.
+
+**The mode marker's symbol.** The mode is stated as a glyph and its word, one rung per shape:
+`⬡ plan`, `⊘ ask before`, `✔ allow edits`, `▸▸ auto`. The glyph is rendered in the SAME styled run
+as the word, so it carries the mode's own colour by construction rather than by being coloured to
+match — there is no separately toned badge here, and no way for the two halves to drift apart. The
+symbol belongs to the marker alone: everywhere the mode is said in a sentence instead (the
+confinement overlay's "the current mode is ask before") it is the word by itself, where a glyph
+would only be noise. A mode off the ladder states its word with no glyph rather than borrowing
+another rung's shape.
 
 **What it is.** ONE frameless row below the prompt box, which closes its own `╰─╯` frame. The
 footer used to be three rows of chrome — a `├──┤` divider standing in for the edge the box was

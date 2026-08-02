@@ -27,7 +27,8 @@
 // viewport's soft-wrap so the last user prompt sticks to the top while a reply streams). The
 // transcript now groups a tool call with its result by ToolCall ID, the input box is a rounded,
 // auto-growing black field, and the chrome is a braille status line plus a footer bar (host-alias
-// ✦ model ✦ workdir, mode — the workspace written with the home directory as `~`,
+// ✦ model ✦ workdir, then the mode behind its own symbol ("⊘ ask before", [modeMarker]) — the
+// workspace written with the home directory as `~`,
 // [workdirDisplay], resolved once at construction). The live token gauge (reserved at P2.7) is now
 // wired: the post-v1 track folds each top-level UsageEvent's total into the status-line
 // context-fill gauge, measured against the discovered context window ([Model.contextGauge] /

@@ -76,6 +76,53 @@ func TestModeColorDistinct(t *testing.T) {
 	}
 }
 
+// TestFooterModeMarkerLeadsWithTheModeSymbol pins the footer's mode marker on every rung of the
+// ladder: the word is led by that rung's own glyph — ⬡ plan, ⊘ ask before, ✔ allow edits, ▸▸ auto
+// — and the glyph is part of the SAME styled run as the word rather than a separately coloured
+// badge beside it. The styled assertion is the point: a glyph rendered under its own style would
+// read identically once the escapes are stripped, and is the exact defect this forbids.
+func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
+	for _, tc := range []struct {
+		mode          domain.Mode
+		symbol, label string
+	}{
+		{domain.ModePlan, "⬡", "plan"},
+		{domain.ModeAskBefore, "⊘", "ask before"},
+		{domain.ModeAllowEdits, "✔", "allow edits"},
+		{domain.ModeAuto, "▸▸", "auto"},
+	} {
+		t.Run(string(tc.mode), func(t *testing.T) {
+			m, _ := newModeModel(t, tc.mode)
+			footer := m.footerContent(80)
+			want := tc.symbol + " " + tc.label
+
+			if got := modeMarker(tc.mode); got != want {
+				t.Errorf("modeMarker(%q) = %q, want %q", tc.mode, got, want)
+			}
+			// The marker still ends the line bodyIndent short of the edge — the symbol joined the
+			// slot, it did not displace the word from the column the gauge above it ends in.
+			if flat := ansiPattern.ReplaceAllString(footer, ""); !strings.HasSuffix(flat, want+bodyIndent) {
+				t.Errorf("footer = %q, want it to end %q", flat, want+bodyIndent)
+			}
+			if run := m.th.footerText.Foreground(modeColor(tc.mode)).Render(want); !strings.Contains(footer, run) {
+				t.Errorf("footer does not carry %q as ONE styled run in the mode's own colour: %q", want, footer)
+			}
+		})
+	}
+}
+
+// TestModeMarkerFallsBackToTheWordAlone proves an off-ladder mode keeps its word and borrows no
+// other rung's shape: no glyph, and no orphan leading space where one would have gone.
+func TestModeMarkerFallsBackToTheWordAlone(t *testing.T) {
+	off := domain.Mode("hands-off")
+	if got := modeSymbol(off); got != "" {
+		t.Errorf("modeSymbol(%q) = %q, want no glyph for an off-ladder mode", off, got)
+	}
+	if got, want := modeMarker(off), string(off); got != want {
+		t.Errorf("modeMarker(%q) = %q, want %q", off, got, want)
+	}
+}
+
 // TestModelShiftTabCyclesWhileBusy proves mid-turn switching: Shift+Tab cycles the mode and
 // drives the engine while running, while awaiting an approval, and while awaiting an answer.
 func TestModelShiftTabCyclesWhileBusy(t *testing.T) {

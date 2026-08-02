@@ -3101,13 +3101,13 @@ func (m Model) footerView() string {
 }
 
 // footerContent composes the footer's single line: host ✦ model ✦ workdir on the left, the mode
-// marker on the right, over one unbroken black field. It takes the STATUS LINE's posture, one row
-// below the box rather than one row above it — a bodyIndent lead, the black field filled to the
-// full window width, and the mode marker ending bodyIndent short of the window edge, the very
-// column the gauge above it ends in (layout.md, "The status line's right slot"). The mode marker
-// takes its own per-mode colour (modeColor), so the segments are styled independently and laid out
-// by hand — mirroring statusLine — rather than rendered under one style, which would let the mode's
-// colour reset bleed the black field. The host falls back to the endpoint when no alias is
+// marker — its symbol and its word (modeMarker) — on the right, over one unbroken black field. It
+// takes the STATUS LINE's posture, one row below the box rather than one row above it — a
+// bodyIndent lead, the black field filled to the full window width, and the mode marker ending
+// bodyIndent short of the window edge, the very column the gauge above it ends in (layout.md,
+// "The status line's right slot"). The mode marker takes its own per-mode colour (modeColor), so
+// the segments are styled independently and laid out by hand — mirroring statusLine — rather than
+// rendered under one style, which would let the mode's colour reset bleed the black field. The host falls back to the endpoint when no alias is
 // configured, and every segment nothing has named is dropped with its separator (nonEmpty).
 //
 // The workdir closes the run rather than opening it because the line reads outward-in — the server
@@ -3124,10 +3124,11 @@ func (m Model) footerContent(w int) string {
 	if m.hb.offline {
 		offline = " " + glyphAssistant + " " + offlineLabel
 	}
-	// footerText keeps the black background; only the foreground swaps to the mode's colour. The
+	// footerText keeps the black background; only the foreground swaps to the mode's colour. Symbol
+	// and word go through that ONE Render, so the glyph can never take a tone of its own. The
 	// trailing bodyIndent is the slot's own margin, not the marker's — the same seam statusLine
 	// appends its right slot's margin at.
-	mode := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(modeLabel(m.opts.Mode)) +
+	mode := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(modeMarker(m.opts.Mode)) +
 		m.th.footerText.Render(bodyIndent)
 
 	gap := w - m.th.measure.Width(bodyIndent) - m.th.measure.Width(info) -
@@ -3252,6 +3253,40 @@ func modeLabel(m domain.Mode) string {
 	default:
 		return string(m)
 	}
+}
+
+// modeSymbol maps an autonomy mode to the glyph that leads its footer marker (the glyphs in
+// theme.go): ⬡ plan, ⊘ ask before, ✔ allow edits, ▸▸ auto. An unknown mode has no glyph — an
+// off-ladder value states its word alone rather than borrowing another rung's shape.
+//
+// It is display-only and deliberately separate from modeLabel: the label is also read aloud in
+// sentences (the confinement overlay's "the current mode is ask before"), where a glyph would be
+// noise. Only the footer's marker leads with the symbol.
+func modeSymbol(m domain.Mode) string {
+	switch m {
+	case domain.ModePlan:
+		return glyphModePlan
+	case domain.ModeAskBefore:
+		return glyphModeAskBefore
+	case domain.ModeAllowEdits:
+		return glyphModeAllowEdits
+	case domain.ModeAuto:
+		return glyphModeAuto
+	default:
+		return ""
+	}
+}
+
+// modeMarker is the footer's mode marker as one string — the mode's symbol, a space, and its
+// friendly label ("⊘ ask before"). It is composed here rather than at the call site so the two
+// halves are rendered under a SINGLE style: the glyph carries the mode's colour because it is
+// part of the same styled run as the word, not because it was coloured to match (footerContent).
+// A mode with no symbol (off the ladder) renders its label alone, with no leading space.
+func modeMarker(m domain.Mode) string {
+	if sym := modeSymbol(m); sym != "" {
+		return sym + " " + modeLabel(m)
+	}
+	return modeLabel(m)
 }
 
 // modeColor maps an autonomy mode to its footer-marker colour (the palette in theme.go). An
