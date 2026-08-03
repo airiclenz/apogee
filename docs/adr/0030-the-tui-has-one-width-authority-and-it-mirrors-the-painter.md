@@ -96,10 +96,12 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
    measured — pushed a 24-row frame to 105 columns on an 80-column window once the rows were
    squared. This is what makes `layout.md`'s absolute cap hold at the painted layer.
 6. **Widget mirrors are the deliberate exception: their oracle is the widget, never the
-   painter.** `wrapRowStarts`/`runesWidth` (`inputaccent.go`), `cellToRuneOffset` (`mouse.go`),
-   `inputContentRows` and `wrappedOffset` (`render.go`) mirror third-party widgets' internal
-   math — the textarea wraps with `uniseg.StringWidth`, the viewport soft-wraps with
-   `ansi.StringWidth`, and neither moves when the painter does. They measure the way their
+   painter.** `wrapRowStarts`/`runesWidth` (`inputaccent.go`), `cellToRuneOffset` (`mouse.go`) and
+   `inputContentRows` (`render.go`) mirror third-party widgets' internal math — the textarea wraps
+   with `uniseg.StringWidth`, the viewport soft-wraps with `ansi.StringWidth`, and neither moves
+   when the painter does. *(`wrappedOffset` (`render.go`), the viewport mirror this list also
+   named, was deleted 2026-08-03 with the submit-time jump-to-top that was its sole consumer; the
+   rule is unchanged, and every live mirror is now the textarea's.)* They measure the way their
    widget measures, down to the one term where the textarea itself weighs a rune with
    go-runewidth (`textarea.go:1838-1839`, `lastCharLen`). The dividing line, stated at each
    site: a mirror's **rows** are the widget's — only it decides which runes it put on which line
