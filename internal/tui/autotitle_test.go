@@ -479,9 +479,14 @@ func TestAutoTitleFiresAgainAfterNewSession(t *testing.T) {
 	}
 }
 
-// Naming is cosmetic and out-of-band: a landed title changes nothing the human can see in the
-// conversation. Two models fed identical input differ only in the naming Msg, and their transcripts
-// stay identical entry for entry.
+// Naming is cosmetic and out-of-band: a landed title changes nothing about the CONVERSATION. Two
+// models fed identical input differ only in the naming Msg, and their transcripts stay identical
+// entry for entry.
+//
+// The rendered view is no longer identical, and that is the design rather than a leak: the top rule
+// wears the session's name (sessionrule.go), so a landed title lands on that ONE row — where the
+// model that never named itself keeps the heuristic name its opening request gave it. Every other
+// row must still match, which is what "the naming call is not a Turn" now means for the frame.
 func TestAutoTitleLeavesTheTranscriptUntouched(t *testing.T) {
 	t.Parallel()
 
@@ -504,8 +509,33 @@ func TestAutoTitleLeavesTheTranscriptUntouched(t *testing.T) {
 	if !reflect.DeepEqual(withTitle.transcript.entries, without.transcript.entries) {
 		t.Error("a landed auto-title changed the transcript; the naming call is not a Turn")
 	}
-	if plain(withTitle.View()) != plain(without.View()) {
-		t.Error("a landed auto-title changed the rendered view; titles surface only in the browser")
+	withRows := strings.Split(plain(withTitle.View()), "\n")
+	withoutRows := strings.Split(plain(without.View()), "\n")
+	if len(withRows) != len(withoutRows) {
+		t.Fatalf("views are %d and %d rows; a landed title changed the frame's row count",
+			len(withRows), len(withoutRows))
+	}
+	ruleRow := -1
+	for i := range withRows {
+		if strings.Contains(withRows[i], "▔") {
+			ruleRow = i
+			break
+		}
+	}
+	if ruleRow < 0 {
+		t.Fatalf("no ▔ top rule row in the rendered view")
+	}
+	for i := range withRows {
+		if i != ruleRow && withRows[i] != withoutRows[i] {
+			t.Errorf("row %d differs with a landed auto-title:\n%q\n%q", i, withRows[i], withoutRows[i])
+		}
+	}
+	if got := withRows[ruleRow]; !strings.Contains(got, "fix the broken parser") ||
+		strings.Contains(got, "tokenizer.go") {
+		t.Errorf("top rule = %q, want the landed title in place of the heuristic name", got)
+	}
+	if got := withoutRows[ruleRow]; !strings.Contains(got, "tokenizer.go") {
+		t.Errorf("unnamed top rule = %q, want the heuristic name from the opening request", got)
 	}
 	if withTitle.ctxUsed != without.ctxUsed || withTitle.tokPerSec != without.tokPerSec {
 		t.Error("a landed auto-title moved the token accounting; it emits no Usage event")

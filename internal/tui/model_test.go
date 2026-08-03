@@ -2002,6 +2002,10 @@ func TestFooterViewIsOneFramelessLine(t *testing.T) {
 // the status line sits directly above the input box (the owner's requested ordering). It also
 // checks layout budgets the row so the viewport shrinks by it. Styling is stripped first so the
 // assertions are over the runes, not the black-field escapes.
+//
+// The row is UNBROKEN here because newTestModel's session is unnamed and its transcript carries no
+// user text, so it has no name to wear (sessionRuleName). What the row looks like once a session HAS
+// a name is TestTopRuleCarriesSessionName's business; this test is about the row's position.
 func TestTopRuleHairlineRow(t *testing.T) {
 	m := newTestModel(t)
 

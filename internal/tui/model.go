@@ -3082,8 +3082,23 @@ func (m Model) inputElisionEdge(hidden int) string {
 // border so it recedes). It sits directly below the transcript's one blank gap row and above the
 // status line (layout.md), capping the whole bottom section while the status line stays directly
 // above the input box.
+//
+// The row also CARRIES the session's name, centered, in place of the rule runes it would otherwise
+// draw there (sessionrule.go, which owns the whole arithmetic). That is an IDENTITY and not a gauge:
+// a screen full of panes says which conversation each one is, and nothing that changes every frame
+// belongs here — everything live already has a home in the chrome below. An unnamed session gets the
+// plain unbroken rule this function used to be, which is also what /clear returns the row to.
+//
+// The two styles are why the pieces are rendered separately rather than composed first: the ▔ runs
+// keep the recessive hairline role, while the label — the name and its two spaces — takes statusBar,
+// so it reads as a label sitting ON the rule rather than as more rule, and the black field stays
+// unbroken across the seam.
 func (m Model) topRule() string {
-	return m.th.hairline.Render(strings.Repeat("▔", m.width))
+	lead, label, trail := sessionRuleLayout(m.th.measure, m.sessionRuleName(), m.width)
+	if label == "" {
+		return m.th.hairline.Render(lead)
+	}
+	return m.th.hairline.Render(lead) + m.th.statusBar.Render(label) + m.th.hairline.Render(trail)
 }
 
 // bottomRule renders the full-width ▁ hairline that closes the screen under the footer: the top

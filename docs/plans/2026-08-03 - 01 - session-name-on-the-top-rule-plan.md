@@ -138,7 +138,20 @@ gone — in particular `internal/tui` must not reference `formatWindowTitle`, `w
 
 ---
 
-## 2. The top rule carries the session's name
+## 2. The top rule carries the session's name — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): one test the item's list does not name had to change, because this item
+invalidates its premise rather than its assertions:
+`TestAutoTitleLeavesTheTranscriptUntouched` (`internal/tui/autotitle_test.go`) asserted
+`plain(withTitle.View()) == plain(without.View())` under the claim "titles surface only in the
+browser" — now false by design, since a landed title lands on the rule. The assertion was narrowed
+rather than dropped: every row of the two views must still match EXCEPT the rule row, and the rule
+row is asserted positively on both sides (the named model wears the landed title and not the
+heuristic; the unnamed one wears the heuristic from its opening request), so the "naming is not a
+Turn" guarantee is still pinned over the whole frame. Two constants beyond the item's sketch:
+`sessionRuleRune = "▔"` (the rule's glyph, so the layout and its tests share one definition of it)
+and no other addition. `internal/tui/doc.go` was left alone — item 3 owns naming `sessionrule.go`
+in the inventory.
 
 **What:** the existing `▔` hairline row renders the session's name centered on it. New file
 `internal/tui/sessionrule.go`; one existing function changes (`Model.topRule`, `internal/tui/model.go`
