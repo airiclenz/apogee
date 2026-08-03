@@ -1,7 +1,8 @@
 # Plan — The terminal window wears the session's name (`✭ <name>`)
 
 **Date:** 2026-08-03
-**Status:** PLANNED — not started.
+**Status:** EXECUTED (2026-08-03) — items 1, 2 and 4 done; item 3 is manual and stays open for the
+owner (see its NOTES: the emit path is proven, the terminal-by-terminal rendering is not).
 **Track:** one `ISSUES.md` bullet — *"I'd like to see the current session's name somewhere -
 could the terminal window be named (trimmed to 30 characters maybe)"*. TUI presentation and
 one exported helper in `internal/title`. No engine, protocol, persistence, or Mechanism
@@ -66,7 +67,26 @@ if the owner asks — the title is inert on every terminal that ignores it); any
 
 File:line anchors below are as of `217b2e1` (2026-08-03) and may drift a few lines.
 
-## 1. The active session's name becomes Model state
+## 1. The active session's name becomes Model state — ✅ DONE (2026-08-03, `23be036`)
+
+NOTES (2026-08-03): three deviations, all deliberate.
+
+- **`nameSession` does NOT sanitize.** The plan put `title.StripEscapes` at the writer; it landed at
+  the READER instead (`formatWindowTitle`, item 2), which is the seam where the guarantee is
+  load-bearing — the OSC payload — and the only place a name is consumed. This also let item 1 stand
+  alone without item 2's export (verified: the commit builds and tests green with item 2 stashed).
+  `Model.sessionName` therefore holds untrusted text, which its field comment says outright.
+- **`flushPendingTitle`'s flush branch does not "re-affirm" the name** — `applyTitle` already named
+  the session when the stash was made, and nothing can change `sessionName` between the stash and
+  its flush without also replacing the stash. Re-affirming would have been dead code.
+- **Its DROP branch, however, needed a write the plan did not foresee.** Verification turned up a
+  real divergence: `titleTouched` is session-global but set by a browser rename of ANY row, so a
+  human renaming some *other* stored session while a generated title waits for an id trips the
+  never-clobber rule without naming this one. The stash is dropped, the record keeps its heuristic
+  title — and the window was left wearing the dropped name, which nothing on disk carried. The drop
+  branch now gives the name back up when `sessionName == pendingTitle`, and only then, so a name the
+  human chose for THIS session still stands. Pinned by `TestSessionNameGivesUpADroppedAutoTitle`
+  (Model side) and `TestWindowTitleGivesUpADroppedAutoTitle` (window side).
 
 **What:**
 
@@ -128,7 +148,17 @@ from every route that can set one, and no stored title changes. `make check` gre
 
 **Commit:** `feat(tui): the model tracks the active session's name`
 
-## 2. `windowTitle` — the spelling, and the sanitizer it needs
+## 2. `windowTitle` — the spelling, and the sanitizer it needs — ✅ DONE (2026-08-03, `4f401e6`)
+
+NOTES (2026-08-03): `internal/title`'s `stripEscapes` had ONE in-package call site, not the three
+the plan guessed, and `title_test.go` needed no change. The file-head block in `windowtitle.go` is a
+section banner rather than a package comment — `package tui`'s doc comment lives in `doc.go`, and a
+second one would be a duplicate-package-doc smell. `windowTitle` gates its heuristic branch on
+`m.transcript.firstUserText() != ""` rather than on `sessionTitle`'s return, because `sessionTitle`
+answers a dated `Session <date>` for a silent session and the window must say `✭ apogee` there; a
+session that HAS spoken keeps whatever `sessionTitle` makes of it, dated fallback included, so the
+window and the browser agree. `TestViewCarriesWindowTitle` reads `m.View().WindowTitle` in both the
+`!m.ready` placeholder and the laid-out frame, as specified.
 
 **What:**
 
@@ -185,7 +215,15 @@ the name is clipped at 30 runes and always preceded by `✭ `. `make check` gree
 
 **Commit:** `feat(tui): the terminal window wears the session's name`
 
-## 3. Manual verification on the owner's terminals
+## 3. Manual verification on the owner's terminals — ⏳ OPEN (owner-run)
+
+NOTES (2026-08-03): the executor cannot see a title bar, so this item stays open. What COULD be
+verified here was: apogee driven under a real pty (`pty.fork`, `TERM=xterm-256color`) emits exactly
+three `OSC 2` sequences over a session's life — `ESC ] 2 ; ✭ apogee BEL` at launch,
+`ESC ] 2 ; ✭ the window title wave BEL` after a `/rename`, and an empty one on exit (the renderer's
+blank-on-close, as documented). So the emit path, the star, the name, and the change-only posture
+are proven; what remains is only how each terminal chooses to DISPLAY the title, which is the list
+below.
 
 **What:** no code. Run apogee under each terminal the issue names and confirm what the table
 above predicts, then record the outcome as NOTES on this item (this is the one item whose
@@ -206,7 +244,10 @@ and item 4's README note quotes the corrected version.
 
 **Commit:** none of its own — fold any correction into item 4's commit.
 
-## 4. The docs say what the window says
+## 4. The docs say what the window says — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): written from the researched reach table, since item 3 stays open — if the owner's
+own pass corrects a row, `layout.md` and `README.md` are the two places to amend.
 
 **What:**
 

@@ -185,6 +185,14 @@ gauge, instead of opening an empty view over a model that still remembers.
 - A session killed mid-task resumes to the last completed turn and says so;
   `/continue` then picks the unfinished work back up, while sending a new message
   instead discards it and continues fresh.
+- The **terminal window is named after the session** — `✭ <name>`, clipped to 30
+  characters — so a tab strip full of terminals says which conversation each one
+  is. It works out of the box in Terminal.app, iTerm2, WezTerm, Kitty, Ghostty,
+  Alacritty, Windows Terminal and `cmd.exe`. Two editors are the exception: in
+  **VS Code** set `"terminal.integrated.tabs.title": "${sequence}"` to see it (the
+  tab shows the process name otherwise), and **Zed** shows it in the terminal's
+  toolbar rather than the tab. Under tmux it needs `set -g set-titles on` to reach
+  the outer window.
 
 Autonomy mode, tool approvals, confinement, and MCP connections are deliberately
 **not** part of a saved session — they are re-established or re-confirmed on

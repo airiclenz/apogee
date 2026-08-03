@@ -3,9 +3,12 @@ P: Planned
 X: Executed
 
 
-- [ ] huge prompts should be collaped to 3 rows (expandable) when displyed in the session chat. Can the module that is used to display tool in the chat be used? That module already supports collapsing and expanding content.
+- [ ] The scrollbar should be visibile based on a setting in apogee's config.yaml: show-scrollbar
+Also, the terminal scrollbar should not be visible at all when apogee is running. llama-launcher does that already properly today.
 
-- [ ] I'd like to see the current session's name somewhere.
+- [ ] When sending a new prompt, I do not want the session chat to jump so that the new prompt ends up at the very top of an empty chat (scrolled down) and the rest of the chat history becomes invisible. I just want the new chat naturally be added to the chat and automatic scrolling taking care of it. When the last prompt later reaches the top of the session chat, it should still stick there - as it already does now.
+
+- [ ] huge prompts should be collaped to 3 rows (expandable) when displyed in the session chat. Can the module that is used to display tool in the chat be used? That module already supports collapsing and expanding content. Maybe we should implement a sub-class for this kind of issue from which the prompt-collapser and the tool-collapser module are derived?
 
 - [ ] Currently I cannot see how much ot it's context a sub agent has used.
 
