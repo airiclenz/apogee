@@ -975,3 +975,188 @@ func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
 		t.Errorf("renames = %+v, want only the human's %+v", got, want)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The name the session goes by (session-name-window-title plan, item 1)
+// ----------------------------------------------------------------------------
+//
+// sessionName is the naming machinery's DISPLAY side: what the human last saw decided, which the
+// frame puts on the terminal window. It is deliberately not the store's truth, so none of these can
+// be answered by asking the host what it holds — what they pin is that the field follows every route
+// that DECIDES a name, keeps standing when a route throws one away, and empties when the session it
+// named goes into history.
+
+// Every naming route feeds the field, and it feeds it from the decision rather than from the write
+// that follows: a title stashed for an id the first Save has not minted yet is already the name this
+// session goes by, so the window carries it before anything on disk does. Both routes are driven at
+// both moments — with a record to rename, and before one exists.
+func TestSessionNameFollowsAppliedTitle(t *testing.T) {
+	t.Parallel()
+
+	routes := []struct {
+		name  string
+		drive func(t *testing.T, m Model) (Model, tea.Cmd)
+		want  string // the name each route's raw input sanitizes down to
+	}{
+		{"an automatic naming call", func(t *testing.T, m Model) (Model, tea.Cmd) {
+			t.Helper()
+			return stepCmd(t, m, autoTitleMsg{title: `  Title: "Fix the broken parser"  `})
+		}, "Fix the broken parser"},
+		{"/rename <text>", func(t *testing.T, m Model) (Model, tea.Cmd) {
+			t.Helper()
+			return sendPrompt(t, m, `/rename   the "parser"   rewrite.`)
+		}, `the "parser" rewrite`},
+	}
+	for _, r := range routes {
+		for _, active := range []bool{true, false} {
+			when := "with a record to rename"
+			if !active {
+				when = "before the first save"
+			}
+			t.Run(r.name+", "+when, func(t *testing.T) {
+				t.Parallel()
+
+				host := &fakeSessionHost{}
+				if active {
+					host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
+				}
+				m := newTitlingModel(t, host, &titleSeam{}, true)
+
+				m, cmd := r.drive(t, m)
+				m = runWrites(t, m, cmd)
+
+				if m.sessionName != r.want {
+					t.Errorf("sessionName = %q, want the sanitized name the route decided (%q)", m.sessionName, r.want)
+				}
+				if active {
+					return
+				}
+				// The stash branch is the one no write can vouch for: nothing was renamed, because
+				// there is no record to rename yet — the name exists on the Model alone.
+				if m.pendingTitle != r.want {
+					t.Errorf("pendingTitle = %q, want the name held for the id the first save mints", m.pendingTitle)
+				}
+				if got := host.renamedTitles(); len(got) != 0 {
+					t.Errorf("renames = %+v, want none: the session was named before any record existed", got)
+				}
+			})
+		}
+	}
+}
+
+// The never-clobber rule DROPS a stashed automatic title at the flush when a human named the session
+// while it waited (flushPendingTitle), and the window must not be left wearing the name that was
+// thrown away — a name nothing on disk ever carried. The human's /rename passed through applyTitle
+// when it landed, so the field already holds theirs; what this pins is that the drop leaves it alone
+// instead of spending the stash on its way out.
+func TestSessionNameSurvivesDroppedAutoTitle(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeSessionHost{} // no active record: the naming call beat the first Save
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, cmd := stepCmd(t, m, autoTitleMsg{title: "a generated name"})
+	if cmd != nil {
+		t.Fatal("a title that arrived before any id dispatched a rename")
+	}
+	if m.sessionName != "a generated name" || m.pendingTitle != "a generated name" {
+		t.Fatalf("sessionName = %q, stash = %q; want the generated name in both", m.sessionName, m.pendingTitle)
+	}
+
+	// The first Save mints the id (as the real host does, before its saveDoneMsg lands) and the human
+	// names the session inside that window, so their name goes straight at the record while the
+	// generated one is still on the stash waiting for a flush.
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0); err != nil {
+		t.Fatalf("seeding the first Save: %v", err)
+	}
+	m, cmd = sendPrompt(t, m, "/rename my own name")
+	m = runWrites(t, m, cmd)
+	if !m.titleTouched {
+		t.Fatal("a manual rename left titleTouched unset; the stash below would not be dropped at all")
+	}
+
+	m, cmd = stepCmd(t, m, saveDoneMsg{})
+	m = runWrites(t, m, cmd)
+
+	if m.pendingTitle != "" {
+		t.Fatalf("pendingTitle = %q, want the generated stash dropped once a human had named the session", m.pendingTitle)
+	}
+	if m.sessionName != "my own name" {
+		t.Errorf("sessionName = %q, want the human's name: the dropped title named nothing", m.sessionName)
+	}
+	want := []renameCall{{id: "s1", title: "my own name"}}
+	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
+		t.Errorf("renames = %+v, want only the human's %+v", got, want)
+	}
+}
+
+// The drop's OTHER path, and the one that can leave the window lying: titleTouched is set by a
+// browser rename of ANY row, so a human who renames some stored session while a generated title
+// waits for an id trips the never-clobber rule without ever naming THIS one. The stash is dropped,
+// the record keeps the heuristic title the first Save stamped — and the window, which took the
+// generated name when it was stashed, must give it up rather than wear a name nothing carries. It
+// falls back to the heuristic, which is exactly what the record now says.
+func TestSessionNameGivesUpADroppedAutoTitle(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeSessionHost{} // no active record: the naming call beat the first Save
+	storeMeta(host, "old1", "an older task", "/ws", time.Now(), 0, nil)
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, _ = sendPrompt(t, m, "please fix the broken parser")
+	m = step(t, m, exchangeDoneMsg{})
+	m, cmd := stepCmd(t, m, autoTitleMsg{title: "a generated name"})
+	m = runWrites(t, m, cmd)
+	if m.sessionName != "a generated name" {
+		t.Fatalf("sessionName = %q, want the stashed generated name", m.sessionName)
+	}
+
+	// The human renames a DIFFERENT, stored session in the browser: titleTouched is set, but nothing
+	// about this session was named.
+	m = openBrowser(t, m)
+	m = step(t, m, keyRune('r'))
+	m.sessionBrowser.renameBuf = "some other session"
+	m, cmd = stepCmd(t, m, keyEnter())
+	m = runWrites(t, m, cmd)
+	if m.sessionName != "a generated name" {
+		t.Fatalf("sessionName = %q, want it untouched by a rename of another row", m.sessionName)
+	}
+
+	// The first Save mints the id the stash was waiting for, and the flush drops it.
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0); err != nil {
+		t.Fatalf("seeding the first Save: %v", err)
+	}
+	m, cmd = stepCmd(t, m, saveDoneMsg{})
+	m = runWrites(t, m, cmd)
+
+	if m.pendingTitle != "" {
+		t.Fatalf("pendingTitle = %q, want the generated stash dropped", m.pendingTitle)
+	}
+	if m.sessionName != "" {
+		t.Errorf("sessionName = %q, want the dropped name given up so the display falls back to the heuristic", m.sessionName)
+	}
+}
+
+// /clear rotates to a fresh Session record, and a record nothing has been said in has no name — so
+// the field empties with the naming fields beside it and the window stops naming the session that
+// just went into history.
+func TestSessionNameResetByClear(t *testing.T) {
+	t.Parallel()
+
+	host := &fakeSessionHost{}
+	host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
+	m := newTitlingModel(t, host, &titleSeam{}, true)
+
+	m, cmd := sendPrompt(t, m, "/rename the parser rewrite")
+	m = runWrites(t, m, cmd)
+	if m.sessionName != "the parser rewrite" {
+		t.Fatalf("sessionName = %q, want the session named before /clear", m.sessionName)
+	}
+
+	m, cmd = sendPrompt(t, m, "/clear")
+	m = runWrites(t, m, cmd)
+
+	if m.sessionName != "" {
+		t.Errorf("sessionName = %q after /clear, want empty: the record it opened has no name", m.sessionName)
+	}
+}

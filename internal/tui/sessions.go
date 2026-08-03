@@ -272,7 +272,13 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// they typed when it lands (autotitle.go, Ratified design 5). The flag is set on the
 		// COMMIT, not on arming the edit: an abandoned rename changed nothing.
 		m.titleTouched = true
-		cmd := m.renameSession(visible[m.sessionBrowser.selected].ID, title) // queued: it mutates m
+		id := visible[m.sessionBrowser.selected].ID
+		// The browser renames ANY row, so only a rename of the live session renames the window with
+		// it — naming a stored session from the browser must leave the window naming this one.
+		if m.sessions != nil && m.sessions.ActiveID() == id {
+			m.nameSession(title)
+		}
+		cmd := m.renameSession(id, title) // queued: it mutates m
 		return m, cmd
 	case "backspace":
 		r := []rune(m.sessionBrowser.renameBuf)
@@ -377,6 +383,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.autoTitleFired = true
 	m.pendingTitle = ""
 	title := msg.rec.Meta.Title
+	m.nameSession(title) // the window follows the restore, as it follows every other naming route
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
 	entries, decErr := decodeTranscript(msg.rec.Transcript)

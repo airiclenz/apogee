@@ -79,12 +79,19 @@ type Model struct {
 	// clobber). pendingTitle stashes a title that resolved before the first Save minted an id to
 	// rename, applied at that save's completion, and pendingSource remembers who asked for it — the
 	// stash outlives the never-clobber check, so the flush makes it again (flushPendingTitle).
-	// Four plain values, safe in the value-copied Model (ADR 0011); startNewSession resets the
-	// three that carry state, so the session /clear opens names itself afresh.
+	// sessionName is the same machinery's DISPLAY side: the name this session is currently known
+	// by, which the frame puts on the terminal window (windowtitle.go). It is what the human last
+	// saw decided rather than what the store holds — a rename that never reaches disk leaves the
+	// window naming the session the human named — and "" means "not named yet", which the window
+	// title answers from the heuristic instead. It carries untrusted text (a model's reply, a
+	// resumed record's Meta), so the seam that renders it sanitizes; nothing else reads it.
+	// Five plain values, safe in the value-copied Model (ADR 0011); startNewSession resets the
+	// four that carry state, so the session /clear opens names itself afresh.
 	autoTitleFired bool
 	titleTouched   bool
 	pendingTitle   string
 	pendingSource  titleSource
+	sessionName    string
 
 	// actuation is the launcher latch (actuation.go, ADR 0029 D5): which blocking launcher verb is
 	// in flight, on what, and the channel its narration is pumped back through. Its zero value is
@@ -312,7 +319,8 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	// call is latched off for the life of this session (Ratified design 5). A bare /rename still
 	// regenerates on demand: the toggle answers "name my sessions for me", not "never ask".
 	m.autoTitleFired = true
-	m.ctxUsed = r.CtxUsed // relight the gauge near the session's last observed fill
+	m.nameSession(r.Title) // the window opens under the name this record already carries
+	m.ctxUsed = r.CtxUsed  // relight the gauge near the session's last observed fill
 	entries, err := decodeTranscript(r.Transcript)
 	if err != nil || len(entries) == 0 {
 		m.transcript.addEphemeralNote("resumed: " + r.Title + " (no scrollback recorded — the model still remembers)")
@@ -1189,6 +1197,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.autoTitleFired = false
 	m.titleTouched = false
 	m.pendingTitle = ""
+	m.sessionName = "" // and the window falls back to naming apogee itself (windowtitle.go)
 	m.layout()
 	return m, cmd
 }

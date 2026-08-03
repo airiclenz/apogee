@@ -525,6 +525,97 @@ func TestSessionBrowserRenameCommits(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// The name the session goes by, from the browser's two routes (item 1 of the
+// session-name-window-title plan; autotitle_test.go holds the naming-call half)
+// ----------------------------------------------------------------------------
+
+// A resumed record arrives with its name already chosen, so both roads into one name the window from
+// the stored title: the --resume start the composition root hands over, and the /sessions restore.
+// The failed restore is the same rule read backwards — nothing was restored, so the conversation that
+// is still live is still the one the window is naming.
+func TestSessionNameFollowsResume(t *testing.T) {
+	t.Run("the --resume start", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		opts := Options{Sessions: host, Workspace: "/ws/a", Resumed: &ResumedSession{Title: "an older task"}}
+		m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+
+		if m.sessionName != "an older task" {
+			t.Errorf("sessionName = %q, want the resumed record's own title", m.sessionName)
+		}
+	})
+
+	t.Run("the /sessions restore", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		storeMeta(host, "sess-1", "france question", "/ws/a", time.Now(), 0, nil)
+		m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+		m = openBrowser(t, m)
+
+		m, cmd := stepCmd(t, m, keyEnter())
+		if cmd == nil {
+			t.Fatal("enter dispatched no Load Cmd")
+		}
+		m = foldResume(t, m, cmd)
+
+		if m.sessionName != "france question" {
+			t.Errorf("sessionName = %q, want the restored record's own title", m.sessionName)
+		}
+	})
+
+	t.Run("a restore that failed", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		host.activeID = "live" // the conversation that stays live when the restore fails
+		storeMeta(host, "sess-1", "corrupt one", "/ws/a", time.Now(), 0, nil)
+		eng := &fakeEngine{restoreFn: func(domain.Session) error { return errors.New("bad snapshot") }}
+		m := newBrowserModel(t, eng, host, "/ws/a")
+
+		// Name the live conversation first, so what follows is about a name being KEPT rather than
+		// about a field that was empty all along.
+		m, cmd := sendPrompt(t, m, "/rename the live conversation")
+		m = runWrites(t, m, cmd)
+
+		m = openBrowser(t, m)
+		m, cmd = stepCmd(t, m, keyEnter())
+		m = foldResume(t, m, cmd)
+
+		if !hasEntry(m, entryNote, "could not restore session: bad snapshot") {
+			t.Fatal("the restore succeeded; this case's premise is broken")
+		}
+		if m.sessionName != "the live conversation" {
+			t.Errorf("sessionName = %q, want the live conversation's name: nothing was restored", m.sessionName)
+		}
+	})
+}
+
+// The browser's `r` renames ANY row, and only one row is ever the session the window is naming.
+// Renaming a stored one is a change to the store and nothing more: the live conversation keeps its
+// own name, because the window says which session THIS is, not which one was last edited.
+func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
+	host := &fakeSessionHost{}
+	host.activeID = "live" // the live conversation's record, which the browser is not listing
+	storeMeta(host, "stored-1", "an older task", "/ws/a", time.Now(), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+
+	m, cmd := sendPrompt(t, m, "/rename the live conversation")
+	m = runWrites(t, m, cmd)
+	if m.sessionName != "the live conversation" {
+		t.Fatalf("sessionName = %q, want the live conversation named before the browser is opened", m.sessionName)
+	}
+
+	m = openBrowser(t, m)
+	m = step(t, m, keyRune('r'))
+	m.sessionBrowser.renameBuf = "an older task, renamed"
+	m, cmd = stepCmd(t, m, keyEnter())
+	m = runWrites(t, m, cmd)
+
+	if got := host.stored["stored-1"].Meta.Title; got != "an older task, renamed" {
+		t.Fatalf("stored title = %q, want the browser's rename to have landed (nothing else here is proved)", got)
+	}
+	if m.sessionName != "the live conversation" {
+		t.Errorf("sessionName = %q, want the live conversation's name untouched by a stored row's rename", m.sessionName)
+	}
+}
+
 // esc peels the modal one layer at a time: a live rename edit → the plain row → the overlay closed.
 func TestSessionBrowserEscLayers(t *testing.T) {
 	host := &fakeSessionHost{}

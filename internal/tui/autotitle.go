@@ -167,6 +167,10 @@ func (m *Model) applyTitle(name string, src titleSource) (cmd tea.Cmd, stashed b
 	if m.sessions == nil {
 		return nil, false
 	}
+	// The window is named from the decision, not from the write that follows it: a title stashed
+	// for an id that does not exist yet is already the name this session goes by, and a rename that
+	// fails on disk must not rename the window back (nameSession).
+	m.nameSession(name)
 	id := m.sessions.ActiveID()
 	if id == "" {
 		m.pendingTitle = name
@@ -174,6 +178,24 @@ func (m *Model) applyTitle(name string, src titleSource) (cmd tea.Cmd, stashed b
 		return nil, true
 	}
 	return m.setSessionTitle(id, name, src), false
+}
+
+// nameSession records the name this session is now known by — the display half of the naming
+// machinery, and the ONLY writer of Model.sessionName. Every route that decides a name goes
+// through it: both naming calls and `/rename <text>` (applyTitle), the browser's `r` when the row
+// it renames is the live session, and both resume paths, which arrive with a name already chosen.
+// startNewSession clears the field directly, because "no name" is not a name.
+//
+// A name that is empty or nothing but whitespace is refused rather than applied: the callers'
+// sanitizers can reduce a title to nothing, and a window that went from naming the session to
+// naming nothing would read as a bug. What the window does with the name — sanitizing it,
+// clipping it, and what it says when there is none — belongs to the seam that renders it
+// (windowtitle.go), not here.
+func (m *Model) nameSession(name string) {
+	if strings.TrimSpace(name) == "" {
+		return
+	}
+	m.sessionName = name
 }
 
 // flushPendingTitle QUEUES a stashed title once a Save has put the record on disk, clearing the
@@ -197,6 +219,16 @@ func (m *Model) flushPendingTitle() {
 		return
 	}
 	if m.pendingSource == titleAutomatic && m.titleTouched {
+		// A dropped title must not stay on the window. The stash named the session when it was made
+		// (applyTitle), so the window can be wearing the very name this drop throws away — and it
+		// would then be a name NOTHING carries, since the record keeps the heuristic title the first
+		// Save stamped. Giving it up returns the window to that heuristic, which is what the record
+		// says. The check is on the name and not on titleTouched, because a human who named THIS
+		// session is already what the field holds and theirs must stand: titleTouched is set by a
+		// browser rename of ANY row, so it cannot tell the two apart on its own.
+		if m.sessionName == m.pendingTitle {
+			m.sessionName = ""
+		}
 		m.pendingTitle = ""
 		return
 	}
