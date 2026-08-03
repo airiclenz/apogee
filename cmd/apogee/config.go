@@ -805,10 +805,11 @@ type fileConfig struct {
 	// an unknown name reaches startup as an error rather than being quietly dropped at the yaml
 	// seam (the `ui.spinner` posture).
 	CursorShape string `yaml:"cursor-shape"`
-	// UI configures how the terminal UI presents itself — today the status-line spinner's animation
-	// and its colour loop. File-only (no flag/env), like the blocks above. Absent ⇒ the renderer's
-	// default style with the colour loop on. A pointer so an absent block falls through to those
-	// defaults rather than being an explicit zero setting, which would read as `spinner-color: false`.
+	// UI configures how the terminal UI presents itself — today the status-line spinner's animation,
+	// its colour loop, and whether the transcript is painted with a scroll bar. File-only (no
+	// flag/env), like the blocks above. Absent ⇒ the renderer's default style with the colour loop on
+	// and the scroll bar shown. A pointer so an absent block falls through to those defaults rather
+	// than being an explicit zero setting, which would read as `spinner-color: false`.
 	UI *uiConfig `yaml:"ui"`
 }
 

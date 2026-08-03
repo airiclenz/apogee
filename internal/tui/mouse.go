@@ -164,8 +164,11 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 
 // pointTranscriptRow maps a screen point to a content coordinate in the rendered transcript: the
 // line index into m.lines and the display cell within it. The viewport is top-anchored at the
-// screen origin (View stacks it first) and its content spans the width left of the scroll-bar
-// gutter. ok is false when the point falls outside the transcript's rows or past the last rendered
+// screen origin (View stacks it first) and its content spans whatever width layout() gave it: the
+// window less the scroll-bar gutter while the bar is shown (ui.show-scrollbar), the whole window
+// width once it is hidden and the column goes back to the body. The column bound below is therefore
+// ASKED of the viewport rather than restating either arithmetic, so the mapping holds in both
+// states. ok is false when the point falls outside the transcript's rows or past the last rendered
 // line (the blank pad refreshViewport leaves below short content), so a click there selects
 // nothing. contentLineAt (model.go) resolves the row, folding in the scroll offset, the
 // sticky-header overlay and the rows this frame's overlays took off the bottom
