@@ -247,11 +247,26 @@ the feature.
   > is the transcript, which keeps the `⧖` record beside the `cancelled` note exactly as it keeps a
   > stopped Turn's streamed partial. A natural completion is untouched: past `finishWorker` a
   > delivered row is committed history and no later stop can resurrect it (audit 2026-08-01).
+  >
+  > **Amended 2026-08-03 (owner ruling).** The **restage half** of the amendment above is reversed;
+  > the drain-skip half stands. Living with it showed the two surfaces contradicting each other: the
+  > `⧖` block said *the model saw this*, while the staged band and the hold note beside it said
+  > *waiting to be sent* — and the next `⏎` then re-sent a message the human had watched being read.
+  > The ruling is **sent is sent**. A row the worker delivered before the Esc **dies with the
+  > scrapped Exchange** — the engine's fate was always exactly this — survives as the `⧖` transcript
+  > record, and is **not** re-staged (`Model.restageDelivered` is gone). So decision 7's hold covers
+  > exactly the rows the worker never delivered, which is the reading it always had before
+  > 2026-08-02: the queue holds what the model never received, and nothing else. The drain-skip in
+  > `deliverInterjections` stays and earns its keep on this reading too — it does not compensate for
+  > the fate, it **narrows** it, keeping rows out of an Exchange that is already doomed wherever the
+  > cancel is visible in time. A natural completion remains untouched.
 - **A row is never silently lost and never delivered twice.** The drain is unconditional and the
   Model's display copy is the queue of record: a row the delivery report does not name stays staged
   and goes out at the terminal boundary instead. The Backspace pop withdraws from the mailbox first
   and gives up if the worker already drained the row — handing the human an editor copy of a message
-  the model has just read would invite sending it twice.
+  the model has just read would invite sending it twice. *(Qualified by the 2026-08-03 amendment
+  above: a row delivered into an Exchange the human then scraps is dropped **with** that Exchange —
+  visibly, as the `⧖` record standing beside the `cancelled` note, which is not silent loss.)*
 - **The drain waits for the Exchange to OPEN.** `Submit` only sets `pendingInput`; the Exchange opens
   inside the first `Step`. So the Submit path deliberately skips the drain before that Step, while
   the resume path (`/continue` into a restored Exchange) drains immediately, because its Exchange is

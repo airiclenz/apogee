@@ -78,9 +78,16 @@
 
 **Commit:** `fix(tui): a delivered interjection dies with the Exchange Esc scraps`
 
-## 2. Re-amend ADR 0025, retire the ISSUES entry, record the change
+## 2. Re-amend ADR 0025, retire the ISSUES entry, record the change — ✅ DONE (2026-08-03)
 
 Depends on item 1.
+
+NOTES (2026-08-03): the CHANGELOG entry was written by rewriting the existing `[Unreleased]` →
+`### Fixed` bullet ("Stopping with Esc can no longer swallow a message you queued…") rather than
+adding a second bullet beside it. That bullet was the never-released 2026-08-02 restage entry, and
+its "**put back on the queue**" clause is the one match the item's own acceptance grep expects to
+find in its new sense — two bullets would have left `[Unreleased]` telling both stories at once.
+Still one entry, and it carries the required wording.
 
 **What:**
 

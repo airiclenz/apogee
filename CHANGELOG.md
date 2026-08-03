@@ -1133,21 +1133,23 @@ point is a **minor** bump, not a breaking change.
   with its exchange (an `esc` stop, a fault) too. On that second path a half-typed answer is kept as
   well, below the message it interrupted — neither half of what you typed is thrown away.
 
-- **Stopping with Esc can no longer swallow a message you queued while the model was working.** A
-  message typed mid-task is delivered at the next tool-round boundary, and Esc scraps the exchange it
-  was delivered into — so a queued message that happened to go out in the seconds before you pressed
-  Esc was thrown away with it: gone from what the model remembers, gone from the queue, and left in
-  the scrollback as a `⧖` line claiming a delivery nothing had a record of. The one thing Esc
-  promises is that nothing was sent and nothing was lost, and the queue counter said `1 queued` in
-  some stops and nothing in others depending on timing you cannot see. Now both windows are closed:
-  a message still waiting when the stop lands **stays queued**, and one already delivered into the
-  stopped exchange is **put back on the queue**, ahead of anything staged after it. The hold note
-  counts it (`2 queued messages held — ⏎ sends them`), Backspace can still take it back into the
-  editor, and one `⏎` sends it. The `⧖` line stays in the scrollback beside the `cancelled` note,
-  exactly as a stopped answer's half-written text does. An exchange that ends **on its own** is
-  untouched: what it delivered is history, and no later stop brings it back.
+- **Stopping with Esc no longer swallows a message you queued while the model was working — and no
+  longer puts one the model already received back on the queue.** A message typed mid-task is
+  delivered at the next tool-round boundary, and Esc scraps the exchange it was delivered into — so
+  a queued message that happened to go out in the seconds before you pressed Esc was thrown away
+  with it: gone from what the model remembers, gone from the queue, and left in the scrollback as a
+  `⧖` line claiming a delivery nothing had a record of. The counter said `1 queued` after some stops
+  and nothing after others, on timing you cannot see. The queue now holds exactly what the model
+  never received. A message still waiting when the stop lands **stays queued** under the usual hold
+  note (`⏎ sends them`, and Backspace still takes it back into the editor), because a stop already
+  on its way no longer hands anything to an exchange that is about to be scrapped. One that did
+  reach the model goes **with** that exchange, dropped from the conversation like the rest of the
+  scrapped work — sent is sent, so it is not offered back for a second send you never asked for —
+  and its `⧖` block stays in the scrollback beside the `cancelled` note as the record of what the
+  model read before you stopped it, exactly as a stopped answer's half-written text does. An
+  exchange that ends **on its own** is untouched: what it delivered is history.
 
-  See the 2026-08-02 amendment to
+  See the 2026-08-02 and 2026-08-03 amendments to
   [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md).
 
 - **Loading a Launch profile no longer leaves a second heartbeat running, or moves the session from
