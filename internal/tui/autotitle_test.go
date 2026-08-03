@@ -977,18 +977,18 @@ func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The name the session goes by (session-name-window-title plan, item 1)
+// The name the session goes by (session-name plan, item 1)
 // ----------------------------------------------------------------------------
 //
-// sessionName is the naming machinery's DISPLAY side: what the human last saw decided, which the
-// frame puts on the terminal window. It is deliberately not the store's truth, so none of these can
+// sessionName is the naming machinery's DISPLAY side: what the human last saw decided, and what the
+// frame renders. It is deliberately not the store's truth, so none of these can
 // be answered by asking the host what it holds — what they pin is that the field follows every route
 // that DECIDES a name, keeps standing when a route throws one away, and empties when the session it
 // named goes into history.
 
 // Every naming route feeds the field, and it feeds it from the decision rather than from the write
 // that follows: a title stashed for an id the first Save has not minted yet is already the name this
-// session goes by, so the window carries it before anything on disk does. Both routes are driven at
+// session goes by, so the frame carries it before anything on disk does. Both routes are driven at
 // both moments — with a record to rename, and before one exists.
 func TestSessionNameFollowsAppliedTitle(t *testing.T) {
 	t.Parallel()
@@ -1045,7 +1045,7 @@ func TestSessionNameFollowsAppliedTitle(t *testing.T) {
 }
 
 // The never-clobber rule DROPS a stashed automatic title at the flush when a human named the session
-// while it waited (flushPendingTitle), and the window must not be left wearing the name that was
+// while it waited (flushPendingTitle), and the frame must not be left wearing the name that was
 // thrown away — a name nothing on disk ever carried. The human's /rename passed through applyTitle
 // when it landed, so the field already holds theirs; what this pins is that the drop leaves it alone
 // instead of spending the stash on its way out.
@@ -1090,10 +1090,10 @@ func TestSessionNameSurvivesDroppedAutoTitle(t *testing.T) {
 	}
 }
 
-// The drop's OTHER path, and the one that can leave the window lying: titleTouched is set by a
+// The drop's OTHER path, and the one that can leave the frame lying: titleTouched is set by a
 // browser rename of ANY row, so a human who renames some stored session while a generated title
 // waits for an id trips the never-clobber rule without ever naming THIS one. The stash is dropped,
-// the record keeps the heuristic title the first Save stamped — and the window, which took the
+// the record keeps the heuristic title the first Save stamped — and the frame, which took the
 // generated name when it was stashed, must give it up rather than wear a name nothing carries. It
 // falls back to the heuristic, which is exactly what the record now says.
 func TestSessionNameGivesUpADroppedAutoTitle(t *testing.T) {
@@ -1138,7 +1138,7 @@ func TestSessionNameGivesUpADroppedAutoTitle(t *testing.T) {
 }
 
 // /clear rotates to a fresh Session record, and a record nothing has been said in has no name — so
-// the field empties with the naming fields beside it and the window stops naming the session that
+// the field empties with the naming fields beside it and the frame stops naming the session that
 // just went into history.
 func TestSessionNameResetByClear(t *testing.T) {
 	t.Parallel()

@@ -10,20 +10,6 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
-- **The terminal window wears the session's name — `✭ <name>`, clipped to 30 characters.** A tab
-  strip full of terminals said nothing about which conversation each one held; now the window
-  itself does, and it follows every route that can name a session: the automatic naming call,
-  either form of `/rename`, the `/sessions` browser's `r` on the live session, and a resumed
-  record's own name. Until one of those has spoken it shows the same first-prompt heuristic the
-  first save stamps, so a window is named the instant you ask for something; a fresh session before
-  its first prompt is `✭ apogee`, and `/clear` returns it there. It carries no live state by
-  design — the title says *which* conversation this is, and everything that changes has a home in
-  the chrome. Two editors need a word: **VS Code** shows it once
-  `"terminal.integrated.tabs.title": "${sequence}"` is set (its tab defaults to the process name),
-  and **Zed** puts it in the terminal's toolbar rather than the tab. Everywhere else — Terminal.app,
-  iTerm2, WezTerm, Kitty, Ghostty, Alacritty, Windows Terminal, `cmd.exe` — it needs nothing.
-  Specced in `layout.md` ("The terminal window's title").
-
 - **Tool blocks collapse and expand — click a header, or its `… +N more lines` marker, to see
   everything a call actually returned.** The compact block is unchanged and it is still what you
   get by default: a command's output shows its first line, a diff its first 20, each with the

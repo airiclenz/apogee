@@ -527,13 +527,13 @@ func TestSessionBrowserRenameCommits(t *testing.T) {
 
 // ----------------------------------------------------------------------------
 // The name the session goes by, from the browser's two routes (item 1 of the
-// session-name-window-title plan; autotitle_test.go holds the naming-call half)
+// session-name plan; autotitle_test.go holds the naming-call half)
 // ----------------------------------------------------------------------------
 
-// A resumed record arrives with its name already chosen, so both roads into one name the window from
+// A resumed record arrives with its name already chosen, so both roads into one name the frame from
 // the stored title: the --resume start the composition root hands over, and the /sessions restore.
 // The failed restore is the same rule read backwards — nothing was restored, so the conversation that
-// is still live is still the one the window is naming.
+// is still live is still the one the frame is naming.
 func TestSessionNameFollowsResume(t *testing.T) {
 	t.Run("the --resume start", func(t *testing.T) {
 		host := &fakeSessionHost{}
@@ -587,9 +587,9 @@ func TestSessionNameFollowsResume(t *testing.T) {
 	})
 }
 
-// The browser's `r` renames ANY row, and only one row is ever the session the window is naming.
+// The browser's `r` renames ANY row, and only one row is ever the session the frame is naming.
 // Renaming a stored one is a change to the store and nothing more: the live conversation keeps its
-// own name, because the window says which session THIS is, not which one was last edited.
+// own name, because the frame says which session THIS is, not which one was last edited.
 func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
 	host := &fakeSessionHost{}
 	host.activeID = "live" // the live conversation's record, which the browser is not listing

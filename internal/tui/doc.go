@@ -412,9 +412,7 @@
 // is dropped without a word whenever it fails or a human has named the session first — plus /rename
 // ([Model.runRename]), the human's half of that same machinery, which takes the name it is given or
 // asks the model for one on demand and, being asked for rather than automatic, reports every
-// outcome and outranks a title the human set a moment ago; windowtitle.go the one thing the frame
-// says OUTSIDE its own rows — the `✭ <session name>` the terminal window is titled with, which is
-// where [Model.View]'s lone [tea.View.WindowTitle] assignment comes from;
+// outcome and outranks a title the human set a moment ago;
 // picker.go the modal single-select overlay behind /model and /server, and
 // popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go

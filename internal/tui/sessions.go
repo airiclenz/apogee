@@ -273,8 +273,8 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// COMMIT, not on arming the edit: an abandoned rename changed nothing.
 		m.titleTouched = true
 		id := visible[m.sessionBrowser.selected].ID
-		// The browser renames ANY row, so only a rename of the live session renames the window with
-		// it — naming a stored session from the browser must leave the window naming this one.
+		// The browser renames ANY row, so only a rename of the live session renames the frame with
+		// it — naming a stored session from the browser must leave the frame naming this one.
 		if m.sessions != nil && m.sessions.ActiveID() == id {
 			m.nameSession(title)
 		}
@@ -383,7 +383,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.autoTitleFired = true
 	m.pendingTitle = ""
 	title := msg.rec.Meta.Title
-	m.nameSession(title) // the window follows the restore, as it follows every other naming route
+	m.nameSession(title) // the frame follows the restore, as it follows every other naming route
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
 	entries, decErr := decodeTranscript(msg.rec.Transcript)

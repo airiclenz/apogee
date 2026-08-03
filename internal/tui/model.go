@@ -80,11 +80,11 @@ type Model struct {
 	// rename, applied at that save's completion, and pendingSource remembers who asked for it — the
 	// stash outlives the never-clobber check, so the flush makes it again (flushPendingTitle).
 	// sessionName is the same machinery's DISPLAY side: the name this session is currently known
-	// by, which the frame puts on the terminal window (windowtitle.go). It is what the human last
-	// saw decided rather than what the store holds — a rename that never reaches disk leaves the
-	// window naming the session the human named — and "" means "not named yet", which the window
-	// title answers from the heuristic instead. It carries untrusted text (a model's reply, a
-	// resumed record's Meta), so the seam that renders it sanitizes; nothing else reads it.
+	// by, and the one the frame renders. It is what the human last saw decided rather than what the
+	// store holds — a rename that never reaches disk leaves the frame naming the session the human
+	// named — and "" means "not named yet", which the seam that renders it answers for itself. It
+	// carries untrusted text (a model's reply, a resumed record's Meta), so that seam sanitizes;
+	// nothing else reads it.
 	// Five plain values, safe in the value-copied Model (ADR 0011); startNewSession resets the
 	// four that carry state, so the session /clear opens names itself afresh.
 	autoTitleFired bool
@@ -1197,7 +1197,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	m.autoTitleFired = false
 	m.titleTouched = false
 	m.pendingTitle = ""
-	m.sessionName = "" // and the window falls back to naming apogee itself (windowtitle.go)
+	m.sessionName = "" // the session /clear opens is unnamed until it names itself
 	m.layout()
 	return m, cmd
 }
@@ -2746,11 +2746,7 @@ const frameBlocks = 12
 // wherever the box is editable (promptCursor).
 func (m Model) View() tea.View {
 	if !m.ready {
-		// The window is already this session's window, whatever the frame inside it is still
-		// waiting on, so even the placeholder names it (windowtitle.go).
-		v := tea.NewView("apogee — starting…")
-		v.WindowTitle = m.windowTitle()
-		return v
+		return tea.NewView("apogee — starting…")
 	}
 
 	// Rendered once, then measured by the same derivation the mouse maps through, so what is drawn
@@ -2802,10 +2798,6 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // enable wheel scrolling (Update routes MouseWheelMsg)
 	v.Cursor = m.promptCursor()
-	// The one thing the frame says outside its own rows: the terminal window's title, which the
-	// renderer emits as OSC 2 only when it CHANGES, so stating it every frame costs nothing
-	// (windowtitle.go).
-	v.WindowTitle = m.windowTitle()
 	return v
 }
 

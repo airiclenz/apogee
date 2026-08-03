@@ -568,58 +568,6 @@ whatever the model segment is showing, so it closes the line rather than displac
 
 ---
 
-## The terminal window's title
-
-**What it says.** The frame names the window it is drawn in: `✭ <session name>`, the star always
-leading, the name clipped to **30 runes**. A session that has not been named yet — a fresh start,
-before the first prompt has been sent — is `✭ apogee`, so a window is identifiable as this program's
-before it is identifiable as any particular conversation. The clip is in runes rather than cells
-because the title never enters the cell buffer: nothing about it is laid out by us, so the measure
-rule that governs every other width here (ADR 0030) has nothing to measure.
-
-**Which name.** The one the session is currently known by, from whichever route last decided it: a
-naming call's answer, either form of `/rename`, the browser's `r` when the row it renames is the
-live session, or the name a resumed record arrived with. Until one of those has spoken the title
-falls back to the same heuristic the first save stamps — the opening request's first line — so the
-window is named from what the human asked the instant they ask it, hours before a naming call could
-answer. `/clear` returns it to `✭ apogee` with the session it starts.
-
-**What it deliberately does not say.** No spinner, no state, no elapsed clock. The title is an
-IDENTITY — which conversation this window is, for a human scanning a tab strip — and a title that
-changed every frame would be a gauge in the one place the reader cannot glance away from. Everything
-live has a home in the chrome above.
-
-**How it gets there.** As a field on the frame (`tea.View.WindowTitle`), not as bytes apogee writes:
-the renderer emits `OSC 2` and does so only when the string changes, so `View` may state it on every
-frame at no cost. The name is escape- and control-stripped on the way in through the same sanitizer
-the naming pipeline uses (`title.StripEscapes`) — inside an OSC payload a stray `BEL` *terminates
-the sequence*, so a title read back off disk carrying one would inject whatever followed it straight
-into the terminal.
-
-**Where it lands, by terminal.** macOS Terminal.app, iTerm2, WezTerm, Kitty, Ghostty and Alacritty
-show it as the window or tab title with no configuration. Windows Terminal shows it in the tab
-unless the profile pins one, and `cmd.exe` on legacy conhost shows it too — the framework enables
-virtual-terminal processing on its own output handle, so it does not depend on the registry default.
-Two editors need a word of explanation, and this is the place a puzzled reader will look for it: in
-**VS Code** the tab label defaults to `${process}`, so the title only surfaces once
-`"terminal.integrated.tabs.title": "${sequence}"` is set; in **Zed** it reaches the terminal's
-toolbar breadcrumb but not the tab label, which is Zed's own open question. Under tmux or screen it
-sets the *pane* title, and reaches the outer window only with `set -g set-titles on`.
-
-**Why some agent CLIs need no VS Code setting and we do.** Because VS Code knows their names, not
-because of anything they send. Since **1.117** (April 2026) it overrides its own tab template with
-`${sequence}` for an allowlist of agent CLIs — `claude`, `codex`, `commandcode`, `copilot`, `gemini`
-— matched on the pty's foreground **process name** and gated by
-`terminal.integrated.tabs.allowAgentCliTitle`, which defaults on. The list is a table in the editor
-(`generalShellTypeMap` in `terminalProcess.ts`, `TerminalLabelComputer.agentCliShellTypes` in
-`terminalInstance.ts`); `apogee` is not in it, and the default template is still `${process}` for
-everyone else. Nor is the sequence we emit the lever: xterm.js routes `OSC 0` and `OSC 2` to one
-title event and VS Code reads only that event, so `OSC 0` would change nothing, while `OSC 1` — the
-icon name alone — never reaches the tab at all. The one route off the setting is upstream, a name
-added to that table (Command Code's was, in July 2026); parked in `TODO.md`.
-
----
-
 ## The staged-interjection band
 
 **What it shows, and when.** A message typed while the agent is working is *staged*, not sent: it

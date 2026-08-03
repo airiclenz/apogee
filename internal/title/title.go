@@ -360,14 +360,12 @@ func fenceMarker(line string) bool {
 // transcript's escape strip). Callers pass a single line, so no newline survives to be lost.
 //
 // It is exported because it is the one definition of "a title carries no escape sequence and no
-// control character", and a title is now read in two places rather than one. The second consumer is
-// the terminal window-title seam (internal/tui/windowtitle.go), where the stakes are higher than a
-// scrambled row: the name is handed to the renderer to emit as OSC 2, and a BEL inside an OSC
-// payload TERMINATES the sequence — so a title carrying one would close the escape early and hand
-// whatever follows it straight to the terminal to execute. A second, weaker strip written at that
-// seam is exactly how two definitions of the same guarantee drift apart, so the seam calls this one.
-// Whitespace controls stay exempt for both consumers alike (strippableControl); each collapses them
-// a step later, and both do.
+// control character", and a title is read outside this package too — the TUI renders the live
+// session's name onto the frame, where a control character is a LAYOUT bug as much as a trust one:
+// it breaks the measure of a row that is squared to the window. A second, weaker strip written at
+// such a seam is exactly how two definitions of the same guarantee drift apart, so every seam calls
+// this one. Whitespace controls stay exempt for every consumer alike (strippableControl); each
+// collapses them a step later, and all do.
 func StripEscapes(s string) string {
 	if !strings.ContainsFunc(s, strippableControl) {
 		return s // the overwhelmingly common case: nothing to strip, nothing to allocate

@@ -1,8 +1,13 @@
 # Plan — The terminal window wears the session's name (`✭ <name>`)
 
 **Date:** 2026-08-03
-**Status:** EXECUTED (2026-08-03) — items 1, 2 and 4 done; item 3 is manual and stays open for the
-owner (see its NOTES: the emit path is proven, the terminal-by-terminal rendering is not).
+**Status:** WITHDRAWN (2026-08-03) — archived. Items 1, 2 and 4 were executed and item 3 is
+withdrawn unrun: the owner ran the shipped build and no tab or window showed the name on any of his
+three terminals, so the window title was withdrawn whole by
+`docs/plans/2026-08-03 - 01 - session-name-on-the-top-rule-plan.md`. What survives from this plan
+is `Model.sessionName` / `nameSession` (item 1) and the exported `title.StripEscapes` (item 2),
+which the top-rule wave reuses; the OSC-2 seam and every doc claim about it are gone. Kept as the
+record of why the terminal's own title bar is a closed route — see item 3's NOTES.
 **Track:** one `ISSUES.md` bullet — *"I'd like to see the current session's name somewhere -
 could the terminal window be named (trimmed to 30 characters maybe)"*. TUI presentation and
 one exported helper in `internal/title`. No engine, protocol, persistence, or Mechanism
@@ -215,7 +220,17 @@ the name is clipped at 30 runes and always preceded by `✭ `. `make check` gree
 
 **Commit:** `feat(tui): the terminal window wears the session's name`
 
-## 3. Manual verification on the owner's terminals — ⏳ OPEN (owner-run)
+## 3. Manual verification on the owner's terminals — ❌ WITHDRAWN (2026-08-03)
+
+NOTES (2026-08-03, WITHDRAWN — the manual pass is moot): the owner ran the shipped build and no tab
+or window showed the name on any of the three terminals he uses — Terminal.app read
+`apogee apogee - 80x24`, VS Code read `apogee`, Zed read `airic - zsh`. The window title is
+therefore withdrawn whole by
+`docs/plans/2026-08-03 - 01 - session-name-on-the-top-rule-plan.md` item 1, which deletes
+`internal/tui/windowtitle.go` and every claim that documented it; the session's name moves to the
+`▔` top rule, a row apogee paints and measures itself. There is nothing left for this item to
+verify. The research below is kept as the record of WHY the route was abandoned rather than
+repaired — it does not need re-deriving.
 
 NOTES (2026-08-03): the executor cannot see a title bar, so this item stays open. What COULD be
 verified here was: apogee driven under a real pty (`pty.fork`, `TERM=xterm-256color`) emits exactly

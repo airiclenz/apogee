@@ -671,39 +671,17 @@ measurement one.
 
 ---
 
-## VS Code names agent CLIs from an allowlist — get `apogee` onto it
-
-**Status:** parked 2026-08-03, researched to the bottom; the decision to open an upstream PR is the
-owner's. Nothing here blocks anything — the window title already works everywhere else, and in VS
-Code with one line of user settings.
-
-VS Code's terminal tab label is `${process}` by default, so a program's OSC title does not reach it.
-Since **1.117** (PR microsoft/vscode#304528, 2026-04-13) the editor makes an exception for agent
-CLIs, and it identifies them **by process name**, not by anything in the byte stream:
-`generalShellTypeMap` (`src/vs/platform/terminal/node/terminalProcess.ts`) maps `claude`, `codex`,
-`commandcode`, `copilot`, `gemini` to shell types; `TerminalLabelComputer.agentCliShellTypes` +
-`refreshLabel` (`terminalInstance.ts`) swap the template for `${sequence}` for exactly those, under
-`terminal.integrated.tabs.allowAgentCliTitle` (default on). Adding `apogee` is a two-line change to
-those two tables, and the precedent that it is accepted from outside Microsoft is Command Code's own
-addition (PR #324417, 2026-07-14).
-
-**Weigh before opening it:** it is a change in someone else's release train — the benefit arrives
-only for users on a VS Code newer than the merge, and the settings line keeps working meanwhile. It
-also means claiming the name `apogee` as a *shell type* in an editor, which is worth wanting only if
-the tool stays named that. Against: it is genuinely the only way off the setting (the sequence we
-emit is not the lever — see `layout.md`, "The terminal window's title"), and it is a small,
-mechanical PR.
-
-**If it lands:** `layout.md`'s reach paragraph and the `README.md` sessions bullet both name the
-allowlist and would need the version caveat instead.
-
----
-
 ## Closed entries — the one-line trail
 
 Full records live in the named docs; a line here keeps the deferral trail deliberate and carries
 any standing constraint that must not be re-filed.
 
+- **VS Code names agent CLIs from an allowlist — get `apogee` onto it** — CLOSED 2026-08-03, **moot
+  rather than declined** (`docs/plans/2026-08-03 - 01 - session-name-on-the-top-rule-plan.md`
+  item 1): apogee no longer sets a terminal title at all, so there is nothing an allowlist entry
+  could surface. The session's name rides the `▔` top rule instead, on a row apogee paints itself.
+  **Standing:** the terminal's own title bar and tab are a closed route, not a deferred one — do not
+  re-file an escape sequence, a settings recipe or an upstream PR for them.
 - **Mid-string (non-trailing) token completion** — CLOSED 2026-07-28, **shipped rather than
   deferred** ([ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) decision 5;
   `docs/plans/archived/2026-07-28 - 03 - slash-skills-inline-plan.md` item 6). The deferral's own rationale

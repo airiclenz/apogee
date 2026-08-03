@@ -66,7 +66,22 @@ tree must be clean before the run starts, or Phase 0 stops.
 
 ---
 
-## 1. Withdraw the terminal window title
+## 1. Withdraw the terminal window title — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): the item's mandate — "every claim that documents it" — reached four files its
+bullet list does not name, all comment-only, all of them left either citing the deleted
+`windowtitle.go` or asserting a terminal window that no longer exists: `internal/title/title.go`
+(the `StripEscapes` doc block named `internal/tui/windowtitle.go` as its second consumer and
+justified the export by the `OSC 2` BEL-termination hazard — reworded to the frame's own rows, where
+a control character breaks a row's measure, so the export stays justified for item 2 without citing
+a deleted file), `internal/tui/model.go` (the `sessionName` field block and the `/clear` reset's
+trailing comment), `internal/tui/autotitle.go` + `autotitle_test.go` and
+`internal/tui/sessions.go` + `sessions_test.go` (prose reworded from "the window" to "the frame";
+the *prompt*-window and context-window senses of the word were left alone). None of them name the
+new seam — item 3 owns naming `sessionrule.go`. Also: `docs/handoffs/archived/2026-08-03 - 00 -
+window-title-vscode-tab-question.md` and the archived plan itself keep their window-title prose as
+historical record, and the two stale citations of the moved plan path (this file's line 37, that
+handoff's line 14) were left as written.
 
 **What:** remove the OSC-2 window title and every claim that documents it, keeping the two things
 item 2 needs (`Model.sessionName`, `title.StripEscapes`).
