@@ -165,7 +165,12 @@ generic note; an `autoTitleMsg` with `ErrTruncated` stays silent.
 
 **Commit:** `fix(tui): tell the user when the naming reply ran out of budget`
 
-## 5. Changelog and doc sweep
+## 5. Changelog and doc sweep — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): no ADR change needed — the ADR 0022 addendum (2026-07-31) describes the naming
+call's category, firing point, seam, writer and gate, and its only "budget" is the transcript
+window measured in runes; it says nothing about the call's sampling and nowhere implies the reply
+may think freely, so it was left untouched.
 
 **What** (depends on items 1–4; sole owner of cross-cutting doc changes):
 

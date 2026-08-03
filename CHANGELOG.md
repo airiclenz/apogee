@@ -820,6 +820,30 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A bare `/rename` on a long session no longer answers "could not name this session".** Naming a
+  session is one small completion asking for one short title, and it capped that completion at 1024
+  tokens — which on a thinking model is not a cap on the answer but a cap on the *thinking plus* the
+  answer. Given the window a big session sends it — the opening request and the most recent ones —
+  the model spent all 1024 of them reasoning about what to call the thing and came back with the
+  answer field empty, and apogee, seeing an empty reply, said it could not name the session. It was
+  not flaky: the same session failed the same way every time, and the silent automatic naming at
+  first prompt was very likely losing meaty opening prompts the same way without ever mentioning it.
+  The call now asks the server to skip the reasoning pass altogether — an eight-word title needs no
+  chain of thought, and skipping it makes the call fast as well as reliable — and the cap is raised
+  to 4096 as the backstop for servers whose chat template ignores that request, sized so that even a
+  model that thinks anyway has room left to write the title afterwards.
+  - **A server that refuses the request outright is not left worse off than before.** The "no
+    thinking" ask rides an extra field, and a strict OpenAI-compatible server may reject a request
+    carrying a field it does not know. When the rejection is a 4xx, the call is re-sent once without
+    it, so a fix for "naming fails on big sessions" can never become "naming fails everywhere". The
+    call still takes no retries in the ordinary sense: a rejection comes back before the server has
+    generated a token, so that second attempt costs the next exchange no queue time.
+  - **And if the budget does run out anyway, the note says so.** A bare `/rename` whose reply was
+    all thinking and no title now reads *"the model spent its whole reply thinking and never wrote
+    the title — try /rename <name>"*, which points at the model rather than sending you looking for
+    a broken server. Every other naming failure keeps the note it had, and the automatic naming
+    stays silent on all of them by design — it falls back to the first-prompt heuristic title.
+
 - **Sending a prompt no longer throws the session chat away.** A new prompt landed at the top of an
   apparently empty transcript, with everything said before it out of sight above — the session
   padded blank rows below the newest prompt so the view could scroll it all the way up, and then
