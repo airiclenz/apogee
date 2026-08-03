@@ -219,7 +219,14 @@ shape.
 
 ---
 
-## 3. ADR 0032 — the user's skill library outranks the workspace
+## 3. ADR 0032 — the user's skill library outranks the workspace — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): the item's citation "ADR 0012 D6" has no referent — ADR 0012's Decision
+section is unnumbered, and the tighten-only rule ("project config may only *add* (tighten)") sits
+in its dangerous-action-guard paragraph. ADR 0032 therefore cites ADR 0012 and quotes that rule
+rather than a decision number that does not exist. The ADR also carries a `## Considered options`
+section beside the four required ones, matching the house shape of ADR 0031 (and 0027/0030/0012);
+the rejected `use-project-skills` gating is recorded there.
 
 Decision record only; no code changes in this item. It lands before item 4 so the code and doc
 comments there can cite a document that exists.
