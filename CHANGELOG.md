@@ -615,7 +615,7 @@ point is a **minor** bump, not a breaking change.
   box's new bottom border and the new hairline — so every row budget, floor and pane threshold is
   where it was. Specced in `layout.md`.
 
-- **The footer's mode marker leads with a symbol for the rung you are on** — `⬡ plan`,
+- **The footer's mode marker leads with a symbol for the rung you are on** — `⊞ plan`,
   `◐ ask before`, `✔ allow edits`, `▸▸ auto`. Each glyph is drawn in that mode's own colour, as one
   piece with the word rather than as a badge beside it, so the autonomy level reads from the shape
   before the word is read — useful precisely when Shift+Tab has just moved it. The words, the
