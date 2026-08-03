@@ -2794,18 +2794,59 @@ func firstViewLine(m Model) string {
 	return strings.SplitN(plain(m.View()), "\n", 2)[0]
 }
 
-// A short reply still pins the latest prompt to the top: the trailing-blank padding keeps
-// SetYOffset from clamping below row 0 when the content is shorter than the viewport.
-func TestStickyPinsShortReply(t *testing.T) {
+// A short exchange stays whole at the tail: no prompt is hoisted to the top of an emptied
+// screen, so the earlier turn is still on screen and no blank padding was appended below the
+// reply. The prompt reaches the top row only naturally, once a reply has grown a screenful.
+func TestShortReplyKeepsTheExchangeAtTheTail(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("first question", nil)
+	m.transcript.addUser("FIRST-QUESTION", nil)
 	m.transcript.commitAssistant("a prior short answer", 0)
 	m.transcript.addUser("LATEST-PROMPT", nil)
 	m.transcript.commitAssistant("a short reply", 0)
 	m.refreshViewport()
 
-	if top := firstViewLine(m); !strings.Contains(top, "LATEST-PROMPT") {
-		t.Errorf("top line = %q; want the latest prompt pinned to the top for a short reply", top)
+	view := plain(m.View())
+	if !strings.Contains(view, "FIRST-QUESTION") {
+		t.Errorf("the earlier turn was scrolled out of sight by a short reply:\n%s", view)
+	}
+	if !strings.Contains(view, "LATEST-PROMPT") || !strings.Contains(view, "a short reply") {
+		t.Errorf("the latest exchange is not on screen:\n%s", view)
+	}
+	if n := m.viewport.TotalLineCount(); n != len(m.lines) {
+		t.Errorf("viewport holds %d rows for %d rendered lines; the content was padded", n, len(m.lines))
+	}
+}
+
+// The reported jump: submitting a prompt into a history taller than the window must append it
+// at the true tail — no blank padding below it, the prompt on the last content rows — with the
+// history still one page-up away, rather than opening alone at the top of an emptied screen.
+func TestSubmitAppendsAtTheTailWithoutJumping(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.addUser("OLDEST-PROMPT", nil)
+	for i := 0; i < 40; i++ {
+		m.transcript.commitAssistant("history paragraph "+strings.Repeat("x", 10), 0)
+	}
+	m.refreshViewport()
+
+	m.input.SetValue("NEW-PROMPT")
+	m = step(t, m, keyEnter())
+
+	if !m.viewport.AtBottom() {
+		t.Errorf("after submit the viewport sits at %d, not at the bottom", m.viewport.YOffset())
+	}
+	if n := m.viewport.TotalLineCount(); n != len(m.lines) {
+		t.Errorf("viewport holds %d rows for %d rendered lines; the submit pad is back", n, len(m.lines))
+	}
+	if last := strings.TrimRight(m.lines[len(m.lines)-1], " "); last == "" {
+		t.Error("the content ends on a blank row; the tail must be the transcript's own last line")
+	}
+	if !strings.Contains(plain(m.View()), "NEW-PROMPT") {
+		t.Error("the submitted prompt is not on screen")
+	}
+	// The history is not gone, only above: one page up brings the previous turn back.
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if got := plain(m.View()); !strings.Contains(got, "history paragraph") {
+		t.Errorf("one page up did not reveal the prior history:\n%s", got)
 	}
 }
 

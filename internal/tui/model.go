@@ -1029,7 +1029,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	// it between Turns 1 and 2 (autotitle.go). It drives no engine and enters no transcript — it
 	// simply rides along in the batch below, and is nil whenever nothing should fire.
 	nameCmd := m.maybeAutoTitle(in.Text)
-	m.layout() // the emptied input box shrinks back; the new prompt pins to the top
+	m.layout() // the emptied input box shrinks back; the repaint follows the tail onto the new prompt
 	next, cmd := m.launchExchange(in)
 	return next, tea.Batch(cmd, nameCmd)
 }
@@ -2518,8 +2518,8 @@ func (m Model) transcriptBudget() int {
 // transcriptWidth is the column budget the transcript body wraps to: the viewport's own width
 // less the right gutter (bodyRightGutter), floored at one column so a window too narrow to hold
 // the gutter still wraps rather than going zero or negative. The viewport keeps its full width —
-// only the content is narrower — so the prompt-offset arithmetic (wrappedOffset) and the mouse
-// mapping still measure against the viewport, and the gutter shows up as unpainted columns.
+// only the content is narrower — so the mouse mapping still measures against the viewport, and
+// the gutter shows up as unpainted columns.
 func (m Model) transcriptWidth() int {
 	return max(1, m.viewport.Width()-bodyRightGutter)
 }
@@ -2587,14 +2587,14 @@ func (m Model) hiddenDraftRows() int {
 }
 
 // refreshViewport re-renders the transcript into the viewport and, unless the human has
-// scrolled away (detached), ends the repaint at the tail so generated output stays in view as
-// it streams. The last user prompt still opens at the top of the visible area: the trailing-blank
-// padding below a reply shorter than a screen puts the bottom ON the prompt row, and once the
-// reply outgrows the screen the same call follows the tail while applyStickyHeader overlays the
+// scrolled away (detached), ends the repaint at the TRUE tail so generated output stays in view
+// as it streams. Nothing is padded below the content: a new prompt is appended at the bottom of
+// the history that was already there and the view follows it, rather than the transcript jumping
+// so the prompt opens alone at the top of an emptied screen. A prompt reaches the top row only
+// once the reply beneath it has grown a screenful, and from there applyStickyHeader overlays the
 // owning prompt at row 0. While detached the offset is left exactly where the human put it;
 // submit re-arms following. The body is rendered to transcriptWidth — the viewport's width less
-// the right gutter — while the prompt offset still measures against the viewport's own width,
-// which is what soft-wraps the stored lines.
+// the right gutter — while the viewport soft-wraps the stored lines against its own full width.
 //
 // It is also where a live transcript drag-selection lives or dies, by the keep-if-unchanged rule
 // (transcriptSel.spanUnchanged, mouse.go): the predicate is evaluated against the OUTGOING lines
@@ -2621,18 +2621,8 @@ func (m *Model) refreshViewport() {
 		}
 		return
 	}
-	lines := rendered.lines
-	if rendered.lastUserStart >= 0 {
-		// Pad with trailing blank rows so the viewport can scroll the prompt all the way to the top
-		// even when the reply beneath it is shorter than a screen; otherwise the bottom is clamped
-		// to maxYOffset (totalRows-height) and the prompt sits mid-screen.
-		off := wrappedOffset(rendered.lines[:rendered.lastUserStart], m.viewport.Width())
-		if need := off + m.viewport.Height(); len(lines) < need {
-			lines = append(lines, make([]string, need-len(lines))...)
-		}
-	}
-	m.viewport.SetContentLines(lines)
-	m.viewport.GotoBottom() // on padded short content the bottom IS the prompt row; otherwise the real tail
+	m.viewport.SetContentLines(rendered.lines)
+	m.viewport.GotoBottom() // the real tail: the content ends where the transcript ends
 }
 
 // refreshViewportAnchored re-renders the transcript and then holds ONE content line on the screen

@@ -751,7 +751,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 		leadIn(&m)
 		openCall(&m, "c1", "go test ./...")
 		m.refreshViewport()
-		return armTranscriptSelection(t, m)
+		return armTranscriptSelection(t, m, 0)
 	}
 
 	// Row 0 IS the live header: the flip rewrites the very line the span covers.

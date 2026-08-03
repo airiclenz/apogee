@@ -19,8 +19,8 @@ import (
 // Two properties keep it safe inside the existing line-oriented renderer. The styling is baked
 // into the text as ANSI before wrapping, and the wrap helpers are SGR-aware (they re-emit a
 // style across a soft-wrap boundary), so word-wrap arithmetic is unperturbed (render.go:204);
-// and every width measure here strips ANSI, so the sticky-header scroll math (wrappedOffset) still
-// measures visible columns. Unterminated markup (a ` or ** or fence still streaming in) degrades to
+// and every width measure here strips ANSI, so the sticky-header scroll math still measures
+// visible columns. Unterminated markup (a ` or ** or fence still streaming in) degrades to
 // literal text, so a partially-streamed message never leaks an escape or breaks the layout.
 
 // renderMarkdownBody renders an assistant message's markdown into styled physical lines at the

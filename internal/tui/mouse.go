@@ -169,8 +169,8 @@ func (m Model) pointInputRow(x, y int) (visRow, visCol int, ok bool) {
 // width once it is hidden and the column goes back to the body. The column bound below is therefore
 // ASKED of the viewport rather than restating either arithmetic, so the mapping holds in both
 // states. ok is false when the point falls outside the transcript's rows or past the last rendered
-// line (the blank pad refreshViewport leaves below short content), so a click there selects
-// nothing. contentLineAt (model.go) resolves the row, folding in the scroll offset, the
+// line — a session shorter than the viewport leaves the rows beneath its tail empty, and a click
+// there names no content at all, so it selects nothing. contentLineAt (model.go) resolves the row, folding in the scroll offset, the
 // sticky-header overlay and the rows this frame's overlays took off the bottom
 // ([Model.transcriptRows]) — so a click on a header row names the prompt line drawn there rather
 // than the reply line hidden beneath it, a click on a popup row names nothing at all, and the
@@ -412,7 +412,7 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 		}
 		text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 		if strings.TrimSpace(text) == "" {
-			m.transcriptSel.active = false // a drag over blank pad copies nothing
+			m.transcriptSel.active = false // a drag that took only blank rows copies nothing
 			return m, nil
 		}
 		return m.copyFlash(text)

@@ -4,12 +4,15 @@
   and the window edge while no bar is painted. The user must be able to scroll up in
   the chat session to see the complete chat history. The session area follows the
   generated output: while the view sits at the bottom, every repaint keeps the tail
-  visible as it streams. An answer shorter than the visible session area opens with its
-  prompt stuck to the top of that area; once an answer outgrows the area the tail stays
-  in view and the prompt it belongs to is overlaid on the top row as a sticky header.
-  Scrolling up detaches from that: the view holds exactly where it was scrolled to and
-  new output no longer moves it. Scrolling back down to the very bottom — or sending a
-  prompt — resumes following (this is also implemented in apogee-code).
+  visible as it streams. A sent prompt is simply appended at the tail of the history
+  already on screen — nothing is padded below it, so the session never jumps to open
+  the new prompt alone at the top of an emptied area with the history out of sight.
+  A prompt reaches the top row only naturally, once the answer beneath it has outgrown
+  the visible area; from there it is overlaid on the top row as a sticky header while
+  its replies are on screen. Scrolling up detaches from that: the view holds exactly
+  where it was scrolled to and new output no longer moves it. Scrolling back down to
+  the very bottom — or sending a prompt — resumes following (this is also implemented
+  in apogee-code).
 
 ✦ The LLM's answer looks like this. There is exactly one empty line between the users
   prompt and the agents response — and exactly one between the answer and the next

@@ -800,6 +800,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Sending a prompt no longer throws the session chat away.** A new prompt landed at the top of an
+  apparently empty transcript, with everything said before it out of sight above — the session
+  padded blank rows below the newest prompt so the view could scroll it all the way up, and then
+  scrolled there. The padding is gone: a prompt is appended at the tail of the history that is
+  already on screen, the view follows it down as the answer streams, and the prompt climbs to the
+  top row only once the answer beneath it has genuinely filled the area — where the sticky header
+  takes over and holds it there, exactly as before. Scrolling up still detaches the view, and
+  scrolling back to the bottom or sending a prompt still resumes following.
+
+  Specced in `layout.md`'s opening paragraph.
+
 - **The terminal's own scroll bar no longer sits beside apogee for the whole run.** Two separate
   things kept it lit. The first: apogee draws on the alternate screen, but that is named per frame,
   and the very first frame — the placeholder shown before the window's size is known — did not name

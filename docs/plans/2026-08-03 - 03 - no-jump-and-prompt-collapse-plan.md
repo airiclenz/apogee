@@ -75,7 +75,16 @@ Prompt collapse (issue 11):
   interface.
 - **D12.** Collapse numbers stay Go constants; no `ui:` config key.
 
-## 1. Remove the submit-time jump-to-top pad
+## 1. Remove the submit-time jump-to-top pad — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): `wrappedOffset` had a second guard the item did not name,
+`TestWrappedOffsetFloors` (`render_test.go` ~50) — removed with the function, along with the
+now-unused `viewport` import in that file. Four mouse/spinner tests also encoded the pad by
+clicking screen row 0 for the prompt block (`TestTranscriptDragSelectsAndCopies`,
+`TestTranscriptMidDragSurvivesRepaint`, `TestTranscriptDragCopiesInEveryState`, and the shared
+`armTranscriptSelection` helper): the helper now takes the row explicitly, a new `promptRow`
+helper locates the latest user block, and `TestBlinkingStarDropsOnlyTheSelectionsSpanningIt`
+passes its deliberate row 0. No behavior beyond the pad was touched.
 
 **What:** In `internal/tui/model.go`, `refreshViewport` (~2596–2627): delete the padding
 block — the `wrappedOffset(rendered.lines[:rendered.lastUserStart], …)` call and the

@@ -14,10 +14,10 @@ import (
 // The renderer turns the transcript into the flat slice of physical lines the viewport
 // shows. It returns []string (not a joined string) for two reasons: tool results carry
 // embedded newlines, so the caller feeds viewport.SetContentLines without re-splitting; and
-// the prompt-offset arithmetic needs to measure the wrapped height of the lines above the last
-// user prompt, which it can only do over the exact lines the viewport stores. Every element
-// is a single physical line (no embedded newline), so wrappedOffset's soft-wrap arithmetic
-// stays in lockstep with the viewport's own calculateLine (TestWrappedOffsetMatchesViewport).
+// the sticky-header overlay and the mouse both address the paint by physical line, which
+// they can only do over the exact lines the viewport stores. Every element is a single
+// physical line (no embedded newline), so a line index means the same thing to the painter,
+// the viewport and a click.
 //
 // The look mirrors layout.md: the last user prompt is a full-width white-on-dark-gray block;
 // the assistant and tool headers lead with ✦; a tool header carries its label alone and the
@@ -31,16 +31,13 @@ import (
 // section header that freezes at the top of the viewport while its replies are on screen.
 type userBlock struct{ start, count int }
 
-// renderedTranscript is the renderer's output: the physical lines, the index of the last user
-// prompt's first line (-1 when the transcript holds no user prompt), the line range of
-// every user block, and what each line is to a motionless click. The caller measures the last
-// prompt's offset to pad the lines below a short reply (so the bottom lands on the prompt row),
-// follows the tail unless the human has scrolled away, overlays the user block owning the top row
-// as a sticky header, and resolves a click through targets (model.go).
+// renderedTranscript is the renderer's output: the physical lines, the line range of every user
+// block, and what each line is to a motionless click. The caller follows the tail unless the
+// human has scrolled away, overlays the user block owning the top row as a sticky header, and
+// resolves a click through targets (model.go).
 type renderedTranscript struct {
-	lines         []string
-	lastUserStart int
-	userBlocks    []userBlock
+	lines      []string
+	userBlocks []userBlock
 	// targets is PARALLEL to lines — one entry per physical line, the zero value for every line
 	// that is not part of a block's click surface. It is built in lockstep with line emission by
 	// the painter itself and is never re-derived by a second reader: a click resolves against the
@@ -115,7 +112,7 @@ func (p blockPaint) railed(th theme, depth int) blockPaint {
 }
 
 // renderView renders the committed entries plus any in-progress assistant buffer into the
-// viewport's lines, recording where the last user block begins. Blocks are separated by one
+// viewport's lines, recording the line range of every user block. Blocks are separated by one
 // line (layout.md), railed at the depth the two blocks share so a sub-agent run's frame is
 // continuous through its separators (railSpacer).
 //
@@ -132,7 +129,6 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	var lines []string
 	var targets []lineTarget
 	var userBlocks []userBlock
-	lastUserStart := -1
 
 	// prevBlockDepth is the depth of the block appended last — the left half of the next
 	// spacer's join. It is deliberately per-APPENDED-BLOCK rather than per-entry (the loop's
@@ -148,7 +144,6 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			targets = append(targets, lineTarget{}) // a separator belongs to neither block
 		}
 		if isUser {
-			lastUserStart = len(lines)
 			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block.lines)})
 		}
 		// The line and its mark are appended in ONE loop, and the mark is read defensively, so the
@@ -219,7 +214,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		preview := renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width, blink)
 		appendBlock(false, 0, len(t.entries), preview)
 	}
-	return renderedTranscript{lines: lines, lastUserStart: lastUserStart, userBlocks: userBlocks, targets: targets}
+	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets}
 }
 
 // renderLines is the line slice alone — the viewport content and the substring-test surface — at
@@ -468,7 +463,7 @@ func renderSkillChip(th theme, name string) string {
 // that is the whole mechanism: the terminal is what turns them into something clickable, so a
 // hanging indent inserted mid-token or an SGR run wrapped around them would break the only rung
 // that always works. width is therefore ignored for those two lines: an overlong path soft-wraps
-// in the viewport (which wrappedOffset already mirrors) rather than being hard-wrapped here.
+// in the viewport rather than being hard-wrapped here.
 // The marker keeps the title's styling even when there is no title, so the block opens the same
 // way either way.
 func renderPresentedBlock(th theme, v presentedView, width int) []string {
@@ -1097,8 +1092,8 @@ func railLines(th theme, lines []string, depth int) []string {
 // painter-facing measure (width.go): the textarea wraps with uniseg.StringWidth
 // (bubbles/v2@v2.1.0/textarea/textarea.go:1805-1852), which is what wrapRowStarts measures with
 // (runesWidth) and is grapheme-clustered, unlike ansi.WcWidth. Sizing the box in the painter's
-// measure would size it to something the widget never draws. The same rule governs wrappedOffset
-// below (the viewport's mirror) and the caret mirrors in inputaccent.go / mouse.go.
+// measure would size it to something the widget never draws. The same rule governs the caret
+// mirrors in inputaccent.go / mouse.go.
 func inputContentRows(value string, innerWidth int) int {
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -1119,36 +1114,4 @@ func clampInt(n, lo, hi int) int {
 		return hi
 	}
 	return n
-}
-
-// ----------------------------------------------------------------------------
-// Prompt-offset and sticky-header arithmetic
-// ----------------------------------------------------------------------------
-
-// wrappedOffset returns the virtual (soft-wrapped) row at which the line after linesAbove
-// begins — the Y offset that puts that line on the viewport's top row. refreshViewport uses it
-// to size the trailing pad below a reply shorter than a screen, so following the tail still
-// lands the prompt on the top row. It mirrors the viewport's calculateLine exactly: each
-// physical line occupies max(1, ceil(width/vpWidth)) rows. This holds only while the viewport
-// has no border or gutter (maxWidth == Width, the current wiring);
-// TestWrappedOffsetMatchesViewport guards the equality against drift.
-//
-// WIDGET MIRROR — deliberately NOT the width authority, for the reason inputContentRows states:
-// the viewport soft-wraps its own stored lines with ansi.StringWidth
-// (bubbles/v2@v2.1.0/viewport/viewport.go:284, 415), so the row count that puts the prompt on the
-// top row has to be counted in the viewport's measure and not in the painter's.
-func wrappedOffset(linesAbove []string, vpWidth int) int {
-	if vpWidth < 1 {
-		vpWidth = 1
-	}
-	total := 0
-	for _, ln := range linesAbove {
-		w := lipgloss.Width(ln)
-		rows := 1
-		if w > 0 {
-			rows = (w + vpWidth - 1) / vpWidth // ceil(w / vpWidth)
-		}
-		total += rows
-	}
-	return total
 }

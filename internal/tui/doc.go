@@ -23,8 +23,8 @@
 // into a compact [toolView], keyed by an OPEN, name-keyed registry of presentation vocabulary
 // (each later tool adds one entry; where a card's facts come from is the tool-summary paragraph
 // below); render.go is the line-oriented renderer (the full-width user block, ✦ assistant/tool
-// headers, ┝/┕ tool-detail branches, depth indenting, and the [wrappedOffset] that mirrors the
-// viewport's soft-wrap so the last user prompt sticks to the top while a reply streams). The
+// headers, ┝/┕ tool-detail branches, depth indenting, and the [userBlock] ranges the sticky
+// header rides on so the owning prompt sticks to the top while a reply streams). The
 // transcript now groups a tool call with its result by ToolCall ID, the input box is a rounded,
 // auto-growing black field, and the chrome is a braille status line plus a footer bar (host-alias
 // ✦ model ✦ workdir, then the mode behind its own symbol ("◐ ask before", [modeMarker]) — the

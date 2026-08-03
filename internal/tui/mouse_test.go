@@ -628,9 +628,10 @@ func TestTranscriptSelectionText(t *testing.T) {
 func TestTranscriptDragSelectsAndCopies(t *testing.T) {
 	m := modelWithTranscript(t, "hello world")
 	w := m.viewport.Width()
+	row := promptRow(t, m)
 
-	m = step(t, m, leftClick(0, 0)) // anchor at the row's first cell (the viewport is top-anchored)
-	m = step(t, m, leftDrag(w, 0))  // drag past the right edge → the whole row
+	m = step(t, m, leftClick(0, row)) // anchor at the prompt row's first cell
+	m = step(t, m, leftDrag(w, row))  // drag past the right edge → the whole row
 	if !m.transcriptSel.active {
 		t.Fatal("a transcript drag did not arm a selection")
 	}
@@ -639,7 +640,7 @@ func TestTranscriptDragSelectsAndCopies(t *testing.T) {
 		t.Fatalf("selected text = %q, want %q (the rendered user block, pad trimmed)", got, want)
 	}
 
-	m, cmd := stepCmd(t, m, leftRelease(w, 0))
+	m, cmd := stepCmd(t, m, leftRelease(w, row))
 	if cmd == nil {
 		t.Fatal("release of a non-empty transcript selection should return a copy Cmd, got nil")
 	}
@@ -1051,17 +1052,34 @@ func screenRow(t *testing.T, m Model, line int) int {
 	return row
 }
 
-// armTranscriptSelection drags across the settled user block — on the viewport's top row, because a
-// transcript this short pads out to put the followed bottom on the prompt row — and returns the
-// model with that selection live.
-func armTranscriptSelection(t *testing.T, m Model) Model {
+// promptRow is the viewport row the latest user prompt's first line is drawn on. A short
+// transcript is no longer scrolled so its prompt tops the screen (the submit-time pad is gone),
+// so a test aiming at the prompt block asks the paint where the block actually landed.
+func promptRow(t *testing.T, m Model) int {
 	t.Helper()
-	m = step(t, m, leftClick(0, 0))
-	m = step(t, m, leftDrag(m.viewport.Width(), 0))
+	if len(m.userBlocks) == 0 {
+		t.Fatal("the transcript holds no user block to aim at")
+	}
+	return screenRow(t, m, m.userBlocks[len(m.userBlocks)-1].start)
+}
+
+// armTranscriptSelection drags across the whole of one viewport row and returns the model with
+// that selection live. The row is the caller's to name — the pad that used to put the latest
+// prompt on row 0 is gone, so which content a row holds is a fact about the paint, not a constant.
+func armTranscriptSelection(t *testing.T, m Model, row int) Model {
+	t.Helper()
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(m.viewport.Width(), row))
 	if !m.transcriptSel.active {
 		t.Fatal("precondition: no transcript selection armed")
 	}
 	return m
+}
+
+// armPromptSelection arms that selection across the latest user prompt's own row.
+func armPromptSelection(t *testing.T, m Model) Model {
+	t.Helper()
+	return armTranscriptSelection(t, m, promptRow(t, m))
 }
 
 // TestTranscriptSelectionSurvivesStreamAppend is the keep-if-unchanged rule's headline case: a
@@ -1071,7 +1089,7 @@ func armTranscriptSelection(t *testing.T, m Model) Model {
 // behaviour a drag could not survive.
 func TestTranscriptSelectionSurvivesStreamAppend(t *testing.T) {
 	m := modelWithTranscript(t, "hello world")
-	m = armTranscriptSelection(t, m)
+	m = armTranscriptSelection(t, m, promptRow(t, m))
 
 	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "a streamed reply"}})
 	if !m.transcriptSel.active {
@@ -1128,16 +1146,17 @@ func TestTranscriptSelectionDropsWhenSpanChanges(t *testing.T) {
 func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
 	m := modelWithTranscript(t, "hello world")
 	w := m.viewport.Width()
+	row := promptRow(t, m)
 
-	m = step(t, m, leftClick(0, 0))
-	m = step(t, m, leftDrag(5, 0))
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(5, row))
 	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "tokens landing mid-drag"}})
 	if !m.transcriptSel.active {
 		t.Fatal("a repaint between two drag motions killed the drag")
 	}
 
-	m = step(t, m, leftDrag(w, 0)) // the drag carries on to the end of the row
-	m, cmd := stepCmd(t, m, leftRelease(w, 0))
+	m = step(t, m, leftDrag(w, row)) // the drag carries on to the end of the row
+	m, cmd := stepCmd(t, m, leftRelease(w, row))
 	if cmd == nil {
 		t.Fatal("release after a surviving drag should return a copy Cmd, got nil")
 	}
@@ -1153,14 +1172,14 @@ func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
 // the two apart because every repaint cleared.
 func TestTranscriptSelectionResize(t *testing.T) {
 	t.Run("a width change rewraps and drops it", func(t *testing.T) {
-		m := armTranscriptSelection(t, modelWithTranscript(t, "hello world"))
+		m := armPromptSelection(t, modelWithTranscript(t, "hello world"))
 		m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 		if m.transcriptSel.active {
 			t.Fatal("a rewrap did not drop the transcript selection")
 		}
 	})
 	t.Run("a height-only change keeps it", func(t *testing.T) {
-		m := armTranscriptSelection(t, modelWithTranscript(t, "hello world"))
+		m := armPromptSelection(t, modelWithTranscript(t, "hello world"))
 		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 30})
 		if !m.transcriptSel.active {
 			t.Fatal("a height-only resize dropped a selection whose lines are unchanged")
@@ -1171,8 +1190,10 @@ func TestTranscriptSelectionResize(t *testing.T) {
 // TestTranscriptHighlightPersistsWhileStreaming checks the lingering post-copy highlight obeys the
 // same rule as a live drag: what was copied stays visibly marked while the reply streams below it.
 func TestTranscriptHighlightPersistsWhileStreaming(t *testing.T) {
-	m := armTranscriptSelection(t, modelWithTranscript(t, "hello world"))
-	m, cmd := stepCmd(t, m, leftRelease(m.viewport.Width(), 0))
+	m := modelWithTranscript(t, "hello world")
+	row := promptRow(t, m)
+	m = armTranscriptSelection(t, m, row)
+	m, cmd := stepCmd(t, m, leftRelease(m.viewport.Width(), row))
 	if cmd == nil {
 		t.Fatal("precondition: the release did not copy")
 	}
@@ -1196,7 +1217,7 @@ func TestNotedBeatRepaintKeepsSelection(t *testing.T) {
 	m := wireHeartbeat(t, testOpts, &fakeHeartbeat{})
 	m.transcript.addUser("hello world", nil)
 	m.refreshViewport()
-	m = armTranscriptSelection(t, m)
+	m = armTranscriptSelection(t, m, promptRow(t, m))
 
 	before := len(noteTexts(m))
 	m = foldBeatMsg(t, m, downBeat("dial tcp: connection refused"))
@@ -1363,9 +1384,10 @@ func TestTranscriptDragCopiesInEveryState(t *testing.T) {
 			m := modelWithTranscript(t, "hello world")
 			m.state = s.state
 			w := m.viewport.Width()
+			row := promptRow(t, m)
 
-			m = step(t, m, leftClick(0, 0)) // the settled user block, pinned to the top row
-			m = step(t, m, leftDrag(w, 0))
+			m = step(t, m, leftClick(0, row)) // the settled user block, wherever it landed
+			m = step(t, m, leftDrag(w, row))
 			if !m.transcriptSel.active {
 				t.Fatal("a transcript drag armed no selection")
 			}
@@ -1374,7 +1396,7 @@ func TestTranscriptDragCopiesInEveryState(t *testing.T) {
 				t.Fatalf("selected text = %q, want %q", got, want)
 			}
 
-			m, cmd := stepCmd(t, m, leftRelease(w, 0))
+			m, cmd := stepCmd(t, m, leftRelease(w, row))
 			if cmd == nil {
 				t.Fatal("release of a non-empty transcript selection should return a copy Cmd, got nil")
 			}
