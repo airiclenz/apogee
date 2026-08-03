@@ -201,6 +201,52 @@ func TestPaintedScrollbarHoldsOneColumn(t *testing.T) {
 	}
 }
 
+// A markdown table's frame is one terminal cell wide in EITHER measure — the same property the
+// scroll bar's two glyphs have, and for the same reason: mdtable.go spends tableDividerWidth as a
+// constant instead of measuring the divider it draws, and a two-cell glyph under one of the
+// painter's measures would make every column arithmetic in the file a cell short there.
+//
+// The second half is the invariant that constant buys: every line of a rendered table — header,
+// rule and body rows alike — paints exactly as many columns as every other, in the measure the
+// painter is using. The fixture carries the disputed ⚠️ grapheme in a cell, so a cell padded with
+// a hard-wired GraphemeWidth rather than the authority (ADR 0030) comes out a column long here on
+// the WcWidth painter, which is the default one.
+func TestTableDividerHoldsOneColumn(t *testing.T) {
+	source := strings.Join([]string{
+		"| Tool | Calls | Notes |",
+		"|:--|--:|:-:|",
+		"| Read File | 12 | danger " + vs16Warning + " |",
+		"| Run | 3 | `go test ./...` |",
+	}, "\n")
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, glyph := range []string{glyphTableColumn, glyphTableCross} {
+				if got := paintedWidth(glyph, tc.method); got != 1 {
+					t.Errorf("%q paints %d columns, want the one cell tableDividerWidth assumes", glyph, got)
+				}
+			}
+
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			lines := renderMarkdownBody(th, source, 40)
+			if len(lines) != 4 {
+				t.Fatalf("rendered %d lines, want 4 (header, rule, two rows): %#v", len(lines), visible(lines))
+			}
+			if !strings.Contains(strip(lines[1]), glyphTableCross) {
+				t.Fatalf("the rule row carries no crossing — the fixture is not a ruled table: %q", strip(lines[1]))
+			}
+			want := paintedWidth(lines[0], tc.method)
+			for i, ln := range lines {
+				if got := paintedWidth(ln, tc.method); got != want {
+					t.Errorf("table line %d paints %d columns, want the header's %d: %q", i, got, want, strip(ln))
+				}
+			}
+		})
+	}
+}
+
 // The absolute width cap of layout.md ("no rendered line ever exceeds the width the block was
 // given"), asserted in the measure the frame is PAINTED in rather than the one it happened to be
 // measured in — which is the whole of what this plan changes.

@@ -196,23 +196,34 @@ func hasUnescapedPipe(s string) bool {
 // Markdown tables: layout and rendering
 // ----------------------------------------------------------------------------
 //
-// A table is drawn borderless — columns of text and two spaces of gutter, with one dim rule
-// running unbroken under the header and no verticals anywhere — so it sits in the body column
-// like any other paragraph rather than a boxed object dropped into the transcript. Every width is a
-// display width (th.measure over the rendered, ANSI-carrying cell — width.go), never a byte count: the
-// cells are styled before they are measured, so markup characters and escape bytes can never
-// push a column open. One row is one physical line, which is what the line-oriented renderer
-// above this file requires (render.go), so an over-wide cell is cut with a … rather than wrapped.
+// A table is drawn as ruled columns: a faint │ between adjacent columns with one space either
+// side, one dim rule under the header crossing every divider at a ┼, and nothing else — no outer
+// frame, no corners, no rule between body rows — so it still sits in the body column like any
+// other paragraph rather than a boxed object dropped into the transcript, while a column boundary
+// stays readable (layout.md). Every width is a display width (th.measure over the rendered,
+// ANSI-carrying cell — width.go), never a byte count: the cells are styled before they are
+// measured, so markup characters and escape bytes can never push a column open. The divider is
+// drawn in the rule's own faint style, because the frame is not content. One row is one physical
+// line, which is what the line-oriented renderer above this file requires (render.go), so an
+// over-wide cell is cut with a … rather than wrapped.
 
-// tableGutter separates two adjacent columns: exactly two spaces, no vertical rule (layout.md).
-const tableGutter = "  "
+// tableDivider separates two adjacent columns: the vertical rule with one space either side, so
+// the columns are told apart without their text touching the stroke (layout.md).
+// tableDividerWidth is its display width — the glyph is one cell under both width methods
+// (TestTableDividerHoldsOneColumn), so the layout arithmetic is a constant rather than a
+// measurement.
+const (
+	tableDivider      = " " + glyphTableColumn + " "
+	tableDividerWidth = 3
+)
 
 // renderTable lays a parsed table out as styled physical lines at the given width: bold header,
-// one continuous ─ rule the full width of the table, then the body rows, each cell inline-rendered
-// and padded on the side its column's alignment names. It reports false when the table cannot be
-// made to fit — the width is too narrow even with every column down to a single cell — and the
-// caller then leaves the block to the paragraph path it would have taken before tables were
-// rendered at all, which is always readable and never overflows.
+// one ─ rule the full width of the table crossing every divider at a ┼, then the body rows, each
+// cell inline-rendered, padded on the side its column's alignment names and separated from its
+// neighbour by the vertical divider. It reports false when the table cannot be made to fit — the
+// width is too narrow even with every column down to a single cell — and the caller then leaves
+// the block to the paragraph path it would have taken before tables were rendered at all, which
+// is always readable and never overflows.
 func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 	if len(tbl.header) == 0 {
 		return nil, false
@@ -232,7 +243,7 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 	}
 
 	widths := tableColumnWidths(th, header, rows)
-	if !fitColumns(widths, width-len(tableGutter)*(len(widths)-1)) {
+	if !fitColumns(widths, width-tableDividerWidth*(len(widths)-1)) {
 		return nil, false
 	}
 
@@ -247,7 +258,7 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 
 // tableColumnWidths measures each column's natural width: the widest rendered cell in it, header
 // included, floored at one cell so a column of nothing but empty cells still holds a place
-// between its gutters instead of running them together.
+// between its dividers instead of running them together.
 func tableColumnWidths(th theme, header []string, rows [][]string) []int {
 	widths := make([]int, len(header))
 	for i, cell := range header {
@@ -265,7 +276,7 @@ func tableColumnWidths(th theme, header []string, rows [][]string) []int {
 }
 
 // fitColumns shrinks widths in place until they sum to no more than budget — the width left over
-// once the gutters are paid for — and reports whether they fit at all. Space is always taken from
+// once the dividers are paid for — and reports whether they fit at all. Space is always taken from
 // the widest column and, where two are equally wide, from the leftmost, so the same table lays out
 // the same way on every repaint (layout.md). It steps a whole level at a time rather than one cell
 // at a time — the identical outcome, without a loop proportional to the overflow — because the
@@ -315,7 +326,9 @@ func fitColumns(widths []int, budget int) bool {
 
 // layoutTableRow lays one row's rendered cells into the fitted column widths: a cell wider than
 // its column is cut ANSI-aware with a … tail, the rest are padded on the side their column names,
-// and the columns are joined by the gutter. The last column is padded like every other one, so
+// and the columns are joined by the divider — drawn in the rule's faint style, the same reasoning
+// theme.go's mdRule comment gives for the rule itself: the frame is not content, so it must not
+// read as loudly as the cells it separates. The last column is padded like every other one, so
 // EVERY line of a table — header, rule and body rows alike — is exactly the table's width. That
 // straight right edge is load-bearing, not cosmetic: a short line leaves the transcript's right
 // gutter wider beside that row than beside the rule above it, which reads as the scroll bar
@@ -326,7 +339,7 @@ func layoutTableRow(th theme, cells []string, widths []int, align []mdAlign) str
 	var b strings.Builder
 	for i, w := range widths {
 		if i > 0 {
-			b.WriteString(tableGutter)
+			b.WriteString(th.mdRule.Render(tableDivider))
 		}
 		cell := ""
 		if i < len(cells) {
@@ -364,18 +377,17 @@ func padTableCell(th theme, cell string, width int, align mdAlign) string {
 	}
 }
 
-// tableRuleRow renders the line under the header: one unbroken ─ run spanning the whole table,
-// gutters included, so the header is underlined by a single continuous rule rather than by one
-// dash per column broken at every column division. Its width is the sum of the columns and the
-// gutters between them — the same arithmetic layoutTableRow walks — which keeps the rule exactly
-// as wide as every other line of the block.
+// tableRuleRow renders the line under the header: a ─ run per column, joined by ─┼─ where the
+// divider passes through, so the header is underlined across the whole table rather than by one
+// dash per column broken at every column division, and each crossing sits in exactly the cell the
+// divider occupies on the rows above and below it. The joint is tableDividerWidth cells like the
+// divider itself, so the rule comes out exactly as wide as every other line of the block — the
+// same arithmetic layoutTableRow walks.
 func tableRuleRow(th theme, widths []int) string {
-	width := 0
+	columns := make([]string, len(widths))
 	for i, w := range widths {
-		if i > 0 {
-			width += len(tableGutter)
-		}
-		width += w
+		columns[i] = strings.Repeat(glyphTableRule, w)
 	}
-	return th.mdRule.Render(strings.Repeat(glyphTableRule, width))
+	crossing := glyphTableRule + glyphTableCross + glyphTableRule
+	return th.mdRule.Render(strings.Join(columns, crossing))
 }

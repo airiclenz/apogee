@@ -168,9 +168,9 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 }
 
 // popupGutter separates two adjacent popup columns: two spaces, the minimum gap between the widest
-// cell of one column and the first cell of the next. It is the same gutter the markdown tables
-// (tableGutter) and the start-up info block use, so every aligned block in the UI reads with one
-// rhythm rather than three.
+// cell of one column and the first cell of the next. A pop-up's columns are told apart by that gap
+// alone — no rule between them, unlike a markdown table's (mdtable.go) — because a pane already
+// has a border of its own and a second stroke inside it would read as a grid.
 const popupGutter = "  "
 
 // layoutPopupRows composes the spec's cell rows into the plain lines the pane paints, one line per

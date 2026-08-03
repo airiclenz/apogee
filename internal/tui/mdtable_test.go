@@ -256,10 +256,10 @@ func TestTableRendersLayoutExample(t *testing.T) {
 		"| Run | 3 | `go test ./...` |",
 	}, "\n")
 	want := []string{
-		"Tool       Calls      Notes",
-		"───────────────────────────────",
-		"Read File     12      fast",
-		"Run            3  go test ./...",
+		"Tool      │ Calls │     Notes",
+		"──────────┼───────┼──────────────",
+		"Read File │    12 │     fast",
+		"Run       │     3 │ go test ./...",
 	}
 
 	got := visibleTrimmed(renderMarkdownBody(th, source, 34))
@@ -321,8 +321,8 @@ func TestTableConsumesItsSyntax(t *testing.T) {
 			t.Errorf("line %d still shows the delimiter row: %q", i, v)
 		}
 	}
-	if v := strip(got[1]); v != "───────" {
-		t.Errorf("rule row = %q; want %q (one unbroken run, gutters ruled too)", v, "───────")
+	if v, want := strip(got[1]), "──┼───┼──"; v != want {
+		t.Errorf("rule row = %q; want %q (ruled through the dividers, crossing each one)", v, want)
 	}
 	if colorActive(th) && !strings.Contains(got[0], "\x1b") {
 		t.Errorf("header row emitted no styling: %q", got[0])
@@ -332,11 +332,12 @@ func TestTableConsumesItsSyntax(t *testing.T) {
 	}
 }
 
-// The rule under the header is ONE unbroken line: the gutters between the columns are ruled like
-// the columns themselves, so it reads as a single horizontal rule under the whole table rather than
-// a dash per column interrupted at every column division. A space anywhere inside that line is the
-// bare-gutter regression. The run is also exactly as wide as every other line of the block — the
-// gutters are now filled rather than blank, so the width the rule spans is the width it draws.
+// The rule under the header runs the whole width of the table: it is ruled THROUGH the dividers
+// rather than stopping at each one, so it reads as a single horizontal rule under the block rather
+// than a dash per column interrupted at every column division. A space anywhere inside that line is
+// the bare-gutter regression. Where it meets a divider it crosses it with a ┼ in exactly the cell
+// the other rows draw their │ in: a crossing one cell off would show as a kink in the vertical.
+// The run is also exactly as wide as every other line of the block.
 func TestTableRuleIsContinuous(t *testing.T) {
 	th := newTheme()
 	source := strings.Join([]string{
@@ -353,17 +354,47 @@ func TestTableRuleIsContinuous(t *testing.T) {
 	}
 	rule := strip(got[1])
 	if strings.Contains(rule, " ") {
-		t.Errorf("rule row = %q; want one unbroken run — the gutters are ruled too, not bare", rule)
+		t.Errorf("rule row = %q; want one unbroken run — the dividers are ruled through, not bare", rule)
 	}
-	if want := strings.Repeat(glyphTableRule, lipgloss.Width(rule)); rule != want {
-		t.Errorf("rule row = %q; want nothing but %q", rule, glyphTableRule)
-	}
-	for i, ln := range got {
-		if w := lipgloss.Width(ln); w != lipgloss.Width(got[1]) {
-			t.Errorf("line %d is %d cells wide but the rule is %d — the rule spans the table exactly: %q",
-				i, w, lipgloss.Width(got[1]), strip(ln))
+	for _, r := range rule {
+		if s := string(r); s != glyphTableRule && s != glyphTableCross {
+			t.Errorf("rule row = %q; want nothing but %q and %q, found %q", rule, glyphTableRule, glyphTableCross, s)
+			break
 		}
 	}
+	crossings := glyphColumns(rule, glyphTableCross)
+	if len(crossings) != 2 {
+		t.Errorf("rule row = %q; want a crossing at each of the two dividers, got %d", rule, len(crossings))
+	}
+	for i, ln := range got {
+		v := strip(ln)
+		if i != 1 {
+			if cols := glyphColumns(v, glyphTableColumn); !reflect.DeepEqual(cols, crossings) {
+				t.Errorf("line %d draws its dividers in columns %v but the rule crosses at %v: %q",
+					i, cols, crossings, v)
+			}
+		}
+		if w := lipgloss.Width(ln); w != lipgloss.Width(got[1]) {
+			t.Errorf("line %d is %d cells wide but the rule is %d — the rule spans the table exactly: %q",
+				i, w, lipgloss.Width(got[1]), v)
+		}
+	}
+}
+
+// glyphColumns reports the display column of every occurrence of glyph in the ANSI-stripped line
+// s — the positions a reader sees it in, which is what "the crossing sits under the divider" has
+// to mean: a byte offset would answer a different question on any line carrying a wide cell.
+func glyphColumns(s, glyph string) []int {
+	var cols []int
+	for i := 0; i < len(s); {
+		j := strings.Index(s[i:], glyph)
+		if j < 0 {
+			break
+		}
+		cols = append(cols, lipgloss.Width(s[:i+j]))
+		i += j + len(glyph)
+	}
+	return cols
 }
 
 // Each column is padded on the side its delimiter cell names, header cells included.
@@ -380,12 +411,12 @@ func TestTableAlignsColumns(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %#v; want three lines", got)
 	}
-	// Columns are 4, 5 and 3 cells wide, so the row is "x   " + "  " + "    y" + "  " + " z " —
+	// Columns are 4, 5 and 3 cells wide, so the row is "x   " + " │ " + "    y" + " │ " + " z " —
 	// the centred cell's own trailing space included, since a row is padded out to the table.
-	if want := "x         y   z "; got[2] != want {
+	if want := "x    │     y │  z "; got[2] != want {
 		t.Errorf("row = %q; want %q (left, right, centred)", got[2], want)
 	}
-	if want := "left  right  mid"; got[0] != want {
+	if want := "left │ right │ mid"; got[0] != want {
 		t.Errorf("header = %q; want %q (the header aligns with its column too)", got[0], want)
 	}
 }
@@ -422,13 +453,13 @@ func TestTableInlineMarkupInCells(t *testing.T) {
 		}
 	}
 	// "bold" and "code" are four cells wide once rendered, the same as "name": the column stays
-	// four wide and "note" starts in the same place on every row.
+	// four wide and the divider — and so "note" behind it — lands in the same place on every row.
 	for i, v := range text {
 		if i == 1 {
-			continue // the rule row has no gutter text to line up
+			continue // the rule row crosses the divider rather than drawing it
 		}
-		if len(v) > 4 && !strings.HasPrefix(v[4:], "  ") {
-			t.Errorf("line %d = %q; want the second column to start at column 6", i, v)
+		if len(v) > 4 && !strings.HasPrefix(v[4:], tableDivider) {
+			t.Errorf("line %d = %q; want the divider straight after the four-cell first column", i, v)
 		}
 	}
 	if colorActive(th) && !strings.Contains(got[3], "\x1b") {
@@ -463,12 +494,13 @@ func TestTableTruncatesToWidth(t *testing.T) {
 }
 
 // A table shrinks as far as one cell per column before it gives up, and every line it draws stays
-// inside the width all the way down.
+// inside the width all the way down. Nine cells is the narrowest these three columns can be drawn
+// in: one cell each, plus the three the divider between them costs.
 func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
 	th := newTheme()
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
-	for _, width := range []int{8, 9, 12, 20} {
+	for _, width := range []int{9, 12, 20} {
 		got := renderMarkdownBody(th, source, width)
 		if len(got) != 3 {
 			t.Errorf("width %d: got %d lines, want 3: %#v", width, len(got), visible(got))
@@ -491,7 +523,9 @@ func TestTableUnfittableFallsBack(t *testing.T) {
 	th := newTheme()
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
-	for _, width := range []int{1, 3, 6} {
+	// Eight cells is the widest of these: three columns cannot be drawn at all until the two
+	// dividers between them are paid for, which leaves nothing for the cells themselves.
+	for _, width := range []int{1, 3, 6, 8} {
 		lines := visible(renderMarkdownBody(th, source, width))
 		got := strings.Join(lines, "\n")
 		if strings.Contains(got, "─") {
@@ -539,7 +573,7 @@ func TestTableFollowedByOtherBlocks(t *testing.T) {
 
 	got := visible(renderMarkdownBody(th, source, 40))
 
-	want := []string{"a  b", "────", "1  2", "", "Title", "• item", "  code()"}
+	want := []string{"a │ b", "──┼──", "1 │ 2", "", "Title", "• item", "  code()"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("mixed blocks:\n--- got ---\n%s\n--- want ---\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -553,7 +587,7 @@ func TestTableInsideProse(t *testing.T) {
 
 	got := visible(renderMarkdownBody(th, source, 40))
 
-	want := []string{"Here it is:", "a  b", "────", "1  2", "done"}
+	want := []string{"Here it is:", "a │ b", "──┼──", "1 │ 2", "done"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("prose around a table:\n--- got ---\n%s\n--- want ---\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))

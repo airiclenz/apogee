@@ -288,10 +288,10 @@ func TestTranscriptRendersMarkdownTable(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Counts:",
 		"",
-		"  Tool       Calls",
-		"  ────────────────",
-		"  Read File     12",
-		"  Run            3",
+		"  Tool      │ Calls",
+		"  ──────────┼──────",
+		"  Read File │    12",
+		"  Run       │     3",
 	}, "\n")
 	if got := plainRender(tr); got != want {
 		t.Errorf("table block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)

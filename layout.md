@@ -449,9 +449,12 @@ line above it. Leading and trailing pipes are optional, `\|` is a literal pipe i
 the block ends at the first blank line or the first line with no pipe in it. A delimiter-shaped
 line with no header above it is not a table and keeps whatever it renders as today.
 
-**It is borderless.** No verticals, no outer frame, no corners — a table is columns of text and
-nothing else, sitting in the same body column the rest of the answer sits in. Every cell is padded
-to the widest cell in its column and columns are separated by exactly **two spaces**. Each cell is
+**It is ruled, not boxed.** No outer frame, no corners, no rule between body rows — a table is
+columns of text separated by a single **`│` with one space either side**, and nothing else, sitting
+in the same body column the rest of the answer sits in rather than reading as a boxed object
+dropped into the transcript. The divider wears the muted colour of the header rule: the frame is
+not content and must not read as loudly as the cells it separates. Every cell is padded to the
+widest cell in its column. Each cell is
 rendered as inline markdown first, so `**bold**` and `` `code` `` inside a cell style the way they
 do in a paragraph, and it is that *rendered* width — the painted width, measured by the
 width authority like every width in this document — that sets the column, never the source width,
@@ -462,11 +465,12 @@ that stopped at its last word instead would leave a wider gap to the scroll-bar 
 rule above it does, which reads as the bar stepping inward beside the body.
 
 **The header and its rule.** The header row's cells are bold, the same weight `**bold**` earns
-anywhere else. The delimiter row renders as a **single unbroken run of `─`** spanning the whole
-table: the two-space gutters are ruled along with the columns, so the line reads as one continuous
-horizontal rule under the header rather than a dash per column interrupted at every column
-division. It is exactly one line tall, wears the same muted colour as before, and — the gutters
-being filled rather than blank — is exactly as wide as every other line of the block.
+anywhere else. The delimiter row renders as a **run of `─` spanning the whole table that crosses
+every divider at a `┼`**: the three cells a divider occupies are ruled `─┼─`, so the line reads as
+one continuous horizontal rule under the header rather than a dash per column interrupted at every
+column division, and each crossing sits in exactly the cell the `│` occupies on the rows above and
+below it. It is exactly one line tall, wears the same muted colour as the dividers, and — the
+divider cells being ruled rather than blank — is exactly as wide as every other line of the block.
 
 **Alignment is the delimiter row's word.** `:--` left, `--:` right, `:-:` centred, a plain `---`
 left; every cell is padded on the side its column names, header cells included. A centred cell with
@@ -507,14 +511,15 @@ and what the transcript draws for it at 34 columns of body width — `Tool` left
 `Notes` centred, the header bold, `go test ./...` styled as inline code with its backticks gone:
 
 ```
-Tool       Calls      Notes
-───────────────────────────────
-Read File     12      fast
-Run            3  go test ./...
+Tool      │ Calls │     Notes
+──────────┼───────┼──────────────
+Read File │    12 │     fast
+Run       │     3 │ go test ./...
 ```
 
 Two of those four lines carry trailing blanks out to the rule's last column — the padding of the
-centred `Notes` column, which print cannot show. All four are 31 columns wide.
+centred `Notes` column, which print cannot show. All four are 33 columns wide: the three columns
+are 9, 5 and 13 cells wide and each of the two dividers costs three more.
 
 ---
 
@@ -807,7 +812,8 @@ and truncation. A column is as wide as its widest cell measured in painted displ
 authority again, so CJK and emoji count for what they occupy on screen, not for their runes), and
 it is measured over **all** of the pane's rows rather than the eight in the window, so the columns
 never shift under the eye while the selection scrolls. Adjacent columns are separated by a
-**two-space** gutter — the same minimum gap a markdown table keeps. Each separator glyph leads the
+**two-space** gutter and nothing else — no rule between them: the pane already carries a border of
+its own, and a second stroke inside it would read as a grid. Each separator glyph leads the
 cell it introduces rather than trailing the one before it — `— backend`, `· 32k`, `(:8080)` — so
 the `—`, the `·` and the `(` line up down the pane as well as the words after them. Every pop-up
 kind has a **fixed schema**: a tier a row does not state is an *empty cell*, which pads like any

@@ -69,6 +69,8 @@ const (
 	glyphPresented       = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
 	glyphInterject       = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
 	glyphTableRule       = "─" // one cell of the rule under a markdown table's header row (mdtable.go)
+	glyphTableColumn     = "│" // U+2502 LIGHT VERTICAL — the rule between two markdown table columns (mdtable.go); one cell wide in either width method, which is what lets tableDividerWidth be a constant (TestTableDividerHoldsOneColumn). Its shape is glyphSubRail's and glyphScrollTrack's but deliberately NOT shared with either: a column boundary, a sub-agent rail and a scroll-bar track are three elements that move independently.
+	glyphTableCross      = "┼" // U+253C LIGHT VERTICAL AND HORIZONTAL — where the header rule crosses a column divider (mdtable.go); one cell wide in either method, like the divider it crosses
 )
 
 // The transcript scroll bar's two glyphs (renderScrollbar). They are one axis drawn in two
