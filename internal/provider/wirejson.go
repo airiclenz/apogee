@@ -27,6 +27,11 @@ type chatRequest struct {
 	// here too.
 	LogProbs    *bool `json:"logprobs,omitempty"`
 	TopLogProbs *int  `json:"top_logprobs,omitempty"`
+	// ChatTemplateKwargs is passed through to the server's chat template (llama.cpp's
+	// `chat_template_kwargs`) — today only to switch a Qwen-family template's thinking block
+	// off. A nil map is omitted, so the byte-identical anchor the logprobs pair holds to
+	// applies here too: a caller that asks for nothing changes nothing on the wire.
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 // chatMessage is one wire message. Content is a pointer so a tool-call-only assistant

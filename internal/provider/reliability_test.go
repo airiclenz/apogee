@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -135,6 +136,45 @@ func TestRespond_ContextOverflow(t *testing.T) {
 	_, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{})
 	if !errors.Is(err, ErrContextOverflow) {
 		t.Fatalf("error = %v, want ErrContextOverflow", err)
+	}
+	// The overflow branch stays a sentinel, not a StatusError: a caller that retries a 4xx
+	// with a smaller request must not mistake "the prompt is too long" for one.
+	var statusErr *StatusError
+	if errors.As(err, &statusErr) {
+		t.Errorf("overflow surfaced as *StatusError (%v); it must stay the ErrContextOverflow sentinel", statusErr)
+	}
+}
+
+// A non-2xx that is not an overflow reaches the caller as a typed *StatusError, so an HTTP
+// class can be branched on with errors.As instead of matched in the message text.
+func TestRespond_StatusErrorCarriesCode(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []int{http.StatusBadRequest, http.StatusNotFound} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(code)
+				_, _ = io.WriteString(w, `{"error":"unknown field 'chat_template_kwargs'"}`)
+			}))
+			defer srv.Close()
+
+			_, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{})
+			var statusErr *StatusError
+			if !errors.As(err, &statusErr) {
+				t.Fatalf("error = %v (%T), want *StatusError", err, err)
+			}
+			if statusErr.Code != code {
+				t.Errorf("Code = %d, want %d", statusErr.Code, code)
+			}
+			if !strings.Contains(statusErr.Body, "chat_template_kwargs") {
+				t.Errorf("Body = %q, want the server's message", statusErr.Body)
+			}
+			if want := fmt.Sprintf("apogee: upstream HTTP %d: ", code); !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("Error() = %q, want the prefix %q it carried before the type existed", err.Error(), want)
+			}
+		})
 	}
 }
 

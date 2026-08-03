@@ -61,7 +61,7 @@ into its commit.
   re-send, window-size (`windowBudgetRunes`) tuning.
 - Any version bump (see closing note).
 
-## 1. Provider seam: per-request thinking switch and a typed status error
+## 1. Provider seam: per-request thinking switch and a typed status error — ✅ DONE (2026-08-03)
 
 **What:** two small, independent additions to `internal/provider`, both needed by the
 wiring items downstream.

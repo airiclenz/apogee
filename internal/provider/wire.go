@@ -68,6 +68,14 @@ type Request struct {
 	// generated text — ADR 0021 §6 prefers logprobs where the server exposes them. A server
 	// that does not support the fields simply answers without them, so setting it is safe.
 	LogProbs bool
+
+	// DisableThinking asks the Upstream to answer without a reasoning pass. It is a semantic
+	// seam field — "this call wants no chain-of-thought" — leaving the Client to decide how
+	// that intent is expressed on a given server. The loop never sets it; the naming call
+	// (internal/title) does, because an eight-word title needs no reasoning while a thinking
+	// model will otherwise spend its whole reply budget producing one. Unset ⇒ nothing is
+	// added to the request, so every existing caller's bytes stay unchanged.
+	DisableThinking bool
 }
 
 // Usage is the token accounting an Upstream reply may carry (absent on servers that omit

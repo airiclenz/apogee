@@ -174,6 +174,34 @@ func TestBuildBody_ToolsArray(t *testing.T) {
 	}
 }
 
+// A request that wants no reasoning carries the exact kwarg object llama.cpp forwards to the
+// chat template — the Qwen-family templates key off `enable_thinking`.
+func TestBuildBody_DisableThinkingEmitsKwarg(t *testing.T) {
+	t.Parallel()
+
+	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, DisableThinking: true})
+
+	kwargs, ok := body["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		t.Fatalf("chat_template_kwargs = %v, want an object", body["chat_template_kwargs"])
+	}
+	if len(kwargs) != 1 || kwargs["enable_thinking"] != false {
+		t.Errorf("chat_template_kwargs = %v, want exactly {\"enable_thinking\": false}", kwargs)
+	}
+}
+
+// The byte-identical anchor: a caller that does not ask for the switch sends no such key, so
+// every existing caller's request is unchanged by the field's arrival.
+func TestBuildBody_OmitsChatTemplateKwargsUnlessAsked(t *testing.T) {
+	t.Parallel()
+
+	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if _, present := body["chat_template_kwargs"]; present {
+		t.Errorf("an unasked-for request carried chat_template_kwargs; the field must be omitted entirely")
+	}
+}
+
 // TestFormatMessage_OracleVectors ports the TS provider-message-format vectors: tool
 // linkage is preserved only when the request offers native tools, and degrades to a user
 // message otherwise.

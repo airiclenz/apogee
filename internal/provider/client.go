@@ -35,6 +35,23 @@ const (
 // branch on it (TDD §8 #8); P1.1 only surfaces it.
 var ErrContextOverflow = errors.New("apogee: context window exceeded")
 
+// StatusError is a non-2xx Upstream reply that is NOT a context overflow (that one stays
+// ErrContextOverflow so its existing errors.Is callers keep working). It carries the status
+// code and the sanitised body so a caller can branch on the HTTP class with errors.As
+// instead of matching the message text — the naming call uses it to tell "this server
+// rejected my request outright" (a 4xx, worth one retry without the offending field) from
+// a transport or 5xx fault.
+type StatusError struct {
+	Code int    // the HTTP status the Upstream answered with
+	Body string // the response body, API key redacted and length-capped
+}
+
+// Error renders exactly the text this branch produced before the type existed, so logs and
+// any message-matching caller are unaffected by the change.
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("apogee: upstream HTTP %d: %s", e.Code, e.Body)
+}
+
 // Client is the OpenAI-compatible chat-completions Responder: it turns a provider.Request
 // into the wire JSON, calls the Upstream over net/http, and assembles the reply. It adds
 // bounded retries (transient transport faults, 429, and 5xx) and an optional per-attempt
@@ -235,23 +252,23 @@ func (c *Client) backoff(ctx context.Context, attempt int) error {
 }
 
 // statusError reads a non-2xx body and classifies it: a 400 overflow → ErrContextOverflow,
-// anything else → an HTTP-status error. The body is sanitised (API key redacted, length
-// capped) before it reaches the caller.
+// anything else → a *StatusError carrying the code. The body is sanitised (API key
+// redacted, length capped) before it reaches the caller.
 func (c *Client) statusError(resp *http.Response) error {
 	raw, _ := io.ReadAll(resp.Body)
 	text := c.sanitize(string(raw))
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
 	}
-	return fmt.Errorf("apogee: upstream HTTP %d: %s", resp.StatusCode, text)
+	return &StatusError{Code: resp.StatusCode, Body: text}
 }
 
 // buildBody projects a Request onto the OpenAI chat-completions JSON body, faithfully to
 // the TS oracle: the configured model wins over the request's, sampling knobs are
 // included only when set, stream_options.include_usage rides every streamed request, and
-// tools (when present) switch message formatting into native-tool mode. The logprobs pair is
-// added only when the caller asked for it (`apogee probe model`), so the loop's bytes are
-// untouched.
+// tools (when present) switch message formatting into native-tool mode. The logprobs pair and
+// the chat-template kwargs are added only when the caller asked for them (`apogee probe model`
+// and the naming call respectively), so the loop's bytes are untouched.
 func (c *Client) buildBody(req Request) chatRequest {
 	hasTools := len(req.Tools) > 0
 
@@ -284,6 +301,15 @@ func (c *Client) buildBody(req Request) chatRequest {
 		on, n := true, topLogProbsCount
 		body.LogProbs = &on
 		body.TopLogProbs = &n
+	}
+
+	if req.DisableThinking {
+		// llama.cpp forwards chat_template_kwargs into the chat template, and the Qwen-family
+		// templates read `enable_thinking` — so this is how "no chain-of-thought" reaches the
+		// server today. The kwarg is template-dependent and a strict OpenAI-compatible server
+		// may reject the unknown field, so a caller must not rely on it alone. Emitted only
+		// when asked, keeping an ordinary loop request byte-identical on the wire.
+		body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 	}
 
 	if hasTools {
