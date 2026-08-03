@@ -7,7 +7,7 @@
   to be removed from the queue even after they have been sent to the model … when cancelling the
   session (ESC), the queued message is displayed as queued again."
 - **Date:** 2026-08-03
-- **Status:** not started
+- **Status:** complete
 - **Authoritative sources:**
   - The owner's ruling of 2026-08-03 (this plan's header IS its record): on Esc, *sent is sent* —
     a delivered interjection is not the queue's to hold. This reverses the **restage half** of ADR
