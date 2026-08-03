@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -40,9 +41,10 @@ import (
 // /rename (runRename) is the human's half of the same machinery, and it inverts two rules. It is an
 // explicit request, so its answer applies even over a name the human set a moment ago, and — unlike
 // the automatic call — it SPEAKS: a verb the human typed that quietly did nothing would be a bug in
-// the interface, so every one of its outcomes lands as a transcript note. And it reads the whole
-// user side of the session rather than its opening request, because "name this" typed late means
-// the session as it now stands.
+// the interface, so every one of its outcomes lands as a transcript note, and a failure whose cause
+// the human could act on is named rather than folded into the generic refusal (foldManualTitle). And
+// it reads the whole user side of the session rather than its opening request, because "name this"
+// typed late means the session as it now stands.
 
 // autoTitleMsg carries the AUTOMATIC naming call's result back to the Update loop. title is the
 // model's raw reply (title.Sanitize turns it into a title, or reports that nothing usable came
@@ -145,7 +147,16 @@ func (m *Model) foldAutoTitle(msg autoTitleMsg) tea.Cmd {
 func (m *Model) foldManualTitle(msg manualTitleMsg) tea.Cmd {
 	name, ok := title.Sanitize(msg.title)
 	if msg.err != nil || !ok {
-		m.transcript.addNote("could not name this session — " + renameUsage)
+		note := "could not name this session"
+		if errors.Is(msg.err, title.ErrTruncated) {
+			// The one failure worth naming to the human. A thinking model can spend the naming
+			// call's whole token cap on reasoning and return no title at all (title.ErrTruncated),
+			// and "could not name this session" would send them looking for a broken server instead
+			// of the model's own verbosity — which the manual form sidesteps immediately. Every
+			// other failure stays generic: a cause the human cannot act on differently is noise.
+			note = "the model spent its whole reply thinking and never wrote the title"
+		}
+		m.transcript.addNote(note + " — " + renameUsage)
 		m.layout()
 		return nil
 	}

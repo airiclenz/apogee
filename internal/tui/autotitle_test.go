@@ -13,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/title"
 )
 
 // ----------------------------------------------------------------------------
@@ -419,6 +420,7 @@ func TestAutoTitleFailuresAreSilent(t *testing.T) {
 		msg  autoTitleMsg
 	}{
 		{"call failed", autoTitleMsg{err: errors.New("upstream refused")}},
+		{"reply truncated", autoTitleMsg{err: title.ErrTruncated}},
 		{"reply unusable", autoTitleMsg{title: "```\n```"}},
 		{"reply empty", autoTitleMsg{title: "   "}},
 	}
@@ -914,6 +916,56 @@ func TestRenameBareFailureNotesAndKeepsTheTitle(t *testing.T) {
 			}
 			if m.titleTouched {
 				t.Error("a failed /rename set titleTouched; nothing was named")
+			}
+		})
+	}
+}
+
+// A bare /rename whose reply ran out of budget says what happened. The truncation is the one
+// failure with a cause the human can do something about — the model thought instead of answering,
+// which the manual form sidesteps — so it earns its own note where every other failure keeps the
+// generic one. Both close with the form that always works.
+func TestRenameBareTruncatedReplyNamesTheCause(t *testing.T) {
+	t.Parallel()
+
+	const (
+		truncated = "spent its whole reply thinking"
+		generic   = "could not name this session"
+	)
+	cases := []struct {
+		name   string
+		err    error
+		want   string
+		absent string
+	}{
+		{"reply truncated", title.ErrTruncated, truncated, generic},
+		{"call failed", errors.New("upstream refused"), generic, truncated},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			host := &fakeSessionHost{}
+			host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
+			m := newTitlingModel(t, host, &titleSeam{err: tc.err}, false)
+			m, _ = sendPrompt(t, m, "fix the broken parser")
+			m = idle(t, m)
+
+			m, cmd := sendPrompt(t, m, "/rename")
+			if cmd == nil {
+				t.Fatal("bare /rename dispatched no naming call")
+			}
+			m, _ = stepCmd(t, m, cmdMsg(cmd))
+
+			note := lastNote(m)
+			if !strings.Contains(note, tc.want) {
+				t.Errorf("note = %q, want it to name the outcome with %q", note, tc.want)
+			}
+			if strings.Contains(note, tc.absent) {
+				t.Errorf("note = %q, want the other failure's wording (%q) absent", note, tc.absent)
+			}
+			if !strings.HasSuffix(note, renameUsage) {
+				t.Errorf("note = %q, want it to close with %q", note, renameUsage)
 			}
 		})
 	}

@@ -144,7 +144,7 @@ retry (or an overflow) escapes as the error with no third attempt.
 
 **Commit:** `fix(cmd): detect truncated naming replies and fall back when the thinking kwarg is rejected`
 
-## 4. TUI: say what actually happened on a truncated bare /rename
+## 4. TUI: say what actually happened on a truncated bare /rename — ✅ DONE (2026-08-03)
 
 **What:** in `internal/tui/autotitle.go` (depends on item 2; meaningful after item 3):
 
