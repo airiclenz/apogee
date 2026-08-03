@@ -8,7 +8,7 @@ X: Executed
 
 - [ ] Clicking on the header of a tool for collapsing/expanding is not very responsive (very often nothing happens at all) - this seems to be connected to 100% GPU usage when an agent is running. When no local session is in progress the expansion/collapse response is snappy.
 
-- [ ] pop-up lists like /sessions, /skills or @file are painted inconsistent. Some have an empty row between the bottom prompt/status section and some have not:
+- [P] pop-up lists like /sessions, /skills or @file are painted inconsistent. Some have an empty row between the bottom prompt/status section and some have not:
   - server: unwanted spacer row
   - session: unwanted spacer row
 
