@@ -63,7 +63,15 @@ the spec or the code is right is a separate owner call.
 File:line anchors below are as of the 2026-08-03 working tree (post-`b18cfa6`) and may drift a
 few lines.
 
-## 1. `ui.show-scrollbar` — from config.yaml to `tui.Options`
+## 1. `ui.show-scrollbar` — from config.yaml to `tui.Options` — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): a third field on `uiSettings` forced touches beyond the item's named files —
+every existing `uiSettings` literal that stands for a *resolved* block now carries
+`showScrollbar` (`config_test.go` `wantUIDefault` + the resolveSettings and partial-block tables,
+`wire_test.go`'s spinner fixtures), or struct equality would fail against the new default; the
+`uiSettings` doc comment's "The two are INDEPENDENT keys" now reads "The two spinner keys", since
+three keys live there. `defaults_test.go` is unmodified, and the file-only merge
+(`config.go:586-588`) needed no change as the plan predicted.
 
 **What:**
 

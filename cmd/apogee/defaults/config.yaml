@@ -355,12 +355,13 @@ system-prompt-text: |
 # and the path line in the transcript works regardless.
 
 # =============================================================================
-# How the terminal UI presents itself. Today that is the status-line spinner — the animation you
-# watch while a turn runs. Config-file only (no flag or env).
+# How the terminal UI presents itself: the status-line spinner — the animation you watch while a
+# turn runs — and whether the transcript shows a scroll bar. Config-file only (no flag or env).
 #
-# The two keys are INDEPENDENT: `spinner` picks the glyph animation, `spinner-color` says whether
-# it drifts through colour, and the colour loop applies to whichever style you name. Setting one
-# key leaves the other at its default. Defaults: snake, with the colour loop on.
+# The keys are INDEPENDENT: `spinner` picks the glyph animation, `spinner-color` says whether it
+# drifts through colour, and the colour loop applies to whichever style you name. `show-scrollbar`
+# says nothing about either. Setting one key leaves the others at their defaults. Defaults: snake,
+# with the colour loop on, and the scroll bar shown.
 #
 #   snake    — a six-dot snake runs the outer ring of a 4x4 dot grid (two braille cells side by
 #              side), one lap a second. Two columns wide.
@@ -381,9 +382,15 @@ system-prompt-text: |
 # gradient steps visibly, and on a 16-colour one it collapses to a couple of tones — that is what
 # `spinner-color: false` is for.
 #
+# `show-scrollbar` decides whether the transcript is painted with a scroll bar down its right-hand
+# edge (it appears only once there is more transcript than window). Turning it off takes the bar
+# AND the column it hangs in away together, so the transcript text takes that width instead — a
+# hidden bar does not leave an empty stripe behind. Default on.
+#
 # ui:
 #   spinner: snake         # snake | glitter | classic
 #   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
+#   show-scrollbar: true   # false = no scroll bar, and the transcript takes back its column
 
 # =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:

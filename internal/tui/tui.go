@@ -183,6 +183,15 @@ type Options struct {
 	// keeps the terminal's own text colour, which is also the pre-styles look under classic.
 	SpinnerColor bool
 
+	// HideScrollbar takes the transcript's scroll bar away — and with it the column the bar hangs
+	// in, which the body then takes, because a hidden bar that still ate a column would read as a
+	// bug. It is what the `ui.show-scrollbar` config key selected, INVERTED at the composition root
+	// (cmd/apogee's wire.go is the one place the polarity flips): the config key is positive and
+	// defaults to true, while this field must have the zero value mean today's behaviour — the bar
+	// shown — so the hand-built Options of the layout tests keep the width they pin. The value is
+	// fixed for the process lifetime, so the wrap width it decides never changes mid-run.
+	HideScrollbar bool
+
 	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config
 	// key selected. apogee draws the REAL terminal cursor (the textarea's simulated one is retired
 	// in newPromptEditor) and it never blinks, so the shape is the only axis there is: a Bubble Tea

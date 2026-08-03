@@ -373,9 +373,10 @@ func (cf contextFilesSettings) resolved() []string {
 // reason presentSettings is: the keys describe ONE subsystem and travel together, from the on-disk
 // block through resolution to the wire.
 //
-// The two are deliberately INDEPENDENT keys. The colour loop is not a property of a style and is
-// not folded into the style name: it applies to whichever style spinner names, so all three styles
-// × colour on/off are valid combinations. Nothing here or downstream may key one off the other.
+// The two spinner keys are deliberately INDEPENDENT. The colour loop is not a property of a style
+// and is not folded into the style name: it applies to whichever style spinner names, so all three
+// styles × colour on/off are valid combinations. Nothing here or downstream may key one off the
+// other.
 type uiSettings struct {
 	// spinner names the status-line animation. It is carried as read (a name this build may not
 	// know) until validate parses it, so an unknown style is a startup error naming the key rather
@@ -385,17 +386,23 @@ type uiSettings struct {
 	// false leaves the glyph in the terminal's own text colour, which is the escape hatch for a
 	// terminal whose colour depth turns the gradient into steps.
 	spinnerColor bool
+	// showScrollbar paints the transcript's scroll bar and reserves the column it hangs in. Default
+	// true; false takes both away together — a hidden bar that still ate a column would read as a
+	// bug — and the transcript body takes that width instead. It is process-constant, so the wrap
+	// width it decides never changes mid-run.
+	showScrollbar bool
 }
 
 // defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
-// style, with the colour loop on. The style is ASKED of internal/tui (ParseSpinnerStyle's documented
-// "" ⇒ the default) rather than restated here, so the vocabulary and its default stay in the one
-// package that owns them — the same reason validate does not list the valid names.
+// style, with the colour loop on and the scroll bar shown. The style is ASKED of internal/tui
+// (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here, so the vocabulary and
+// its default stay in the one package that owns them — the same reason validate does not list the
+// valid names.
 func defaultUISettings() uiSettings {
 	// ParseSpinnerStyle errors only on a style it does not know; "" is the request for the default,
 	// so this cannot fail.
 	style, _ := tui.ParseSpinnerStyle("")
-	return uiSettings{spinner: style, spinnerColor: true}
+	return uiSettings{spinner: style, spinnerColor: true, showScrollbar: true}
 }
 
 // validate rejects a ui block naming a spinner style this build has no animation for. Catching it
@@ -1001,12 +1008,17 @@ type uiConfig struct {
 	// not a property of a style. A pointer so an explicit `spinner-color: false` is distinguishable
 	// from an absent key (which keeps the default true).
 	SpinnerColor *bool `yaml:"spinner-color"`
+	// ShowScrollbar gates the transcript's scroll bar and the column it hangs in. A pointer so an
+	// explicit `show-scrollbar: false` is distinguishable from an absent key (which keeps the
+	// default true).
+	ShowScrollbar *bool `yaml:"show-scrollbar"`
 }
 
 // toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
-// the block leaves out. A block that sets one key therefore leaves the other at its default, which
-// is what keeps the two axes independent from the on-disk shape onward: naming a style does not turn
-// the colour loop off, and turning the loop off does not change the style.
+// the block leaves out. A block that sets one key therefore leaves the others at their defaults,
+// which is what keeps the axes independent from the on-disk shape onward: naming a style does not
+// turn the colour loop off, turning the loop off does not change the style, and neither says
+// anything about the scroll bar.
 func (u uiConfig) toUISettings() uiSettings {
 	s := defaultUISettings()
 	if u.Spinner != "" {
@@ -1014,6 +1026,9 @@ func (u uiConfig) toUISettings() uiSettings {
 	}
 	if u.SpinnerColor != nil {
 		s.spinnerColor = *u.SpinnerColor
+	}
+	if u.ShowScrollbar != nil {
+		s.showScrollbar = *u.ShowScrollbar
 	}
 	return s
 }

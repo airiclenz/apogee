@@ -448,11 +448,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		LoadProfile:    loadProfileSeam,
 		UnloadServer:   unloadServerSeam,
 		StopServer:     stopServerSeam,
-		// The resolved `ui:` block: which animation paints the status-line spinner and whether its
-		// colour loop runs. Two independent values, resolved and validated by applyConfig, so the
-		// renderer selects rather than parses.
-		Spinner:      opts.ui.spinner,
-		SpinnerColor: opts.ui.spinnerColor,
+		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
+		// colour loop runs, and whether the transcript's scroll bar is painted at all. Independent
+		// values, resolved and validated by applyConfig, so the renderer selects rather than parses.
+		// The scroll bar is the one key whose polarity flips here — the config says show, the
+		// renderer's option says hide, so its zero value is the shown default (see tui.Options).
+		Spinner:       opts.ui.spinner,
+		SpinnerColor:  opts.ui.spinnerColor,
+		HideScrollbar: !opts.ui.showScrollbar,
 		// The `cursor-shape:` key: the shape the REAL terminal cursor takes at the prompt caret
 		// (steady always — there is no blink key). Selected here, like the two above, so the
 		// renderer never parses a config name.
