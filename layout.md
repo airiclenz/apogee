@@ -216,6 +216,23 @@ never the number. On a pane too narrow for even a clipped name, the count is the
 
 ---
 
+## The scroll bar and the column it hangs in
+
+**`ui.show-scrollbar` decides whether either exists.** The wrap rule at the top of this document
+is stated against the default, where the session area keeps a column down its right-hand edge for
+the scroll bar and the bar is painted there once there is more transcript than window. With
+`show-scrollbar: false` in `config.yaml`'s `ui:` block the column goes away **with** the bar
+rather than staying behind as an empty stripe: the body takes that width back and the wrap rule
+measures to the window edge instead, still stopping short of it by the free column the text always
+keeps, so the text never touches the edge in either state. What the key hides is the indicator,
+never the movement — scrolling works the same with the bar gone.
+
+**It is fixed for the run.** The key is config-file only, like the rest of the `ui:` block, and it
+is read once at start-up, so the width the transcript wraps to cannot change under text that has
+already been wrapped; a changed key takes effect the next time apogee starts.
+
+---
+
 ## The rules behind the tool-call sketch
 
 **The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a

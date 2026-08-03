@@ -201,9 +201,19 @@ was — the pre-launch scrollback intact, no apogee frame left behind.
 
 **Commit:** `fix(tui): the placeholder frame stays on the alt screen`
 
-## 4. The docs say what the switch does
+## 4. The docs say what the switch does — ✅ DONE (2026-08-03)
 
 Depends on items 1-3.
+
+NOTES (2026-08-03): the README bullet is skipped under the item's own escape clause — `README.md`
+documents no `ui:` block anywhere (no `spinner`, no `spinner-color`, no `ui:` example; its
+Configuration section names only mechanisms, compaction, the context window and `cursor-shape`), so
+there was nothing to add `show-scrollbar` beside and no new section was invented. In `layout.md` the
+switch is stated once, but as a new H2 section ("The scroll bar and the column it hangs in") rather
+than inside the wrap rule's own sentence: that sentence lives in the opening sketch (lines 2-4),
+which is the owner's verbatim prose and the home of the flagged free-column discrepancy. The new
+section cites the wrap rule and states **no** column counts of its own, so the two/three counts stay
+exactly as they were.
 
 **What:**
 

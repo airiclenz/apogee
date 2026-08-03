@@ -3,14 +3,11 @@ P: Planned
 X: Executed
 
 
-- [ ] The scrollbar should be visibile based on a setting in apogee's config.yaml: show-scrollbar
-Also, the terminal scrollbar should not be visible at all when apogee is running. llama-launcher does that already properly today.
+- [P] When sending a new prompt, I do not want the session chat to jump so that the new prompt ends up at the very top of an empty chat (scrolled down) and the rest of the chat history becomes invisible. I just want the new chat naturally be added to the chat and automatic scrolling taking care of it. When the last prompt later reaches the top of the session chat, it should still stick there - as it already does now.
 
-- [ ] When sending a new prompt, I do not want the session chat to jump so that the new prompt ends up at the very top of an empty chat (scrolled down) and the rest of the chat history becomes invisible. I just want the new chat naturally be added to the chat and automatic scrolling taking care of it. When the last prompt later reaches the top of the session chat, it should still stick there - as it already does now.
+- [P] huge prompts should be collaped to 3 rows (expandable) when displyed in the session chat. Can the module that is used to display tool in the chat be used? That module already supports collapsing and expanding content. Maybe we should implement a sub-class for this kind of issue from which the prompt-collapser and the tool-collapser module are derived?
 
-- [ ] huge prompts should be collaped to 3 rows (expandable) when displyed in the session chat. Can the module that is used to display tool in the chat be used? That module already supports collapsing and expanding content. Maybe we should implement a sub-class for this kind of issue from which the prompt-collapser and the tool-collapser module are derived?
-
-- [ ] Currently I cannot see how much ot it's context a sub agent has used.
+- [ ] Currently I cannot see how much of it's context a sub agent has used.
 
 - [ ] Clicking on the header of a tool for collapsing/expanding is not very responsive (very often nothing happens at all) - this seems to be connected to 100% GPU usage when an agent is running. When no local session is in progress the expansion/collapse response is snappy.
 

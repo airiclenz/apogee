@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The transcript's scroll bar has a switch — `ui.show-scrollbar` in `config.yaml`'s `ui:` block.**
+  It ships on, which is the look apogee has always had: a column down the session area's right-hand
+  edge, and a bar painted in it once there is more transcript than window. Set it to `false` and the
+  column goes away **with** the bar rather than staying behind as an empty stripe — the transcript
+  text takes that width back and wraps to the window edge instead, still short of it by the free
+  column it always keeps. Scrolling itself is untouched: what the key hides is the indicator, never
+  the movement. Config-file only, like the rest of the `ui:` block, and read once at start-up, so
+  the width the transcript wraps to is exactly as fixed for the run as it was before.
+
+  Specced in `layout.md` ("The scroll bar and the column it hangs in").
+
 - **The top rule wears the session's name — `▔▔▔▔ the name ▔▔▔▔`, centered on the hairline above the
   status line.** A screen full of panes said nothing about which conversation each one held; now the
   frame itself does, on a row it paints. The name follows every route that can set one — the automatic
@@ -779,6 +790,14 @@ point is a **minor** bump, not a breaking change.
   lines)` marker, so the input box the answer is typed into is never pushed off-screen.
 
 ### Fixed
+
+- **The terminal's own scroll bar no longer sits beside apogee for the whole run.** apogee draws on
+  the alternate screen, which is what keeps a terminal from showing its own bar and its own
+  scrollback — but that is named per frame, and the very first frame, the placeholder shown before
+  the window's size is known, did not name it. So apogee opened on the **primary** screen, pushed a
+  line or two into the scrollback, and the terminal kept a scroll bar alive from there on. Every
+  frame apogee emits now names the alternate screen, so nothing it paints ever reaches the
+  scrollback and quitting hands the shell back exactly as it was found.
 
 - **Reading a file that talks about errors is no longer mistaken for a file that is missing.** The
   optional `read_loop` Mechanism watches for the model hunting for a file that does not exist, and
