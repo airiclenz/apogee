@@ -299,10 +299,12 @@ func TestTranscriptRendersMarkdownTable(t *testing.T) {
 }
 
 // A table wide enough to be fitted to the body column reaches that column's last cell on EVERY
-// line — marker gutter included. This is the property the transcript's right-hand chrome is laid
-// out against: the block is rendered to the same width the rest of the body wraps to, so the free
-// column beside the scroll-bar gutter is the same beside a table row as beside the rule above it
-// (model.go's transcriptWidth / bodyRightGutter, layout.md).
+// line — marker gutter included, and the continuation lines a wrapped cell adds along with it. This
+// is the property the transcript's right-hand chrome is laid out against: the block is rendered to
+// the same width the rest of the body wraps to, so the free column beside the scroll-bar gutter is
+// the same beside a table row as beside the rule above it (model.go's transcriptWidth /
+// bodyRightGutter, layout.md). At this width both the header's and one body row's middle cell wrap,
+// which is exactly the case a filler line could break.
 func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
 	const width = 60
 	tr := feed(domain.MessageEvent{Text: strings.Join([]string{
@@ -314,8 +316,9 @@ func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
 
 	lines := tr.renderLines(newTheme(), width)
 
-	if len(lines) != 4 {
-		t.Fatalf("got %d lines, want 4 (header, rule, two rows): %#v", len(lines), visible(lines))
+	if len(lines) != 6 {
+		t.Fatalf("got %d lines, want 6 (a two-line header, the rule, a two-line row and a one-line row): %#v",
+			len(lines), visible(lines))
 	}
 	for i, ln := range lines {
 		if w := lipgloss.Width(ln); w != width {

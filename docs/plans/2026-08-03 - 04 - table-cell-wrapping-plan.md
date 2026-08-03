@@ -158,9 +158,19 @@ wrapping on top of it.
 
 ---
 
-## 2. Cells wrap instead of truncating
+## 2. Cells wrap instead of truncating — ✅ DONE (2026-08-03)
 
 Depends on item 1.
+
+NOTES (2026-08-03): deviation — three existing tests are baselined on "a row is one physical line"
+and had to be re-baselined for the wrap; the item's test list names none of them.
+`TestTableRowsShareOneWidth` and `TestTableShrinksToTheWidthItIsGiven` (`mdtable_test.go`) and
+`TestTranscriptTableFillsTheBodyColumn` (`internal/tui/transcript_test.go`) asserted an exact line
+count that a wrapped row now exceeds; each keeps the contract it was written for (one straight right
+edge, the width cap, the full body column) and only its line count moved.
+NOTES (2026-08-03): per the run's DECISION, this item also fixed the stale "plus their gutters"
+clause item 1 left in `layout.md`'s "The width cap is absolute." paragraph — it now reads "plus the
+dividers between them".
 
 **What.** A row becomes as many physical lines as its tallest cell needs.
 

@@ -203,9 +203,12 @@ func hasUnescapedPipe(s string) bool {
 // stays readable (layout.md). Every width is a display width (th.measure over the rendered,
 // ANSI-carrying cell — width.go), never a byte count: the cells are styled before they are
 // measured, so markup characters and escape bytes can never push a column open. The divider is
-// drawn in the rule's own faint style, because the frame is not content. One row is one physical
-// line, which is what the line-oriented renderer above this file requires (render.go), so an
-// over-wide cell is cut with a … rather than wrapped.
+// drawn in the rule's own faint style, because the frame is not content. Nothing is ever cut: a
+// cell too wide for its column wraps inside it, so one row is as many physical lines as its tallest
+// cell needs, cells top-aligned and a short one blank-filled below its content. The line-oriented
+// renderer above this file (render.go) is untroubled by that — a row simply contributes more lines
+// to the block than one — and every one of those lines, continuation and filler included, is padded
+// to the table's full width, so the block still shows one straight right edge.
 
 // tableDivider separates two adjacent columns: the vertical rule with one space either side, so
 // the columns are told apart without their text touching the stroke (layout.md).
@@ -219,8 +222,10 @@ const (
 
 // renderTable lays a parsed table out as styled physical lines at the given width: bold header,
 // one ─ rule the full width of the table crossing every divider at a ┼, then the body rows, each
-// cell inline-rendered, padded on the side its column's alignment names and separated from its
-// neighbour by the vertical divider. It reports false when the table cannot be made to fit — the
+// cell inline-rendered, wrapped to its column, padded on the side its column's alignment names and
+// separated from its neighbour by the vertical divider. A row contributes as many lines as its
+// tallest cell needs, so the block is taller than its row count whenever a cell wraps — which is
+// why the rows are appended rather than assigned. It reports false when the table cannot fit — the
 // width is too narrow even with every column down to a single cell — and the caller then leaves
 // the block to the paragraph path it would have taken before tables were rendered at all, which
 // is always readable and never overflows.
@@ -248,10 +253,10 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 	}
 
 	out := make([]string, 0, len(rows)+2)
-	out = append(out, layoutTableRow(th, header, widths, tbl.align))
+	out = append(out, layoutTableRows(th, header, widths, tbl.align)...)
 	out = append(out, tableRuleRow(th, widths))
 	for _, row := range rows {
-		out = append(out, layoutTableRow(th, row, widths, tbl.align))
+		out = append(out, layoutTableRows(th, row, widths, tbl.align)...)
 	}
 	return out, true
 }
@@ -324,44 +329,78 @@ func fitColumns(widths []int, budget int) bool {
 	return true
 }
 
-// layoutTableRow lays one row's rendered cells into the fitted column widths: a cell wider than
-// its column is cut ANSI-aware with a … tail, the rest are padded on the side their column names,
-// and the columns are joined by the divider — drawn in the rule's faint style, the same reasoning
-// theme.go's mdRule comment gives for the rule itself: the frame is not content, so it must not
-// read as loudly as the cells it separates. The last column is padded like every other one, so
-// EVERY line of a table — header, rule and body rows alike — is exactly the table's width. That
-// straight right edge is load-bearing, not cosmetic: a short line leaves the transcript's right
-// gutter wider beside that row than beside the rule above it, which reads as the scroll bar
-// stepping inward beside the body, and it ends the row's selectable cells early where the mouse
-// still addresses the full width (mouse.go). The trailing blanks cost the copied text nothing —
+// wrapTableCell breaks one rendered cell into the lines its column holds. The fast path is the one
+// that matters: almost every cell already fits, and the markdown walk re-runs over the whole
+// transcript on every streamed token (model.go), so a cell inside its column is handed back as the
+// single line it already is without being wrapped at all. Anything wider goes through wrapText
+// rather than ansi.Wrap or th.measure.Wrap directly — wrapText is what carries an SGR run across a
+// break, so a **bold** span survives being divided, and what enforces the painted cap on whatever
+// the upstream wrapper hands back (render.go, ADR 0030 §7). The cap is enforced here, never assumed.
+func wrapTableCell(th theme, cell string, width int) []string {
+	if th.measure.Width(cell) <= width {
+		return []string{cell}
+	}
+	return wrapText(th, cell, width)
+}
+
+// layoutTableRows lays one row's rendered cells into the fitted column widths and returns the
+// physical lines it occupies: every cell is wrapped to its own column, the row is as tall as the
+// tallest of them, and each line takes one line from every column — a run of spaces where a shorter
+// cell has already run out, so cells are top-aligned and a short cell's blanks fall below its
+// content rather than above it. Nothing is dropped and no height is capped: a cap would only put
+// the truncation back at a different threshold. The columns are joined by the divider — drawn in
+// the rule's faint style, the same reasoning theme.go's mdRule comment gives for the rule itself:
+// the frame is not content, so it must not read as loudly as the cells it separates. The last
+// column is padded like every other one, so EVERY line of a table — header, rule, body rows and the
+// continuation and filler lines a wrapped row adds — is exactly the table's width. That straight
+// right edge is load-bearing, not cosmetic: a short line leaves the transcript's right gutter wider
+// beside that line than beside the rule above it, which reads as the scroll bar stepping inward
+// beside the body, and it ends the line's selectable cells early where the mouse still addresses
+// the full width (mouse.go). The trailing blanks cost the copied text nothing —
 // transcriptSelectionText trims each line it cuts.
-func layoutTableRow(th theme, cells []string, widths []int, align []mdAlign) string {
-	var b strings.Builder
+func layoutTableRows(th theme, cells []string, widths []int, align []mdAlign) []string {
+	wrapped := make([][]string, len(widths))
+	height := 1
 	for i, w := range widths {
-		if i > 0 {
-			b.WriteString(th.mdRule.Render(tableDivider))
-		}
 		cell := ""
 		if i < len(cells) {
 			cell = cells[i]
 		}
-		a := mdAlignLeft
-		if i < len(align) {
-			a = align[i]
-		}
-		b.WriteString(padTableCell(th, cell, w, a))
+		wrapped[i] = wrapTableCell(th, cell, w)
+		height = max(height, len(wrapped[i]))
 	}
-	return b.String()
+
+	divider := th.mdRule.Render(tableDivider)
+	out := make([]string, height)
+	for line := range height {
+		var b strings.Builder
+		for i, w := range widths {
+			if i > 0 {
+				b.WriteString(divider)
+			}
+			if line >= len(wrapped[i]) {
+				b.WriteString(strings.Repeat(" ", w))
+				continue
+			}
+			a := mdAlignLeft
+			if i < len(align) {
+				a = align[i]
+			}
+			b.WriteString(padTableCell(th, wrapped[i][line], w, a))
+		}
+		out[line] = b.String()
+	}
+	return out
 }
 
-// padTableCell fits one rendered cell to its column: truncated with a … when it is too wide, then
-// padded to the column with the spaces its alignment asks for — on the right for a left-aligned
-// cell, on the left for a right-aligned one, split for a centred one with the odd cell going to
-// its right (layout.md).
+// padTableCell pads one wrapped line of a cell out to its column with the spaces its alignment asks
+// for — on the right for a left-aligned cell, on the left for a right-aligned one, split for a
+// centred one with the odd cell going to its right (layout.md). Every wrapped line of a cell is
+// padded, not just its first, so a right- or centre-aligned column stays aligned all the way down.
+// It never cuts: the line arrives already wrapped to the column, and the only thing that can still
+// exceed it is a single grapheme wider than the whole column, which no break can divide and which
+// layout.md's width cap exempts — wrapText gives it a line to itself and it keeps it.
 func padTableCell(th theme, cell string, width int, align mdAlign) string {
-	if th.measure.Width(cell) > width {
-		cell = th.measure.Truncate(cell, width, "…")
-	}
 	pad := width - th.measure.Width(cell)
 	if pad <= 0 {
 		return cell
@@ -382,7 +421,7 @@ func padTableCell(th theme, cell string, width int, align mdAlign) string {
 // dash per column broken at every column division, and each crossing sits in exactly the cell the
 // divider occupies on the rows above and below it. The joint is tableDividerWidth cells like the
 // divider itself, so the rule comes out exactly as wide as every other line of the block — the
-// same arithmetic layoutTableRow walks.
+// same arithmetic layoutTableRows walks.
 func tableRuleRow(th theme, widths []int) string {
 	columns := make([]string, len(widths))
 	for i, w := range widths {

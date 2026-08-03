@@ -482,15 +482,22 @@ to set.
 no more than anything else — and it is the **painted** width that is capped, so the cap holds on a
 line carrying emoji or CJK on any terminal, not merely in the measure the layout computed with. The
 only thing that may cross it is a single grapheme wider than the whole limit, which no break can
-divide; it takes a line to itself. Where the natural column widths plus their gutters do not fit,
-the widest column is shrunk one cell at a time — the leftmost of them where two are equally wide,
-so the outcome is the same every repaint — until the table fits, and a cell too wide for the column
-it lands in is cut with a `…` tail. If the table cannot fit even with every column down to a single
-cell, it is not drawn as a table at all: the block falls back to the plain paragraphs it would have
-been before, which is always readable and never overflows.
+divide; it takes a line to itself. Where the natural column widths plus the dividers between them do
+not fit, the widest column is shrunk one cell at a time — the leftmost of them where two are equally
+wide, so the outcome is the same every repaint — until the table fits, and a cell too wide for the
+column it lands in **wraps** inside that column. Nothing is cut: there is no `…` anywhere in the
+table contract, and the single indivisible grapheme above is its one exemption. If the table cannot
+fit even with every column down to a single cell, it is not drawn as a table at all: the block falls
+back to the plain paragraphs it would have been before, which is always readable and never
+overflows.
 
-**One row is one line.** No cell wraps; a row is exactly one physical line however much it carries.
-Overflow is the `…` above, never a second row.
+**One row is as many lines as its tallest cell.** A cell too wide for its column wraps inside it,
+and the row becomes as many physical lines as the tallest of its cells needs. Cells are
+**top-aligned**: a shorter cell's content sits on the row's first lines and its blank lines fall
+below it, never above. The height is **unbounded** and nothing is ever dropped — a cap would only
+put the cut back at a different threshold. Every line of the block is still exactly the table's
+width, the continuation lines of a wrapped cell and the blank filler beside it included, so the
+straight right edge above holds through a wrapped row as it does through the rule.
 
 **A partial table is plain text.** While a table streams in, everything before the delimiter row is
 ordinary paragraphs — the contract every other half-typed construct keeps — and the block snaps

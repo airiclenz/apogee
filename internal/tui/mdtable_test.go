@@ -276,7 +276,9 @@ func TestTableRendersLayoutExample(t *testing.T) {
 // would read as the bar stepping inward, and the mouse addresses columns the row no longer holds
 // (mouse.go). The regression it guards is a body row whose last cell is narrower than its column —
 // here the "Status" header is two cells wider than every value under it, which is exactly the
-// two-column step the shape reported against the first table release.
+// two-column step the shape reported against the first table release. At this width the middle
+// column is shrunk by two cells and the second body row wraps, so the block is one line taller than
+// its row count — the filler line under the shorter cells beside it is held to the width too.
 func TestTableRowsShareOneWidth(t *testing.T) {
 	th := newTheme()
 	source := strings.Join([]string{
@@ -290,8 +292,9 @@ func TestTableRowsShareOneWidth(t *testing.T) {
 
 	got := renderMarkdownBody(th, source, width)
 
-	if len(got) != 5 {
-		t.Fatalf("got %d lines, want 5 (header, rule, three rows): %#v", len(got), visible(got))
+	if len(got) != 6 {
+		t.Fatalf("got %d lines, want 6 (header, rule, three rows, one of them wrapped to two): %#v",
+			len(got), visible(got))
 	}
 	for i, ln := range got {
 		if w := lipgloss.Width(ln); w != width {
@@ -467,48 +470,275 @@ func TestTableInlineMarkupInCells(t *testing.T) {
 	}
 }
 
-// The width cap is absolute: an over-wide table shrinks its widest column and cuts the cells that
-// no longer fit with a … tail, and no rendered line exceeds the width.
-func TestTableTruncatesToWidth(t *testing.T) {
+// The width cap is absolute and its endpoint is a wrap: an over-wide table still shrinks its widest
+// column — the whole overflow coming off that one, the narrow column keeping its natural width — but
+// the cell that no longer fits now wraps onto further lines inside its column instead of being cut
+// with a … tail, and every word of it survives in order.
+func TestTableWrapsToWidth(t *testing.T) {
 	th := newTheme()
+	const cell = "very long very long very long very long very long very long"
 	source := strings.Join([]string{
 		"| id | description |",
 		"| --- | --- |",
-		"| 1 | " + strings.Repeat("very long ", 6) + "|",
+		"| 1 | " + cell + " |",
 	}, "\n")
 	const width = 24
 
 	got := renderMarkdownBody(th, source, width)
+	text := visible(got)
 
 	for _, ln := range got {
 		if w := lipgloss.Width(ln); w > width {
 			t.Errorf("line %q has visible width %d > %d", strip(ln), w, width)
 		}
 	}
-	if v := strip(got[2]); !strings.HasSuffix(v, "…") {
-		t.Errorf("over-wide cell = %q; want it cut with a … tail", v)
+	if len(got) <= 3 {
+		t.Fatalf("got %d lines, want the over-wide cell wrapped onto further lines: %#v", len(got), text)
 	}
-	if len(got) != 3 {
-		t.Errorf("got %d lines, want 3 — a row is one physical line however wide its cells", len(got))
+	// The "id" column is two cells wide naturally and keeps both: the shrink comes off the widest
+	// column only, so the divider sits in the same display column on every line of the block.
+	for i, v := range text {
+		if strings.Contains(v, "…") {
+			t.Errorf("line %d = %q; want a wrap — no cell is cut any more", i, v)
+		}
+		if i == 1 {
+			continue // the rule row crosses the divider rather than drawing it
+		}
+		if !strings.HasPrefix(v[2:], tableDivider) {
+			t.Errorf("line %d = %q; want the divider straight after the two-cell id column", i, v)
+		}
+	}
+	var wrapped []string
+	for _, v := range text[2:] {
+		wrapped = append(wrapped, strings.TrimSpace(strings.SplitN(v, glyphTableColumn, 2)[1]))
+	}
+	if got, want := strings.Join(wrapped, " "), cell; got != want {
+		t.Errorf("wrapped cell reads %q across its lines; want the whole of %q", got, want)
 	}
 }
 
 // A table shrinks as far as one cell per column before it gives up, and every line it draws stays
 // inside the width all the way down. Nine cells is the narrowest these three columns can be drawn
-// in: one cell each, plus the three the divider between them costs.
+// in: one cell each, plus the three the divider between them costs. Below its natural width the
+// block is still a table — the squeezed columns wrap rather than fall back — so its height grows
+// with the wrapping instead of holding at one line per row.
 func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
 	th := newTheme()
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
 	for _, width := range []int{9, 12, 20} {
 		got := renderMarkdownBody(th, source, width)
-		if len(got) != 3 {
-			t.Errorf("width %d: got %d lines, want 3: %#v", width, len(got), visible(got))
+		lines := visible(got)
+		if len(got) < 3 {
+			t.Errorf("width %d: got %d lines, want at least 3: %#v", width, len(got), lines)
+		}
+		if !strings.Contains(strings.Join(lines, "\n"), glyphTableRule) {
+			t.Errorf("width %d: block drew no rule; want it still rendered as a table: %#v", width, lines)
 		}
 		for _, ln := range got {
 			if w := lipgloss.Width(ln); w > width {
 				t.Errorf("width %d: line %q has visible width %d", width, strip(ln), w)
 			}
+		}
+	}
+}
+
+// The endpoint of an over-wide cell is a wrap, not a cut: it spills onto further lines inside its
+// own column and every word of it is still on screen. This is the issue the wave closes — a cell
+// cut with a … lost information the model had put in the table.
+func TestTableWrapsInsteadOfTruncating(t *testing.T) {
+	th := newTheme()
+	const note = "the quick brown fox jumps over the lazy dog"
+	source := strings.Join([]string{
+		"| id | note |",
+		"| --- | --- |",
+		"| 1 | " + note + " |",
+	}, "\n")
+
+	got := visible(renderMarkdownBody(th, source, 30))
+
+	if len(got) < 4 {
+		t.Fatalf("got %d lines, want the over-wide cell wrapped onto further lines: %#v", len(got), got)
+	}
+	block := strings.Join(got, "\n")
+	if strings.Contains(block, "…") {
+		t.Errorf("a cell was cut with a … tail; want it wrapped:\n%s", block)
+	}
+	for _, word := range strings.Fields(note) {
+		if !strings.Contains(block, word) {
+			t.Errorf("the wrap dropped %q:\n%s", word, block)
+		}
+	}
+}
+
+// A row is as many physical lines as its TALLEST cell needs, and the shorter cells beside it are
+// blank-filled BELOW their content — cells are top-aligned, so a one-line cell reads on the row's
+// first line rather than floating in its middle. The filler line is padded out like any other, so
+// the block's right edge stays straight through it.
+func TestTableRowHeightIsItsTallestCell(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| short | long |",
+		"| --- | --- |",
+		"| ab | one two three four |",
+	}, "\n")
+	const width = 20
+
+	got := renderMarkdownBody(th, source, width)
+	want := []string{
+		"short │ long        ",
+		"──────┼─────────────",
+		"ab    │ one two     ",
+		"      │ three four  ",
+	}
+
+	if v := visible(got); !reflect.DeepEqual(v, want) {
+		t.Errorf("ragged row:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(v, "\n"), strings.Join(want, "\n"))
+	}
+	for i, ln := range got {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("line %d is %d cells wide, want %d — filler lines are padded too: %q",
+				i, w, width, strip(ln))
+		}
+	}
+}
+
+// A right- or centre-aligned column aligns EVERY one of its wrapped lines, not merely the first:
+// the padding is applied per line, so a continuation line that fell back to the left would show as
+// a step in an otherwise straight column.
+func TestTableWrappedLinesKeepAlignment(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| right | mid |",
+		"| ----: | :-: |",
+		"| alpha beta gamma | one two three |",
+	}, "\n")
+
+	got := visibleTrimmed(renderMarkdownBody(th, source, 23))
+	want := []string{
+		"     right │    mid",
+		"───────────┼───────────",
+		"alpha beta │  one two",
+		"     gamma │   three",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("wrapped alignment:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// Every line of the block is exactly the table's width in the width authority's measure — the
+// header (which wraps here too), the rule, the body rows, and the continuation and filler lines a
+// wrapped row adds. That straight right edge is what the transcript's right-hand chrome is laid
+// out against (mouse.go, model.go).
+func TestTableEveryLineIsTheTableWidth(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| a header that is much too long for its column | b |",
+		"| --- | ---: |",
+		"| one two three four five six seven | 42 |",
+		"| x | a value that does not fit either |",
+	}, "\n")
+	const width = 32
+
+	got := renderMarkdownBody(th, source, width)
+
+	if len(got) <= 5 {
+		t.Fatalf("got %d lines, want a block taller than its four source rows: %#v", len(got), visible(got))
+	}
+	for i, ln := range got {
+		if w := th.measure.Width(ln); w != width {
+			t.Errorf("line %d is %d cells wide, want %d: %q", i, w, width, strip(ln))
+		}
+	}
+}
+
+// Inline style survives a wrap: a bold or code span broken across a column's line boundary re-emits
+// its SGR run on the continuation line and resets at its end, so the second half of a **bold** cell
+// is bold too rather than the style bleeding out of the table (wrapText, render.go).
+func TestTableWrapKeepsInlineStyle(t *testing.T) {
+	th := newTheme()
+	if !colorActive(th) {
+		t.Skip("profile emits no colour, so there is no SGR run to carry across the break")
+	}
+	source := strings.Join([]string{
+		"| id | note |",
+		"| --- | --- |",
+		"| 1 | **bold across the wrap boundary** |",
+	}, "\n")
+
+	got := renderMarkdownBody(th, source, 20)
+
+	if len(got) < 4 {
+		t.Fatalf("got %d lines, want the bold cell wrapped: %#v", len(got), visible(got))
+	}
+	for i, ln := range got[3:] {
+		if !strings.Contains(ln, "\x1b") {
+			t.Errorf("continuation line %d carries no SGR; the bold run was dropped at the break: %q",
+				i+3, strip(ln))
+		}
+	}
+	last := got[len(got)-1]
+	if !strings.Contains(last, "\x1b[m") && !strings.Contains(last, "\x1b[0m") {
+		t.Errorf("the last wrapped line never resets its style, so bold would bleed past it: %q", last)
+	}
+}
+
+// Row height is unbounded: a cell of several hundred characters in a narrow column gets every line
+// its content needs and nothing is dropped. A cap would only put the truncation back at a different
+// threshold, which is the thing this wave removes.
+func TestTableWrapIsUnbounded(t *testing.T) {
+	th := newTheme()
+	const words = 120
+	cell := strings.TrimSpace(strings.Repeat("word ", words))
+	source := strings.Join([]string{
+		"| id | text |",
+		"| --- | --- |",
+		"| 1 | " + cell + " |",
+	}, "\n")
+	const width = 14 // id keeps two cells, the divider three, the text column the other nine
+
+	got := visible(renderMarkdownBody(th, source, width))
+
+	var rebuilt []string
+	for _, v := range got[2:] {
+		rebuilt = append(rebuilt, strings.TrimSpace(strings.SplitN(v, glyphTableColumn, 2)[1]))
+	}
+	// Nine cells hold exactly "word word", so the row is half as tall as the cell has words — and
+	// it is that many lines tall however far past a screenful that runs.
+	if want := words / 2; len(rebuilt) != want {
+		t.Errorf("got %d body lines for a %d-word cell; want %d, with nothing dropped",
+			len(rebuilt), words, want)
+	}
+	if joined := strings.Join(rebuilt, " "); joined != cell {
+		t.Errorf("wrapped cell reads %q; want the whole of the original", joined)
+	}
+}
+
+// BenchmarkRenderTable pins the cost of the path a streamed token actually pays: a table whose
+// cells all fit at a width that needs no shrinking, so every cell takes wrapTableCell's fast path.
+// The markdown walk re-runs over the whole transcript on every token (model.go), so this render is
+// on the per-keystroke path and its allocation count is the number that matters.
+func BenchmarkRenderTable(b *testing.B) {
+	th := newTheme()
+	tbl, _, ok := matchTableBlock([]string{
+		"| Tool | Calls | Notes |",
+		"|:--|--:|:-:|",
+		"| Read File | 12 | fast |",
+		"| Run | 3 | go test ./... |",
+		"| Write File | 7 | ok |",
+	}, 0)
+	if !ok {
+		b.Fatal("benchmark source is not a table")
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, fits := renderTable(th, tbl, 60); !fits {
+			b.Fatal("table did not fit at 60 columns")
 		}
 	}
 }
