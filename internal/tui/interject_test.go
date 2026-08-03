@@ -1232,12 +1232,12 @@ func TestCancelHoldsWithSingleNote(t *testing.T) {
 	}
 }
 
-// TestCancelRestagesADeliveredRow is the second half of "Esc discards nothing": the cancel lands
-// AFTER the worker committed a row. The fold's AbortExchange drops that row from the conversation
-// with the rest of the scrapped Exchange, so it goes back onto the queue — ahead of what is still
-// staged, because it was typed first — where the hold note counts it and the next ⏎ sends it. The
-// transcript's ⧖ record stays put: the model did read the remark before the Exchange was thrown away.
-func TestCancelRestagesADeliveredRow(t *testing.T) {
+// TestCancelDropsADeliveredRow: the cancel lands AFTER the worker committed a row. Sent is sent
+// (owner ruling 2026-08-03) — the fold's AbortExchange drops that row from the conversation with the
+// rest of the scrapped Exchange and it stays dropped: the queue holds only the row the worker never
+// delivered, the hold note counts only that one, and the next ⏎ does not re-send what the model
+// already read. The transcript's ⧖ record stays put as the surviving evidence of that delivery.
+func TestCancelDropsADeliveredRow(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1251,15 +1251,14 @@ func TestCancelRestagesADeliveredRow(t *testing.T) {
 
 	next, _ := stepCmd(t, m, cancelledMsg{})
 
-	if n := len(next.pendingInterjections); n != 2 {
-		t.Fatalf("staged rows = %d; want the delivered row back beside the one still queued", n)
+	if n := len(next.pendingInterjections); n != 1 {
+		t.Fatalf("staged rows = %d; want only the undelivered row — a delivered one is not re-queued", n)
 	}
-	got := []string{next.pendingInterjections[0].raw, next.pendingInterjections[1].raw}
-	if want := []string{"also check the tests", "and the docs"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("queue = %q; want the re-staged row first — it was typed first", got)
+	if got := next.pendingInterjections[0].raw; got != "and the docs" {
+		t.Errorf("queue = %q; want the undelivered row alone", got)
 	}
-	if note := heldNote(2); countNotes(next, note) != 1 {
-		t.Errorf("hold note %q not written exactly once; the re-staged row must be counted by it", note)
+	if note := heldNote(1); countNotes(next, note) != 1 {
+		t.Errorf("hold note %q not written exactly once; it counts the undelivered row only", note)
 	}
 	var interjected int
 	for _, e := range next.transcript.entries {
@@ -1276,16 +1275,16 @@ func TestCancelRestagesADeliveredRow(t *testing.T) {
 		t.Fatalf("state = %v; want running — the held queue sends on ⏎", sent.state)
 	}
 	drainCmd(t, sent, cmd)
-	const want = "also check the tests\n\nand the docs"
+	const want = "and the docs"
 	if n := len(eng.submitted); n != 1 || eng.submitted[0].Text != want {
-		t.Errorf("submitted = %+v; want both rows re-sent, oldest first (%q)", eng.submitted, want)
+		t.Errorf("submitted = %+v; want only the undelivered row (%q) — the delivered one is not re-sent",
+			eng.submitted, want)
 	}
 }
 
-// TestNaturalCompletionKeepsDeliveredRowsDelivered is the boundary on that undo: a row committed
-// into an Exchange that ended under its own power is history. It is not re-staged, not re-sent, and
-// a LATER Exchange's stop cannot resurrect it — delivered rows are undoable only while the Exchange
-// holding them can still be scrapped.
+// TestNaturalCompletionKeepsDeliveredRowsDelivered pins the same rule at the other terminal fold: a
+// row committed into an Exchange that ended under its own power is history. It is not re-staged, not
+// re-sent, and a later Exchange's stop cannot resurrect it either.
 func TestNaturalCompletionKeepsDeliveredRowsDelivered(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)

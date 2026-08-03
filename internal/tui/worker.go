@@ -169,7 +169,7 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 // landed go out as ONE interjectedMsg before the Step, so the Update loop moves exactly them into
 // the transcript; an empty mailbox sends nothing at all.
 //
-// A CANCELLED ctx skips the drain outright, and that is the first half of "Esc discards nothing"
+// A CANCELLED ctx skips the drain outright, keeping rows out of an Exchange that is already doomed
 // (ADR 0025 decision 7). The Exchange this boundary would deliver into is about to be scrapped —
 // the model's cancelledMsg fold calls AbortExchange, which drops everything committed since the
 // Exchange opened, the interjections included — so committing rows here would take them out of the
@@ -177,9 +177,12 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 // still see them: they never appear in a report, so the Model keeps them staged and the terminal
 // fold holds them for the next ⏎.
 //
-// The check narrows the window rather than closing it: a cancel landing after it still commits into
-// a doomed Exchange, and the rows it committed are re-staged by the cancelledMsg fold
-// (Model.restageDelivered) — the two halves together are what make the guarantee total.
+// The check narrows the window rather than closing it, and it stands alone: a cancel landing after
+// it still commits into a doomed Exchange, and those rows die with the Exchange when the fold
+// scraps it. That is the accepted fate, not a defect to compensate for — sent is sent (owner ruling
+// 2026-08-03), and the ⧖ transcript block is what survives of a delivery the human watched happen.
+// What this check buys is a smaller window in which any row can meet it: wherever the cancel is
+// already visible here, the row stays on the queue of record instead.
 //
 // The first refusal STOPS the drain rather than skipping past it. An Interject error is a statement
 // about the Exchange (no open Exchange, or an input carrying nothing), not about that one row, so
