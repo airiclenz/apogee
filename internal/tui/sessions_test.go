@@ -790,7 +790,7 @@ func TestSessionRowCellsStripEscapes(t *testing.T) {
 	}
 	// The laid-out line is what the pane paints, before any styling of its own: no ESC survives into
 	// it from any cell.
-	for i, ln := range layoutPopupRows(rows) {
+	for i, ln := range layoutPopupRows(newTheme(), rows) {
 		if strings.ContainsRune(ln, 0x1b) {
 			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
 		}
@@ -810,7 +810,7 @@ func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
 	if got, want := m.sessionBrowser.renameBuf, "reset c me"; got != want {
 		t.Errorf("rename buffer = %q, want the seed escape-stripped (%q)", got, want)
 	}
-	for i, ln := range layoutPopupRows(sessionRows(m.sessionBrowser, m.opts.Workspace, time.Now())) {
+	for i, ln := range layoutPopupRows(m.th, sessionRows(m.sessionBrowser, m.opts.Workspace, time.Now())) {
 		if strings.ContainsRune(ln, 0x1b) {
 			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
 		}
@@ -830,7 +830,7 @@ func TestSessionRowsAlignTheColumns(t *testing.T) {
 		},
 	}
 
-	lines := layoutPopupRows(sessionRows(b, "/ws/a", now))
+	lines := layoutPopupRows(newTheme(), sessionRows(b, "/ws/a", now))
 	if len(lines) != 2 {
 		t.Fatalf("rows = %v, want one per visible session", lines)
 	}

@@ -710,7 +710,7 @@ func TestPopupColumnsShareOneOffset(t *testing.T) {
 		{"a-much-longer-profile", "— mlx"},
 		{"b", "— vllm"},
 	}
-	lines := layoutPopupRows(rows)
+	lines := layoutPopupRows(newTheme(), rows)
 	want := ansi.StringWidth("a-much-longer-profile") + len(popupGutter)
 	for i, ln := range lines {
 		if got := popupCellOffset(t, ln, "—"); got != want {
@@ -760,7 +760,7 @@ func TestPopupAbsentCellKeepsLaterColumnsAligned(t *testing.T) {
 		{"alpha", "— llamacpp", "· running"},
 		{"beta", "", "· running"}, // no backend tier on this row
 	}
-	lines := layoutPopupRows(rows)
+	lines := layoutPopupRows(newTheme(), rows)
 	want := ansi.StringWidth("alpha") + len(popupGutter) + ansi.StringWidth("— llamacpp") + len(popupGutter)
 	for i, ln := range lines {
 		if got := popupCellOffset(t, ln, "· running"); got != want {
@@ -772,7 +772,7 @@ func TestPopupAbsentCellKeepsLaterColumnsAligned(t *testing.T) {
 // A column empty in EVERY row collapses: it contributes neither width nor gutter, so a schema tier
 // no row filled costs the pane nothing and lays out exactly as if the tier were not in the schema.
 func TestPopupEmptyColumnCollapses(t *testing.T) {
-	withTier := layoutPopupRows([]popupRow{
+	withTier := layoutPopupRows(newTheme(), []popupRow{
 		{"a", "", "· x"},
 		{"bb", "", "· y"},
 	})
@@ -783,7 +783,7 @@ func TestPopupEmptyColumnCollapses(t *testing.T) {
 		}
 	}
 
-	withoutTier := layoutPopupRows([]popupRow{{"a", "· x"}, {"bb", "· y"}})
+	withoutTier := layoutPopupRows(newTheme(), []popupRow{{"a", "· x"}, {"bb", "· y"}})
 	for i, ln := range withoutTier {
 		if ln != withTier[i] {
 			t.Errorf("row %d lays out as %q with the empty column and %q without it", i, withTier[i], ln)
@@ -799,7 +799,7 @@ func TestPopupColumnsMeasureDisplayWidth(t *testing.T) {
 		{"日本語", "· three wide glyphs"}, // 3 runes, 6 display cells
 		{"abcdef", "· six narrow runes"},
 	}
-	lines := layoutPopupRows(rows)
+	lines := layoutPopupRows(newTheme(), rows)
 	want := 6 + len(popupGutter)
 	for i, ln := range lines {
 		if got := popupCellOffset(t, ln, "·"); got != want {
@@ -865,7 +865,7 @@ func TestRenderPopupSingleCellRowsAreUnchanged(t *testing.T) {
 		t.Errorf("single-cell popup drifted from the pre-column rendering:\ngot:\n%s\n\nwant:\n%s",
 			got, popupSingleCellGolden)
 	}
-	for i, ln := range layoutPopupRows(singleCellRows(labels)) {
+	for i, ln := range layoutPopupRows(th, singleCellRows(labels)) {
 		if ln != labels[i] {
 			t.Errorf("single-cell row %d composed to %q, want the label verbatim %q", i, ln, labels[i])
 		}

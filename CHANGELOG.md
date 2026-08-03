@@ -845,6 +845,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **An emoji in a pop-up row no longer knocks that row's columns out of line.** A row carrying a
+  glyph like `⚠️` — a symbol plus the invisible codepoint that asks for its colour form — was
+  measured as two terminal cells while most terminals draw it in one, so that row alone was padded
+  a cell short: in the `/sessions` browser, the `/model` picker and the `/` dropdown, the fact
+  beside such an entry started one column left of every other row's, and the offering read as
+  ragged where it should read as a table. The staged-message band above the input box had the same
+  arithmetic behind it, and left a one-column seam of the terminal's own background at the end of
+  any queued line carrying one. Both now measure the way the terminal actually paints. A pane title
+  is affected in the other direction and is fixed with them: it was being clipped with an `…` at
+  widths that could in fact seat it whole, so a name the terminal had room for lost its tail.
+
 - **A bare `/rename` on a long session no longer answers "could not name this session".** Naming a
   session is one small completion asking for one short title, and it capped that completion at 1024
   tokens — which on a thinking model is not a cap on the answer but a cap on the *thinking plus* the

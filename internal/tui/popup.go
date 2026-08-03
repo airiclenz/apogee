@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -153,14 +152,14 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	}
 
 	lines := make([]string, 0, len(body)+len(rows)+2) //nolint:mnd // +2: the optional title and hint rows
-	if title := popupTitleLine(spec.title, hidden, inner); title != "" {
-		lines = append(lines, blackFill.Render(th.presentTitle.Render(truncateToWidth(title, inner))))
+	if title := popupTitleLine(th, spec.title, hidden, inner); title != "" {
+		lines = append(lines, blackFill.Render(th.presentTitle.Render(truncateToWidth(th, title, inner))))
 	}
 	lines = append(lines, body...)
 	lines = append(lines, rows...)
 
 	if spec.hint != "" {
-		lines = append(lines, blackFill.Render(th.statusFaint.Render(truncateToWidth(spec.hint, inner))))
+		lines = append(lines, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, spec.hint, inner))))
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
@@ -180,21 +179,23 @@ const popupGutter = "  "
 // pad of the last column carries no information, and the pane's black fill covers that gap
 // already, which is what keeps a single-cell spec byte-identical to the plain labels it was
 // composed from.
-func layoutPopupRows(rows []popupRow) []string {
-	widths := popupColumnWidths(rows)
+func layoutPopupRows(th theme, rows []popupRow) []string {
+	widths := popupColumnWidths(th, rows)
 	out := make([]string, len(rows))
 	for i, row := range rows {
-		out[i] = layoutPopupRow(row, widths)
+		out[i] = layoutPopupRow(th, row, widths)
 	}
 	return out
 }
 
 // popupColumnWidths measures each column of the spec: the widest cell in it across every row, in
-// DISPLAY cells (ansi.StringWidth — a CJK glyph is two cells wide and an escape sequence none),
-// never a rune or byte count, so a wide-rune cell cannot under-measure its column and let the row
-// spill past the pane's right border. A column no row filled measures 0, which is the signal
-// layoutPopupRow collapses it on.
-func popupColumnWidths(rows []popupRow) []int {
+// DISPLAY cells (th.measure, the package's width authority — a CJK glyph is two cells wide and an
+// escape sequence none), never a rune or byte count, so a wide-rune cell cannot under-measure its
+// column and let the row spill past the pane's right border. The authority rather than
+// ansi.StringWidth because the pad computed from this width is painted, and a column measured in a
+// measure the painter is not on lands a cell off on any row carrying VARIATION SELECTOR-16
+// (ADR 0030). A column no row filled measures 0, which is the signal layoutPopupRow collapses it on.
+func popupColumnWidths(th theme, rows []popupRow) []int {
 	columns := 0
 	for _, row := range rows {
 		columns = max(columns, len(row))
@@ -202,7 +203,7 @@ func popupColumnWidths(rows []popupRow) []int {
 	widths := make([]int, columns)
 	for _, row := range rows {
 		for i, cell := range row {
-			widths[i] = max(widths[i], ansi.StringWidth(cell))
+			widths[i] = max(widths[i], th.measure.Width(cell))
 		}
 	}
 	return widths
@@ -214,7 +215,7 @@ func popupColumnWidths(rows []popupRow) []int {
 // no row filled costs the pane nothing; an empty cell in a column another row DID fill still pads,
 // which is what keeps the columns after an absent tier aligned. A row shorter than the schema is
 // treated as ending in empty cells, so a producer may leave trailing tiers off.
-func layoutPopupRow(row popupRow, widths []int) string {
+func layoutPopupRow(th theme, row popupRow, widths []int) string {
 	var b strings.Builder
 	written := 0
 	for i, w := range widths {
@@ -229,7 +230,7 @@ func layoutPopupRow(row popupRow, widths []int) string {
 			cell = row[i]
 		}
 		b.WriteString(cell)
-		if pad := w - ansi.StringWidth(cell); pad > 0 {
+		if pad := w - th.measure.Width(cell); pad > 0 {
 			b.WriteString(strings.Repeat(" ", pad))
 		}
 		written++
@@ -266,7 +267,7 @@ func singleCellRows(labels []string) []popupRow {
 // still offering ↑↓ to select among them — so THAT is what the pane owes an accounting for, and
 // renderPopup carries the count to the title row (popupTitleLine), the one row the pane always has.
 func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) ([]string, int) {
-	rows := layoutPopupRows(spec.rows)
+	rows := layoutPopupRows(th, spec.rows)
 
 	capRows := spec.maxRows
 	if capRows < 0 {
@@ -286,7 +287,7 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 		if selected {
 			marker = glyphUser + " "
 		}
-		row := truncateToWidth(marker+rows[i], inner)
+		row := truncateToWidth(th, marker+rows[i], inner)
 		if selected {
 			out = append(out, th.userBlock.Width(inner).Render(row))
 		} else {
@@ -335,15 +336,15 @@ func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lip
 	if maxBodyRows > 0 && len(wrapped) > maxBodyRows {
 		hidden = len(wrapped) - (maxBodyRows - 1)
 		wrapped = wrapped[:maxBodyRows-1]
-		marker = popupElisionMarkerFitting(hidden, inner)
+		marker = popupElisionMarkerFitting(th, hidden, inner)
 	}
 
 	out := make([]string, 0, len(wrapped)+1)
 	for _, ln := range wrapped {
-		out = append(out, blackFill.Render(th.popupBody.Render(truncateToWidth(ln, inner))))
+		out = append(out, blackFill.Render(th.popupBody.Render(truncateToWidth(th, ln, inner))))
 	}
 	if marker != "" {
-		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(marker, inner))))
+		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, marker, inner))))
 	}
 	return out, hidden
 }
@@ -374,8 +375,8 @@ func popupElisionMarkerShort(hidden int) string {
 // than any statement of the fact can be — the caller's truncateToWidth still holds the width
 // contract, and the count leads the short form, so what survives the clip is the number rather than
 // the noun.
-func popupElisionMarkerFitting(hidden, budget int) string {
-	if marker := popupElisionMarker(hidden); ansi.StringWidth(marker) <= budget {
+func popupElisionMarkerFitting(th theme, hidden, budget int) string {
+	if marker := popupElisionMarker(hidden); th.measure.Width(marker) <= budget {
 		return marker
 	}
 	return popupElisionMarkerShort(hidden)
@@ -405,17 +406,17 @@ func popupElisionMarkerFitting(hidden, budget int) string {
 // taken against a name the human can still read, and taken knowing there is text behind it. When
 // not even a clipped name survives, the count is the whole row: on a pane that narrow the name is
 // no longer identifying anything anyway.
-func popupTitleLine(title string, hidden, inner int) string {
+func popupTitleLine(th theme, title string, hidden, inner int) string {
 	if hidden == 0 {
 		return title
 	}
 	if title == "" {
-		return popupElisionMarkerFitting(hidden, inner)
+		return popupElisionMarkerFitting(th, hidden, inner)
 	}
-	gutter := ansi.StringWidth(popupGutter)
-	marker := popupElisionMarkerFitting(hidden, inner-gutter-ansi.StringWidth(title))
-	if room := inner - gutter - ansi.StringWidth(marker); ansi.StringWidth(title) > room {
-		if title = truncateToWidth(title, room); title == "" {
+	gutter := th.measure.Width(popupGutter)
+	marker := popupElisionMarkerFitting(th, hidden, inner-gutter-th.measure.Width(title))
+	if room := inner - gutter - th.measure.Width(marker); th.measure.Width(title) > room {
+		if title = truncateToWidth(th, title, room); title == "" {
 			return marker
 		}
 	}
@@ -441,17 +442,20 @@ func popupRowWindow(selected, total, capRows int) (int, int) {
 
 // truncateToWidth clips s to at most width DISPLAY cells, ending in an ellipsis when it had to cut
 // — so a long file path, a wide-rune title, or an aligned row too wide for the pane never
-// overflows the terminal and breaks the overlay's layout. The measure is ansi.StringWidth, not a
-// rune count: a CJK glyph occupies two terminal cells and an escape sequence none, so counting
-// runes would let a wide row spill past the right border while measuring as if it fit — the exact
-// bug the pane's every-line-is-exactly-width contract cannot survive. A width of 1 or less leaves
+// overflows the terminal and breaks the overlay's layout. The measure is th.measure, the package's
+// width authority (width.go), not a rune count: a CJK glyph occupies two terminal cells and an
+// escape sequence none, so counting runes would let a wide row spill past the right border while
+// measuring as if it fit — the exact bug the pane's every-line-is-exactly-width contract cannot
+// survive. It measures AND cuts through the authority rather than through ansi.StringWidth and
+// ansi.Truncate, because a width measured in one method and cut in another is the same defect one
+// step later (ADR 0030 §3) and the cut is what the painter then draws. A width of 1 or less leaves
 // no room for text beside the ellipsis, so the line degrades to nothing rather than to a lone "…".
-func truncateToWidth(s string, width int) string {
+func truncateToWidth(th theme, s string, width int) string {
 	if width <= 1 {
 		return ""
 	}
-	if ansi.StringWidth(s) <= width {
+	if th.measure.Width(s) <= width {
 		return s
 	}
-	return ansi.Truncate(s, width, "…")
+	return th.measure.Truncate(s, width, "…")
 }

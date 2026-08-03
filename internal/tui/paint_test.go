@@ -307,3 +307,93 @@ func TestPaintedWidthMeasuresDisagreeOnVS16(t *testing.T) {
 		})
 	}
 }
+
+// A pop-up's columns are the scroll bar's invariant one surface over: every row opens its second
+// column in the same PAINTED cell, the row carrying the disputed ⚠️ grapheme included.
+//
+// popupColumnWidths measures a cell and layoutPopupRow pads it back out to that measure, and both
+// used to be hard-wired to ansi.StringWidth. On the WcWidth painter — the DEFAULT one — a cell
+// carrying VS16 was therefore charged two cells for a glyph the terminal draws in one, so it was
+// padded a cell short and the column after it opened a cell early on that row alone: the pop-up's
+// own version of the bar drifting left. Routing the measure and the pad through th.measure
+// (ADR 0030) is what squares them, and the fixture's second row is the straight edge that proves it.
+func TestPaintedPopupColumnsHoldOneOffset(t *testing.T) {
+	rows := []popupRow{
+		{"danger " + vs16Warning, "— first"},
+		{"eight_ok", "— second"}, // eight cells in EITHER measure
+	}
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			widest := 0
+			for _, row := range rows {
+				widest = max(widest, paintedWidth(row[0], tc.method))
+			}
+			want := widest + paintedWidth(popupGutter, tc.method)
+
+			for i, ln := range layoutPopupRows(th, rows) {
+				if got := paintedColumn(ln, "—", tc.method); got != want {
+					t.Errorf("row %d opens its second column in painted cell %d, want %d: %q",
+						i, got, want, ln)
+				}
+			}
+		})
+	}
+}
+
+// truncateToWidth clips in the measure the painter is on, which cuts both ways and both are
+// defects. Clipping in GraphemeWidth on a WcWidth painter sheds text the terminal had room for —
+// the pane's width is scarce enough that a needlessly dropped word is a real loss — while the
+// mirror-image mistake would let a row spill past the border the pane composes every line to.
+// Measuring and cutting must also agree with EACH OTHER (ADR 0030 §3), which is why the function
+// takes both operations off th.measure rather than pairing one with ansi.Truncate.
+func TestPopupTruncationFollowsThePainter(t *testing.T) {
+	const title = "danger " + vs16Warning // eight painted cells under WcWidth, nine under GraphemeWidth
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			const room = 8
+			got := truncateToWidth(th, title, room)
+			if w := paintedWidth(got, tc.method); w > room {
+				t.Errorf("clipped title paints %d columns, past the pane's %d: %q", w, room, got)
+			}
+			switch fits := paintedWidth(title, tc.method) <= room; {
+			case fits && got != title:
+				t.Errorf("clipped %q to %q, but the painter seats it whole in %d columns", title, got, room)
+			case !fits && got == title:
+				t.Errorf("kept %q whole at %d columns, which the painter cannot seat", title, room)
+			}
+		})
+	}
+}
+
+// The staged-row band is a solid bar: every one of its rows paints edge to edge across the window,
+// so no seam shows the terminal's own background through the black fill. queuedRow composes that
+// row by clipping to the window and padding back out to it, and a pad computed in a measure the
+// painter is not on leaves the bar a column short on exactly the row carrying ⚠️ — the row a human
+// would read as a rendering glitch rather than as a width bug.
+func TestPaintedQueuedBandFillsTheWindow(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := stageRow(t, paintedAs(t, runningModel(t), tc.method), "danger "+vs16Warning+" queued")
+
+			lines := strings.Split(strip(m.renderPendingInterjections()), "\n")
+			if len(lines) != 3 {
+				t.Fatalf("band lines = %d (%q), want one staged row framed by a blank row each side",
+					len(lines), lines)
+			}
+			for i, ln := range lines {
+				if got := paintedWidth(ln, tc.method); got != m.width {
+					t.Errorf("band row %d paints %d columns, want the window's %d: %q",
+						i, got, m.width, ln)
+				}
+			}
+		})
+	}
+}

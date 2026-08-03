@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -472,10 +471,16 @@ func (m Model) renderPendingInterjections() string {
 // back out to that same width and styled as a whole. Text, indent, and pad alike therefore carry
 // the black background, so the row reads as one solid bar instead of leaving the terminal's own
 // background showing past the text — the statusLine posture. A "" text renders a blank band row.
+//
+// Both the clip and the pad go through m.th.measure, the package's width authority (width.go),
+// because this row is composed TO the window width and then painted: measuring it in a method the
+// painter is not on puts the bar's right edge a cell off the frame's on any row carrying VARIATION
+// SELECTOR-16, and cutting in a different method than it measured in is that same defect one step
+// later (ADR 0030 §3).
 func (m Model) queuedRow(text string) string {
 	w := max(1, m.width)
-	line := ansi.Truncate(text, w, "…")
-	if pad := w - ansi.StringWidth(line); pad > 0 {
+	line := m.th.measure.Truncate(text, w, "…")
+	if pad := w - m.th.measure.Width(line); pad > 0 {
 		line += strings.Repeat(" ", pad)
 	}
 	return m.th.queuedText.Render(line)

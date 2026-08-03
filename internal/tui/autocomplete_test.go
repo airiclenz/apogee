@@ -102,7 +102,7 @@ func TestSlashMenuSummariesShareOneColumn(t *testing.T) {
 	}
 
 	want := widest + len(popupGutter)
-	for i, ln := range layoutPopupRows(rows) {
+	for i, ln := range layoutPopupRows(newTheme(), rows) {
 		if got := popupCellOffset(t, ln, items[i].cells[1]); got != want {
 			t.Errorf("row %q starts its description at column %d, want %d: %q", items[i].value, got, want, ln)
 		}

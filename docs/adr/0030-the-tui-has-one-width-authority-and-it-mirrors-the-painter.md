@@ -166,6 +166,11 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
   wait on the same file. A wrap or clip computed in grapheme width never paints *wider* than its
   limit under wcwidth, so the absolute cap holds regardless; what remains possible is a popup
   column being a cell off on a row carrying VS16. Tracked in `TODO.md`.
+  *(The `popup.go` and `interject.go` sites were converted on 2026-08-03 once plan
+  `2026-07-31 - 01` was archived: `truncateToWidth` now cuts as well as measures with the
+  authority, and the drift each left possible is pinned under both methods in `paint_test.go`.
+  `wrapText`'s own `ansi.Wrap` is the one site still standing, and stays tracked in `TODO.md`.
+  The rule above is unchanged.)*
 - **`CHANGELOG.md`'s v1.1.0 `caretTo` entry claimed the fix used "the same width the widget's own
   cursor math uses", which was not true.** Shipped history is not rewritten; the entry carries a
   dated correction pointing at the real fix.

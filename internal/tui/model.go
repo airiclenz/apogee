@@ -3080,7 +3080,7 @@ func (m Model) inputElisionEdge(hidden int) string {
 		return ""
 	}
 	budget := m.width - inputEdgeChrome
-	marker := popupElisionMarkerFitting(hidden, budget)
+	marker := popupElisionMarkerFitting(m.th, hidden, budget)
 	fill := budget - m.th.measure.Width(marker)
 	if fill < 0 {
 		return ""

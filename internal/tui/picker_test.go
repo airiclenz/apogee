@@ -840,7 +840,7 @@ func TestModelPickerAlignsTheProfileColumns(t *testing.T) {
 
 	m, _ = typeCommand(t, m, "/model")
 
-	lines := layoutPopupRows(m.pickerRows())
+	lines := layoutPopupRows(m.th, m.pickerRows())
 	if len(lines) != 2 {
 		t.Fatalf("rows = %v, want one per offered profile", lines)
 	}

@@ -649,15 +649,23 @@ here breaks the absolute width cap; each is a place the package still measures i
 painter may not be using, or mirrors a widget imperfectly. The `inputContentRows` residue was
 closed on 2026-07-31 (owner-approved follow-up); its entry stays below with what remains of it.
 
-**The four sites the plan could not touch.** `popup.go:185, 212, 293` and `interject.go:393` still
-measure with `ansi.StringWidth`, and `wrapText` (`render.go`) still *wraps* with `ansi.Wrap` even
-though its cap enforcement measures with the authority; `truncateToWidth` (`popup.go`) is the same
-case. All of them were left because plan `2026-07-31 - 01 - popup-column-alignment-plan.md` owns
-those files while it is live, and `wrapText`'s other caller is `popup.go:245`. A grapheme-width
-wrap or clip never paints *wider* than its limit under wcwidth, so the cap holds regardless; what
-stays possible is a popup column landing a cell off on a row carrying VARIATION SELECTOR-16. Pick
-this up once that plan is archived — it is a rename per site (`ansi.X` → `th.measure.X`), plus
-threading `th` into `truncateToWidth`.
+**~~The four sites the plan could not touch~~ — FIXED 2026-08-03.** `popup.go` and `interject.go`
+measured with `ansi.StringWidth`, and `truncateToWidth` (`popup.go`) both measured and cut in it.
+They were left because plan `2026-07-31 - 01 - popup-column-alignment-plan.md` owned those files
+while it was live; that plan is archived, so the rename was made — `popupColumnWidths`,
+`layoutPopupRow`, `popupElisionMarkerFitting`, `popupTitleLine` and `truncateToWidth` now take
+`th theme` and measure (and truncate) with `th.measure`, and `Model.queuedRow` (`interject.go`)
+does the same. The drift they left possible — a popup column landing a cell off, and the staged-row
+band one column short of the window, on a row carrying VARIATION SELECTOR-16 — is pinned under both
+width methods by `TestPaintedPopupColumnsHoldOneOffset`, `TestPopupTruncationFollowsThePainter` and
+`TestPaintedQueuedBandFillsTheWindow` (`paint_test.go`).
+
+**`wrapText` still wraps with `ansi.Wrap`** (`render.go`), even though its cap enforcement measures
+with the authority. A grapheme-width wrap never paints *wider* than its limit under wcwidth, so the
+absolute cap holds regardless; what it costs is a break taken a cell earlier than the painter needed
+on a line carrying VARIATION SELECTOR-16. It is a rename (`ansi.Wrap` → `th.measure.Wrap`), but it
+moves every wrapped surface in the package — transcript prose, popup bodies, table cells — so it
+wants its own item with the re-baselining that implies.
 
 **~~`inputContentRows` is an unfaithful widget mirror~~ — FIXED 2026-07-31** (`render.go`). It sized
 the prompt box to the rows it *thought* the textarea drew, and it was measurably wrong: against a
