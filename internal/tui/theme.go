@@ -95,12 +95,16 @@ const bodyIndent = "  "
 
 // bodyRightGutter is bodyIndent's mirror on the right: the columns the transcript body leaves
 // free at its right edge, so wrapped text breaks short of whatever sits beside it instead of
-// running up against it. The scroll-bar column is reserved unconditionally (scrollbarWidth) and
-// the bar paints inside it only while there is something to scroll, so the gutter is a constant
-// rather than a function of whether the bar is currently drawn: a wrap width that changed when
-// the bar appeared would re-wrap the whole visible transcript mid-run. That leaves one free
-// column between the text and a painted bar, and two to the window edge while the gutter is
-// blank. TestTranscriptBodyLeavesRightGutter pins it against a really-composed View.
+// running up against it. While the scroll bar is enabled (`ui.show-scrollbar`, default on) its
+// column is reserved unconditionally (scrollbarWidth) and the bar paints inside it only while
+// there is something to scroll, so the gutter is a constant rather than a function of whether the
+// bar is currently drawn: a wrap width that changed when the bar appeared would re-wrap the whole
+// visible transcript mid-run. That leaves one free column between the text and a painted bar, and
+// two to the window edge while the gutter is blank. Turning the setting off removes the column and
+// the bar together — the body takes the column and this gutter still holds it off the window edge
+// — which cannot re-wrap mid-run either, because the setting is fixed for the process lifetime.
+// TestTranscriptBodyLeavesRightGutter pins the shown state against a really-composed View and
+// TestHiddenScrollbarYieldsTheColumn the hidden one.
 const bodyRightGutter = 1
 
 // theme bundles the reusable styles. They are intentionally spare — a few colour and weight

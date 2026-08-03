@@ -2440,7 +2440,7 @@ const (
 	// content rows plus its own two border rows) and the viewport gets what is left (layout).
 	frameFixedRows = gapHeight + topRuleHeight + statusHeight + footerHeight + bottomRuleHeight
 
-	scrollbarWidth = 1 // the transcript's right-hand scroll-bar gutter (always reserved)
+	scrollbarWidth = 1 // the transcript's right-hand scroll-bar gutter (reserved while the bar is shown)
 
 	minInputRows    = 1
 	maxInputRows    = 10 // past this the textarea scrolls internally rather than growing further
@@ -2472,7 +2472,15 @@ const (
 // frame spends transcriptBudget instead, which does not have that floor and so cannot compose a row
 // the window never paid for.
 func (m *Model) layout() {
-	m.viewport.SetWidth(max(1, m.width-scrollbarWidth)) // reserve the scroll-bar gutter column
+	// The scroll-bar gutter column is reserved only while the bar is shown (ui.show-scrollbar,
+	// inverted into Options.HideScrollbar): a hidden bar gives the column back to the body rather
+	// than eating it invisibly. The setting is fixed for the process lifetime, so this cannot
+	// re-wrap the transcript mid-run — see bodyRightGutter (theme.go).
+	width := m.width
+	if !m.opts.HideScrollbar {
+		width -= scrollbarWidth
+	}
+	m.viewport.SetWidth(max(1, width))
 	m.input.SetWidth(m.inputInnerWidth())
 	before := m.input.Height()
 	m.input.SetHeight(m.inputRows())
@@ -2756,7 +2764,9 @@ func (m Model) View() tea.View {
 	rows := make([]string, 0, frameBlocks)
 	// Draw the transcript at the height the overlays leave it, with its sticky header, then hang the
 	// scroll-bar gutter off its right edge — the bar is sized from the same local viewport, so the
-	// two columns line up row-for-row. The height goes on that LOCAL copy and is never written back:
+	// two columns line up row-for-row. With the bar switched off (ui.show-scrollbar) the body goes
+	// on alone, into the full window width layout() then gave it.
+	// The height goes on that LOCAL copy and is never written back:
 	// m.viewport keeps its laid-out height, which is what lets contentLineAt (via transcriptRows)
 	// measure this very shrink instead of compounding it. At zero rows the transcript is off the
 	// frame entirely — the overlays took the whole budget, a draft grew the box into it, or the
@@ -2766,7 +2776,11 @@ func (m Model) View() tea.View {
 		vp.SetHeight(h)
 		body := m.applyStickyHeader(vp.View())
 		body = m.highlightTranscript(body) // overlay any transcript drag-selection on the composed rows
-		rows = append(rows, m.joinScrollbar(body, m.renderScrollbar(vp)))
+		if m.opts.HideScrollbar {
+			rows = append(rows, body)
+		} else {
+			rows = append(rows, m.joinScrollbar(body, m.renderScrollbar(vp)))
+		}
 	}
 	if ov.prompt != "" {
 		rows = append(rows, ov.prompt)

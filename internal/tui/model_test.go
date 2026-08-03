@@ -2300,6 +2300,46 @@ func TestTranscriptBodyLeavesRightGutter(t *testing.T) {
 	}
 }
 
+// TestHiddenScrollbarYieldsTheColumn is the inverse of the two pinning tests above: with
+// `ui.show-scrollbar` off (Options.HideScrollbar, the inverted form the composition root passes)
+// the bar's column goes back to the body rather than sitting reserved and blank. The transcript
+// overflows its viewport, so the shown state would certainly paint a track and a thumb here — and
+// hiding the bar hides the BAR, not the scrolling, which the wheel at the end proves.
+func TestHiddenScrollbarYieldsTheColumn(t *testing.T) {
+	const width = 80
+	opts := testOpts
+	opts.HideScrollbar = true
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	// Single-character words wrap flush to the limit, and this many of them overflow the viewport
+	// several times over.
+	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: strings.Repeat("x ", 1200)}})
+
+	if m.viewport.Width() != width {
+		t.Errorf("viewport width = %d, want the full window's %d — the hidden bar still holds a column",
+			m.viewport.Width(), width)
+	}
+	if want := width - bodyRightGutter; m.transcriptWidth() != want {
+		t.Errorf("transcript wraps to %d columns, want %d (the window less its right gutter)",
+			m.transcriptWidth(), want)
+	}
+	if total, h := m.viewport.TotalLineCount(), m.viewport.Height(); total <= h {
+		t.Fatalf("transcript is %d lines in a %d-row viewport — the fixture does not overflow, so a "+
+			"shown bar would be blank and this proves nothing", total, h)
+	}
+
+	for i, row := range transcriptRows(t, m) {
+		if strings.ContainsAny(row, "│█") {
+			t.Errorf("transcript row %d carries a scroll-bar glyph with the bar hidden: %q", i, row)
+		}
+	}
+
+	before := m.viewport.YOffset()
+	m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.viewport.YOffset() >= before {
+		t.Errorf("the wheel did not scroll with the bar hidden: offset %d → %d", before, m.viewport.YOffset())
+	}
+}
+
 // The gutter is a floor, not a bare subtraction: at window widths too small to hold it the body
 // still wraps to at least one column, and the transcript rows stay inside the viewport plus its
 // reserved scroll-bar column (both floored at one, so a 0/1-column window still draws two).

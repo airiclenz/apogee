@@ -108,9 +108,17 @@ test; the wire hop to `Options.HideScrollbar` is one reviewed line.
 
 **Commit:** `feat(config): ui.show-scrollbar is the transcript scrollbar's switch`
 
-## 2. The scrollbar and its column obey the switch
+## 2. The scrollbar and its column obey the switch — ✅ DONE (2026-08-03)
 
 Depends on item 1.
+
+NOTES (2026-08-03): the `grep -n scrollbarWidth internal/tui/` bullet found no consumer beyond the
+predicted set (`model.go:2443`/`:2475` plus the four test sites, all of which exercise the default
+shown state and stayed green unmodified). Two comments beside the named edits were amended for
+truth rather than left lying: the `scrollbarWidth` const's own trailing comment (`model.go:2443`, a
+line the item names) said "always reserved", and `View`'s block comment described the join as
+unconditional. `layout()` reserves via a local `width` less `scrollbarWidth` instead of two literal
+`SetWidth` calls — same behaviour, one call site.
 
 **What:**
 
