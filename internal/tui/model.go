@@ -2982,6 +2982,68 @@ func squareLine(measure widthAuthority, s string, w int) string {
 	return s + strings.Repeat(" ", -over)
 }
 
+// squareOnField is squareLine with the pad painted on field rather than left bare — the same split
+// lipgloss makes between the run it styles as text and the run it styles as whitespace
+// (lipgloss/v2@v2.0.4/align.go:12-56). It matters wherever the surface is a solid field: a content
+// line carries an SGR reset of its own at its end, so a bare pad after it would show the terminal's
+// background through the gap between the text and the box's right edge.
+func squareOnField(measure widthAuthority, field lipgloss.Style, s string, w int) string {
+	over := measure.Width(s) - w
+	if over > 0 {
+		return measure.Truncate(s, w, "")
+	}
+	return s + field.Render(strings.Repeat(" ", -over))
+}
+
+// drawBox frames content in style's border and horizontal padding and returns the box's rows: one
+// string per PAINTED row, each exactly width columns in the authority's measure, ONE row per line of
+// content it was handed.
+//
+// It stands in for style.Width(width).Render(…), and for squareLine's reason one level up. A
+// lipgloss Width does not merely pad: past its width it WRAPS, and it measures in GraphemeWidth
+// whatever the painter is doing (ADR 0030 §5). So a composed row the authority calls exactly the
+// box's inner width can be wider than that to lipgloss — any VARIATION SELECTOR-16 cluster makes it
+// so — and the style folds that ONE composed row into TWO painted rows: the row's tail moves to a
+// line of its own, the box grows past the row budget it was drawn for, and the fold leaves rows that
+// stop short of the box's right border. Drawing the rows here keeps one composed row one painted row
+// at every width, under either measure.
+//
+// Only the shape the two boxed surfaces use is honoured — a four-sided border, horizontal padding,
+// and the field colour that padding sits on — because that is the whole of what theme.go's
+// startupBorder and popupBorder carry. Where the width cannot pay for the padding the PADDING gives
+// way before the border does, so a box that is drawn at all is exactly width columns wide; narrower
+// than its own two border glyphs there is no box to draw and the answer is no rows.
+func drawBox(measure widthAuthority, style lipgloss.Style, content []string, width int) []string {
+	edges := style.GetHorizontalBorderSize()
+	if width < edges {
+		return nil
+	}
+	border := style.GetBorderStyle()
+	span := width - edges // the columns between the two vertical border glyphs
+	padLeft := min(style.GetPaddingLeft(), span)
+	padRight := min(style.GetPaddingRight(), span-padLeft)
+	inner := span - padLeft - padRight
+
+	// Each edge takes its own colours off the style, and the padding takes the box's field, so a
+	// transparent card (startupBorder) and a solid-black pane (popupBorder) both come out of the one
+	// routine. An unset colour reads back as lipgloss.NoColor, which renders as no sequence at all.
+	top := lipgloss.NewStyle().Foreground(style.GetBorderTopForeground()).Background(style.GetBorderTopBackground())
+	bottom := lipgloss.NewStyle().Foreground(style.GetBorderBottomForeground()).Background(style.GetBorderBottomBackground())
+	left := lipgloss.NewStyle().Foreground(style.GetBorderLeftForeground()).Background(style.GetBorderLeftBackground())
+	right := lipgloss.NewStyle().Foreground(style.GetBorderRightForeground()).Background(style.GetBorderRightBackground())
+	field := lipgloss.NewStyle().Background(style.GetBackground())
+
+	lead := left.Render(border.Left) + field.Render(strings.Repeat(" ", padLeft))
+	tail := field.Render(strings.Repeat(" ", padRight)) + right.Render(border.Right)
+
+	rows := make([]string, 0, len(content)+2) //nolint:mnd // +2: the top and bottom border rows
+	rows = append(rows, top.Render(border.TopLeft+strings.Repeat(border.Top, span)+border.TopRight))
+	for _, ln := range content {
+		rows = append(rows, lead+squareOnField(measure, field, ln, inner)+tail)
+	}
+	return append(rows, bottom.Render(border.BottomLeft+strings.Repeat(border.Bottom, span)+border.BottomRight))
+}
+
 // joinScrollbar hangs the scroll-bar gutter off the right edge of the transcript body: every body
 // row is squared to the viewport's width first (squareLine), then its bar cell is appended.
 //

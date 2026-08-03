@@ -648,8 +648,10 @@ moment to give `ConfineWritablePaths` its first writer.
 here breaks the absolute width cap; each is a place the package still measures in a measure the
 painter may not be using, or mirrors a widget imperfectly. The `inputContentRows` residue was
 closed on 2026-07-31 (owner-approved follow-up); its entry stays below with what remains of it. The
-`wrapText` residue — the last site ADR 0030 itself named — was closed on 2026-08-03, and its entry
-carries the one it uncovered: the pop-up pane's lipgloss-composed frame.
+`wrapText` residue — the last site ADR 0030 itself named — was closed on 2026-08-03, and so was the
+one it uncovered: the boxed surfaces composed by `lipgloss.Style.Width`, which turned out to be two
+sites rather than the one the entry named. What is still open here is the two width entries at the
+end: the widget mirrors' tab handling, and `hangingPrefixes` at block width 1–2.
 
 **~~The four sites the plan could not touch~~ — FIXED 2026-08-03.** `popup.go` and `interject.go`
 measured with `ansi.StringWidth`, and `truncateToWidth` (`popup.go`) both measured and cut in it.
@@ -680,17 +682,29 @@ renderer counts rows with (the viewport height, the sticky offsets and the `user
 count off it). They are squared with `squareLine` now — the painter's measure, the way
 `promptMarkerRow` already padded its own row. `TestUserBlockRowsAreOneSquareLineEach` pins it.
 
-**The pop-up pane is composed in lipgloss's measure** (`popup.go`) — the residue the entry above
-uncovered, and the reason the pop-up body is the one wrapped surface that does not yet follow the
-painter. `blackFill` (`lipgloss.NewStyle()…Width(inner)`), `th.userBlock.Width(inner)` on the
-selected row and `th.popupBorder.Width(width)` on the whole box all pad — and past their width
-*wrap* — in GraphemeWidth whatever the painter is doing, so a pane line the authority calls exactly
-`inner` cells wide is folded into two pane rows and the box outgrows the row budget `popupBudget`
-granted it. It is **pre-existing and independent of the wrap**: it is reachable today through pop-up
-ROWS, which never touch `wrapText` (a single row of `"⚠️ "`×6 at width 20 paints a five-row pane
-where the pane composed four). Fixing it means squaring the pane's lines the way ADR 0030 §5 squared
-the transcript frame, which the border rules out doing through `lipgloss.Style.Width` — the box's
-own rows have to be drawn rather than delegated, so it wants its own item.
+**~~The pop-up pane is composed in lipgloss's measure~~ — FIXED 2026-08-03** (`popup.go`,
+`render.go`, `model.go`). `blackFill` (`lipgloss.NewStyle()…Width(inner)`), `th.userBlock.Width(inner)`
+on the selected row and `th.popupBorder.Width(width)` on the whole box all padded — and past their
+width *wrapped* — in GraphemeWidth whatever the painter was doing, so a pane line the authority
+called exactly `inner` cells wide was folded into two pane rows and the box outgrew the row budget
+`popupBudget` granted it (a single row of `"⚠️ "`×6 at width 20 painted a five-row pane where the
+pane composed four). It was pre-existing and independent of the wrap — reachable through pop-up
+ROWS, which never touch `wrapText`.
+
+**The start-up card was the same defect at a second site**, and this is what closing the entry
+turned up: `th.startupBorder.Width(width)` (`render.go`, both layouts) folded a VS16-carrying info
+row the same way — seven painted lines from six composed, with the fold splitting the model name
+across two rows. One class, two instances, one fix.
+
+The fix is `drawBox` (`model.go`, beside `squareLine`): the box's own rows are **drawn** — border
+glyphs, padding and the squaring pad emitted as separately styled runs, the content squared to the
+inner width with `th.measure` — rather than delegated to `lipgloss.Style.Width`, which ADR 0030 §5's
+reasoning rules out for a bordered surface. `lipgloss.JoinVertical` went with it, being the same
+GraphemeWidth pad one level in. `TestPaintedBoxRowsAreNotFolded` (`paint_test.go`) pins
+composed-rows == painted-rows, and every row's right border, for both surfaces under both width
+methods. Both `lipgloss.Style.Width` sites that remain are correct where they stand: the prompt box
+(`inputView`) frames a widget that wraps in GraphemeWidth itself — the widget-mirror exception of
+ADR 0030 §6 — and nothing else in the package sets a `Width`.
 
 **~~`inputContentRows` is an unfaithful widget mirror~~ — FIXED 2026-07-31** (`render.go`). It sized
 the prompt box to the rows it *thought* the textarea drew, and it was measurably wrong: against a

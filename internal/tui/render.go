@@ -579,9 +579,12 @@ type startupInfoRow struct{ label, value string }
 // version below it, no context (renderStartupStacked).
 //
 // Either way the card spans the full content width: width is the same railed inner budget every
-// other transcript entry is laid out to (transcriptWidth), so th.startupBorder.Width(width) lands
-// the box's right border on the exact column the rest of the transcript's content ends at. lipgloss
-// folds the border and padding into that width, so the rendered lines are exactly width columns.
+// other transcript entry is laid out to (transcriptWidth), so the box's right border lands on the
+// exact column the rest of the transcript's content ends at. The border and its padding fold INTO
+// that width, so the rendered lines are exactly width columns. Both layouts frame their lines with
+// drawBox rather than with th.startupBorder.Width(width): the rows are DRAWN in the painter's own
+// measure, so a card whose info block carries a VARIATION SELECTOR-16 grapheme stays as many painted
+// rows as it composed instead of having lipgloss fold one of them in two (ADR 0030 §5).
 func renderStartupBox(th theme, v startupView, width int) []string {
 	// inner is the content-column budget inside the rounded border and its padding — the room the
 	// two layouts actually lay out to. GetHorizontalFrameSize tracks the border + padding, so the
@@ -633,7 +636,7 @@ func renderStartupWide(th theme, logo []string, rows []startupInfoRow, labelW, i
 		}
 		lines = append(lines, line)
 	}
-	return strings.Split(th.startupBorder.Width(width).Render(strings.Join(lines, "\n")), "\n")
+	return drawBox(th.measure, th.startupBorder, lines, width)
 }
 
 // renderStartupStacked paints the narrow fallback: the logo, one blank line, then the host / model /
@@ -648,7 +651,7 @@ func renderStartupStacked(th theme, v startupView, width int) []string {
 	for _, r := range rows {
 		content = append(content, startupInfoLine(th, r, labelW))
 	}
-	return strings.Split(th.startupBorder.Width(width).Render(strings.Join(content, "\n")), "\n")
+	return drawBox(th.measure, th.startupBorder, content, width)
 }
 
 // startupInfoLine renders one info row — the dim label padded to the block's label column, two

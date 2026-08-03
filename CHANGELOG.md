@@ -870,6 +870,18 @@ point is a **minor** bump, not a breaking change.
   is affected in the other direction and is fixed with them: it was being clipped with an `…` at
   widths that could in fact seat it whole, so a name the terminal had room for lost its tail.
 
+- **A pop-up pane or a start-up card carrying an emoji no longer grows a row it never composed.**
+  The same `⚠️`-shaped disagreement, one layer out: the pane's rounded box and the start-up card
+  were each drawn by handing a total width to the styling library, and a width there does not merely
+  pad a short row — past its width it *wraps*. So a row the terminal paints in exactly the room the
+  box has could still measure one cell too wide to the library, and got folded onto a second line: a
+  `/sessions` entry or a `/model` row came back cut in two, the pane stood a row taller than the
+  window had budgeted for it — on a short terminal, exactly where a pane has no row to spare — and
+  neither half of the split row reached the pane's right border. The start-up card did the same with
+  the model name, splitting it across two lines and standing a row taller than its own logo. Both
+  boxes now draw their own rows in the measure the terminal paints in, so one composed row is one
+  painted row at every width.
+
 - **A bare `/rename` on a long session no longer answers "could not name this session".** Naming a
   session is one small completion asking for one short title, and it capped that completion at 1024
   tokens — which on a thinking model is not a cap on the answer but a cap on the *thinking plus* the

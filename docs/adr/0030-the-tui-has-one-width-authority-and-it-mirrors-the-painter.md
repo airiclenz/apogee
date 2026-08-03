@@ -95,6 +95,11 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
    the bar a column left, and the vertical one — left-aligning by padding to the widest row *it*
    measured — pushed a 24-row frame to 105 columns on an 80-column window once the rows were
    squared. This is what makes `layout.md`'s absolute cap hold at the painted layer.
+   *(Extended 2026-08-03: `drawBox` (`model.go`) is the boxed counterpart of `squareLine`. A
+   **bordered** surface cannot be squared by a `lipgloss.Style.Width` at all — past its width that
+   style wraps rather than pads, folding one composed row into two painted ones — so the pop-up pane
+   and the start-up card draw their own rows, border glyphs and padding included. See the last
+   Consequences bullet.)*
 6. **Widget mirrors are the deliberate exception: their oracle is the widget, never the
    painter.** `wrapRowStarts`/`runesWidth` (`inputaccent.go`), `cellToRuneOffset` (`mouse.go`) and
    `inputContentRows` (`render.go`) mirror third-party widgets' internal math — the textarea wraps
@@ -181,6 +186,16 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
   pane's frame, which is composed by `lipgloss.Style.Width` end to end and so folds such a line
   into two pane rows. That fold is pre-existing and reachable through pop-up rows, which never
   wrapped; it is why the pop-up body is the one wrapped surface not yet following the painter.)*
+  *(Closed 2026-08-03: the fold is fixed, and it was **two** sites of one defect class rather than
+  the one this note named — the pop-up pane (`blackFill`, the selected row's `userBlock.Width`, and
+  `popupBorder.Width`) and the start-up card (`startupBorder.Width`, both layouts). Both now frame
+  their content with `drawBox` (§5's dated note), which pads and cuts every row with `th.measure`
+  and emits the border and padding itself, so one composed row is one painted row.
+  `lipgloss.JoinVertical` left the pop-up with it, being the same GraphemeWidth pad one level in.
+  `TestPaintedBoxRowsAreNotFolded` (`paint_test.go`) pins composed-rows == painted-rows, and each
+  row's right border, for both surfaces under both width methods. The one `lipgloss.Style.Width`
+  left in the package is the prompt box's (`inputView`), which frames a widget that wraps in
+  GraphemeWidth itself — §6's mirror exception, correct where it stands.)*
 - **`CHANGELOG.md`'s v1.1.0 `caretTo` entry claimed the fix used "the same width the widget's own
   cursor math uses", which was not true.** Shipped history is not rewritten; the entry carries a
   dated correction pointing at the real fix.

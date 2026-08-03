@@ -20,14 +20,14 @@ import (
 // overlay's state.
 //
 // Contract:
-//   - width is the TOTAL box width, in lipgloss v2 semantics: the rounded border and the padding
-//     fold INTO width, so every rendered line is exactly width display cells (like
-//     renderStartupBox). Callers pass m.width — the full window width, the same value the input
-//     box spans — so the pane's right border lands on the terminal's last column, flush with the
-//     prompt box below it.
+//   - width is the TOTAL box width: the rounded border and the padding fold INTO width, so every
+//     rendered line is exactly width display cells in the painter's own measure, and the pane is
+//     exactly as many painted rows as it composed (drawBox, like renderStartupBox). Callers pass
+//     m.width — the full window width, the same value the input box spans — so the pane's right
+//     border lands on the terminal's last column, flush with the prompt box below it.
 //   - The pane is filled solid black: the border style paints its border and padding cells black,
-//     and renderPopup pads every content line to the full inner width on the same black field, so
-//     no interior cell (including the gap after a short row) is left on the terminal background.
+//     and every content line is padded out to the full inner width on the same black field, so no
+//     interior cell (including the gap after a short row) is left on the terminal background.
 //   - The module owns the marker (glyphUser + a space on the selected row, two spaces
 //     otherwise), the selected-row highlight (th.userBlock's full bar), the scroll windowing
 //     (popupRowWindow), and — since the column contract below — the COLUMN ALIGNMENT of the rows
@@ -127,13 +127,19 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	}
 	inner := max(1, width-frame)
 
-	// Every non-highlight line is padded to the full inner width on a solid-black field: the outer
-	// border style only paints its own border and padding cells, so a line shorter than inner would
-	// otherwise leave the gap between its text and the right border on the terminal's default
-	// background (a black-hole strip). blackFill closes that — title, plain rows, and hint all read
-	// as sitting on the same black pane. The selected row keeps th.userBlock's dark-gray highlight
-	// bar (already full-inner-width) as its deliberate selection cue.
-	blackFill := lipgloss.NewStyle().Background(colBlack).Width(inner)
+	// Every content line sits on a solid-black field: the outer border style only paints its own
+	// border and padding cells, so a line whose own styles carry no background would otherwise show
+	// the terminal's default background through the pane (a black-hole strip). blackFill closes that
+	// — title, plain rows, and hint all read as sitting on the same black pane — and drawBox pads
+	// each line out to the full inner width on that same field. The selected row keeps th.userBlock's
+	// dark-gray highlight bar, squared to the inner width itself, as its deliberate selection cue.
+	//
+	// It is deliberately NOT a Width style any more. lipgloss pads — and past its width WRAPS — in
+	// GraphemeWidth whatever the painter is doing, so a line the authority calls exactly inner cells
+	// wide can measure wider to lipgloss (any VARIATION SELECTOR-16 cluster does) and a Width style
+	// would fold that one pane row into two: the pane outgrows the row budget popupBudget granted it
+	// and neither half of the folded row reaches the pane's right border (ADR 0030 §5).
+	blackFill := lipgloss.NewStyle().Background(colBlack)
 
 	// BOTH content blocks are composed BEFORE the title row is written, because what they could not
 	// fit changes what that row says: a pane granted no body rows and no row window reports those
@@ -162,8 +168,12 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 		lines = append(lines, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, spec.hint, inner))))
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-	return th.popupBorder.Width(width).Render(content)
+	// drawBox rather than th.popupBorder.Width(width).Render: the pane's own rows are DRAWN, squared
+	// to the inner width in the painter's measure, so one composed line is always one painted row and
+	// the pane is exactly as tall as the frame budgeted for it. lipgloss.JoinVertical went with it —
+	// it left-aligned by padding every row out to the widest row IT measured, which is the same
+	// GraphemeWidth pad one level in.
+	return strings.Join(drawBox(th.measure, th.popupBorder, lines, width), "\n")
 }
 
 // popupGutter separates two adjacent popup columns: two spaces, the minimum gap between the widest
@@ -289,7 +299,11 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 		}
 		row := truncateToWidth(th, marker+rows[i], inner)
 		if selected {
-			out = append(out, th.userBlock.Width(inner).Render(row))
+			// Squared in the authority's measure before the style is applied, the way renderUserBlock
+			// pads its own rows: the highlight bar spans the full inner width on the block's OWN
+			// dark-gray field rather than the pane's black, and a lipgloss Width would fold the row
+			// instead of padding it whenever the two measures disagree about it (ADR 0030 §5).
+			out = append(out, th.userBlock.Render(squareLine(th.measure, row, inner)))
 		} else {
 			out = append(out, blackFill.Render(th.statusFaint.Render(row)))
 		}

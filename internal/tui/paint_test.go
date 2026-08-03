@@ -397,3 +397,103 @@ func TestPaintedQueuedBandFillsTheWindow(t *testing.T) {
 		})
 	}
 }
+
+// A boxed surface paints exactly as many rows as it composed, and every one of them reaches the
+// box's right border.
+//
+// Both boxes used to hand their total width to lipgloss — th.popupBorder.Width(width) for the pane
+// and th.startupBorder.Width(width) for the start-up card — and a lipgloss Width does not merely
+// pad: past its width it WRAPS, in GraphemeWidth whatever the painter is doing. A row the authority
+// measures as exactly the box's inner width can be wider than that to lipgloss, because a VARIATION
+// SELECTOR-16 cluster is one cell to the WcWidth painter and two to lipgloss. So ONE composed row
+// came back as TWO painted rows, splitting the row's tail onto a line of its own: the pane below
+// painted six rows where it composed five, and the start-up card seven where it composed six, the
+// fold leaving rows that stop short of the box's right border. A pane taller than the frame budgeted for it
+// (popupBudget) is the version of that defect a human sees. drawBox draws the rows instead, in the
+// painter's own measure (ADR 0030 §5).
+//
+// The GraphemeWidth arm is the case the two measures agree about, so it passed before the fix too;
+// it is here to pin that the fix left the agreeing case exactly where it was.
+func TestPaintedBoxRowsAreNotFolded(t *testing.T) {
+	// One row of ⚠️ , six times: twelve cells to the WcWidth painter and eighteen to lipgloss, which
+	// is the disagreement — the row fits the pane's inner width in the measure the terminal paints
+	// in, and overflows it in the measure lipgloss would have wrapped it at.
+	pane := popupSpec{
+		title:       "pick one",
+		rows:        []popupRow{{strings.Repeat(vs16Warning+" ", 6)}},
+		selected:    0,
+		hint:        "esc close",
+		maxBodyRows: -1,
+		maxRows:     -1,
+	}
+	card := startupView{
+		Logo:    "AAAA\nBBBB\nCCCC",
+		Host:    "host",
+		Model:   "danger " + vs16Warning, // the info block's widest value, so it sets the card's right edge
+		Context: "32k",
+		Version: "0.10.13",
+	}
+
+	for _, box := range []struct {
+		name  string
+		width int
+		rows  int // the rows the surface composes: its two borders plus its content lines
+		draw  func(th theme, width int) []string
+	}{
+		{
+			name: "pop-up pane", width: 20, rows: 5, // ╭─╮, title, one row, hint, ╰─╯
+			draw: func(th theme, width int) []string {
+				return strings.Split(renderPopup(th, pane, width), "\n")
+			},
+		},
+		{
+			// The wide layout pairs logo line i with info row i and blank-fills the shorter side, so
+			// the card's four info rows set its height however many lines the logo has.
+			name: "start-up card", width: 30, rows: 6, // ╭─╮, four logo/info lines, ╰─╯
+			draw: func(th theme, width int) []string { return renderStartupBox(th, card, width) },
+		},
+	} {
+		for _, tc := range paintMethods {
+			t.Run(box.name+"/"+tc.name, func(t *testing.T) {
+				th := newTheme()
+				th.measure = widthAuthority{method: tc.method}
+
+				lines := box.draw(th, box.width)
+				if len(lines) != box.rows {
+					t.Errorf("box paints %d rows, want the %d it composed:\n%s",
+						len(lines), box.rows, strings.Join(mapStrip(lines), "\n"))
+				}
+				for i, ln := range lines {
+					plain := strip(ln)
+					if got := paintedWidth(plain, tc.method); got != box.width {
+						t.Errorf("row %d paints %d columns, want the box's %d: %q",
+							i, got, box.width, plain)
+					}
+					if edge := lastGlyph(plain); edge != "╮" && edge != "│" && edge != "╯" {
+						t.Errorf("row %d ends in %q, not the box's right border: %q", i, edge, plain)
+					}
+				}
+			})
+		}
+	}
+}
+
+// mapStrip strips the SGR from every line of a block, for a failure message that shows the rows a
+// box painted rather than the escape sequences it painted them with.
+func mapStrip(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = strip(ln)
+	}
+	return out
+}
+
+// lastGlyph is the final grapheme cluster of a plain line, or "" when it has none — the cell a boxed
+// row's right border has to occupy.
+func lastGlyph(s string) string {
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return ""
+	}
+	return string(runes[len(runes)-1])
+}
