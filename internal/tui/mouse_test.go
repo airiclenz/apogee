@@ -1669,9 +1669,14 @@ func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
 }
 
 // TestFrameRowBoundaryAgreesWithTheMouseMapping is the seam itself, over a table of overlay
-// heights: the row at which View stops drawing the transcript and starts drawing the overlay is
-// exactly the row at which the mouse stops finding transcript content. One derivation, so the two
-// cannot drift — and the composed frame still fits the terminal.
+// heights: the row at which View stops drawing the transcript is exactly the row at which the mouse
+// stops finding transcript content. One derivation, so the two cannot drift — and the composed
+// frame still fits the terminal.
+//
+// What View draws on that boundary row is the frame's blank gap row: the transcript-side slot sits
+// BELOW the gap so its panes seat flush on the ▔ hairline, which puts the pane's first line one row
+// further down. The gap row belongs to neither side — it maps to no content line, exactly as the
+// pane rows do — so the seam is unmoved by where it falls.
 func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 	deepTranscript := func(m *Model) {
 		for i := range 60 {
@@ -1732,16 +1737,20 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 				t.Errorf("row %d is past the transcript but the mouse maps it to content line %d", drawn, line)
 			}
 
-			// View's own boundary: the overlay's first line is painted on exactly that row.
+			// View's own boundary: the gap row is painted on exactly that row, and the overlay's
+			// first line on the one below it.
 			frame := strings.Split(m.View().Content, "\n")
 			if overlay != "" {
 				want := strings.Split(overlay, "\n")[0]
-				if drawn >= len(frame) {
-					t.Fatalf("frame has %d rows, too short to hold the boundary row %d", len(frame), drawn)
+				if drawn+1 >= len(frame) {
+					t.Fatalf("frame has %d rows, too short to hold the boundary row %d and the pane below it", len(frame), drawn)
 				}
-				if frame[drawn] != want {
+				if got := ansiPattern.ReplaceAllString(frame[drawn], ""); strings.TrimSpace(got) != "" {
+					t.Errorf("frame row %d = %q, want the frame's blank gap row on the transcript's boundary", drawn, got)
+				}
+				if frame[drawn+1] != want {
 					t.Errorf("frame row %d = %q, want the overlay's first line %q",
-						drawn, ansiPattern.ReplaceAllString(frame[drawn], ""), ansiPattern.ReplaceAllString(want, ""))
+						drawn+1, ansiPattern.ReplaceAllString(frame[drawn+1], ""), ansiPattern.ReplaceAllString(want, ""))
 				}
 			}
 			if len(frame) > m.height {

@@ -63,7 +63,17 @@ one-row cosmetic fix).
   `frameRowPlan`) or the give-way order.
 - Version bump (see closing note).
 
-## 1. Seat the transcript-side overlay panes flush on the bottom chrome
+## 1. Seat the transcript-side overlay panes flush on the bottom chrome — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): design call answered — ALL THREE panes (approval/ask prompt, browser, picker)
+moved below the gap row, so `View` keeps one append order with no per-pane branching. Two prose
+sites beyond the item's list were touched, both stale for the same reason and neither arithmetic:
+the `frameFixedRows` block comment (`model.go:2422`, "separates the transcript from the chrome" —
+now "from whatever comes next") and the doc comment of `TestFrameRowBoundaryAgreesWithTheMouseMapping`
+(`mouse_test.go`), whose assertion was the one existing test pinning the old order (repaired to
+expect the blank gap row on the boundary and the pane one row below it). `mouse.go`'s overlay
+comments (lines ~50 and ~181) describe the slot without stating an order, so they needed no change.
+New tests live in `model_test.go` beside `TestTopRuleHairlineRow`.
 
 **Design call (needs the user before implementing).**
 Q: Should the approval/ask prompt move below the gap row together with the browser and

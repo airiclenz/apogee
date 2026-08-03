@@ -2049,6 +2049,126 @@ func TestTopRuleHairlineRow(t *testing.T) {
 	}
 }
 
+// blankRow reports whether a composed frame row carries nothing but spaces — the form the frame's
+// gap row takes once styling is stripped.
+func blankRow(s string) bool { return strings.TrimSpace(s) == "" }
+
+// frameRule returns the composed frame's rows and the index of its ▔ top-edge hairline — the row
+// that caps the bottom chrome, and so the row every transcript-side pane is measured against.
+func frameRule(t *testing.T, m Model) ([]string, int) {
+	t.Helper()
+	rows := strings.Split(plain(m.View()), "\n")
+	for i, ln := range rows {
+		if strings.Contains(ln, "▔") {
+			return rows, i
+		}
+	}
+	t.Fatalf("no ▔ top-edge hairline in the composed frame:\n%s", strings.Join(rows, "\n"))
+	return nil, -1
+}
+
+// TestOverlayPaneSitsFlushOnBottomChrome pins where the frame's single blank gap row falls relative
+// to the transcript-side overlay slot: ABOVE it. The /sessions browser, the /model | /server picker
+// and the approval prompt used to be stacked between the transcript and that gap row, so each of
+// them painted one empty row between its bottom border and the ▔ hairline — while the autocomplete
+// dropdown and the staged-interjection band, which sit in the OTHER slot, hugged the input box with
+// no such spacer. That asymmetry is the reported inconsistency (ISSUES.md); the panes now seat flush
+// on the chrome and the gap separates the session area from the pane instead.
+//
+// The frame's total height is asserted with it: this is a stacking reorder and nothing else, so the
+// frame still fills the window exactly (D2) and the row arithmetic behind it is untouched.
+func TestOverlayPaneSitsFlushOnBottomChrome(t *testing.T) {
+	servers := []ServerChoice{
+		{Name: "host-a", Endpoint: "http://192.168.64.1:1111"},
+		{Name: "host-b", Endpoint: "http://192.168.64.2:1111"},
+	}
+
+	panes := []struct {
+		name string
+		open func(t *testing.T) Model
+	}{
+		{"session browser", func(t *testing.T) Model {
+			m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a"})
+			m.sessionBrowser = browserWithSessions(4)
+			m.layout()
+			return m
+		}},
+		{"server picker", func(t *testing.T) Model {
+			m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a", Servers: servers})
+			m.picker = picker{open: true, kind: pickerServer}
+			m.layout()
+			return m
+		}},
+		{"approval prompt", func(t *testing.T) Model {
+			m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a"})
+			m.state = stateAwaitingApproval
+			m.pending = &approvalReqMsg{Request: domain.ApprovalRequest{
+				Tool:      "write_file",
+				Reason:    "the file has to exist before the build can run",
+				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
+			}}
+			m.layout()
+			return m
+		}},
+	}
+
+	for _, pane := range panes {
+		t.Run(pane.name, func(t *testing.T) {
+			m := pane.open(t)
+			rows, ruleRow := frameRule(t, m)
+
+			// (a) Flush: the pane's bottom border is the row directly above the hairline.
+			if !strings.Contains(rows[ruleRow-1], "╰") {
+				t.Errorf("row above the ▔ hairline = %q, want the pane's ╰ bottom border — no spacer against the chrome\n%s",
+					rows[ruleRow-1], strings.Join(rows, "\n"))
+			}
+			// (b) The gap row is the one directly above the pane's ╭ title row, and it is the ONLY
+			// blank row between the transcript block and the chrome.
+			paneTop := -1
+			for i := range ruleRow {
+				if strings.Contains(rows[i], "╭") {
+					paneTop = i
+					break
+				}
+			}
+			if paneTop < 1 {
+				t.Fatalf("pane top border at row %d, want it below at least the gap row\n%s", paneTop, strings.Join(rows, "\n"))
+			}
+			if !blankRow(rows[paneTop-1]) {
+				t.Errorf("row above the pane's ╭ = %q, want the frame's blank gap row", rows[paneTop-1])
+			}
+			for i := paneTop; i < ruleRow; i++ {
+				if blankRow(rows[i]) {
+					t.Errorf("blank row %d between the pane and the ▔ hairline; the frame's one gap row belongs above the pane\n%s",
+						i, strings.Join(rows, "\n"))
+				}
+			}
+			// D2: the reorder must not change the frame's total rows.
+			if got := lipgloss.Height(m.View().Content); got != m.height {
+				t.Errorf("composed frame = %d rows, want %d (the whole window, no more and no less)", got, m.height)
+			}
+		})
+	}
+}
+
+// TestFrameGapRowWithoutOverlay is the reorder's other half: with nothing open in the
+// transcript-side slot the frame is exactly what it always was — one blank row directly above the
+// ▔ hairline — so moving the gap above the slot changed the idle frame not at all.
+func TestFrameGapRowWithoutOverlay(t *testing.T) {
+	m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a"})
+
+	rows, ruleRow := frameRule(t, m)
+	if ruleRow < 1 {
+		t.Fatalf("▔ hairline at row %d, want the gap row above it", ruleRow)
+	}
+	if !blankRow(rows[ruleRow-1]) {
+		t.Errorf("row above the ▔ hairline = %q, want the frame's blank gap row", rows[ruleRow-1])
+	}
+	if got := lipgloss.Height(m.View().Content); got != m.height {
+		t.Errorf("composed frame = %d rows, want %d (the whole window, no more and no less)", got, m.height)
+	}
+}
+
 // TestBottomRuleHairlineRow is the top rule's mirror. Losing the footer's ╰──╯ left the workdir
 // line flush against the terminal's last row with nothing under it, so a ▁ hairline — the ▔
 // INVERTED, upper one-eighth block against lower — closes the screen below it. The two are one

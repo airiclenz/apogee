@@ -2419,8 +2419,10 @@ func (m Model) upstreamBlockNote() string {
 // Layout
 // ----------------------------------------------------------------------------
 
-// The fixed chrome heights below the transcript. One blank gap row separates the transcript
-// from the chrome (layout.md); the ▔ top-edge hairline is one row; the status line is one row;
+// The fixed chrome heights below the transcript. One blank gap row separates the transcript from
+// whatever comes next — the bottom chrome, or a pane in the transcript-side overlay slot, which
+// then seats flush on that chrome (layout.md, View); the ▔ top-edge hairline is one row; the
+// status line is one row;
 // the footer is ONE frameless content line — it has no divider above it and no bordered rule below
 // it, because the prompt box closes its own frame; and the ▁ bottom-edge hairline is one row,
 // closing the screen under the footer. The two hairlines are one role in two positions, which is
@@ -2660,6 +2662,10 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 // approval or ask prompt, the /sessions browser, the /model | /server picker, the autocomplete
 // dropdown, and the staged-interjection strip. Each field is "" when its overlay is closed.
 //
+// They sit in two slots, and every one of them is FLUSH on the chrome its slot abuts: the first
+// three go directly above the ▔ hairline (the frame's blank gap row falls above them, not between
+// them and the chrome), the last two directly above the input box.
+//
 // They are gathered as ONE value because two readers need them and must never disagree: View
 // composes them into the frame, and [Model.transcriptRows] measures them to say how many screen
 // rows the transcript still owns — which is what the mouse maps a click through.
@@ -2738,9 +2744,10 @@ const frameBlocks = 12
 // screen (layout.md). Before
 // the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder —
 // on the alternate screen as well, so no frame apogee emits ever touches the primary one. The
-// approval or ask prompt, when one is pending, sits between the transcript and the blank line, as
-// do the /sessions browser and the picker; the autocomplete dropdown and the staged-interjection
-// strip sit just above the input box. Every one of them takes its rows from the transcript
+// approval or ask prompt, when one is pending, sits between the blank line and the ▔ hairline — so
+// it seats flush on the bottom chrome — as do the /sessions browser and the picker; the
+// autocomplete dropdown and the staged-interjection strip sit just above the input box, flush on it
+// in the same way. Every one of them takes its rows from the transcript
 // (transcriptRows). It also places the frame's cursor: the real terminal one, at the prompt caret,
 // wherever the box is editable (promptCursor).
 func (m Model) View() tea.View {
@@ -2780,6 +2787,14 @@ func (m Model) View() tea.View {
 			rows = append(rows, m.joinScrollbar(body, m.renderScrollbar(vp)))
 		}
 	}
+	// The single blank line between chat content and what follows it (layout.md). It sits ABOVE the
+	// transcript-side overlay slot, not below it, so a pane opened there seats FLUSH on the ▔
+	// hairline rather than painting an empty row against the bottom chrome — the asymmetry the
+	// dropdown and the staged band never had, since they already hug the input box. With no pane
+	// open the frame is unchanged: the blank row still lands directly above the ▔. Either way the
+	// frame spends exactly one gap row, so the row arithmetic (frameFixedRows, transcriptBudget)
+	// does not know or care which side of the slot it falls on.
+	rows = append(rows, "")
 	if ov.prompt != "" {
 		rows = append(rows, ov.prompt)
 	}
@@ -2792,10 +2807,9 @@ func (m Model) View() tea.View {
 	if ov.picker != "" {
 		rows = append(rows, ov.picker)
 	}
-	// The single blank line between chat content and the bottom chrome (layout.md), then the
-	// ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay (when
-	// open), the input box, the footer, and the ▁ hairline closing the screen under it.
-	rows = append(rows, "", m.topRule(), m.statusLine())
+	// Then the ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay
+	// (when open), the input box, the footer, and the ▁ hairline closing the screen under it.
+	rows = append(rows, m.topRule(), m.statusLine())
 	if ov.dropdown != "" {
 		rows = append(rows, ov.dropdown)
 	}
