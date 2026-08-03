@@ -2,10 +2,7 @@ A: Activated / Active
 P: Planned
 X: Executed
 
-
-- [X] When sending a new prompt, I do not want the session chat to jump so that the new prompt ends up at the very top of an empty chat (scrolled down) and the rest of the chat history becomes invisible. I just want the new chat naturally be added to the chat and automatic scrolling taking care of it. When the last prompt later reaches the top of the session chat, it should still stick there - as it already does now.
-
-- [X] huge prompts should be collaped to 3 rows (expandable) when displyed in the session chat. Can the module that is used to display tool in the chat be used? That module already supports collapsing and expanding content. Maybe we should implement a sub-class for this kind of issue from which the prompt-collapser and the tool-collapser module are derived?
+- [ ] when printing markdown tables, cells with much contect currently truncate the content if it does not fit. The content needs to be wrapped into another line within the cell. This will probably require the introduction of vertical and horizontal table lines / frames.
 
 - [ ] Currently I cannot see how much of it's context a sub agent has used.
 
