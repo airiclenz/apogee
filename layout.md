@@ -606,6 +606,18 @@ Two editors need a word of explanation, and this is the place a puzzled reader w
 toolbar breadcrumb but not the tab label, which is Zed's own open question. Under tmux or screen it
 sets the *pane* title, and reaches the outer window only with `set -g set-titles on`.
 
+**Why some agent CLIs need no VS Code setting and we do.** Because VS Code knows their names, not
+because of anything they send. Since **1.117** (April 2026) it overrides its own tab template with
+`${sequence}` for an allowlist of agent CLIs — `claude`, `codex`, `commandcode`, `copilot`, `gemini`
+— matched on the pty's foreground **process name** and gated by
+`terminal.integrated.tabs.allowAgentCliTitle`, which defaults on. The list is a table in the editor
+(`generalShellTypeMap` in `terminalProcess.ts`, `TerminalLabelComputer.agentCliShellTypes` in
+`terminalInstance.ts`); `apogee` is not in it, and the default template is still `${process}` for
+everyone else. Nor is the sequence we emit the lever: xterm.js routes `OSC 0` and `OSC 2` to one
+title event and VS Code reads only that event, so `OSC 0` would change nothing, while `OSC 1` — the
+icon name alone — never reaches the tab at all. The one route off the setting is upstream, a name
+added to that table (Command Code's was, in July 2026); parked in `TODO.md`.
+
 ---
 
 ## The staged-interjection band

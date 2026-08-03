@@ -225,6 +225,27 @@ blank-on-close, as documented). So the emit path, the star, the name, and the ch
 are proven; what remains is only how each terminal chooses to DISPLAY the title, which is the list
 below.
 
+NOTES (2026-08-03, the VS Code row — RESOLVED from source, no experiment needed): the owner's
+observation that Claude Code names their VS Code tab with `tabs.title` still `${process}` is real,
+and the reason is not the escape sequence. VS Code **1.117** (PR microsoft/vscode#304528, merged
+2026-04-13) detects a fixed set of agent CLIs by the pty's foreground **process name** —
+`generalShellTypeMap` in `src/vs/platform/terminal/node/terminalProcess.ts` maps `claude`, `codex`,
+`commandcode`, `copilot`, `gemini` — and `TerminalLabelComputer.refreshLabel`
+(`terminalInstance.ts:2739-2741`) then swaps the user's template for `${sequence}` for exactly
+those, gated by `terminal.integrated.tabs.allowAgentCliTitle` (default **true**). The global
+default stayed `${process}` — the earlier attempt to change it for everyone (PR #294647, the one
+issue #291275 pointed at) was merged 2026-02-11 and **reverted six days later** (`edb22b0d`), which
+is why that issue reads as not-planned. So the shipped docs were right for apogee and wrong only in
+implying the rule is universal; both `layout.md` and `README.md` now say why.
+
+The OSC-0 hypothesis in the handoff is **refuted**, so the "if OSC 2 is the wrong sequence" branch
+is closed and no code changes: xterm.js registers `OSC 0` → `setTitle` + `setIconName`, `OSC 2` →
+`setTitle` (`InputHandler.ts:286-290`), VS Code listens only to `xterm.raw.onTitleChange`
+(`terminalInstance.ts:1526`) and stores it as `_sequence` (`:2158`). `OSC 0` would therefore land
+exactly where `OSC 2` already lands, and `OSC 1` reaches nothing. Bubble Tea's hard-coded `OSC 2`
+stands. The only route off the setting is getting `apogee` into VS Code's table upstream — parked
+in `TODO.md`, owner's call.
+
 **What:** no code. Run apogee under each terminal the issue names and confirm what the table
 above predicts, then record the outcome as NOTES on this item (this is the one item whose
 result cannot be asserted by a test — `make check` cannot see a title bar):
