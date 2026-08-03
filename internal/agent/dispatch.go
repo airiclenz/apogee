@@ -126,6 +126,47 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 	}
 }
 
+// hookExecutionCtx returns ctx wrapped with the domain.SubprocessPermit a hook may spawn a
+// subprocess under, or ctx unchanged when it may not (confinement-execution-contract §10). It is
+// the hook-time analogue of resolveLadderAuto's subprocess row — a hook runs outside the per-call
+// Resolution, so the ladder's answer reaches it as a context token instead of a verdict:
+//
+//	| effective mode | confine-to-workspace | fs caps    | installed                          |
+//	|----------------|----------------------|------------|------------------------------------|
+//	| not Auto       | —                    | —          | nothing (Plan refuses; Ask-Before / |
+//	|                |                      |            | Allow-Edits need an Approval a hook |
+//	|                |                      |            | cannot open)                        |
+//	| Auto           | off                  | —          | permit, nil Confinement (unfenced)  |
+//	| Auto           | on                   | available   | permit carrying the workspace box   |
+//	| Auto           | on                   | unavailable | nothing (the ladder gates the       |
+//	|                |                      |            | subprocess surface here)            |
+//
+// The mode is read through effectiveMode(), never Mode(), so a sub-agent whose parent has
+// tightened mid-delegation loses the permit exactly as it loses the matching tool verdict
+// (ADR 0013). The box is built from the same three Config fields resolutionInput uses, so a
+// hook-spawned process is fenced identically to a subprocess tool's.
+func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
+	if a.effectiveMode() != domain.ModeAuto {
+		return ctx
+	}
+	if !a.ConfineToWorkspace() {
+		return domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{})
+	}
+	if !a.fsConfinementAvailable() {
+		return ctx
+	}
+	return domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{
+		Confinement: &domain.Confinement{
+			Confiner: a.cfg.Confiner,
+			Box: domain.ConfinementBox{
+				WorkspaceRoot: a.cfg.WorkspaceDir,
+				WritablePaths: a.cfg.ConfineWritablePaths,
+				NetworkAllow:  a.cfg.ConfineNetworkAllow,
+			},
+		},
+	})
+}
+
 // executeRun runs a Run verdict directly — no Approval, no Confine — and records it. It is also
 // the shared "run it now" tail for an approved Gate and an approved runtime-demote re-run, both
 // of which run unconfined once the human has authorised the call.

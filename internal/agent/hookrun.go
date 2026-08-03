@@ -132,6 +132,13 @@ func (a *Agent) firePreRequest(ctx context.Context, id domain.MechanismID, hook 
 // corrective exchange to the retried request (R1); err is non-nil only when a hook panicked
 // (recovered).
 func (a *Agent) runPostResponseHooks(ctx context.Context, turn int, resp *domain.Response) (retry bool, inject string, err error) {
+	// Post-response is the ONE hook point whose Mechanisms may spawn a subprocess (autofix's
+	// external formatters). The domain.SubprocessPermit is installed ONCE here, ahead of the
+	// cascade, so every post-response hook — catalogued and experimental alike — sees the same
+	// authorisation the ladder granted; outside Auto no permit is installed at all, which is the
+	// refusal default (confinement-execution-contract §10).
+	ctx = a.hookExecutionCtx(ctx)
+
 	for _, m := range a.registry.Ordered(domain.HookPostResponse) {
 		if a.skipMechanism(m) {
 			continue

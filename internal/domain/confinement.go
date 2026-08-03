@@ -105,3 +105,47 @@ func ConfinementFromContext(ctx context.Context) (Confinement, bool) {
 	conf, ok := ctx.Value(confinementCtxKey{}).(Confinement)
 	return conf, ok
 }
+
+// SubprocessPermit is the hook-time counterpart of Confinement: the token a HOOK must find on
+// its context before it may spawn a subprocess at all (docs/design/confinement-execution-contract.md
+// §10). A hook runs outside the per-call Resolution — no verdict, no Approval, no audit trip — so
+// the permit carries the ladder's answer to it instead, in three states:
+//
+//   - ABSENT (the default, and what a bare context yields): this hook may NOT spawn a subprocess.
+//     Plan forbids command execution outright, and Ask-Before / Allow-Edits gate a command behind
+//     an Approval that a post-response hook has no way to open, so refusal is the only honest
+//     answer in every mode but Auto.
+//   - PRESENT with a nil Confinement: run UNFENCED — the Auto + confine-to-workspace:false
+//     "I am the sandbox" opt-in, mirroring resolveLadderAuto's unfenced row.
+//   - PRESENT carrying a Confinement: confine the cmd to that box first (Confiner.Confine), and
+//     skip the spawn entirely if the box cannot be established. Never fall back to unfenced.
+//
+// Absence means REFUSAL here, while an absent Confinement handle in ConfinementFromContext means
+// "run unconfined". The asymmetry is deliberate: a tool reads its handle only after dispatch has
+// already resolved a verdict for that call, so the missing handle records a decision that was
+// taken; no such resolution runs ahead of a hook, so a missing permit records that nobody ever
+// authorised the spawn.
+type SubprocessPermit struct {
+	// Confinement, when non-nil, is the box the permitted subprocess must be confined to before
+	// it runs. Nil means the permit authorises an unfenced spawn.
+	Confinement *Confinement
+}
+
+// subprocessPermitCtxKey is the unexported context key under which a SubprocessPermit rides.
+type subprocessPermitCtxKey struct{}
+
+// WithSubprocessPermit returns a context carrying p, authorising the hooks that run under it to
+// spawn a subprocess on the terms p describes. Only the engine installs it, and only for the hook
+// points whose ladder row permits execution (today: post-response — hookExecutionCtx,
+// internal/agent/dispatch.go).
+func WithSubprocessPermit(ctx context.Context, p SubprocessPermit) context.Context {
+	return context.WithValue(ctx, subprocessPermitCtxKey{}, p)
+}
+
+// SubprocessPermitFromContext returns the SubprocessPermit installed by WithSubprocessPermit and
+// whether one is present. ok is false on any context nobody granted a permit on — including a bare
+// context.Background() — and a hook that reads false must not spawn a subprocess.
+func SubprocessPermitFromContext(ctx context.Context) (SubprocessPermit, bool) {
+	p, ok := ctx.Value(subprocessPermitCtxKey{}).(SubprocessPermit)
+	return p, ok
+}

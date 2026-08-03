@@ -707,3 +707,74 @@ unchanged degradation notice); `confinetest.Probe` passes #1–#6 **natively**; 
 SACL-less filesystem yields `ErrConfinementUnavailable` and §4's forced `Gate`; `ProbeNetwork` skips;
 the labels are provably reverted after teardown and an interrupted run is recoverable from the
 journal; `make cross` + `GOOS=windows go vet ./...` green; the other OSes' backends untouched.
+
+## 10. Hook-time subprocess execution (amendment, 2026-08-03)
+
+**Owner finding:** the 2026-08-01 audit — "`autofix` spawns an external formatter outside every
+execution guard". This section is the hook-point half of §2's execution contract and §4's
+Resolution. It is an **amendment**, not a renegotiation: §2.2's prepare-in-place shape and §4's
+verdict table are unchanged; what is new is the seam by which a **hook** — which never reaches §4
+at all — learns whether it may spawn a subprocess, and inside which box.
+
+### 10.1 Why a hook needs its own seam
+
+§4 decides one **tool call**: dispatch gathers the facts, `resolve()` returns a verdict, and the
+executor carries it out — Approval, Confine, audit trip and all. A Mechanism firing at a hook point
+is on none of that path. It runs inside the Turn, between the loop's own steps, with no call to
+resolve, no Approver to consult (the Approver is consulted after the stream closes, per call, and a
+post-response hook has no way to open a gate of its own) and no verdict to execute. So a hook that
+shells out is, by construction, outside every guard §4 provides.
+
+The fix is a **capability token on the context**, granted by the engine, mirroring how §2.2 hands a
+subprocess tool its `Confinement` handle:
+
+```go
+type SubprocessPermit struct{ Confinement *Confinement }
+
+func WithSubprocessPermit(ctx context.Context, p SubprocessPermit) context.Context
+func SubprocessPermitFromContext(ctx context.Context) (SubprocessPermit, bool)
+```
+
+Both live in `internal/domain/confinement.go`, beside the `Confinement` helpers, so a Mechanism
+(`internal/mechanisms`) reads them without importing the root facade (ADR 0010).
+
+### 10.2 The three states, and why absence means refusal
+
+| permit | meaning for the hook |
+|---|---|
+| **absent** (`ok == false`) | **may not spawn a subprocess at all** |
+| **present**, `Confinement == nil` | spawn **unfenced** — the Auto + `confine-to-workspace: false` "I am the sandbox" opt-in |
+| **present**, `Confinement != nil` | `Confiner.Confine(ctx, box, cmd)` first, then run; a `Confine` error — `ErrConfinementUnavailable` included — **skips the spawn**, never falls back to unfenced |
+
+The asymmetry with `ConfinementFromContext` is deliberate and load-bearing. There, an absent handle
+means *run unconfined*, because dispatch has already resolved a verdict for that call: the missing
+handle records a decision that was **taken** (the Run row). Here, nothing resolves ahead of a hook,
+so a missing permit records that **nobody ever authorised** the spawn — and the only safe reading of
+an unauthorised subprocess is refusal. A hook point with no permit installed therefore keeps the
+default posture (may not spawn) with no further code.
+
+### 10.3 The ladder row the engine installs
+
+`(*Agent).hookExecutionCtx` (`internal/agent/dispatch.go`) is the hook-time analogue of
+`resolveLadderAuto`'s `classSubprocess` row:
+
+| effective mode | `confine-to-workspace` | fs confinement caps | installed |
+|---|---|---|---|
+| not Auto | — | — | **nothing** (Plan forbids command execution; Ask-Before / Allow-Edits gate a command behind an Approval a hook cannot open) |
+| Auto | off | — | permit, **nil** `Confinement` |
+| Auto | on | available | permit carrying `&Confinement{Confiner, Box}` |
+| Auto | on | unavailable | **nothing** — "confine if you can, gate if you can't" has no gate to fall back to here, so the surface closes |
+
+The mode is read through `effectiveMode()`, never `Mode()`, so a sub-agent whose parent tightened
+mid-delegation loses the permit exactly as it loses the matching tool verdict (ADR 0013). The box is
+built from the same three `Config` fields `resolutionInput` uses — `WorkspaceDir`,
+`ConfineWritablePaths`, `ConfineNetworkAllow` — so a hook-spawned process is fenced identically to a
+subprocess tool's.
+
+### 10.4 Scope
+
+The permit is installed at **post-response only**, once per cascade, ahead of both the catalogued
+and the experimental hooks (`runPostResponseHooks`, `internal/agent/hookrun.go`). Pre-request,
+pre-tool-exec and post-tool-result get no permit, which under §10.2 keeps their existing "may not
+spawn" posture — the intended one. Widening to another hook point is a deliberate act: install the
+permit there and record the row here.

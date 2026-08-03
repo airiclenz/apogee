@@ -1890,6 +1890,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Security
 
+- **A Mechanism firing at a hook point may now only spawn a process when the autonomy ladder says
+  it may.** A hook runs between the loop's own steps — it never reaches the per-call resolution, so
+  it has no verdict, no approval gate and no confinement box of its own, and anything it shelled out
+  to ran outside all three. Post-response hooks now fire under an explicit **subprocess permit**
+  carried on the context, and **its absence is a refusal, not a licence**: in Plan, Ask-Before and
+  Allow-Edits nothing is granted, so a hook cannot run a command at all. In Auto it is granted with
+  the same box a subprocess tool would get — the workspace root, your writable paths and network
+  allowlist — or, with `confine-to-workspace` off, unfenced, which is what that flag already means
+  everywhere else. A host whose kernel cannot enforce filesystem confinement grants nothing rather
+  than falling back to an unfenced spawn. A sub-agent reads its **effective** mode, so a parent that
+  tightens mid-delegation closes the child's hook-time surface too. The permit is installed at
+  post-response only; every other hook point keeps the "may not spawn" default. Contract:
+  `docs/design/confinement-execution-contract.md` §10.
+
 - **A tool's blast-radius class is now decided by what it *does*, not by what it *says* about
   itself.** The per-call classification consulted a tool's own `ReadOnly()` declaration **before**
   any of the structural markers, so a tool that declared itself read-only took the read-only row and
