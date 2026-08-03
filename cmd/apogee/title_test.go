@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/title"
 )
 
@@ -56,6 +58,66 @@ func titleServer(t *testing.T, reply string) (*httptest.Server, *titleRequest) {
 	}))
 	t.Cleanup(srv.Close)
 	return srv, &got
+}
+
+// titleAttempt is one scripted answer from scriptedTitleServer: a non-zero status fails that
+// attempt with errBody, otherwise it is answered 200 with a completion carrying content and
+// finishReason.
+type titleAttempt struct {
+	status       int
+	errBody      string
+	content      string
+	finishReason string
+}
+
+// scriptedTitleServer answers successive naming POSTs from script, recording each request body
+// verbatim so a test can prove what a re-send carried and what it dropped. A POST past the end of
+// the script fails the test on the spot: the wiring made more attempts than the case allows, which
+// is the assertion every fallback case here rests on. The returned accessor copies the record under
+// the lock, so a test may read it while the server is still up.
+func scriptedTitleServer(t *testing.T, script ...titleAttempt) (*httptest.Server, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read naming request: %v", err)
+			http.Error(w, "unreadable request", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		bodies = append(bodies, string(raw))
+		attempt := len(bodies)
+		mu.Unlock()
+
+		if attempt > len(script) {
+			t.Errorf("naming POST %d; the script allows %d — the wiring made an extra attempt", attempt, len(script))
+			http.Error(w, "unscripted attempt", http.StatusInternalServerError)
+			return
+		}
+		scripted := script[attempt-1]
+		if scripted.status != 0 {
+			http.Error(w, scripted.errBody, scripted.status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body, err := json.Marshal(map[string]any{"choices": []map[string]any{{
+			"message":       map[string]string{"content": scripted.content},
+			"finish_reason": scripted.finishReason,
+		}}})
+		if err != nil {
+			t.Errorf("marshal scripted reply: %v", err)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), bodies...)
+	}
 }
 
 // The generator's whole job: one round-trip to the server the session is bound to RIGHT NOW,
@@ -180,6 +242,126 @@ func TestTitleGeneratorDoesNotRetry(t *testing.T) {
 	if n := attempts.Load(); n != 1 {
 		t.Errorf("server saw %d naming POSTs; want exactly 1 — a retried title re-enters the queue", n)
 	}
+}
+
+// A thinking model on a server that ignored the "no reasoning" switch spends the whole token cap
+// arriving at a title and returns finish_reason "length" with nothing in it. That is a cause the
+// caller can name, so it comes back as title.ErrTruncated rather than as an empty reply with no
+// error — which reads exactly like the model answering with garbage.
+func TestTitleGeneratorNamesATruncatedReply(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name         string
+		content      string
+		finishReason string
+		wantTitle    string
+		wantTruncErr bool
+	}{
+		{name: "empty at the cap", finishReason: "length", wantTruncErr: true},
+		{name: "whitespace at the cap", content: " \n\t ", finishReason: "length", wantTruncErr: true},
+		// A cut-off reply that still carries text is not this failure: a truncated title is a title,
+		// and the sanitizer TUI-side is what decides whether it survives.
+		{name: "cut off mid-title", content: "fix the flaky parser", finishReason: "length",
+			wantTitle: "fix the flaky parser"},
+		// An empty reply the server considers COMPLETE stays the generic nothing-usable case the
+		// sanitizer already reports; only the cap makes it ErrTruncated.
+		{name: "empty but complete", finishReason: "stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := scriptedTitleServer(t, titleAttempt{content: tc.content, finishReason: tc.finishReason})
+			binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
+			wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+
+			got, err := wiring.generate(context.Background(), []string{"name this session"})
+			switch {
+			case tc.wantTruncErr && !errors.Is(err, title.ErrTruncated):
+				t.Fatalf("generate = (%q, %v); want title.ErrTruncated so the caller can say what happened", got, err)
+			case !tc.wantTruncErr && err != nil:
+				t.Fatalf("generate = (%q, %v); want no error", got, err)
+			}
+			if !tc.wantTruncErr && got != tc.wantTitle {
+				t.Errorf("generate = %q; want the reply passed through as %q", got, tc.wantTitle)
+			}
+		})
+	}
+}
+
+// The "answer without thinking" intent rides as a chat_template_kwargs object — a field llama.cpp
+// accepts and a stricter OpenAI-compatible server may reject outright. One re-send without it is
+// what keeps asking for it from turning "naming fails on big sessions" into "naming fails always".
+func TestTitleGeneratorFallsBackWhenTheThinkingKwargIsRejected(t *testing.T) {
+	t.Parallel()
+
+	srv, bodies := scriptedTitleServer(t,
+		titleAttempt{status: http.StatusBadRequest, errBody: `{"error":"unknown field: chat_template_kwargs"}`},
+		titleAttempt{content: "fix the flaky parser test", finishReason: "stop"},
+	)
+	binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
+	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+
+	got, err := wiring.generate(context.Background(), []string{"the parser test fails every other run"})
+	if err != nil {
+		t.Fatalf("generate: %v; want the fallback attempt's title", err)
+	}
+	if want := "fix the flaky parser test"; got != want {
+		t.Errorf("generate = %q; want %q from the re-send", got, want)
+	}
+
+	sent := bodies()
+	if len(sent) != 2 {
+		t.Fatalf("server saw %d naming POSTs; want the rejected attempt and exactly one fallback", len(sent))
+	}
+	if !strings.Contains(sent[0], "chat_template_kwargs") {
+		t.Errorf("first request body = %s; want the thinking kwarg on the attempt that is allowed to fail", sent[0])
+	}
+	if strings.Contains(sent[1], "chat_template_kwargs") {
+		t.Errorf("fallback request body = %s; want the rejected field dropped, not re-sent", sent[1])
+	}
+}
+
+// The fallback is ONE re-send, and only for the class it can help. A second rejection escapes as the
+// error, and an overflow is never re-sent at all: the request is too big for the window, which
+// dropping a field cannot fix, and a pointless second POST would take a queue slot ahead of the
+// user's next Exchange.
+func TestTitleGeneratorFallsBackAtMostOnce(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a rejected fallback escapes", func(t *testing.T) {
+		t.Parallel()
+		srv, bodies := scriptedTitleServer(t,
+			titleAttempt{status: http.StatusBadRequest, errBody: "bad request"},
+			titleAttempt{status: http.StatusBadRequest, errBody: "bad request"},
+		)
+		binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
+		wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+
+		got, err := wiring.generate(context.Background(), []string{"name this session"})
+		if err == nil {
+			t.Fatalf("generate = (%q, nil); want the second rejection surfaced as an error", got)
+		}
+		if n := len(bodies()); n != 2 {
+			t.Errorf("server saw %d naming POSTs; want exactly 2 — the fallback must not repeat", n)
+		}
+	})
+
+	t.Run("an overflow is not re-sent", func(t *testing.T) {
+		t.Parallel()
+		srv, bodies := scriptedTitleServer(t,
+			titleAttempt{status: http.StatusBadRequest, errBody: `{"error":"maximum context length exceeded"}`},
+		)
+		binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
+		wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+
+		got, err := wiring.generate(context.Background(), []string{"name this session"})
+		if !errors.Is(err, provider.ErrContextOverflow) {
+			t.Fatalf("generate = (%q, %v); want the overflow sentinel", got, err)
+		}
+		if n := len(bodies()); n != 1 {
+			t.Errorf("server saw %d naming POSTs; want exactly 1 — an oversized prompt cannot be helped by a re-send", n)
+		}
+	})
 }
 
 // The composition root always hands the TUI a naming seam: `auto-title:` gates only the AUTOMATIC

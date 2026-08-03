@@ -117,7 +117,7 @@ window forms.
 
 **Commit:** `fix(title): turn thinking off and quadruple the naming call's reply budget`
 
-## 3. Wiring: detect the truncated-empty reply, survive a rejected kwarg
+## 3. Wiring: detect the truncated-empty reply, survive a rejected kwarg — ✅ DONE (2026-08-03)
 
 **What:** in `cmd/apogee/title.go` `generate` (depends on items 1–2):
 
