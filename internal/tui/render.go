@@ -785,6 +785,27 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 // beside the painter and not beside diffBody, the producer that used to apply it.
 const diffDetailCap = 20
 
+// splitAtCap splits a body's lines at a collapsed paint's cap: the lines the compact shape SHOWS,
+// and how many it leaves unshown — 0 when the body already fits, which is exactly "this paint hides
+// nothing". It is the shown/hidden arithmetic alone, held apart from any one block's caps and
+// wording so the collapsed paints that need it — a tool call's detail body, a long prompt's wrapped
+// rows — cannot come to disagree about where the seam falls or how much sits behind it.
+//
+// What counts a remainder out loud stays the caller's: a tool block's `… +N more lines` and a
+// prompt's see-more marker are different sentences about the same number.
+//
+// A negative cap is clamped rather than left to panic on the slice: this runs on the repaint path,
+// where a panic is the whole session.
+func splitAtCap[T any](lines []T, limit int) (shown []T, hidden int) {
+	if limit < 0 {
+		limit = 0
+	}
+	if len(lines) <= limit {
+		return lines, 0
+	}
+	return lines[:limit], len(lines) - limit
+}
+
 // collapsedDetails is the collapsed paint of a retained body, split at the seam a click cares
 // about: the lines the compact shape SHOWS, and the synthesized "… +N more lines" marker counting
 // what it hides (truncated says whether it hides anything at all; the marker is meaningless when
@@ -800,7 +821,9 @@ const diffDetailCap = 20
 // (toolBody, toolpresent.go): a diff body — one carrying at least one tagged line, which every
 // body diffBody produces does — keeps diffDetailCap lines, so a focused change reads in place; any
 // other multi-line body keeps its first line alone, the gist a Run's output is worth in the chat.
-// A body already inside its cap paints whole and grows no marker.
+// A body already inside its cap paints whole and grows no marker. Which cap applies and how the
+// remainder is worded are this function's; where the cut falls is splitAtCap's, shared with the
+// other collapsed paints.
 //
 // The kind is READ, never re-derived here. This runs on every repaint and twice per call — the
 // toggle-target rule asks it as well as the branch — over a body the entry now retains whole, so
@@ -816,11 +839,11 @@ func collapsedDetails(body toolBody) (shown []detailLine, remainder detailLine, 
 	if body.isDiff() {
 		limit = diffDetailCap
 	}
-	lines := body.all()
-	if len(lines) <= limit {
-		return lines, detailLine{}, false
+	shown, hidden := splitAtCap(body.all(), limit)
+	if hidden == 0 {
+		return shown, detailLine{}, false
 	}
-	return lines[:limit], detailLine{Text: "… +" + plural(len(lines)-limit, "more line")}, true
+	return shown, detailLine{Text: "… +" + plural(hidden, "more line")}, true
 }
 
 // branchDetails is what a targetless call hangs off its header: the body, plus the summary as

@@ -65,10 +65,10 @@ const (
 // rebuilt, so persisting it would append a fresh copy on every resume until the record was a
 // column of "resumed:" notes.
 //
-// expanded is the block's VIEW state and nothing else (entryToolCall only, toggleExpanded its one
-// writer): false — the zero value, and therefore the default for every entry however it was born,
-// folded mid-flight or replayed from a record — is the collapsed, compact paint; true paints the
-// block's retained body in full (layout.md, "Collapsed and expanded blocks"). It sits beside done
+// expanded is the block's VIEW state and nothing else (the kinds hasBlockState admits, setExpanded
+// its one writer): false — the zero value, and therefore the default for every entry however it was
+// born, folded mid-flight or replayed from a record — is the collapsed, compact paint; true paints
+// the block's retained body in full (layout.md, "Collapsed and expanded blocks"). It sits beside done
 // because it is the same kind of per-entry fact the painter reads off the shared entries slice,
 // and it is deliberately absent from the wire form — the state is the view's alone, so a resumed
 // session paints everything collapsed and /clear forgets it with everything else.
@@ -497,12 +497,31 @@ func (t *transcript) hasOpenToolCall() bool {
 	return false
 }
 
+// hasBlockState reports whether an entry kind owns a collapsed/expanded block state — the gate
+// setExpanded and toggleExpanded both answer through. Three kinds do: a tool call, whose retained
+// body is capped when the block is collapsed, and the human's own two voices — the prompt
+// (entryUser) and the interjection (entryInterjected), which read as one block and collapse by one
+// rule — whose bodies collapse to a fixed row count when they run long (layout.md, "Collapsed and
+// expanded blocks"). Every other kind — an assistant answer, a note, the start-up box — paints one
+// way whatever is asked of it, so a click on it keeps its selection meaning.
+//
+// It is a fact about the KIND and never about the block's size: an over-long prompt and a one-word
+// one answer alike, because whether a body is big enough to hide anything is measured at paint time
+// against the current width, and any answer kept here would be stale by the next resize.
+func hasBlockState(kind entryKind) bool {
+	switch kind {
+	case entryToolCall, entryUser, entryInterjected:
+		return true
+	default:
+		return false
+	}
+}
+
 // setExpanded puts one block into the collapsed or the expanded paint and reports whether it found
-// a block to set. index addresses t.entries, and only a tool-call entry has a block state: every
-// other kind — a user send, an assistant answer, a note — paints one way whatever is asked of it,
-// and an index outside the slice is a caller resolving a click against a paint the transcript has
-// already grown past. Both answer false and change nothing, because this sits on the repaint path
-// where a panic is the whole session.
+// a block to set. index addresses t.entries, and only a kind hasBlockState admits carries one:
+// every other kind paints one way whatever is asked of it, and an index outside the slice is a
+// caller resolving a click against a paint the transcript has already grown past. Both answer false
+// and change nothing, because this sits on the repaint path where a panic is the whole session.
 //
 // It is the one writer of entry.expanded, and it writes THROUGH the entries slice exactly as
 // addToolResult marks done: the Model is copied by value on every Update (ADR 0011), so per-entry
@@ -513,8 +532,14 @@ func (t *transcript) hasOpenToolCall() bool {
 // It is stated as a SET rather than only a flip because the two click surfaces mean different
 // things (layout.md, "Collapsed and expanded blocks"): a header toggles its block, while a
 // `… +N more lines` marker asks to see the rest and can only ever open one.
+//
+// Holding the state is not the same as showing it. What an expanded block actually paints is the
+// painter's business (render.go), and a block with nothing to hide — a prompt that fits inside the
+// collapsed row cap at the current width — simply paints the same either way. That is deliberate:
+// the gate is about which kinds OWN a block state, so a resize can change whether a body collapses
+// without the transcript ever hearing about it.
 func (t *transcript) setExpanded(index int, expanded bool) bool {
-	if index < 0 || index >= len(t.entries) || t.entries[index].kind != entryToolCall {
+	if index < 0 || index >= len(t.entries) || !hasBlockState(t.entries[index].kind) {
 		return false
 	}
 	t.entries[index].expanded = expanded

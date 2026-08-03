@@ -1149,15 +1149,23 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	}
 }
 
-// toggleExpanded flips the block state of a TOOL-CALL entry and nothing else: an index naming
-// another kind, or naming nothing at all (a click resolved against a paint the transcript has
-// grown past), answers false and leaves every entry as it was. It runs on the repaint path, so
-// the out-of-range cases are the point — a panic there is the whole session.
-func TestToggleExpandedTargetsToolCallsOnly(t *testing.T) {
+// toggleExpanded flips the block state of the kinds that OWN one — a tool call and the human's own
+// two voices, the prompt and the interjection — and nothing else: an index naming another kind, or
+// naming nothing at all (a click resolved against a paint the transcript has grown past), answers
+// false and leaves every entry as it was. It runs on the repaint path, so the out-of-range cases
+// are the point — a panic there is the whole session.
+//
+// The gate is the KIND's, never the block's size: the short prompt below toggles like any other,
+// and whether that state changes what is painted is the painter's question, asked at the live width.
+func TestToggleExpandedTargetsCollapsibleKinds(t *testing.T) {
 	fixture := func() *transcript {
 		tr := &transcript{}
 		tr.addUser("read a.go", nil)
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
+		tr.addInterjected("the other a.go", nil)
+		tr.entries = append(tr.entries, entry{kind: entryAssistant, text: "reading it now"})
+		tr.addNote("cancelled")
+		tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
 		return tr
 	}
 	cases := []struct {
@@ -1166,8 +1174,12 @@ func TestToggleExpandedTargetsToolCallsOnly(t *testing.T) {
 		want  bool
 	}{
 		{name: "a tool call toggles", index: 1, want: true},
-		{name: "a user send has no block state", index: 0, want: false},
-		{name: "an index past the tail is no entry", index: 2, want: false},
+		{name: "a user send toggles", index: 0, want: true},
+		{name: "an interjection toggles", index: 2, want: true},
+		{name: "an assistant answer has no block state", index: 3, want: false},
+		{name: "a note has no block state", index: 4, want: false},
+		{name: "the start-up box has no block state", index: 5, want: false},
+		{name: "an index past the tail is no entry", index: 6, want: false},
 		{name: "a negative index is no entry", index: -1, want: false},
 	}
 	for _, tc := range cases {

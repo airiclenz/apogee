@@ -114,7 +114,17 @@ adjusted only where they encoded the pad.
 
 **Commit:** `fix(tui): append new prompts at the tail instead of pinning them to the top`
 
-## 2. Open the collapse state gate to user-authored entries
+## 2. Open the collapse state gate to user-authored entries — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): the kind set landed as a named predicate, `hasBlockState(kind entryKind) bool`
+(`transcript.go`, above `setExpanded`), so the gate and its rationale read in one place. The shared
+cap helper is a GENERIC, `splitAtCap[T any](lines []T, limit int) (shown []T, hidden int)` — the
+repo's first use of type parameters, and what "usable by both" requires: the tool path splits
+`[]detailLine` and item 3's painter will split `[]string`, so a `[]string`-only helper could not
+serve both. It clamps a negative cap instead of panicking on the slice (unreachable from either
+call site's constants, but this is the repaint path). The test rename is
+`TestToggleExpandedTargetsToolCallsOnly` → `TestToggleExpandedTargetsCollapsibleKinds`. No CHANGELOG
+entry: nothing user-visible changes until item 3, which carries the feature's entry.
 
 **What:** In `internal/tui/transcript.go`, widen `setExpanded` (~516–522) and thereby
 `toggleExpanded` (~528–533) from `kind != entryToolCall` to a kind set
