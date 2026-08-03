@@ -186,7 +186,7 @@ may think freely, so it was left untouched.
 
 **Commit:** `docs: record the naming-call thinking-budget fix`
 
-## 6. Close out the predecessor plan (housekeeping, independent)
+## 6. Close out the predecessor plan (housekeeping, independent) — ✅ DONE (2026-08-03)
 
 **What:** `docs/plans/2026-08-03 - 01 - session-name-on-the-top-rule-plan.md` is fully
 done (all three items marked ✅ DONE 2026-08-03) but was never closed out. Re-check
