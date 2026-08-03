@@ -78,8 +78,8 @@ func paintedColumn(row, glyph string, method ansi.Method) int {
 
 // paintTestModel returns a ready 80×24 model whose transcript overflows the viewport — so the
 // scroll bar has a thumb to paint — with tail appended as the last paragraphs. The filler is
-// deliberately plain ASCII with no box-drawing glyphs, so the only │/█ on a transcript row is
-// the scroll bar itself.
+// deliberately plain ASCII with no box-drawing glyphs, so the only vertical stroke on a transcript
+// row is the scroll bar itself.
 func paintTestModel(t *testing.T, tail ...string) Model {
 	t.Helper()
 	var b strings.Builder
@@ -161,8 +161,8 @@ func trimRight(s string) string { return strings.TrimRight(s, " ") }
 
 // THE INVARIANT — this is the inverted form of the characterization test item 1 left here (it
 // pinned the bar drifting one column left on the ⚠️ row under WcWidth). The scroll bar is a
-// straight column: every transcript row paints its │/█ in the window's last column, the ⚠️ row
-// included, whichever measure the painter is using.
+// straight column: every transcript row paints its track/thumb glyph in the window's last column,
+// the ⚠️ row included, whichever measure the painter is using.
 //
 // What used to break it was the join, not the bar: lipgloss.JoinHorizontal padded each transcript
 // row to the block's GraphemeWidth, so on a WcWidth painter the ⚠️ row arrived at the gutter a
@@ -176,9 +176,9 @@ func TestPaintedScrollbarHoldsOneColumn(t *testing.T) {
 			columns := map[int]int{}
 			sawVS16 := false
 			for _, row := range transcriptPaintRows(t, m, tc.method) {
-				col := paintedColumn(row, "│", tc.method)
+				col := paintedColumn(row, glyphScrollTrack, tc.method)
 				if col < 0 {
-					col = paintedColumn(row, "█", tc.method) // the thumb rows carry the other glyph
+					col = paintedColumn(row, glyphScrollThumb, tc.method) // the thumb rows carry the other glyph
 				}
 				if col < 0 {
 					t.Fatalf("no scroll-bar glyph on painted row %q", row)

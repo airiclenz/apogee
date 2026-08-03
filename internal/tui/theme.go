@@ -69,6 +69,18 @@ const (
 	glyphTableRule       = "─" // one cell of the rule under a markdown table's header row (mdtable.go)
 )
 
+// The transcript scroll bar's two glyphs (renderScrollbar). They are one axis drawn in two
+// weights — the thumb is the heavy stroke, the track the light one — so the bar reads as a single
+// centered line that only thickens where the view sits, rather than as a block sliding over a
+// hairline. Both are one terminal cell wide in either width method, which is what lets the gutter
+// stay one column (scrollbarWidth); TestPaintedScrollbarHoldsOneColumn pins that against a really-
+// painted frame. The track's shape is glyphSubRail's but deliberately not shared with it: the
+// sub-agent rail is a different element and the two move independently.
+const (
+	glyphScrollThumb = "┃" // U+2503 HEAVY VERTICAL — the thumb, the position marker
+	glyphScrollTrack = "│" // U+2502 LIGHT VERTICAL — the groove behind it
+)
+
 // The autonomy-mode glyphs, one per rung of the ladder (modeSymbol). They lead the footer's mode
 // marker in the mode's OWN colour — the glyph and the word are one styled run, not a coloured
 // badge beside a label — so the rung reads at a glance from the shape before the word is read.

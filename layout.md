@@ -227,6 +227,13 @@ measures to the window edge instead, still stopping short of it by the free colu
 keeps, so the text never touches the edge in either state. What the key hides is the indicator,
 never the movement — scrolling works the same with the bar gone.
 
+**It is one axis in two weights.** The track is a light vertical `│` and the thumb the heavy `┃`
+above it, drawn in the same column and centred on the same stroke, so the bar reads as a single
+line that thickens over the part of the transcript on screen rather than as a block sliding across
+a hairline. The two tones do the rest of the work: the thumb takes the dim foreground the rest of
+the chrome uses, the track the recessive one. Both glyphs are one cell wide, which is what lets the
+column stay a single column.
+
 **It is fixed for the run.** The key is config-file only, like the rest of the `ui:` block, and it
 is read once at start-up, so the width the transcript wraps to cannot change under text that has
 already been wrapped; a changed key takes effect the next time apogee starts.

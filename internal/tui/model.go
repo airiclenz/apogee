@@ -2939,8 +2939,10 @@ func (m Model) applyStickyHeader(view string) string {
 // renderScrollbar draws the one-column gutter reserved at the transcript's right edge (layout).
 // When the content overflows the viewport it shows a thumb sized to the visible fraction and
 // positioned by the scroll percent; when everything fits it is blank, so the bar appears only
-// while there is something to scroll. The returned block is exactly vp.Height() rows tall so it
-// lines up with the viewport view it is joined to.
+// while there is something to scroll. Thumb and track are the same axis in two weights
+// (glyphScrollThumb / glyphScrollTrack, theme.go), so the column reads as one line that thickens
+// where the view sits. The returned block is exactly vp.Height() rows tall so it lines up with the
+// viewport view it is joined to.
 //
 // It takes the viewport it is drawing FOR rather than reading the Model's, because the frame is
 // composed at the height the overlays leave (transcriptRows) on a local copy: sizing the thumb
@@ -2963,9 +2965,9 @@ func (m Model) renderScrollbar(vp viewport.Model) string {
 	pos := int(vp.ScrollPercent() * float64(h-thumb)) // 0 (top) … h-thumb (bottom)
 	for i := range rows {
 		if i >= pos && i < pos+thumb {
-			rows[i] = m.th.scrollThumb.Render("█")
+			rows[i] = m.th.scrollThumb.Render(glyphScrollThumb)
 		} else {
-			rows[i] = m.th.scrollTrack.Render("│")
+			rows[i] = m.th.scrollTrack.Render(glyphScrollTrack)
 		}
 	}
 	return strings.Join(rows, "\n")
@@ -2995,8 +2997,8 @@ func squareLine(measure widthAuthority, s string, w int) string {
 //
 // It stands in for the lipgloss.JoinHorizontal this used to be. JoinHorizontal pads each block's
 // rows to that block's widest row in GraphemeWidth, so on a terminal painting in WcWidth the ⚠️ row
-// reached the gutter a column short and dropped its │/█ one column left of every other row's. Doing
-// the padding here, in the painter's measure, is what makes the bar a straight column.
+// reached the gutter a column short and dropped its bar cell one column left of every other row's.
+// Doing the padding here, in the painter's measure, is what makes the bar a straight column.
 func (m Model) joinScrollbar(body, bar string) string {
 	if bar == "" {
 		return body

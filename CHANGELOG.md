@@ -553,6 +553,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The transcript's scroll bar is one line in two weights — the thumb thinned from `█` to `┃`.**
+  The bar used to be a solid block riding over a hairline track, two shapes that shared a column
+  without sharing an axis; the thumb is now the heavy vertical `┃` over the same light `│` track, so
+  the column reads as a single centred stroke that simply thickens over the stretch of transcript
+  on screen. Nothing about the bar's geometry moved: the same one-cell gutter, the same thumb
+  sizing and placement, the same two tones, and the same `ui.show-scrollbar` switch deciding
+  whether the column exists at all. Specced in `layout.md` ("The scroll bar and the column it
+  hangs in").
+
 - **The context gauge names the window it measures against — `8k/98k 8%`.** The status line's
   gauge used to state the tokens used and leave you to find the window they were used out of
   somewhere else; it now spells both, because a fill only means something beside the limit it

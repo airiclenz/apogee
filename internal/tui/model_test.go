@@ -2328,7 +2328,7 @@ func TestHiddenScrollbarYieldsTheColumn(t *testing.T) {
 	}
 
 	for i, row := range transcriptRows(t, m) {
-		if strings.ContainsAny(row, "│█") {
+		if strings.ContainsAny(row, glyphScrollTrack+glyphScrollThumb) {
 			t.Errorf("transcript row %d carries a scroll-bar glyph with the bar hidden: %q", i, row)
 		}
 	}
@@ -2337,6 +2337,42 @@ func TestHiddenScrollbarYieldsTheColumn(t *testing.T) {
 	m = step(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	if m.viewport.YOffset() >= before {
 		t.Errorf("the wheel did not scroll with the bar hidden: offset %d → %d", before, m.viewport.YOffset())
+	}
+}
+
+// The shown bar is one axis in two weights: thumb and track paint the same column and differ only
+// in stroke. They are a single codepoint apart (U+2503 / U+2502), so a thumb that slipped to the
+// track's glyph would erase the position marker without moving one column — every geometry test
+// here would stay green while the bar stopped saying where the view sits. This pins the contrast
+// itself, on a really-composed frame: the bar's column carries exactly the two glyphs, both of them.
+func TestScrollbarThumbReadsAgainstItsTrack(t *testing.T) {
+	m := newTestModel(t)
+	// Single-character words wrap flush to the limit, and this many of them overflow the viewport
+	// several times over — so the bar is painted rather than blank.
+	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: strings.Repeat("x ", 1200)}})
+	if total, h := m.viewport.TotalLineCount(), m.viewport.Height(); total <= h {
+		t.Fatalf("transcript is %d lines in a %d-row viewport — the fixture does not overflow, so the "+
+			"bar is blank and this proves nothing", total, h)
+	}
+
+	cells := map[string]int{}
+	for i, row := range transcriptRows(t, m) {
+		runes := []rune(row)
+		if len(runes) == 0 {
+			t.Fatalf("transcript row %d is empty — it carries no scroll-bar cell", i)
+		}
+		cells[string(runes[len(runes)-1])]++ // the bar hangs off the row's right edge (joinScrollbar)
+	}
+
+	if cells[glyphScrollThumb] == 0 {
+		t.Errorf("no thumb %q in the bar's column: %v", glyphScrollThumb, cells)
+	}
+	if cells[glyphScrollTrack] == 0 {
+		t.Errorf("no track %q in the bar's column: %v", glyphScrollTrack, cells)
+	}
+	if len(cells) != 2 {
+		t.Errorf("the bar's column carries %d distinct glyphs, want the thumb and the track only: %v",
+			len(cells), cells)
 	}
 }
 
