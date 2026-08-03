@@ -171,6 +171,16 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
   authority, and the drift each left possible is pinned under both methods in `paint_test.go`.
   `wrapText`'s own `ansi.Wrap` is the one site still standing, and stays tracked in `TODO.md`.
   The rule above is unchanged.)*
+  *(Correction, 2026-08-03: `wrapText` was converted the same day — it breaks with
+  `th.measure.Wrap` now, so the break is chosen in the measure §7's cap is enforced in and
+  `render.go` reaches for no hard-wired `x/ansi` helper at all. **No site this ADR named is
+  unconverted any more.** The user block's own padding moved with it, off `lipgloss.Style.Width`
+  and onto `squareLine` for §5's reason: a `Width` style does not merely pad in GraphemeWidth, past
+  its width it wraps, and a line the authority calls exactly the block width can be wider than that
+  to lipgloss. What `TODO.md` still tracks is a different residue this uncovered — the pop-up
+  pane's frame, which is composed by `lipgloss.Style.Width` end to end and so folds such a line
+  into two pane rows. That fold is pre-existing and reachable through pop-up rows, which never
+  wrapped; it is why the pop-up body is the one wrapped surface not yet following the painter.)*
 - **`CHANGELOG.md`'s v1.1.0 `caretTo` entry claimed the fix used "the same width the widget's own
   cursor math uses", which was not true.** Shipped history is not rewritten; the entry carries a
   dated correction pointing at the real fix.

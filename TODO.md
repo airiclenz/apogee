@@ -647,7 +647,9 @@ moment to give `ConfineWritablePaths` its first writer.
 [ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md). Nothing
 here breaks the absolute width cap; each is a place the package still measures in a measure the
 painter may not be using, or mirrors a widget imperfectly. The `inputContentRows` residue was
-closed on 2026-07-31 (owner-approved follow-up); its entry stays below with what remains of it.
+closed on 2026-07-31 (owner-approved follow-up); its entry stays below with what remains of it. The
+`wrapText` residue — the last site ADR 0030 itself named — was closed on 2026-08-03, and its entry
+carries the one it uncovered: the pop-up pane's lipgloss-composed frame.
 
 **~~The four sites the plan could not touch~~ — FIXED 2026-08-03.** `popup.go` and `interject.go`
 measured with `ansi.StringWidth`, and `truncateToWidth` (`popup.go`) both measured and cut in it.
@@ -660,12 +662,35 @@ band one column short of the window, on a row carrying VARIATION SELECTOR-16 —
 width methods by `TestPaintedPopupColumnsHoldOneOffset`, `TestPopupTruncationFollowsThePainter` and
 `TestPaintedQueuedBandFillsTheWindow` (`paint_test.go`).
 
-**`wrapText` still wraps with `ansi.Wrap`** (`render.go`), even though its cap enforcement measures
-with the authority. A grapheme-width wrap never paints *wider* than its limit under wcwidth, so the
-absolute cap holds regardless; what it costs is a break taken a cell earlier than the painter needed
-on a line carrying VARIATION SELECTOR-16. It is a rename (`ansi.Wrap` → `th.measure.Wrap`), but it
-moves every wrapped surface in the package — transcript prose, popup bodies, table cells — so it
-wants its own item with the re-baselining that implies.
+**~~`wrapText` still wraps with `ansi.Wrap`~~ — FIXED 2026-08-03** (`render.go`). It breaks with
+`th.measure.Wrap` now, so the break is CHOSEN in the same measure the cap enforcement holds and the
+painter draws in; `render.go` imports no hard-wired `x/ansi` helper at all any more. The re-baselining
+the entry expected did not materialise — on content the two measures agree about the two wraps are
+identical, so no existing test moved — and what the move buys back is the cell the wrap used to give
+away on a line carrying VARIATION SELECTOR-16 under the WcWidth painter.
+`TestWrapTextBreaksInThePaintersMeasure` and `TestWrappedSurfacesBreakInThePaintersMeasure`
+(`render_test.go`) pin it under both width methods.
+
+The **user block's rows had to move with it** (`render.go`, `renderUserBlock`): they were padded to
+the block width by `th.userBlock.Width(width)`, and a lipgloss `Width` style does not merely pad in
+GraphemeWidth — past its width it *wraps*. Once the wrap takes its break in the painter's measure, a
+prompt line the authority calls exactly the block width can measure wider to lipgloss, and the style
+folded it in two, smuggling a `"\n"` into ONE element of the `[]string` the whole line-oriented
+renderer counts rows with (the viewport height, the sticky offsets and the `userBlocks` ranges all
+count off it). They are squared with `squareLine` now — the painter's measure, the way
+`promptMarkerRow` already padded its own row. `TestUserBlockRowsAreOneSquareLineEach` pins it.
+
+**The pop-up pane is composed in lipgloss's measure** (`popup.go`) — the residue the entry above
+uncovered, and the reason the pop-up body is the one wrapped surface that does not yet follow the
+painter. `blackFill` (`lipgloss.NewStyle()…Width(inner)`), `th.userBlock.Width(inner)` on the
+selected row and `th.popupBorder.Width(width)` on the whole box all pad — and past their width
+*wrap* — in GraphemeWidth whatever the painter is doing, so a pane line the authority calls exactly
+`inner` cells wide is folded into two pane rows and the box outgrows the row budget `popupBudget`
+granted it. It is **pre-existing and independent of the wrap**: it is reachable today through pop-up
+ROWS, which never touch `wrapText` (a single row of `"⚠️ "`×6 at width 20 paints a five-row pane
+where the pane composed four). Fixing it means squaring the pane's lines the way ADR 0030 §5 squared
+the transcript frame, which the border rules out doing through `lipgloss.Style.Width` — the box's
+own rows have to be drawn rather than delegated, so it wants its own item.
 
 **~~`inputContentRows` is an unfaithful widget mirror~~ — FIXED 2026-07-31** (`render.go`). It sized
 the prompt box to the rows it *thought* the textarea drew, and it was measurably wrong: against a

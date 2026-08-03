@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -448,7 +447,14 @@ func renderUserBlock(th theme, marker, text string, skills []string, width int, 
 				out = append(out, promptMarkerRow(th, ln, promptSeeMore(hidden), width))
 				continue
 			}
-			out = append(out, th.userBlock.Width(width).Render(ln))
+			// Squared in the authority's measure, the way promptMarkerRow below pads its own row,
+			// rather than by a lipgloss Width style: lipgloss pads — and past its width WRAPS — in
+			// GraphemeWidth whatever the painter is doing (ADR 0030). Now that wrapText breaks in
+			// the painter's measure, a line it calls exactly width cells wide can measure wider to
+			// lipgloss (any VARIATION SELECTOR-16 cluster does), and a Width style would fold that
+			// one line into two — smuggling a "\n" into a single element of a []string the whole
+			// line-oriented renderer counts rows with.
+			out = append(out, th.userBlock.Render(squareLine(th.measure, ln, width)))
 		}
 	}
 	if len(skills) > 0 {
@@ -680,7 +686,7 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // and renderEntryLines apply the rail) — width is already the railed inner column.
 //
 // The label is styled (bold orange) before the header is wrapped — the markdown.go posture:
-// ansi.Wrap is SGR-aware and the width authority strips ANSI, so baking the style into the text
+// the authority's wrap is SGR-aware and its measure strips ANSI, so baking the style into the text
 // leaves the soft-wrap and sticky-offset arithmetic untouched.
 //
 // Targets are padded to the block's widest so the detail column lines up; widths are display
@@ -1099,21 +1105,32 @@ func hangingPrefixes(th theme, marker, text string, width int) []string {
 // and preserving the text's own newlines. An empty string yields a single empty line so a
 // just-opened assistant buffer still renders its marker.
 //
+// It breaks with the width authority (th.measure.Wrap), so the break is CHOSEN in the same measure
+// the cap below is enforced in and the painter draws in — ADR 0030's rule for this package. It used
+// to break with the package-level ansi.Wrap, which is hard-wired to ansi.GraphemeWidth whatever the
+// painter is doing: on the painter's default WcWidth that measured a VARIATION SELECTOR-16 cluster
+// two cells against the one the terminal paints, so every wrapped surface — transcript prose,
+// pop-up bodies, table cells — took its break a cell earlier than it needed on such a line. On
+// content the two measures agree about (everything without VS16) the two wraps are identical, which
+// is why this is a rename rather than a re-layout. A caller that then pads with a lipgloss Width
+// style hands the gain straight back — lipgloss folds in GraphemeWidth — which is why the user
+// block below squares its own rows and why the pop-up pane still does not (TODO.md).
+//
 // No line it returns is wider than limit in the width authority's measure — layout.md's absolute
-// cap, enforced here rather than assumed. The upstream wrap does not hold it on its own: x/ansi's
-// breakpoint branch (x/ansi@v0.11.7/wrap.go:406-419) lacks the full-line checks its default branch
-// has, so a run of breakpoints keeps growing a word onto an already-full line —
-// ansi.Wrap("| --- | --- | --- |", 3, "") comes back with a five-cell first line, and
-// ansi.Wrap("----", 3, "") with a four-cell one. Every line that comes back over the limit is
-// therefore hard-broken down to it, which is also what makes the docstring's "hard-breaking any
-// word longer than the limit" true rather than aspirational. The one thing no break can divide is
-// a single grapheme wider than the limit — a CJK glyph at limit 1 — and that keeps a line to
-// itself.
+// cap, enforced here rather than assumed. The upstream wrap does not hold it on its own, in either
+// measure: the breakpoint branch lacks the full-line checks its default branch has, on the wcwidth
+// path (x/ansi@v0.11.7/wrap.go:406-419) and on the grapheme path (:352-361) alike, so a run of
+// breakpoints keeps growing a word onto an already-full line — a wrap of "| --- | --- | --- |" at
+// limit 3 comes back with a five-cell first line, and of "----" with a four-cell one. Every line
+// that comes back over the limit is therefore hard-broken down to it, which is also what makes the
+// docstring's "hard-breaking any word longer than the limit" true rather than aspirational. The one
+// thing no break can divide is a single grapheme wider than the limit — a CJK glyph at limit 1 —
+// and that keeps a line to itself.
 func wrapText(th theme, text string, limit int) []string {
 	if limit < 1 {
 		limit = 1
 	}
-	wrapped := strings.Split(ansi.Wrap(text, limit, ""), "\n")
+	wrapped := strings.Split(th.measure.Wrap(text, limit, ""), "\n")
 	out := make([]string, 0, len(wrapped))
 	for _, ln := range wrapped {
 		if th.measure.Width(ln) <= limit {

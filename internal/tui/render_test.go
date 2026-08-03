@@ -131,6 +131,183 @@ func TestWrapTextHoldsTheWidthCap(t *testing.T) {
 func withoutSpaces(s string) string { return strings.ReplaceAll(s, " ", "") }
 
 // ----------------------------------------------------------------------------
+// The wrap is taken in the painter's measure (ADR 0030)
+// ----------------------------------------------------------------------------
+
+// Enforcing the cap in the authority's measure is only half of it: the BREAK has to be chosen in
+// that measure too, or the wrapper is deciding where lines end by a ruler the terminal is not
+// using. wrapText used to call the package-level ansi.Wrap, which is hard-wired to
+// ansi.GraphemeWidth whatever the painter does — the last site ADR 0030 left unconverted. On the
+// painter's DEFAULT WcWidth that reads a VARIATION SELECTOR-16 cluster as two cells where the
+// terminal paints one, so the wrap broke a cell early on every line carrying one and the surface
+// came out shorter than the width it was given.
+//
+// Under GraphemeWidth the authority's wrap IS ansi.Wrap, so the grapheme half of this table also
+// pins that the conversion changed nothing where the two measures agree; only the WcWidth half
+// fails on the pre-fix code.
+func TestWrapTextBreaksInThePaintersMeasure(t *testing.T) {
+	t.Parallel()
+
+	warns := vs16Warning + " " + vs16Warning + " " + vs16Warning
+
+	cases := []struct {
+		name         string
+		in           string
+		limit        int
+		wc, grapheme []string
+	}{
+		{
+			// Five painted cells at limit 5 — one line the painter fills exactly. GraphemeWidth
+			// calls the same string eight cells and breaks it.
+			name:     "VS16 clusters that fit the painted limit",
+			in:       warns,
+			limit:    5,
+			wc:       []string{warns},
+			grapheme: []string{vs16Warning + " " + vs16Warning, vs16Warning},
+		},
+		{
+			name:     "VS16 clusters that fit a narrow painted limit",
+			in:       vs16Warning + " " + vs16Warning,
+			limit:    3,
+			wc:       []string{vs16Warning + " " + vs16Warning},
+			grapheme: []string{vs16Warning, vs16Warning},
+		},
+		{
+			// The wrap only moves where the measures disagree: plain prose breaks identically.
+			name:     "ascii prose the measures agree about",
+			in:       "the quick brown fox jumps",
+			limit:    10,
+			wc:       []string{"the quick", "brown fox", "jumps"},
+			grapheme: []string{"the quick", "brown fox", "jumps"},
+		},
+		{
+			// Wide glyphs are two cells to BOTH measures, so they break the same way as well.
+			name:     "cjk the measures agree about",
+			in:       "日本語のテキスト",
+			limit:    6,
+			wc:       []string{"日本語", "のテキ", "スト"},
+			grapheme: []string{"日本語", "のテキ", "スト"},
+		},
+	}
+
+	for _, pm := range paintMethods {
+		for _, c := range cases {
+			t.Run(pm.name+"/"+c.name, func(t *testing.T) {
+				t.Parallel()
+				th := newTheme()
+				th.measure = widthAuthority{method: pm.method}
+
+				want := c.wc
+				if pm.method == ansi.GraphemeWidth {
+					want = c.grapheme
+				}
+				if got := wrapText(th, c.in, c.limit); !reflect.DeepEqual(got, want) {
+					t.Errorf("wrapText(%q, %d) = %q, want %q", c.in, c.limit, got, want)
+				}
+			})
+		}
+	}
+}
+
+// wrapText is the one wrap in the package, so moving it moves every wrapped surface at once —
+// transcript prose and table cells among them. Each is asserted through its own production entry
+// point rather than through wrapText again, so a surface that grew a wrap of its own would show up
+// here.
+//
+// The pop-up body is the third surface TODO.md named and it is deliberately NOT here: its wrap does
+// move with the others, but the pane it lands in is composed by lipgloss — Style.Width pads, and
+// past its width WRAPS, in GraphemeWidth whatever the painter is doing — so a VS16 line the
+// authority calls short enough is folded back into two pane rows. That fold is the pane's, not the
+// wrap's: it is reachable today through pop-up ROWS, which never touch wrapText at all, and it is
+// tracked in TODO.md with the rest of the ADR 0030 residue.
+func TestWrappedSurfacesBreakInThePaintersMeasure(t *testing.T) {
+	t.Parallel()
+
+	// Five painted cells, eight grapheme cells: one line to the painter's default measure, two to
+	// the other one, at a width of 5 on every surface.
+	const width = 5
+	warns := vs16Warning + " " + vs16Warning + " " + vs16Warning
+
+	surfaces := []struct {
+		name  string
+		lines func(th theme) []string
+	}{
+		{
+			name:  "transcript prose",
+			lines: func(th theme) []string { return renderMarkdownBody(th, warns, width) },
+		},
+		{
+			name:  "table cell",
+			lines: func(th theme) []string { return wrapTableCell(th, warns, width) },
+		},
+	}
+
+	for _, pm := range paintMethods {
+		for _, s := range surfaces {
+			t.Run(pm.name+"/"+s.name, func(t *testing.T) {
+				t.Parallel()
+				th := newTheme()
+				th.measure = widthAuthority{method: pm.method}
+
+				want := 1
+				if pm.method == ansi.GraphemeWidth {
+					want = 2
+				}
+				lines := s.lines(th)
+				if len(lines) != want {
+					t.Fatalf("%s wrapped %q at width %d into %d lines, want %d: %q",
+						s.name, warns, width, len(lines), want, lines)
+				}
+				// Whatever the break, no line may exceed the width it was given in the measure
+				// the frame is painted in — layout.md's absolute cap.
+				for i, ln := range lines {
+					if w := th.measure.Width(strip(ln)); w > width {
+						t.Errorf("%s line %d %q is %d cells, over the %d cap", s.name, i, strip(ln), w, width)
+					}
+				}
+			})
+		}
+	}
+}
+
+// The user block pads its own wrapped rows, in the painter's measure, the way promptMarkerRow two
+// functions down already pads its. It used to hand them to a lipgloss Width style, which pads —
+// and past its width WRAPS — in GraphemeWidth whatever the painter is doing (ADR 0030). Once
+// wrapText takes its break in the painter's measure, a prompt line the authority calls exactly the
+// block width can measure wider than that to lipgloss, and the style folds it in two: not an
+// overflow, but a "\n" smuggled into ONE element of the []string the whole line-oriented renderer
+// counts rows with, so the viewport height, the sticky offsets and the userBlocks ranges each count
+// one row where the terminal paints two.
+func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
+	t.Parallel()
+
+	const width = 12
+	text := strings.Repeat(vs16Warning+" ", 8)
+
+	for _, pm := range paintMethods {
+		t.Run(pm.name, func(t *testing.T) {
+			t.Parallel()
+			th := newTheme()
+			th.measure = widthAuthority{method: pm.method}
+
+			paint := renderUserBlock(th, glyphUser+" ", text, nil, width, true)
+			if len(paint.lines) == 0 {
+				t.Fatalf("the user block rendered nothing at all")
+			}
+			for i, ln := range paint.lines {
+				if strings.Contains(ln, "\n") {
+					t.Errorf("row %d holds %d physical lines in one entry: %q",
+						i, strings.Count(ln, "\n")+1, strip(ln))
+				}
+				if w := th.measure.Width(strip(ln)); w != width {
+					t.Errorf("row %d %q is %d cells, want the block's %d", i, strip(ln), w, width)
+				}
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The sub-agent rail through the inter-block spacers
 // ----------------------------------------------------------------------------
 

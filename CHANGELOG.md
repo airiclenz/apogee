@@ -845,6 +845,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Wrapped text now breaks where the terminal actually draws, not a cell short.** Every wrapped
+  surface — the assistant's prose, a markdown table cell, your own prompt block — chose its line
+  breaks with a ruler that counts a glyph like `⚠️` as two cells, while most terminals paint it in
+  one. A line carrying one broke a column earlier than it needed to, so it sat inside a narrower
+  column than the window had actually given it, and a word that would have fit was pushed down a
+  row. The wrap now measures the way the terminal paints — the same measure the absolute width cap
+  was already held in. On text without such a glyph, which is nearly all of it, not a single break
+  moves.
+  - **And a prompt block carrying one no longer paints a row it did not count.** The block's rows
+    were filled out to the full width with that same two-cell ruler, which does not merely pad past
+    its width — it wraps — so one row of your prompt could quietly become two, out of step with the
+    rows the scroll bar, the sticky header and a click were all counting. They are filled in the
+    painted measure now, like every other row of the block.
+
 - **An emoji in a pop-up row no longer knocks that row's columns out of line.** A row carrying a
   glyph like `⚠️` — a symbol plus the invisible codepoint that asks for its colour form — was
   measured as two terminal cells while most terminals draw it in one, so that row alone was padded
