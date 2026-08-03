@@ -611,16 +611,17 @@ func renderStartupBox(th theme, v startupView, width int) []string {
 	if inner >= logoW+startupWideMinGap+infoW {
 		return renderStartupWide(th, logo, rows, labelW, infoW, width, inner)
 	}
-	return renderStartupStacked(th, v, width)
+	return renderStartupStacked(th, v, width, inner)
 }
 
 // renderStartupWide paints the wide start-up card: the logo on the left, the info block right-
 // aligned against the right content edge (left column inner-infoW), so the widest info row sits
 // flush against the right padding and shorter rows trail off toward it. Logo line i pairs with info
 // row i (top-aligned) and whichever side is shorter blank-fills — the four logo lines pair directly
-// with the four info rows, so there is no blank spacer. lipgloss pads every line to the full width
-// (renderStartupBox's contract). The caller guarantees inner ≥ logoW + startupWideMinGap + infoW, so
-// the per-line pad count is at least startupWideMinGap.
+// with the four info rows, so there is no blank spacer. drawBox pads every line out to the card's
+// content budget, in the painter's own measure (renderStartupBox's contract). The caller guarantees
+// inner ≥ logoW + startupWideMinGap + infoW, so the per-line pad count is at least
+// startupWideMinGap.
 func renderStartupWide(th theme, logo []string, rows []startupInfoRow, labelW, infoW, width, inner int) []string {
 	left := inner - infoW // the info block's left column
 	n := max(len(logo), len(rows))
@@ -642,14 +643,26 @@ func renderStartupWide(th theme, logo []string, rows []startupInfoRow, labelW, i
 // renderStartupStacked paints the narrow fallback: the logo, one blank line, then the host / model /
 // version rows stacked below it (no context), dim labels aligned in a column and plain values. This
 // is the card's original layout, kept for widths too narrow for the two-column wide layout.
-func renderStartupStacked(th theme, v startupView, width int) []string {
+//
+// It fits its OWN info rows to inner, the card's content budget, rather than handing the box a row
+// it has no room for. drawBox squares every row it is given, so an over-long one comes back cut at
+// the border and says nothing about it: on a card of 29 columns or less a host of
+// "192.168.64.1:1111" was painted as "192.168.64.1:111" — a port silently one digit short, which
+// reads as a fact rather than as a cut. Fitting here ends such a row in the same "…" every other
+// overflowing surface in this package carries (truncateToWidth), so what was eaten is visible.
+// The value is not wrapped onto a further line instead: a host, a model name and a version are
+// single unbreakable tokens, so a wrap would only move the same cut one line down. A row that
+// already fits comes back untouched, which is every row at the widths this card is normally drawn
+// at. The logo above them is left to the box: block art has no tail to elide, and the widths where
+// it overruns are far below the ones where the info rows do.
+func renderStartupStacked(th theme, v startupView, width, inner int) []string {
 	content := strings.Split(v.Logo, "\n")
 	content = append(content, "") // one blank line between the logo and the info rows
 
 	rows := []startupInfoRow{{"host", v.Host}, {"model", v.Model}, {"version", v.Version}}
 	labelW := startupLabelWidth(th, rows)
 	for _, r := range rows {
-		content = append(content, startupInfoLine(th, r, labelW))
+		content = append(content, truncateToWidth(th, startupInfoLine(th, r, labelW), inner))
 	}
 	return drawBox(th.measure, th.startupBorder, content, width)
 }

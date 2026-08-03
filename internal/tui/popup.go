@@ -456,7 +456,11 @@ func popupRowWindow(selected, total, capRows int) (int, int) {
 
 // truncateToWidth clips s to at most width DISPLAY cells, ending in an ellipsis when it had to cut
 // — so a long file path, a wide-rune title, or an aligned row too wide for the pane never
-// overflows the terminal and breaks the overlay's layout. The measure is th.measure, the package's
+// overflows the terminal and breaks the overlay's layout. It is the package's elision, not the
+// overlay's alone: the start-up card's stacked info rows fit themselves through it too
+// (renderStartupStacked), so a cut value looks the same wherever one is made.
+//
+// The measure is th.measure, the package's
 // width authority (width.go), not a rune count: a CJK glyph occupies two terminal cells and an
 // escape sequence none, so counting runes would let a wide row spill past the right border while
 // measuring as if it fit — the exact bug the pane's every-line-is-exactly-width contract cannot

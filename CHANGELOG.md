@@ -860,6 +860,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A narrow start-up card no longer eats the end of a host or model name without saying so.** In a
+  window too narrow for the card's side-by-side layout, the facts stack under the logo — and a value
+  wider than the card simply stopped at the border: at 29 columns a host of `192.168.64.1:1111` was
+  painted as `192.168.64.1:111`, a port one digit short, which reads as the address you configured
+  rather than as a cut. The card now fits its own rows to the room it has, and a value it cannot show
+  whole ends in the same `…` every other clipped line in apogee carries, so what was eaten is visible
+  as missing. At every width that can seat the values — which is every ordinary window — not a
+  character of the card moves.
+
 - **Wrapped text now breaks where the terminal actually draws, not a cell short.** Every wrapped
   surface — the assistant's prose, a markdown table cell, your own prompt block — chose its line
   breaks with a ruler that counts a glyph like `⚠️` as two cells, while most terminals paint it in

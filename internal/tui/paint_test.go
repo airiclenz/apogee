@@ -478,6 +478,96 @@ func TestPaintedBoxRowsAreNotFolded(t *testing.T) {
 	}
 }
 
+// The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
+// to be shown whole ends in the elision marker rather than simply stopping at the border.
+//
+// drawBox squares every row it is handed (squareOnField), which is a CUT with no marker — it is the
+// box's last line of defence, not a layout. The stacked card leaned on it: at 29 columns a host of
+// "192.168.64.1:1111" painted as "192.168.64.1:111", a port one digit short, which reads as a fact
+// rather than as a truncation. renderStartupStacked fits its rows itself now, through the same
+// truncateToWidth every other overflowing surface in this package uses.
+//
+// Both measures are swept because the fit is the PAINTER's: a value carrying a VARIATION SELECTOR-16
+// grapheme is one cell to the WcWidth painter and two to a mode-2027 terminal's, so a fit made in
+// the wrong measure either cuts a row that fitted or leaves standing one that did not.
+func TestPaintedStackedStartupCardFitsItsValues(t *testing.T) {
+	card := startupView{
+		Logo:    strings.TrimRight(apogeeLogo, "\n"), // 36 cells wide: every width below is the stacked layout
+		Host:    "192.168.64.1:1111",
+		Model:   "gpt-oss-20b " + vs16Warning, // carries the grapheme the two measures disagree about
+		Context: "32k",
+		Version: "v9.9.9-test",
+	}
+	// The rows the stacked layout composes, in the order it stacks them: the logo, one blank line,
+	// then these three. Counting back from the bottom border finds them at any width.
+	values := []string{card.Host, card.Model, card.Version}
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			for width := 10; width <= 48; width++ {
+				lines := renderStartupBox(th, card, width)
+				if len(lines) < len(values)+2 {
+					t.Fatalf("width %d: card painted %d rows, too few to hold the three info rows:\n%s",
+						width, len(lines), strings.Join(mapStrip(lines), "\n"))
+				}
+				for i, ln := range lines {
+					plain := strip(ln)
+					if got := paintedWidth(plain, tc.method); got != width {
+						t.Errorf("width %d: row %d paints %d columns, want the card's %d: %q",
+							width, i, got, width, plain)
+					}
+					if edge := lastGlyph(plain); edge != "╮" && edge != "│" && edge != "╯" {
+						t.Errorf("width %d: row %d ends in %q, not the card's right border: %q",
+							width, i, edge, plain)
+					}
+				}
+				// A value the card cannot seat whole must SAY it was cut. Without the fit the row
+				// simply ran into the border and the reader had no way to tell.
+				info := lines[len(lines)-1-len(values) : len(lines)-1]
+				for i, ln := range info {
+					plain := strip(ln)
+					if strings.Contains(plain, values[i]) || strings.Contains(plain, "…") {
+						continue
+					}
+					t.Errorf("width %d: info row %d shows neither %q whole nor the elision marker: %q",
+						width, i, values[i], plain)
+				}
+			}
+
+			// The item's own case, named: at 29 columns the host is cut, and the cut is visible.
+			const narrow = 29
+			cut := renderStartupBox(th, card, narrow)
+			host := strip(cut[len(cut)-1-len(values)]) // the first info row, counting back from the border
+			if strings.Contains(host, card.Host) {
+				t.Fatalf("width %d: the host row seats %q whole — pick a narrower width or a longer host: %q",
+					narrow, card.Host, host)
+			}
+			if !strings.HasSuffix(strings.TrimRight(host, " │"), "…") {
+				t.Errorf("width %d: the cut host row does not end in the elision marker: %q", narrow, host)
+			}
+
+			// And at a width that can pay for them, nothing is cut and nothing is marked: the fit is a
+			// no-op at every width the card is normally drawn at.
+			const roomy = 50
+			roomyRows := mapStrip(renderStartupBox(th, card, roomy))
+			for _, ln := range roomyRows {
+				if strings.Contains(ln, "…") {
+					t.Errorf("width %d: a row carries the elision marker where the card has room: %q", roomy, ln)
+				}
+			}
+			whole := strings.Join(roomyRows, "\n")
+			for _, want := range values {
+				if !strings.Contains(whole, want) {
+					t.Errorf("width %d: card does not show %q whole:\n%s", roomy, want, whole)
+				}
+			}
+		})
+	}
+}
+
 // mapStrip strips the SGR from every line of a block, for a failure message that shows the rows a
 // box painted rather than the escape sequences it painted them with.
 func mapStrip(lines []string) []string {

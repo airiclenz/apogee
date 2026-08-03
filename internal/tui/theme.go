@@ -151,13 +151,13 @@ type theme struct {
 	presentTitle lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
-	// as bold white, `inline code` and ``` fenced blocks ``` in orange, and the dim rule a
-	// table draws under its header row.
+	// as bold white, `inline code` and ``` fenced blocks ``` in orange, and the dim frame a
+	// table draws around its columns.
 	mdBold        lipgloss.Style // **bold** span
 	mdHeading     lipgloss.Style // # … ###### heading line (bold white)
 	mdCode        lipgloss.Style // `inline code` span (orange)
 	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (orange)
-	mdRule        lipgloss.Style // the ─ run under a markdown table's header (faint: the rule frames the columns, it is not content)
+	mdRule        lipgloss.Style // a markdown table's whole frame: the ─ run under its header, the ─ runs between its body rows, and the │ divider between its columns (with the ┼ where the two meet) — faint, because the frame frames the columns and is not content
 	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box — a closed frame, bottom edge included
 	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
 	popupBorder   lipgloss.Style // selector-popup chrome (renderPopup): startupBorder's rounded shape, filled solid black so the pane reads as a distinct overlay
