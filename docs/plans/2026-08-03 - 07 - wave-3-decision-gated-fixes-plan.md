@@ -132,7 +132,26 @@ says and record the divergence as a dated NOTES line under the item.
 
 ---
 
-## 2. `autofix` runs its formatters under the permit, and the prettier rungs go
+## 2. `autofix` runs its formatters under the permit, and the prettier rungs go — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): the ladder entry's run signature is
+`func(ctx context.Context, gate spawnGate, content string) (string, bool)`, not the item's
+illustrative `(ctx, path, content)`. The permit's box and the per-Mechanism timeout are fire-time
+values a construction-built closure cannot capture (a test sets `timeout` on the constructed
+Mechanism, so capturing it at construction would ignore that), and `path` is unused by every
+remaining rung once the filename-keyed formatter is gone. `spawnGate` carries all three
+(`allowed` / `confinement` / `timeout`) and is read once per `PostResponse` as the item requires. A
+permit whose `Confinement` carries a nil `Confiner` also skips the rung, on the same
+"never fall back to unfenced" rule as a `Confine` error.
+
+NOTES (2026-08-03): the "No permit → no spawn" test's second half — "while a broken Go file is
+still repaired by the gofmt tail" — is not reachable as written: `go/format.Source` succeeds only
+on content whose parse errors come from the missing package clause, and it never adds one, so the
+in-process tail's output never reduces `checkSyntax`'s error count (probed against the real
+parser). The requirement is met by two tests instead: `TestAutofixWithoutPermitNeverSpawns` proves
+the marker is absent against the production ladder, and `TestAutofixWithoutPermitStillRunsInProcessRungs`
+proves a non-external rung still runs unpermitted, using a hand-built ladder in the production
+shape.
 
 **Depends on item 1** (the permit type and the engine-side install).
 

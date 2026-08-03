@@ -860,6 +860,29 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `autofix` Mechanism no longer runs a formatter outside every guard apogee has — and it no
+  longer runs the one formatter that executes code from the repository it is formatting.** When
+  `autofix` repaired a syntax-broken file the model was about to write, it shelled out to the
+  language's formatter directly: no mode check, no approval, no confinement box, no bound on the
+  kill path. Two things follow from that one seam, and both are closed.
+  - **The spawn is now gated and fenced.** A formatter runs only when the hook carries a subprocess
+    permit — so in Plan, Ask-Before and Allow-Edits `autofix` does not spawn at all — and, when the
+    permit names a box, the command is confined to it before it starts. A box that cannot be
+    established **skips that formatter** rather than falling back to running it unfenced; the file
+    is simply left as-is for the syntax stage to correct, which is what `autofix` has always done
+    with a formatter it could not use. The in-process `gofmt` repair spawns nothing and is
+    unaffected: it still runs in every mode, Plan included.
+  - **The JavaScript / TypeScript rungs are gone.** That formatter resolves its configuration by
+    walking up from the file's path and `require()`s whatever `.prettierrc.js` or plugin it finds —
+    so a `.ts` or `.js` write into a hostile repository turned a silent formatting pass into running
+    that repository's code as you. The remaining three (`goimports`, `black`, `rustfmt`) read
+    declarative config only. A broken `.ts` file is now left for the syntax stage, exactly as one in
+    a language with no formatter installed always has been.
+  - **A wedged formatter can no longer freeze the session.** The formatter's clock now hangs off the
+    turn's own context, so cancelling stops one mid-run, and the wait after a kill is bounded too: a
+    wrapper-shaped formatter that leaves a grandchild holding the pipes used to block the agent
+    permanently, mid-turn. The 3-second bound is unchanged.
+
 - **A pop-up pane no longer paints a spacer row against the bottom chrome.** The `/sessions` browser
   and the `/model` | `/server` picker — and the approval or ask prompt with them — each stood one
   blank row clear of the `▔` hairline, while the `/` and `@` dropdown and the staged-message band
