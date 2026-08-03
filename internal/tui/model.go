@@ -2746,7 +2746,11 @@ const frameBlocks = 12
 // wherever the box is editable (promptCursor).
 func (m Model) View() tea.View {
 	if !m.ready {
-		return tea.NewView("apogee — starting…")
+		// The window is already this session's window, whatever the frame inside it is still
+		// waiting on, so even the placeholder names it (windowtitle.go).
+		v := tea.NewView("apogee — starting…")
+		v.WindowTitle = m.windowTitle()
+		return v
 	}
 
 	// Rendered once, then measured by the same derivation the mouse maps through, so what is drawn
@@ -2798,6 +2802,10 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // enable wheel scrolling (Update routes MouseWheelMsg)
 	v.Cursor = m.promptCursor()
+	// The one thing the frame says outside its own rows: the terminal window's title, which the
+	// renderer emits as OSC 2 only when it CHANGES, so stating it every frame costs nothing
+	// (windowtitle.go).
+	v.WindowTitle = m.windowTitle()
 	return v
 }
 

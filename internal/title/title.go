@@ -288,7 +288,7 @@ func capRunes(s string, limit int) string {
 // already has.
 func Sanitize(raw string) (string, bool) {
 	s := firstContentLine(stripThinking(raw))
-	s = stripAffixes(stripEscapes(s))
+	s = stripAffixes(StripEscapes(s))
 	s = collapseWhitespace(s)
 	s = strings.TrimSpace(strings.TrimSuffix(s, "."))
 	if s == "" {
@@ -354,11 +354,21 @@ func fenceMarker(line string) bool {
 	return tag == "" || !strings.ContainsAny(tag, " \t")
 }
 
-// stripEscapes removes ANSI escape sequences and every remaining control character. The reply is
+// StripEscapes removes ANSI escape sequences and every remaining control character. The reply is
 // untrusted model text that ends up in a rendered session-browser row, so a title can never be
 // allowed to carry cursor movement, colour, or an OSC sequence (the same posture as the
 // transcript's escape strip). Callers pass a single line, so no newline survives to be lost.
-func stripEscapes(s string) string {
+//
+// It is exported because it is the one definition of "a title carries no escape sequence and no
+// control character", and a title is now read in two places rather than one. The second consumer is
+// the terminal window-title seam (internal/tui/windowtitle.go), where the stakes are higher than a
+// scrambled row: the name is handed to the renderer to emit as OSC 2, and a BEL inside an OSC
+// payload TERMINATES the sequence — so a title carrying one would close the escape early and hand
+// whatever follows it straight to the terminal to execute. A second, weaker strip written at that
+// seam is exactly how two definitions of the same guarantee drift apart, so the seam calls this one.
+// Whitespace controls stay exempt for both consumers alike (strippableControl); each collapses them
+// a step later, and both do.
+func StripEscapes(s string) string {
 	if !strings.ContainsFunc(s, strippableControl) {
 		return s // the overwhelmingly common case: nothing to strip, nothing to allocate
 	}
