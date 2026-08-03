@@ -5,7 +5,7 @@ Apogee is a terminal coding agent (Go, Bubble Tea TUI) built to run small, local
 ## Where knowledge lives
 
 - `CONTEXT.md` — the domain language and concept map (Mechanisms, Bypass, Steps,   Turns, …). Terms used in code and docs are defined here; read the relevant   section before design work. Large — read sections, don't load it wholesale.
-- `docs/adr/` — 25+ architectural decision records. Settled questions live here; check for an ADR before re-opening one.
+- `docs/adr/` — 30+ architectural decision records. Settled questions live here; check for an ADR before re-opening one.
 - `docs/design/` — design contracts (confinement execution contract, hook mutation API, MCP client, mechanism catalogue, technical design).
 - `docs/plans/` — implementation plans in the house format: numbered `## N.` H2 items with What/Tests/Acceptance/commit. Plans are saved repo docs, executed item-by-item; completed plans get archived.
 - `docs/handoffs/` — multi-session work-in-flight handoffs (superseded ones move to `docs/handoffs/archived/`).
@@ -24,6 +24,7 @@ Apogee is a terminal coding agent (Go, Bubble Tea TUI) built to run small, local
 - The Bubble Tea `Model` is copied by value on every `Update`: never let a `strings.Builder` (or any no-copy type) be held by value anywhere it reaches. Rule and guard test are in `internal/tui/` (see `doc.go`, ADR 0011).
 - Tests that need a live LLM are gated by `APOGEE_LIVE_ENDPOINT`; without it they skip. `make live-eval` drives the live path.
 - Early-development stance: prefer the best long-term architecture over lowest churn; the owner reshapes now to get it right.
+- **North star (ADR 0031, tiebreaker force):** the embeddable engine must stay sufficient for any **Driver** (TUI, bench, a future daemon — see `CONTEXT.md`). Its door-keeping invariants — wire-silent engine, wait-tolerant Approver, no first-party connectors, benchable-all-the-way-up — bind design work; a change that closes one of those doors must supersede ADR 0031 explicitly.
 
 ## Tool-specific loading
 

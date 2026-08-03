@@ -48,7 +48,7 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v0.9.x` on `main` — pre-production.** The release line was deliberately reset
+**`v0.10.x` on `main` — pre-production.** The release line was deliberately reset
 from `1.x` to `0.x` (2026-07-23): the old numbering overstated maturity, and under
 SemVer a `0.x` version makes no API-stability promise — the Go API is still allowed
 to move while the tool hardens. One consequence: build from source (prebuilt

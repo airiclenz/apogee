@@ -22,12 +22,35 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 
 **Remaining:**
 
-- **Sedule Command** A command /schedule with attached prompt that pops up a question or a set 
-  of pre-defined cycle times to re-run the given prompt when the scheduled cycle-time has passed.
-  Stopping a schedule could be done with /shedule-stop. Each time the prompt is re-run, it runs
-  in a fresh context window. I am not sure how or if we should save the schedule-runs as separate
-  sessions for the session history (I think they should be marked / grouped for that schedule run).
-  Needs grilling.
+- **`/schedule` command** — a `/schedule` command with an attached prompt that re-runs that
+  prompt each time a chosen cycle time passes (picked from a popup question or a set of
+  pre-defined cycle times); `/schedule-stop` ends it. Each firing runs in a **fresh context
+  window**; the runs should be saved as sessions, marked / grouped under their schedule in the
+  `/sessions` history. **Enriched 2026-08-03 from the north-star grill
+  ([ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)):**
+  - **Layering (the hard constraint):** the scheduler is a **library** (e.g. `internal/schedule`)
+    and the TUI is merely its first Driver surface — the `/schedule` command may own nothing but
+    the popup and the in-transcript notices; everything that decides *when and how* a run fires
+    (cycle timing, re-run semantics, overlap policy, session grouping) must be importable by a
+    daemon that does not exist yet. If a firing ever injects model-visible content (a
+    scheduled-run preamble, prior-run context), library placement is mandatory per ADR 0031
+    invariant 4 (benchable all the way up), not merely tidy.
+  - **One firing is a headless run:** construct a fresh agent through the public API, run the
+    prompt, persist the session record — the same act as the deferred `apogee headless` runner
+    (see the **Embeddable agent** / **Driver** entries in `CONTEXT.md`). The TUI host adds only
+    the timer and the display; there is no scheduler-shaped duplication between TUI and daemon.
+  - **Lifetime is the honest TUI semantics:** a TUI-hosted schedule dies with the TUI — "while
+    apogee is open, re-run this every N minutes" is the coherent promise, a feature not a gap.
+    Durable schedules that survive quit are the future daemon's value-add over the *same*
+    library, so building this in the TUI first closes no doors.
+  - **Grill branch points** (still needs grilling; settle these): the overlap policy (skip /
+    queue / run concurrently when a firing is still in flight at the next tick); which Agent
+    modes a schedule may use — an Ask-Before schedule parks on the wait-tolerant Approver until
+    a human notices, so likely Plan or pre-authorized modes only at first; whether the schedule
+    id lands in the session record's browsable `Meta`
+    ([ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md));
+    and fresh-vs-resumed context per firing — the same open question ADR 0031 records for
+    workflow nodes, so grilling `/schedule` part-answers the platform question for free.
 
 - **Naming Sub-Agents** Sub agents should be able to receive a summary / name that identifies what they do. This should be visible in the session chat.
 

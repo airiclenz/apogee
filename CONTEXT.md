@@ -42,6 +42,17 @@ and versioned; everything else lives in `internal/`. See
 _Avoid_: "**Apogee Core**" (retired — it named the proxy-era transform engine, a
 different thing; do not resurrect the name for the new library), "the SDK".
 
+**Driver**:
+A program that embeds the **Embeddable agent** and drives the loop through its public
+API. Two exist today — the TUI and the bench — with `apogee headless` deferred and a
+platform daemon anticipated. The engine must stay sufficient for *any* Driver: nothing
+model-visible or safety-relevant may exist only in one Driver's surface, and a wire
+surface (HTTP, webhooks) is always composed by a Driver — the engine itself is
+wire-silent. See
+[ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md).
+_Avoid_: "embedder" (names the linking, not the responsibility of pacing the loop),
+"frontend" / "client" (a Driver owns the loop's pace and state roots, not just a view).
+
 **Sub-agent**:
 A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with
 its own Session and a reduced context Budget. It is itself an instance of the **Embeddable
