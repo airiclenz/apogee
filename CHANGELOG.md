@@ -10,6 +10,29 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The top rule wears the session's name — `▔▔▔▔ the name ▔▔▔▔`, centered on the hairline above the
+  status line.** A screen full of panes said nothing about which conversation each one held; now the
+  frame itself does, on a row it paints. The name follows every route that can set one — the automatic
+  naming call, either form of `/rename`, the `/sessions` browser's `r` on the live session, and a
+  resumed record's own name — and until one of those has spoken it shows the same first-prompt
+  heuristic the first save stamps, so the rule is named the instant you ask for something. It carries
+  no live state by design: the row says *which* conversation this is, and everything that changes has
+  a home in the chrome below it.
+  - **A name is clipped only when the rule has no room for it.** There is no fixed maximum — three `▔`
+    cells and a space stay on each side, and the name gets everything between them, whole, however
+    long it is, measured in the cells the terminal really paints rather than in runes. A short name in
+    a wide window simply keeps its long `▔` runs, and a window too narrow to show a name honestly goes
+    back to a plain rule.
+  - **An unnamed session gets the plain unbroken rule** — no `apogee` placeholder, because the frame
+    is already unmistakably apogee's from every other row — and `/clear` returns the row there with
+    the session it starts.
+  - **It costs the frame no row.** The `▔` hairline that caps the bottom chrome was already there and
+    already spanned the window, so the name rides a row the transcript had paid for. It is the route
+    that replaced the terminal window title added earlier the same day, which is withdrawn: it reached
+    no tab or window on any terminal tested.
+
+  Specced in `layout.md` ("The top rule wears the session's name").
+
 - **Tool blocks collapse and expand — click a header, or its `… +N more lines` marker, to see
   everything a call actually returned.** The compact block is unchanged and it is still what you
   get by default: a command's output shows its first line, a diff its first 20, each with the

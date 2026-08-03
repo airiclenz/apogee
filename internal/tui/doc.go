@@ -412,7 +412,11 @@
 // is dropped without a word whenever it fails or a human has named the session first — plus /rename
 // ([Model.runRename]), the human's half of that same machinery, which takes the name it is given or
 // asks the model for one on demand and, being asked for rather than automatic, reports every
-// outcome and outranks a title the human set a moment ago;
+// outcome and outranks a title the human set a moment ago; sessionrule.go the session name the
+// frame wears on its own top rule — the ▔ hairline above the status line, which carries the name
+// centered in place of the rule runes it would otherwise draw there, and which is where
+// [Model.topRule] gets both the name (the landed one, else the first prompt's heuristic, else none)
+// and the cell arithmetic that centers and clips it;
 // picker.go the modal single-select overlay behind /model and /server, and
 // popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go

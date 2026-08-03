@@ -185,6 +185,11 @@ gauge, instead of opening an empty view over a model that still remembers.
 - A session killed mid-task resumes to the last completed turn and says so;
   `/continue` then picks the unfinished work back up, while sending a new message
   instead discards it and continues fresh.
+- The session's **name is written on the top rule**, the hairline above the status
+  line — `▔▔▔▔ the name ▔▔▔▔` — so a screen full of panes says which conversation
+  each one is. It shows whatever named the session, from `/rename` or from the automatic
+  naming call, and a session with no name yet shows a plain unbroken rule. Nothing
+  needs configuring in your terminal for it: it is a row apogee paints itself.
 
 Autonomy mode, tool approvals, confinement, and MCP connections are deliberately
 **not** part of a saved session — they are re-established or re-confirmed on

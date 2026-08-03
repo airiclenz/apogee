@@ -46,7 +46,7 @@
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
 
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
   ⠉⠹ reading · main.go · 3s                                    16k/32k 50% █████░░░░░
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Send a message… [Shift] + [Enter] creates a line break                              │
@@ -565,6 +565,60 @@ The slot holds one word at a time and says nothing else: an actuation's own prog
 transcript notes, not chrome. The `✦ offline` marker is separate again — it is *appended* to the
 **end** of the left slot in the error tone once the offline crossing is made, after the workdir and
 whatever the model segment is showing, so it closes the line rather than displacing a fact.
+
+---
+
+## The top rule wears the session's name
+
+**What it says.** The `▔` hairline that caps the bottom chrome carries the session's name, centered,
+in place of the rule runes it would otherwise draw there — `▔▔▔▔ the name ▔▔▔▔`, as the sketch at the
+top of this file shows it. The shape is `<▔ run><space><name><space><▔ run>`, the two spaces always
+present so the name never touches a rule rune, and the three pieces together measure exactly the
+window's width. It costs the frame no row: the rule already existed and already spanned the window,
+so the name rides a row the transcript had already paid for and the row inventory above is unchanged.
+**The only thing that clips the name is the room the rule leaves.** There is no fixed maximum: three
+`▔` cells and one space stay on EACH side, always — that is what makes the row read as a rule
+*carrying* a name rather than as a caption with two stubs — which fixes the name's room at `w - 8`. A
+name is shown WHOLE whenever it fits, however long it is, and is truncated with an `…` only when it
+would not, so a short name in a wide window keeps its long `▔` runs. It is the runs that flex, not
+the name that shrinks to some arbitrary number. The truncation is in **cells**, like every other
+width in this document and unlike a rune count, because this row is painted into the cell buffer: a
+CJK name gives up half as many glyphs to fit the same room, and a rune-based clip would overrun the
+window on exactly those names. The fill the label does not spend is split with the lead run taking
+half rounded down, so on an odd fill the name sits one column left of dead centre — a reader who
+counts columns would otherwise take that for a bug.
+
+**Which name.** Two answers, in the order a session acquires them: the name the automatic naming call
+or either form of `/rename` decided, and failing that the same first-prompt heuristic the first save
+stamps, which names the rule from the human's opening request the instant it is sent — hours before a
+naming call can answer. The gate on that second branch is "the transcript has a first user text", not
+"the heuristic returned something": the heuristic answers a dated `Session <date>` for a session that
+has said nothing, and a rule naming the calendar would be worse than a rule naming nothing. A session
+that HAS spoken keeps whatever the heuristic makes of it, dated fallback included — that is the title
+its record carries, and the rule agreeing with the `/sessions` browser is the point.
+
+**What an unnamed session gets.** The plain unbroken rule, with no placeholder in the name's slot —
+not `apogee`, not anything else. The rule is a rule that carries a name when there is one, and the
+frame is already unmistakably this program's from every other row, so a stand-in would be noise on
+the one row that has nothing to say yet. `/clear` therefore returns the row to a plain rule with the
+session it starts.
+
+**What it deliberately does not say.** No spinner, no clock, no working marker. The row states an
+IDENTITY — which conversation this is, for a human scanning a screen full of panes — and a row that
+changed every frame would be a gauge in the place the reader uses to tell one window from another.
+Everything live already has a home in the chrome below it, one row down.
+
+**How it degrades.** Below six cells a name is not a name, it is an ellipsis with a hint, so when
+`w - 8` falls under six the row degrades to the plain unbroken rule rather than showing a stub. The
+boundary is crisp: `w = 13` is a plain rule, `w = 14` carries a six-cell name between two three-cell
+runs. A zero-width frame — reachable before the first size message lands — paints no row at all.
+
+**The strip.** The name is untrusted twice over: it is a model's reply to the naming call, and it is a
+stored record's title read back off disk, which nothing sanitizes on the way in. It goes through the
+same strong strip the naming pipeline uses (whole escape sequences AND every non-whitespace control
+character) and then has its whitespace runs collapsed, so a pasted multi-line name occupies one row
+rather than smuggling a newline into the frame. Here a control character is a LAYOUT bug as much as a
+security one: it breaks the row's measure, and every row of this frame is squared to the window.
 
 ---
 

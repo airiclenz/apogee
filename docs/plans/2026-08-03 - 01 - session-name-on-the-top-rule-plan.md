@@ -265,7 +265,17 @@ negative count, and a zero-width model is reachable before the first `WindowSize
 
 ---
 
-## 3. The docs say what the rule says
+## 3. The docs say what the rule says — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): two elaborations on the item's literal text, both in `layout.md`. The sketch at
+line 49 carries the owner's own placeholder wording — `centered session name`, the exact label in
+`docs/design/prompt-box-layout.md` — rather than an invented example name, because "Match
+`docs/design/prompt-box-layout.md`" reads most safely as matching it verbatim; the row still measures
+the sketch's 87 columns (32 `▔`, space, 21-cell label, space, 32 `▔`). And the new section's **What it
+says** paragraph closes with one sentence on the centering bias (the extra column goes RIGHT), which
+the item lists only for item 2's doc comment: a reader of the spec who counts the sketch's two runs
+would otherwise meet an off-by-one and take it for a bug. Everything the item enumerates is present
+under the six bold lead-ins it names.
 
 Depends on items 1 and 2.
 
