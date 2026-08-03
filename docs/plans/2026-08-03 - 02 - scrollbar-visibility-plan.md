@@ -157,9 +157,23 @@ to today's (the unmodified pinning tests prove it), and the hidden state yields 
 
 **Commit:** `feat(tui): the scrollbar obeys ui.show-scrollbar`
 
-## 3. The placeholder frame stays on the alt screen
+## 3. The placeholder frame stays on the alt screen — ✅ DONE (2026-08-03)
 
 Independent of items 1-2.
+
+NOTES (2026-08-03): the item's two `WindowTitle` anchors are gone — `7355bed` withdrew the terminal
+window title, so the placeholder carries no `WindowTitle` to sit beside and the named precedent
+`TestViewCarriesWindowTitle` no longer exists; `v.AltScreen = true` is now the placeholder branch's
+only field, and the new test sits beside `TestModelViewBeforeReady` (`model_test.go:2389`), the
+surviving test that reads `m.View()` in that branch. Startup audit (`main.go`, `root.go`'s `RunE`,
+`wire.go:runRoot` to `tui.Run`): the DEFAULT happy path writes nothing before the program starts —
+`main.go` prints only on a failed `Execute`. Seven pre-TUI writes exist, all one-line stderr notices
+that are conditional, deliberate and documented as landing before the alt screen: the first-run
+config-seed line and `applyConfig`'s soft notice (`root.go` `RunE`), the unconfined-Auto warning
+(`wire.go:197`), the degraded-confinement notice (`:207`), the Windows label-walk pre-warm (`:227`),
+the validated-set notices (`:277`), and the deferred confinement-teardown notice (`:131`, on exit).
+Nothing writes to stdout on any of those paths. No change made or warranted — a notice the user must
+read has to reach the primary screen.
 
 **What:**
 

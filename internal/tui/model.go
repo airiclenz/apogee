@@ -2746,7 +2746,8 @@ const frameBlocks = 12
 // View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
 // the bordered input box, the footer line and the ▁ bottom-edge hairline, filling the alternate
 // screen (layout.md). Before
-// the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder. The
+// the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder —
+// on the alternate screen as well, so no frame apogee emits ever touches the primary one. The
 // approval or ask prompt, when one is pending, sits between the transcript and the blank line, as
 // do the /sessions browser and the picker; the autocomplete dropdown and the staged-interjection
 // strip sit just above the input box. Every one of them takes its rows from the transcript
@@ -2754,7 +2755,14 @@ const frameBlocks = 12
 // wherever the box is editable (promptCursor).
 func (m Model) View() tea.View {
 	if !m.ready {
-		return tea.NewView("apogee — starting…")
+		// The alternate screen from the very FIRST frame, not just the laid-out ones: Bubble Tea v2
+		// applies it as a per-frame view field (ADR 0011), so a placeholder that left it unset would
+		// paint on the PRIMARY screen, push its lines into scrollback and keep the terminal's own
+		// scrollbar alive for the whole run. MouseMode stays laid-out-frame-only — there is nothing
+		// here to click.
+		v := tea.NewView("apogee — starting…")
+		v.AltScreen = true
+		return v
 	}
 
 	// Rendered once, then measured by the same derivation the mouse maps through, so what is drawn

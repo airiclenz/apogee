@@ -2396,6 +2396,26 @@ func TestModelViewBeforeReady(t *testing.T) {
 	}
 }
 
+// Every frame apogee emits lives on the alternate screen — the pre-ready placeholder as much as a
+// laid-out one. A frame that left AltScreen unset would paint on the primary screen, push its lines
+// into the terminal's scrollback and keep the terminal's own scrollbar visible for the whole run.
+func TestViewStaysOnAltScreen(t *testing.T) {
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+	if m.ready {
+		t.Fatal("model ready before any WindowSizeMsg")
+	}
+	if !m.View().AltScreen {
+		t.Error("pre-ready placeholder frame is not on the alternate screen")
+	}
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	if !m.ready {
+		t.Fatal("model not ready after a WindowSizeMsg")
+	}
+	if !m.View().AltScreen {
+		t.Error("laid-out frame is not on the alternate screen")
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Depth > 0 rendering (Phase 3 sub-agents render as a framed block, no crash) — P3.14
 // ----------------------------------------------------------------------------
