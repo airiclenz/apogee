@@ -122,7 +122,7 @@ frame-paint tests live there — follow the existing `plain(m.View())` /
 
 **Commit:** `fix(tui): seat overlay panes flush on the bottom chrome, gap row above the slot`
 
-## 2. Record the new slot order in layout.md, CHANGELOG and ISSUES.md
+## 2. Record the new slot order in layout.md, CHANGELOG and ISSUES.md — ✅ DONE (2026-08-03)
 
 Depends on item 1.
 

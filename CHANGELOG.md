@@ -860,6 +860,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A pop-up pane no longer paints a spacer row against the bottom chrome.** The `/sessions` browser
+  and the `/model` | `/server` picker — and the approval or ask prompt with them — each stood one
+  blank row clear of the `▔` hairline, while the `/` and `@` dropdown and the staged-message band
+  sat flush on the input box: the same offering looked deliberately placed in one slot and adrift in
+  the other, depending only on which surface you had opened. The frame's single gap row now sits
+  ABOVE that slot instead of below it, so a pane opened there seats its bottom border directly on
+  the hairline and every pane in the frame reads alike. With no pane open the frame is unchanged —
+  the blank row still lands directly above the `▔` — and the row budget is untouched either way: the
+  frame spends exactly one gap row in every composition, so the transcript pays no more and no less
+  for a pane than it did before.
+
 - **A narrow start-up card no longer eats the end of a host or model name without saying so.** In a
   window too narrow for the card's side-by-side layout, the facts stack under the logo — and a value
   wider than the card simply stopped at the border: at 29 columns a host of `192.168.64.1:1111` was

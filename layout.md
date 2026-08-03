@@ -95,6 +95,16 @@ address in it, and the rows an overlay paints are the same three answers to one 
 on a pane's border or on a session row selects nothing in the transcript, because there is no
 transcript there.
 
+**And a pane in that slot sits flush on the bottom chrome.** The frame spends exactly one blank gap
+row, and it sits ABOVE the slot — between the session area and whatever comes next — so the approval
+and ask prompts, the `/sessions` browser and the `/model` | `/server` picker each seat their bottom
+border directly on the `▔` hairline, with no empty row painted against it. That is how the `/` and
+`@` dropdown and the staged-interjection band already hug the input box from below, and the panes
+above the hairline now read the same way rather than each carrying a spacer the others did not. With
+no pane open nothing moves: the gap row still lands directly above the `▔`, exactly where it always
+did. Which side of the slot the row falls on is a stacking question and not a budget one — the frame
+spends the one row in every composition — so none of the arithmetic below knows about it.
+
 **A short window shrinks the panes rather than pushing the box off-screen.** A pane never promises
 rows the frame cannot hold: it spends what the window can spare above the input box, so a long
 choice set on a half-height pane scrolls a smaller window around the selection, and on a window
