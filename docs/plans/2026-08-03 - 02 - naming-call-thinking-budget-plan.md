@@ -92,7 +92,7 @@ carrying the status code, and a 400-overflow still satisfies
 
 **Commit:** `feat(provider): per-request thinking disable and typed upstream status errors`
 
-## 2. Title package: thinking off, budget quadrupled, truncation named
+## 2. Title package: thinking off, budget quadrupled, truncation named — ✅ DONE (2026-08-03)
 
 **What:** in `internal/title/title.go` (depends on item 1):
 

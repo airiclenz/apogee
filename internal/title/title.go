@@ -2,14 +2,15 @@
 // out-of-band call that gives a Session record a human title instead of the first line
 // of the user's first prompt.
 //
-// It is deliberately two pure functions and nothing else. Prompt renders the request from a
-// WINDOW of the user's requests — one entry for the automatic call at first-prompt submit,
-// because one is all that exists when it fires; a bounded, budget-capped selection of the
-// session's user side when the human asks for a name later. Sanitize turns whatever text came
-// back into a title or reports that nothing usable did. Neither one talks to a server, a Session
-// record, or the TUI, so both are table-testable and the policy that surrounds them — when to
-// fire, whether to apply the result, which title wins — lives entirely with the callers that own
-// that state.
+// It is deliberately two pure functions and one shared sentinel error, and nothing else. Prompt
+// renders the request from a WINDOW of the user's requests — one entry for the automatic call at
+// first-prompt submit, because one is all that exists when it fires; a bounded, budget-capped
+// selection of the session's user side when the human asks for a name later. Sanitize turns
+// whatever text came back into a title or reports that nothing usable did. Neither one talks to a
+// server, a Session record, or the TUI, so both are table-testable and the policy that surrounds
+// them — when to fire, whether to apply the result, which title wins — lives entirely with the
+// callers that own that state. ErrTruncated is the shared word for the one failure the callers on
+// both sides of the seam must agree on.
 //
 // The naming call is NOT a Mechanism and NOT a Turn (ADR 0022 addendum, 2026-07-31): it fires
 // at no Hook point, never shapes the primary call, emits no events, and nothing breaks when it
@@ -19,6 +20,7 @@
 package title
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -29,14 +31,27 @@ import (
 )
 
 // Naming-call sampling. A low temperature keeps the title descriptive rather than inventive
-// (the compaction precedent, agent/compact.go), and the token cap is deliberately generous for
-// so short an answer: small models routinely think inline before they answer, and a cap sized
-// for the title alone truncates the reply mid-thought — which reads to Sanitize as a failure
-// even though the model was on its way to a perfectly good name.
+// (the compaction precedent, agent/compact.go).
+//
+// The token cap is a BACKSTOP, not a budget for the answer. Prompt asks for no reasoning pass at
+// all (DisableThinking), but that intent only lands on a server whose chat template honours it;
+// on one that ignores it, max_tokens bounds the REASONING tokens too, and a thinking model then
+// spends the whole cap before it writes a word of title. That is not hypothetical: a live
+// qwen3.6-35B-A3B run at the old 1024 answered a big session's naming call with 4,045 characters
+// of reasoning, finish_reason "length", and empty content — every time. 4096 is sized so even
+// that unsuppressed worst case leaves room for the title after the thinking.
 const (
 	titleTemperature = 0.2
-	titleMaxTokens   = 1024
+	titleMaxTokens   = 4096
 )
+
+// ErrTruncated reports that the naming completion hit the token cap and came back with no answer
+// in it — the model spent the whole reply on reasoning. It is defined here because both sides of
+// the naming seam need the one definition: the wiring that runs the call (cmd/apogee) returns it,
+// the fold that reports the outcome (internal/tui) tests for it, and both already import this
+// package. It is distinct from Sanitize's ok=false, which means a reply did arrive and nothing
+// usable survived the cleanup.
+var ErrTruncated = errors.New("the naming reply hit the token cap before writing a title")
 
 // promptExcerptRunes bounds how much of the request rides the naming call when the window holds
 // exactly one — the automatic call at first-prompt submit. The title describes the task, and a
@@ -110,6 +125,8 @@ const windowHeader = "The user's requests in this session, oldest first:"
 // Model is deliberately left empty: the Client's own configured model wins in buildBody, which
 // is what binds the naming call to the session's current server and model (Ratified design 3).
 // The request carries no tools and does not stream — it is one round-trip for one line of text.
+// It also asks for no reasoning pass: an eight-word title needs no chain-of-thought, while a
+// thinking model left to itself will happily spend the entire reply budget arriving at one.
 func Prompt(prompts []string, workspaceBase string, date time.Time) provider.Request {
 	temperature, maxTokens := titleTemperature, titleMaxTokens
 	return provider.Request{
@@ -117,7 +134,8 @@ func Prompt(prompts []string, workspaceBase string, date time.Time) provider.Req
 			{Role: "system", Content: systemInstruction},
 			{Role: "user", Content: userMessage(prompts, workspaceBase, date)},
 		},
-		Sampling: provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
+		Sampling:        provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
+		DisableThinking: true,
 	}
 }
 

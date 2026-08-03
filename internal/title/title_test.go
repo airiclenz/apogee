@@ -121,18 +121,35 @@ func TestPromptLeavesModelToTheClient(t *testing.T) {
 	}
 }
 
+// TestPromptSetsSamplingConstants pins the naming call's sampling on BOTH prompt forms: the
+// single request the automatic call sends and the multi-request window a bare /rename sends. The
+// cap is asserted against the literal 4096 rather than titleMaxTokens so lowering the constant
+// back to a value a thinking model exhausts fails here instead of passing silently.
 func TestPromptSetsSamplingConstants(t *testing.T) {
 	t.Parallel()
 
-	req := Prompt([]string{"hello"}, "apogee", promptDate)
-	if req.Sampling.Temperature == nil || *req.Sampling.Temperature != titleTemperature {
-		t.Errorf("Temperature = %v, want %v", req.Sampling.Temperature, titleTemperature)
+	forms := map[string][]string{
+		"single request": {"hello"},
+		"window":         {"hello", "now add a retry", "and write the test"},
 	}
-	if req.Sampling.MaxTokens == nil {
-		t.Fatal("MaxTokens is unset, want a generous cap for a model that thinks inline")
-	}
-	if *req.Sampling.MaxTokens < 512 {
-		t.Errorf("MaxTokens = %d, want at least 512", *req.Sampling.MaxTokens)
+	for name, prompts := range forms {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			req := Prompt(prompts, "apogee", promptDate)
+			if req.Sampling.Temperature == nil || *req.Sampling.Temperature != titleTemperature {
+				t.Errorf("Temperature = %v, want %v", req.Sampling.Temperature, titleTemperature)
+			}
+			if req.Sampling.MaxTokens == nil {
+				t.Fatal("MaxTokens is unset, want the backstop cap for a server that ignores the thinking switch")
+			}
+			if *req.Sampling.MaxTokens != 4096 {
+				t.Errorf("MaxTokens = %d, want 4096", *req.Sampling.MaxTokens)
+			}
+			if !req.DisableThinking {
+				t.Error("DisableThinking = false, want the naming call to ask for no reasoning pass")
+			}
+		})
 	}
 }
 
