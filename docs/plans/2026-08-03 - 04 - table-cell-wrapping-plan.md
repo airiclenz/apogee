@@ -299,7 +299,7 @@ too narrow even with every column down to a single cell", which the floor falsif
 
 ---
 
-## 4. Narrate the new table, and mark the issue executed
+## 4. Narrate the new table, and mark the issue executed — ✅ DONE (2026-08-03)
 
 Depends on items 1–3. Documentation only — no behaviour changes here.
 

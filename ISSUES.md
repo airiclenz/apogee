@@ -2,7 +2,7 @@ A: Activated / Active
 P: Planned
 X: Executed
 
-- [ ] when printing markdown tables, cells with much content currently truncate the content if it does not fit. The content needs to be wrapped into another line within the cell. This will probably require the introduction of vertical and horizontal table lines / frames.
+- [X] when printing markdown tables, cells with much content currently truncate the content if it does not fit. The content needs to be wrapped into another line within the cell. This will probably require the introduction of vertical and horizontal table lines / frames.
 
 - [ ] Currently I cannot see how much of it's context a sub agent has used.
 

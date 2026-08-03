@@ -152,9 +152,12 @@
 // numbered lists, GFM pipe tables) into styled physical lines — a spare, pure, lipgloss-only
 // renderer matching toolpresent.go's posture, with render.go still owning the marker and depth
 // framing. Tables are the one construct with a file of their own, mdtable.go: it parses the block
-// and lays it out as borderless aligned columns, measuring the RENDERED cell so markup and colour
-// escapes never widen a column, and falling back to plain paragraphs where even single-cell
-// columns cannot fit the width (layout.md is the visual contract). filecache.go
+// and lays it out as aligned columns ruled by a faint │ under a header rule that crosses every
+// divider at a ┼, measuring the RENDERED cell so markup and colour escapes never widen a column,
+// WRAPPING a cell too wide for its column inside that column rather than cutting it — so a row is
+// as many lines as its tallest cell and nothing is ever dropped — and falling back to plain
+// paragraphs where the width cannot give every column its four-cell readable floor (layout.md is
+// the visual contract). filecache.go
 // backs the "@" overlay with a short-TTL, single-walk workspace listing filtered in memory, so a
 // typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke. mouse.go
 // implements click-to-position caret and drag-to-select (with OSC52 copy) in BOTH rectangles —

@@ -573,6 +573,31 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A markdown table cell that does not fit its column now wraps inside it instead of being cut with
+  a `…`.** A long cell used to lose its tail the moment the columns had to be squeezed — the widest
+  column shrank, the sentence in it stopped mid-word at a `…`, and what the model actually wrote was
+  simply not on screen. Now that cell wraps onto as many further lines as it needs inside its own
+  column, so the row becomes as tall as its tallest cell and nothing is dropped. There is no `…`
+  anywhere in the table contract any more, and no height cap either — a cap would only put the cut
+  back at a different threshold.
+  - **Columns are told apart by a vertical rule, `│` with one space either side**, because a wrapped
+    row needs a visible column boundary to still read as columns. It wears the muted colour of the
+    header rule — the frame is not content — and the header rule crosses it at a `┼`, so that line
+    stays one continuous stroke the full width of the table. Nothing else was added: no outer frame,
+    no corners, no rule between body rows, so the table still sits in the body column like any other
+    paragraph rather than reading as a boxed object. Cells are top-aligned, and every line of the
+    block — header, rule, body, the continuation lines of a wrapped cell and the blank filler beside
+    them — is still padded to exactly the table's width, so the straight right edge the scroll-bar
+    gutter and a drag selection both depend on holds through a wrapped row.
+  - **A table too narrow to read is still plain paragraphs.** No column is shrunk below four cells of
+    content — narrower than that a wrapped cell comes apart into a letter or two per line, which is
+    vertical text with a rule beside it, not a column — and where the width cannot give every column
+    that minimum the block falls back to the paragraphs it rendered before, which always fit. The
+    floor is a floor on the shrink, not a width every column is handed: a column whose content is
+    naturally narrower keeps its own width and is never charged the four cells it would not use.
+
+  Specced in `layout.md` ("Markdown tables in assistant text").
+
 - **The transcript's scroll bar is one line in two weights — the thumb thinned from `█` to `┃`.**
   The bar used to be a solid block riding over a hairline track, two shapes that shared a column
   without sharing an axis; the thumb is now the heavy vertical `┃` over the same light `│` track, so
