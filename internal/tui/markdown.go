@@ -12,9 +12,9 @@ import (
 // transcript needs into styled physical lines: **bold**, # headings (bold white), `inline code`
 // and ``` fenced blocks ``` (orange), bullet/numbered lists, and GFM pipe tables — the last
 // dispatched from the walk below into its companion mdtable.go, which draws them as aligned
-// columns ruled by a faint │, wrapping an over-wide cell inside its column rather than cutting it
-// and falling back to plain paragraphs below a readable column floor, all under the same absolute
-// width cap. It is a deliberately spare, lipgloss-only renderer (no syntax highlighting, no
+// columns ruled by a faint │ and by a ─ under the header and between adjacent body rows, wrapping
+// an over-wide cell inside its column rather than cutting it and falling back to plain paragraphs
+// below a readable column floor, all under the same absolute width cap. It is a deliberately spare, lipgloss-only renderer (no syntax highlighting, no
 // external dependency) — pure and table-testable, matching toolpresent.go's posture; render.go
 // owns the marker and depth framing.
 //

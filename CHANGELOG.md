@@ -583,8 +583,8 @@ point is a **minor** bump, not a breaking change.
   - **Columns are told apart by a vertical rule, `│` with one space either side**, because a wrapped
     row needs a visible column boundary to still read as columns. It wears the muted colour of the
     header rule — the frame is not content — and the header rule crosses it at a `┼`, so that line
-    stays one continuous stroke the full width of the table. Nothing else was added: no outer frame,
-    no corners, no rule between body rows, so the table still sits in the body column like any other
+    stays one continuous stroke the full width of the table. Nothing else was added: no outer frame
+    and no corners, so the table still sits in the body column like any other
     paragraph rather than reading as a boxed object. Cells are top-aligned, and every line of the
     block — header, rule, body, the continuation lines of a wrapped cell and the blank filler beside
     them — is still padded to exactly the table's width, so the straight right edge the scroll-bar
@@ -595,6 +595,21 @@ point is a **minor** bump, not a breaking change.
     that minimum the block falls back to the paragraphs it rendered before, which always fit. The
     floor is a floor on the shrink, not a width every column is handed: a column whose content is
     naturally narrower keeps its own width and is never charged the four cells it would not use.
+
+  Specced in `layout.md` ("Markdown tables in assistant text").
+
+- **Adjacent rows of a markdown table are now ruled apart.** A table drew exactly one horizontal
+  rule, under its header, and everything below it ran together — which got harder to read the moment
+  cells started wrapping, because a two-line row and the row under it looked like one four-line
+  block. Now the same faint `─` runs between every pair of adjacent body rows, crossing each column
+  divider at a `┼` exactly as the header's rule does, so a row boundary is as visible as a column
+  boundary. It is one stroke used in two places, not two: the header keeps its distinction through
+  its **bold** cells rather than through a rule of its own.
+  - **The table is still ruled, not boxed.** No rule above the first body row, where the header's
+    rule already sits; none below the last, because there is no bottom frame to close; and none
+    inside a row — a cell that wraps onto further lines is still one row, and its continuation lines
+    stay rule-free, so "more of this row" never reads as "the next row". Still no outer frame and no
+    corners.
 
   Specced in `layout.md` ("Markdown tables in assistant text").
 

@@ -197,10 +197,12 @@ func hasUnescapedPipe(s string) bool {
 // ----------------------------------------------------------------------------
 //
 // A table is drawn as ruled columns: a faint │ between adjacent columns with one space either
-// side, one dim rule under the header crossing every divider at a ┼, and nothing else — no outer
-// frame, no corners, no rule between body rows — so it still sits in the body column like any
-// other paragraph rather than a boxed object dropped into the transcript, while a column boundary
-// stays readable (layout.md). Every width is a display width (th.measure over the rendered,
+// side, one dim rule under the header and another between each pair of adjacent body rows, every
+// one of them crossing every divider at a ┼, and nothing else — no outer frame, no corners, no rule
+// above the first body row or below the last — so it still sits in the body column like any other
+// paragraph rather than a boxed object dropped into the transcript, while both a column boundary
+// and a row boundary stay readable (layout.md). The rules are one glyph set and one style: the
+// header keeps its distinction through its bold cell text, not through a rule of its own. Every width is a display width (th.measure over the rendered,
 // ANSI-carrying cell — width.go), never a byte count: the cells are styled before they are
 // measured, so markup characters and escape bytes can never push a column open. The divider is
 // drawn in the rule's own faint style, because the frame is not content. Nothing is ever cut: a
@@ -229,14 +231,17 @@ const (
 const minTableColumnWidth = 4
 
 // renderTable lays a parsed table out as styled physical lines at the given width: bold header,
-// one ─ rule the full width of the table crossing every divider at a ┼, then the body rows, each
-// cell inline-rendered, wrapped to its column, padded on the side its column's alignment names and
-// separated from its neighbour by the vertical divider. A row contributes as many lines as its
-// tallest cell needs, so the block is taller than its row count whenever a cell wraps — which is
-// why the rows are appended rather than assigned. It reports false when the table cannot fit — the
-// width cannot give every column minTableColumnWidth cells of content, once the dividers are paid
-// for — and the caller then leaves the block to the paragraph path it would have taken before
-// tables were rendered at all, which is always readable and never overflows.
+// one ─ rule the full width of the table crossing every divider at a ┼, then the body rows with
+// that same rule between each adjacent pair of them, each cell inline-rendered, wrapped to its
+// column, padded on the side its column's alignment names and separated from its neighbour by the
+// vertical divider. The inter-row rule goes BETWEEN rows only: never above the first (the header's
+// rule already sits there), never below the last (there is no bottom frame), and never inside a
+// wrapped row — a row that spills onto further lines is still one row. A row contributes as many
+// lines as its tallest cell needs, so the block is taller than its row count whenever a cell wraps —
+// which is why the rows are appended rather than assigned. It reports false when the table cannot
+// fit — the width cannot give every column minTableColumnWidth cells of content, once the dividers
+// are paid for — and the caller then leaves the block to the paragraph path it would have taken
+// before tables were rendered at all, which is always readable and never overflows.
 func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 	if len(tbl.header) == 0 {
 		return nil, false
@@ -260,10 +265,15 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 		return nil, false
 	}
 
-	out := make([]string, 0, len(rows)+2)
+	out := make([]string, 0, 2*len(rows)+2)
 	out = append(out, layoutTableRows(th, header, widths, tbl.align)...)
 	out = append(out, tableRuleRow(th, widths))
-	for _, row := range rows {
+	for i, row := range rows {
+		if i > 0 {
+			// Between adjacent rows only: the header's rule already separates the first from the
+			// header above it, and the last row ends the block with nothing under it.
+			out = append(out, tableRuleRow(th, widths))
+		}
 		out = append(out, layoutTableRows(th, row, widths, tbl.align)...)
 	}
 	return out, true
@@ -443,10 +453,13 @@ func padTableCell(th theme, cell string, width int, align mdAlign) string {
 	}
 }
 
-// tableRuleRow renders the line under the header: a ─ run per column, joined by ─┼─ where the
-// divider passes through, so the header is underlined across the whole table rather than by one
-// dash per column broken at every column division, and each crossing sits in exactly the cell the
-// divider occupies on the rows above and below it. The joint is tableDividerWidth cells like the
+// tableRuleRow renders one horizontal rule — the line under the header and the line between two
+// adjacent body rows are the same line, drawn by this one builder in the one glyph set and the one
+// faint style, because a second rule shape would say the two boundaries mean different things. The
+// header is told from the body by its bold cells, not by its rule. It is a ─ run per column, joined
+// by ─┼─ where the divider passes through, so the table is ruled across its whole width rather than
+// by one dash per column broken at every column division, and each crossing sits in exactly the cell
+// the divider occupies on the rows above and below it. The joint is tableDividerWidth cells like the
 // divider itself, so the rule comes out exactly as wide as every other line of the block — the
 // same arithmetic layoutTableRows walks.
 func tableRuleRow(th theme, widths []int) string {

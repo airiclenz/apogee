@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -259,6 +260,7 @@ func TestTableRendersLayoutExample(t *testing.T) {
 		"Tool      │ Calls │     Notes",
 		"──────────┼───────┼──────────────",
 		"Read File │    12 │     fast",
+		"──────────┼───────┼──────────────",
 		"Run       │     3 │ go test ./...",
 	}
 
@@ -278,7 +280,8 @@ func TestTableRendersLayoutExample(t *testing.T) {
 // here the "Status" header is two cells wider than every value under it, which is exactly the
 // two-column step the shape reported against the first table release. At this width the middle
 // column is shrunk by two cells and the second body row wraps, so the block is one line taller than
-// its row count — the filler line under the shorter cells beside it is held to the width too.
+// its row count — the filler line under the shorter cells beside it is held to the width too, as are
+// the two rules between the three rows.
 func TestTableRowsShareOneWidth(t *testing.T) {
 	th := newTheme()
 	source := strings.Join([]string{
@@ -292,8 +295,8 @@ func TestTableRowsShareOneWidth(t *testing.T) {
 
 	got := renderMarkdownBody(th, source, width)
 
-	if len(got) != 6 {
-		t.Fatalf("got %d lines, want 6 (header, rule, three rows, one of them wrapped to two): %#v",
+	if len(got) != 8 {
+		t.Fatalf("got %d lines, want 8 (header, rule, three rows — one wrapped to two — and a rule between each pair): %#v",
 			len(got), visible(got))
 	}
 	for i, ln := range got {
@@ -335,12 +338,14 @@ func TestTableConsumesItsSyntax(t *testing.T) {
 	}
 }
 
-// The rule under the header runs the whole width of the table: it is ruled THROUGH the dividers
-// rather than stopping at each one, so it reads as a single horizontal rule under the block rather
-// than a dash per column interrupted at every column division. A space anywhere inside that line is
-// the bare-gutter regression. Where it meets a divider it crosses it with a ┼ in exactly the cell
-// the other rows draw their │ in: a crossing one cell off would show as a kink in the vertical.
-// The run is also exactly as wide as every other line of the block.
+// EVERY rule the table draws — the one under the header and the one between each pair of adjacent
+// body rows — runs the whole width of the table: it is ruled THROUGH the dividers rather than
+// stopping at each one, so it reads as a single horizontal rule across the block rather than a dash
+// per column interrupted at every column division. A space anywhere inside one of those lines is the
+// bare-gutter regression. Where a rule meets a divider it crosses it with a ┼ in exactly the cell the
+// other rows draw their │ in: a crossing one cell off would show as a kink in the vertical, and it
+// has to hold for the inter-row rules as much as for the header's, since they are the same stroke
+// continued down the block.
 func TestTableRuleIsContinuous(t *testing.T) {
 	th := newTheme()
 	source := strings.Join([]string{
@@ -352,35 +357,148 @@ func TestTableRuleIsContinuous(t *testing.T) {
 
 	got := renderMarkdownBody(th, source, 40) // wider than the table, so no column is shrunk
 
-	if len(got) != 4 {
-		t.Fatalf("got %d lines, want 4 (header, rule, two rows): %#v", len(got), visible(got))
+	if len(got) != 5 {
+		t.Fatalf("got %d lines, want 5 (header, rule, row, rule, row): %#v", len(got), visible(got))
 	}
-	rule := strip(got[1])
-	if strings.Contains(rule, " ") {
-		t.Errorf("rule row = %q; want one unbroken run — the dividers are ruled through, not bare", rule)
+	if rules := tableRuleLines(visible(got)); !reflect.DeepEqual(rules, []int{1, 3}) {
+		t.Fatalf("rules on lines %v; want the header's on line 1 and one between the two rows on line 3: %#v",
+			rules, visible(got))
 	}
-	for _, r := range rule {
-		if s := string(r); s != glyphTableRule && s != glyphTableCross {
-			t.Errorf("rule row = %q; want nothing but %q and %q, found %q", rule, glyphTableRule, glyphTableCross, s)
-			break
-		}
-	}
-	crossings := glyphColumns(rule, glyphTableCross)
+
+	// The header's crossings are the reference every other line of the block is held to.
+	crossings := glyphColumns(strip(got[1]), glyphTableCross)
 	if len(crossings) != 2 {
-		t.Errorf("rule row = %q; want a crossing at each of the two dividers, got %d", rule, len(crossings))
+		t.Errorf("rule row = %q; want a crossing at each of the two dividers, got %d", strip(got[1]), len(crossings))
 	}
 	for i, ln := range got {
 		v := strip(ln)
-		if i != 1 {
-			if cols := glyphColumns(v, glyphTableColumn); !reflect.DeepEqual(cols, crossings) {
-				t.Errorf("line %d draws its dividers in columns %v but the rule crosses at %v: %q",
+		if i == 1 || i == 3 {
+			if strings.Contains(v, " ") {
+				t.Errorf("rule row %d = %q; want one unbroken run — the dividers are ruled through, not bare", i, v)
+			}
+			for _, r := range v {
+				if s := string(r); s != glyphTableRule && s != glyphTableCross {
+					t.Errorf("rule row %d = %q; want nothing but %q and %q, found %q",
+						i, v, glyphTableRule, glyphTableCross, s)
+					break
+				}
+			}
+			if cols := glyphColumns(v, glyphTableCross); !reflect.DeepEqual(cols, crossings) {
+				t.Errorf("rule row %d crosses in columns %v but the header's rule crosses at %v: %q",
 					i, cols, crossings, v)
 			}
+		} else if cols := glyphColumns(v, glyphTableColumn); !reflect.DeepEqual(cols, crossings) {
+			t.Errorf("line %d draws its dividers in columns %v but the rules cross at %v: %q",
+				i, cols, crossings, v)
 		}
 		if w := lipgloss.Width(ln); w != lipgloss.Width(got[1]) {
 			t.Errorf("line %d is %d cells wide but the rule is %d — the rule spans the table exactly: %q",
 				i, w, lipgloss.Width(got[1]), v)
 		}
+	}
+}
+
+// tableRuleLines reports the indexes of the lines of an ANSI-stripped block that are horizontal
+// rules — nothing but the rule glyph and its crossings — which is how a test tells "this line is a
+// rule" apart from "this line is a row" without counting on where the rules fall.
+func tableRuleLines(lines []string) []int {
+	var out []int
+	for i, v := range lines {
+		if v == "" {
+			continue
+		}
+		rule := true
+		for _, r := range v {
+			if s := string(r); s != glyphTableRule && s != glyphTableCross {
+				rule = false
+				break
+			}
+		}
+		if rule {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// A rule sits between every pair of ADJACENT body rows, and nowhere else: not above the first body
+// row, where the header's own rule already is, and not below the last, because the table is ruled
+// and not boxed — it has no bottom frame to close. Three body rows therefore draw three rules in
+// all, and the block's last line is a row rather than a stroke hanging under one.
+func TestTableRulesBetweenBodyRows(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| a | b |",
+		"| --- | --- |",
+		"| 1 | one |",
+		"| 2 | two |",
+		"| 3 | three |",
+	}, "\n")
+
+	got := visible(renderMarkdownBody(th, source, 40))
+	want := []string{
+		"a │ b    ",
+		"──┼──────",
+		"1 │ one  ",
+		"──┼──────",
+		"2 │ two  ",
+		"──┼──────",
+		"3 │ three",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ruled body rows:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if rules := tableRuleLines(got); !reflect.DeepEqual(rules, []int{1, 3, 5}) {
+		t.Errorf("rules on lines %v; want one under the header and one between each adjacent pair", rules)
+	}
+}
+
+// One body row draws exactly one rule — the header's. A rule under the last row would be a bottom
+// frame, which the block does not have however many rows it holds.
+func TestTableLastRowHasNoRuleUnderIt(t *testing.T) {
+	th := newTheme()
+	source := "| a | b |\n| --- | --- |\n| 1 | one |"
+
+	got := visible(renderMarkdownBody(th, source, 40))
+
+	if rules := tableRuleLines(got); !reflect.DeepEqual(rules, []int{1}) {
+		t.Errorf("rules on lines %v of %#v; want only the header's", rules, got)
+	}
+}
+
+// A wrapped row is still ONE row: the rule separates rows, never the lines a single row spills onto,
+// so the reader can tell "more of the same row" from "the next row". Both rows here are two lines
+// tall, which puts the only inter-row rule between the second line of the first row and the first
+// line of the second.
+func TestTableWrappedRowIsNotRuledInside(t *testing.T) {
+	th := newTheme()
+	source := strings.Join([]string{
+		"| short | long |",
+		"| --- | --- |",
+		"| ab | one two three four |",
+		"| cd | five six seven eight |",
+	}, "\n")
+
+	got := visible(renderMarkdownBody(th, source, 20))
+	want := []string{
+		"short │ long        ",
+		"──────┼─────────────",
+		"ab    │ one two     ",
+		"      │ three four  ",
+		"──────┼─────────────",
+		"cd    │ five six    ",
+		"      │ seven eight ",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("wrapped rows:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if rules := tableRuleLines(got); !reflect.DeepEqual(rules, []int{1, 4}) {
+		t.Errorf("rules on lines %v; want the header's and one between the two rows — a wrapped row is not ruled inside",
+			rules)
 	}
 }
 
@@ -457,16 +575,20 @@ func TestTableInlineMarkupInCells(t *testing.T) {
 	}
 	// "bold" and "code" are four cells wide once rendered, the same as "name": the column stays
 	// four wide and the divider — and so "note" behind it — lands in the same place on every row.
+	rules := tableRuleLines(text)
+	if !reflect.DeepEqual(rules, []int{1, 3}) {
+		t.Fatalf("rules on lines %v; want the header's and one between the two rows: %#v", rules, text)
+	}
 	for i, v := range text {
-		if i == 1 {
-			continue // the rule row crosses the divider rather than drawing it
+		if slices.Contains(rules, i) {
+			continue // a rule row crosses the divider rather than drawing it
 		}
 		if len(v) > 4 && !strings.HasPrefix(v[4:], tableDivider) {
 			t.Errorf("line %d = %q; want the divider straight after the four-cell first column", i, v)
 		}
 	}
-	if colorActive(th) && !strings.Contains(got[3], "\x1b") {
-		t.Errorf("a `code` cell emitted no styling: %q", got[3])
+	if colorActive(th) && !strings.Contains(got[4], "\x1b") {
+		t.Errorf("a `code` cell emitted no styling: %q", got[4])
 	}
 }
 

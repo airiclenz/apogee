@@ -449,28 +449,38 @@ line above it. Leading and trailing pipes are optional, `\|` is a literal pipe i
 the block ends at the first blank line or the first line with no pipe in it. A delimiter-shaped
 line with no header above it is not a table and keeps whatever it renders as today.
 
-**It is ruled, not boxed.** No outer frame, no corners, no rule between body rows — a table is
-columns of text separated by a single **`│` with one space either side**, and nothing else, sitting
-in the same body column the rest of the answer sits in rather than reading as a boxed object
-dropped into the transcript. The divider wears the muted colour of the header rule: the frame is
-not content and must not read as loudly as the cells it separates. Every cell is padded to the
+**It is ruled, not boxed.** No outer frame and no corners — a table is columns of text separated by
+a single **`│` with one space either side** and ruled across by a **`─` under the header and between
+every pair of adjacent body rows**, and nothing else, sitting in the same body column the rest of
+the answer sits in rather than reading as a boxed object dropped into the transcript. The dividers
+and the rules all wear the same muted colour: the frame is not content and must not read as loudly
+as the cells it separates. Every cell is padded to the
 widest cell in its column. Each cell is
 rendered as inline markdown first, so `**bold**` and `` `code` `` inside a cell style the way they
 do in a paragraph, and it is that *rendered* width — the painted width, measured by the
 width authority like every width in this document — that sets the column, never the source width,
 so markup characters and the bytes of a colour escape never push a column open. The **last** column
-is padded like every other one, so every line of a table — header, rule and body rows alike — ends
+is padded like every other one, so every line of a table — header, rules and body rows alike — ends
 in the same column and the block shows one straight right edge to whatever sits beside it. A row
 that stopped at its last word instead would leave a wider gap to the scroll-bar gutter than the
 rule above it does, which reads as the bar stepping inward beside the body.
 
-**The header and its rule.** The header row's cells are bold, the same weight `**bold**` earns
-anywhere else. The delimiter row renders as a **run of `─` spanning the whole table that crosses
-every divider at a `┼`**: the three cells a divider occupies are ruled `─┼─`, so the line reads as
-one continuous horizontal rule under the header rather than a dash per column interrupted at every
+**The header and the rules.** The header row's cells are bold, the same weight `**bold**` earns
+anywhere else — and that weight is the only thing setting the header apart, because the line under
+it and the lines between the body rows are one and the same stroke. A rule — the delimiter row
+renders as the first of them — is a **run of `─` spanning the whole table that crosses every divider
+at a `┼`**: the three cells a divider occupies are ruled `─┼─`, so the line reads as one continuous
+horizontal rule across the block rather than a dash per column interrupted at every
 column division, and each crossing sits in exactly the cell the `│` occupies on the rows above and
-below it. It is exactly one line tall, wears the same muted colour as the dividers, and — the
-divider cells being ruled rather than blank — is exactly as wide as every other line of the block.
+below it. Every one of them is exactly one line tall, wears the same muted colour as the dividers,
+and — the divider cells being ruled rather than blank — is exactly as wide as every other line of
+the block.
+
+**Where the rules go.** One under the header, and one between each pair of **adjacent body rows** —
+nowhere else. Never above the first body row, where the header's rule already sits; never below the
+last, because there is no bottom frame to close; and never inside a row, because a row whose cell
+wraps onto further lines is still one row and its continuation lines stay rule-free, so "more of
+this row" never reads as "the next row".
 
 **Alignment is the delimiter row's word.** `:--` left, `--:` right, `:-:` centred, a plain `---`
 left; every cell is padded on the side its column names, header cells included. A centred cell with
@@ -496,12 +506,13 @@ for, the block is not drawn as a table at all: it falls back to the plain paragr
 been before, which is always readable and never overflows.
 
 **One row is as many lines as its tallest cell.** A cell too wide for its column wraps inside it,
-and the row becomes as many physical lines as the tallest of its cells needs. Cells are
+and the row becomes as many physical lines as the tallest of its cells needs — undivided by a rule,
+which goes between rows and never inside one. Cells are
 **top-aligned**: a shorter cell's content sits on the row's first lines and its blank lines fall
 below it, never above. The height is **unbounded** and nothing is ever dropped — a cap would only
 put the cut back at a different threshold. Every line of the block is still exactly the table's
 width, the continuation lines of a wrapped cell and the blank filler beside it included, so the
-straight right edge above holds through a wrapped row as it does through the rule.
+straight right edge above holds through a wrapped row as it does through the rules.
 
 **A partial table is plain text.** While a table streams in, everything before the delimiter row is
 ordinary paragraphs — the contract every other half-typed construct keeps — and the block snaps
@@ -525,12 +536,15 @@ and what the transcript draws for it at 34 columns of body width — `Tool` left
 Tool      │ Calls │     Notes
 ──────────┼───────┼──────────────
 Read File │    12 │     fast
+──────────┼───────┼──────────────
 Run       │     3 │ go test ./...
 ```
 
-Two of those four lines carry trailing blanks out to the rule's last column — the padding of the
-centred `Notes` column, which print cannot show. All four are 33 columns wide: the three columns
-are 9, 5 and 13 cells wide and each of the two dividers costs three more.
+Two of those five lines carry trailing blanks out to the rule's last column — the padding of the
+centred `Notes` column, which print cannot show. All five are 33 columns wide: the three columns
+are 9, 5 and 13 cells wide and each of the two dividers costs three more. The two body rows are
+ruled apart by the same stroke that underlines the header, and neither the top nor the bottom of the
+block is closed.
 
 ---
 

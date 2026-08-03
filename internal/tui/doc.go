@@ -152,8 +152,9 @@
 // numbered lists, GFM pipe tables) into styled physical lines — a spare, pure, lipgloss-only
 // renderer matching toolpresent.go's posture, with render.go still owning the marker and depth
 // framing. Tables are the one construct with a file of their own, mdtable.go: it parses the block
-// and lays it out as aligned columns ruled by a faint │ under a header rule that crosses every
-// divider at a ┼, measuring the RENDERED cell so markup and colour escapes never widen a column,
+// and lays it out as aligned columns ruled by a faint │ and, horizontally, by one ─ under the header
+// and another between each pair of adjacent body rows — every rule crossing every divider at a ┼,
+// and no outer frame — measuring the RENDERED cell so markup and colour escapes never widen a column,
 // WRAPPING a cell too wide for its column inside that column rather than cutting it — so a row is
 // as many lines as its tallest cell and nothing is ever dropped — and falling back to plain
 // paragraphs where the width cannot give every column its four-cell readable floor (layout.md is

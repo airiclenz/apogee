@@ -291,6 +291,7 @@ func TestTranscriptRendersMarkdownTable(t *testing.T) {
 		"  Tool      │ Calls",
 		"  ──────────┼──────",
 		"  Read File │    12",
+		"  ──────────┼──────",
 		"  Run       │     3",
 	}, "\n")
 	if got := plainRender(tr); got != want {
@@ -304,7 +305,8 @@ func TestTranscriptRendersMarkdownTable(t *testing.T) {
 // the same width the rest of the body wraps to, so the free column beside the scroll-bar gutter is
 // the same beside a table row as beside the rule above it (model.go's transcriptWidth /
 // bodyRightGutter, layout.md). At this width both the header's and one body row's middle cell wrap,
-// which is exactly the case a filler line could break.
+// which is exactly the case a filler line could break — and the rule between the two body rows is
+// held to the body column like every other line.
 func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
 	const width = 60
 	tr := feed(domain.MessageEvent{Text: strings.Join([]string{
@@ -316,8 +318,8 @@ func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
 
 	lines := tr.renderLines(newTheme(), width)
 
-	if len(lines) != 6 {
-		t.Fatalf("got %d lines, want 6 (a two-line header, the rule, a two-line row and a one-line row): %#v",
+	if len(lines) != 7 {
+		t.Fatalf("got %d lines, want 7 (a two-line header, the rule, a two-line row, the rule between the rows and a one-line row): %#v",
 			len(lines), visible(lines))
 	}
 	for i, ln := range lines {

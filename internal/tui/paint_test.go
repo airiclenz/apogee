@@ -231,8 +231,8 @@ func TestTableDividerHoldsOneColumn(t *testing.T) {
 			th.measure = widthAuthority{method: tc.method}
 
 			lines := renderMarkdownBody(th, source, 40)
-			if len(lines) != 4 {
-				t.Fatalf("rendered %d lines, want 4 (header, rule, two rows): %#v", len(lines), visible(lines))
+			if len(lines) != 5 {
+				t.Fatalf("rendered %d lines, want 5 (header, rule, row, rule, row): %#v", len(lines), visible(lines))
 			}
 			if !strings.Contains(strip(lines[1]), glyphTableCross) {
 				t.Fatalf("the rule row carries no crossing — the fixture is not a ruled table: %q", strip(lines[1]))
