@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -78,10 +79,11 @@ type blockPaint struct {
 	targets []targetKind
 }
 
-// plainPaint is the paint of a block that carries no click surface at all — a user send, an
-// assistant answer, a note, a start-up box, a ⤷ descent label, a stray result. Everything the
-// renderer emits that is not a tool block goes through here, so "no target" is stated once rather
-// than spelled out at each producer.
+// plainPaint is the paint of a block that carries no click surface at all — an assistant answer, a
+// note, a start-up box, a ⤷ descent label, a stray result. Everything the renderer emits that can
+// never be toggled goes through here, so "no target" is stated once rather than spelled out at each
+// producer. The two kinds that CAN be toggled — a tool block, and a prompt tall enough to collapse —
+// mark their own lines as they emit them.
 func plainPaint(lines []string) blockPaint {
 	return blockPaint{lines: lines, targets: make([]targetKind, len(lines))}
 }
@@ -230,23 +232,25 @@ func (t *transcript) renderLines(th theme, width int) []string {
 // left of its rail gutter, then each line is prefixed by the rail (P3.14) so the nested block
 // reads as a framed sub-section.
 //
-// Only a tool call has a click surface — it is the only kind with two states to toggle between —
-// so every other kind comes back as plainPaint: a note or an answer paints one way whatever is
-// asked of it, and a click there keeps its selection meaning. blink reaches that one kind for the
-// same reason: a tool call is the only entry that can still be WAITING for something, so it is the
-// only header with a star to blink (layout.md, "The live star").
+// Two kinds carry a click surface, for the one reason: they have two states to toggle between. A
+// tool call marks its header line and the remainder marker beneath it; a prompt tall enough to
+// collapse marks EVERY row it paints, chip row included, because there the whole block is the
+// toggle (layout.md, "Collapsed and expanded blocks"). Every other kind comes back as plainPaint: a
+// note or an answer paints one way whatever is asked of it, and a click there keeps its selection
+// meaning. blink narrows further still — a tool call is the only entry that can still be WAITING
+// for something, so it is the only header with a star to blink (layout.md, "The live star").
 func renderEntryLines(th theme, e entry, width int, blink bool) blockPaint {
 	inner := railedWidth(width, e.depth)
 	switch e.kind {
 	case entryUser:
-		return plainPaint(railLines(th, renderUserBlock(th, glyphUser+" ", e.text, e.skills, inner), e.depth))
+		return renderUserBlock(th, glyphUser+" ", e.text, e.skills, inner, e.expanded).railed(th, e.depth)
 	case entryInterjected:
 		// The human's mid-Exchange remark: the same block the prompt gets — it is the same voice —
 		// under the ⧖ marker that says it arrived while the model was already working (ADR 0025).
 		// Its chip row is the sent block's, for the same reason: a skill rides an interjection
 		// (ADR 0027), and the record of what the model was given must not depend on whether the
 		// remark was delivered mid-run or flushed into a new Exchange.
-		return plainPaint(railLines(th, renderUserBlock(th, glyphInterject+" ", e.text, e.skills, inner), e.depth))
+		return renderUserBlock(th, glyphInterject+" ", e.text, e.skills, inner, e.expanded).railed(th, e.depth)
 	case entryAssistant:
 		marker := glyphAssistant + " "
 		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
@@ -406,10 +410,44 @@ func subAgentGist(head entry, span []entry) string {
 // marker is the block's lead ("❯ " for a submitted prompt, "⧖ " for a delivered interjection):
 // the two are the same voice and so share one shape, and the glyph is the whole of the
 // difference the reader needs.
-func renderUserBlock(th theme, marker, text string, skills []string, width int) []string {
+//
+// A body that soft-wraps past promptCollapsedRows rows COLLAPSES to that many, the last of them
+// truncated to make room for the right-aligned see-more marker counting what is left behind
+// (promptSeeMore). expanded is the entry's own view state (transcript.setExpanded) and opens the
+// body whole, closed again by the see-less marker the block then trails. Both are paint-time acts
+// on a body the entry keeps in full — the trigger is measured against the width being painted, so
+// a resize alone can collapse a prompt or open one, and nothing about the entry changes
+// (layout.md, "Collapsed and expanded blocks").
+//
+// The chip row is never collapsed away and never truncated: it is the record of what the model was
+// actually given, and it is one row whatever the body does. The see-less marker trails the whole
+// block, chips included, so the row that closes the block is the block's last.
+//
+// The block is a click surface exactly when it has two shapes to move between, and then it is a
+// click surface WHOLE: every row it paints is marked targetHeader — the marker row, the chip row and
+// the see-less row among them — because layout.md makes the whole prompt the toggle rather than one
+// line of it. The mark is state-INDEPENDENT for the tool block's reason: an expanded prompt keeps it,
+// which is the click that closes it again. A body inside the cap marks nothing at all, so a click
+// on an ordinary prompt keeps its selection meaning.
+func renderUserBlock(th theme, marker, text string, skills []string, width int, expanded bool) blockPaint {
 	var out []string
+	trailer := ""
+	collapsible := false
 	if text != "" {
-		for _, ln := range hangingPrefixes(th, marker, text, width) {
+		body := hangingPrefixes(th, marker, text, width)
+		collapsible = len(body) > promptCollapsedRows
+		shown, hidden := body, 0
+		switch {
+		case !expanded:
+			shown, hidden = splitAtCap(body, promptCollapsedRows)
+		case collapsible:
+			trailer = promptMarkerRow(th, "", promptSeeLess, width)
+		}
+		for i, ln := range shown {
+			if hidden > 0 && i == len(shown)-1 {
+				out = append(out, promptMarkerRow(th, ln, promptSeeMore(hidden), width))
+				continue
+			}
 			out = append(out, th.userBlock.Width(width).Render(ln))
 		}
 	}
@@ -420,7 +458,35 @@ func renderUserBlock(th theme, marker, text string, skills []string, width int) 
 		}
 		out = append(out, renderUserChipRow(th, chipMarker, skills, width))
 	}
-	return out
+	if trailer != "" {
+		out = append(out, trailer)
+	}
+	kind := targetNone
+	if collapsible {
+		kind = targetHeader
+	}
+	var paint blockPaint
+	paint.add(out, kind)
+	return paint
+}
+
+// promptMarkerRow composes one row of a user block that carries a collapse marker at its right
+// edge: the row's own content on the left, the highlighted marker flush against the block's right
+// edge, and the block's dark-gray field spanning the gap between them — three segments on one line,
+// the renderUserChipRow idiom, so the marker keeps its own colour while the row stays a solid
+// block. content is the unstyled row text ("" for the see-less row, which carries none).
+//
+// The content is truncated with the house ellipsis to leave promptMarkerGap columns clear before
+// the marker, which is what makes the collapsed shape exactly promptCollapsedRows rows: the marker
+// rides a content row instead of taking one of its own. A width too narrow for the marker itself
+// truncates the marker rather than overrunning the block — the row is never wider than the block it
+// belongs to, at any width the painter is handed.
+func promptMarkerRow(th theme, content, marker string, width int) string {
+	tail := th.promptToggle.Render(th.measure.Truncate(marker, max(0, width), "…"))
+	tw := th.measure.Width(tail)
+	content = th.measure.Truncate(content, max(0, width-tw-promptMarkerGap), "…")
+	pad := strings.Repeat(" ", max(0, width-tw-th.measure.Width(content)))
+	return th.userBlock.Render(content+pad) + tail
 }
 
 // renderUserChipRow composes one full-width row of invoked-skill chips inside the user block:
@@ -784,6 +850,30 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 // the entry keeps in full (layout.md, "Collapsed and expanded blocks"), which is why it lives
 // beside the painter and not beside diffBody, the producer that used to apply it.
 const diffDetailCap = 20
+
+// The collapsed prompt's numbers and wording (layout.md, "Collapsed and expanded blocks"). A
+// prompt whose body soft-wraps to MORE than promptCollapsedRows rows paints that many rows and
+// counts the rest, with promptSeeMoreFormat right-aligned on the last of them — the row's own text
+// truncated first so promptMarkerGap columns stay clear between the two. Expanded, the body paints
+// whole and promptSeeLess trails it on a row of its own, because a full body leaves no row the
+// marker could ride without cutting content.
+//
+// They are constants and deliberately not configuration (no `ui:` key): the shape is the
+// transcript's grammar, and a reader who wants a different one changes it here.
+const (
+	promptCollapsedRows = 3
+	promptMarkerGap     = 2
+	promptSeeMoreFormat = "see more (+%s)…" // %s is the hidden-row count, pluralised (plural)
+	promptSeeMoreNoun   = "line"            // what promptSeeMoreFormat counts
+	promptSeeLess       = "see less…"
+)
+
+// promptSeeMore words the marker a collapsed prompt carries on its last row for the hidden rows
+// behind it: "see more (+1 line)…", "see more (+7 lines)…". It is the prompt's sentence about the
+// same number a tool block words as "… +N more lines" — one count, two voices (splitAtCap).
+func promptSeeMore(hidden int) string {
+	return fmt.Sprintf(promptSeeMoreFormat, plural(hidden, promptSeeMoreNoun))
+}
 
 // splitAtCap splits a body's lines at a collapsed paint's cap: the lines the compact shape SHOWS,
 // and how many it leaves unshown — 0 when the body already fits, which is exactly "this paint hides

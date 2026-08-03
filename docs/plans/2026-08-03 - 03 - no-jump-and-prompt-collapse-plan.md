@@ -146,7 +146,29 @@ existing collapse goldens (`render_test.go` ~624, ~687, ~758; `transcript_test.g
 
 **Commit:** `refactor(tui): open per-entry expanded state to user-authored blocks`
 
-## 3. Collapse huge prompts to three rows with an in-line toggle marker
+## 3. Collapse huge prompts to three rows with an in-line toggle marker — ✅ DONE (2026-08-03)
+
+NOTES (2026-08-03): checkpoint — the WORK is split across two implementer dispatches (owner's call);
+the item itself stays one item with one commit. DONE (dispatch 1): the collapsed/expanded PAINT —
+`promptCollapsedRows` / `promptMarkerGap` / `promptSeeMoreFormat` / `promptSeeMoreNoun` /
+`promptSeeLess` beside `diffDetailCap` with the `promptSeeMore` wording helper; `theme.promptToggle`
+(bold `colCode` orange on the block's own dark-gray field); `renderUserBlock(…, expanded bool)` plus
+the `promptMarkerRow` composer in `render.go`; both `renderEntryLines` sites passing `e.expanded`;
+the CHANGELOG entry for the whole feature (click behaviour included); and six render goldens in
+`render_test.go`. Two paint decisions the item text left open: the see-less row trails the WHOLE
+block (chip row included) rather than sitting between body and chips, so the row that closes the
+block is the block's last; and `promptMarkerRow` truncates the marker itself at widths too narrow to
+hold it, so a row is never wider than the block at any width. REMAINING (dispatch 2): the click
+surface and everything downstream of it — see the item's Tests/What for the exact list.
+
+NOTES (2026-08-03): dispatch 2 closed that remainder — click surface, target/mouse/codec/sticky
+tests, layout.md and ISSUES.md. One shape decision the item text left open: `renderUserBlock` now
+RETURNS a `blockPaint` and marks its own rows (D11's "the prompt painter emits its own click
+targets") rather than handing `[]string` back for `renderEntryLines` to mark — the over/
+under-threshold fact is measured inside the painter, and re-deriving it at the call site would have
+been the second accounting ADR 0030 forbids. `plainPaint`'s doc comment lost its "a user send"
+example for the same reason. The ISSUES.md line-11 entry is checked off; its `line 9 & 11` prefix
+typo was already gone before this dispatch, so nothing was dropped there.
 
 Depends on item 2. Independent of item 1.
 

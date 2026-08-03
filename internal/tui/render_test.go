@@ -728,6 +728,267 @@ func TestExpandedGroupPaintsIdentically(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The collapsed prompt: a huge send paints three rows and a marker (layout.md, "Collapsed and
+// expanded blocks")
+// ----------------------------------------------------------------------------
+
+// promptRows renders tr at width and returns its lines with the styling stripped and the trailing
+// pad KEPT — deliberately not renderPlain, which trims it: a prompt block is painted to the full
+// width and its collapse marker is flush against the right edge, so where a row ENDS is half of
+// what these tests assert.
+func promptRows(t *testing.T, tr *transcript, width int) []string {
+	t.Helper()
+	lines := tr.renderLines(newTheme(), width)
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = strip(ln)
+	}
+	return out
+}
+
+// splitMarker asserts the geometry of a prompt row carrying a collapse marker — the row is exactly
+// the block's width, it ends with want, and at least promptMarkerGap columns separate the two — and
+// returns the row's own content, trailing pad trimmed, for the caller to assert on.
+func splitMarker(t *testing.T, row, want string, width int) string {
+	t.Helper()
+	th := newTheme()
+	if got := th.measure.Width(row); got != width {
+		t.Errorf("row %q is %d columns wide; want the block's full %d", row, got, width)
+	}
+	if !strings.HasSuffix(row, want) {
+		t.Fatalf("row %q does not end with the marker %q", row, want)
+	}
+	content := strings.TrimRight(strings.TrimSuffix(row, want), " ")
+	if gap := width - th.measure.Width(content) - th.measure.Width(want); gap < promptMarkerGap {
+		t.Errorf("marker %q sits %d columns past the content %q; want at least promptMarkerGap (%d)",
+			want, gap, content, promptMarkerGap)
+	}
+	return content
+}
+
+// TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker pins the collapsed shape in one table: a
+// prompt whose body wraps past promptCollapsedRows rows paints exactly that many, the last of them
+// truncated to leave the right-aligned see-more marker its gap, and the marker counts what is left
+// behind — pluralised. A body inside the cap paints whole with no marker at all, which is the
+// boundary the trigger turns on, and an interjection collapses by the very same rule.
+func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
+	const width = 40
+	// One unbreakable word, wrapped hard: it fills the block's rows edge to edge, which is what
+	// makes the third row long enough to be truncated by the marker beside it.
+	long := strings.Repeat("x", 200)
+	cases := []struct {
+		name   string
+		build  func(tr *transcript)
+		want   []string // every row of the block, trailing pad trimmed, the marker excluded
+		marker string   // the marker the last row carries; "" when the block hides nothing
+	}{
+		{
+			name:   "a four-row prompt keeps three rows and counts the fourth",
+			build:  func(tr *transcript) { tr.addUser("alpha\nbravo\ncharlie\ndelta", nil) },
+			want:   []string{"❯ alpha", "  bravo", "  charlie"},
+			marker: "see more (+1 line)…",
+		},
+		{
+			name:   "a long prompt counts every row it hides",
+			build:  func(tr *transcript) { tr.addUser("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", nil) },
+			want:   []string{"❯ a", "  b", "  c"},
+			marker: "see more (+7 lines)…",
+		},
+		{
+			name:  "exactly three rows is not over the threshold",
+			build: func(tr *transcript) { tr.addUser("alpha\nbravo\ncharlie", nil) },
+			want:  []string{"❯ alpha", "  bravo", "  charlie"},
+		},
+		{
+			name:  "a short prompt paints as it always has",
+			build: func(tr *transcript) { tr.addUser("alpha", nil) },
+			want:  []string{"❯ alpha"},
+		},
+		{
+			// width 40 less the 20-column marker and its 2-column gap leaves 18 for the row, ellipsis
+			// included — the whole of what "truncated to leave a gap" means.
+			name:   "the third row is truncated to make room for the marker",
+			build:  func(tr *transcript) { tr.addUser("alpha\nbravo\n"+long, nil) },
+			want:   []string{"❯ alpha", "  bravo", "  " + strings.Repeat("x", 15) + "…"},
+			marker: "see more (+5 lines)…",
+		},
+		{
+			name:   "an interjection collapses by the same rule",
+			build:  func(tr *transcript) { tr.addInterjected("alpha\nbravo\ncharlie\ndelta", nil) },
+			want:   []string{"⧖ alpha", "  bravo", "  charlie"},
+			marker: "see more (+1 line)…",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+
+			rows := promptRows(t, tr, width)
+			if len(rows) != len(tc.want) {
+				t.Fatalf("block painted %d rows, want %d:\n%s", len(rows), len(tc.want), strings.Join(rows, "\n"))
+			}
+			for i, row := range rows {
+				got := strings.TrimRight(row, " ")
+				if tc.marker != "" && i == len(rows)-1 {
+					got = splitMarker(t, row, tc.marker, width)
+				}
+				if got != tc.want[i] {
+					t.Errorf("row %d = %q; want %q", i, got, tc.want[i])
+				}
+			}
+			if tc.marker == "" && strings.Contains(strings.Join(rows, "\n"), "see more") {
+				t.Errorf("a block that hides nothing grew a marker:\n%s", strings.Join(rows, "\n"))
+			}
+		})
+	}
+}
+
+// TestExpandedPromptPaintsItsWholeBodyAndTrailsSeeLess is what the expanded state is FOR on a
+// prompt: every wrapped row paints, no content row is truncated, and the see-less marker takes a
+// trailing row of its own — the row a full body leaves no room for it to ride. Collapsing again
+// paints exactly the compact shape back, over one transcript, because that is the claim: nothing
+// about the entry changes but the flag the painter reads.
+func TestExpandedPromptPaintsItsWholeBodyAndTrailsSeeLess(t *testing.T) {
+	const width = 40
+	tr := &transcript{}
+	tr.addUser("alpha\nbravo\ncharlie\ndelta\necho", nil)
+
+	collapsed := promptRows(t, tr, width)
+	if len(collapsed) != promptCollapsedRows {
+		t.Fatalf("collapsed is not the default: %d rows\n%s", len(collapsed), strings.Join(collapsed, "\n"))
+	}
+
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
+	}
+	rows := promptRows(t, tr, width)
+	want := []string{"❯ alpha", "  bravo", "  charlie", "  delta", "  echo"}
+	if len(rows) != len(want)+1 {
+		t.Fatalf("expanded block painted %d rows, want the %d body rows plus one see-less row:\n%s",
+			len(rows), len(want), strings.Join(rows, "\n"))
+	}
+	for i, w := range want {
+		if got := strings.TrimRight(rows[i], " "); got != w {
+			t.Errorf("row %d = %q; want %q", i, got, w)
+		}
+	}
+	if content := splitMarker(t, rows[len(rows)-1], promptSeeLess, width); content != "" {
+		t.Errorf("the see-less row carries %q; want the marker alone on a row of its own", content)
+	}
+
+	if !tr.setExpanded(0, false) {
+		t.Fatal("setExpanded(0, false) = false; want the prompt collapsed again")
+	}
+	if got := promptRows(t, tr, width); !reflect.DeepEqual(got, collapsed) {
+		t.Errorf("collapsing again did not repaint the compact shape:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(collapsed, "\n"))
+	}
+}
+
+// TestUnderThresholdPromptIgnoresItsExpandedState pins the harmless half of the state gate (item 2):
+// every prompt OWNS an expanded state, and one whose body fits inside the row cap paints identically
+// either way — holding the flag is not the same as showing it.
+func TestUnderThresholdPromptIgnoresItsExpandedState(t *testing.T) {
+	tr := &transcript{}
+	tr.addUser("alpha\nbravo", nil)
+
+	collapsed := renderPlain(tr, 40)
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the prompt entry to own a block state")
+	}
+	if got := renderPlain(tr, 40); got != collapsed {
+		t.Errorf("an under-threshold prompt repainted when expanded:\n--- got ---\n%s\n--- want (unchanged) ---\n%s",
+			got, collapsed)
+	}
+}
+
+// TestPromptCollapseFollowsThePaintWidth is the trigger's other half: whether a prompt collapses is
+// measured at paint time against the width being painted, so one entry — untouched between the two
+// renders — paints whole in a wide window and collapses in a narrow one. The hidden count is read
+// off the expanded paint at that same narrow width, so the marker's arithmetic is asserted against
+// the rows it is counting rather than against a number written down here.
+func TestPromptCollapseFollowsThePaintWidth(t *testing.T) {
+	const narrow = 24
+	tr := &transcript{}
+	tr.addUser("the quick brown fox jumps over the lazy dog and keeps on running", nil)
+
+	if wide := promptRows(t, tr, 100); len(wide) != 1 || strings.Contains(wide[0], "see more") {
+		t.Fatalf("the prompt did not paint whole at width 100:\n%s", strings.Join(wide, "\n"))
+	}
+
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
+	}
+	body := len(promptRows(t, tr, narrow)) - 1 // less the trailing see-less row
+	if !tr.setExpanded(0, false) {
+		t.Fatal("setExpanded(0, false) = false; want the prompt collapsed again")
+	}
+
+	rows := promptRows(t, tr, narrow)
+	if len(rows) != promptCollapsedRows {
+		t.Fatalf("the same prompt painted %d rows at width %d; want %d:\n%s",
+			len(rows), narrow, promptCollapsedRows, strings.Join(rows, "\n"))
+	}
+	splitMarker(t, rows[len(rows)-1], promptSeeMore(body-promptCollapsedRows), narrow)
+}
+
+// TestCollapsedPromptKeepsItsChipRow holds the chip row out of the collapse in both states: it is
+// the record of what the model was actually given, so it is never counted among the collapsed rows
+// and never hidden — and the see-less marker closes the whole block, chips included.
+func TestCollapsedPromptKeepsItsChipRow(t *testing.T) {
+	const width = 44
+	tr := &transcript{}
+	tr.addUser("alpha\nbravo\ncharlie\ndelta", []string{"coding-standards"})
+
+	rows := promptRows(t, tr, width)
+	if len(rows) != promptCollapsedRows+1 {
+		t.Fatalf("collapsed block painted %d rows; want %d body rows plus the chip row:\n%s",
+			len(rows), promptCollapsedRows, strings.Join(rows, "\n"))
+	}
+	splitMarker(t, rows[promptCollapsedRows-1], promptSeeMore(1), width)
+	if want := glyphSkill + " coding-standards"; !strings.Contains(rows[promptCollapsedRows], want) {
+		t.Errorf("the chip row is not the collapsed block's last row: %q", rows[promptCollapsedRows])
+	}
+
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
+	}
+	rows = promptRows(t, tr, width)
+	if len(rows) != 6 { // four body rows, the chip row, then the see-less row
+		t.Fatalf("expanded block painted %d rows; want 6:\n%s", len(rows), strings.Join(rows, "\n"))
+	}
+	if want := glyphSkill + " coding-standards"; !strings.Contains(rows[4], want) {
+		t.Errorf("the chip row moved: %q", rows[4])
+	}
+	splitMarker(t, rows[5], promptSeeLess, width)
+}
+
+// TestPromptMarkerCarriesTheHighlightStyle pins the marker's look: it is painted in the theme's own
+// promptToggle role and not in the prompt body's, which is what sets the toggle off from what the
+// human wrote. A loose contains against the theme's own render (the toolLabel precedent), with the
+// two guards for the opposite failures — a role that paints nothing at all, and one that paints
+// exactly what the body does.
+func TestPromptMarkerCarriesTheHighlightStyle(t *testing.T) {
+	th := newTheme()
+	tr := &transcript{}
+	tr.addUser("alpha\nbravo\ncharlie\ndelta", nil)
+
+	row := tr.renderLines(th, 40)[promptCollapsedRows-1]
+	marker := promptSeeMore(1)
+	styled := th.promptToggle.Render(marker)
+	if styled == marker {
+		t.Fatal("the promptToggle role renders no escape sequence; the marker would be unstyled")
+	}
+	if styled == th.userBlock.Render(marker) {
+		t.Error("the promptToggle role paints exactly what the prompt body does; the marker is not set off")
+	}
+	if !strings.Contains(row, styled) {
+		t.Errorf("row %q does not carry the styled marker %q", row, styled)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The click surface: which rendered lines toggle a block (layout.md, "Collapsed and expanded
 // blocks")
 // ----------------------------------------------------------------------------
@@ -920,6 +1181,83 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 
 			if got := blockMarks(t, tr, tc.width); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("marked lines mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPromptBlockIsOneClickSurface pins the prompt's half of the target rule (D8): a block with two
+// shapes to move between is a click surface WHOLE — every row it paints, the marker row, the chip
+// row and the see-less row among them — and a block with one shape is no target on any row. Each
+// case renders a transcript holding that block alone, so "every row of the block" and "every
+// rendered line" are the same set and a row that quietly changed its mind fails here.
+func TestPromptBlockIsOneClickSurface(t *testing.T) {
+	const width = 40
+	const huge = "alpha\nbravo\ncharlie\ndelta" // four wrapped rows: one past promptCollapsedRows
+	cases := []struct {
+		name  string
+		build func(t *testing.T, tr *transcript)
+		want  targetKind
+	}{
+		{
+			name:  "an over-threshold prompt marks every row it paints",
+			build: func(_ *testing.T, tr *transcript) { tr.addUser(huge, nil) },
+			want:  targetHeader,
+		},
+		{
+			// The chip row is not part of what collapses, but it IS part of what a click lands on:
+			// the toggle surface is the block, not the body.
+			name:  "the chip row is marked with the rest of the block",
+			build: func(_ *testing.T, tr *transcript) { tr.addUser(huge, []string{"coding-standards"}) },
+			want:  targetHeader,
+		},
+		{
+			// State-independent, for the tool block's reason: this is the click that closes it again.
+			name: "an expanded prompt keeps its marks, see-less row included",
+			build: func(t *testing.T, tr *transcript) {
+				tr.addUser(huge, nil)
+				if !tr.setExpanded(0, true) {
+					t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
+				}
+			},
+			want: targetHeader,
+		},
+		{
+			name:  "an interjection is a click surface by the same rule",
+			build: func(_ *testing.T, tr *transcript) { tr.addInterjected(huge, nil) },
+			want:  targetHeader,
+		},
+		{
+			name:  "an under-threshold prompt is no target at all",
+			build: func(_ *testing.T, tr *transcript) { tr.addUser("alpha\nbravo\ncharlie", nil) },
+			want:  targetNone,
+		},
+		{
+			name:  "a chip row with no body hides nothing and marks nothing",
+			build: func(_ *testing.T, tr *transcript) { tr.addUser("", []string{"coding-standards"}) },
+			want:  targetNone,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(t, tr)
+
+			rendered := tr.renderView(newTheme(), width, false)
+			if len(rendered.targets) != len(rendered.lines) {
+				t.Fatalf("targets and lines out of lockstep: %d targets for %d lines",
+					len(rendered.targets), len(rendered.lines))
+			}
+			if len(rendered.lines) == 0 {
+				t.Fatal("the block painted nothing at all")
+			}
+			for i, target := range rendered.targets {
+				if target.kind != tc.want {
+					t.Errorf("row %d (%q) is marked %v; want %v", i, strip(rendered.lines[i]), target.kind, tc.want)
+				}
+				if tc.want != targetNone && target.entry != 0 {
+					t.Errorf("row %d names entry %d; want the block's own head entry 0", i, target.entry)
+				}
 			}
 		})
 	}

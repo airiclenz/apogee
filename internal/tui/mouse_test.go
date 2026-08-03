@@ -905,6 +905,140 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 	}
 }
 
+// hugePromptBody is a send whose body wraps well past promptCollapsedRows at any test width — the
+// prompt that collapses, and therefore the one whose every row is a click target (render.go).
+const hugePromptBody = "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot"
+
+// modelWithHugePrompt builds a ready idle model holding one over-threshold prompt — chips and all,
+// so the chip row is among the rows a test can aim at — and a short reply beneath it. The seeded
+// start-up box is dropped so the block sits high enough to be on screen at any parked offset.
+func modelWithHugePrompt(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser(hugePromptBody, []string{"coding-standards"})
+	m.transcript.commitAssistant("a short reply", 0)
+	m.refreshViewport()
+	return m
+}
+
+// promptBlockLine returns the rendered line at offset rows into the latest user block, checking it
+// is inside the block as painted — a test aiming at "the chip row" must fail loudly if the block
+// stopped painting one rather than silently clicking somewhere else.
+func promptBlockLine(t *testing.T, m Model, offset int) int {
+	t.Helper()
+	if len(m.userBlocks) == 0 {
+		t.Fatal("the transcript holds no user block to aim at")
+	}
+	b := m.userBlocks[len(m.userBlocks)-1]
+	if offset < 0 || offset >= b.count {
+		t.Fatalf("offset %d is outside the prompt block's %d painted rows", offset, b.count)
+	}
+	return b.start + offset
+}
+
+// TestTranscriptClickTogglesThePromptBlock is the prompt's own toggle rule (layout.md, "Collapsed
+// and expanded blocks"): the WHOLE block is the click surface, so a motionless click on any of its
+// rows — the first, the truncated row carrying the see-more marker, the chip row that is not part of
+// the body at all — opens the prompt, and a second click on that same row closes it again.
+func TestTranscriptClickTogglesThePromptBlock(t *testing.T) {
+	rows := map[string]int{
+		"the block's first row": 0,
+		"the marker row":        promptCollapsedRows - 1,
+		"the chip row":          promptCollapsedRows,
+	}
+	for name, offset := range rows {
+		t.Run(name, func(t *testing.T) {
+			m := modelWithHugePrompt(t)
+			line := promptBlockLine(t, m, offset)
+			if blockExpanded(t, m, line) {
+				t.Fatal("setup: the prompt is expanded before any click; collapsed is the default")
+			}
+			if body := strings.Join(m.lines, "\n"); !strings.Contains(body, "see more") {
+				t.Fatalf("setup: the prompt did not collapse, so there is nothing to toggle:\n%s", strip(body))
+			}
+
+			m = clickCell(t, m, 2, screenRow(t, m, line))
+			if !blockExpanded(t, m, line) {
+				t.Fatal("a click on the prompt did not expand it")
+			}
+			if body := strip(strings.Join(m.lines, "\n")); !strings.Contains(body, "foxtrot") || !strings.Contains(body, "see less") {
+				t.Fatalf("the expanded paint did not reach the viewport lines:\n%s", body)
+			}
+
+			m = clickCell(t, m, 2, screenRow(t, m, line))
+			if blockExpanded(t, m, line) {
+				t.Fatal("a second click on the prompt did not collapse it")
+			}
+			if body := strip(strings.Join(m.lines, "\n")); strings.Contains(body, "foxtrot") {
+				t.Fatalf("the re-collapsed paint still shows the hidden rows:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestTranscriptDragFromAPromptRowStillSelects is the arbitration on the new surface: motion decides
+// there exactly as it does on a tool header. A drag across a prompt row copies the text it ran over
+// and leaves the block's state alone — a toggle is a click that never moved.
+func TestTranscriptDragFromAPromptRowStillSelects(t *testing.T) {
+	m := modelWithHugePrompt(t)
+	line := promptBlockLine(t, m, 0)
+	row := screenRow(t, m, line)
+
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(m.viewport.Width(), row))
+	m, cmd := stepCmd(t, m, leftRelease(m.viewport.Width(), row))
+	if cmd == nil {
+		t.Fatal("a drag across the prompt returned no copy Cmd")
+	}
+	if !strings.Contains(m.flash, "copied") {
+		t.Fatalf("flash = %q, want a copy confirmation", m.flash)
+	}
+	if blockExpanded(t, m, line) {
+		t.Fatal("a drag that started on the prompt toggled it; motion must win")
+	}
+}
+
+// TestTranscriptPromptToggleKeepsTheClickedRow is the anchoring invariant on the prompt: the body
+// grows and shrinks BELOW the clicked row, so that row is painted on the same screen row after the
+// toggle as before it — in both directions, with the view following a tail deep enough that the
+// attached repaint would otherwise slide the block by every line the expansion added.
+func TestTranscriptPromptToggleKeepsTheClickedRow(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	for i := range 20 { // scrollback above the prompt, so the tail is a real scroll position
+		m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+	}
+	m.transcript.addUser(hugePromptBody, nil)
+	for i := range 5 { // the block stays on screen at the tail, with room below it
+		m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+	}
+	m.refreshViewport()
+	if m.detached || m.viewport.YOffset() == 0 {
+		t.Fatalf("setup: want the view following the tail at a real offset, got detached=%v offset=%d",
+			m.detached, m.viewport.YOffset())
+	}
+
+	line := promptBlockLine(t, m, promptCollapsedRows-1) // the marker row: the last row above the growth
+	row := screenRow(t, m, line)
+
+	m = clickCell(t, m, 2, row)
+	if !blockExpanded(t, m, line) {
+		t.Fatal("the click did not expand the prompt")
+	}
+	if got := screenRow(t, m, line); got != row {
+		t.Errorf("expanding moved the clicked row from screen row %d to %d", row, got)
+	}
+
+	m = clickCell(t, m, 2, row)
+	if blockExpanded(t, m, line) {
+		t.Fatal("the second click did not collapse the prompt")
+	}
+	if got := screenRow(t, m, line); got != row {
+		t.Errorf("collapsing moved the clicked row from screen row %d to %d", row, got)
+	}
+}
+
 // TestTranscriptSelectionSurvivesWheelScroll checks the content-anchored selection is untouched by
 // a mid-drag wheel scroll: the anchor names a content line, not a screen row, so scrolling moves
 // what is on screen without moving (or clearing) the selection.

@@ -388,6 +388,29 @@ absent, on the same precedent that keeps transcript selection mouse-only; a bloc
 its own future feature. After a toggle the clicked header keeps its screen row — content grows or
 shrinks *below* it, and the line under the cursor never moves.
 
+**A huge prompt collapses to three rows.** A send whose body soft-wraps to *more than three* rows —
+a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one shape — paints three:
+the first two whole, the third truncated with the house ellipsis far enough to clear a gap, and
+`see more (+N lines)…` right-aligned on that same row, where N is every wrapped row beyond the
+three. The marker *rides* a content row rather than taking one of its own, which is what makes the
+collapsed shape exactly three rows, and it is painted in its own highlighted style so what apogee is
+saying inside the block never reads as what the human wrote. Expanded, the body paints in full — no
+content row is ever truncated to make room — and `see less…` closes the block on a trailing row of
+its own, after the skill chips. The chip row is never collapsed away, never truncated and never
+counted among the hidden rows: it is the record of what the model was actually given.
+
+The trigger is measured **at paint time, against the width being painted** — the same render-time
+act on retained facts every truncation here is — so widening the window can open a prompt that was
+collapsed and narrowing it can collapse one that was not, with nothing about the entry changing.
+**The whole block is the toggle surface**: every row it paints, the marker row and the chip row
+included, so a motionless click anywhere in it flips the state in both directions, a drag from any
+of those rows is a drag-select like any other, and the clicked row keeps its screen position across
+the toggle. Collapsed is the default here too — the prompt just sent as much as every prompt of a
+resumed session — and the state is the view's alone, never persisted. The sticky header shows the
+block's **rendered state** and special-cases nothing: a collapsed huge prompt sticks as its
+three-row shape, a deliberately expanded one sticks expanded, self-inflicted and undone by one
+click.
+
 **A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
 block: collapsed, it stands alone and the whole railed span beneath it — every inner block, rail
 and all — is elided. Its summary line carries the run's gist in two tempi: while the run works,

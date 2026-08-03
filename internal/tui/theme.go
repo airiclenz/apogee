@@ -130,6 +130,7 @@ type theme struct {
 	measure widthAuthority
 
 	userBlock    lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
+	promptToggle lipgloss.Style // the see-more / see-less marker a long prompt block carries at its right edge (renderUserBlock): bold orange on the block's OWN dark-gray field, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader   lipgloss.Style // the ✦ Label target header
 	toolLabel    lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
 	toolDetail   lipgloss.Style // the ┝/┕ branch detail lines (dim)
@@ -182,13 +183,18 @@ func newTheme() theme {
 	return theme{
 		// The painter's own starting measure. It moves only when the terminal tells the program
 		// the painter moved (Update's tea.ModeReportMsg case).
-		measure:    newWidthAuthority(),
-		userBlock:  lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
-		toolHeader: lipgloss.NewStyle(),
-		toolLabel:  lipgloss.NewStyle().Bold(true).Foreground(colCode),
-		toolDetail: lipgloss.NewStyle().Foreground(colFaint),
-		subRail:    lipgloss.NewStyle().Foreground(colCode),
-		skillChip:  lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
+		measure:   newWidthAuthority(),
+		userBlock: lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
+		// The collapse marker keeps the block's background and changes everything else: the tool
+		// label's orange, bolded, against the dark-gray field the prompt text is white on. It is the
+		// one run inside the block that is apogee talking rather than the human, and the hue is the
+		// one the TUI already spends on "a thing you act on".
+		promptToggle: lipgloss.NewStyle().Bold(true).Foreground(colCode).Background(colDarkGray),
+		toolHeader:   lipgloss.NewStyle(),
+		toolLabel:    lipgloss.NewStyle().Bold(true).Foreground(colCode),
+		toolDetail:   lipgloss.NewStyle().Foreground(colFaint),
+		subRail:      lipgloss.NewStyle().Foreground(colCode),
+		skillChip:    lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
 		// The two inline token accents invert the chip: the colour moves to the FOREGROUND and the
 		// background stays the box's own black, so an accented token reads as one word of the
 		// sentence it stands in rather than as a badge pasted over the field.

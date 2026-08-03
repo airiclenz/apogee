@@ -10,6 +10,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A prompt taller than three rows collapses to three, with a `see more (+N lines)…` toggle on the
+  last of them.** A pasted spec or a long instruction used to bury everything around it under a wall
+  of your own text — every wrapped row of it, every time you scrolled past. Now the block paints its
+  first three rows, truncates the third far enough to make room, and counts what it is holding back
+  at the right edge; a click anywhere in the block — the chip row included — opens it whole, with a
+  `see less…` row closing it again. Dragging across a prompt still selects text exactly as before:
+  only a motionless click toggles.
+  - **Collapsed is the default, always** — the prompt you just sent included, and every prompt of a
+    resumed session. Whether a block is open is a way of LOOKING at the scrollback and is never
+    written to the session record.
+  - **The trigger is measured at paint time against the width being painted**, so widening the window
+    can open a prompt that was collapsed and narrowing it can collapse one that was not. The entry
+    itself never changes — the same body is simply laid out to a different column count.
+  - **Interjections (`⧖`) collapse by the same rule**, and the skill chips a send carries are never
+    among what is hidden: they are the record of what the model was actually given.
+  - **The sticky header shows the block as it is painted**, so a collapsed prompt sticks as its
+    three-row shape and a deliberately opened one sticks open — undone by the same one click.
+
+  Specced in `layout.md` ("Collapsed and expanded blocks").
+
 - **The transcript's scroll bar has a switch — `ui.show-scrollbar` in `config.yaml`'s `ui:` block.**
   It ships on, which is the look apogee has always had: a column down the session area's right-hand
   edge, and a bar painted in it once there is more transcript than window. Set it to `false` and the

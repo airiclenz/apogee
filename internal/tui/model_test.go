@@ -2889,6 +2889,50 @@ func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 	}
 }
 
+// The sticky header shows the block's RENDERED state and special-cases nothing (layout.md,
+// "Collapsed and expanded blocks"): a huge prompt that collapsed to its three-row shape sticks as
+// those three rows, hidden body and all, and one deliberately expanded sticks expanded — the
+// overlay simply paints the block's own lines, however many the painter made.
+func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot", nil)
+	for i := 0; i < 30; i++ { // reply enough to scroll the prompt off the top
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+	}
+	m.refreshViewport()
+
+	// Scrolled into the reply, so the prompt is above the top row and is drawn as the header.
+	block := m.userBlocks[len(m.userBlocks)-1]
+	m.detached = true
+	m.viewport.SetYOffset(block.start + block.count + 3)
+
+	start, count := m.stickyHeaderSpan()
+	if count != promptCollapsedRows {
+		t.Fatalf("the sticky header spans %d rows; want the collapsed prompt's %d", count, promptCollapsedRows)
+	}
+	head := strip(strings.Join(m.lines[start:start+count], "\n"))
+	if !strings.Contains(head, "❯ alpha") || !strings.Contains(head, "see more") {
+		t.Errorf("the stuck header is not the collapsed shape:\n%s", head)
+	}
+	if strings.Contains(head, "foxtrot") {
+		t.Errorf("the stuck header shows body rows the collapsed block hides:\n%s", head)
+	}
+	if top := firstViewLine(m); !strings.Contains(top, "❯ alpha") {
+		t.Errorf("top line = %q; want the collapsed prompt stuck to the top", top)
+	}
+
+	// Expanded, the same block sticks as everything it now paints — six body rows and the see-less
+	// row that closes it.
+	if !m.transcript.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
+	}
+	m.refreshViewport()
+	if _, count := m.stickyHeaderSpan(); count != 7 {
+		t.Errorf("the expanded prompt sticks as %d rows; want its six body rows plus the see-less row", count)
+	}
+}
+
 // The input box grows with its content and the viewport shrinks by the same number of rows,
 // keeping the layout balanced as a multi-line message is typed.
 func TestInputAutoGrowReflowsViewport(t *testing.T) {
