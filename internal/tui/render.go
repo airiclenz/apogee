@@ -470,11 +470,13 @@ func renderUserBlock(th theme, marker, text string, skills []string, width int, 
 	return paint
 }
 
-// promptMarkerRow composes one row of a user block that carries a collapse marker at its right
-// edge: the row's own content on the left, the highlighted marker flush against the block's right
-// edge, and the block's dark-gray field spanning the gap between them — three segments on one line,
-// the renderUserChipRow idiom, so the marker keeps its own colour while the row stays a solid
-// block. content is the unstyled row text ("" for the see-less row, which carries none).
+// promptMarkerRow composes one row of a user block that carries a collapse marker near its right
+// edge: the row's own content on the left, the highlighted marker held promptMarkerMargin columns
+// off the block's right edge, and the block's dark-gray field spanning both the gap before it and
+// that margin after — segments on one line, the renderUserChipRow idiom, so the marker keeps its
+// own colour while the row stays a solid block. The margin matters because the marker carries a
+// background of its own: run flush to the edge and its highlight would touch the block's boundary
+// and read as clipped. content is the unstyled row text ("" for the see-less row, which carries none).
 //
 // The content is truncated with the house ellipsis to leave promptMarkerGap columns clear before
 // the marker, which is what makes the collapsed shape exactly promptCollapsedRows rows: the marker
@@ -482,11 +484,13 @@ func renderUserBlock(th theme, marker, text string, skills []string, width int, 
 // truncates the marker rather than overrunning the block — the row is never wider than the block it
 // belongs to, at any width the painter is handed.
 func promptMarkerRow(th theme, content, marker string, width int) string {
-	tail := th.promptToggle.Render(th.measure.Truncate(marker, max(0, width), "…"))
+	inner := max(0, width-promptMarkerMargin) // the columns left once the right margin is reserved
+	tail := th.promptToggle.Render(th.measure.Truncate(marker, inner, "…"))
 	tw := th.measure.Width(tail)
-	content = th.measure.Truncate(content, max(0, width-tw-promptMarkerGap), "…")
-	pad := strings.Repeat(" ", max(0, width-tw-th.measure.Width(content)))
-	return th.userBlock.Render(content+pad) + tail
+	content = th.measure.Truncate(content, max(0, inner-tw-promptMarkerGap), "…")
+	pad := strings.Repeat(" ", max(0, inner-tw-th.measure.Width(content)))
+	margin := strings.Repeat(" ", min(promptMarkerMargin, width))
+	return th.userBlock.Render(content+pad) + tail + th.userBlock.Render(margin)
 }
 
 // renderUserChipRow composes one full-width row of invoked-skill chips inside the user block:
@@ -853,8 +857,9 @@ const diffDetailCap = 20
 
 // The collapsed prompt's numbers and wording (layout.md, "Collapsed and expanded blocks"). A
 // prompt whose body soft-wraps to MORE than promptCollapsedRows rows paints that many rows and
-// counts the rest, with promptSeeMoreFormat right-aligned on the last of them — the row's own text
-// truncated first so promptMarkerGap columns stay clear between the two. Expanded, the body paints
+// counts the rest, with promptSeeMoreFormat right-aligned on the last of them a promptMarkerMargin
+// off the edge — the row's own text truncated first so promptMarkerGap columns stay clear between
+// the two. Expanded, the body paints
 // whole and promptSeeLess trails it on a row of its own, because a full body leaves no row the
 // marker could ride without cutting content.
 //
@@ -863,6 +868,7 @@ const diffDetailCap = 20
 const (
 	promptCollapsedRows = 3
 	promptMarkerGap     = 2
+	promptMarkerMargin  = 1                 // block field kept clear to the marker's right, so it never reads as clipped
 	promptSeeMoreFormat = "see more (+%s)…" // %s is the hidden-row count, pluralised (plural)
 	promptSeeMoreNoun   = "line"            // what promptSeeMoreFormat counts
 	promptSeeLess       = "see less…"

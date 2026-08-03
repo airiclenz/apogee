@@ -747,19 +747,22 @@ func promptRows(t *testing.T, tr *transcript, width int) []string {
 }
 
 // splitMarker asserts the geometry of a prompt row carrying a collapse marker — the row is exactly
-// the block's width, it ends with want, and at least promptMarkerGap columns separate the two — and
-// returns the row's own content, trailing pad trimmed, for the caller to assert on.
+// the block's width, it ends with want over a promptMarkerMargin of clear field, and at least
+// promptMarkerGap columns separate want from the row's own content — and returns that content,
+// trailing pad trimmed, for the caller to assert on.
 func splitMarker(t *testing.T, row, want string, width int) string {
 	t.Helper()
 	th := newTheme()
 	if got := th.measure.Width(row); got != width {
 		t.Errorf("row %q is %d columns wide; want the block's full %d", row, got, width)
 	}
-	if !strings.HasSuffix(row, want) {
-		t.Fatalf("row %q does not end with the marker %q", row, want)
+	margin := strings.Repeat(" ", promptMarkerMargin)
+	if !strings.HasSuffix(row, want+margin) {
+		t.Fatalf("row %q does not end with the marker %q over its %d-column margin", row, want, promptMarkerMargin)
 	}
-	content := strings.TrimRight(strings.TrimSuffix(row, want), " ")
-	if gap := width - th.measure.Width(content) - th.measure.Width(want); gap < promptMarkerGap {
+	content := strings.TrimRight(strings.TrimSuffix(row, want+margin), " ")
+	gap := width - promptMarkerMargin - th.measure.Width(content) - th.measure.Width(want)
+	if gap < promptMarkerGap {
 		t.Errorf("marker %q sits %d columns past the content %q; want at least promptMarkerGap (%d)",
 			want, gap, content, promptMarkerGap)
 	}
@@ -805,11 +808,12 @@ func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
 			want:  []string{"❯ alpha"},
 		},
 		{
-			// width 40 less the 20-column marker and its 2-column gap leaves 18 for the row, ellipsis
-			// included — the whole of what "truncated to leave a gap" means.
+			// width 40 less the 20-column marker, its 2-column gap and the 1-column right margin
+			// leaves 17 for the row, ellipsis included — the whole of what "truncated to leave a
+			// gap" means, with the margin paid for out of the content and never out of the marker.
 			name:   "the third row is truncated to make room for the marker",
 			build:  func(tr *transcript) { tr.addUser("alpha\nbravo\n"+long, nil) },
-			want:   []string{"❯ alpha", "  bravo", "  " + strings.Repeat("x", 15) + "…"},
+			want:   []string{"❯ alpha", "  bravo", "  " + strings.Repeat("x", 14) + "…"},
 			marker: "see more (+5 lines)…",
 		},
 		{

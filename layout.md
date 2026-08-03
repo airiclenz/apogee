@@ -393,8 +393,12 @@ a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one 
 the first two whole, the third truncated with the house ellipsis far enough to clear a gap, and
 `see more (+N lines)…` right-aligned on that same row, where N is every wrapped row beyond the
 three. The marker *rides* a content row rather than taking one of its own, which is what makes the
-collapsed shape exactly three rows, and it is painted in its own highlighted style so what apogee is
-saying inside the block never reads as what the human wrote. Expanded, the body paints in full — no
+collapsed shape exactly three rows, and it is painted in its own highlighted style — bold light
+gray-blue on the block's own field — so what apogee is saying inside the block never reads as what
+the human wrote. It stops **one column short of the block's right edge** rather than running flush
+to it: the marker carries a background, and a highlight touching the boundary reads as clipped
+text. That column is the block's own field, and it is paid for out of the content the row can hold,
+never out of the marker. Expanded, the body paints in full — no
 content row is ever truncated to make room — and `see less…` closes the block on a trailing row of
 its own, after the skill chips. The chip row is never collapsed away, never truncated and never
 counted among the hidden rows: it is the record of what the model was actually given.
@@ -572,7 +576,7 @@ mode on the right. The host falls back to the endpoint's own host when no alias 
 any segment nothing has named is dropped with its separator.
 
 **The mode marker's symbol.** The mode is stated as a glyph and its word, one rung per shape:
-`⬡ plan`, `◐ ask before`, `✔ allow edits`, `▸▸ auto`. The glyph is rendered in the SAME styled run
+`⊞ plan`, `◐ ask before`, `✔ allow edits`, `▸▸ auto`. The glyph is rendered in the SAME styled run
 as the word, so it carries the mode's own colour by construction rather than by being coloured to
 match — there is no separately toned badge here, and no way for the two halves to drift apart. The
 symbol belongs to the marker alone: everywhere the mode is said in a sentence instead (the
