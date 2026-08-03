@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"io"
+	"os"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -547,6 +549,22 @@ type ConfinementInfo struct {
 // the moment the first worker emits (phase-2 detail plan §3 C2/C3; ADR 0011). The program
 // context is ctx, so a program-wide shutdown also cancels an in-flight Exchange (C4).
 func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
+	// The alternate screen is claimed HERE, before the program starts, rather than being left to
+	// the first frame's AltScreen field — see claimAltScreen for why the order cannot be left to
+	// Bubble Tea. Only on a real terminal: with stdout redirected there is no scroll bar to put
+	// out and the sequences would be noise in the file.
+	if stdoutIsTerminal() {
+		if err := claimAltScreen(os.Stdout); err != nil {
+			return err
+		}
+		// What this claims, it gives back. The renderer restores the primary screen on every
+		// shutdown it reaches, but a program that dies before it ever paints never entered the
+		// alternate screen by its own bookkeeping and so never leaves it either — the shell would
+		// come back to a screen apogee took and kept. Pairing the claim unconditionally covers
+		// that case; when the renderer did restore, this second one lands on a primary screen
+		// already restored, where it is a cursor restore to the position it just returned to.
+		defer func() { _, _ = io.WriteString(os.Stdout, ansiExitAltScreen) }()
+	}
 	// The per-Turn snapshot notify: the worker sends turnSnapshotMsg through the Bridge's
 	// late-bound program sender (the same programRef the Sink pushes Events through), so the
 	// Model persists between Steps without any exported API. Bind (below) resolves it to the
@@ -557,4 +575,45 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	br.Bind(program)
 	_, err := program.Run()
 	return err
+}
+
+// The three screen-control sequences apogee sends on its own behalf. Everything else on the wire
+// is the renderer's.
+const (
+	ansiEnterAltScreen  = "\x1b[?1049h" // switch to the alternate screen, saving the primary one
+	ansiExitAltScreen   = "\x1b[?1049l" // switch back, restoring the primary screen
+	ansiEraseScrollback = "\x1b[3J"     // drop the terminal's saved lines (xterm E3)
+)
+
+// claimAltScreen switches w to the alternate screen and then erases the terminal's saved lines,
+// in that order and in one write.
+//
+// The order is the whole point. macOS Terminal.app copies the primary screen into its scrollback
+// when a program switches to the alternate screen, and its own scroll bar then stays lit for the
+// entire run — the thing llama-launcher never suffers, because it never leaves the primary screen
+// at all. Erasing the saved lines afterwards puts that scroll bar out; erasing them first clears a
+// scrollback the switch immediately refills, which is why this cannot be a command returned from
+// Init: Bubble Tea writes RawMsg straight through, but defers the alt-screen switch to the next
+// ticker-driven flush, so an Init command reliably lands BEFORE the switch — the useless order.
+//
+// Claiming the screen up here makes the renderer's own switch, one frame later, a no-op on a
+// screen that is already alternate: the primary buffer is untouched by it, so nothing new reaches
+// the scrollback, and the renderer's shutdown restores the primary screen exactly as it always did.
+//
+// The cost is deliberate and documented in layout.md: the shell scrollback from before the launch
+// does not survive apogee starting. That is the trade the scroll bar demands — there is no
+// sequence that hides it while leaving the saved lines in place.
+func claimAltScreen(w io.Writer) error {
+	_, err := io.WriteString(w, ansiEnterAltScreen+ansiEraseScrollback)
+	return err
+}
+
+// stdoutIsTerminal reports whether stdout is a character device, i.e. something with a scroll bar
+// to worry about. A redirected stdout gets no screen-control sequences from us.
+func stdoutIsTerminal() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }

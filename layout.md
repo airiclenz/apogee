@@ -238,6 +238,19 @@ column stay a single column.
 is read once at start-up, so the width the transcript wraps to cannot change under text that has
 already been wrapped; a changed key takes effect the next time apogee starts.
 
+**The terminal's own scroll bar is a different bar, and apogee puts it out.** Every frame apogee
+draws lives on the alternate screen, so nothing it renders ever reaches the terminal's scrollback —
+but that alone does not settle the terminal's scroll bar. macOS Terminal.app copies the primary
+screen into its scrollback at the moment a program switches to the alternate one, and its scroll
+bar then stays lit for the whole run, alongside apogee's own. So apogee claims the alternate screen
+itself, before the renderer starts, and erases the terminal's saved lines in the same write — the
+switch first, the erase second, because an erase sent first only clears a scrollback the switch
+immediately refills. **This is why the shell scrollback from before the launch does not survive
+apogee starting**: there is no sequence that puts the terminal's bar out and leaves the saved lines
+in place, and a frame sharing the screen with a scroll bar it does not control is the thing this
+trade buys off. What apogee claims it gives back — the primary screen is restored on the way out,
+so the shell returns to the screen it had.
+
 ---
 
 ## The rules behind the tool-call sketch

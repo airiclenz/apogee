@@ -800,13 +800,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
-- **The terminal's own scroll bar no longer sits beside apogee for the whole run.** apogee draws on
-  the alternate screen, which is what keeps a terminal from showing its own bar and its own
-  scrollback — but that is named per frame, and the very first frame, the placeholder shown before
-  the window's size is known, did not name it. So apogee opened on the **primary** screen, pushed a
-  line or two into the scrollback, and the terminal kept a scroll bar alive from there on. Every
-  frame apogee emits now names the alternate screen, so nothing it paints ever reaches the
-  scrollback and quitting hands the shell back exactly as it was found.
+- **The terminal's own scroll bar no longer sits beside apogee for the whole run.** Two separate
+  things kept it lit. The first: apogee draws on the alternate screen, but that is named per frame,
+  and the very first frame — the placeholder shown before the window's size is known — did not name
+  it, so apogee opened on the **primary** screen and pushed a line or two into the scrollback. Every
+  frame it emits now names the alternate screen. The second, and the one that actually kept the bar
+  up: macOS Terminal.app copies the primary screen into its scrollback at the moment *any* program
+  switches to the alternate screen, so a run that never wrote a byte to the primary screen still
+  left the terminal with saved lines to scroll and a bar to show them with. apogee now claims the
+  alternate screen itself, ahead of the renderer, and erases the terminal's saved lines in the same
+  write — in that order, since an erase sent first only clears a scrollback the switch immediately
+  refills.
+
+  The trade is deliberate and worth stating plainly: **the shell scrollback from before the launch
+  does not survive apogee starting.** No sequence puts the terminal's bar out and leaves the saved
+  lines in place. The screen itself is still handed back — the primary screen is restored on the way
+  out, so the shell returns to what it had.
 
 - **Reading a file that talks about errors is no longer mistaken for a file that is missing.** The
   optional `read_loop` Mechanism watches for the model hunting for a file that does not exist, and

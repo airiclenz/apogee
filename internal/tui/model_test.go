@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2449,6 +2450,21 @@ func TestViewStaysOnAltScreen(t *testing.T) {
 	}
 	if !m.View().AltScreen {
 		t.Error("laid-out frame is not on the alternate screen")
+	}
+}
+
+// The scroll bar macOS Terminal.app lights when a program takes the alternate screen goes out only
+// if the saved lines are erased AFTER the switch — sent first, the erase clears a scrollback the
+// switch immediately refills, and the bar stays lit for the whole run. Both halves of that order
+// are pinned here, exactly, because nothing downstream can observe it: the sequences leave for a
+// real terminal and no test can watch what Terminal.app does with them.
+func TestClaimAltScreenErasesTheScrollbackAfterTheSwitch(t *testing.T) {
+	var buf bytes.Buffer
+	if err := claimAltScreen(&buf); err != nil {
+		t.Fatalf("claimAltScreen: %v", err)
+	}
+	if got, want := buf.String(), ansiEnterAltScreen+ansiEraseScrollback; got != want {
+		t.Errorf("claimAltScreen wrote %q, want the switch then the erase: %q", got, want)
 	}
 }
 
