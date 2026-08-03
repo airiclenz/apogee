@@ -486,10 +486,14 @@ divide; it takes a line to itself. Where the natural column widths plus the divi
 not fit, the widest column is shrunk one cell at a time — the leftmost of them where two are equally
 wide, so the outcome is the same every repaint — until the table fits, and a cell too wide for the
 column it lands in **wraps** inside that column. Nothing is cut: there is no `…` anywhere in the
-table contract, and the single indivisible grapheme above is its one exemption. If the table cannot
-fit even with every column down to a single cell, it is not drawn as a table at all: the block falls
-back to the plain paragraphs it would have been before, which is always readable and never
-overflows.
+table contract, and the single indivisible grapheme above is its one exemption. No column is ever
+shrunk below **four cells** of content: narrower than that a wrapped cell comes apart into a letter
+or two per line, which reads as vertical text with a rule beside it rather than as a column. That
+minimum is a floor on the shrink, not a width every column is handed — a column whose content is
+naturally narrower keeps its own width and is never charged the four cells it would not have used.
+If the width cannot give every column that readable minimum once the dividers between them are paid
+for, the block is not drawn as a table at all: it falls back to the plain paragraphs it would have
+been before, which is always readable and never overflows.
 
 **One row is as many lines as its tallest cell.** A cell too wide for its column wraps inside it,
 and the row becomes as many physical lines as the tallest of its cells needs. Cells are

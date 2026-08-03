@@ -284,6 +284,44 @@ func TestWidthNeverExceeds(t *testing.T) {
 	}
 }
 
+// The same absolute cap, swept across every width a table can be handed and asserted in BOTH
+// measures the painter can be in — the sweep is where the narrow-width endpoints live, and one
+// width in isolation cannot find them. Before the readable floor, a column squeezed to a single
+// cell could be handed a two-cell grapheme that no break divides: the cell stood a column proud of
+// the cap at widths 5, 9 and 10 under GraphemeWidth. The floor and the paragraph fallback below it
+// are what close that, so the only line left that may cross the cap is the one layout.md exempts —
+// a single indivisible grapheme wider than the whole width, which keeps a line to itself.
+func TestTableWidthNeverExceedsAcrossWidths(t *testing.T) {
+	source := strings.Join([]string{
+		"| id | description | " + vs16Warning + " |",
+		"| --- | :-: | --: |",
+		"| 1 | " + strings.Repeat("wrap ", 8) + "| " + vs16Warning + " |",
+		"| 22 | " + vs16Warning + " short | **bold** |",
+	}, "\n")
+
+	for _, pm := range paintMethods {
+		t.Run(pm.name, func(t *testing.T) {
+			t.Parallel()
+			th := newTheme()
+			th.measure = widthAuthority{method: pm.method}
+
+			for width := 1; width <= 120; width++ {
+				for i, ln := range renderMarkdownBody(th, source, width) {
+					v := strip(ln)
+					w := th.measure.Width(ln)
+					if w <= width {
+						continue
+					}
+					if cluster, _ := ansi.FirstGraphemeCluster(v, pm.method); cluster == v {
+						continue // the one exemption: a grapheme no break can divide
+					}
+					t.Errorf("width %d: line %d %q is %d cells wide, over the cap", width, i, v, w)
+				}
+			}
+		})
+	}
+}
+
 func TestEmptyMessageRendersOneLine(t *testing.T) {
 	th := newTheme()
 	if out := renderMarkdownBody(th, "", 40); len(out) != 1 || strip(out[0]) != "" {

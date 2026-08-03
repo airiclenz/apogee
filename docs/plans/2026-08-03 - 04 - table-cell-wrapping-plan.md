@@ -237,9 +237,24 @@ dividers between them".
 
 ---
 
-## 3. A readable floor, and the paragraph fallback below it
+## 3. A readable floor, and the paragraph fallback below it — ✅ DONE (2026-08-03)
 
 Depends on item 2.
+
+NOTES (2026-08-03): deviation — `TestTableShrinksToTheWidthItIsGiven` (`mdtable_test.go`) is
+baselined on "nine cells is the narrowest these three columns can be drawn in", which the floor
+moves to eighteen; its widths are now {18, 20, 24} and its comment names `minTableColumnWidth`. The
+item's test list does not name it; the contract it asserts — still a table below its natural width,
+every line inside the cap — is unchanged.
+NOTES (2026-08-03): the width sweep is the sibling the item allows rather than an extension of
+`TestWidthNeverExceeds`: `TestTableWidthNeverExceedsAcrossWidths` (`markdown_test.go`). Per the
+run's DECISION it sweeps widths 1…120 under BOTH `ansi.WcWidth` and `ansi.GraphemeWidth`, and its
+fixture carries the two-cell VS16 grapheme that crossed the cap before the floor (reproduced at
+widths 9 and 10 here, 5/9/10 in item 2's verifier fixture). The only line it still exempts is
+`layout.md`'s single indivisible grapheme.
+NOTES (2026-08-03): deviation — `renderTable`'s doc comment said it reports false when "the width is
+too narrow even with every column down to a single cell", which the floor falsifies; it now names
+`minTableColumnWidth`. Its behaviour is otherwise unchanged, as the item says.
 
 **What.** Stop a squeezed column from shredding words one letter per line.
 

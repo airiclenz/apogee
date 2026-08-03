@@ -517,16 +517,16 @@ func TestTableWrapsToWidth(t *testing.T) {
 	}
 }
 
-// A table shrinks as far as one cell per column before it gives up, and every line it draws stays
-// inside the width all the way down. Nine cells is the narrowest these three columns can be drawn
-// in: one cell each, plus the three the divider between them costs. Below its natural width the
-// block is still a table — the squeezed columns wrap rather than fall back — so its height grows
-// with the wrapping instead of holding at one line per row.
+// A table shrinks as far as the readable floor before it gives up, and every line it draws stays
+// inside the width all the way down. Eighteen cells is the narrowest these three columns can be
+// drawn in: minTableColumnWidth cells each, plus the three the divider between them costs twice.
+// Below its natural width the block is still a table — the squeezed columns wrap rather than fall
+// back — so its height grows with the wrapping instead of holding at one line per row.
 func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
 	th := newTheme()
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
-	for _, width := range []int{9, 12, 20} {
+	for _, width := range []int{18, 20, 24} {
 		got := renderMarkdownBody(th, source, width)
 		lines := visible(got)
 		if len(got) < 3 {
@@ -743,8 +743,8 @@ func BenchmarkRenderTable(b *testing.B) {
 	}
 }
 
-// Below that floor the block is not a table at all: it falls back to the plain paragraphs it
-// rendered before tables existed, delimiter row and pipes visible — and those paragraphs stay
+// Below the readable floor the block is not a table at all: it falls back to the plain paragraphs
+// it rendered before tables existed, delimiter row and pipes visible — and those paragraphs stay
 // inside the width like every other line the TUI draws. At these widths a row of one- and
 // three-cell tokens no longer fits on one line, so the delimiter's dashes are matched across the
 // breaks the wrapper makes rather than as one run (they are still all there, in order: wrapText
@@ -753,9 +753,10 @@ func TestTableUnfittableFallsBack(t *testing.T) {
 	th := newTheme()
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
-	// Eight cells is the widest of these: three columns cannot be drawn at all until the two
-	// dividers between them are paid for, which leaves nothing for the cells themselves.
-	for _, width := range []int{1, 3, 6, 8} {
+	// Seventeen cells is the widest of these: three columns are not drawn until each has
+	// minTableColumnWidth cells of content and both dividers between them are paid for, which is
+	// eighteen — and at the narrow end there is not even room for the dividers themselves.
+	for _, width := range []int{1, 3, 6, 8, 12, 17} {
 		lines := visible(renderMarkdownBody(th, source, width))
 		got := strings.Join(lines, "\n")
 		if strings.Contains(got, "─") {
@@ -768,6 +769,61 @@ func TestTableUnfittableFallsBack(t *testing.T) {
 			if w := th.measure.Width(ln); w > width {
 				t.Errorf("width %d: fallback line %q is %d cells wide, over the cap", width, ln, w)
 			}
+		}
+	}
+}
+
+// The floor is the fallback's threshold, asserted at the layout boundary itself: renderTable turns
+// away every width that cannot give each of its three columns minTableColumnWidth cells once the
+// two dividers are paid for, renderMarkdownBody draws the block as plain paragraphs there — source
+// text visible, neither table glyph anywhere in it — and the very next cell up is a table again.
+func TestTableNarrowerThanTheFloorFallsBack(t *testing.T) {
+	th := newTheme()
+	lines := []string{"| alpha | beta | gamma |", "| --- | --- | --- |", "| 1 | 2 | 3 |"}
+	tbl, _, ok := matchTableBlock(lines, 0)
+	if !ok {
+		t.Fatal("the fixture is not a table")
+	}
+	source := strings.Join(lines, "\n")
+	const floorWidth = 3*minTableColumnWidth + 2*tableDividerWidth // 18: every column at the floor
+
+	for width := 1; width < floorWidth; width++ {
+		if _, fits := renderTable(th, tbl, width); fits {
+			t.Errorf("width %d: fitted a table that cannot give every column %d cells", width, minTableColumnWidth)
+		}
+		got := visible(renderMarkdownBody(th, source, width))
+		block := strings.Join(got, "\n")
+		if strings.Contains(block, glyphTableColumn) || strings.Contains(block, glyphTableRule) {
+			t.Errorf("width %d: the block drew table rules; want the plain-paragraph fallback:\n%s", width, block)
+		}
+		if !strings.Contains(strings.Join(got, ""), "---") {
+			t.Errorf("width %d: the delimiter row was consumed; want it left as source text:\n%s", width, block)
+		}
+	}
+	if _, fits := renderTable(th, tbl, floorWidth); !fits {
+		t.Errorf("width %d pays every column its floor exactly; want the table drawn", floorWidth)
+	}
+}
+
+// A column narrower than the floor by nature is never charged it: three columns of two cells each
+// are drawn as a table at twelve cells, where charging one floor per column — 3×4 plus the two
+// dividers, eighteen — would have thrown the whole block down to paragraphs for want of a width
+// none of its columns would ever have used.
+func TestTableOfNarrowColumnsIsNotRejected(t *testing.T) {
+	th := newTheme()
+	source := "| id | ab | xy |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
+	const width = 3*2 + 2*tableDividerWidth // 12: the three natural widths and their dividers
+
+	got := renderMarkdownBody(th, source, width)
+
+	want := []string{"id │ ab │ xy", "───┼────┼───", "1  │ 2  │ 3 "}
+	if !reflect.DeepEqual(visible(got), want) {
+		t.Errorf("narrow-column table:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(visible(got), "\n"), strings.Join(want, "\n"))
+	}
+	for i, ln := range got {
+		if w := th.measure.Width(ln); w != width {
+			t.Errorf("line %d is %d cells wide, want the table's %d: %q", i, w, width, strip(ln))
 		}
 	}
 }
@@ -825,42 +881,67 @@ func TestTableInsideProse(t *testing.T) {
 }
 
 // fitColumns takes space from the widest column, and from the leftmost of equally wide ones, so a
-// table lays out identically on every repaint.
+// table lays out identically on every repaint — and it stops at the floor it is given rather than
+// shredding a column into one letter per line. The width a table REQUIRES is sum(min(natural,
+// floor)), asserted here in both directions: a column narrower than the floor by nature is never
+// widened to it and so is never charged it, which is what keeps a table of naturally narrow columns
+// from being turned away over a floor none of its columns would ever occupy.
 func TestTableFitColumns(t *testing.T) {
 	cases := []struct {
 		name   string
 		widths []int
 		budget int
+		floor  int
 		want   []int
 		ok     bool
 	}{
-		{"already fits", []int{3, 4}, 10, []int{3, 4}, true},
-		{"widest gives way first", []int{2, 9}, 8, []int{2, 6}, true},
-		{"equal columns: the leftmost gives way first", []int{5, 5, 3}, 10, []int{3, 4, 3}, true},
-		{"levels down to the runner-up before touching it", []int{9, 4, 2}, 10, []int{4, 4, 2}, true},
-		{"all the way to one cell each", []int{9, 9}, 2, []int{1, 1}, true},
-		{"one cell each still overflows", []int{9, 9}, 1, nil, false},
-		{"no budget at all", []int{4}, 0, nil, false},
+		{"already fits", []int{3, 4}, 10, 1, []int{3, 4}, true},
+		{"widest gives way first", []int{2, 9}, 8, 1, []int{2, 6}, true},
+		{"equal columns: the leftmost gives way first", []int{5, 5, 3}, 10, 1, []int{3, 4, 3}, true},
+		{"levels down to the runner-up before touching it", []int{9, 4, 2}, 10, 1, []int{4, 4, 2}, true},
+		{"all the way to one cell each", []int{9, 9}, 2, 1, []int{1, 1}, true},
+		{"one cell each still overflows", []int{9, 9}, 1, 1, nil, false},
+		{"no budget at all", []int{4}, 0, 1, nil, false},
+		{"the floor stops the shrink", []int{9, 9}, 8, 4, []int{4, 4}, true},
+		{"a column already at the floor gives nothing up", []int{4, 12}, 12, 4, []int{4, 8}, true},
+		{"one cell under the floor turns the table away", []int{9, 9}, 7, 4, nil, false},
+		{"naturally narrow columns are not charged the floor", []int{2, 2, 2}, 6, 4, []int{2, 2, 2}, true},
+		{"a narrow column pays only its own width", []int{2, 12}, 6, 4, []int{2, 4}, true},
+		{"and is never shrunk to pay for a wide one", []int{2, 12}, 5, 4, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			required := 0
+			for _, w := range tc.widths {
+				required += min(w, tc.floor)
+			}
+
 			widths := append([]int(nil), tc.widths...)
-			ok := fitColumns(widths, tc.budget)
+			ok := fitColumns(widths, tc.budget, tc.floor)
 			if ok != tc.ok {
-				t.Fatalf("fitColumns(%v, %d) = %v; want %v", tc.widths, tc.budget, ok, tc.ok)
+				t.Fatalf("fitColumns(%v, %d, floor %d) = %v; want %v", tc.widths, tc.budget, tc.floor, ok, tc.ok)
 			}
 			if !ok {
+				if required <= tc.budget {
+					t.Errorf("turned away though the required width %d fits the %d budget", required, tc.budget)
+				}
 				return
 			}
-			if !reflect.DeepEqual(widths, tc.want) {
-				t.Errorf("fitColumns(%v, %d) = %v; want %v", tc.widths, tc.budget, widths, tc.want)
+			if required > tc.budget {
+				t.Errorf("fitted though the required width %d is over the %d budget", required, tc.budget)
 			}
-			total := len(widths) - 1
-			for _, w := range widths {
+			if !reflect.DeepEqual(widths, tc.want) {
+				t.Errorf("fitColumns(%v, %d, floor %d) = %v; want %v", tc.widths, tc.budget, tc.floor, widths, tc.want)
+			}
+			total := 0
+			for i, w := range widths {
 				total += w
-				if w < 1 {
-					t.Errorf("column shrunk to %d; want a floor of one cell", w)
+				if floor := min(tc.widths[i], tc.floor); w < floor {
+					t.Errorf("column %d shrunk to %d; want no less than its floor of %d", i, w, floor)
 				}
+			}
+			if total > tc.budget {
+				t.Errorf("fitted widths %v sum to %d, over the %d budget", widths, total, tc.budget)
 			}
 		})
 	}

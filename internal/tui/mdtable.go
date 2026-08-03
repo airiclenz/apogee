@@ -220,15 +220,23 @@ const (
 	tableDividerWidth = 3
 )
 
+// minTableColumnWidth is the narrowest a column may be squeezed to and still read as a column.
+// Below four cells a wrapped cell comes apart into a letter or two per line — vertical text with a
+// rule beside it rather than a table — and the plain paragraphs the block falls back to are more
+// readable than that, which is why the floor is the fallback's threshold rather than a width the
+// layout quietly rounds up to. It is a floor on the SHRINK, not a width every column is given: a
+// column whose content is naturally narrower keeps its own width and is never charged the floor.
+const minTableColumnWidth = 4
+
 // renderTable lays a parsed table out as styled physical lines at the given width: bold header,
 // one ─ rule the full width of the table crossing every divider at a ┼, then the body rows, each
 // cell inline-rendered, wrapped to its column, padded on the side its column's alignment names and
 // separated from its neighbour by the vertical divider. A row contributes as many lines as its
 // tallest cell needs, so the block is taller than its row count whenever a cell wraps — which is
 // why the rows are appended rather than assigned. It reports false when the table cannot fit — the
-// width is too narrow even with every column down to a single cell — and the caller then leaves
-// the block to the paragraph path it would have taken before tables were rendered at all, which
-// is always readable and never overflows.
+// width cannot give every column minTableColumnWidth cells of content, once the dividers are paid
+// for — and the caller then leaves the block to the paragraph path it would have taken before
+// tables were rendered at all, which is always readable and never overflows.
 func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 	if len(tbl.header) == 0 {
 		return nil, false
@@ -248,7 +256,7 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 	}
 
 	widths := tableColumnWidths(th, header, rows)
-	if !fitColumns(widths, width-tableDividerWidth*(len(widths)-1)) {
+	if !fitColumns(widths, width-tableDividerWidth*(len(widths)-1), minTableColumnWidth) {
 		return nil, false
 	}
 
@@ -286,31 +294,50 @@ func tableColumnWidths(th theme, header []string, rows [][]string) []int {
 // the same way on every repaint (layout.md). It steps a whole level at a time rather than one cell
 // at a time — the identical outcome, without a loop proportional to the overflow — because the
 // markdown walk re-runs over the whole transcript on every streamed token (model.go).
-func fitColumns(widths []int, budget int) bool {
-	total := 0
+//
+// No column is taken below floor, and the width the table REQUIRES is the sum of min(natural,
+// floor) rather than one floor per column: a column already narrower than the floor is never
+// widened to it, so it must not be charged it either — a table of naturally narrow columns fits
+// wherever its own widths fit. That required width is the whole fit test, and it subsumes the "even
+// a single cell per column overflows" guard a floor of one made necessary.
+func fitColumns(widths []int, budget, floor int) bool {
+	total, required := 0, 0
 	for _, w := range widths {
 		total += w
+		required += min(w, floor)
 	}
-	if len(widths) > budget {
-		return false // even a single cell per column overflows the width
+	if required > budget {
+		return false // some column would have to go under the floor, or under its own content
 	}
 
 	for total > budget {
-		// The widest width, how many columns share it, and the width just below it: the level
-		// this pass brings that group down to.
-		top, next, count := 0, 0, 0
+		// The widest width among the columns that can still give a cell up, how many share it, and
+		// the width just below it: the level this pass brings that group down to, never past the
+		// floor. A column already at or under the floor is not in the running — it is either as
+		// narrow as a column may be drawn, or narrower by its own nature and not shrinkable at all.
+		top, next, count := 0, floor, 0
 		for _, w := range widths {
 			switch {
+			case w <= floor: // nothing left to give: it is at the floor or naturally under it
 			case w > top:
-				top, next, count = w, top, 1
+				top, next, count = w, max(next, top), 1
 			case w == top:
 				count++
 			case w > next:
 				next = w
 			}
 		}
-		// Never take more than the overflow: the last cells come off the group left to right,
-		// which is what leaves the extra cell with the rightmost of equally wide columns.
+		if count == 0 {
+			// Unreachable while required <= budget holds — every column is then at or under the
+			// floor only when the widths already sum inside the budget — and it stays here as the
+			// loop's own termination guarantee, because a render path that cannot terminate hangs
+			// the whole TUI.
+			return false
+		}
+		// Never take more than the overflow, and never more than the level allows — the level is
+		// floored, so this is also what keeps the group off the floor. The last cells come off the
+		// group left to right, which leaves the extra cell with the rightmost of equally wide
+		// columns.
 		take := min(total-budget, count*(top-next))
 		each, extra := take/count, take%count
 		for i, w := range widths {
