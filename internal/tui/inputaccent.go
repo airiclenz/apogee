@@ -251,6 +251,10 @@ func wrapRowStarts(line []rune, width int) []int {
 // the widget believes it drew. It is the forward half of the cell↔rune mapping [cellToRuneOffset]
 // inverts, so a token's start cell and the caret's column are read off the same ruler, and it is
 // that widget's ruler rather than the painter's: both are mirrors of its internal math.
+//
+// It measures no TABs and needs none of the tab arithmetic the transcript side carries: everything
+// weighed here comes from the textarea's own value, which the widget sanitises tabs out of on the
+// way in — see [cellToRuneOffset] (mouse.go) for why that holds on every write path.
 func runesWidth(rs []rune) int {
 	return uniseg.StringWidth(string(rs))
 }
