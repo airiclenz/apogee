@@ -87,7 +87,18 @@ empty box and still deletes one rune on a non-empty box (existing behaviour pinn
 
 **Commit:** `fix(tui): backspace/del delete the prompt selection`
 
-## 2. Prompt-recall store (`internal/recall`)
+## 2. Prompt-recall store (`internal/recall`) — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): three refinements to the item's literal text. (a) Consecutive dedup compares
+against the newest record *for that workspace* rather than the file's last line outright, so a
+hash-colliding stranger's line cannot hide a genuine duplicate — dedup then answers for exactly the
+view `Load` returns. (b) `Append`/`Load` run the workspace through `filepath.Clean` before hashing
+and stamping it, so `/w` and `/w/` are one workspace and one file; the store still resolves nothing
+itself (ADR 0001) — the caller passes an absolute path. (c) The filename takes the first 8 hex
+characters of the digest as written here (the `probeRecordKey` precedent hex-encodes 8 *bytes*);
+collisions are a correctness non-event because every record names its workspace and `Load` filters.
+Compaction triggers on the file's raw line count (so a file of pure junk still gets trimmed) and
+keeps the newest 1000 well-formed records, dropping the malformed lines `Load` was already skipping.
 
 **What:** New package `internal/recall` owning persistence. `Store` rooted at a
 directory (the wire layer will pass `<config-home>/prompts`), API:
