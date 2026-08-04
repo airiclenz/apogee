@@ -53,7 +53,8 @@ var (
 )
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
-// tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯. A
+// tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯, and a
+// menu-style popup row that is NOT the selected one leads with ·, the ❯'s quiet counterpart. A
 // sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level) and opened
 // by a ⤷ sub-agent label (P3.14).
 const (
@@ -62,6 +63,7 @@ const (
 	glyphBranch          = "┝"
 	glyphBranchLast      = "┕"
 	glyphUser            = "❯"
+	glyphMenuUnselected  = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
 	glyphSubRail         = "│"
 	glyphSubLabel        = "⤷"
 	glyphBullet          = "•" // a markdown bullet-list item (- / * / +)
@@ -162,6 +164,7 @@ type theme struct {
 	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
 	popupBorder   lipgloss.Style // selector-popup chrome (renderPopup): startupBorder's rounded shape, filled solid black so the pane reads as a distinct overlay
 	popupBody     lipgloss.Style // a popup's wrapped body block (renderPopup): normal white on black — between presentTitle (bold) and statusFaint (chrome) in the hierarchy
+	popupAccent   lipgloss.Style // the SELECTED row of a MENU-style popup (popupSpec.menuRows): its ❯ and its label lit as one bold accent-orange run on the pane's black, with no highlight bar behind them — the cue th.userBlock's full-width bar is replaced by wherever a pane is a menu rather than a list
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
 	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
@@ -236,7 +239,16 @@ func newTheme() theme {
 							BorderBackground(colBlack).
 							Background(colBlack).
 							Padding(0, 1),
-		popupBody:   lipgloss.NewStyle().Foreground(colWhite).Background(colBlack), // wrapped body prose: normal white, not bold (title) nor faint (chrome)
+		popupBody: lipgloss.NewStyle().Foreground(colWhite).Background(colBlack), // wrapped body prose: normal white, not bold (title) nor faint (chrome)
+		// A menu's selected row is marked by LIGHT rather than by a block of colour: bold in the
+		// accent tone the theme already spends on "this is apogee's own" — colCode, the orange the
+		// tool label, the sub-agent rail and the auto-mode marker all carry — against the faint gray
+		// the other rows keep. The contrast between the two IS the cue, which is why the row needs no
+		// bar behind it: a full-width highlight on a four-row decision menu paints a quarter of the
+		// pane a second colour and reads as a banner, not as a pointer. The black is the pane's own
+		// field, carried the way skillAccent carries the field it stands on, so the lit run sits IN
+		// the pane instead of cutting a notch of another background through it.
+		popupAccent: lipgloss.NewStyle().Bold(true).Foreground(colCode).Background(colBlack),
 		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
 		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
 		spinnerBase: lipgloss.NewStyle().Background(colBlack), // match the status bar's black field

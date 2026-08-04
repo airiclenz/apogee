@@ -82,7 +82,17 @@ title; height accounting (chrome) is one row smaller with the flag on.
 **Commit:** `feat(tui): popup painter learns title-in-border mode` — this commit also adds
 the previously untracked `docs/design/user-questions-layout.md` and this plan file.
 
-## 2. Painter: menu-style row rendering (pointer + color, no bar)
+## 2. Painter: menu-style row rendering (pointer + color, no bar) — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the accent the owner's decision calls for is `colCode` (#f0883e orange) — the tone
+the theme already spends on every "this is apogee's own" accent (tool label, sub-agent rail, auto-mode
+marker), so no colour was introduced; the new style is `theme.popupAccent` (bold accent on the pane's
+black, applied to the ❯ and the label only, never squared to the inner width, so no bar appears). Two
+additions the item's text implies but does not name: the unselected marker needed a glyph, added as
+`glyphMenuUnselected` ("·") beside `glyphUser` in theme.go, and the tests needed an SGR probe helper
+(`styleSGR`, popup_test.go). The style is named `popupAccent` rather than something longer because a
+field name past `startupBorder`'s width makes gofmt realign the whole theme struct — a 70-line
+whitespace diff over lines this item does not otherwise touch.
 
 **What:** Add an opt-in menu row style to `internal/tui/popup.go`. New `popupSpec` field
 (e.g. `menuRows bool`), default false. When set: the selected row renders `❯ ` plus the

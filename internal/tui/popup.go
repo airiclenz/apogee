@@ -29,7 +29,8 @@ import (
 //     and every content line is padded out to the full inner width on the same black field, so no
 //     interior cell (including the gap after a short row) is left on the terminal background.
 //   - The module owns the marker (glyphUser + a space on the selected row, two spaces
-//     otherwise), the selected-row highlight (th.userBlock's full bar), the scroll windowing
+//     otherwise — or glyphMenuUnselected in menu style, popupSpec.menuRows), the selected-row
+//     highlight (th.userBlock's full bar, or the menu's accent run instead), the scroll windowing
 //     (popupRowWindow), and — since the column contract below — the COLUMN ALIGNMENT of the rows
 //     themselves: callers hand over the FULL row list plus the global selected index, and
 //     renderPopup lays the rows out, windows around the selection, and truncates every content
@@ -120,12 +121,24 @@ type popupRow []string
 // heading without dropping the box. It changes where the title is drawn and nothing about what it
 // says: the elision marker rides the border title exactly as it rides the title row
 // (popupTitleLine), so a pane cannot go quiet about content it hid by moving its name into the frame.
+//
+// menuRows paints the row list as a MENU rather than as a list with a cursor in it: the selected row
+// is glyphUser plus its label lit in the accent (th.popupAccent), every other row is
+// glyphMenuUnselected plus its label faint, and NO row carries th.userBlock's full-width highlight
+// bar (docs/design/user-questions-layout.md). The difference is what the row list is FOR. A picker
+// offers a long scrolled list of things to look through, and the bar is the position marker that
+// finds the cursor in it; a decision surface offers four options to choose between, all of them on
+// screen at once, and there the bar is a banner across a quarter of the pane rather than a pointer —
+// the ❯ and the accent say the same thing in the width of one glyph, and every row that is not the
+// answer stays out of the way. It is opt-in for exactly that reason: the flag off is the picker's
+// rendering, unchanged down to the two-space marker (contract 3).
 type popupSpec struct {
 	title         string
 	titleInBorder bool
 	body          string
 	maxBodyRows   int
 	rows          []popupRow
+	menuRows      bool
 	selected      int
 	hint          string
 	maxRows       int
@@ -308,7 +321,10 @@ func singleCellRows(labels []string) []popupRow {
 
 // popupRowLines composes the spec's rows into the styled, black-filled content lines the pane
 // paints — the selected row within the scroll window carrying the glyphUser marker and the
-// full-bar highlight, the others faint — and reports how many rows it is NOT showing.
+// full-bar highlight, the others faint — and reports how many rows it is NOT showing. In MENU style
+// (popupSpec.menuRows) the marker and the styling change and nothing else does: the unselected rows
+// lead with glyphMenuUnselected instead of two blank cells, the selected row is lit in the accent
+// instead of barred, and the columns, the window and the count are the ones every other pane gets.
 //
 // The columns are measured and padded over the WHOLE row list before any windowing, so a row
 // scrolled out of view still holds its column open and the alignment never shifts as the selection
@@ -340,17 +356,30 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	for i := start; i < end; i++ {
 		selected := i == spec.selected
 		marker := "  "
-		if selected {
+		switch {
+		case selected:
 			marker = glyphUser + " "
+		case spec.menuRows:
+			// The dot is a marker like the chevron, in the same two cells: the labels of a menu line
+			// up in one column whichever row is selected, so moving the selection moves the light and
+			// not the text.
+			marker = glyphMenuUnselected + " "
 		}
 		row := truncateToWidth(th, marker+rows[i], inner)
-		if selected {
+		switch {
+		case selected && spec.menuRows:
+			// No squareLine here, deliberately: the accent is on the CHOSEN WORDS, so it stops where
+			// they do and the rest of the row stays the pane's own black (drawTitledBox pads it out on
+			// that field like every other content line). Padding the row first would light the empty
+			// tail as well and hand the menu back the bar it exists to avoid.
+			out = append(out, blackFill.Render(th.popupAccent.Render(row)))
+		case selected:
 			// Squared in the authority's measure before the style is applied, the way renderUserBlock
 			// pads its own rows: the highlight bar spans the full inner width on the block's OWN
 			// dark-gray field rather than the pane's black, and a lipgloss Width would fold the row
 			// instead of padding it whenever the two measures disagree about it (ADR 0030 §5).
 			out = append(out, th.userBlock.Render(squareLine(th.measure, row, inner)))
-		} else {
+		default:
 			out = append(out, blackFill.Render(th.statusFaint.Render(row)))
 		}
 	}

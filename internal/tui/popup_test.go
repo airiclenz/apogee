@@ -1043,3 +1043,134 @@ func TestPopupTitleInBorderChromeIsOneRowShorter(t *testing.T) {
 		t.Errorf("title-in-border pane is %d rows, want %d (one less than the %d-row titled pane)", rowsOn, rowsOff-1, rowsOff)
 	}
 }
+
+// styleSGR is the SGR sequence a style opens its rendered text with — the probe the marker/highlight
+// assertions test for, rather than a byte golden of a whole styled line, so a lipgloss renderer
+// change cannot false-fail them.
+func styleSGR(style lipgloss.Style) string {
+	probe := style.Render("x")
+	return probe[:strings.IndexByte(probe, 'm')+1]
+}
+
+// popupMenuRowsGolden is popupTitleSpec's row list painted as a MENU: the selected row pointed at by
+// ❯, the other row led by ·, and the labels in one column either way — the pane's own drawing of
+// docs/design/user-questions-layout.md's option list. The bar the flag-off rendering paints behind
+// the selected row leaves no trace here because ANSI is stripped; TestRenderPopupMenuRowsHaveNoBar
+// below is what pins its absence.
+const popupMenuRowsGolden = `╭──────────────────────────────────────╮
+│ saved sessions                       │
+│ a body line that is long enough to   │
+│ wrap once at forty cells             │
+│ · first row                          │
+│ ❯ second row                         │
+│ esc close                            │
+╰──────────────────────────────────────╯`
+
+// The flag decides ONE thing — how the rows are MARKED — and it decides it completely: off, the pane
+// is byte-for-byte the list rendering the picker, the /sessions browser and the autocomplete dropdown
+// have always had (two blank cells before an unselected label); on, every row that is not the answer
+// leads with the dot and the labels stay in the one column, so moving the selection moves the marker
+// and not the text.
+func TestRenderPopupMenuRows(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+
+	off := strip(renderPopup(th, popupTitleSpec(), 40))
+	if off != popupTitleRowGolden {
+		t.Errorf("menuRows off drifted from the list rendering:\ngot:\n%s\n\nwant:\n%s", off, popupTitleRowGolden)
+	}
+
+	spec := popupTitleSpec()
+	spec.menuRows = true
+	on := strip(renderPopup(th, spec, 40))
+	if on != popupMenuRowsGolden {
+		t.Errorf("menuRows on:\ngot:\n%s\n\nwant:\n%s", on, popupMenuRowsGolden)
+	}
+}
+
+// The selected row of a menu is lit, not barred: it carries the accent style's SGR and the ❯, and
+// th.userBlock's full-width highlight — the cue the flag exists to replace — appears nowhere in the
+// pane. A bar behind one of four options on a decision surface reads as a banner across a quarter of
+// the box; the accent says the same thing in the width of one glyph.
+func TestRenderPopupMenuRowsHaveNoBar(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	spec := popupTitleSpec()
+	spec.menuRows = true
+	out := renderPopup(th, spec, 40)
+
+	if !strings.Contains(strip(out), glyphUser+" second row") {
+		t.Errorf("selected menu row missing the %q pointer:\n%s", glyphUser, strip(out))
+	}
+	if sgr := styleSGR(th.popupAccent); !strings.Contains(out, sgr) {
+		t.Errorf("selected menu row carries no accent SGR %q", sgr)
+	}
+	if sgr := styleSGR(th.userBlock); strings.Contains(out, sgr) {
+		t.Errorf("a menu row still carries the userBlock highlight bar %q", sgr)
+	}
+}
+
+// An unselected menu row is the dot AND the faint style — the two halves of "this is an option you
+// have not chosen". Losing either one leaves the rows reading as equals with a stray glyph in front
+// of them.
+func TestRenderPopupMenuUnselectedRowsAreFaintDots(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	spec := popupTitleSpec()
+	spec.menuRows = true
+	lines := popupLines(renderPopup(th, spec, 40))
+
+	var unselected string
+	for _, ln := range lines {
+		if strings.HasPrefix(popupInterior(ln), glyphMenuUnselected+" first row") {
+			unselected = ln
+		}
+	}
+	if unselected == "" {
+		t.Fatalf("no unselected row led with %q:\n%s", glyphMenuUnselected, strip(strings.Join(lines, "\n")))
+	}
+	if sgr := styleSGR(th.statusFaint); !strings.Contains(unselected, sgr) {
+		t.Errorf("unselected menu row is not faint (%q): %q", sgr, unselected)
+	}
+	if sgr := styleSGR(th.popupAccent); strings.Contains(unselected, sgr) {
+		t.Errorf("unselected menu row carries the selected row's accent %q: %q", sgr, unselected)
+	}
+}
+
+// Menu style changes the marker, not the layout: a two-cell row still lands its second column at one
+// offset down the whole pane, selected row included. That is what the approval prompt's right-hand
+// [a]/[s]/[d]/[esc] shortcut column rides on — the ❯ and the · are the same two cells wide, so the
+// columns cannot shift as the selection moves.
+func TestRenderPopupMenuRowsKeepColumnsAligned(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	spec := popupSpec{
+		rows: []popupRow{
+			{"Allow", "[a]"},
+			{"Always allow this session", "[s]"},
+			{"Deny", "[d]"},
+			{"Cancel", "[esc]"},
+		},
+		menuRows: true,
+		selected: 0,
+		maxRows:  8,
+	}
+	lines := popupLines(renderPopup(th, spec, 60))
+
+	// In DISPLAY cells, never in bytes: ❯ is three bytes and · is two, so a byte offset would report
+	// the pointer row a column off from the rows below it and call an aligned pane broken.
+	offsets := make([]int, 0, len(spec.rows))
+	for _, ln := range lines {
+		if i := strings.IndexByte(strip(ln), '['); i >= 0 {
+			offsets = append(offsets, lipgloss.Width(strip(ln)[:i]))
+		}
+	}
+	if len(offsets) != len(spec.rows) {
+		t.Fatalf("found %d shortcut cells, want %d:\n%s", len(offsets), len(spec.rows), strip(strings.Join(lines, "\n")))
+	}
+	for i, off := range offsets {
+		if off != offsets[0] {
+			t.Errorf("row %d's shortcut column starts at %d, want %d (the column the first row opened)", i, off, offsets[0])
+		}
+	}
+}
