@@ -11,17 +11,20 @@ import (
 // Event→Msg bridge (phase-2 detail plan §3 C2)
 // ----------------------------------------------------------------------------
 
-// teaSink is the EventSink the engine emits through. Emit wraps each Event in an eventMsg
-// and hands it to the running program via Send — Bubble Tea's goroutine-safe, async-to-
-// Update enqueue — which is exactly the mechanism the EventSink contract intends and
-// satisfies "Emit must not block the loop for long" (Send is async, so the Step goroutine
-// never blocks here).
+// teaSink is the EventSink the engine emits through. Emit wraps Events in eventMsgs and hands
+// them to the running program via Send — Bubble Tea's goroutine-safe, async-to-Update enqueue —
+// which is exactly the mechanism the EventSink contract intends and satisfies "Emit must not
+// block the loop for long" (Send is async, so the Step goroutine never blocks here).
 //
-// Delivery is lossless by default: every Event becomes one Msg, never dropped — the
-// correctness floor the bench-side ordering and the TUI both want. If TokenEvent flooding
-// ever shows program-queue pressure, coalesce adjacent TokenEvents within this sink
-// (concatenate their text in a short window) — coalescing, never dropping — behind this
-// same interface; do not pre-optimise (phase-2 detail plan §3 C2).
+// Delivery is lossless: no Event's content is ever dropped or reordered — the correctness floor
+// the bench-side ordering and the TUI both want. It is not, however, one-Msg-per-Event: adjacent
+// TokenEvents sharing a (Depth, Turn) are coalesced — their text accumulates for a short window
+// (tokenCoalesceWindow) and lands as a single TokenEvent — which is the option phase-2 detail
+// plan §3 C2 held in reserve, taken because a provider emits one delta per visible byte-run
+// (internal/agent/loop.go) and every Msg costs the TUI a transcript render. Every other variant
+// flushes the open buffer ahead of itself, so what the Update loop sees is exactly the order the
+// engine emitted; flush() closes the window at the Step boundary, so a stream never spills past
+// the Step that produced it.
 type teaSink struct {
 	prog *programRef
 

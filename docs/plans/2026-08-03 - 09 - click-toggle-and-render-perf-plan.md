@@ -298,7 +298,7 @@ house style is plain unit tests, `render.go`'s pure-renderer tests as the model)
 
 **Commit:** `perf(tui): reuse unchanged block paints across transcript renders`
 
-## 5. Close out the issue and record the change
+## 5. Close out the issue and record the change — ✅ DONE (2026-08-04)
 
 Depends on items 1–4.
 

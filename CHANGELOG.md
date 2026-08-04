@@ -650,6 +650,28 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A streaming reply no longer re-renders the whole transcript for every token.** A local model
+  streaming at speed pinned a core — and the GPU behind the terminal's compositor with it, which is
+  what made the fan audible for the length of a run — because each SSE delta became its own screen
+  update, and each screen update re-parsed, re-styled and re-wrapped the entire scrollback from the
+  top. The bill therefore grew with the conversation: the longer a session ran, the more work every
+  single token cost. Nothing about what is painted changed — the output is byte-identical — only
+  how often it is rebuilt and how much of it.
+  - **Adjacent tokens are merged inside the TUI's event sink over a short window** — about two
+    frames at 60 fps, imperceptible as latency, and it caps token-driven repaints near ~33/s no
+    matter how fast the provider streams. Merging, never dropping: no token's text is lost or
+    reordered, and any other kind of event delivers the merged text ahead of itself, because every
+    one of them depends on the tokens that preceded it. The window never outlives the Step that
+    opened it — the sink is flushed the instant a Step returns, the cancel path included — so
+    events still arrive inside the Step that emitted them, which is what the worker and the Model
+    both rest on.
+  - **A finished block's paint is reused until something it depends on actually changes.** Each
+    block's rendered lines are cached against the width they were laid out to, the expanded and
+    done flags across its span, the blink phase for a live block, and the width measure the
+    terminal answered with — so a steady-state streaming repaint costs the live tail rather than
+    the whole scrollback. There are no invalidation hooks to forget: a key that no longer matches
+    simply misses and the block is painted again.
+
 - **`/skills` now tells a skill that lost an id clash apart from one that is broken.** Every skip
   discovery recorded used to be headed `N skills found but not loaded` — true of a malformed
   `SKILL.md`, and a libel on a shadowed one, which parsed perfectly and simply is not the copy
@@ -946,6 +968,25 @@ point is a **minor** bump, not a breaking change.
   lines)` marker, so the input box the answer is typed into is never pushed off-screen.
 
 ### Fixed
+
+- **A click on a tool block's header lands while a reply is streaming.** Collapsing or expanding a
+  call during a run was a coin flip — very often nothing happened at all — while the same click on
+  an idle transcript was instant and always has been. Two independent misses were behind that, and
+  both are gone.
+  - **The toggle is resolved from where you pressed, not from where you released.** A motionless
+    click was hit-tested a second time at release, against *screen* coordinates, and every streamed
+    token scrolls the transcript to its tail underneath your finger — so in the 50–150 ms between
+    press and release the row you aimed at had moved out from under the pointer and the release
+    resolved nothing. The press already records its target in content coordinates, which appending
+    cannot shift; that is what the toggle reads now, identically for a header, a `… +N more lines`
+    marker and a collapsed prompt's `see more (+N lines)…` block.
+  - **A press on a block that is still working survives the block repainting under it.** A live
+    block's header star alternates ✦/✧ with the spinner, and a repaint of any line the press sat on
+    discarded the press outright — so the running calls you most want to open were the ones whose
+    headers could not be clicked at all. A press with no drag behind it paints no highlight, so
+    there is no stale text it could be covering; it now rides out repaints. A real drag selection
+    still drops the moment its text changes, exactly as before, which is the rule that keeps a
+    highlight from describing text that is no longer there.
 
 - **`apogee probe model` dates itself in your own time zone.** The report's `probed at` line, and
   the two dates its record section names — `changed since …` when a model swapped behind an
