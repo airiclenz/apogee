@@ -165,6 +165,10 @@ apogee says `unknown command or skill: /…` and leaves your line in the box to 
 Anywhere else in a message a slash is just text, so paths like `/usr/bin` travel
 untouched.
 
+The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
+the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
+prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits.
+
 ## Sessions
 
 Every conversation is a session, saved continuously: after each completed turn the

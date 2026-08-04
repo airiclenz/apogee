@@ -254,10 +254,11 @@ func TestHeartbeatUnwiredIsInert(t *testing.T) {
 	}
 }
 
-// assertNoBatch proves cmd starts no chain: with no monitor wired Init has nothing to return, so
-// the nil Cmd is the whole proof today. The batched arm is kept for the day Init carries a start-up
-// Cmd again — a batch resolves to its BatchMsg at once, while a Cmd that parks (a timer, say) never
-// answers, so a short wait tells the two apart without executing what it holds.
+// assertNoBatch proves cmd starts no chain. Init does carry start-up Cmds now — the first beat and
+// the prompt-recall load, batched — but tea.Batch drops nils, and this model wires neither seam, so
+// the batch collapses back to nil and that nil is the whole proof here. The batched arm covers what
+// a wired seam would hand us: a batch resolves to its BatchMsg at once, while a Cmd that parks (a
+// timer, say) never answers, so a short wait tells the two apart without executing what it holds.
 func assertNoBatch(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
