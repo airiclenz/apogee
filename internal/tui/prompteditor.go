@@ -74,9 +74,12 @@ type promptEditor struct {
 // called from the launch paths and finishWorker), never derived per frame: View renders the
 // widget as it stands, so the placeholder is state the Model sets once rather than a render-time
 // branch.
+// Both legends advertise ↑ recall, and both earn it: the placeholder is drawn only on an EMPTY box,
+// which is exactly the box where ↑ starts a walk through what this workspace has sent (recall.go),
+// and the walk is live at idle and while a worker runs alike.
 const (
-	idlePlaceholder    = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ⌃c quit"
-	runningPlaceholder = "queue a message…  ⏎ queue · esc stop"
+	idlePlaceholder    = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit"
+	runningPlaceholder = "queue a message…  ⏎ queue · ↑ recall · esc stop"
 )
 
 // cursorShapeNames is the vocabulary [ParseCursorShape] accepts, in the order its error lists

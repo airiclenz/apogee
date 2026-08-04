@@ -350,6 +350,7 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if m.inputEditable() {
 		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
 			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
+			m.dropRecall()                    // a click IN the box is acting in it: the arrows go back to the caret
 			off := m.caretTo(visRow, visCol)
 			m.sel = promptSel{
 				active:    true,

@@ -173,7 +173,24 @@ roots test if one exists, else assert via the wire test harness).
 
 **Commit:** `feat(tui): recall host seam and startup prompt load`
 
-## 4. Up/Down recall navigation in the prompt box
+## 4. Up/Down recall navigation in the prompt box — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): five notes on the literal text. (a) The chokepoint clears recall UNCONDITIONALLY and
+stashes the walk in a local (`rec := m.recall; m.dropRecall()`) — item 1's posture for `sel`, for item 1's
+reason: the branches above it (session browser, picker, autocomplete) claim keys and return early, so a
+conditional clear would leave the mode alive behind a modal. `recallKey` reads its position out of that
+stash. (b) A recorded send is APPENDED to `entries`, not prepended: entries run oldest→newest (item 3),
+so the end of the slice IS the front of the walk. (c) `recordSend` mirrors the store's consecutive dedup
+in memory, so the in-memory view is exactly what a reload would return — without it, re-sending a
+recalled line grew the walk a duplicate the store had refused. It also records nothing at all when
+`Options.Recall` is nil, keeping "a nil host disables the feature entirely" true of the in-memory half
+too. (d) No suppression branch was added to `recomputeAutocomplete`: `showRecall` dismisses the overlay
+and deliberately does not recompute, and every site that DOES recompute has already ended recall (the
+chokepoint, or the paste/resize/ask/click clears), so the invariant is structural rather than a dead
+guard in a hot path. `TestRecallCommandOpensNoAutocomplete` pins it, with a typed-`/clear` contrast so
+the assertion cannot pass vacuously. (e) BOTH placeholders gained `↑ recall`, not just the idle one:
+recall is live at `stateIdle` and `stateRunning`, and a placeholder is only ever drawn on an empty box —
+which is precisely the box where ↑ starts a walk.
 
 **What:** Depends on items 1, 2, 3 (item 1 because both edit the same
 `handleKey` chokepoint). Add a plain-value `promptRecall` struct to `promptEditor`

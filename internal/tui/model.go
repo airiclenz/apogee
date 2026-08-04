@@ -463,6 +463,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
 		m.sel = promptSel{} // the box moved/reflowed: its stored visual coords are stale
+		m.dropRecall()      // and the box the human recalled into is no longer the box in front of them
 		m.layout()
 		return m, nil
 
@@ -497,6 +498,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			return m, nil
 		}
 		m.sel = promptSel{} // the value is about to change; drop the selection before its coords go stale
+		m.dropRecall()      // a paste is an edit: the recalled entry is now the human's own draft
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle || m.state == stateRunning {
@@ -543,6 +545,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// for as long as the question stands (submitAnswer swaps it back when the answer is away).
 		m.setPlaceholder(idlePlaceholder)
 		m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
+		m.dropRecall()      // and any walk in progress: the box now belongs to the question
 		m.layout()
 		return m, m.input.Focus()
 
@@ -815,6 +818,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	sel := m.sel
 	m.sel = promptSel{}
 
+	// Recall mode ends on any keypress for the same reason and by the same shape: it means "the box
+	// holds a recalled entry the human has not acted in", and a keypress IS acting in it. The two
+	// arrows that are recall itself are carved out the same way the destructive keys are — the walk's
+	// position is stashed on the way past and read back by recallKey (recall.go) — so the clear can
+	// stay unconditional and no branch below has to remember to end the mode. The entries are not
+	// mode: they survive every key.
+	rec := m.recall
+	m.dropRecall()
+
 	// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
 	// selection, resume, delete-confirm, rename edit, and esc to close (sessions.go) — before the
 	// normal input routing below, exactly as the autocomplete overlay claims its keys first.
@@ -965,6 +977,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return popped, nil
 			}
 		}
+		// ↑/↓ walk this workspace's recorded prompts while the box is empty or holds an untouched
+		// recalled entry (recall.go). It sits immediately before the fall-through because that is the
+		// arrows' other duty — moving the caret — and recall may only take them where it has something
+		// to show: recallKey claims nothing on a typed draft, at the ask, or with no entries at all, so
+		// a box the human is working in never loses its cursor keys.
+		if next, handled := m.recallKey(msg, rec); handled {
+			return next, nil
+		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle || m.state == stateRunning {
@@ -1035,13 +1055,23 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // first, the box's own text last, because it is the newest thing the human wrote. That is also why
 // an EMPTY box is not always a no-op: with rows held, ⏎ is what sends them.
 func (m Model) submit() (tea.Model, tea.Cmd) {
+	// The line VERBATIM, read before anything empties the box: what ↑ hands back has to be what the
+	// human typed, @refs and /tokens included, not the parse of it (recall.go). Only the paths that
+	// actually send or run record it — a refusal leaves the line in the box, where ↑ would be an
+	// insult — and an empty box records nothing, which is also the "⏎ sends the held queue" case:
+	// those rows were recorded when they were staged.
+	sent := m.input.Value()
+	var record tea.Cmd
+
 	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
 		// A whole-input invocation IS the command line — nothing else was typed — so emptying the
 		// box is exactly stripping the verb. runCommand does not touch the editor: its other caller,
 		// the dropdown's accept path, cuts the token out and deliberately keeps the rest of the draft.
 		m.promptEditor.reset()
-		return m.runCommand(parsed)
+		m, record = m.recordSend(sent) // a /command line is an input the human sent (decision 3)
+		next, cmd := m.runCommand(parsed)
+		return next, tea.Batch(cmd, record)
 	}
 	if parsed.kind == kindUnknownSlash {
 		return m.refuseUnknownSlash(parsed)
@@ -1087,8 +1117,9 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		in = m.joinedInterjections(parsed)
 		m.pendingInterjections = nil
 	}
-	m.promptEditor.reset() // empties the textarea and closes the overlay
-	m.detached = false     // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
+	m.promptEditor.reset()         // empties the textarea and closes the overlay
+	m, record = m.recordSend(sent) // the send is committed: this line is recallable from here on
+	m.detached = false             // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
 	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs))
 	// The first prompt of a fresh Session record also NAMES it: one cosmetic out-of-band completion
 	// fired here, in parallel with the Exchange this prompt starts, so a single-slot server answers
@@ -1097,7 +1128,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	nameCmd := m.maybeAutoTitle(in.Text)
 	m.layout() // the emptied input box shrinks back; the repaint follows the tail onto the new prompt
 	next, cmd := m.launchExchange(in)
-	return next, tea.Batch(cmd, nameCmd)
+	return next, tea.Batch(cmd, nameCmd, record)
 }
 
 // refuseUnknownSlash answers the sole-token typo guard (parseInput's kindUnknownSlash): a note

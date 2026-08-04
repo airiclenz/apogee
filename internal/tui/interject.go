@@ -148,6 +148,13 @@ const commandsAtIdleNote = "commands run at idle — not queued"
 // references deliberately stay unresolved until delivery, so the model reads the file as it stands
 // then.
 func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
+	// The line verbatim, before anything empties the box: an interjection is an input the human sent,
+	// so it is recorded for ↑ exactly as a submitted message is (recall.go, decision 3). Read here for
+	// submit's reason — only the paths that queue or run reach the record; the refusals below leave
+	// the line standing and record nothing.
+	sent := m.input.Value()
+	var record tea.Cmd
+
 	parsed := m.promptEditor.submitParse(m.knownSkillID)
 	if parsed.kind == kindCommand {
 		if !m.commandRunnable(parsed) {
@@ -156,7 +163,9 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 		// Nothing else was typed (the whole-input command rule), so emptying the box is exactly
 		// stripping the verb — submit's reading at idle, and runCommand touches the editor in neither.
 		m.promptEditor.reset()
-		return m.runCommand(parsed)
+		m, record = m.recordSend(sent)
+		next, cmd := m.runCommand(parsed)
+		return next, tea.Batch(cmd, record)
 	}
 	if parsed.kind == kindUnknownSlash {
 		return m.refuseUnknownSlash(parsed)
@@ -178,8 +187,9 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	m.pendingInterjections = append(m.pendingInterjections, row)
 	m.box.push(row)
 	m.promptEditor.reset()
-	m.layout() // the emptied box shrinks back; the strip above it gains a row
-	return m, nil
+	m, record = m.recordSend(sent) // the row is queued: the human sent this line, so ↑ hands it back
+	m.layout()                     // the emptied box shrinks back; the strip above it gains a row
+	return m, record
 }
 
 // popInterjection lifts the NEWEST staged row back into the editor, reporting whether it did. It
