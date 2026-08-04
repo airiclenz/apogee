@@ -2,9 +2,14 @@ A: Activated / Active
 P: Planned
 X: Executed
 
-- [ ] Currently I cannot see how much of it's context a sub agent has used.
+- [ ] I'd like a full screen menu for all available settings when running the slash command /settings. This needs grilling.
 
-- [X] Clicking on the header of a tool for collapsing/expanding is not very responsive (very often nothing happens at all) - this seems to be connected to 100% GPU usage when an agent is running. When no local session is in progress the expansion/collapse response is snappy.
+- [ ] not all tool calls follow the collapsable display pattern. Generally, I want to not see more than 3 to 4 lines of a tool call and the tool call content needs to be properly formatted (orientation, font weight, color highlights), aligned and readable. All tools must follow the same general formatting rules and be collapsable. This means for example that file-write-tools needs to be able to display the changed lines, and so on...
+The tool header needs to indicate if a tool in the session chat is expanded or collapse (e.g. `Run Python ▾` for expanded and `Run Python ▸` for collapsed - feel free to find better symbols). This will probably need grilling.
+
+- [ ] `/new` should not be recorded as a recallable prompt
+
+- [ ] Currently I cannot see how much of it's context a sub agent has used.
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.
 
