@@ -264,6 +264,35 @@ func (e *promptEditor) caretToOffset(byteOff int) {
 	e.seatCaret(row, col)
 }
 
+// deleteSelection cuts a prompt drag-selection's span out of the value and leaves the caret where
+// that span began. It is what Backspace and Del mean while the box holds a highlight: the human can
+// SEE what is selected, so the destructive keys must take exactly that rather than the one rune
+// beside the caret (ISSUES.md — the highlight used to vanish and the selected text survive).
+//
+// The span arrives as an argument rather than being read off e.sel because handleKey's chokepoint
+// has already dropped the live selection by the time the two keys are routed (model.go): what it
+// stashed there is the authority, and passing it in keeps that the ONLY copy. The span is
+// normalised first — a right-to-left drag stores head before anchor, the same posture selectionText
+// copies under (mouse.go) — and sliced in RUNES, so a multi-byte selection loses whole characters
+// instead of splitting one.
+//
+// The rebuild-and-reseat shape is removeCompletionToken's (autocomplete.go): SetValue over the two
+// surviving flanks, then drive the caret back to the cut by offset, since the widget leaves its
+// cursor wherever the new value put it. caretToOffset counts BYTES while a selection counts RUNES,
+// so byteOffsetOf bridges the two — read against the NEW value, whose first lo runes are exactly
+// the head that survived the cut.
+func (e *promptEditor) deleteSelection(sel promptSel) {
+	lo, hi := sel.anchorOff, sel.headOff
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	r := []rune(e.input.Value())
+	lo = clampInt(lo, 0, len(r))
+	hi = clampInt(hi, lo, len(r))
+	e.input.SetValue(string(r[:lo]) + string(r[hi:]))
+	e.caretToOffset(byteOffsetOf(e.input.Value(), lo))
+}
+
 // reseatInput re-clamps the prompt textarea's internal scroll after a SetHeight changed the box's
 // height. bubbles repositions the view only when the caret falls outside it, so a box that
 // auto-grows keeps a stale downward offset — the first content line scrolls out of sight with a

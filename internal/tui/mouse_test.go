@@ -289,6 +289,10 @@ func TestClickPositionsCaretWhileRunning(t *testing.T) {
 }
 
 // TestKeypressClearsSelection checks the single chokepoint in handleKey drops a live selection.
+// It is the rule for every key that MOVES ON from what was selected. The two destructive keys are
+// carved out of it and CONSUME the span instead — backspace and del delete the selected text
+// (TestSelectionDeleteKeys) — which is a different fate, not an exception to the clear: the
+// chokepoint drops the stale coordinates either way.
 func TestKeypressClearsSelection(t *testing.T) {
 	m := modelWithInput(t, "hello world")
 	m.sel = promptSel{active: true, anchorOff: 0, headOff: 5}
@@ -297,6 +301,111 @@ func TestKeypressClearsSelection(t *testing.T) {
 	if m.sel.active {
 		t.Fatal("a keypress should clear the mouse selection")
 	}
+}
+
+// dragSelect drives a real click-drag-release across the prompt's first content row, from display
+// cell fromCol to toCol — the mouse path a human takes to highlight text. The row and the left
+// margin are ASKED of the layout (inputContentRect) rather than restated, so the helper follows the
+// box wherever it sits.
+func dragSelect(t *testing.T, m Model, fromCol, toCol int) Model {
+	t.Helper()
+	x0, y0, _, _ := m.inputContentRect()
+	m = step(t, m, leftClick(x0+fromCol, y0))
+	m = step(t, m, leftDrag(x0+toCol, y0))
+	return step(t, m, leftRelease(x0+toCol, y0))
+}
+
+// TestSelectionDeleteKeys is ISSUES.md's "backspace/del on selected text should delete it": with a
+// highlight standing, both destructive keys take the whole span and seat the caret where the span
+// began — whichever direction the drag ran, since a right-to-left drag names the same text.
+func TestSelectionDeleteKeys(t *testing.T) {
+	cases := []struct {
+		name           string
+		fromCol, toCol int
+		key            tea.KeyPressMsg
+	}{
+		{"backspace", 0, 5, tea.KeyPressMsg{Code: tea.KeyBackspace}},
+		{"delete", 0, 5, tea.KeyPressMsg{Code: tea.KeyDelete}},
+		{"backwards drag names the same span", 5, 0, tea.KeyPressMsg{Code: tea.KeyBackspace}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := dragSelect(t, modelWithInput(t, "hello world"), c.fromCol, c.toCol)
+			if !m.sel.active || m.sel.anchorOff == m.sel.headOff {
+				t.Fatalf("the drag armed no selection to delete: %+v", m.sel)
+			}
+
+			m = step(t, m, c.key)
+
+			if got := m.input.Value(); got != " world" {
+				t.Fatalf("input = %q, want the selected range gone", got)
+			}
+			if row, col := m.input.Line(), m.input.Column(); row != 0 || col != 0 {
+				t.Errorf("caret at (%d,%d), want it at the span's start (0,0)", row, col)
+			}
+			if m.sel.active {
+				t.Errorf("the selection outlived the text it named: %+v", m.sel)
+			}
+		})
+	}
+}
+
+// The cut is by RUNE, not by byte: a span over multi-byte text loses whole characters, never half
+// of one. The difference is invisible in ASCII and corrupts the draft in Japanese.
+func TestSelectionDeleteCutsRunes(t *testing.T) {
+	m := dragSelect(t, modelWithInput(t, "日本語のテキスト"), 0, 4) // 4 cells = the two double-width glyphs
+
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+
+	if got, want := m.input.Value(), "語のテキスト"; got != want {
+		t.Fatalf("input = %q, want %q", got, want)
+	}
+}
+
+// The prompt is editable while a worker runs — the human is typing an interjection into it (ADR
+// 0025) — so the selection delete lands there exactly as it does at idle.
+func TestSelectionDeleteWhileRunning(t *testing.T) {
+	m := modelWithInput(t, "hello world")
+	m.state = stateRunning
+
+	m = dragSelect(t, m, 0, 5)
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+
+	if got := m.input.Value(); got != " world" {
+		t.Fatalf("input = %q, want the selected range gone while a worker runs", got)
+	}
+}
+
+// With nothing highlighted, backspace keeps both of its existing meanings — the carve-out stands in
+// front of them and must stay out of their way. A bare click is among the "nothing highlighted"
+// cases: it leaves a COLLAPSED span, which is a caret, not a selection.
+func TestBackspaceWithoutSelectionIsUnchanged(t *testing.T) {
+	t.Run("non-empty box deletes one rune", func(t *testing.T) {
+		m := modelWithInput(t, "hello")
+		m.input.MoveToEnd()
+
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+		if got := m.input.Value(); got != "hell" {
+			t.Fatalf("input = %q, want a single rune deleted", got)
+		}
+	})
+	t.Run("a bare click deletes one rune", func(t *testing.T) {
+		m := dragSelect(t, modelWithInput(t, "hello"), 5, 5) // press and release on the same cell
+
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+		if got := m.input.Value(); got != "hell" {
+			t.Fatalf("input = %q, want a single rune deleted", got)
+		}
+	})
+	t.Run("empty box pops the queued interjection", func(t *testing.T) {
+		m := newTestModel(t)
+		m.pendingInterjections = []queuedInterjection{staged(1, "held row")}
+
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+		if got := m.input.Value(); got != "held row" {
+			t.Fatalf("input = %q, want the queued row popped back into the box", got)
+		}
+	})
 }
 
 // TestShadeCellsPreservesGlyphs checks that shading a cell range neither adds nor drops visible

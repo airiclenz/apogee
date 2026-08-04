@@ -42,7 +42,17 @@ dedups consecutive identical entries and caps what `Load` returns at the newest 
 A nil recall host disables the feature entirely (bench/tests unaffected — ADR 0031
 wire-silence is untouched; this is pure driver-side state).
 
-## 1. Backspace/Del delete the prompt selection
+## 1. Backspace/Del delete the prompt selection — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): two deviations from the item's literal shape. (a) The chokepoint still clears
+`m.sel` unconditionally and STASHES the span in a local; the carve-out consumes that stash inside
+the `inputEditable()` block, immediately before the `popInterjection` case. Short-circuiting at the
+chokepoint itself would have run ahead of the modal overlays that claim every keypress first — the
+/sessions browser's rename edit owns `backspace` — and would have left a stale selection alive on
+the paths that return early. (b) The guard is `sel.active && sel.anchorOff != sel.headOff`, adding
+the `active` conjunct so the predicate is exactly what paints the highlight (`highlightInput`): a
+release that copied nothing leaves the offsets standing with `active` false, and that invisible span
+must not swallow the key. Item 4 extends the same chokepoint/carve-out seam as planned.
 
 **What:** Fix ISSUES.md line 5. Today `handleKey` unconditionally clears the mouse
 selection as its first act (`m.sel = promptSel{}`, `internal/tui/model.go:789`), then

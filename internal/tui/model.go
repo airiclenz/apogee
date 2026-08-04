@@ -796,7 +796,11 @@ type ctrlCResetMsg struct{}
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Any keypress drops a mouse drag-selection: typing past it, navigating, or submitting all
 	// move on from what was selected, and clearing here (before the value can change) keeps the
-	// selection's cached visual coordinates from ever going stale (mouse.go).
+	// selection's cached visual coordinates from ever going stale (mouse.go). Backspace and Del are
+	// carved OUT of that meaning — they DELETE what is selected rather than move on from it — so
+	// the span is stashed on the way past. The clear itself stays unconditional: whichever branch
+	// below claims the key, the stale coordinates are already gone.
+	sel := m.sel
 	m.sel = promptSel{}
 
 	// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
@@ -921,6 +925,26 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// feature ships — while a worker runs, where ⏎ stages the message as an interjection
 	// (inputEditable; ADR 0025). Enter is handled above; everything else is an edit.
 	if m.inputEditable() {
+		// Backspace and Del take the SELECTION when the box holds one — the carve-out the chokepoint
+		// above stashed the span for. The predicate is exactly what paints the highlight
+		// (highlightInput, mouse.go): an active, non-empty span. Anything less would let a span the
+		// human cannot see swallow the keypress — a release that copied nothing leaves the offsets
+		// standing with active false, and a collapsed span is a caret, not a selection.
+		//
+		// The order against the empty-box case below is deliberate rather than incidental: a
+		// selection implies a non-empty box, so the two can never both apply, and saying so here
+		// keeps it true if either side ever moves.
+		if sel.active && sel.anchorOff != sel.headOff {
+			switch msg.String() {
+			case "backspace", "delete":
+				m.deleteSelection(sel)
+				if m.state == stateIdle || m.state == stateRunning {
+					m = m.recomputeAutocomplete() // the value changed: re-derive the overlay, as a typed edit does
+				}
+				m.layout() // re-flow: the box shrinks as the cut unwraps rows
+				return m, nil
+			}
+		}
 		if m.input.Value() == "" && msg.String() == "backspace" {
 			// Backspace on an empty input un-does the last thing staged: it lifts the newest queued
 			// interjection back into the box. Nothing else is staged beside the text any more — a
